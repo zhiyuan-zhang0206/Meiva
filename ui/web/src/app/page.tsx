@@ -21,7 +21,6 @@ import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-s
 import { useToUser } from "@/lib/context/use-to-user";
 import { useNotices } from "@/lib/notifications/use-notices";
 import { PRIORITY_RANK } from "@/lib/notifications/notices";
-import { InspectorToggle } from "@/components/inspector/inspector-toggle";
 import { PendingStrip } from "@/components/conversation/pending-strip";
 import { UploadButton } from "@/components/conversation/upload-button";
 import { TimelineView } from "@/components/timeline";
@@ -383,7 +382,6 @@ function HomeContent({
           >
             <AlertsBadge />
             {contextAvailable && <button onClick={openContext} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent">{contextText("openContext")}</button>}
-            <InspectorToggle />
           </HeaderBar>
           <div className="relative z-20 bg-background">
             <PendingStrip items={visiblePendingMessages} maxWidthCss={composerMaxWidth} />

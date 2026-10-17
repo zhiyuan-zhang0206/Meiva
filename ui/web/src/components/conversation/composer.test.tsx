@@ -942,6 +942,18 @@ describe("Composer context breakdown panel", () => {
 });
 
 describe("Composer file upload (drag + paste)", () => {
+  it("puts the upload control inside the input row, not in the meta line", () => {
+    renderComposer(
+      <Composer {...baseProps} mode="idle">
+        <button type="button" aria-label="Upload file">attach</button>
+      </Composer>,
+    );
+    const upload = screen.getByRole("button", { name: "Upload file" });
+    const input = screen.getByTestId("composer-input");
+    expect(upload.parentElement).toBe(input.parentElement);
+    expect(screen.getByTestId("composer-meta").contains(upload)).toBe(false);
+  });
+
   it("does not show the file-upload hint when no file delivery is in flight", () => {
     render(<Composer {...baseProps} mode="idle" filesUploading={false} />);
     expect(screen.queryByTestId("composer-upload-hint")).toBeNull();

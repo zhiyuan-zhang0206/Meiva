@@ -314,9 +314,6 @@ vi.mock("@/components/inspector/inspector-panel", async () => {
   };
 });
 
-vi.mock("@/components/inspector/inspector-toggle", () => ({
-  InspectorToggle: () => <button data-testid="inspector-toggle">toggle</button>,
-}));
 
 import HomePage from "./page";
 
@@ -639,9 +636,6 @@ describe("HomePage top-level render", () => {
     expect(main.contains(timelineGroup!)).toBe(true);
     expect(inspectorPanel?.parentElement).toBe(timelineGroup);
     expect(inspectorPanel?.previousElementSibling?.getAttribute("role")).toBe("separator");
-    const toggle = screen.getByTestId("inspector-toggle");
-    expect(screen.getByRole("banner").contains(toggle)).toBe(true);
-    expect(screen.getByTestId("composer").contains(toggle)).toBe(false);
   });
 
   it("keeps a healthy inspector mounted across an agent switch (no remount, task #3894)", async () => {

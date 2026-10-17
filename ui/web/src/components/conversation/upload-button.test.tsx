@@ -69,9 +69,9 @@ describe("UploadButton rendering", () => {
     expect(document.querySelector('input[type="file"]')).toBeNull();
   });
 
-  it("uploading a multi-file batch → shows file count + percentage (N files · pct)", () => {
+  it("uploading a multi-file batch → shows file count + percentage (N · pct)", () => {
     render(<UploadButton {...baseProps} uploading={true} count={3} progress={42} />);
-    expect(screen.getByText("3 files · 42%")).toBeDefined();
+    expect(screen.getByText("3 · 42%")).toBeDefined();
   });
 
   it("uploading a single file → shows percentage only (no count prefix)", () => {

@@ -32,16 +32,17 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
   onClose: () => void;
 }) {
   const t = useTranslations("toUser");
-  const { open: inspecting } = useInspectorOpen();
+  const tInspector = useTranslations("inspector");
+  const { open: inspecting, toggle: toggleInspector } = useInspectorOpen();
   const queryClient = useQueryClient();
   const [noticeCollapsed, setNoticeCollapsed] = useState(false);
   const notice = notices.at(0);
   return (
-    <aside className={cn("w-full bg-background", FLEX, MIN_H_0, FLEX_COL, mobile ? "fixed inset-0 z-50" : "h-full")} aria-label={t("sharedContext")}>
+    <aside className={cn("relative w-full bg-background", FLEX, MIN_H_0, FLEX_COL, mobile ? "fixed inset-0 z-50" : "h-full")} aria-label={t("sharedContext")}>
       {mobile && <header className={cn("h-11 shrink-0 items-center justify-between border-b px-4 text-sm", FLEX)}>
         <span>{t("sharedContext")}</span><button aria-label={t("backToMessages")} onClick={onClose} className="rounded p-1 hover:bg-accent"><X className="size-4" /></button>
       </header>}
-      <div data-testid="shared-document" hidden={inspecting} className={cn(MIN_H_0, FLEX_1, FLEX_COL, inspecting ? "hidden" : FLEX)}>
+      <div data-testid="shared-document" className={cn(MIN_H_0, FLEX_1, FLEX_COL, FLEX)}>
         {noticesFailed && <p role="status" className="px-4 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}
         {notice && <section className="shrink-0" aria-label={t("notification")}>
           <div data-testid="notice-bar" className={cn("items-center gap-2 px-4 text-xs", COLUMN_TITLE_BAR_CLASS, FLEX)}>
@@ -56,10 +57,26 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
             <OpenNoticeDetail key={notice.id} agentId={agentId} notice={notice} onResolved={() => dropOpenNotices(queryClient, [notice.id])} />
           </div>}
         </section>}
-        <ToUserDocumentView key={agentId} agentId={agentId} document={document.data} failed={document.isError} pending={document.isFetching} refresh={() => void document.refetch()} mobile={mobile} />
+        <ToUserDocumentView key={agentId} agentId={agentId} document={document.data} failed={document.isError} pending={document.isFetching} refresh={() => void document.refetch()} mobile={mobile} inspecting={inspecting} onInspect={toggleInspector} />
       </div>
       {inspecting && (
-        <div data-testid="shared-inspector" className={cn(FLEX, MIN_H_0, FLEX_1)}><Inspector agentId={agentId} embedded /></div>
+        <div
+          data-testid="shared-inspector"
+          className={cn("absolute inset-0 z-30 bg-background", FLEX, FLEX_COL)}
+        >
+          <header className={cn("shrink-0 items-center gap-2 px-3 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_CLASS, FLEX)}>
+            <span className="truncate">{tInspector("title")}</span>
+            <button
+              type="button"
+              aria-label={tInspector("closeInspector")}
+              onClick={toggleInspector}
+              className="ml-auto rounded p-1 hover:bg-accent"
+            >
+              <X className="size-3.5" />
+            </button>
+          </header>
+          <div className={cn(MIN_H_0, FLEX_1, FLEX)}><Inspector agentId={agentId} embedded /></div>
+        </div>
       )}
     </aside>
   );

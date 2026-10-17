@@ -441,7 +441,6 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     >
       <div className={cn("gap-2 border-t border-border pt-2", FLEX, FLEX_COL)}>
       <div className={cn("relative items-center gap-2 px-0.5 text-xs text-muted-foreground h-4 leading-4", FLEX, MIN_W_0)}>
-        {children}
         <span data-testid="composer-meta" className={cn("truncate", commandHint && "italic", MIN_W_0)}>
           {commandHint ??
             (contextTokens > 0 ? (
@@ -521,6 +520,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
           onOpenChange={handleAutocompleteOpenChange}
         />
         <div className={cn("gap-2 items-end", FLEX)}>
+        {children}
         <Textarea
           ref={taRef}
           data-testid="composer-input"
