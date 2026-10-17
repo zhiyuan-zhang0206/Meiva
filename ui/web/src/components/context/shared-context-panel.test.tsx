@@ -86,12 +86,17 @@ it("shows the document as the panel's body without a view switcher", () => {
   expect(screen.queryByRole("tablist")).toBeNull();
 });
 
-it("swaps to the inspector view and keeps the mounted document hidden", async () => {
+it("lays the inspector over the document instead of replacing it", async () => {
   snapshot.inspectorOpen = true;
   renderPanel();
   expect(await screen.findByTestId("inspector-view")).toBeTruthy();
-  expect(screen.getByTestId("shared-document").getAttribute("hidden")).not.toBeNull();
+  // The To user document is the panel's primary content: it stays mounted and
+  // visible underneath, and the inspector is a secondary sheet on top of it.
+  const document = screen.getByTestId("shared-document");
+  expect(document.getAttribute("hidden")).toBeNull();
   expect(screen.getByTestId("document-view")).toBeTruthy();
+  const sheet = screen.getByTestId("shared-inspector");
+  expect(sheet.className).toContain("absolute inset-0");
 });
 
 it("keeps the notice area inside the document body", () => {

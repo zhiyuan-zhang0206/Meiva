@@ -16,8 +16,9 @@ empty document shows the empty state and a legacy `to_user.html` shows the
 migration placeholder, never a collapsed panel. The panel itself is a lazy
 boundary, loaded when the right panel first renders.
 
-The inspector is the panel's secondary view, not a peer tab: the top-bar
-Inspector toggle swaps the body to it (its own queries and ordered section list) and
+The inspector is the panel's secondary surface, not a peer tab: a small trigger at
+the end of the document bar lays it over the document (its own queries and ordered
+section list) and
 the same toggle swaps back. The document body stays mounted while hidden, so the
 switch preserves reply drafts and the document reading position. Below the
 desktop breakpoint the shared context opens as a full-screen reading view from
@@ -87,4 +88,4 @@ On desktop the home page mounts the panel for every selected agent (the document
 area owns its empty and legacy states); on narrow viewports the header's To user
 action opens the same panel as the reading view.
 
-The panel's body is the agent's document with the notice area inside it; the inspector is a secondary view that replaces the body while open — the document body stays mounted while hidden so reply drafts and reading position survive — and the document shows again when the inspector closes; the home shell mounts the panel for every selected agent, so a missing document shows its empty state instead of collapsing the panel.
+The panel's body is the agent's document with the notice area inside it; the inspector is a secondary sheet laid over that document while open — the document stays mounted and visible underneath so reading position and reply drafts survive — and the sheet disappears again when it closes; the home shell mounts the panel for every selected agent, so a missing document shows its empty state instead of collapsing the panel.

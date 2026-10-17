@@ -3,6 +3,8 @@
 import { Loader2, AlertCircle, Paperclip } from "lucide-react";
 import { useRef, useCallback } from "react";
 
+import { cn } from "@/lib/format/utils";
+
 interface Props {
   agentId: number | null;
   onUpload: (files: File[]) => Promise<void>;
@@ -32,13 +34,16 @@ export function UploadButton({ agentId, onUpload, uploading, progress, count, er
     [onUpload],
   );
 
-  // While uploading render the spinner — no new upload allowed (input not in DOM).
-  // For a multi-file batch prefix the file count ("3 files · 42%").
+  // While uploading render the spinner — no new upload allowed (input not in
+  // DOM). For a multi-file batch prefix the file count ("3 files · 42%").
   if (uploading) {
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-        <Loader2 className="size-3 animate-spin" />
-        {count > 1 ? `${count} files · ${progress}%` : `${progress}%`}
+      <span
+        className="inline-flex h-9 shrink-0 items-center gap-1 px-1 text-[10px] text-muted-foreground"
+        aria-label={count > 1 ? `${count} files uploading, ${progress}%` : `Uploading, ${progress}%`}
+      >
+        <Loader2 className="size-4 animate-spin" />
+        {count > 1 ? `${count} · ${progress}%` : `${progress}%`}
       </span>
     );
   }
@@ -63,15 +68,18 @@ export function UploadButton({ agentId, onUpload, uploading, progress, count, er
       <button
         type="button"
         aria-label={error ? `Upload failed: ${error} (click to retry)` : "Upload file"}
+        title={error ?? undefined}
         onClick={handleClick}
         disabled={agentId == null}
-        className={
+        className={cn(
+          "inline-flex size-9 shrink-0 items-center justify-center rounded-full transition-colors",
+          "disabled:pointer-events-none disabled:opacity-30",
           error
-            ? "inline-flex items-center gap-1 text-[10px] text-destructive hover:text-destructive/80 disabled:opacity-30 transition-colors"
-            : "inline-flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground disabled:opacity-30 transition-colors"
-        }
+            ? "text-destructive hover:bg-destructive/10"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+        )}
       >
-        {error ? <AlertCircle className="size-3.5" /> : <Paperclip className="size-3.5" />}
+        {error ? <AlertCircle className="size-4" /> : <Paperclip className="size-4" />}
       </button>
     </>
   );

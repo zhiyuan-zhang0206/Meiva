@@ -26,9 +26,22 @@ function document(content: string, modifiedAt: string | null = null): ToUserDocu
 function idleQuery(data?: ToUserDocument) {
   return { data, isFetching: false, isError: false, refetch: vi.fn() };
 }
-function show(value: ToUserDocument, { mobile = false, linked }: { mobile?: boolean; linked?: ToUserDocument } = {}) {
+function show(
+  value: ToUserDocument,
+  { mobile = false, linked, onInspect }: { mobile?: boolean; linked?: ToUserDocument; onInspect?: () => void } = {},
+) {
   linkedQuery.mockReturnValue(idleQuery(linked));
-  return render(<ToUserDocumentView agentId={7} document={value} failed={false} pending={false} refresh={vi.fn()} mobile={mobile} />);
+  return render(
+    <ToUserDocumentView
+      agentId={7}
+      document={value}
+      failed={false}
+      pending={false}
+      refresh={vi.fn()}
+      mobile={mobile}
+      onInspect={onInspect}
+    />,
+  );
 }
 function url() {
   return new URL(window.location.href);
@@ -153,4 +166,15 @@ describe("To user document bar", () => {
     expect(screen.queryByText("sharedContext")).toBeNull();
     expect(screen.getByTestId("document-status")).toBeTruthy();
   });
+});
+
+it("offers the inspector trigger only when the panel wires it, and reports presses", () => {
+  const onInspect = vi.fn();
+  const view = show(document("hello"));
+  expect(screen.queryByTestId("open-inspector")).toBeNull();
+  view.unmount();
+
+  show(document("hello"), { onInspect });
+  fireEvent.click(screen.getByTestId("open-inspector"));
+  expect(onInspect).toHaveBeenCalledOnce();
 });

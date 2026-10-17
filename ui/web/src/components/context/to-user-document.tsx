@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, House, RefreshCw } from "lucide-react";
+import { Activity, ArrowLeft, House, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
@@ -20,15 +20,20 @@ function pushedEntry(): boolean {
 }
 
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile }: {
+export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, onInspect }: {
   agentId: number;
   document: ToUserDocument | undefined;
   failed: boolean;
   pending: boolean;
   refresh: () => void;
   mobile: boolean;
+  /** Whether the inspector sheet is open (drives the trigger's pressed state). */
+  inspecting?: boolean;
+  /** Opens/closes the inspector. Omitted surfaces render no trigger. */
+  onInspect?: () => void;
 }) {
   const t = useTranslations("toUser");
+  const tInspector = useTranslations("inspector");
   const [references, setReferences] = useState<string[]>(() =>
     typeof window === "undefined" ? [] : readReferences(new URL(window.location.href), agentId),
   );
@@ -81,6 +86,19 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
           <button title={t("refresh")} aria-label={t("refresh")} onClick={() => { if (references.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
             <RefreshCw className="size-3.5" />
           </button>
+          {onInspect ? (
+            <button
+              type="button"
+              data-testid="open-inspector"
+              title={tInspector("openInspector")}
+              aria-label={tInspector("openInspector")}
+              aria-pressed={inspecting}
+              onClick={onInspect}
+              className={cn("rounded p-1 hover:bg-accent", inspecting && "bg-accent text-foreground")}
+            >
+              <Activity className="size-3.5" />
+            </button>
+          ) : null}
         </div>
       </div>
       {error && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}

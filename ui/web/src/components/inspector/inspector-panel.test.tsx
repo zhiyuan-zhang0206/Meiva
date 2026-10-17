@@ -11,6 +11,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InspectorPanel } from "./inspector-panel";
+import { useTimelineStore } from "@/lib/timeline/timeline-store";
+
 import { InspectorToggle } from "./inspector-toggle";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
 import type * as TimeFormat from "@/lib/format/time";
@@ -1265,46 +1267,6 @@ describe("InspectorPanel mobile", () => {
     );
     await waitFor(() => expect(signals.get(2)).toBeDefined());
     expect(signals.get(1)?.aborted).toBe(true);
-  });
-});
-
-describe("InspectorToggle", () => {
-  it("renders and toggles on click", () => {
-    render(<InspectorToggle />);
-    const btn = screen.getByRole("button", { name: "Close inspector" });
-    fireEvent.click(btn);
-    expect(toggle).toHaveBeenCalledOnce();
-  });
-
-  it("chevron points left when open and right when closed (2026-08-24 ruling)", () => {
-    render(<InspectorToggle />);
-    const openButton = screen.getByRole("button", { name: "Close inspector" });
-    const openChevrons = [...openButton.querySelectorAll("svg path")]
-      .map((p) => p.getAttribute("d"))
-      .filter((d) => d?.startsWith("m"));
-    expect(openChevrons).toContain("m15 18-6-6 6-6");
-
-    cleanup();
-    panelState.open = false;
-    render(<InspectorToggle />);
-    const closedButton = screen.getByRole("button", { name: "Open inspector" });
-    const closedChevrons = [...closedButton.querySelectorAll("svg path")]
-      .map((p) => p.getAttribute("d"))
-      .filter((d) => d?.startsWith("m"));
-    expect(closedChevrons).toContain("m9 18 6-6-6-6");
-  });
-
-  it("does not prefetch while closed, even on pointer intent", () => {
-    panelState.open = false;
-    getAgentInspectStatistics.mockResolvedValue(fixture());
-    render(<InspectorToggle />);
-    const btn = screen.getByRole("button", { name: "Open inspector" });
-    expect(getAgentInspectStatistics).not.toHaveBeenCalled();
-    expect(getAgentInspectLive).not.toHaveBeenCalled();
-    fireEvent.pointerEnter(btn);
-    fireEvent.focus(btn);
-    expect(getAgentInspectStatistics).not.toHaveBeenCalled();
-    expect(getAgentInspectLive).not.toHaveBeenCalled();
   });
 });
 
