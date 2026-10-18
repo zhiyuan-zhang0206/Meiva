@@ -83,7 +83,9 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
         assert snapshot is not None
         published_awaiting.append([notice.title for notice in snapshot.notices_awaiting_response])
 
-    async def _capture_posted(_bus: object, _agent_id: int, notice_id: int, *_args: object) -> None:
+    async def _capture_posted(
+        _bus: object, _agent_id: int, notice_id: int, *_args: object, **_kwargs: object
+    ) -> None:
         posted.append(notice_id)
 
     async def _capture_resolved(_bus: object, _agent_id: int, notice_id: int, **_: object) -> None:
