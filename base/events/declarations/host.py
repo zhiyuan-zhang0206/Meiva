@@ -342,6 +342,7 @@ EVENTS: dict[str, EventSpec] = {
         "nobody classified the entry) and the enforcement mode in force",
         payload=ImpersonationCapabilityRefused,
         tier="anomaly",
+        site="meiva/impersonation/attachment.py:_record_capability_refusal (positional emit)",
     ),
     "impersonation_capability_defaulted": telemetry_event(
         "impersonation_capability_defaulted",
@@ -351,6 +352,7 @@ EVENTS: dict[str, EventSpec] = {
         "the takeover's authority",
         payload=ImpersonationCapabilityDefaulted,
         tier="noise",
+        site="base/agents/impersonation/__init__.py:_record_launcher_default (positional emit)",
     ),
     "impersonation_terminal_notice_failed": telemetry_event(
         "impersonation_terminal_notice_failed",
