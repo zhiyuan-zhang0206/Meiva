@@ -236,15 +236,6 @@ def server_is_healthy(host: str, port: int, token: str) -> bool:
         return False
 
 
-def _probe_port(host: str, port: int) -> str | None:
-    """Return /health's body, or None when no HTTP server answers the port."""
-    try:
-        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=1.0) as resp:
-            return resp.read().decode(errors="replace")
-    except OSError:
-        return None
-
-
 def page_server_occupants() -> dict[int, tuple[int, str | None]]:
     """Map each local page-server port to its process and cluster home."""
     found: dict[int, tuple[int, str | None]] = {}

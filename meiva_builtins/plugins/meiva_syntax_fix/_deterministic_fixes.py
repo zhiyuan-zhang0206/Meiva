@@ -62,17 +62,6 @@ def fix_unicode_punctuation(code: str) -> tuple[str, int]:
 _STRING_NEWLINE_PATTERN = re.compile(r"\n")
 
 
-def _count_leading(line: str, char: str) -> int:
-    """Count consecutive `char` at the start of a line."""
-    n = 0
-    for c in line:
-        if c == char:
-            n += 1
-        else:
-            break
-    return n
-
-
 def _to_triple_quote(quote_char: str) -> str:
     """Map single quote to triple-single, double quote to triple-double."""
     return quote_char * 3

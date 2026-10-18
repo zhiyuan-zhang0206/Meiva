@@ -39,14 +39,6 @@ def media_gated_members(model: str, *, catalog: ModelCatalog) -> frozenset[str]:
     )
 
 
-def own_media_gated_members() -> frozenset[str]:
-    """`media_gated_members` for the model of the process this runs in — the exec child, whose
-    settings carry its agent's overlay."""
-    from meiva.sdk_surface import settings as sdk_settings
-
-    return _gated(_attach_unavailable_reason(catalog=sdk_settings.model_catalog()))
-
-
 def _gated(unavailable_reason: str | None) -> frozenset[str]:
     return frozenset() if unavailable_reason is None else frozenset({"meiva.self.attach"})
 

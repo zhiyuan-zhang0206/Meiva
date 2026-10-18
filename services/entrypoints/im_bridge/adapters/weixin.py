@@ -332,19 +332,6 @@ def get_str(data: dict[str, Any] | None, key: str) -> str:
     return str(data.get(key) or "")
 
 
-def _dm_text(message: dict[str, Any], account_id: str) -> tuple[str, str] | None:
-    """`(text, sender_id)` of a deliverable DM; None for self, group, bot or empty messages."""
-    sender_id = str(message.get("from_user_id") or "").strip()
-    if not sender_id or sender_id == account_id:
-        return None
-    if message.get("room_id") or message.get("chat_room_id"):
-        return None  # iLink bots are DM-only; group events are not surfaced
-    if message.get("message_type") == MSG_TYPE_BOT:
-        return None
-    text = extract_text(message.get("item_list") or [])
-    return (text, sender_id) if text else None
-
-
 class WeixinAdapter(IMAdapter):
     """iLink personal-bot adapter — DM-only, text-only, QR-login credentials.
 

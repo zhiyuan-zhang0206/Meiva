@@ -59,17 +59,6 @@ def worker_request(argv: list[str]) -> tuple[dict[str, object], Path]:
     return cast(dict[str, object], value), Path(argv[2])
 
 
-def worker_secrets() -> dict[str, str]:
-    """Read the controller's secret mapping from stdin; it never reaches disk."""
-    value: object = json.loads(sys.stdin.buffer.read() or b"{}")
-    if not isinstance(value, dict):
-        raise TypeError("operation secrets must be an object")
-    secrets = cast(dict[object, object], value)
-    if not all(isinstance(key, str) and isinstance(item, str) for key, item in secrets.items()):
-        raise TypeError("operation secrets must map names to strings")
-    return cast(dict[str, str], secrets)
-
-
 def _result_object(path: Path) -> dict[str, object]:
     try:
         value = json.loads(path.read_text())

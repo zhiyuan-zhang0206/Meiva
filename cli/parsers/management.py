@@ -8,19 +8,7 @@ parser building never loads Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-
-
-def _config_overlay_json(value: str) -> str:
-    """Argparse type for `--config`: reject a non-object overlay before any command runs."""
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise argparse.ArgumentTypeError(f"invalid config JSON: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise argparse.ArgumentTypeError("config must be a JSON object")
-    return value
 
 
 def _h_config_audit(args: argparse.Namespace) -> int:

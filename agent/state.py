@@ -556,13 +556,6 @@ def compact_version() -> int:
     return meiva.state.compact.version
 
 
-def _annotation_text(annotation: Any) -> str:
-    """`str` / `set[str]` / `str | None` — an annotation spelled the way its
-    author wrote it, for the contribution ledger's one-line detail (a bare class
-    reprs as `<class 'str'>`, which is noise in a catalog)."""
-    return annotation.__name__ if isinstance(annotation, type) else repr(annotation)
-
-
 def plugin_state_schema(extensions: ExtensionRegistry) -> PluginStateSchema:
     """The state declarations of every plugin in `extensions`, validated.
 

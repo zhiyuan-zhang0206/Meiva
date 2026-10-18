@@ -107,20 +107,6 @@ MAX_AGENT_UPLOAD_FILES = 1000  # file count per agent (inode-ish bound)
 _RENDERABLE_SUFFIXES = frozenset({".html", ".htm", ".svg", ".xhtml", ".xml", ".md"})
 
 
-def upload_quota_used(agent_dir: Path) -> tuple[int, int]:
-    """(total bytes, file count) of everything currently in an agent's upload
-    dir — the quota baseline a new batch is checked against."""
-    if not agent_dir.is_dir():
-        return 0, 0
-    total = 0
-    count = 0
-    for p in agent_dir.iterdir():
-        if p.is_file():
-            total += p.stat().st_size
-            count += 1
-    return total, count
-
-
 def render_safe_headers(name: str) -> dict[str, str]:
     """Extra response headers for serving an upload back. Renderable types get
     attachment + nosniff so a stored payload cannot execute in a browser;
