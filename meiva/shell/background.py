@@ -120,7 +120,10 @@ def notified_line(
         f'{shlex.quote(str(cli_path()))} agents send {agent_id} "{notice}" '
         f"--source {source} --tail-file {q_path}"
     )
-    line = f"exec 3> >(tee {q_path}); ( {cmd} ) >&3 2>&1; _ec=$?; exec 3>&-; "
+    line = (
+        f"exec 3> >(tee {q_path}); ( {cmd} ) >&3 2>&1; _ec=$?; "
+        f"printf '[exit %s]\\n' \"$_ec\" >&3; exec 3>&-; "
+    )
     line += send_notice if notify == "always" else f"{send_notice} --completion"
     if not keep:
         line += "; exit $_ec"
