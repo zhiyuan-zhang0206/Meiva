@@ -293,8 +293,10 @@ def dispatch_exec_result(
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
             )
-            logger.info("[exec] {body}", event="exec", body=envelope.text)
-            logger.info("[halt] {body}", event="halt", body="system_halt (compact)")
+            logger.info("[exec] {body}", event="exec", body=envelope.text, agent_id=agent_id)
+            logger.info(
+                "[halt] {body}", event="halt", body="system_halt (compact)", agent_id=agent_id
+            )
         case ExecLifecycle(
             output=output, exc=AgentTermination() | AgentRestart() | AgentImpersonation() as exc
         ):
@@ -308,11 +310,12 @@ def dispatch_exec_result(
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
             )
-            logger.info("[exec] {body}", event="exec", body=envelope.text)
+            logger.info("[exec] {body}", event="exec", body=envelope.text, agent_id=agent_id)
             logger.info(
                 "[halt] {body}",
                 event="halt",
                 body=f"lifecycle {type(exc).__name__}",
+                agent_id=agent_id,
             )
         case ExecLifecycle(exc=other_exc):
             # Exhaustive fallthrough: future LifecycleExit subclass not handled
@@ -338,6 +341,7 @@ def dispatch_exec_result(
                 label="exec-cancelled",
                 body=envelope.text,
                 event="exec_cancelled",
+                agent_id=agent_id,
             )
             # Notify frontend of abort (symmetric with llm_node cancel path;
             # the timeout path does not send Cancelled — not a user cancel).
@@ -355,7 +359,11 @@ def dispatch_exec_result(
                 referenced_messages=referenced_messages,
             )
             logger.info(
-                "[{label}] {body}", label="exec-timeout", body=envelope.text, event="exec_timeout"
+                "[{label}] {body}",
+                label="exec-timeout",
+                body=envelope.text,
+                event="exec_timeout",
+                agent_id=agent_id,
             )
         case ExecCrashed(
             output=output, exc=exc, full_traceback=child_traceback, code_reached=code_reached
@@ -390,6 +398,7 @@ def dispatch_exec_result(
                 full_traceback=child_traceback or format_full_traceback(exc),
                 event="exec_failed",
                 exc_type=type(exc).__name__,
+                agent_id=agent_id,
             )
             if code_reached is False:
                 # Bootstrap-class failure: the child died before the agent's
@@ -405,7 +414,7 @@ def dispatch_exec_result(
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
             )
-            logger.info("[exec] {body}", event="exec", body=envelope.text)
+            logger.info("[exec] {body}", event="exec", body=envelope.text, agent_id=agent_id)
     return halted, envelope, status
 
 

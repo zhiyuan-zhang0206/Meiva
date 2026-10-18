@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from base.events.notifications.catalog import CORE_CATEGORIES, NotificationCategory, merge_catalog
+from base.events.notifications.catalog import (
+    CORE_CATEGORIES,
+    NotificationCategory,
+    category_from_manifest,
+    merge_catalog,
+)
 from base.packages.plugins import enable_config
 from base.packages.plugins.manifest import load_manifest
 
@@ -23,20 +28,5 @@ def declared_categories() -> dict[str, NotificationCategory]:
             continue
         manifest = load_manifest(installed[name])
         declared = cast(list[dict[str, Any]], manifest.contributions.get("notifications") or [])
-        categories: list[NotificationCategory] = []
-        for item in declared:
-            category = NotificationCategory(
-                id=item["id"],
-                label=item["label"],
-                description=item["description"],
-                importance=item["importance"],
-                default_enabled=item["defaultEnabled"],
-                dedupe_window_seconds=item["dedupeWindowSeconds"],
-            )
-            if not category.id.startswith(f"{name}."):
-                raise ValueError(
-                    f"plugin {name!r} declared {category.id!r} outside its own namespace"
-                )
-            categories.append(category)
-        groups.append(categories)
+        groups.append([category_from_manifest(item, plugin=name) for item in declared])
     return merge_catalog(groups)

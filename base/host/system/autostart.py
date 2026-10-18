@@ -51,6 +51,7 @@ from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 from base.host.system.boot_unit import install, uninstall
 from base.host.system.cron import (
     LAUNCHD_LABEL_PREFIX,
+    bootout_launchd_job,
     launchd_env_block,
     meiva_binary_path,
     os_jobs_enabled,
@@ -145,15 +146,11 @@ def register_macos(*, host: Host) -> int:
 def _unregister_macos(*, host: Host) -> int:
     plist_path = _autostart_plist_path()
     label = _LABEL
-    host.run(
-        ["launchctl", "bootout", f"gui/{host.uid}/{label}"],
-        capture_output=True,
-        timeout=_LAUNCHCTL_TIMEOUT_S,
-    )
+    retired = bootout_launchd_job(label, host=host)
     if plist_path.exists():
         plist_path.unlink()
         logger.info("Removed autostart plist {}", plist_path)
-    return 0
+    return 0 if retired else 1
 
 
 def register_linux(*, host: Host) -> int:

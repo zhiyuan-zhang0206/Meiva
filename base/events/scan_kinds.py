@@ -89,7 +89,12 @@ def walk_py(repo: Path) -> Iterator[tuple[str, list[str]]]:
         try:
             with path.open(encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
-        except OSError:
+        except OSError as exc:
+            print(
+                f"WARNING: {rel} could not be read ({exc!r}); it is not scanned, so its "
+                "event emissions are unjudged",
+                file=sys.stderr,
+            )
             continue
         yield rel, lines
 

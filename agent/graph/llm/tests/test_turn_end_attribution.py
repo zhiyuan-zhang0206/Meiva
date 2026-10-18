@@ -113,3 +113,37 @@ async def test_turn_end_failure_records_carry_the_owning_agent(
     assert len(records) == 1
     assert records[0]["extra"]["ok"] is False
     assert records[0]["extra"]["agent_id"] == 1
+
+
+async def test_halt_record_carries_the_owning_agent(
+    hosted_resources: HostedTurnResources,
+    fake_cancel_event: InterruptEvent,
+    loguru_records: LogRecords,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+) -> None:
+    async def _empty() -> AsyncIterator[AIMessageChunk]:
+        yield AIMessageChunk(
+            content="",
+            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+            usage_metadata={"input_tokens": 1, "output_tokens": 0, "total_tokens": 1},
+        )
+
+    llm = MagicMock()
+    llm.astream.return_value = _empty()
+    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
+
+    result = await llm_attempt(
+        state,
+        _make_runtime(
+            hosted_resources, llm, model_catalog=model_catalog, database_gate=database_gate
+        ),
+        _CONFIG,
+        Attempt(1, time.time()),
+        LlmLedger(),
+    )
+    assert result is not None
+
+    records = loguru_records.events("halt")
+    assert len(records) == 1
+    assert records[0]["extra"]["agent_id"] == 1

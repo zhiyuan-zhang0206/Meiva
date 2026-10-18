@@ -383,4 +383,16 @@ EVENTS: dict[str, EventSpec] = {
         "observation, so the wake had nothing left to do; not a failure",
         tier="observation",
     ),
+    "brew_pin": telemetry_event(
+        "brew_pin",
+        "the brew-pin assertion could not judge this host: brew list (--pinned) raised or "
+        "exited non-zero, so the installed and pinned sets are unknown, not empty",
+        tier="anomaly",
+    ),
+    "launchd_retirement": telemetry_event(
+        "launchd_retirement",
+        "launchctl print still lists a job after its bootout; the retired job keeps running "
+        "the code it was loaded with while its plist is already gone",
+        tier="anomaly",
+    ),
 }

@@ -15,6 +15,8 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
@@ -87,6 +89,23 @@ def test_transcript_log_is_capped(make_session: MakeSession, tmp_path: Path) -> 
     session.log_write(b"c" * 50)
     assert session._log_written == 200
     assert len(log_file.read_bytes()) == 200, "log must not grow past the cap"
+
+
+def test_a_transcript_write_failure_is_reported_not_swallowed(
+    make_session: MakeSession, tmp_path: Path, loguru_records: LogRecords
+) -> None:
+    session = make_session("meiva-test-logfail-1", 1024)
+    read_only = os.open(tmp_path / "read-only", os.O_CREAT | os.O_RDONLY)
+    os.close(session._log_fd)
+    session._log_fd = read_only
+
+    session.log_write(b"dropped")
+
+    [event] = loguru_records.events("pty_transcript")
+    assert event["level"].name == "WARNING"
+    assert event["extra"]["name"] == "meiva-test-logfail-1"
+    assert event["extra"]["n"] == 1
+    assert session._log_write_failures == 1
 
 
 def _live(_identity: OwnedProcess) -> bool:

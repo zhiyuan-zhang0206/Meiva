@@ -31,9 +31,13 @@ def _path(*, host: Host) -> str:
     return "/work tree/.venv/bin:/usr/bin"
 
 
+_NOT_LOADED = Reply(returncode=113, stderr="Could not find service")
+
+
 def _launchctl(**replies: Reply) -> tuple[FakeCommands, Host]:
     """A macOS host whose launchctl verbs answer as given (default: success)."""
     commands = FakeCommands()
+    commands.on(["launchctl", "print"], replies.pop("print", _NOT_LOADED), repeat=True)
     for verb, reply in replies.items():
         commands.on(["launchctl", verb], reply, repeat=True)
     commands.on("launchctl", Reply(), repeat=True)
@@ -95,7 +99,12 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
     assert job.register_macos(tick_reader=lambda: 900, host=host) == 0
 
     assert plist.read_text(encoding="utf-8") == first
-    assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap", "bootout", "bootstrap"]
+    assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
+        "bootout",
+        "bootstrap",
+        "bootout",
+        "bootstrap",
+    ]
 
 
 def test_linux_registration_replaces_only_its_own_lines(tmp_path: Path) -> None:
@@ -168,7 +177,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     commands, host = _launchctl(bootstrap=Reply(stderr="denied", returncode=1))
     monkeypatch.setattr(job.logger, "error", record_error)
     assert job.register_macos(tick_reader=lambda: 900, host=host) == 1
-    assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
+    assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == ["bootout", "bootstrap"]
     assert errors == [
         ("launchctl bootstrap failed for {}: {}", "com.meiva.packages-refresh", "denied")
     ]
@@ -178,7 +187,12 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     assert job.unregister_macos(host=host) == 0
     assert job.unregister_macos(host=host) == 0
     assert not plist.exists()
-    assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap", "bootout", "bootout"]
+    assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
+        "bootout",
+        "bootstrap",
+        "bootout",
+        "bootout",
+    ]
 
 
 def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -23,6 +23,8 @@ from base.lm.catalog.decide.types import (
     DecisionRequestError,
     YesNo,
 )
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.plugin_providers import build_model_catalog
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import KIND_BODY, KIND_DESC, ChunkHit
@@ -498,3 +500,22 @@ async def test_unknown_decision_model_is_a_clear_error(catalog: ModelCatalog) ->
             catalog=catalog,
             usage_kind="memory_rerank",
         )
+
+
+def test_unreadable_candidate_is_reported_not_silently_dropped(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
+    _write(tmp_path, "readable.md", "---\ntype: Memory\n---\n\nbody text\n")
+    unreadable = _write(tmp_path, "locked.md", "---\ntype: Memory\n---\n\nsecret\n")
+    unreadable.chmod(0o000)
+    hits = [_hit(tmp_path, "locked.md"), _hit(tmp_path, "readable.md")]
+    try:
+        candidates = rerank.load_candidates(hits, tmp_path, frozenset(), 30)
+    finally:
+        unreadable.chmod(0o600)
+
+    assert [candidate.path for candidate in candidates] == ["readable.md"]
+    [event] = loguru_records.events("memory_search_rerank")
+    assert event["level"].name == "WARNING"
+    assert event["extra"]["n"] == 1
+    assert "locked.md" in event["extra"]["first"]

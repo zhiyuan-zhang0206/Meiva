@@ -95,8 +95,8 @@ def register_macos(*, tick_reader: Callable[[], int], host: Host) -> int:
 
 
 def unregister_macos(*, host: Host) -> int:
-    base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path(), host=host)
-    return 0
+    retired = base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path(), host=host)
+    return 0 if retired else 1
 
 
 def register_linux(*, tick_reader: Callable[[], int], host: Host) -> int:

@@ -58,3 +58,10 @@ def test_stop_cluster_instance_reports_an_escalation(
     assert args[1] == "postgres_stop_escalated"
     assert kwargs["level"] == "error"
     assert "ended by an immediate shutdown" in capsys.readouterr().err
+
+
+def test_redis_stop_failure_reads_the_port_not_the_exit_status() -> None:
+    assert dp.redis_stop_failure(6399, still_answers=False) is None
+    failure = dp.redis_stop_failure(6399, still_answers=True)
+    assert failure is not None
+    assert "still answers on 127.0.0.1:6399" in failure
