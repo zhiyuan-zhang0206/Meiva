@@ -2995,9 +2995,10 @@ groups:
           description: >-
             The unit spent its restart budget on one continuous outage, so its circuit breaker is open:
             the backoff ladder (60s, 5m, then 15m) replaced it three times and only its capped 15m
-            cadence — or a usable database after the root saw it unavailable — still replaces it, one
-            attempt per grant. A fresh ALIVE observation resets the count and closes the
-            breaker; an unrelated cause needs an operator. The state reports kind=breaker_open, which
+            cadence — or a dependency-recovery grant, one immediate attempt on the first usable
+            database the root observes and again whenever an unavailable one answers — still
+            replaces it. A fresh ALIVE observation resets the count and closes the breaker; an
+            unrelated cause needs an operator. The state reports kind=breaker_open, which
             outranks a recorded replacement failure (that unit's evidence still rides in the same
             event's detail and attributes_last_error); the query also accepts the historical
             restarts_exhausted value. Each event carries the failure count and the last error on
