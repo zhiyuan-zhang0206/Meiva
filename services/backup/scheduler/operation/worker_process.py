@@ -161,7 +161,6 @@ async def run_operation(
     *,
     kind: OperationKind,
     env: dict[str, str],
-    secrets: Mapping[str, str] | None = None,
     stop: StopSignal | None = None,
     timeout_s: float = 6 * 3600,
     progress: Callable[[str], None] | None = None,
@@ -187,7 +186,7 @@ async def run_operation(
     process: subprocess.Popen[bytes] | None = None
     try:
         publish_result(work / "request.json", request)
-        future, cancelled = await _to_completion(lambda: _launch(module, work, env, secrets))
+        future, cancelled = await _to_completion(lambda: _launch(module, work, env))
         process = future.result()
         _raise_stopped(cancelled)
         tail = None if progress is None else _Tail(work / "stderr.log", progress)
@@ -225,13 +224,11 @@ def _finished_result(process: subprocess.Popen[bytes], work: Path) -> dict[str, 
     return result
 
 
-def _launch(
-    module: str, work: Path, env: dict[str, str], secrets: Mapping[str, str] | None
-) -> subprocess.Popen[bytes]:
+def _launch(module: str, work: Path, env: dict[str, str]) -> subprocess.Popen[bytes]:
     with (work / "stdout.log").open("xb") as stdout, (work / "stderr.log").open("xb") as stderr:
         os.fchmod(stdout.fileno(), 0o600)
         os.fchmod(stderr.fileno(), 0o600)
-        process = subprocess.Popen(  # noqa: S603 -- fixed trusted worker in this checkout
+        return subprocess.Popen(  # noqa: S603 -- fixed trusted worker in this checkout
             [
                 sys.executable,
                 "-I",
@@ -243,19 +240,13 @@ def _launch(
                 str(work / "result.json"),
             ],
             start_new_session=True,
-            stdin=subprocess.DEVNULL if secrets is None else subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
             stdout=stdout,
             stderr=stderr,
             env=env,
             cwd=_CODE_ROOT,
             close_fds=True,
         )
-    if secrets is not None and process.stdin is not None:
-        with suppress(OSError):
-            process.stdin.write(json.dumps(dict(secrets)).encode())
-        with suppress(OSError):
-            process.stdin.close()
-    return process
 
 
 async def _await_operation(
