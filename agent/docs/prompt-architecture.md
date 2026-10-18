@@ -471,6 +471,15 @@ Landed so far:
   the delegation check
   (`MEIVA_SYSTEM_PROMPT_DELEGATION_CHECK`, default on) still requires matching the
   task against that index and loading the covering skill before acting.
+- The delegation check's parallel-work step names the choice and its price
+  (`agent/graph/prompt/system_prompt.py:_STEP_PARALLEL`): do not let a separate
+  piece of work queue behind the current one — fork when the child needs this
+  conversation (it inherits it and starts already oriented), otherwise spawn a
+  fresh agent with a written brief. Forking does not shrink the parent's window,
+  and the child pays this context's size on every call. The cost sentence is the
+  point: through 2026-10-18 the step only named a condition ("fork when your
+  existing context is valuable"), and 58 of 3,778 births were forks while 78 of
+  1,081 agents that held tasks ever created a child.
 
 - A one-sentence cross-machine delegation hint (`MEIVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION`,
   default on) rendered right after the delegation check: when work spans
