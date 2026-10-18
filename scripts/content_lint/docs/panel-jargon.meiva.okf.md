@@ -39,4 +39,22 @@ names the original term to restore. It is not a translation dictionary, and
 extending it beyond observed cases would recreate the over-correction it exists
 to prevent.
 
+## A section label must be recognised, not guessed
+
+A heading is a Markdown heading line, or a line whose entire text is bold, with an
+optional trailing colon. Everything after a heading until the next one belongs to
+that section, so an unrecognised label does not just lose its own line: the
+glossary stays counted as body and its entry cap becomes a no-op, and identifiers
+in a mislabelled evidence area are reported as body findings.
+
+The gate therefore reports `unparsed-section` when a line carries a glossary or
+evidence label that is not a heading. It is soft, because the writer may have
+meant prose, but it names the label: a panel that looks like it passed without its
+glossary ever being read is the one failure mode a reader cannot see.
+
+Glossary terms are counted from the bold lead of an entry (`**term**: ...`), a
+Markdown table row, or a bullet whose term is in backticks (`- `term`: ...`), so the
+entry cap does not depend on which of the three forms a writer picked.
+
+
 Parent: [[scripts/content_lint/docs/content_lint.meiva.okf.md]].

@@ -125,3 +125,47 @@ def test_invented_translation_names_the_original_term(tmp_path: Path, rules: Pat
         "\u81ea\u6211\u7ec8\u7ed3 -> self-terminate",
     }
     assert passed
+
+
+_GLOSSARY_TABLE_ROWS = "| \u672f\u8bed1 | \u610f\u601d1 |\n| \u672f\u8bed2 | \u610f\u601d2 |"
+
+
+def test_bold_label_without_trailing_colon_is_a_heading(tmp_path: Path, rules: Path) -> None:
+    text = (
+        _BODY_OK
+        + "\n\n- **\u540d\u8bcd\u8868\uff08\u4e24\u6761\uff09**\n\n"
+        + _GLOSSARY_TABLE
+        + _GLOSSARY_TABLE_ROWS
+        + f"\n\n## {_EVIDENCE_HEADING}\n\n- \u6539\u52a8 P1\n"
+    )
+    panel = tmp_path / "to_user.md"
+    panel.write_text(text, encoding="utf-8")
+    findings, count, passed = gate.evaluate(panel, gate.load_ruleset(rules))
+    assert (findings, count, passed) == ([], 2, True)
+
+
+def test_backtick_bullet_glossary_terms_are_counted(tmp_path: Path, rules: Path) -> None:
+    text = (
+        _BODY_OK
+        + "\n\n"
+        + _GLOSSARY_HEADING
+        + (
+            "\n\n- `agent`\uff1a\u5e72\u6d3b\u7684\u7a0b\u5e8f"
+            "\n- `watcher`\uff1a\u5b9a\u65f6\u68c0\u67e5\n"
+        )
+    )
+    panel = tmp_path / "to_user.md"
+    panel.write_text(text, encoding="utf-8")
+    _findings, count, passed = gate.evaluate(panel, gate.load_ruleset(rules))
+    assert count == 2 and passed
+
+
+def test_unrecognised_section_label_is_reported(tmp_path: Path, rules: Path) -> None:
+    text = _BODY_OK + "\n\n- **\u540d\u8bcd\u8868**\uff1a\uff08\u4e24\u6761\uff09\n"
+    panel = tmp_path / "to_user.md"
+    panel.write_text(text, encoding="utf-8")
+    findings, count, passed = gate.evaluate(panel, gate.load_ruleset(rules))
+    assert count == 0
+    assert [finding.rule for finding in findings] == ["unparsed-section"]
+    assert findings[0].detail.startswith("\u540d\u8bcd\u8868")
+    assert passed

@@ -91,12 +91,16 @@ def load_ruleset(path: Path | None = None) -> Ruleset:
     )
 
 
+_BOLD_LABEL = re.compile(r"^\*\*(?P<text>[^*]+?)\*\*\s*[:" + _FULLWIDTH_COLON + r"]?\s*$")
+
+
 def _heading_text(line: str) -> str | None:
     stripped = re.sub(r"^[-*+]\s+", "", line.strip())
     if stripped.startswith("#"):
         return stripped.lstrip("#").strip()
-    if stripped.startswith("**") and stripped.endswith((_FULLWIDTH_COLON, ":")):
-        return stripped.strip("*" + _FULLWIDTH_COLON + ":").strip()
+    label = _BOLD_LABEL.match(stripped)
+    if label:
+        return label.group("text").strip()
     return None
 
 
@@ -132,6 +136,9 @@ def _glossary_terms(lines: Sequence[str], ruleset: Ruleset) -> set[str]:
             continue
         for match in re.finditer(r"\*\*([^*]{1,40})\*\*", line):
             terms.add(match.group(1).strip())
+        if re.match(r"^\s*[-*+]\s+", line):
+            for match in re.finditer(r"`([^`]{1,40})`", line):
+                terms.add(match.group(1).strip())
         row = line.strip()
         if not row.startswith("|"):
             continue
@@ -163,6 +170,27 @@ def _acronym_findings(
     return findings
 
 
+def _unparsed_section_findings(lines: Sequence[str], ruleset: Ruleset) -> list[Finding]:
+    markers = ruleset.glossary_headings + ruleset.evidence_headings
+    findings: list[Finding] = []
+    for number, line in enumerate(lines, start=1):
+        if _heading_text(line) is not None:
+            continue
+        for span in re.finditer(r"\*\*([^*]{1,40})\*\*", line):
+            label = span.group(1).strip()
+            if any(marker in label for marker in markers):
+                findings.append(
+                    Finding(
+                        line=number,
+                        rule="unparsed-section",
+                        detail=f"{label} (not a heading: the section is read as body)",
+                        hard=False,
+                    )
+                )
+                break
+    return findings
+
+
 def _invented_findings(
     body_lines: Sequence[str],
     invented: tuple[tuple[str, tuple[str, ...]], ...],
@@ -185,7 +213,8 @@ def _invented_findings(
 
 # meiva:link scripts/content_lint/docs/panel-jargon.meiva.okf.md
 def scan_panel(path: Path, ruleset: Ruleset) -> tuple[list[Finding], int]:
-    body, _evidence, glossary = split_body(path.read_text(encoding="utf-8"), ruleset)
+    text = path.read_text(encoding="utf-8")
+    body, _evidence, glossary = split_body(text, ruleset)
     terms = _glossary_terms(glossary, ruleset)
     findings: list[Finding] = []
     for rule in ruleset.rules:
@@ -202,6 +231,7 @@ def scan_panel(path: Path, ruleset: Ruleset) -> tuple[list[Finding], int]:
     known = tuple(ruleset.allowed_acronyms) + tuple(term.upper() for term in ruleset.keep_terms)
     findings.extend(_acronym_findings(body, terms, known))
     findings.extend(_invented_findings(body, ruleset.invented))
+    findings.extend(_unparsed_section_findings(text.splitlines(), ruleset))
     return sorted(findings, key=lambda finding: (finding.line, finding.rule)), len(terms)
 
 
