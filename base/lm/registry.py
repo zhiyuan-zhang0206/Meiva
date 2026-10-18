@@ -1,5 +1,5 @@
 # meiva:note
-# `ModelTuning` field names match flat `base.config` settings fields one-for-one, with `DEFAULT_TUNING` fully populated as the shared floor and `None` serving as the topology-independent unset sentinel across `explain_setting` and `resolve_setting` (`shared-default < model-default < explicit`). `validate_models` and `validate_spec` require `attach_modalities` to be a subset of `media_types`, require every spawnable model to declare `context_window`, `knowledge_cutoff`, `effort_levels`, a current price, a concrete `tuning.reasoning_effort` within `effort_levels`, and `max_output_tokens` on Anthropic-protocol bindings, and require acyclic `superseded_by` chains, valid `fast_of` standard targets, and non-spawnable `unavailable_fallback` sources pointing to spawnable replacements. `resolve_available_model` and `normalize_overlay_llm_model` settle withdrawn models to their declared fallback in one hop and return `(requested, resolved)` when rewriting an overlay.
+# `ModelTuning` field names match flat `base.config` settings fields one-for-one, with `DEFAULT_TUNING` fully populated as the shared floor and `None` serving as the topology-independent unset sentinel across `explain_setting` and `resolve_setting` (`shared-default < model-default < explicit`). `validate_models` and `validate_spec` require `attach_modalities` to be a subset of `media_types`, require `sdk_hidden_members` entries to be dotted paths under `meiva` and `sdk_doc_style` to be a plain identifier, require every spawnable model to declare `context_window`, `knowledge_cutoff`, `effort_levels`, a current price, a concrete `tuning.reasoning_effort` within `effort_levels`, and `max_output_tokens` on Anthropic-protocol bindings, and require acyclic `superseded_by` chains, valid `fast_of` standard targets, and non-spawnable `unavailable_fallback` sources pointing to spawnable replacements. `resolve_available_model` and `normalize_overlay_llm_model` settle withdrawn models to their declared fallback in one hop and return `(requested, resolved)` when rewriting an overlay.
 # meiva:link base/lm/docs/model-configuration.meiva.okf.md
 from __future__ import annotations
 
@@ -93,6 +93,8 @@ class ModelSpec:
     streaming: bool = True
     media_types: frozenset[str] = frozenset()
     attach_modalities: frozenset[str] | None = None
+    sdk_hidden_members: frozenset[str] = frozenset()
+    sdk_doc_style: str | None = None
     tuning: ModelTuning = field(default_factory=ModelTuning)
 
 
@@ -119,6 +121,25 @@ def attach_modalities_for_model(
     return media_types_for_model(model, models=models, vision_prefixes=vision_prefixes)
 
 
+# meiva:note
+# A model's SDK-help declaration names real places: a hidden entry is a dotted path under
+# `meiva`, and a style is the plain identifier a target declares with `doc_variants`. Checked
+# with the rest of the catalog so a typo fails the build instead of silently hiding nothing.
+def _validate_sdk_help(spec: ModelSpec, model_id: str) -> None:
+    for path in sorted(spec.sdk_hidden_members):
+        if path != "meiva" and not path.startswith("meiva."):
+            raise RuntimeError(
+                f"model {model_id!r} declares sdk_hidden_members entry {path!r} — an entry "
+                f"is a dotted path under `meiva`, e.g. 'meiva.self.attach'"
+            )
+    style = spec.sdk_doc_style
+    if style is not None and not style.isidentifier():
+        raise RuntimeError(
+            f"model {model_id!r} declares sdk_doc_style {style!r} — a style is a plain "
+            f"identifier, the key a target declares with doc_variants"
+        )
+
+
 def validate_spec(
     model_id: str,
     spec: ModelSpec,
@@ -127,6 +148,7 @@ def validate_spec(
     prices: PriceBook,
     pending_price_models: Collection[str] = (),
 ) -> None:
+    _validate_sdk_help(spec, model_id)
     if spec.attach_modalities is not None and not spec.attach_modalities <= spec.media_types:
         raise RuntimeError(
             f"model {model_id!r} declares attach_modalities "

@@ -16,7 +16,7 @@ import re as _re
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 from meiva.sdk_surface import meiva_module, process_context
 
@@ -49,9 +49,89 @@ class _Render:
 
     compact_classes: bool = False
     hidden_members: frozenset[str] = frozenset()
+    # meiva:note
+    # Which declared documentation variant this render reads (`doc_variants`); None renders
+    # every target's own docstring as written.
+    doc_style: str | None = None
 
 
 _DEFAULT_RENDER = _Render()
+
+# meiva:note
+# What a model reads of the SDK — which members and in which words — is declared on its
+# `ModelSpec`; this module only resolves it. The two lookups below are the whole coupling.
+# meiva:link docs/decisions/agents/context/2026-10-18-per-model-sdk-help.md
+VARIANT_ATTR = "__meiva_doc_variants__"
+
+# meiva:note
+# Declare alternative help texts for one SDK target, keyed by style name. The target keeps its
+# docstring as the default contract; a model whose `ModelSpec.sdk_doc_style` names a key reads
+# that text instead. Use it when two models must read different text for the same member, not
+# to restate one fact twice: every variant is a complete contract, and agent_docstrings.py
+# holds it to the docstring rules.
+# meiva:link docs/decisions/agents/context/2026-10-18-per-model-sdk-help.md
+
+
+def doc_variants(**texts: str) -> Callable[[Any], Any]:
+    def attach(target: Any) -> Any:
+        setattr(target, VARIANT_ATTR, dict(texts))
+        return target
+
+    return attach
+
+
+def _variant_text(obj: Any, style: str | None) -> str | None:
+    if not style:
+        return None
+    holder: dict[str, Any] = getattr(obj, "__dict__", {})
+    texts = holder.get(VARIANT_ATTR)
+    if not isinstance(texts, dict):
+        return None
+    text = cast("dict[str, str]", texts).get(style)
+    return text if text else None
+
+
+def _doc_for(obj: Any, own_doc: str | None, render: "_Render") -> str | None:
+    variant = _variant_text(obj, render.doc_style)
+    return variant if variant is not None else own_doc
+
+
+# meiva:note
+# What one model sees of the SDK: the members help omits, and the text style it reads.
+# `hidden_members` merges the capability gate (a text-only model cannot attach media) with
+# the model's own `ModelSpec.sdk_hidden_members`; the prompt's SDK reference and an exec
+# turn's `meiva.help()` both build this value, so the two paths cannot disagree.
+@_dataclasses.dataclass(frozen=True)
+class ModelHelpProfile:
+    hidden_members: frozenset[str] = frozenset()
+    doc_style: str | None = None
+
+    # meiva:note
+    # The profile a given model's agent reads, built from the catalog row that model's
+    # provider declares.
+    @classmethod
+    def for_model(cls, model: str, *, catalog: Any) -> "ModelHelpProfile":
+        from meiva.sdk_surface.attachment_transport import media_gated_members
+
+        spec: Any = catalog.models.get(model)
+        declared: frozenset[str] = spec.sdk_hidden_members if spec is not None else frozenset()
+        style: Any = spec.sdk_doc_style if spec is not None else None
+        return cls(
+            hidden_members=media_gated_members(model, catalog=catalog) | declared,
+            doc_style=style if isinstance(style, str) and style else None,
+        )
+
+    # meiva:note
+    # The profile of the model this process runs as; empty when no agent context is bound,
+    # which is what a bare `import meiva` sees.
+    @classmethod
+    def current(cls) -> "ModelHelpProfile":
+        if process_context.ambient_context() is None:
+            return cls()
+        from meiva.sdk_surface import settings as sdk_settings
+        from meiva.sdk_surface.attachment_transport import current_model
+
+        return cls.for_model(current_model(), catalog=sdk_settings.model_catalog())
 
 
 def help(*targets: Any) -> None:
@@ -62,27 +142,23 @@ def help(*targets: Any) -> None:
     render(*targets)
 
 
+# meiva:note
+# Framework-internal render entry behind `meiva.help`, not part of the SDK: the system prompt
+# builder passes the render parameters `meiva.help` deliberately does not take. An empty
+# profile renders the surface model-independently, which is what the static overview wants.
 def render(
     *targets: Any,
     compact_classes: bool = False,
-    hidden_members: frozenset[str] | None = None,
+    profile: ModelHelpProfile | None = None,
 ) -> None:
-    """Framework-internal render entry behind `meiva.help`; not part of the SDK.
-
-    The system prompt builder calls this with the render parameters that
-    `meiva.help` deliberately does not take. `compact_classes` shows class fields
-    without methods. `hidden_members` omits the named dotted SDK members; when
-    omitted, members unavailable to the model are hidden automatically."""
     _meiva = meiva_module()
 
-    if hidden_members is None:
-        if process_context.ambient_context() is None:
-            hidden_members = frozenset()
-        else:
-            from meiva.sdk_surface.attachment_transport import own_media_gated_members
-
-            hidden_members = own_media_gated_members()
-    render = _Render(compact_classes=compact_classes, hidden_members=hidden_members)
+    resolved = profile if profile is not None else ModelHelpProfile.current()
+    render = _Render(
+        compact_classes=compact_classes,
+        hidden_members=resolved.hidden_members,
+        doc_style=resolved.doc_style,
+    )
     if not targets:
         targets = (_meiva,)
     for i, target in enumerate(targets):
@@ -282,7 +358,7 @@ def _format_module_stub(
     # _format_submodule_ref). Only a top-level target (the root `meiva`) keeps its
     # own docstring — it has no parent listing to carry it.
     pieces: list[str] = []
-    doc = inspect.getdoc(mod)
+    doc = _doc_for(mod, inspect.getdoc(mod), render)
     if doc and include_own_doc:
         if is_skill_object(mod):
             pieces.append(doc)
@@ -318,10 +394,14 @@ def _format_child(name: str, child: Any, render: _Render = _DEFAULT_RENDER) -> s
         # The class formatter is the one that reads the render parameters
         # (compact classes; the recursion into nested members).
         return _format_class_stub(name, child, render)
+    if formatter is _format_function_stub or formatter is _format_submodule_ref:
+        # meiva:note
+        # Both read the render's `doc_style` to pick a declared variant.
+        return formatter(name, child, render)
     return formatter(name, child)
 
 
-def _child_formatter(child: Any) -> Callable[[str, Any], str] | None:
+def _child_formatter(child: Any) -> Callable[..., str] | None:
     """Pick the stub formatter for a child entry by its kind, or None for
     an unrenderable value (falls back to a comment line)."""
     if is_skill_object(child):
@@ -339,18 +419,18 @@ def _child_formatter(child: Any) -> Callable[[str, Any], str] | None:
     return None
 
 
-def _format_function_stub(name: str, fn: Any) -> str:
+def _format_function_stub(name: str, fn: Any, render: _Render = _DEFAULT_RENDER) -> str:
     sig = format_signature(fn)
-    doc = inspect.getdoc(fn)
+    doc = _doc_for(fn, inspect.getdoc(fn), render)
     if not doc:
         return f"def {name}{sig}: ..."
     return f"def {name}{sig}:\n{format_docstring(doc, indent='    ')}"
 
 
-def _format_submodule_ref(name: str, mod: Any) -> str:
+def _format_submodule_ref(name: str, mod: Any, render: _Render = _DEFAULT_RENDER) -> str:
     """Submodule child: `from . import name` + module's full docstring as orphan."""
     lines = [f"from . import {name}"]
-    doc = inspect.getdoc(mod)
+    doc = _doc_for(mod, inspect.getdoc(mod), render)
     if doc:
         lines.append(format_docstring(doc, indent=""))
     return "\n".join(lines)
@@ -426,7 +506,7 @@ def _format_class_stub(name: str, cls: type[Any], render: _Render = _DEFAULT_REN
     # docstring must be the class's OWN — inspect.getdoc() walks the MRO and
     # would render Exception's built-in doc for a deliberately doc-less class.
     head = _class_head(name, cls)
-    parts = _class_doc_parts(name, cls)
+    parts = _class_doc_parts(name, cls, render)
     if issubclass(cls, _enum.Enum):
         # Enum members are the contract (legal values) — always keep them.
         parts.extend(f"    {m.name} = {m.value!r}" for m in cls)
@@ -445,11 +525,13 @@ def _class_head(name: str, cls: type) -> str:
     return f"class {name}({bases}):" if bases else f"class {name}:"
 
 
-def _class_doc_parts(name: str, cls: type) -> list[str]:
-    """The class's OWN docstring as rendered parts — inspect.getdoc() walks
-    the MRO and would render Exception's built-in doc for a deliberately
-    doc-less class, so read `vars(cls)['__doc__']` instead."""
-    own_doc = vars(cls).get("__doc__")
+# meiva:note
+# The class's OWN docstring as rendered parts: inspect.getdoc() walks the MRO and would render
+# Exception's built-in doc for a deliberately doc-less class, so read `vars(cls)['__doc__']`
+# instead. A variant declared for this render's style replaces it.
+def _class_doc_parts(name: str, cls: type, render: _Render = _DEFAULT_RENDER) -> list[str]:
+    variant = _variant_text(cls, render.doc_style)
+    own_doc = variant if variant is not None else vars(cls).get("__doc__")
     # A docstring-less dataclass gets an auto-synthesized __doc__ of the form
     # "Name(field: type, ...)" — pure signature noise, not documentation.
     if _is_synthesized_dataclass_doc(name, cls, own_doc):

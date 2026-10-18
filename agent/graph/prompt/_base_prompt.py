@@ -37,6 +37,7 @@ def capture_meiva_overview() -> str:
     function stubs *without* repeating the docstring (help(meiva.X) drops a
     submodule target's own docstring — see meiva._format_module_stub).
     """
+    from meiva.sdk_surface.help import ModelHelpProfile
     from meiva.sdk_surface.help import render as render_help
 
     buf = io.StringIO()
@@ -46,7 +47,7 @@ def capture_meiva_overview() -> str:
         # themselves is applied by the expand section (`system_prompt.py`), which
         # knows the agent's model. Keeps the overview byte-stable across models
         # and processes.
-        render_help(meiva, hidden_members=frozenset())
+        render_help(meiva, profile=ModelHelpProfile())
     return buf.getvalue()
 
 
