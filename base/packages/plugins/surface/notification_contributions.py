@@ -47,9 +47,10 @@ def _optional_fields(
 # meiva:note
 # `contributions.notifications` is declaration only: the manifest names a category,
 # and the gateway's notification spine owns the switches, the dedupe window and the
-# delivery log. An id outside the plugin's own `<plugin>.` namespace, or a
-# duplicate id, is a validator error rather than an ownership clash resolved at
-# delivery time.
+# delivery log. A duplicate id inside one manifest is a validator error here; an id
+# outside the plugin's own `<plugin>.` namespace is refused when the gateway merges
+# the catalog (`gateway/extensions/notification_categories.py:declared_categories`),
+# never at delivery time.
 # meiva:link docs/conventions/extensions/plugin-spec-v2.md
 def validate_notification_contributions(value: Any, errors: list[str]) -> list[dict[str, object]]:
     if not isinstance(value, list):

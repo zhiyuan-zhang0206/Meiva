@@ -16,7 +16,7 @@ composition root.
 ## Dependency closure
 
 The operation takes its own dependencies as required arguments: `open_url`
-(`base/host/net/ports.py`), `timers` (`base/clock.py`) and its numbers
+(`base/host/net/ports.py`), `timers` (`base/clock`) and its numbers
 (`DownloadLimits`). The composition root passes `SYSTEM_URL_OPENER`,
 `SYSTEM_TIMERS` and the `otel_collector_download_*` settings. `download_with_retry`
 waits its backoff through the caller's clock — the `sleep` hook it hands to
