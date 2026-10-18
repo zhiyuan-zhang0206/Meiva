@@ -117,19 +117,8 @@ the mutable `app-latest` release carries the stable `latest.json` endpoint.
 through a Tauri `--config` overlay, reads it back from the APK with `aapt2`, and
 refuses a publish that would not advance the advertised code.
 
-## Notification surface
-
-One bridge serves both platforms: `scripts/notify-bridge.js` subscribes to the
-gateway's `/api/system` broadcast and renders only the `notification` role,
-whose delivery the gateway's spine already decided — category switches,
-deduplication and the delivery log are server-side. The bridge keeps one job the
-server cannot do: deduplicating by `notification_id` inside the webview session
-and turning a native notification tap into the Inbox deep link.
-
-Android posts through the notification plugin's mobile path off the main looper;
-macOS posts through the same plugin's desktop path from `desktop.rs`, and the
-permission prompt follows the switch in settings rather than the first event.
-Neither platform decides *what* is worth notifying.
+Notification delivery on both platforms is its own node:
+[[ui/app/docs/notifications.meiva.okf.md|notifications]].
 
 ## Limits
 
