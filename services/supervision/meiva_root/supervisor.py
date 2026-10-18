@@ -410,6 +410,7 @@ class Supervisor(StoppingMixin):
         return UnitFailureFacts(
             intent_running=runtime.intent is UnitIntent.RUNNING,
             restart_failed=runtime.restart_failed,
+            last_error=runtime.last_error,
         )
 
     async def dispatch(self, request: RequestPayload) -> ResponsePayload:

@@ -300,7 +300,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-lifecycle-pointer-stuck` | `lifecycle_pointer_stuck` (2h) | 0s | warning | the settle of an unobserved force-terminate fence (boot recovery and the absent-machine sweep): now an operator settles it by hand |
 | `meiva-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
 | `meiva-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
-| `meiva-ops-root-unit-restart-failed` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind` | 0m | error / critical | the root unit episode store and its posts |
+| `meiva-ops-root-unit-restart-failed` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind`, per machine and unit | 0m | error / critical | the root unit episode store and its posts; the breaker rule also routes to Telegram (a database outage takes the webhook's own ingest path down with it) |
 | `meiva-ops-root-unit-not-revivable` | `root_unit_not_revivable` >1 in 2m | 0m | error | `terminal_escalate_rounds` |
 | `meiva-ops-root-unit-stop-escalated` | `root_unit_stop_escalated` >0 in 10m | 0m | error | nothing: a stop that outlived its window gave up silently and left a half-dead unit (2026-10-18) |
 | `meiva-ops-root-diagnostic-venv` / `-brew-pin` / `-browser-reach` | `root_diagnostic` non-alive, >1 / >1 / >2 samples | 0m | warning | the per-probe consecutive-failure thresholds |
@@ -319,9 +319,11 @@ Rules evaluate in Grafana and POST firing/resolved webhooks to the gateway's `PO
 (contact point and policy in `contact.yml`). The policy is the one place merging and repetition
 are decided: instances of one rule are one group (`group_by: [alertname]`, 30s wait, 5m
 interval, 4h repeat), critical skips the wait, and every other alert has an explicit route to the
-webhook. `attributes_check="gateway_liveness"` alerts and the probe's dead-man rule also go straight
-to Telegram through Grafana's native notifier (bot token and owner chat id rendered by converge from
-the telegram settings), because the webhook cannot report a down gateway.
+webhook. `attributes_check="gateway_liveness"` alerts, the probe's dead-man rule and an open unit
+circuit breaker (`metric="root_unit_restart_attempts_exhausted"`) also go straight to Telegram
+through Grafana's native notifier (bot token and owner chat id rendered by converge from the
+telegram settings), because the webhook cannot report a down gateway — and its ingest writes the
+alert row to Postgres, so it cannot report a stalled database either (2026-10-18).
 
 The ingest stores each alert instance in `alerts` (deduped by fingerprint x starts_at, Alertmanager
 webhook shape) and fans firing notifications out through the im_bridge daemon (the only sanctioned

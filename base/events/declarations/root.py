@@ -41,18 +41,41 @@ class RootRestartCleared(TypedDict):
     failed_for_s: float
 
 
+# meiva:note
+# One root unit sits in an explicit failure state (task #4872), emitted on EVERY
+# health round while it holds: the unit's intent is running and it has an open
+# circuit breaker or a recorded replacement failure. A rule debounces that stream;
+# silence resolves it. `kind` is `breaker_open` or `restart_failed` (an open breaker
+# outranks a recorded error; rules also accept the historical `restarts_exhausted`),
+# `detail` is the bounded evidence line and never a grouping key, `attempts` counts
+# the replacements this outage spent and `last_error` is the unit's recorded exit
+# error (task #5315).
 class RootUnitFailureState(TypedDict):
-    """One root unit sits in an explicit failure state (task #4872).
-
-    Emitted on EVERY health round while the condition holds — the unit's intent
-    is running and it has a recorded replacement failure or exhausted automatic
-    restart attempts. A rule can debounce that stream; silence resolves it. ``kind`` is ``restart_failed``,
-    ``restarts_exhausted`` (the first that applies in that order);
-    ``detail`` is the bounded evidence line, never a grouping key.
-    """
-
     unit: str
     kind: str
+    detail: str
+    attempts: int
+    last_error: str
+
+
+# meiva:note
+# One transition, once: the unit spent its restart budget on a continuous outage,
+# so only the backoff ladder's capped cadence, or a dependency-recovery grant
+# (one attempt on the first usable database observed, then one per
+# unavailable-to-answering edge), replaces it now. `detail` is the last
+# error the unit left behind (task #5315).
+class RootUnitBreakerOpen(TypedDict):
+    unit: str
+    attempts: int
+    detail: str
+
+
+# meiva:note
+# One transition, once: a fresh ALIVE observation or an observed operator stop ended
+# the episode, and `open_for_s` is how long the breaker held it (task #5315).
+class RootUnitBreakerClosed(TypedDict):
+    unit: str
+    open_for_s: float
     detail: str
 
 
@@ -404,6 +427,21 @@ EVENTS: dict[str, EventSpec] = {
         "(task #4872)",
         payload=RootUnitFailureState,
         tier="anomaly",
+    ),
+    "root_unit_breaker_open": telemetry_event(
+        "root_unit_breaker_open",
+        "root unit spent its automatic restart budget on one continuous outage — the "
+        "circuit breaker is open, so only the backoff ladder's capped cadence or a "
+        "recovered database replaces it (task #5315)",
+        payload=RootUnitBreakerOpen,
+        tier="anomaly",
+    ),
+    "root_unit_breaker_closed": telemetry_event(
+        "root_unit_breaker_closed",
+        "root unit's open circuit breaker closed again — a fresh ALIVE observation or "
+        "an observed operator stop ended the outage (task #5315)",
+        payload=RootUnitBreakerClosed,
+        tier="noise",
     ),
     "root_unit_not_revivable": telemetry_event(
         "root_unit_not_revivable",

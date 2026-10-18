@@ -23,9 +23,9 @@ def _policy() -> dict[str, Any]:
 def _routes() -> dict[str, dict[str, Any]]:
     routes: dict[str, dict[str, Any]] = {}
     for route in _policy()["routes"]:
-        label = route["object_matchers"][0][0]
+        label, _operator, value = route["object_matchers"][0]
         if route["receiver"] == "meiva-alerts-telegram":
-            routes[f"telegram:{label}"] = route
+            routes[f"telegram:{label}:{value}"] = route
         else:
             routes["critical" if label == "severity" else "catch-all"] = route
     return routes
@@ -41,8 +41,9 @@ def test_every_alert_reaches_the_webhook_receiver() -> None:
     assert policy["matchers"] == []
     assert _routes()["catch-all"]["object_matchers"] == [["alertname", "=~", ".+"]]
     assert list(_routes()) == [
-        "telegram:attributes_check",
-        "telegram:metric",
+        "telegram:attributes_check:gateway_liveness",
+        "telegram:metric:health_probe_silent",
+        "telegram:metric:root_unit_restart_attempts_exhausted",
         "critical",
         "catch-all",
     ]
@@ -76,7 +77,12 @@ def test_critical_alerts_skip_the_batching_wait() -> None:
     )
 
 
-def test_gateway_liveness_also_reaches_telegram_directly_and_still_the_webhook() -> None:
+# meiva:note
+# A down gateway, a silent probe and an open breaker all bypass the webhook: its
+# ingest stores the alert row in Postgres before the IM fan-out, so an alert about a
+# stalled database cannot land. On 2026-10-18 four machines sat in an open breaker
+# for 36 minutes and nothing was delivered (task #5312).
+def test_alerts_the_webhook_cannot_deliver_also_reach_telegram_directly() -> None:
     contacts = {c["name"]: c for c in _document()["contactPoints"]}
     (receiver,) = contacts["meiva-alerts-telegram"]["receivers"]
     assert receiver["type"] == "telegram"
@@ -85,8 +91,15 @@ def test_gateway_liveness_also_reaches_telegram_directly_and_still_the_webhook()
         "chatid": "$__env{MEIVA_ALERTS_TELEGRAM_CHAT_ID}",
     }
     for key, matcher in (
-        ("telegram:attributes_check", ["attributes_check", "=", "gateway_liveness"]),
-        ("telegram:metric", ["metric", "=", "health_probe_silent"]),
+        (
+            "telegram:attributes_check:gateway_liveness",
+            ["attributes_check", "=", "gateway_liveness"],
+        ),
+        ("telegram:metric:health_probe_silent", ["metric", "=", "health_probe_silent"]),
+        (
+            "telegram:metric:root_unit_restart_attempts_exhausted",
+            ["metric", "=", "root_unit_restart_attempts_exhausted"],
+        ),
     ):
         route = _routes()[key]
         assert route["object_matchers"] == [matcher]
