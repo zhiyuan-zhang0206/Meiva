@@ -34,6 +34,21 @@ The close-time pipeline and OTLP worker barriers are bounded: a timeout leaves
 the JSONL mirror and its delivery diagnostic intact rather than silently blocking
 or claiming an export that did not finish.
 
+## Capability gate
+
+Every public SDK entry is wrapped by the usage recorder, which admits the call
+through `Attachment.admit_sdk_call(fn)` before the body runs. The gate compares
+`fn` with the lease's declared capabilities
+(`meiva/impersonation/capabilities.py` maps a dotted entry to one capability; MCP
+tool calls resolve as `mcps.<server>.<tool>` and need machine authority). A lease
+with no declaration is legacy-full and is never checked. Otherwise an entry the
+declaration does not cover — including one no capability classifies — is recorded
+as `impersonation_capability_refused` and then, per
+`impersonation_capability_enforcement`, either runs (`warn`, the shipped default)
+or is refused with `CapabilityDenied` (`enforce`). The gate covers SDK entries
+only: connection handles (`meiva.context.sql` / `.redis` / `.gateway`) are not
+entries and are narrowed by how the attachment builds its clients, not here.
+
 The borrowed identity rides the process's bound `MeivaContext` (`identity.lease`, bound by `bind_process`
 and put back at detach). `meiva.sdk_surface.agent_identity.validate_external_identity` checks the lease
 and the state version on SDK

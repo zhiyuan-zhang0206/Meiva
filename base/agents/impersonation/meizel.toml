@@ -1,7 +1,7 @@
-exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py", "maintenance.py", "manifest.py", "notes.py", "relay.py", "replacement.py", "sessions.py", "status.py", "terminal_notices.py", "tests", "wake.py"]
+exports = ["capabilities.py", "delivery.py", "event_signals.py", "history.py", "host_transport.py", "maintenance.py", "manifest.py", "notes.py", "relay.py", "replacement.py", "sessions.py", "status.py", "terminal_notices.py", "tests", "wake.py"]
 
 [uses]
-"__init__.py" = ["_store.py", "history.py", "manifest.py", "relay.py", "status.py", "wake.py"]
+"__init__.py" = ["_store.py", "capabilities.py", "history.py", "manifest.py", "relay.py", "status.py", "wake.py"]
 "_store.py" = ["status.py"]
 "delivery.py" = ["_store.py", "status.py", "wake.py"]
 "event_log.py" = ["_store.py", "history.py"]
@@ -13,5 +13,5 @@ exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py",
 "replacement.py" = ["status.py"]
 "sessions.py" = ["__init__.py", "history.py"]
 "terminal_notices.py" = ["host_transport.py"]
-"tests" = ["__init__.py", "_store.py", "event_log.py", "event_signals.py", "history.py", "host_transport.py", "maintenance.py", "manifest.py", "relay.py", "sessions.py", "status.py", "terminal_notices.py"]
+"tests" = ["__init__.py", "_store.py", "capabilities.py", "event_log.py", "event_signals.py", "history.py", "host_transport.py", "maintenance.py", "manifest.py", "relay.py", "sessions.py", "status.py", "terminal_notices.py"]
 "wake.py" = ["status.py"]
