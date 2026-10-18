@@ -1,9 +1,11 @@
 # meiva:note
 # Passive recall fails in two directions, so its regression set has two halves: 30 real inbound
-# turns where a note the agent needed was retrieved but never delivered, and 20 where nothing in
+# turns where a note the agent needed was retrieved but never delivered, and 25 where nothing in
 # the pool applied yet the ranking was confident. A lower injection threshold should move the
 # first half up and the second half down; a change that moves both the same way has not been
-# judged. The ranking threshold and cap are read from the agent config, never copied here.
+# judged. The precision half carries scores on both sides of every step it might be asked to take,
+# so the next cut down cannot report "recall up, precision unchanged" by arithmetic alone.
+# The ranking threshold and cap are read from the agent config, never copied here.
 # meiva:link services/docs/gateway_side/memory_indexer/memory-recall-regression.meiva.okf.md
 
 from __future__ import annotations
@@ -137,9 +139,11 @@ def evaluate(
 def evaluate_precision(
     case: Case, ranked: Sequence[tuple[str, float]], *, threshold: float, cap: int
 ) -> Outcome:
-    top = list(ranked)[:1]
-    if top and cap > 0 and top[0][1] >= threshold:
-        return Outcome(case=case, rank=1, score=float(top[0][1]), threshold=threshold, cap=cap)
+    for position, (_, score) in enumerate(list(ranked)[: max(cap, 0)], 1):
+        if score >= threshold:
+            return Outcome(
+                case=case, rank=position, score=float(score), threshold=threshold, cap=cap
+            )
     return Outcome(case=case, rank=None, score=None, threshold=threshold, cap=cap)
 
 
