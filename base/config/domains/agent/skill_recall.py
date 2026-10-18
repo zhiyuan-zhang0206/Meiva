@@ -107,3 +107,105 @@ class AgentSkillRecallSettings(EnvSettings):
             "lifecycle": "live",
         },
     )
+
+    skill_recall_peer_messages: bool = Field(
+        default=False,
+        alias="MEIVA_SKILL_RECALL_PEER_MESSAGES",
+        description=(
+            "Also consider turns woken by another agent's message, not only by a person or a "
+            "schedule. A peer message is scored only when the peer gate passes: one cheap "
+            "decision request checks that the message asks for work and does not already state "
+            "how to do it. Off keeps the 2026-10-11 behaviour exactly; the peer gate exists "
+            "because most inbound messages are peer traffic that the original trigger excluded."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    skill_recall_peer_gate_work_floor: float = Field(
+        default=0.30,
+        gt=0,
+        le=1,
+        alias="MEIVA_SKILL_RECALL_PEER_GATE_WORK_FLOOR",
+        description=(
+            "Peer gate: skip a peer message when the probability that it asks the recipient to "
+            "do work is at or below this floor, i.e. when it is clearly a status report, "
+            "acknowledgement or notification. Messages between this floor and the method "
+            "ceiling pass: an uncertain message is scored rather than dropped, because a missed "
+            "offer costs a redo while an extra offer costs one line in the prompt."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    skill_recall_peer_gate_method_ceiling: float = Field(
+        default=0.70,
+        gt=0,
+        le=1,
+        alias="MEIVA_SKILL_RECALL_PEER_GATE_METHOD_CEILING",
+        description=(
+            "Peer gate: skip a peer message when the probability that it already states how to "
+            "do the work (steps, criteria, commands, acceptance checks) is at or above this "
+            "ceiling. A brief that carries its own method does not need a playbook offered on "
+            "top of it; the same split made the batch-review episodes score 'not applicable' in "
+            "the 2026-10-17 evaluation."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    skill_recall_peer_gate_max_chars: int = Field(
+        default=4000,
+        gt=0,
+        alias="MEIVA_SKILL_RECALL_PEER_GATE_MAX_CHARS",
+        description=(
+            "Peer gate: only the first this-many characters of the peer message are sent to the "
+            "decision model. The gate reads one message, never the conversation, which is what "
+            "makes it about 17x cheaper than the recall pass it guards."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    skill_recall_peer_gate_deadline_seconds: float = Field(
+        default=1.5,
+        gt=0,
+        alias="MEIVA_SKILL_RECALL_PEER_GATE_DEADLINE_SECONDS",
+        description=(
+            "Wall-clock budget (seconds) for the peer gate. It runs before the recall pass, so "
+            "a peer-woken turn can spend this budget plus skill_recall_deadline_seconds when "
+            "both calls are slow; the gate reads one message (p50 about 0.6s)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )

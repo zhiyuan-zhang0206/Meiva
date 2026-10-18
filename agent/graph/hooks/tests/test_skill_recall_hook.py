@@ -24,7 +24,12 @@ from langgraph.types import Overwrite
 from agent.graph.hooks import skill_recall
 from agent.graph.hooks.framework import framework_hooks
 from agent.graph.hooks.skill_recall import SkillRecallHook
-from agent.graph.recall.skill_recall import FALSE_IF, STATE_PREAMBLE, TRUE_IF
+from agent.graph.recall.skill_recall import (
+    FALSE_IF,
+    PEER_GATE_PREAMBLE,
+    STATE_PREAMBLE,
+    TRUE_IF,
+)
 from agent.messages import inbound_message
 from agent.state import CompactState, SkillRecallState, build_agent_state
 from base import paths
@@ -668,3 +673,116 @@ async def test_reads_from_execs_exclude_skills_until_a_compaction_clears_them(
     ]
     assert final.skill_reads == []
     assert final.skill_recall == SkillRecallState(prompted={"alpha", "beta"}, window=1)
+
+
+async def test_a_peer_request_is_scored_when_the_gate_passes(
+    three_skills: Path, database: Database
+) -> None:
+    scorer = _Scorer({"work": 0.95, "method_given": 0.05, "beta": 0.9})
+
+    update = await _run(
+        database,
+        _state(_tail("agent:402", "please review PR 1234 against the docs")),
+        scorer,
+        skill_recall_peer_messages=True,
+    )
+
+    assert len(scorer.calls) == 2
+    (gate_state, gate_questions), (_, recall_questions) = scorer.calls
+    assert set(gate_questions) == {"work", "method_given"}
+    assert gate_state == PEER_GATE_PREAMBLE + "please review PR 1234 against the docs"
+    assert set(recall_questions) == {"alpha", "beta", "gamma"}
+    assert _offered(update) == ["beta"]
+
+
+async def test_a_peer_status_message_is_not_scored(three_skills: Path, database: Database) -> None:
+    scorer = _Scorer({"work": 0.05, "method_given": 0.05, "beta": 0.9})
+
+    update = await _run(
+        database,
+        _state(_tail("agent:402", "PR merged, nothing else to do")),
+        scorer,
+        skill_recall_peer_messages=True,
+    )
+
+    assert update is None
+    assert len(scorer.calls) == 1
+
+
+async def test_a_peer_brief_that_states_the_method_is_not_scored(
+    three_skills: Path, database: Database
+) -> None:
+    scorer = _Scorer({"work": 0.95, "method_given": 0.95, "beta": 0.9})
+
+    update = await _run(
+        database,
+        _state(_tail("agent:402", "run these three steps: ...")),
+        scorer,
+        skill_recall_peer_messages=True,
+    )
+
+    assert update is None
+    assert len(scorer.calls) == 1
+
+
+async def test_an_uncertain_peer_gate_still_scores(three_skills: Path, database: Database) -> None:
+    scorer = _Scorer({"work": 0.5, "method_given": 0.5, "beta": 0.9})
+
+    update = await _run(
+        database,
+        _state(_tail("agent:402", "look at the failing suite")),
+        scorer,
+        skill_recall_peer_messages=True,
+    )
+
+    assert len(scorer.calls) == 2
+    assert _offered(update) == ["beta"]
+
+
+async def test_peer_messages_are_off_by_default(three_skills: Path, database: Database) -> None:
+    scorer = _Scorer({"work": 0.95, "method_given": 0.05, "beta": 0.9})
+
+    update = await _run(database, _state(_tail("agent:402")), scorer)
+
+    assert update is None
+    assert scorer.calls == []
+
+
+async def test_a_failed_gate_keeps_the_behaviour_before_peer_messages(
+    three_skills: Path, database: Database
+) -> None:
+    scorer = _Scorer({}, error=DecisionRequestError("provider down"))
+
+    update = await _run(
+        database, _state(_tail("agent:402")), scorer, skill_recall_peer_messages=True
+    )
+
+    assert update is None
+    assert len(scorer.calls) == 1
+
+
+async def test_the_gate_reads_only_the_configured_prefix_of_the_message(
+    three_skills: Path, database: Database
+) -> None:
+    scorer = _Scorer({"work": 0.95, "method_given": 0.05, "beta": 0.9})
+
+    await _run(
+        database,
+        _state(_tail("agent:402", "x" * 500)),
+        scorer,
+        skill_recall_peer_messages=True,
+        skill_recall_peer_gate_max_chars=100,
+    )
+
+    assert scorer.calls[0][0] == PEER_GATE_PREAMBLE + "x" * 100
+
+
+async def test_a_person_message_still_skips_the_gate(
+    three_skills: Path, database: Database
+) -> None:
+    scorer = _Scorer({"beta": 0.9})
+
+    await _run(database, _state(_tail("user")), scorer, skill_recall_peer_messages=True)
+
+    assert len(scorer.calls) == 1
+    assert set(scorer.calls[0][1]) == {"alpha", "beta", "gamma"}
