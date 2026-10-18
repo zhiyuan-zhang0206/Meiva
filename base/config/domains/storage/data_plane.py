@@ -433,6 +433,29 @@ class DataPlaneSettings(EnvSettings):
         },
     )
 
+    db_pool_restore_timeout_seconds: float = Field(
+        default=5.0,
+        alias="MEIVA_DB_POOL_RESTORE_TIMEOUT_SECONDS",
+        description=(
+            "Statement budget, in seconds, for one per-borrow session restore "
+            "(RESET ALL plus the baseline SET). It bounds the restore itself, "
+            "not the wait for a free connection (db_pool_acquire_timeout_seconds "
+            "does that): a backend stuck in I/O must fail this restore fast so "
+            "the pool counts the check as failed and retries against its own "
+            "deadline, instead of pinning the borrower to the inherited statement "
+            "ceiling (2026-10-18 write stall: check_ms reached 389 s). Every "
+            "process that pools connections runs this restore, so the field lives "
+            "in the data_plane domain, not in the agent-only one."
+        ),
+        gt=0,
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     transport_encryption: str = Field(
         default="",
         alias="MEIVA_TRANSPORT_ENCRYPTION",

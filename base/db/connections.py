@@ -151,7 +151,7 @@ def restore_budget_statement(budget_seconds: float | None = None) -> tuple[Liter
     from base.config import settings
 
     if budget_seconds is None:
-        budget_seconds = settings.agent.db_pool_restore_timeout_seconds
+        budget_seconds = settings.data_plane.db_pool_restore_timeout_seconds
     budget_ms = max(1, int(budget_seconds * 1000))
     reset = PG_POOLED_BASELINE_RESTORE_SQL[0]
     return cast(LiteralString, f"{reset}; SET statement_timeout = {budget_ms}"), budget_ms
