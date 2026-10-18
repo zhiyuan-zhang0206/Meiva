@@ -1,25 +1,28 @@
 ---
 type: doc
 title: Memory Recall Regression Set — Two Directions
-description: A 50-case passive-recall regression set, 30 turns where a usable note was never delivered and 20 where nothing applied yet the ranking fired, with the 2026-10-18 baseline and the held/slipped/lost and fired/silent evaluator.
+description: A 55-case passive-recall regression set, 30 turns where a usable note was never delivered and 25 where nothing applied yet the ranking fired, with the 2026-10-18 baseline, the held/slipped/lost and fired/silent evaluator, and the resolution limits of the set.
 ---
 
 # Memory Recall Regression Set
 
-`services/derived/memory_indexer/tests/recall_cases.jsonl` holds 50 real inbound turns in two
+`services/derived/memory_indexer/tests/recall_cases.jsonl` holds 55 real inbound turns in two
 halves, because passive recall fails in two directions and a set that only measures one of them
 cannot judge a threshold:
 
 - **recall set — 30 cases.** A note the agent needed *was retrieved* and scored under the
   injection threshold, so the turn injected nothing. 24 sat at rank 1, 6 at rank 2, scores
   0.65–0.79; 20 of them are delivered by the shipped 0.72 default, all 30 were silenced by 0.80.
-- **precision set — 20 cases.** Nothing in the pool applied to the turn, yet the ranking was
-  confident: 15 of them fire at the shipped default (top scores 0.72–0.84), 5 stay silent
-  (0.36–0.50). These are receipts, machine readouts and small talk — the traffic that produces
-  a plausible-looking but useless note.
+- **precision set — 25 cases.** Nothing in the pool applied to the turn, yet the ranking was
+  confident. 15 fire at the shipped default (top scores 0.72–0.84), 5 sit just under it
+  (0.63–0.70) and 5 stay silent (0.36–0.50). These are receipts, machine readouts and small talk —
+  the traffic that produces a plausible-looking but useless note. The five in the middle exist so
+  that the *next* step down, 0.72 → 0.65, moves this half as well: without them it would report
+  "recall up, precision unchanged" purely because no case scored between 0.50 and 0.72.
 
 `recall_regression.py` scores a fresh run into **delivered / held / slipped / lost** for the recall
-half and **fired / silent** (plus *newly firing*) for the precision half. The threshold and the cap
+half and **fired / silent** (plus *newly firing*) for the precision half; a precision case fires if
+*any* of the top `cap` matches clears the threshold, not only the first. The threshold and the cap
 are read from the agent config (`memory_recall_inject_threshold`, `memory_recall_inject_max`), never
 copied into this module, so a re-calibration cannot leave the report judging at a stale cut.
 
@@ -58,7 +61,7 @@ Then:
 
 ## Reading the pair
 
-The baseline on 2026-10-18 at 0.72 was **delivered 20/30, fired 15/20**. Judge a change by both
+The baseline on 2026-10-18 at 0.72 was **delivered 20/30, fired 15/25**. Judge a change by both
 numbers at once:
 
 - **Lowering the threshold** should raise *delivered* and raise *fired* too. That is expected and
@@ -72,6 +75,15 @@ numbers at once:
 
 Re-record `baseline_rank` / `baseline_score` / `baseline_delivered` only when the retrieval stack
 itself changed, never when the cut point moved, and say which stack produced the new numbers.
+
+### How fine a cut this set can resolve
+
+The two halves are not equally sharp. At 0.72 the next step down (0.65) moves recall **20 → 30**
+and precision **15 → 19**, so that step is judged by the set itself rather than by arithmetic; but
+recall saturates at 30/30 for anything at or below 0.65 and precision only creeps (19 at 0.65,
+20 at 0.63, 21 at 0.50), so **cuts below 0.65 are not distinguishable here** — they need new cases,
+not a re-reading of these. The set also records one note per turn: it says whether a turn was
+silenced, never how many extra notes a looser cut would have stacked on top.
 
 ## When to run it
 

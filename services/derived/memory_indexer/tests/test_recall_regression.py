@@ -50,8 +50,8 @@ def test_fixture_has_both_directions() -> None:
     groups = [case.group for case in cases]
 
     assert groups.count(RECALL) == 30
-    assert groups.count(PRECISION) == 20
-    assert len({case.id for case in cases}) == 50
+    assert groups.count(PRECISION) == 25
+    assert len({case.id for case in cases}) == 55
     assert all(case.message.strip() and case.gloss.strip() for case in cases)
     assert all(case.gloss.isascii() for case in cases)
     assert CASES_PATH.read_bytes().isascii(), (
@@ -121,6 +121,25 @@ def test_a_precision_case_fires_on_any_note_above_the_threshold() -> None:
     assert evaluate_precision(case, [], threshold=THRESHOLD, cap=CAP).verdict == "silent"
 
 
+def test_a_precision_case_reaches_past_the_first_match_but_not_past_the_cap() -> None:
+    case = _case(group=PRECISION, rank=None, path=None)
+    buried = [("first.md", 0.40), ("second.md", 0.73)]
+
+    outcome = evaluate_precision(case, buried, threshold=THRESHOLD, cap=CAP)
+
+    assert (outcome.rank, outcome.score, outcome.verdict) == (2, 0.73, "fired")
+    assert (
+        evaluate_precision(
+            case,
+            [("a.md", 0.40), ("b.md", 0.40), ("c.md", 0.40), buried[1]],
+            threshold=THRESHOLD,
+            cap=CAP,
+        ).verdict
+        == "silent"
+    )
+    assert evaluate_precision(case, buried, threshold=THRESHOLD, cap=1).verdict == "silent"
+
+
 def test_report_counts_both_halves_and_names_movements() -> None:
     held = evaluate(_case(), [("topic/note.md", 0.75)], threshold=THRESHOLD, cap=CAP)
     lost = evaluate(_case(rank=2), [("a.md", 0.9)], threshold=THRESHOLD, cap=CAP)
@@ -181,11 +200,13 @@ def test_lowering_the_threshold_moves_the_two_halves_against_each_other() -> Non
 
     strict = counts(0.80)
     shipped = counts(0.72)
+    one_step = counts(0.65)
     loose = counts(0.50)
 
     assert strict[0] < shipped[0] < loose[0], "the recall half must improve as the threshold drops"
-    assert strict[1] <= shipped[1] < loose[1], (
-        "the precision half must degrade as the threshold drops"
+    assert shipped[0] < one_step[0], "the next step down must move the recall half too"
+    assert strict[1] <= shipped[1] < one_step[1] < loose[1], (
+        "the precision half must degrade at every step, not only at the far end"
     )
 
 
@@ -207,7 +228,7 @@ def test_cli_reports_the_baseline_itself(
     assert main(["--results", str(payload), "--threshold", "0.72", "--cap", "3"]) == 0
 
     out = capsys.readouterr().out
-    assert "50 cases" in out
+    assert "55 cases" in out
     assert "delivered  20" in out
     assert "fired  15" in out
 
