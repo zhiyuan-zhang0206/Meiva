@@ -3181,7 +3181,7 @@ DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
         GRANT SELECT, INSERT, UPDATE ON notification_events TO meiva_runner;
-        GRANT USAGE, SELECT, UPDATE ON SEQUENCE notification_events_id_seq TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE notification_events_id_seq TO meiva_runner;
     END IF;
 END $$;
 
