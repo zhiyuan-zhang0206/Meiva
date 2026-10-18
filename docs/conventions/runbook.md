@@ -375,8 +375,9 @@ failed attempt is retried (launchd `KeepAlive`, systemd `Restart=on-failure`) fo
 then sits in systemd's `failed` state, on macOS the job exits 0. Fix the cause in the
 boot log, then run `meiva start`. A boot attempt never re-ups a unit whose meiva-root
 circuit breaker is open: that unit is not abandoned — root's health monitor keeps
-replacing it on a 60s/5m/15m ladder and closes the breaker on the first healthy
-generation or when the database it depends on answers again.
+replacing it on a 60s/5m/15m ladder, grants one immediate attempt when the
+database it depends on answers again (and once on the first usable observation),
+and closes the breaker only on the first healthy generation.
 
 **OS-scheduled jobs.** The platform scheduler runs the health probe
 (`base/host/system/cron.py`), boot autostart (`base/host/system/autostart.py`),

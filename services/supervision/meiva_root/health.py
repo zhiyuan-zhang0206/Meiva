@@ -4,8 +4,9 @@
 # errors, timeouts and foreign listeners stay terminal until fresh evidence
 # resolves them. Consecutive replacements are spaced by one backoff ladder, and a
 # unit that spends that budget opens a circuit breaker whose only escapes are the
-# ladder's capped cadence and a dependency that answers again after this monitor
-# saw it failing (task #5315).
+# ladder's capped cadence and a dependency-recovery grant: one attempt on the
+# first usable database this monitor observes and one per unavailable-to-answering
+# edge (task #5315).
 # meiva:link services/supervision/meiva_root/docs/meiva_root.meiva.okf.md
 
 from __future__ import annotations

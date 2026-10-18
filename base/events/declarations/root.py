@@ -60,8 +60,9 @@ class RootUnitFailureState(TypedDict):
 
 # meiva:note
 # One transition, once: the unit spent its restart budget on a continuous outage,
-# so only the backoff ladder's capped cadence, or a database that answers again
-# after this monitor saw it unavailable, replaces it now. `detail` is the last
+# so only the backoff ladder's capped cadence, or a dependency-recovery grant
+# (one attempt on the first usable database observed, then one per
+# unavailable-to-answering edge), replaces it now. `detail` is the last
 # error the unit left behind (task #5315).
 class RootUnitBreakerOpen(TypedDict):
     unit: str
