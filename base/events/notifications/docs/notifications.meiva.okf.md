@@ -111,11 +111,17 @@ Two simulations are modelled, one flipped input at a time: turning
 
 ## Transports
 
-`ui/app/src-tauri/scripts/notify-bridge.js` renders the delivered event on
-Android and macOS. The console renders the per-category switches that decide
-those deliveries (Display settings → Notifications, the `notifications.categories`
-map) and no delivery feed of its own: its inbox is the notice queue, so the
-`notification` role never enters a timeline. The Telegram bridge still reads
-`agent_notices` directly — it moves onto these rows next. No transport re-derives
-its own trigger from agent state. A transport may render less (an importance
-floor, a master switch), never more.
+`ui/app/src-tauri/scripts/notify-bridge.js` renders the delivered event on Android and
+macOS, and catches up after a gap through `GET /api/notifications?after_id=`: the live
+event is a Redis publication with no memory, so the delivery log is the only thing a
+client that was offline can ask. A publish with no subscriber is still a successful
+publish — Redis accepts it and the row is marked delivered — so this read, not the live
+event, is what makes a delivery survive an offline client. The endpoint returns the
+newest deliveries after the cursor (oldest-first) plus the newest id, so a first-run
+client adopts a cursor instead of replaying history; every later advance uses the last
+row it actually read. The console renders the per-category switches that decide those
+deliveries (Display settings → Notifications, the `notifications.categories` map) and no
+delivery feed of its own: its inbox is the notice queue, so the `notification` role
+never enters a timeline. The Telegram bridge still reads `agent_notices` directly — it
+moves onto these rows next. No transport re-derives its own trigger from agent state. A
+transport may render less (an importance floor, a master switch), never more.

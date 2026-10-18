@@ -39,6 +39,16 @@ _SELECT_PENDING = (
 _MARK_ANNOUNCED = (
     "UPDATE notification_events SET announced_at = now() WHERE id = %s AND announced_at IS NULL"
 )
+# meiva:note
+# The recovery read: the newest deliveries after a client cursor, so a client that
+# was offline catches up instead of losing the live event. Newest-first because
+# the cap must drop the OLDEST row of a long gap, not the most recent one.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+_SELECT_RECENT = (
+    "SELECT id, category, subject, body, href, importance, agent_id, created_at "
+    "FROM notification_events WHERE id > %s ORDER BY id DESC LIMIT %s"
+)
+_SELECT_LATEST = "SELECT COALESCE(MAX(id), 0) FROM notification_events"
 
 
 def parse_overrides(value: Any) -> dict[str, bool]:
@@ -137,3 +147,15 @@ def pending_sync(pool: ConnectionPool, *, min_age_seconds: float, limit: int) ->
     with pool.connection() as conn:
         rows = conn.execute(_SELECT_PENDING, (min_age_seconds, limit)).fetchall()
     return [int(row[0]) for row in rows]
+
+
+def recent_sync(pool: ConnectionPool, *, after_id: int, limit: int) -> list[tuple[Any, ...]]:
+    with pool.connection() as conn:
+        rows = conn.execute(_SELECT_RECENT, (after_id, limit)).fetchall()
+    return list(reversed(rows))
+
+
+def latest_id_sync(pool: ConnectionPool) -> int:
+    with pool.connection() as conn:
+        row = conn.execute(_SELECT_LATEST).fetchone()
+    return 0 if row is None else int(row[0])

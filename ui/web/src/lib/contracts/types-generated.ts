@@ -1439,6 +1439,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_notifications_api_notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedules": {
         parameters: {
             query?: never;
@@ -3389,6 +3405,20 @@ export interface components {
             body?: string | null;
             href?: string | null;
             dedupe_key?: string | null;
+        };
+        NotificationDeliveriesResponse: {
+            notifications: components["schemas"]["NotificationDeliveryItem"][];
+            latest_id: number;
+        };
+        NotificationDeliveryItem: {
+            id: number;
+            category: string;
+            subject: string;
+            body: string | null;
+            href: string | null;
+            importance: string;
+            agent_id: number;
+            created_at: string;
         };
         Object: {
             ordinal: number;
@@ -6909,6 +6939,36 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notifications_api_notifications_get: {
+        parameters: {
+            query?: {
+                after_id?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationDeliveriesResponse"];
                 };
             };
             422: {

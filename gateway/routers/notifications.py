@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from datetime import datetime
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from base.events.notifications.publish import announce_sync, deliver_sync
-from base.events.notifications.store import read_overrides_sync
+from base.events.notifications.store import latest_id_sync, read_overrides_sync, recent_sync
 from gateway.extensions.notification_categories import declared_categories
 
 router = APIRouter()
@@ -31,6 +32,22 @@ class NotificationCategoryItem(BaseModel):
 
 class NotificationCategoriesResponse(BaseModel):
     categories: list[NotificationCategoryItem]
+
+
+class NotificationDeliveryItem(BaseModel):
+    id: int
+    category: str
+    subject: str
+    body: str | None
+    href: str | None
+    importance: str
+    agent_id: int
+    created_at: datetime
+
+
+class NotificationDeliveriesResponse(BaseModel):
+    notifications: list[NotificationDeliveryItem]
+    latest_id: int
 
 
 # meiva:note
@@ -89,3 +106,41 @@ async def post_notification(
         return {"delivered": False, "id": None}
     await asyncio.to_thread(announce_sync, pool, request.app.state.bus, record.id)
     return {"delivered": True, "id": record.id}
+
+
+# meiva:note
+# The recovery read a client needs after it was offline: the live `notification`
+# event is a Redis publication, so a client that missed it has no second chance
+# unless it can ask the delivery log. It returns the NEWEST `limit` deliveries
+# after the cursor, oldest-first, plus the newest id in the table so a first-run
+# client can set its cursor without replaying history. The category switches and
+# deduplication were already applied when these rows were written; this endpoint
+# re-decides nothing.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+@router.get("/api/notifications")
+async def get_notifications(
+    request: Request,
+    after_id: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+) -> NotificationDeliveriesResponse:
+    pool = request.app.state.db_pool
+    rows, latest_id = await asyncio.gather(
+        asyncio.to_thread(recent_sync, pool, after_id=after_id, limit=limit),
+        asyncio.to_thread(latest_id_sync, pool),
+    )
+    return NotificationDeliveriesResponse(
+        notifications=[
+            NotificationDeliveryItem(
+                id=int(row[0]),
+                category=row[1],
+                subject=row[2],
+                body=row[3],
+                href=row[4],
+                importance=row[5],
+                agent_id=int(row[6]),
+                created_at=row[7],
+            )
+            for row in rows
+        ],
+        latest_id=latest_id,
+    )
