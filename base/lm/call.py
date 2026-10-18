@@ -249,8 +249,10 @@ def answer_text(
         if build_error is not None:
             raise build_error(model, e) from e
         raise error_type(str(e)) from e
+    from base.lm.metering import unmeter
+
     return invoke_text(
-        llm,
+        unmeter(llm),
         [
             {"type": "text", "text": material},
             {"type": "text", "text": prompt},

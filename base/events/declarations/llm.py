@@ -27,6 +27,7 @@ class LlmUsage(TypedDict):
     price_write_1h: NotRequired[float]
     unpriced: int | None
     usage_kind: str
+    attribution: str
     source: NotRequired[str]
 
 
@@ -40,6 +41,12 @@ class SilentIdle(TypedDict):
     cumulative_output_tokens: int
     estimated_cost_usd: float | None
     halted: bool
+
+
+class LlmUsageMeteringFailed(TypedDict):
+    model: str
+    error_type: str
+    failures: int
 
 
 class LlmRetry(TypedDict):
@@ -73,6 +80,13 @@ class CompactionCompleted(TypedDict):
 EVENTS: dict[str, EventSpec] = {
     "llm_usage": telemetry_event("llm_usage", "LLM call metering", payload=LlmUsage, persist=True),
     "turn_end": telemetry_event("turn_end", "one turn finished", payload=TurnEnd, persist=True),
+    "llm_usage_metering_failed": telemetry_event(
+        "llm_usage_metering_failed",
+        "direct model call accounting failed (the call ran; its llm_usage row is dropped)",
+        payload=LlmUsageMeteringFailed,
+        tier="anomaly",
+        persist=True,
+    ),
     "llm_turn_aborted": telemetry_event(
         "llm_turn_aborted",
         "turn aborted after retries",

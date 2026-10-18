@@ -16,7 +16,7 @@ from base.lm.pricing import CostQuote, quote, tally_tokens
 from base.lm.pricing.cache_writes import cache_write_tokens
 from base.lm.provider_api import InferenceSpeed
 from base.log import logger
-from base.telemetry import report_sink_failure
+from base.telemetry import ambient_agent_id, report_sink_failure
 
 
 def usage_model(msg: AIMessage, requested_model: str, *, catalog: ModelCatalog) -> str:
@@ -58,6 +58,7 @@ def log_usage_from_message(
     usage_kind: str = "agent",
     source: str | None = None,
     for_agent_id: int | None = None,
+    attribution: str | None = None,
     stamp_message: bool = False,
     catalog: ModelCatalog,
 ) -> tuple[int, float] | None:
@@ -67,7 +68,11 @@ def log_usage_from_message(
     (`MeivaUsage`): the one `quote` result feeds the event and the message alike.
     """
 
-    if not isinstance(msg, AIMessage):
+    # meiva:note
+    # A message carries at most one usage record: the direct-call meter stamps `meiva_usage`
+    # before a caller that also accounts for the call gets to log it.
+    # meiva:link base/lm/docs/usage.meiva.okf.md
+    if not _accountable(msg):
         return None
     usage_metadata = msg.usage_metadata
     if not usage_metadata:
@@ -102,6 +107,7 @@ def log_usage_from_message(
         usage_kind=usage_kind,
         source=source,
         for_agent_id=for_agent_id,
+        attribution=attribution,
         emit_billing="input_tokens" in usage_metadata and "output_tokens" in usage_metadata,
         requested_model=model,
         record_out=record,
@@ -142,6 +148,16 @@ def log_usage_fields(
         for_agent_id=for_agent_id,
         catalog=catalog,
     )
+
+
+def _accountable(msg: AIMessage) -> bool:
+    return isinstance(msg, AIMessage) and message_addl_kwargs(msg).get("meiva_usage") is None
+
+
+def _attribution(for_agent_id: int | None) -> str:
+    if for_agent_id is not None:
+        return "caller"
+    return "process" if ambient_agent_id() is not None else "unattributed"
 
 
 def _price_snapshot(priced: CostQuote) -> dict[str, float]:
@@ -194,6 +210,7 @@ def _log_usage(
     requested_model: str | None = None,
     cache_write_5m: int = 0,
     cache_write_1h: int = 0,
+    attribution: str | None = None,
     record_out: dict[str, Any] | None = None,
     catalog: ModelCatalog,
 ) -> tuple[int, float]:
@@ -227,6 +244,7 @@ def _log_usage(
         **cache_fields,
         "reasoning": reasoning,
         **snapshot,
+        "attribution": attribution or _attribution(for_agent_id),
     }
     if record_out is not None:
         record_out.update(record)

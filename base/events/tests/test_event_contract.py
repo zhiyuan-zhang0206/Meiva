@@ -146,6 +146,7 @@ _DECLARED_PAYLOAD_KEYS = {
         "price_write_1h",
         "unpriced",
         "usage_kind",
+        "attribution",
         "source",
     ),
     "sse_drop": ("kind", "n"),

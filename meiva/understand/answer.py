@@ -262,8 +262,10 @@ def _call_text(deps: UnderstandDeps, content: list[Any], *, effort: str | Reason
         )
     except RuntimeError as e:  # missing API key etc. — surface uniformly
         raise UnderstandError(str(e)) from e
+    from base.lm.metering import unmeter
+
     return invoke_text(
-        llm,
+        unmeter(llm),
         content,
         desc=f"{model}, text",
         error_type=UnderstandError,
@@ -345,8 +347,10 @@ def _call_media(
         )
     except RuntimeError as e:  # missing API key etc. — surface uniformly
         raise UnderstandError(str(e)) from e
+    from base.lm.metering import unmeter
+
     return invoke_text(
-        llm,
+        unmeter(llm),
         content,
         desc=f"{model}, mime={mime}",
         error_type=UnderstandError,

@@ -179,12 +179,16 @@ async def generate_label_async(
     # parsing complexity (PR #69 hit a thinking block signature
     # leaking into the label). Disable at the source so the consumer
     # typically only needs to handle str content.
-    llm = build_chat_model(
-        config.labeler_model,
-        thinking={"type": "disabled"},
-        catalog=catalog,
-        llm_override=llm_override,
-        overrides=overrides,
+    from base.lm.metering import unmeter
+
+    llm = unmeter(
+        build_chat_model(
+            config.labeler_model,
+            thinking={"type": "disabled"},
+            catalog=catalog,
+            llm_override=llm_override,
+            overrides=overrides,
+        )
     )
     messages = [
         SystemMessage(content=system_prompt(config.labeler_max_chars)),
