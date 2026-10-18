@@ -14,6 +14,8 @@ from base.host.system.tests.fake_commands import (
     Reply,
     fake_host,
 )
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 
 _UID = 501
 
@@ -32,8 +34,12 @@ def _plant_plist(fake_home: Path, label: str) -> Path:
     return p
 
 
-def _launchctl() -> tuple[FakeCommands, Host]:
+_NOT_LOADED = Reply(returncode=113, stderr="Could not find service")
+
+
+def _launchctl(print_reply: Reply = _NOT_LOADED) -> tuple[FakeCommands, Host]:
     commands = FakeCommands()
+    commands.on(["launchctl", "print"], print_reply, repeat=True)
     commands.on("launchctl", Reply(), repeat=True)
     return commands, fake_host(commands, platform=DARWIN_ARM64, uid=_UID)
 
@@ -286,7 +292,10 @@ def test_unregister_macos_removes_only_the_probe_plist(
     assert cron.unregister_macos(host=host) == 0
     assert not probe.exists()
     assert autostart.exists()
-    assert [argv[-1] for argv in commands.argvs] == [f"gui/{_UID}/com.meiva.health-probe"]
+    assert commands.argvs == [
+        ("launchctl", "bootout", f"gui/{_UID}/com.meiva.health-probe"),
+        ("launchctl", "print", f"gui/{_UID}/com.meiva.health-probe"),
+    ]
 
 
 def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -370,3 +379,17 @@ def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
     assert cron.register_macos(300, host=host) == 0
     assert plist.read_text() == "<desired-plist/>"
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
+
+
+def test_unregister_macos_reports_a_job_launchd_still_holds(
+    fake_home: Path, loguru_records: LogRecords
+) -> None:
+    probe = _plant_plist(fake_home, "com.meiva.health-probe")
+    _commands, host = _launchctl(print_reply=Reply())
+
+    assert cron.unregister_macos(host=host) == 1
+
+    assert not probe.exists()
+    [event] = loguru_records.events("launchd_retirement")
+    assert event["level"].name == "ERROR"
+    assert "com.meiva.health-probe" in event["message"]

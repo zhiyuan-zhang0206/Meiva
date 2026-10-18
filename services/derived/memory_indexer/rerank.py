@@ -189,6 +189,7 @@ def load_candidates(
     """
     root = memory_root.resolve()
     candidates: list[Candidate] = []
+    unreadable: list[tuple[str, BaseException]] = []
     for hit in hits:
         if len(candidates) == limit:
             break
@@ -197,7 +198,10 @@ def load_candidates(
             continue
         try:
             content = file.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except FileNotFoundError:
+            continue
+        except (OSError, UnicodeDecodeError) as exc:
+            unreadable.append((rel, exc))
             continue
         chunk = chunk_text(content, hit.kind, hit.chunk_idx)
         if chunk is None:
@@ -206,6 +210,14 @@ def load_candidates(
         description = note.description.strip() if note and note.description else ""
         tags = list(note.tags) if note else []
         candidates.append(Candidate(rel, chunk, description, tags))
+    if unreadable:
+        logger.warning(
+            "memory_search rerank skipped {n} candidate note(s) it could not read; "
+            "they are ranked out of this search: {first}",
+            n=len(unreadable),
+            first=f"{unreadable[0][0]}: {unreadable[0][1]!r}",
+            event="memory_search_rerank",
+        )
     return candidates
 
 

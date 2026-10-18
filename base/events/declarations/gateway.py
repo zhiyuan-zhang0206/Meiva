@@ -325,4 +325,10 @@ EVENTS: dict[str, EventSpec] = {
             'services/desktop/browser/page_lifecycle.py:renew_agent_page telemetry.emit("telemetry", ...)'
         ),
     ),
+    "memory_search_rerank": telemetry_event(
+        "memory_search_rerank",
+        "memory-search rerank skipped candidate notes it could not read; they are ranked out "
+        "of this search",
+        tier="anomaly",
+    ),
 }

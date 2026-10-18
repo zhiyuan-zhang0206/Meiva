@@ -323,6 +323,20 @@ def test_upgrade_preserves_injected_env(
     assert _landed_env(unit_home)["TOKEN"] == _FAKE_TOKEN  # secret survived
 
 
+def test_upgrade_refuses_when_the_landed_env_cannot_be_read(
+    unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pkg = _make_mcp_package(tmp_path, desc="v1")
+    assert cmd_mcp_install(str(pkg), None, None, [f"TOKEN={_FAKE_TOKEN}"]) == 0
+    landed = unit_home / "mcps" / "acme" / ".mcp.json"
+    landed.write_text("{not json", encoding="utf-8")
+
+    assert cmd_mcp_upgrade("acme") == 1
+    err = capsys.readouterr().err
+    assert "refusing to re-land" in err
+    assert landed.read_text(encoding="utf-8") == "{not json"
+
+
 # ─── list / uninstall / upgrade ──────────────────────────────────────────
 
 

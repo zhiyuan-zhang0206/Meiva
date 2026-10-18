@@ -343,15 +343,12 @@ def _landed_env(dest: Path, name: str) -> dict[str, str]:
     An installed MCP's secrets live here (see `_apply_env_overrides`), so this is
     what `upgrade` reads before re-landing in order to carry them forward.
     """
-    from meiva.mcps.config import MCPError, read_servers
+    from meiva.mcps.config import read_servers
 
     mcp_json = dest / ".mcp.json"
     if not mcp_json.is_file():
         return {}
-    try:
-        servers = read_servers(mcp_json)
-    except MCPError:
-        return {}
+    servers = read_servers(mcp_json)
     env = servers.get(name, {}).get("env")
     if isinstance(env, dict):
         return dict(cast(dict[str, Any], env))
@@ -761,7 +758,17 @@ def cmd_mcp_upgrade(name: str) -> int:
         # machine-local values injected at install time (`--env`), which the
         # source deliberately does not ship. Re-applied over the new source env,
         # so an upgrade never silently drops a server's token.
-        carried = _landed_env(dest, name)
+        try:
+            carried = _landed_env(dest, name)
+        except MCPError as e:
+            print(
+                f"[meiva mcp upgrade] the installed copy's .mcp.json is unreadable ({e}); "
+                "refusing to re-land, because its recorded env — the server's machine-local "
+                f"secrets — could not be carried forward. Repair it, or "
+                f"`meiva mcp uninstall {name}` and install again.",
+                file=sys.stderr,
+            )
+            return 1
         _land_package(acq.cloned, pkg_dir, dest)
         _apply_env_overrides(dest, name, carried)
         try:

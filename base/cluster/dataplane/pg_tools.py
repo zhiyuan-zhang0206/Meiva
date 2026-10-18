@@ -363,11 +363,20 @@ def _reap_locked(lock: Path, fd: int, *, config: ThrowawayConfig) -> int:
     detail = _owner_detail(fd)
     data = instance_dir / "data"
     if (data / "PG_VERSION").is_file():
-        subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + a verified data dir
+        stop = subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + a verified data dir
             [pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
         )
+        if stop.returncode != 0:
+            logger.warning(
+                "reaping throwaway postgres {dir}: pg_ctl stop exited {rc}; a surviving "
+                "postmaster, if any, now writes into a removed data directory: {err}",
+                dir=str(instance_dir),
+                rc=stop.returncode,
+                err=(stop.stderr or b"").decode(errors="replace").strip()[:400],
+                event="throwaway_pg_reap",
+            )
     shutil.rmtree(instance_dir, ignore_errors=True)
     logger.info(f"reaped orphaned throwaway postgres {instance_dir}{detail}")
     return 1

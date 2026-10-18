@@ -457,9 +457,12 @@ async def _llm_node_impl(
                 "[halt] {body}",
                 event="halt",
                 body="no tool_call and EMPTY text — empty turn, user sees no reply",
+                agent_id=agent_id,
             )
         else:
-            logger.info("[halt] {body}", event="halt", body="no tool_call (idle)")
+            logger.info(
+                "[halt] {body}", event="halt", body="no tool_call (idle)", agent_id=agent_id
+            )
         return Command[LlmGoto](
             update={"messages": [final_msg], "halted": True, **cut_update},
             goto=AFTER_EXEC,
@@ -468,5 +471,6 @@ async def _llm_node_impl(
         "[code] {body}",
         event="code",
         body=code_from_args(final_msg.tool_calls[0]["args"], source="llm final_msg tool_call"),
+        agent_id=agent_id,
     )
     return Command[LlmGoto](update={"messages": [final_msg], **cut_update}, goto=BEFORE_EXEC)
