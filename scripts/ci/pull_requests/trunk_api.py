@@ -7,15 +7,10 @@ import re
 import subprocess
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 from base.host.git.gitenv import git_env
 from base.host.net.ports import UrlOpener
 from base.host.system.hostport import Host
-
-# The Meiva checkout root this module ships in — anchors base-freshness git reads
-# against THIS repo's origin regardless of the caller's cwd (task #2496).
-_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 API_BASE_URL = "https://api.trunk.io/v1"
 REQUEST_TIMEOUT_SECONDS = 30
@@ -46,45 +41,55 @@ def _is_sha(value: str) -> bool:
     return bool(_SHA1_RE.match(value) or _SHA256_RE.match(value))
 
 
+# meiva:note
+# Every failure the caller cannot act on reads as None: a timeout, a program that cannot start, a
+# non-zero exit and non-SHA output. An unexpected exception still propagates, so a broken command
+# implementation never passes for a missing answer.
+def _sha_from(argv: list[str], *, host: Host, env: dict[str, str] | None = None) -> str | None:
+    try:
+        result = host.run(
+            argv, env=env, capture_output=True, text=True, timeout=REQUEST_TIMEOUT_SECONDS
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    stdout = result.stdout.strip()
+    sha = stdout.split(maxsplit=1)[0] if stdout else ""
+    return sha if _is_sha(sha) else None
+
+
+# meiva:note
+# GitHub is the queue's truth for main; a checkout's origin is not evidence, because a managed mirror
+# that stops syncing answers with an old main and makes every stale base look current. gh api is the
+# authenticated read, the public ls-remote covers a missing or unauthenticated gh, and the repo
+# argument supplies owner and name for both — no remote name, no second repository configuration.
+def _main_sha(repo: str, *, host: Host) -> str | None:
+    sha = _sha_from(
+        ["gh", "api", f"repos/{repo}/git/ref/heads/main", "--jq", ".object.sha"], host=host
+    )
+    if sha is not None:
+        return sha
+    return _sha_from(
+        ["git", "ls-remote", f"https://github.com/{repo}.git", "refs/heads/main"],
+        host=host,
+        env=git_env(),
+    )
+
+
+# meiva:note
+# Returns ((base_sha, main_sha), False) when the PR's recorded baseRefOid differs from main,
+# (None, False) when they match, and (None, True) when either read is unknown. Advisory: an unknown
+# never blocks --merge, and --require-fresh-base refuses only on a stale base.
 def base_freshness(pr: str, repo: str, *, host: Host) -> tuple[tuple[str, str] | None, bool]:
-    """Return ((base_sha, main_sha) when stale else None, unreadable).
-    The PR's `baseRefOid` is the base-branch SHA GitHub last evaluated the PR against. When
-    current main is ahead of it, the queue's predictive branch will include commits this PR's green
-    CI never saw, so Trunk re-tests the tree against the newer base — the extra in-queue round task
-    #2496 (A1) wants operators warned about. Advisory only: any read error or non-SHA output sets
-    `unreadable` and never blocks submission.
-    """
-    try:
-        result = host.run(
-            ["gh", "pr", "view", pr, "--repo", repo, "--json", "baseRefOid", "--jq", ".baseRefOid"],
-            capture_output=True,
-            text=True,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
+    base_sha = _sha_from(
+        ["gh", "pr", "view", pr, "--repo", repo, "--json", "baseRefOid", "--jq", ".baseRefOid"],
+        host=host,
+    )
+    if base_sha is None:
         return None, True
-    if result.returncode != 0:
-        return None, True
-    base_sha = result.stdout.strip()
-    if not _is_sha(base_sha):
-        return None, True
-    try:
-        result = host.run(
-            # -C anchors the checkout: cwd can be another git repo (e.g. the memory
-            # pool), whose origin would answer with a VALID sha and mis-refuse in
-            # require mode (QA NIT, 2026-09-06).
-            ["git", "-C", str(_REPO_ROOT), "ls-remote", "origin", "refs/heads/main"],
-            env=git_env(),
-            capture_output=True,
-            text=True,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        return None, True
-    if result.returncode != 0:
-        return None, True
-    main_sha = result.stdout.split(maxsplit=1)[0]
-    if not _is_sha(main_sha):
+    main_sha = _main_sha(repo, host=host)
+    if main_sha is None:
         return None, True
     if base_sha == main_sha:
         return None, False

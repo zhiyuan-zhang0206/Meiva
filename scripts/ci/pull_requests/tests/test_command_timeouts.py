@@ -102,7 +102,7 @@ def test_limbo_timeout_remains_missing_evidence(probe: str) -> None:
     assert result is None if probe == "runs" else result == []
 
 
-@pytest.mark.parametrize("probe", ["gh", "git"])
+@pytest.mark.parametrize("probe", ["gh", "gh-api", "git"])
 def test_freshness_timeout_still_submits_the_green_pr(probe: str) -> None:
     # meiva:note
     # The freshness-timeout test passes a literal fixture token only through its injected FakeUrlOpener, with no real credential or network request. The exact S106 suppression identifies this intentional test input at the call site; moving the same literal behind a constant would only hide it from the security check. The test still verifies both expected queue requests.
@@ -110,13 +110,19 @@ def test_freshness_timeout_still_submits_the_green_pr(probe: str) -> None:
     error = subprocess.TimeoutExpired(probe, 30)
     runner.on(["gh", "api", "repos/o/r/issues/42/timeline"], Reply(stdout="null"))
     runner.on(["gh", "api", "repos/o/r/pulls/42/commits"], Reply(stdout="null"))
-    runner.on(["gh", "pr", "view"], _rollup(), error if probe == "gh" else Reply(stdout="a" * 40))
+    base_read, github_api, git_leg = {
+        "gh": (error, Reply(stdout="a" * 40), Reply(stdout="a" * 40)),
+        "gh-api": (Reply(stdout="a" * 40), error, Reply(stdout="a" * 40)),
+        "git": (Reply(stdout="a" * 40), Reply(returncode=1, stderr="gh: no token"), error),
+    }[probe]
+    runner.on(["gh", "pr", "view"], _rollup(), base_read)
     runner.on(["gh", "api", "repos/o/r/actions/runs?head_sha=abc123"], Reply(stdout="[]"))
     runner.on(
         ["gh", "api", "repos/o/r/actions/runs?head_sha=abc123&status=completed&per_page=100"],
         Reply(stdout="1"),
     )
-    runner.on("git", error)
+    runner.on(["gh", "api", "repos/o/r/git/ref/heads/main"], github_api)
+    runner.on("git", git_leg)
     opener = FakeUrlOpener()
     opener.on("https://api.trunk.io/v1/submitPullRequest", Answer("{}"))
     opener.on("https://api.trunk.io/v1/getSubmittedPullRequest", Answer('{"state":"merged"}'))
