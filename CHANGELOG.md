@@ -12,8 +12,9 @@ and the matching GitHub Releases.
   (60s, 5m, then 15m) instead of restarting it every round, and opens a per-unit circuit breaker
   when the restart budget is spent. While a breaker is open, one bounded `SELECT 1` per round tells
   the monitor when the cluster database answers again; the first usable observation and every
-  unavailable-to-answering edge after it grant one immediate attempt: after 2026-10-18's database stall the four machines' agent hosts stayed down for 36
-  minutes because nothing retried them and nothing was reported. `root_unit_breaker_open` /
+  unavailable-to-answering edge after it grant one immediate attempt. After 2026-10-18's database
+  stall the four machines' agent hosts stayed down for 36 minutes because nothing retried them and
+  nothing was reported. `root_unit_breaker_open` /
   `root_unit_breaker_closed` mark the transitions (attempts, last error, time held), the per-round
   `root_unit_failure_state` carries `attempts` and `last_error`, both root-unit alert rules group by
   machine as well as unit, and the breaker rule also goes straight to Telegram — the webhook's
