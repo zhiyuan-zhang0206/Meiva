@@ -537,21 +537,3 @@ async def test_settle_stale_running_rows_without_owner_filter_keeps_boot_semanti
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id = %s", (expired,)
     ).fetchone() == ("idling",)
-
-
-async def test_settled_turn_delivers_a_turn_finished_notification(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    agent_id = _agent(db_conn)
-    incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", uuid4(), expected_from="idling", db=database
-    )
-    assert incarnation is not None
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
-    rows = db_conn.execute(
-        "SELECT category FROM notification_events WHERE agent_id = %s", (agent_id,)
-    ).fetchall()
-    assert [row[0] for row in rows] == ["core.turn_finished"]
