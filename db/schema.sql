@@ -3151,8 +3151,14 @@ CREATE TABLE IF NOT EXISTS notification_events (
     importance      TEXT NOT NULL CHECK (importance IN ('low', 'normal', 'high')),
     -- Producing agent, or 0 for a system-level notification.
     agent_id        BIGINT NOT NULL DEFAULT 0,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- When the live notification event was published; NULL means the delivery
+    -- is still owed and the outbox sweep retries it.
+    announced_at    TIMESTAMPTZ
 );
+
+COMMENT ON COLUMN notification_events.announced_at IS
+    'When the live notification event was published; NULL means the delivery is still owed and the outbox sweep retries it.';
 
 CREATE INDEX IF NOT EXISTS notification_events_created_idx
     ON notification_events (created_at DESC);
@@ -3162,6 +3168,11 @@ CREATE INDEX IF NOT EXISTS notification_events_dedupe_idx
     ON notification_events (category, dedupe_key, created_at DESC)
     WHERE dedupe_key IS NOT NULL;
 
+-- The outbox sweep: the oldest deliveries still owed a live event.
+CREATE INDEX IF NOT EXISTS notification_events_pending_idx
+    ON notification_events (created_at)
+    WHERE announced_at IS NULL;
+
 -- meiva_runner surface: the hosted runtime settles a turn and records the
 -- delivery itself. Append-only — UPDATE/DELETE stay out, and the ledger is never
 -- rewritten. Gated on the role's existence for the fresh-bootstrap path;
@@ -3169,7 +3180,7 @@ CREATE INDEX IF NOT EXISTS notification_events_dedupe_idx
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
-        GRANT SELECT, INSERT ON notification_events TO meiva_runner;
+        GRANT SELECT, INSERT, UPDATE ON notification_events TO meiva_runner;
         GRANT USAGE, SELECT ON SEQUENCE notification_events_id_seq TO meiva_runner;
     END IF;
 END $$;
