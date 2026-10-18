@@ -34,6 +34,7 @@ from base.deploy.state import host_deploy_state
 from base.deploy.tests.maintenance_factory import WHEN
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
+from base.sessions.posixproc import process_group_has_live_members
 from base.sessions.pty import closure
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.sessions.pty.tests import pty_jobs as jobs
@@ -168,6 +169,23 @@ def launched_processes(home: Path) -> Generator[Launcher, None, None]:
 def launch(home: Path) -> Iterator[Launcher]:
     with launched_processes(home) as create:
         yield create
+
+
+# meiva:note
+# SIGKILL is delivered asynchronously: `Popen.wait` reaps the leader while the
+# kernel is still tearing down the rest of its group, so a one-shot
+# `process_group_has_live_members` right after the kill observes a member that
+# is already dying and fails a cleanup that worked. Poll the observation the
+# session supervisor itself uses; a member that really survived stays in the
+# group and still fails at the deadline.
+def assert_group_drained(pgid: int, *, timeout_s: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while process_group_has_live_members(pgid):
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"process group {pgid} still has a live member after {timeout_s:.0f}s"
+            )
+        time.sleep(0.02)
 
 
 def drained() -> None:
