@@ -34,14 +34,28 @@ _SELF = Capability.SELF_LIFECYCLE
 _TASKS = Capability.TASKS_WRITE
 _UI = Capability.UI
 _SCHEDULE = Capability.SCHEDULE
+_EXTERNAL_MODEL = Capability.EXTERNAL_MODEL
 
 # meiva:note
 # One capability per entry. Observation is read; changing another agent's lifecycle
 # (`agents.control`, `compaction.submit`) is the sharp one; `self.*` is the borrowed
 # identity's own lifecycle and persistent settings; `schedule` outlives the lease.
+# Three rows are not what their names suggest:
+#   * `understand` is `external.model`, never `read`: it bills the user and ships
+#     local file content to a model outside the cluster, so a lease that may read
+#     may not thereby spend money or export files. The reverse holds: granting
+#     `external.model` does expose any local file the caller names, so treat it as
+#     export when approving - one entry maps to one capability, so the gate cannot
+#     also demand `read`.
+#   * `shell.sessions.capture` is `read` because it only observes; the observation
+#     can still contain credentials printed by a previous command, so `read` here
+#     means "may watch this machine", not "the output is safe".
+#   * `mcps.*` is machine authority via the prefix rule: a signed-in browser or a
+#     remote account is the same authority as `shell`, and a tool cannot be
+#     enumerated for a finer split.
 ENTRY_CAPABILITIES: Mapping[str, Capability] = {
     "help": _READ,
-    "understand": _READ,
+    "understand": _EXTERNAL_MODEL,
     "cwd.get": _READ,
     "cwd.set": _READ,
     "files.read": _READ,

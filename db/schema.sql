@@ -1493,6 +1493,13 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
             AND relay_codex_remote IS NULL)
     )
 );
+
+COMMENT ON COLUMN agent_impersonations.capabilities IS
+    'Granted SDK capabilities for this lease''s controller; NULL is a pre-vocabulary lease and keeps its full issued surface.';
+
+COMMENT ON COLUMN agent_impersonations.capability_declared_by IS
+    'How the capability set arose: explicit, caller-default, launcher-default or legacy.';
+
 CREATE UNIQUE INDEX IF NOT EXISTS agent_impersonations_one_open
     ON agent_impersonations(agent_id)
     WHERE status IN ('requested', 'accepted', 'active') OR delta_version > applied_version

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from base.agents.impersonation.capabilities import Capability
+from base.agents.impersonation.capabilities import PROFILES, Capability
 from meiva.impersonation import capabilities
 from meiva.sdk_surface import metering
 
@@ -25,13 +25,26 @@ def test_every_agent_visible_entry_has_a_capability() -> None:
     unclassified = [fq for fq in fqs if capabilities.capability_for(fq) is None]
     assert unclassified == [], (
         "these agent-visible SDK entries have no declared capability; classify each one in "
-        f"meiva/sdk_surface/capabilities.py: {unclassified}"
+        f"meiva/impersonation/capabilities.py: {unclassified}"
     )
 
 
 def test_dynamic_mcp_tools_need_machine_authority() -> None:
     assert capabilities.capability_for("mcps.chrome.navigate") is Capability.SHELL
     assert capabilities.capability_for("mcps.notion.API-post-page") is Capability.SHELL
+
+
+# meiva:note
+# `understand` bills the user and exports local file content to a model outside the
+# cluster, so it may not ride `read`: a lease that grants reading must not thereby
+# spend money or ship files. These assertions pin the ruling, not just the mapping -
+# in particular, no profile grants it, so a defaulted takeover cannot gain it.
+def test_understand_needs_external_model_not_read() -> None:
+    assert capabilities.capability_for("understand") is Capability.EXTERNAL_MODEL
+
+
+def test_no_profile_grants_external_model() -> None:
+    assert all(Capability.EXTERNAL_MODEL not in members for members in PROFILES.values())
 
 
 def test_an_unclassified_entry_has_no_capability() -> None:

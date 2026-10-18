@@ -28,5 +28,5 @@ def test_every_declared_entry_has_a_capability() -> None:
     missing = sorted(declared - set(sdk_capabilities.ENTRY_CAPABILITIES))
     assert missing == [], (
         "the Fleet plugin declares these SDK entries with no capability; "
-        f"classify them in meiva/sdk_surface/capabilities.py: {missing}"
+        f"classify them in meiva/impersonation/capabilities.py: {missing}"
     )

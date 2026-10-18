@@ -45,6 +45,8 @@ the drift gate refuses unmirrored dependency changes before DB mutation.
    operations go expand-contract: ship the code that stops using the object first, drop it in
    a later migration
 3. Sync the corresponding schema change into `db/schema.sql` (the baseline stays current).
+   That includes `COMMENT ON` statements: the smoke compares `pg_dump --schema-only`
+   output, so a comment that lives only in the migration makes the two diverge.
    When the change is **non-idempotent** (strict — no `IF NOT EXISTS` / `OR REPLACE`),
    also stamp this migration's name in the seed section — `INSERT INTO schema_migrations
    (name) VALUES ('<name>')` — because a fresh DB replays every unseeded migration and
