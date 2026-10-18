@@ -77,3 +77,29 @@ def test_identity_records_names_not_values() -> None:
     identity = client.caller_identity()
     assert "value-that-must-not-leak" not in json.dumps(identity)
     assert identity["pid"] == os.getpid()
+
+
+def test_redaction_covers_attached_and_underscored_forms() -> None:
+    argv = client.redacted_argv(
+        [
+            "meiva",
+            "start",
+            "-phunter2",
+            "--api_key=abc",
+            "--dsn",
+            "postgres://u:pw@h:5432/db",
+            "--keyword",
+            "kept",
+        ]
+    )
+
+    assert argv == [
+        "meiva",
+        "start",
+        "-p=<redacted>",
+        "--api_key=<redacted>",
+        "--dsn",
+        "<redacted>",
+        "--keyword",
+        "kept",
+    ]

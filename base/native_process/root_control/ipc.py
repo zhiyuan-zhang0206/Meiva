@@ -25,7 +25,7 @@ MAX_MESSAGE_BYTES = 64 * 1024
 
 # The verbs that name a target unit; the others take no name.
 _NAMED_VERBS = frozenset({"up", "down", "force-down", "restart"})
-_STATE_VERBS = frozenset({"up", "down", "force-down", "restart", "shutdown"})
+STATE_VERBS = frozenset({"up", "down", "force-down", "restart", "shutdown"})
 _CALLER_FIELDS = frozenset(
     {"pid", "ppid", "uid", "cwd", "argv", "agent_id", "machine", "operation_id", "env_keys"}
 )
@@ -163,7 +163,7 @@ def _verb_request(
 def _parse_caller(raw: object, verb: str) -> CallerPayload | None:
     if raw is None:
         return None
-    if verb not in _STATE_VERBS:
+    if verb not in STATE_VERBS:
         raise ProtocolError(f"verb {verb!r} takes no 'caller'")
     if not isinstance(raw, dict):
         raise ProtocolError("'caller' must be an object")
