@@ -4,7 +4,7 @@ from typing import Any
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation_handoff import flush_checkpoint
@@ -16,7 +16,10 @@ from base.packages.tests.model_catalog import AddBindings
 from gateway.tests.lifecycle.guarded_compact.host.admission import admit
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact import apply as compact_apply
-from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
+from services.agent_runner.agent_host.invocation.compact.checkpoint import (
+    cold_reader,
+    verbatim_suffix,
+)
 from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel
 
 
@@ -68,3 +71,49 @@ async def test_actual_cold_materialization_gap_never_acknowledges_marker_alone(
     assert not status["continuation_released"] and status["result_available"]
     cold = await cold_reader(accepted.saver).aget_tuple(accepted.config)
     assert cold is not None and cold.checkpoint["channel_values"]["native_compact"] is not None
+
+
+def test_a_matching_window_is_verbatim() -> None:
+    source = [HumanMessage(id="m1", content="old"), AIMessage(id="m2", content="reply")]
+
+    assert verbatim_suffix(source, source)
+    assert verbatim_suffix([source[1]], source)
+
+
+def test_a_rewritten_message_with_the_same_id_is_not_verbatim() -> None:
+    source = [HumanMessage(id="m1", content="old"), AIMessage(id="m2", content="reply")]
+
+    assert not verbatim_suffix([source[0], AIMessage(id="m2", content="rewritten")], source)
+
+
+def test_a_window_that_is_not_the_source_tail_is_not_verbatim() -> None:
+    source = [HumanMessage(id="m1", content="old"), AIMessage(id="m2", content="reply")]
+
+    assert not verbatim_suffix([source[0]], source)
+    assert not verbatim_suffix([HumanMessage(id="m9", content="fabricated")], source)
+
+
+def test_the_filtered_tail_still_counts_as_verbatim() -> None:
+    source = [
+        HumanMessage(id="m1", content="old"),
+        AIMessage(id="m2", content="reply"),
+        AIMessage(
+            id="m3",
+            content="",
+            tool_calls=[
+                {
+                    "name": "execute_code",
+                    "args": {"code": "meiva.self.compact('x')"},
+                    "id": "c9",
+                    "type": "tool_call",
+                }
+            ],
+        ),
+        ToolMessage(
+            id="m4",
+            content="[system halt] You just called meiva.self.compact",
+            tool_call_id="c9",
+        ),
+    ]
+
+    assert verbatim_suffix([source[0], source[1]], source)

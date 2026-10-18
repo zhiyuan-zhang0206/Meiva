@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from agent.graph.hooks.compact import compose_summary_message, retained_tail
@@ -120,16 +120,24 @@ def _replacement_head(
     old_ids = {message.id for message in source_messages}
     if any(message.id in old_ids for message in messages[: summary_index + 1]):
         return False
-    return _verbatim_suffix(messages[summary_index + 1 :], source_messages)
+    return verbatim_suffix(messages[summary_index + 1 :], source_messages)
 
 
-def _verbatim_suffix(window: list[Any], source_messages: list[Any]) -> bool:
+def verbatim_suffix(window: list[Any], source_messages: list[Any]) -> bool:
     if not window:
         return True
-    source_ids = [message.id for message in source_messages]
-    start = next((index for index, mid in enumerate(source_ids) if mid == window[0].id), None)
-    if start is None or source_ids[start:] != [message.id for message in window]:
-        return False
-    return [message.id for message in retained_tail(window, len(window))] == [
-        message.id for message in window
+    filtered = retained_tail(source_messages, len(source_messages))
+    expected = filtered[-len(window) :]
+    return [_comparable(message) for message in expected] == [
+        _comparable(message) for message in window
     ]
+
+
+def _comparable(message: Any) -> tuple[str, str, str, tuple[str, ...]]:
+    calls = message.tool_calls if isinstance(message, AIMessage) else ()
+    return (
+        type(message).__name__,
+        str(message.id),
+        str(message.content),
+        tuple(str(call.get("id")) for call in calls),
+    )

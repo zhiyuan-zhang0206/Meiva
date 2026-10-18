@@ -475,8 +475,10 @@ def retained_tail(messages: Sequence[AnyMessage], limit: int) -> list[AnyMessage
 
 # meiva:note
 # A replacement parks the summary, then the notes that describe it, then the
-# retained history: the last message is the last thing that happened, and every
-# parked note stays ahead of it.
+# retained history: the last message is the last thing that happened. The window
+# can sit last because parked messages are notes only — the claim path defers a
+# co-batched chat to a pending inbound instead of parking it here — so nothing
+# that arrived after the compaction can end up ahead of the replaced history.
 # meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 def build_compact_transition(
     summary: str,
