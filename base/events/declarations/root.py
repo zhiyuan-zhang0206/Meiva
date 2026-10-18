@@ -618,4 +618,10 @@ EVENTS: dict[str, EventSpec] = {
         payload=LifecycleRequest,
         site="cli/database/lifecycle_audit.py:_record record_audit_reported",
     ),
+    "throwaway_pg_reap": telemetry_event(
+        "throwaway_pg_reap",
+        "pg_ctl stop failed for an orphaned throwaway Postgres whose data directory is deleted "
+        "next; a surviving postmaster would keep writing into the removed directory",
+        tier="anomaly",
+    ),
 }

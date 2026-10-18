@@ -38,6 +38,8 @@ import pytest
 
 from base.cluster.dataplane import pg_throwaway_base, pg_tools
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import repo_root
 
 _READY_TIMEOUT_S = 120.0
@@ -137,7 +139,9 @@ def test_sweep_reaps_an_instance_whose_owner_was_killed(
         owner.kill()
 
 
-def test_sweep_reaps_an_instance_whose_lock_was_released(throwaway_root: Path) -> None:
+def test_sweep_reaps_an_instance_whose_lock_was_released(
+    throwaway_root: Path, loguru_records: LogRecords
+) -> None:
     """The same reap without the initdb: releasing the lock is exactly what the
     kernel does for a killed owner, so the leftover instance is reaped."""
     instance = _write_instance(throwaway_root, "meiva-pg-dead")
@@ -148,6 +152,10 @@ def test_sweep_reaps_an_instance_whose_lock_was_released(throwaway_root: Path) -
     assert pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 1
     assert not instance.exists()
     assert not registration.lock.exists()
+    [event] = loguru_records.events("throwaway_pg_reap")
+    assert event["level"].name == "WARNING"
+    assert event["extra"]["rc"] != 0
+    assert str(instance) in event["message"]
 
 
 def test_sweep_reaps_an_orphan_on_the_disk_fallback_base(

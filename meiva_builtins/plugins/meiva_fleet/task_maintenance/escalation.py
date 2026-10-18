@@ -22,6 +22,13 @@ class EscalationReceipt:
     leg: Literal["user", "delegator"]
     inbound_id: int | None
     content: str
+    # meiva:note
+    # The committed `agent_notices` row of the user leg (None for a delegator
+    # digest, which is an inbound note rather than an inbox notice). The daemon
+    # delivers that row through the notification spine after this transaction
+    # commits, exactly like a gateway-posted notice.
+    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+    notice_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -82,7 +89,7 @@ def _user_notice(cur: psycopg.Cursor, task: _Task) -> EscalationReceipt | None:
         "INSERT INTO agent_notices "
         "(agent_id,local_id,task_id,title,content,priority,require_response,blocking,expire_at) "
         "VALUES (%s,COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id=%s),-1)+1, "
-        "%s,%s,%s,%s,TRUE,FALSE,now()+make_interval(secs=>%s))",
+        "%s,%s,%s,%s,TRUE,FALSE,now()+make_interval(secs=>%s)) RETURNING id",
         (
             task.owner,
             task.owner,
@@ -93,7 +100,10 @@ def _user_notice(cur: psycopg.Cursor, task: _Task) -> EscalationReceipt | None:
             read_declared_flag("daemon.notice_ttl_limit_seconds", contribute().flags),
         ),
     )
-    return EscalationReceipt(task.owner, [task.id], "user", None, content)
+    row = cur.fetchone()
+    if row is None:
+        raise RuntimeError("escalation notice insert returned no row")
+    return EscalationReceipt(task.owner, [task.id], "user", None, content, int(row[0]))
 
 
 def _delegator_note(cur: psycopg.Cursor, owner: int, tasks: list[_Task]) -> EscalationReceipt:

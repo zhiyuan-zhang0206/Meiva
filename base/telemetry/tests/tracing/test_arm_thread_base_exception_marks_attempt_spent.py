@@ -626,3 +626,22 @@ def test_claim_idle_wait_span_skips_non_recording_span(
 
     assert node_span.ended is False
     assert tracer.opened == []
+
+
+def test_gzip_old_mirror_failure_is_reported_not_swallowed(
+    tmp_path: Path, loguru_records: list[dict]
+) -> None:
+    from base.telemetry.tracing import gzip_old_mirror
+
+    rotated = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl"
+    rotated.write_text('{"a":1}\n', encoding="utf-8")
+    tmp_path.chmod(0o500)
+    try:
+        assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path) == 0
+    finally:
+        tmp_path.chmod(0o700)
+
+    assert rotated.exists(), "the file stays for the next pass to retry"
+    assert not (tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl.gz").exists()
+    [record] = loguru_records
+    assert "trace mirror gzip" in record["message"]

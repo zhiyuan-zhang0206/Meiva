@@ -50,6 +50,13 @@ editing a container to add a question delivers again — a new question is what 
 user has to act on. The spine reads the notice row itself rather than trusting
 either post path to pass the right shape.
 
+The task-maintenance daemon's stall escalation is the same producer on a sync
+path: its user leg commits a `require_response` notice inside the escalation
+transaction and then calls `deliver_notice_notification_sync`, so a stall that
+needs a human decision reaches the push transports as `core.needs_input` instead
+of stopping at the console inbox. Its delegator leg is an agent note and
+deliberately produces no user notification.
+
 ## Plugin emission
 
 A plugin delivers through `POST /api/agents/{id}/notifications` with

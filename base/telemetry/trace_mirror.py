@@ -24,6 +24,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from base.log import logger
+from base.telemetry.delivery.reporting import report_sink_failure
 
 __all__ = [
     "disk_usage",
@@ -165,8 +166,9 @@ def gzip_old_mirror(grace_seconds: int = 60, *, traces_dir: Path) -> int:
             ):
                 shutil.copyfileobj(src, dst, length=1024 * 1024)
             path.unlink(missing_ok=True)
-        except OSError:
+        except OSError as exc:
             gz_path.unlink(missing_ok=True)
+            report_sink_failure("trace mirror gzip", exc)
             continue
         compressed += 1
     if compressed:
