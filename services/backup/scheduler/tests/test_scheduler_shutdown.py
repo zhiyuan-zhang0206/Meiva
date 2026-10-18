@@ -137,7 +137,6 @@ def _operation_harness(root: Path, mode: str, postgres_base: Path):
         *,
         kind: worker.OperationKind,
         env: dict[str, str],
-        secrets: Mapping[str, str] | None = None,
         stop: StopSignal | None = None,
         timeout_s: float = 6 * 3600,
     ) -> CompletedOperation:
@@ -158,7 +157,6 @@ def _operation_harness(root: Path, mode: str, postgres_base: Path):
                 "MEIVA_TEST_BACKUP_MODE": mode,
                 "MEIVA_TEST_BACKUP_POSTGRES_BASE": str(postgres_base),
             },
-            secrets=secrets,
             stop=stop,
             timeout_s=timeout_s,
         )
