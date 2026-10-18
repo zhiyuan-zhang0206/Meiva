@@ -833,6 +833,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/native_process/root_control/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/native_process/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

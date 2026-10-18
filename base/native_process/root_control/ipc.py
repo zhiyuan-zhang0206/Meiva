@@ -25,7 +25,11 @@ MAX_MESSAGE_BYTES = 64 * 1024
 
 # The verbs that name a target unit; the others take no name.
 _NAMED_VERBS = frozenset({"up", "down", "force-down", "restart"})
-_REQUEST_FIELDS = frozenset({"verb", "name", "payload"})
+_STATE_VERBS = frozenset({"up", "down", "force-down", "restart", "shutdown"})
+_CALLER_FIELDS = frozenset(
+    {"pid", "ppid", "uid", "cwd", "argv", "agent_id", "machine", "operation_id", "env_keys"}
+)
+_REQUEST_FIELDS = frozenset({"verb", "name", "payload", "caller"})
 _RESPONSE_FIELDS = frozenset({"ok", "result", "error", "code"})
 
 
@@ -57,12 +61,30 @@ class ErrorCode(StrEnum):
     INTERNAL = "internal"
 
 
+# meiva:note
+# Who asked for a state change, in wire form. Values never leave the process:
+# `env_keys` names variables (never their values), and `argv` arrives already
+# redacted and truncated by the client.
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+class CallerPayload(TypedDict):
+    pid: int
+    ppid: int
+    uid: int
+    cwd: str
+    argv: list[str]
+    agent_id: str | None
+    machine: str
+    operation_id: str | None
+    env_keys: list[str]
+
+
 class RequestPayload(TypedDict):
     """A validated request in wire form."""
 
     verb: str
     name: NotRequired[str]
     payload: NotRequired[dict[str, object]]
+    caller: NotRequired[CallerPayload]
 
 
 class ResponsePayload(TypedDict):
@@ -98,28 +120,97 @@ def parse_request(raw: bytes) -> RequestPayload:
     if not isinstance(verb_raw, str):
         raise ProtocolError("request must carry a string 'verb'")
     name_raw = document.get("name")
+    caller = _parse_caller(document.get("caller"), verb_raw)
     if verb_raw == Verb.RESOURCE:
-        if not isinstance(name_raw, str) or not name_raw:
-            raise ProtocolError("resource requires a non-empty 'name'")
-        payload = document.get("payload")
-        if not isinstance(payload, dict):
-            raise ProtocolError("resource requires an object 'payload'")
-        return {"verb": verb_raw, "name": name_raw, "payload": payload}
+        request = _resource_request(name_raw, document.get("payload"))
+    else:
+        request = _verb_request(verb_raw, name_raw, document)
+    if caller is not None:
+        request["caller"] = caller
+    return request
+
+
+def _resource_request(name_raw: object, payload: object) -> RequestPayload:
+    if not isinstance(name_raw, str) or not name_raw:
+        raise ProtocolError("resource requires a non-empty 'name'")
+    if not isinstance(payload, dict):
+        raise ProtocolError("resource requires an object 'payload'")
+    return {"verb": Verb.RESOURCE, "name": name_raw, "payload": payload}
+
+
+def _verb_request(
+    verb_raw: str, name_raw: object, document: Mapping[str, object]
+) -> RequestPayload:
     if "payload" in document:
         raise ProtocolError(f"verb {verb_raw!r} takes no 'payload'")
     if verb_raw in _NAMED_VERBS:
         if not isinstance(name_raw, str) or not name_raw:
             raise ProtocolError(f"verb {verb_raw!r} requires a non-empty 'name'")
-        named: RequestPayload = {"verb": verb_raw, "name": name_raw}
-        return named
+        return {"verb": verb_raw, "name": name_raw}
     try:
         Verb(verb_raw)
     except ValueError as exc:
         raise UnknownVerbError(f"unknown verb {verb_raw!r}") from exc
     if "name" in document:
         raise ProtocolError(f"verb {verb_raw!r} takes no 'name'")
-    unnamed: RequestPayload = {"verb": verb_raw}
-    return unnamed
+    return {"verb": verb_raw}
+
+
+# meiva:note
+# Validate the optional caller block fail-fast; a verb that changes nothing
+# rejects it rather than dropping it silently.
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+def _parse_caller(raw: object, verb: str) -> CallerPayload | None:
+    if raw is None:
+        return None
+    if verb not in _STATE_VERBS:
+        raise ProtocolError(f"verb {verb!r} takes no 'caller'")
+    if not isinstance(raw, dict):
+        raise ProtocolError("'caller' must be an object")
+    values = cast("dict[str, object]", raw)
+    unknown = set(values) - _CALLER_FIELDS
+    if unknown:
+        raise ProtocolError(f"unknown caller field(s): {sorted(unknown)}")
+    missing = _CALLER_FIELDS - set(values)
+    if missing:
+        raise ProtocolError(f"caller is missing field(s): {sorted(missing)}")
+    caller: CallerPayload = {
+        "pid": _positive_int(values["pid"], "pid"),
+        "ppid": _positive_int(values["ppid"], "ppid"),
+        "uid": _positive_int(values["uid"], "uid"),
+        "cwd": _text(values["cwd"], "cwd"),
+        "argv": _texts(values["argv"], "argv"),
+        "agent_id": _optional_text(values["agent_id"], "agent_id"),
+        "machine": _text(values["machine"], "machine"),
+        "operation_id": _optional_text(values["operation_id"], "operation_id"),
+        "env_keys": _texts(values["env_keys"], "env_keys"),
+    }
+    return caller
+
+
+def _positive_int(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ProtocolError(f"caller {field!r} must be a non-negative integer")
+    return value
+
+
+def _text(value: object, field: str) -> str:
+    if not isinstance(value, str):
+        raise ProtocolError(f"caller {field!r} must be a string")
+    return value
+
+
+def _optional_text(value: object, field: str) -> str | None:
+    if value is None:
+        return None
+    return _text(value, field)
+
+
+def _texts(value: object, field: str) -> list[str]:
+    items = cast("list[object]", value) if isinstance(value, list) else None
+    if items is None or not all(isinstance(item, str) for item in items):
+        raise ProtocolError(f"caller {field!r} must be a list of strings")
+    return cast("list[str]", items)
 
 
 def parse_response(raw: bytes) -> ResponsePayload:
