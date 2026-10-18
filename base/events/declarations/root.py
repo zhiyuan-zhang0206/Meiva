@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from base.events.vocabulary import EventSpec, telemetry_event
+from base.events.vocabulary import EventSpec, audit_event, telemetry_event
 
 
 class RootHealthTick(TypedDict):
@@ -336,6 +336,20 @@ class ConvergeFileOverwritten(TypedDict):
     surface: str
 
 
+# meiva:note
+# One row per batch of unit-state requests a CLI process is about to send to
+# meiva-root, written before the first request leaves the process so a request
+# that hangs or fails still names its caller. `caller` is the block the wire
+# carries (CallerPayload), so the audit row and the root's intent record name
+# the same pid, argv and host (task #5325).
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+class LifecycleRequest(TypedDict):
+    verb: str
+    units: list[str]
+    operation_id: str | None
+    caller: dict[str, object]
+
+
 EVENTS: dict[str, EventSpec] = {
     "lgtm_dashboard_render_failed": telemetry_event(
         "lgtm_dashboard_render_failed",
@@ -595,5 +609,13 @@ EVENTS: dict[str, EventSpec] = {
         payload=LifecyclePointerStuck,
         tier="anomaly",
         site="services/upkeep/ttl_reaper/lifecycle_fences.py:scan_stuck_lifecycle_pointers_blocking telemetry.emit",
+    ),
+    "lifecycle_request": audit_event(
+        "lifecycle_request",
+        "a CLI process asked meiva-root to change unit state — the verb, the units and the "
+        "caller block (pid/argv/host/operation), recorded when the request is sent rather than "
+        "when it succeeds, so an operator stop or start is attributable after the fact",
+        payload=LifecycleRequest,
+        site="cli/database/lifecycle_audit.py:_record record_audit_reported",
     ),
 }

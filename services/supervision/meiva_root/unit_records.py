@@ -13,7 +13,12 @@ from dataclasses import dataclass, field
 
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import UnitState
-from services.supervision.meiva_root.intent_store import IntentSource, RestartFailure, UnitIntent
+from services.supervision.meiva_root.intent_store import (
+    CallerFacts,
+    IntentSource,
+    RestartFailure,
+    UnitIntent,
+)
 from services.supervision.meiva_root.manifest import UnitManifest
 
 
@@ -51,6 +56,7 @@ class UnitRuntime:
     intent: UnitIntent = UnitIntent.STOPPED
     intent_source: IntentSource = IntentSource.SELECTION
     restart_failed: RestartFailure | None = None
+    intent_caller: CallerFacts | None = None
     state: UnitState = UnitState.STOPPED
     generation: Generation | None = None
     restart_count: int = 0
