@@ -337,6 +337,16 @@ def _remote_loop(
     )
 
 
+class _FirstBeatProgress(LoopProgress):
+    def __init__(self) -> None:
+        super().__init__("test", 60.0)
+        self.first_beat = asyncio.Event()
+
+    def beat(self) -> None:
+        super().beat()
+        self.first_beat.set()
+
+
 @pytest.mark.parametrize("loop", [_sweep_loop, _remote_loop], ids=["sweep", "remote"])
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_a_quiesced_unit_borrows_no_connection(
@@ -345,11 +355,19 @@ async def test_a_quiesced_unit_borrows_no_connection(
     quiesced: bool,
     database_gate: ProcessDbGate,
 ) -> None:
+    # meiva:note
+    # The observation point is the loop's first beat, not a wall-clock sleep: a
+    # beat follows the quiesced decision in both branches (`run_rounds` beats after
+    # the round, `sleep_with_progress` beats before sleeping), so one beat proves
+    # the loop reached its first decision. A fixed 0.2 s sleep instead assumed a
+    # loaded runner schedules the round within that window — the 2026-10-18
+    # `[False-remote]` failure was the round simply not having run yet.
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
     pool = MagicMock()
-    task = asyncio.create_task(loop(cast("ConnectionPool", pool), _progress(), database_gate))
+    progress = _FirstBeatProgress()
+    task = asyncio.create_task(loop(cast("ConnectionPool", pool), progress, database_gate))
     try:
-        await asyncio.sleep(0.2)
+        await asyncio.wait_for(progress.first_beat.wait(), timeout=30)
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
