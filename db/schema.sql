@@ -3174,13 +3174,15 @@ CREATE INDEX IF NOT EXISTS notification_events_pending_idx
     WHERE announced_at IS NULL;
 
 -- meiva_runner surface: the hosted runtime settles a turn and records the
--- delivery itself. Append-only — UPDATE/DELETE stay out, and the ledger is never
--- rewritten. Gated on the role's existence for the fresh-bootstrap path;
+-- delivery itself. Append-only apart from the one mark that says its live event
+-- was published: `announced_at` is the only column the runner may update, and
+-- DELETE stays out. Gated on the role's existence for the fresh-bootstrap path;
 -- base/cluster/authority/groups.py::ensure_groups re-affirms it at birth.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
-        GRANT SELECT, INSERT, UPDATE ON notification_events TO meiva_runner;
+        GRANT SELECT, INSERT ON notification_events TO meiva_runner;
+        GRANT UPDATE (announced_at) ON notification_events TO meiva_runner;
         GRANT USAGE, SELECT ON SEQUENCE notification_events_id_seq TO meiva_runner;
     END IF;
 END $$;

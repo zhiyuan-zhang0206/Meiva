@@ -502,3 +502,36 @@ def test_runner_writes_native_work_copy_and_cancel_ack_with_domain_limits(runner
         for table in ("upload_delivery_batches", "agent_creation_snapshots"):
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
                 conn.execute(sql.SQL("INSERT INTO {} DEFAULT VALUES").format(sql.Identifier(table)))
+
+
+# meiva:note
+# The runner writes one column of the delivery log — the mark that its live event
+# was published — and the grant is column-scoped, so a delivery's subject or body
+# stays the spine's to write even when the runner is the one announcing.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def test_runner_marks_a_delivery_but_cannot_rewrite_it(runner_db: str) -> None:
+    grant_runner(runner_db)
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        row = conn.execute(
+            "INSERT INTO notification_events (category, subject, importance) "
+            "VALUES ('core.turn_finished', 'turn finished', 'low') RETURNING id"
+        ).fetchone()
+        assert row is not None
+        notification_id = int(row[0])
+    with psycopg.connect(runner_url(runner_db), autocommit=True) as conn:
+        conn.execute(
+            "UPDATE notification_events SET announced_at = now() "
+            "WHERE id = %s AND announced_at IS NULL",
+            (notification_id,),
+        )
+        assert conn.execute(
+            "SELECT announced_at IS NOT NULL FROM notification_events WHERE id = %s",
+            (notification_id,),
+        ).fetchone() == (True,)
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute(
+                "UPDATE notification_events SET subject = 'rewritten' WHERE id = %s",
+                (notification_id,),
+            )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("DELETE FROM notification_events WHERE id = %s", (notification_id,))
