@@ -245,20 +245,23 @@ class AgentMemorySettings(EnvSettings):
 
     memory_write_dedup_threshold: float = Field(
         # meiva:note
-        # Not calibrated: 0.8 was inherited from the recall threshold's original value and stays
-        # on its own terms — the two answer different questions and now move separately (recall
-        # became 0.72 on 2026-10-18 evidence). Every duplicate probability is logged by the check,
-        # so this threshold can be calibrated against them.
+        # Measured on two 200-write samples, not benchmark-calibrated: with the same-rule
+        # question in services/derived/memory_indexer/rerank.py, 0.80 reminded on 8% and 10.5%
+        # of writes, named a real duplicate in about half of those, and caught 42% and 48% of
+        # mergeable duplicates (docs/decisions/agents/context/2026-10-19-dedup-question.md).
+        # The two thresholds answer different questions and move separately (recall became 0.72
+        # on 2026-10-18 evidence). Every duplicate probability is logged by the check, so this
+        # cut can be re-calibrated against them.
         default=0.80,
         ge=0,
         le=1,
         alias="MEIVA_MEMORY_WRITE_DEDUP_THRESHOLD",
         description=(
-            "Minimum probability (0..1, the decision model's answer to \"does an existing "
-            'shared note record essentially the same knowledge as this new one") for the '
-            "write check to point the agent at that note as a likely duplicate. Not "
-            "calibrated by a benchmark: the value is a starting point, and every probability "
-            "is logged so it can be calibrated later."
+            "Minimum probability (0..1, the decision model's answer to \"do these two notes "
+            'record the same rule or decision") for the write check to point the agent at '
+            "that note as a likely duplicate. Measured on two 200-write samples in 2026-10-19: "
+            "at 0.80 about half of the reminders name a real duplicate and 42-48% of mergeable "
+            "duplicates are caught; every probability is logged so the cut can be re-calibrated."
         ),
         json_schema_extra={
             "restart_required": "agent",

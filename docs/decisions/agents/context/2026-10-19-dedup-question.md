@@ -11,12 +11,12 @@ The shipped question defined a duplicate as a note that "records essentially the
 same knowledge", and then excluded the case that matters: *"a note that adds a
 different rule, a different scope, or a different decision about the same subject
 is not the same knowledge."* Forks are the common failure, not the rare one: of
-the same-rule nearest neighbours in a 200-write sample, 85% were forks — one note
-carries a later exception the other does not. The exclusion clause told the model
-to score exactly those low, and the cut point cannot recover them: in the same
-sample, same-topic-different-decision pairs sat at 0.51–0.57 while the fork of a
-real ruling sat at 0.22–0.44, so lowering the threshold fires the wrong pairs
-first.
+the same-rule nearest neighbours in the first sample below, 19 of 22 (86%) were
+forks — one note carries a later exception the other does not. The exclusion
+clause told the model to score exactly those low, and the cut point cannot
+recover them: in that sample, same-topic-different-decision pairs sat at
+0.51–0.57 while the fork of a real ruling sat at 0.22–0.44, so lowering the
+threshold fires the wrong pairs first.
 
 Measured on two independent 200-write samples:
 
@@ -24,6 +24,22 @@ Measured on two independent 200-write samples:
 |---|---|
 | 200 random writes, 2026-10-17 | 5 reminders (2.5%), caught 5 of 26 mergeable duplicates (19%) |
 | 200 random writes, 2026-10-18 (fresh period) | 1 reminder (0.5%), caught 1 of 21 (5%) |
+
+How the samples were drawn, so the numbers can be recomputed rather than
+trusted:
+
+- **2026-10-17** — the 2,217 pool paths written since 2026-09-26, of which 1,886
+  still existed; 200 drawn with `random.seed(20261017)`. Each note was scored
+  through the production dedup request (k=5, itself excluded) and its best
+  candidate kept. Labels came from a stratified read of 79 pairs (all of the
+  ≥0.4 band, all of 0.2–0.4, 15 random each from 0.1–0.2 and below), which is
+  where the 26 and the 86% fork share come from — a band-weighted extrapolation,
+  not a count of the whole sample.
+- **2026-10-18** — paths written 2026-09-01..09-25 (`git log` gave 2,026, of
+  which 1,053 existed), 200 drawn with `random.seed(20261018)`; a second scoring
+  pass re-read all 46 disputed pairs and kept 21 as mergeable duplicates. Its
+  states were rebuilt from the same excerpt rules as production and reproduce the
+  gateway scores to within 0.017 on average.
 
 A live week of maintenance traffic agrees: 40 sampled writes produced no
 candidate at 0.80 at all.
@@ -38,8 +54,12 @@ Ask a different question — the same rule or decision, not the same wording:
 > less detail, or a later exception added to one of them does not make the
 > decisions different.
 
-`true_if`: the two notes record the same rule or decision.
-`false_if`: two different decisions on the same subject, or only a shared topic.
+`true_if`: `The two notes record the same rule or decision.`
+`false_if`: `They are two different decisions on the same subject, or share only a topic.`
+
+Those two lines are part of the prompt
+(`base/lm/catalog/decide/types.py::question_text` joins all three), so a
+paraphrase here is a different prompt; a test pins the three strings.
 
 The threshold stays at 0.80: the new question's curve peaks in precision there.
 
