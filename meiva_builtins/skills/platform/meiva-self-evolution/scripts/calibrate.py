@@ -1,16 +1,6 @@
-"""Calibration harness for model judges: trivial baselines first, then the judge.
-
-A judge that reports "80% agreement" on a random run sample has measured the
-sample, not itself: when almost every run passes, an always-pass stub scores
-higher than a real judge. This module scores any judge against a balanced case
-set (half expected-pass, half expected-fail) and reports sensitivity,
-specificity and the two trivial baselines. A judge earns trust only when it
-beats both baselines; `uncertain` never counts as correct, so abstaining cannot
-game the score.
-
-A judge is any callable ``judge(case) -> "pass" | "fail" | "uncertain"``. Load
-one from a dotted path, e.g. ``--judge my_pkg.judge:evaluate``.
-"""
+# meiva:note
+# Score a judge against a balanced case set next to the two trivial baselines: accuracy must strictly beat max(always-pass, always-fail), and "uncertain" counts as neither correct nor caught so abstaining cannot inflate the score.
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md
 
 from __future__ import annotations
 
@@ -22,20 +12,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-Verdict = str  # "pass" | "fail" | "uncertain"
+Verdict = str
 VERDICTS = ("pass", "fail", "uncertain")
 Judge = Callable[["Case"], Verdict]
 
 
 @dataclass(frozen=True)
 class Case:
-    """One evidence packet with a known outcome."""
-
     case_id: str
     task: str
     evidence: tuple[str, ...]
     telemetry: str
-    expected: str  # "pass" | "fail"
+    expected: str
 
     def __post_init__(self) -> None:
         if self.expected not in ("pass", "fail"):
@@ -46,14 +34,12 @@ class Case:
 
 @dataclass(frozen=True)
 class Calibration:
-    """Judge behaviour on one case set, next to the baselines it must beat."""
-
     n: int
     expected_pass: int
     expected_fail: int
     accuracy: float
-    sensitivity: float  # expected-fail cases called "fail"
-    specificity: float  # expected-pass cases called "pass"
+    sensitivity: float
+    specificity: float
     abstain_rate: float
     always_pass_accuracy: float
     always_fail_accuracy: float
@@ -84,8 +70,6 @@ def load_cases(path: str | Path) -> list[Case]:
 
 
 def synthesize_failure(case: Case, promise: str, *, case_id: str) -> Case:
-    """Turn a passing packet into a promise-only failure: the final message is
-    replaced by a statement of future work, so nothing was delivered."""
     evidence = list(case.evidence)
     if evidence and evidence[0].startswith("Final message"):
         evidence[0] = f"Final message from the agent: {promise}"
@@ -155,7 +139,6 @@ def format_report(cal: Calibration) -> str:
 
 
 def stub_judge(name: str) -> Judge:
-    """Named trivial judges, so the baselines can be reproduced without a model."""
     stubs: dict[str, Judge] = {
         "always-pass": lambda _case: "pass",
         "always-fail": lambda _case: "fail",
@@ -169,7 +152,6 @@ def stub_judge(name: str) -> Judge:
 
 
 def load_judge(spec: str) -> Judge:
-    """Resolve ``module:function`` to a judge callable, or a stub name."""
     if ":" not in spec:
         return stub_judge(spec)
     module_name, _, attr = spec.partition(":")
