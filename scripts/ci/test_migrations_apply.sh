@@ -61,8 +61,22 @@ psql -d "$TEST_DB" -v ON_ERROR_STOP=1 -q -f db/schema.sql
 echo "  ok"
 
 # A schema-owner run proves the DDL parses, not that a service can read it.
-# SET ROLE needs a superuser (or membership); CI's throwaway cluster is one.
-echo "-> a service role can read the attribution view and its evidence table"
+# The catalog check runs on any connection; the read below additionally needs
+# SET ROLE (superuser or membership), so it stays guarded — but never silently:
+# the ACL check above it fails on its own when a grant is missing.
+echo "-> a service role holds SELECT on the attribution view and its evidence table"
+psql -d "$TEST_DB" -v ON_ERROR_STOP=1 -q -o /dev/null <<'SQL'
+DO $$
+BEGIN
+    IF NOT (has_table_privilege('meiva_runner', 'public.telemetry_events_attributed', 'SELECT')
+            AND has_table_privilege('meiva_runner', 'public.telemetry_owner_inference', 'SELECT')
+            AND has_table_privilege('meiva_gateway', 'public.telemetry_events_attributed', 'SELECT')) THEN
+        RAISE EXCEPTION 'a service role cannot read the attribution view (empty ACL?)';
+    END IF;
+END $$;
+SQL
+echo "  ok"
+echo "-> a service role read really returns rows"
 if [ "$(psql -d "$TEST_DB" -At -c "SELECT rolsuper FROM pg_roles WHERE rolname = current_user")" = "t" ]; then
     psql -d "$TEST_DB" -v ON_ERROR_STOP=1 -q -o /dev/null <<'SQL'
 SET ROLE meiva_runner;
@@ -75,7 +89,7 @@ RESET ROLE;
 SQL
     echo "  ok"
 else
-    echo "  skipped: SET ROLE needs a superuser"
+    echo "  skipped: SET ROLE needs a superuser (the ACL check above still ran)"
 fi
 
 echo "-> retired deploy storage is absent and the version-gate row survives"
