@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from typing import Literal
 
+# meiva:note
+# Why the query was issued. `recall`: passive recall, the query is the recent conversation.
+# `search`: an agent's own `meiva.memory.search` call, the query is what the agent is looking for.
+# `dedup`: the check on a note an agent just wrote, the query is the new note and the score is
+# the probability that a result records the same rule or decision as that note — one rule, not one
+# wording: a later exception in one of the notes does not make them different decisions
+# (docs/decisions/agents/context/2026-10-19-dedup-question.md).
+# The ranker asks a different question for each.
 MemorySearchPurpose = Literal["recall", "search", "dedup"]
-"""Why the query was issued. `recall`: passive recall, the query is the recent conversation.
-`search`: an agent's own `meiva.memory.search` call, the query is what the agent is looking for.
-`dedup`: the check on a note an agent just wrote, the query is the new note and the score is
-the probability that a result records essentially the same knowledge.
-The ranker asks a different question for each."""
 
 
 MEMORY_SEARCH_MAX_EXCLUDE = 800
