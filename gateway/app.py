@@ -106,6 +106,9 @@ from gateway.routers import (
     memory as memory_router,
 )
 from gateway.routers import (
+    notifications as notifications_router,
+)
+from gateway.routers import (
     pages as pages_router,
 )
 from gateway.routers import (
@@ -525,6 +528,7 @@ def create_app(
         conversation_router.router,
         default_model_router.router,
         settings_router.router,
+        notifications_router.router,
         schedules_router.router,
         guide_router.router,
         inventory_router.router,

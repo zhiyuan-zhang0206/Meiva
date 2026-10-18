@@ -1,4 +1,4 @@
-exports = ["inspector.py", "stats.py", "ui_contributions.py"]
+exports = ["inspector.py", "notification_contributions.py", "stats.py", "ui_contributions.py"]
 
 [uses]
 "tests" = ["stats.py"]

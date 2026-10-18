@@ -70,3 +70,7 @@ def merge_catalog(
                 raise ValueError(f"notification category declared twice: {category.id}")
             merged[category.id] = category
     return merged
+
+
+def core_catalog() -> dict[str, NotificationCategory]:
+    return {category.id: category for category in CORE_CATEGORIES}

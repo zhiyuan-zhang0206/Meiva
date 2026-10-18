@@ -83,3 +83,9 @@ async def insert_async(pool: AsyncConnectionPool[Any], params: tuple[Any, ...]) 
     if row is None:
         raise RuntimeError("notification insert returned no id")
     return int(row[0])
+
+
+def read_overrides_sync(pool: ConnectionPool) -> dict[str, bool]:
+    with pool.connection() as conn:
+        row = conn.execute(_SELECT_OVERRIDES, (SETTINGS_KEY,)).fetchone()
+    return parse_overrides(None if row is None else row[0])

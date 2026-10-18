@@ -22,8 +22,11 @@ notification as a side effect.
 ## Categories
 
 A category carries a label, an importance, a default switch and a dedupe window.
-Core categories live in `catalog.CORE_CATEGORIES`; plugins declare theirs on the
-`notifications` contribution surface and own the `<plugin>.` id prefix.
+Core categories live in `catalog.CORE_CATEGORIES`. A plugin declares its own in
+`contributions.notifications` in `meiva-plugin.json`, under its own
+`<plugin>.` id prefix; `gateway/extensions/notification_categories.py` merges the
+manifests with the core set, and `GET /api/notifications/categories` returns that
+merged view with the user's switches already applied.
 
 ## Policy
 
@@ -40,6 +43,14 @@ records `core.needs_input` or `core.notice` from `ops/lifecycle/events.py`,
 keyed by the notice id so an edit or a retried post cannot notify twice; the
 spine reads the notice row itself rather than trusting either post path to pass
 the right shape.
+
+## Plugin emission
+
+A plugin delivers through `POST /api/agents/{id}/notifications` with
+`category`, `subject` and an optional `dedupe_key`; the endpoint resolves the
+category against the merged catalog (422 when undeclared), writes the delivery
+and announces it. `meiva_fleet` registers `meiva_fleet.task_closed` and emits it
+from the task update path after the row commits, keyed by task id.
 
 ## Transports
 
