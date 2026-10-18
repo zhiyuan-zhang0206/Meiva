@@ -25,7 +25,10 @@ absent from the baseline. A design discussion about that column started from a
 false premise until someone diffed the two schemas by hand; this script repeats
 that diff on demand. 2026-10-17 against the production database it reported one
 extra column (`agents_meta.watchers`), ten extra tables — the four checkpointer
-tables and six `telemetry_events` partitions — and nothing missing.
+tables and six `telemetry_events` partitions — and nothing missing. The
+2026-10-18 migration (`20261018T112825_drop-agents-meta-watchers.sql`) drops the
+column, so a database that has applied it reports only the ten designed runtime
+tables.
 
 ## schema-drift
 
