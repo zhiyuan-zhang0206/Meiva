@@ -1,0 +1,7 @@
+exports = ["catalog.py", "policy.py", "publish.py", "store.py", "tests"]
+
+[uses]
+"__init__.py" = ["catalog.py", "policy.py", "publish.py"]
+"policy.py" = ["catalog.py"]
+"publish.py" = ["catalog.py", "policy.py", "store.py"]
+"tests" = ["catalog.py", "policy.py", "publish.py", "store.py"]

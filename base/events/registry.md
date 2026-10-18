@@ -351,6 +351,7 @@ same origin as persistent events but uses an independent schema.
 | `llm_done` | — |
 | `notice_posted` | ✓ |
 | `notice_resolved` | ✓ |
+| `notification` | ✓ |
 | `page_closed` | ✓ |
 | `page_opened` | ✓ |
 | `reasoning_delta` | — |

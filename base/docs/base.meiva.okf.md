@@ -47,6 +47,11 @@ The base-layer public entry points: [[base/docs/entry-points.meiva.okf.md]].
 
 ## Notes
 
+- **Notifications** (`base/events/notifications/`): the one delivery decision behind every
+  notification transport — declared categories, per-category user switches,
+  key-based deduplication and a delivery log that Android, macOS, the console and
+  the Telegram bridge render from; see
+  [[base/events/notifications/docs/notifications.meiva.okf.md]].
 - `base/host/system/macos_firewall.py` — declarative macOS Application Firewall manifest,
   audit, status renderer, and rootless-first reconciliation with bounded
   `sudo -n` / manual-command fallback; see

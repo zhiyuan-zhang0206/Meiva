@@ -753,6 +753,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/events/notifications/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/events/reads/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

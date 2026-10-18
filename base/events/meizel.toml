@@ -1,10 +1,11 @@
-exports = ["contract.py", "declarations", "live", "reads", "scan_kinds.py", "tests"]
+exports = ["contract.py", "declarations", "live", "reads", "scan_kinds.py", "tests", "notifications"]
 
 [uses]
 "__init__.py" = ["contract.py"]
 "contract.py" = ["loader.py", "vocabulary.py"]
 "declarations" = ["vocabulary.py"]
 "loader.py" = ["declarations", "vocabulary.py"]
+"notifications" = ["live"]
 "reads" = ["contract.py"]
 "tests" = ["contract.py", "declarations", "loader.py", "vocabulary.py"]
 
