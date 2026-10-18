@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import PIPE, STDOUT
@@ -408,22 +409,68 @@ def _drift_checks(s: Session, args: argparse.Namespace) -> None:
         raise FailedError("drift check failed: " + "; ".join(failed))
 
 
-def up(s: Session, args: argparse.Namespace) -> None:
+# meiva:note
+# Exit code 2 already means "refused before doing anything"; a run where some
+# hosts came up and others did not is its own outcome, so automation can tell
+# a partial up from a rejected one.
+# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+PARTIAL_FAILURE_EXIT = 3
+
+_INCOMPLETE = 'cat "$HOME/.meiva/state/converge-incomplete.json" 2>/dev/null'
+
+
+@dataclass(frozen=True)
+class HostFailure:
+    alias: str
+    step: str
+    reason: str
+
+    def line(self) -> str:
+        return f"{self.alias} failed at {self.step!r}: {self.reason}"
+
+
+def _host_failure(s: Session, alias: str, exc: FailedError) -> HostFailure:
+    try:
+        recorded = json.loads(s.run(alias, _INCOMPLETE, effect=False))
+        return HostFailure(alias, str(recorded["step"]), str(recorded["error"]))
+    except (FailedError, ValueError, KeyError, TypeError):
+        return HostFailure(alias, "start", str(exc))
+
+
+# meiva:note
+# One host's converge failure must not stop the rest: each start is attempted,
+# the failures are collected with their step and reason, and the caller reports
+# them and exits 3. A half-up cluster is reported, never hidden behind a single
+# abort that leaves the remaining hosts untouched.
+# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
+    failures: list[HostFailure] = []
     for alias in [args.gateway, *args.runner]:
         macos = s.os[alias] == "Darwin"
-        s.run(alias, gui_oneshot(alias, args.start_timeout) if macos else f"{HOME}; {MEIVA} start")
-        if (
-            not s.dry_run
-            and (hold := split_hold_text(s.run(alias, _STATUS, effect=False)))[0] not in _FREE
-        ):
-            raise FailedError(f"{alias}: start left maintenance {hold}")
+        try:
+            s.run(
+                alias,
+                gui_oneshot(alias, args.start_timeout) if macos else f"{HOME}; {MEIVA} start",
+            )
+            if (
+                not s.dry_run
+                and (hold := split_hold_text(s.run(alias, _STATUS, effect=False)))[0] not in _FREE
+            ):
+                raise FailedError(f"start left maintenance {hold}")
+        except FailedError as exc:
+            failure = _host_failure(s, alias, exc)
+            failures.append(failure)
+            s.say(f"PARTIAL: {failure.line()}")
+    if failures:
+        _silence(s, args, "close")
+        return failures
     program = f"{_PYTHON} -"
     if s.dry_run:
         s.run(args.gateway, f"{program} smoke MACHINE {args.smoke_timeout}  # each agent-runner")
         _refresh(s, args)
         _drift_checks(s, args)
         _silence(s, args, "close")
-        return
+        return []
     rows, commit = _roster(s, args, program)
     for name in [row["name"] for row in rows if row["serve_agent_runner"]]:
         smoke = f"{program} smoke {shlex.quote(name)} {args.smoke_timeout}"
@@ -432,6 +479,7 @@ def up(s: Session, args: argparse.Namespace) -> None:
     _drift_checks(s, args)
     _silence(s, args, "close")
     s.say(f"up complete: every listed machine runs {commit[:12]}")
+    return []
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -489,7 +537,18 @@ def main(argv: list[str] | None = None) -> int:
         s.os = {host: s.run(host, "uname -s", effect=False).split()[-1] for host in hosts}
         for phase in ("down", "up") if args.half == "run" else (args.half,):
             s.say(f"phase: {phase}")
-            (down if phase == "down" else up)(s, args)
+            if phase == "down":
+                down(s, args)
+                continue
+            failures = up(s, args)
+            if failures:
+                for failure in failures:
+                    s.say(f"PARTIAL: {failure.line()}")
+                s.say(
+                    f"up incomplete: {len(failures)} host(s) failed; the rest are serving. "
+                    f"Fix each and rerun `up` (idempotent)."
+                )
+                return PARTIAL_FAILURE_EXIT
     except FailedError as exc:
         s.say(
             f"FAILED: {exc}\nFailed phase: {phase}. Nothing rolled back. "

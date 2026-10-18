@@ -22,7 +22,9 @@ from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import service_selection
 from base.host.system.hostport import Host
+from base.paths import meiva_home
 from cli.commands._repo import repo_root
+from cli.commands.converge import incomplete
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.bringup import print_data_plane_status
 from cli.commands.data_plane.config import data_plane_config_from_settings
@@ -31,6 +33,17 @@ from cli.commands.probe import print_service_row
 from services.supervision.roster import build_services
 from services.supervision.roster.service_spec import ServiceSpec
 from services.supervision.roster.spec import services_for_capabilities_annotated
+
+
+# meiva:note
+# A converge that aborted leaves a marker in this home; print it beside the
+# maintenance hold, because the services may be up while one step never applied.
+# meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
+def print_converge_section(home: Path) -> None:
+    recorded = incomplete.read_incomplete(home)
+    if recorded is None:
+        return
+    print(f"converge: INCOMPLETE {recorded.summary()}")
 
 
 def root_tree_units() -> dict[str, dict[str, object]]:
@@ -76,6 +89,7 @@ def cmd_status(
         f"[meiva status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n"
     )
     print_hold_section()
+    print_converge_section(meiva_home())
     print()
     services_to_show = _status_roster(roles, machine=machine, host=host)
     name_w = max((len(session_name(spec.session)) for spec, _reason in services_to_show), default=7)
