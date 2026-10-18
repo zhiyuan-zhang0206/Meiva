@@ -150,7 +150,6 @@ pub fn check_for_updates(app: AppHandle, interactive: bool) {
     });
 }
 
-
 /// Ask the operating system for permission to post notifications.
 ///
 /// macOS answers with its own one-time prompt and remembers the choice, so this
@@ -159,7 +158,9 @@ pub fn check_for_updates(app: AppHandle, interactive: bool) {
 pub fn request_notification_permission(app: &AppHandle) {
     use tauri_plugin_notification::NotificationExt;
 
-    if let Ok(tauri_plugin_notification::PermissionState::Granted) = app.notification().permission_state() {
+    if let Ok(tauri_plugin_notification::PermissionState::Granted) =
+        app.notification().permission_state()
+    {
         return;
     }
     if let Err(err) = app.notification().request_permission() {
@@ -175,7 +176,13 @@ pub fn request_notification_permission(app: &AppHandle) {
 pub fn show_notification(app: &AppHandle, title: String, body: String) {
     use tauri_plugin_notification::NotificationExt;
 
-    if let Err(err) = app.notification().builder().title(&title).body(&body).show() {
+    if let Err(err) = app
+        .notification()
+        .builder()
+        .title(&title)
+        .body(&body)
+        .show()
+    {
         log::error!("could not show a notification: {err}");
     }
 }
