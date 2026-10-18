@@ -438,14 +438,17 @@ class DataPlaneSettings(EnvSettings):
         alias="MEIVA_DB_POOL_RESTORE_TIMEOUT_SECONDS",
         description=(
             "Statement budget, in seconds, for one per-borrow session restore "
-            "(RESET ALL plus the baseline SET). It bounds the restore itself, "
-            "not the wait for a free connection (db_pool_acquire_timeout_seconds "
-            "does that): a backend stuck in I/O must fail this restore fast so "
-            "the pool counts the check as failed and retries against its own "
-            "deadline, instead of pinning the borrower to the inherited statement "
-            "ceiling (2026-10-18 write stall: check_ms reached 389 s). Every "
-            "process that pools connections runs this restore, so the field lives "
-            "in the data_plane domain, not in the agent-only one."
+            "(RESET ALL plus the baseline SET), separate from the wait for a free "
+            "connection (db_pool_acquire_timeout_seconds does that). It bounds "
+            "what the backend itself can observe: a lock wait or a slow statement "
+            "inside the restore now fails at this budget (5 s), the pool counts "
+            "the check as failed and retries against its own deadline, and the "
+            "borrower no longer inherits the wait. It does not bound a backend "
+            "wedged in uninterruptible I/O, the WAL flush inside COMMIT, or a "
+            "client/network wait — statement_timeout cannot reach those, and the "
+            "2026-10-18 write stall (check_ms 389 s at host level) was that "
+            "class. Every process that pools connections runs this restore, so "
+            "the field lives in the data_plane domain, not in the agent-only one."
         ),
         gt=0,
         json_schema_extra={

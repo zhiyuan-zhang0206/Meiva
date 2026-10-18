@@ -138,15 +138,18 @@ PG_POOLED_BASELINE_RESTORE_SQL: tuple[LiteralString, LiteralString] = (
 
 
 # meiva:note
-# The scrub plus the statement budget that bounds the rest of this restore, in
-# one simple-protocol round trip: the budget must be in force before the restore
-# touches the server, so it rides with the `RESET ALL` rather than following it
-# — hence the caller's `prepare=False`, the only way two statements travel in
-# one message. It bounds this restore only: the next statement restores the
-# session's standing ceiling (`db_pool_restore_timeout_seconds` owns the
-# value). Read lazily because this module is on the exec child's boot path and
-# must not pull the eager config chain in (task #3621). `budget_seconds`
-# overrides the configured budget for one restore; the pool hooks pass nothing.
+# The scrub plus the statement budget for one restore, in a single
+# simple-protocol round trip: the budget has to be in force before the restore
+# touches the server, so it rides with the `RESET ALL` (the caller's
+# `prepare=False` is what lets both statements travel in one message). What it
+# bounds is what the backend can observe — a lock wait or a slow statement
+# inside the restore. It does not bound a backend wedged in uninterruptible
+# I/O, the WAL flush inside COMMIT, or a client/network wait; the 2026-10-18
+# 389 s check was that class, so #5303's client-side deadline stays a separate
+# item. The next statement restores the session's standing ceiling
+# (`db_pool_restore_timeout_seconds` owns the value). Read lazily because this
+# module is on the exec child's boot path (task #3621); `budget_seconds`
+# overrides the configured value for one restore.
 def restore_budget_statement(budget_seconds: float | None = None) -> tuple[LiteralString, int]:
     from base.config import settings
 
