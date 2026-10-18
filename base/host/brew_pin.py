@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from base.host.proc import CommandRunner
+from base.log import logger
 
 _BREW_TIMEOUT_S = 60.0
 
@@ -43,38 +44,51 @@ PGBOUNCER_APT_VERSION = "1.26.0-1.pgdg24.04+1"
 REDIS_APT_VERSION = "6:8.2.*"
 
 
+# meiva:note
+# A failed `brew list` means "could not ask", never "nothing matched": the empty answer is the
+# positive claim a clean pin set is read from, so it returns None (unknown) and reports instead.
 # meiva:link base/host/docs/brew_pin.meiva.okf.md
-def pinned_brew_formulae(*, run: CommandRunner) -> set[str] | None:
+def _brew_lines(args: list[str], *, run: CommandRunner, what: str) -> set[str] | None:
     try:
-        result = run(
-            ["brew", "list", "--pinned"], capture_output=True, text=True, timeout=_BREW_TIMEOUT_S
-        )
+        result = run(["brew", *args], capture_output=True, text=True, timeout=_BREW_TIMEOUT_S)
     except FileNotFoundError:
         return None
-    except (OSError, subprocess.SubprocessError):
-        return set()
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning(
+            "brew {what} could not run; the brew-pin assertion cannot judge this host: {err}",
+            what=what,
+            err=repr(exc),
+            event="brew_pin",
+        )
+        return None
+    if result.returncode != 0:
+        logger.warning(
+            "brew {what} exited {rc}; the brew-pin assertion cannot judge this host: {err}",
+            what=what,
+            rc=result.returncode,
+            err=(result.stderr or "").strip()[:400],
+            event="brew_pin",
+        )
+        return None
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+# meiva:link base/host/docs/brew_pin.meiva.okf.md
+def pinned_brew_formulae(*, run: CommandRunner) -> set[str] | None:
+    return _brew_lines(["list", "--pinned"], run=run, what="list --pinned")
 
 
 def installed_brew_formulae(*, run: CommandRunner) -> set[str] | None:
-    try:
-        result = run(
-            ["brew", "list", "--formula"], capture_output=True, text=True, timeout=_BREW_TIMEOUT_S
-        )
-    except FileNotFoundError:
-        return None
-    except (OSError, subprocess.SubprocessError):
-        return set()
-    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    return _brew_lines(["list", "--formula"], run=run, what="list --formula")
 
 
-def unpinned_formulae(*, run: CommandRunner) -> tuple[str, ...]:
+def unpinned_formulae(*, run: CommandRunner) -> tuple[str, ...] | None:
     pinned = pinned_brew_formulae(run=run)
     if pinned is None:
-        return ()
+        return None
     installed = installed_brew_formulae(run=run)
     if installed is None:
-        return ()
+        return None
     return tuple(sorted((PINNED_BREW_FORMULAE & installed) - pinned))
 
 

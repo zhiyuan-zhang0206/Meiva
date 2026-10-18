@@ -12,6 +12,7 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 "pipeline_build.py" = ["delivery", "event_store.py", "metrics", "otlp"]
 "process_logging.py" = ["delivery", "emitter.py"]
 "tests" = ["__init__.py", "audit_events.py", "delivery", "emitter.py", "event_store.py", "metrics", "observability.py", "otlp", "pipeline_build.py", "process_logging.py", "station_endpoint.py", "trace_mirror.py", "tracing.py"]
+"trace_mirror.py" = ["delivery"]
 "tracing.py" = ["delivery", "observability.py", "otlp", "trace_mirror.py"]
 
 [debt.private-name]
