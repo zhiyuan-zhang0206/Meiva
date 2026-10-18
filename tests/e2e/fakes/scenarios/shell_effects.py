@@ -112,8 +112,10 @@ launch = meiva.watcher.launch(
 at = meiva.watcher.at(datetime.timedelta(seconds=4), "AT-WAKE-MARK", name="e2e-at", notify="always")
 cron = meiva.watcher.cron("* * * * *", "CRON-WAKE-MARK", timezone="UTC",
     end_time=datetime.timedelta(seconds=90), name="e2e-cron", notify="always")
-(root / "watcher-ids").write_text(f"{{launch}} {{at}} {{cron}}")
-print("watchers-created", launch, at, cron)
+(root / "watcher-ids").write_text(
+    f"{{launch.session_id}} {{at.session_id}} {{cron.session_id}}"
+)
+print("watchers-created", launch.session_id, at.session_id, cron.session_id)
 """
     return RecordingModel(
         agent_id=agent_id, script=(exec_call(1, code), *(say("watcher wake") for _ in range(8)))
@@ -126,7 +128,7 @@ import meiva
 from pathlib import Path
 wid = meiva.watcher.launch("import time; time.sleep(60)", timeout="2s",
     name="e2e-timeout", notify="always")
-Path({str(sandbox() / "timeout-id")!r}).write_text(str(wid))
+Path({str(sandbox() / "timeout-id")!r}).write_text(str(wid.session_id))
 print("timeout-watcher", wid)
 """
     return RecordingModel(
@@ -169,7 +171,7 @@ import datetime
 from pathlib import Path
 wid = meiva.watcher.at(datetime.timedelta(seconds=15), "RESURRECT-WAKE-MARK",
     name="e2e-resurrect", notify="always")
-Path({str(root / "resurrection-id")!r}).write_text(str(wid))
+Path({str(root / "resurrection-id")!r}).write_text(str(wid.session_id))
 print("resurrection-watcher", wid)
 """
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say("watcher armed")))

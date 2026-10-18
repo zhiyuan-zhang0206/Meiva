@@ -64,3 +64,5 @@ Generated-file tests replace send without executing the scripts. A live
 session's files must survive sibling launches because asynchronous shell startup
 may not have read them yet; only dead-session files are eligible for pruning.
 These tests establish file retention, not successful watcher execution.
+
+`launch`, `at` and `cron` return the same `SessionHandle(session_id, output_path)` as `run_background`; `sessions` accepts the handle or its id.

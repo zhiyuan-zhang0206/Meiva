@@ -237,7 +237,7 @@ def test_renew_accepts_watcher_session(db_conn: psycopg.Connection, _agent_row: 
             <= new_deadline
             <= datetime.now(UTC) + timedelta(seconds=121)
         )
-        renewals, _ = _facts(db_conn, _agent_row, wid)
+        renewals, _ = _facts(db_conn, _agent_row, wid.session_id)
         assert renewals == 1
     finally:
         with contextlib.suppress(ValueError, RuntimeError):

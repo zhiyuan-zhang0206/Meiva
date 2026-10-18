@@ -17,6 +17,7 @@ from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dic
 from base.sessions.page_session import is_page_label
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.security import scan_content
+from meiva.shell.handle import SessionHandle
 
 # A session name is a lowercase slug starting with a letter: it rides inside the
 # session identifier (after the numeric id), so the charset stays conservative
@@ -456,28 +457,28 @@ def new(name: str, *, ttl: float) -> int:
 
 # `id` / `list` shadow builtins intentionally: these are the agent-facing names.
 # (flake8-builtins `A` is not in this repo's ruff select, so no noqa is needed.)
-def send(id: int, cmd: str, *, enter: bool = True) -> None:
+def send(id: int | SessionHandle, cmd: str, *, enter: bool = True) -> None:
     """Send text asynchronously, without waiting for the command to finish.
 
     Set `enter=False` to type without submitting. Terminal applications may
     truncate long input. For long instructions, use the receiver's supported
     paste mode or send a short pointer to a file it can read."""
-    id = coerce_typed(id, "id", int)
+    id = _session_id(id)
     cmd = coerce_str(cmd, "cmd")
     enter = coerce_typed(enter, "enter", bool)
     shell_sessions_handle().send(id, cmd, enter=enter)
 
 
-def send_keys(id: int, *keys: str) -> None:
+def send_keys(id: int | SessionHandle, *keys: str) -> None:
     """Send raw keys to a session without submitting a line. Each argument is
     one key: a single character, or a name like `C-c`, `Escape`, `Up`,
     `Enter`, `Space`, `PageUp`."""
-    id = coerce_typed(id, "id", int)
+    id = _session_id(id)
     keys = tuple(coerce_str(key, "key") for key in keys)
     shell_sessions_handle().send_keys(id, *keys)
 
 
-def capture(id: int, lines: int | None = None, *, scrollback: bool = True) -> str:
+def capture(id: int | SessionHandle, lines: int | None = None, *, scrollback: bool = True) -> str:
     """The session's most recent `lines` of output, including history that
     has scrolled past. Omit `lines` for the configured default
     (``display.shell_capture_default_lines``, 200 out of the box). Pass
@@ -486,7 +487,7 @@ def capture(id: int, lines: int | None = None, *, scrollback: bool = True) -> st
     ignored then)."""
     from meiva.sdk_surface.settings import config_authority
 
-    id = coerce_typed(id, "id", int)
+    id = _session_id(id)
     resolved_lines: int
     if lines is None:
         resolved_lines = config_authority().service_field_value("shell_capture_default_lines")
@@ -496,8 +497,20 @@ def capture(id: int, lines: int | None = None, *, scrollback: bool = True) -> st
     return shell_sessions_handle().capture(id, resolved_lines, scrollback=scrollback)
 
 
-def kill(id: int) -> None:
-    id = coerce_typed(id, "id", int)
+def _session_id(id: object) -> int:
+    """Accept a session id or the handle `run_background`/`watcher.*` returned.
+
+    A watcher and a background command both come back as `SessionHandle`; passing
+    that value straight to `sessions` must keep working, so the handle's id wins
+    over the strict int check.
+    """
+    if isinstance(id, SessionHandle):
+        return id.session_id
+    return coerce_typed(id, "id", int)
+
+
+def kill(id: int | SessionHandle) -> None:
+    id = _session_id(id)
     shell_sessions_handle().kill(id)
 
 
@@ -509,7 +522,7 @@ def kill_all() -> int:
     return shell_sessions_handle().kill_all()
 
 
-def renew(id: int, *, ttl: float) -> datetime:
+def renew(id: int | SessionHandle, *, ttl: float) -> datetime:
     """Move a live session's expiry to now + `ttl` seconds.
 
     Each renewal accepts at most 24 hours and replaces, rather than extends, the
@@ -519,7 +532,7 @@ def renew(id: int, *, ttl: float) -> datetime:
 
     Returns:
         The new expiry time."""
-    id = coerce_typed(id, "id", int)
+    id = _session_id(id)
     ttl = validate_ttl(coerce_typed(ttl, "ttl", (int, float)))
     return shell_sessions_handle().renew(id, ttl)
 
