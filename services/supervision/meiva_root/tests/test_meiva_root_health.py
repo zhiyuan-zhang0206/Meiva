@@ -106,20 +106,35 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     return fake
 
 
+# meiva:note
+# Move the fake clock to a ladder deadline the test cares about.
+def _advance(clock: FakeClock, seconds: float) -> None:
+    clock.now += seconds
+
+
 def _registry(unit_id: str, probe: Callable[[], DaemonProbe]) -> ProbeRegistry:
     registry = ProbeRegistry()
     registry.register(unit_id, probe)
     return registry
 
 
+# meiva:note
+# A no-wait ladder: the pre-ladder tests drive rounds, not the clock.
 def _config(**overrides: Any) -> HealthConfig:
     values: dict[str, Any] = {
         "interval_s": 0.01,
         "startup_grace_s": 0.0,
         "max_restart_attempts": 3,
+        "restart_backoff_s": (0.0,),
     }
     values.update(overrides)
     return HealthConfig(**values)
+
+
+# meiva:note
+# The production ladder (60s, 5m, then 15m) over the same test predicates.
+def _ladder_config(**overrides: Any) -> HealthConfig:
+    return _config(restart_backoff_s=(60.0, 300.0, 900.0), **overrides)
 
 
 def test_config_validation() -> None:
@@ -145,20 +160,23 @@ async def test_restart_uses_one_probe_and_next_round_observes_readiness(clock: F
     assert monitor.snapshot()["svc"].restart_attempts == 0
 
 
-async def test_three_actual_restarts_then_only_observation(clock: FakeClock) -> None:
+# meiva:note
+# The breaker slows the episode down; it never strands the unit (task #5315).
+async def test_the_capped_cadence_keeps_retrying_past_the_budget(clock: FakeClock) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
     monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
     for _ in range(8):
         await monitor.run_round()
     assert probe.calls == 8
-    assert stub.restart_calls == ["svc"] * 3
-    assert monitor.snapshot()["svc"].restart_attempts == 3
+    assert stub.restart_calls == ["svc"] * 8
+    assert monitor.snapshot()["svc"].restart_attempts == 8
+    assert monitor.snapshot()["svc"].breaker_open
     probe.verdict = DaemonProbe.up("repaired")
     await monitor.run_round()
+    assert not monitor.snapshot()["svc"].breaker_open
     probe.verdict = DaemonProbe.down("new outage")
     await monitor.run_round()
-    assert stub.restart_calls == ["svc"] * 4
     assert monitor.snapshot()["svc"].restart_attempts == 1
 
 
@@ -182,9 +200,9 @@ async def test_stop_timeout_is_budgeted_and_later_units_are_observed(grouped: bo
     monitor = HealthMonitor(stub, registry, config=_config())
     for _ in range(5):
         await monitor.run_round()
-    assert stub.restart_calls == ["svc"] * 3
+    assert stub.restart_calls == ["svc"] * 5
     assert sibling.calls == 5
-    assert monitor.snapshot()["svc"].restart_attempts == 3
+    assert monitor.snapshot()["svc"].restart_attempts == 5
     assert monitor.snapshot()["svc"].last_detail == "listener closed"
 
 
@@ -238,8 +256,8 @@ async def test_unknown_rounds_do_not_spend_or_replenish_attempts(clock: FakeCloc
         await monitor.run_round()
         probe.verdict = DaemonProbe.down("no")
         await monitor.run_round()
-    assert stub.restart_calls == ["svc"] * 3
-    assert monitor.snapshot()["svc"].restart_attempts == 3
+    assert stub.restart_calls == ["svc"] * 7
+    assert monitor.snapshot()["svc"].restart_attempts == 7
 
 
 @pytest.mark.parametrize("deferral", ["policy never", "already scheduled"])
@@ -340,7 +358,7 @@ async def test_snapshot_is_a_copy(clock: FakeClock) -> None:
     assert monitor.snapshot()["svc"].restart_attempts == 1
 
 
-async def test_maintenance_gate_preserves_spent_attempts(clock: FakeClock) -> None:
+async def test_maintenance_gate_blocks_an_attempt_without_spending_it(clock: FakeClock) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
     allowed = {"value": True}
@@ -355,7 +373,8 @@ async def test_maintenance_gate_preserves_spent_attempts(clock: FakeClock) -> No
         await monitor.run_round()
         allowed["value"] = False
         await monitor.run_round()
-    assert stub.restart_calls == ["svc"] * 3
+    assert stub.restart_calls == ["svc"] * 6
+    assert monitor.snapshot()["svc"].restart_attempts == 6
 
 
 async def test_start_stop_loop(clock: FakeClock) -> None:
@@ -414,7 +433,9 @@ async def _wait_stopped(supervisor: Supervisor) -> None:
             await asyncio.sleep(0.01)
 
 
-async def test_real_children_are_replaced_only_three_times(started: StartFactory) -> None:
+async def test_real_children_are_replaced_on_the_ladder_past_the_budget(
+    started: StartFactory,
+) -> None:
     supervisor = await started([_unit("svc")])
     first_pid = int((await _unit_status(supervisor))["pid"])
     first = OwnedProcess.capture(psutil.Process(first_pid))
@@ -427,10 +448,11 @@ async def test_real_children_are_replaced_only_three_times(started: StartFactory
         current = await _unit_status(supervisor)
         assert current["state"] == "running"
         pids.add(int(current["pid"]))
-    assert len(pids) == 4
+    assert len(pids) == 8
     assert not first.live()
-    assert (await _unit_status(supervisor))["restart_count"] == 3
-    assert monitor.snapshot()["svc"].restart_attempts == 3
+    assert (await _unit_status(supervisor))["restart_count"] == 7
+    assert monitor.snapshot()["svc"].restart_attempts == 7
+    assert monitor.snapshot()["svc"].breaker_open
 
 
 async def test_code_gate_exit_is_not_automatically_restarted(
@@ -484,9 +506,10 @@ async def test_failed_replacement_remains_visible_and_budgeted(
     entry = cast("list[dict[str, Any]]", (await supervisor.status())["units"])[0]
     assert entry["intent"] == "running" and entry["state"] == "stopped"
     assert entry["restart_failed"]["stage"] == "up"
-    assert monitor.snapshot()["svc"].restart_attempts == 3
+    assert monitor.snapshot()["svc"].restart_attempts == 7
     assert len(recorder.events("root_restart_failed")) == 1
     assert len(recorder.events("root_unit_failure_state")) == 7
+    assert len(recorder.events("root_unit_breaker_open")) == 1
 
 
 async def test_a_probe_outlasting_its_own_deadline_is_unavailable_and_never_restarts() -> None:
@@ -520,8 +543,10 @@ async def test_health_snapshot_exposes_simple_attempt_budget(clock: FakeClock) -
     for _ in range(3):
         await monitor.run_round()
     entry = cast("dict[str, object]", monitor.health_snapshot()["svc"])
-    assert entry["restart_attempts"] == 3
+    assert entry["restart_attempts"] == 4
     assert entry["restart_limit_reached"] is True
+    assert entry["breaker_open"] is True
+    assert entry["next_restart_in_s"] == 0.0
 
 
 async def test_initial_down_observation_does_not_replace_starting_generation(
@@ -627,3 +652,139 @@ def test_startup_grace_rejects_unbounded_or_negative_values() -> None:
     for invalid in (-1.0, float("inf"), float("nan")):
         with pytest.raises(ValueError, match="startup_grace"):
             _config(startup_grace_s=invalid)
+
+
+@pytest.mark.parametrize("ladder", [(), (-1.0,), (float("inf"),), (float("nan"),)])
+def test_restart_backoff_ladder_is_validated(ladder: tuple[float, ...]) -> None:
+    with pytest.raises(ValueError, match="restart_backoff_s"):
+        _config(restart_backoff_s=ladder)
+
+
+def test_restart_delay_follows_the_ladder_and_caps_at_its_last_entry() -> None:
+    ladder = (60.0, 300.0, 900.0)
+    assert [health_mod.restart_delay_s(n, ladder) for n in (0, 1, 2)] == [0.0, 60.0, 300.0]
+    assert [health_mod.restart_delay_s(n, ladder) for n in (3, 4, 9)] == [900.0] * 3
+
+
+async def test_consecutive_failures_are_spaced_by_the_ladder(clock: FakeClock) -> None:
+    stub = StubSupervisor()
+    monitor = HealthMonitor(
+        stub, _registry("svc", CellProbe(DaemonProbe.down("no"))), config=_ladder_config()
+    )
+    await monitor.run_round()
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc"]
+    _advance(clock, 60)
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 2
+    _advance(clock, 299)
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 2
+    _advance(clock, 1)
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 3
+
+
+async def test_a_successful_start_resets_the_ladder(clock: FakeClock) -> None:
+    probe = CellProbe(DaemonProbe.down("no"))
+    stub = StubSupervisor()
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_ladder_config())
+    await monitor.run_round()
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc"]
+    probe.verdict = DaemonProbe.up("serving")
+    await monitor.run_round()
+    state = monitor.snapshot()["svc"]
+    assert (state.restart_attempts, state.next_restart_at) == (0, None)
+    assert state.db_recovery_pending is False
+    probe.verdict = DaemonProbe.down("a fresh outage")
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc", "svc"]
+
+
+async def test_the_breaker_opens_once_then_closes_on_a_healthy_observation(
+    clock: FakeClock, recorder: _Recorder
+) -> None:
+    probe = CellProbe(DaemonProbe.down("no"))
+    stub = StubSupervisor()
+    stub.failure_facts = UnitFailureFacts(
+        intent_running=True, restart_failed=None, last_error="unexpected exit: exit 1"
+    )
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_ladder_config())
+    for wait in (0, 60, 300, 899, 1):
+        _advance(clock, wait)
+        await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 4
+    assert monitor.snapshot()["svc"].breaker_open
+    opened = recorder.events("root_unit_breaker_open")
+    assert len(opened) == 1
+    assert (opened[0]["attempts"], opened[0]["detail"]) == (3, "unexpected exit: exit 1")
+    state = recorder.events("root_unit_failure_state")[-1]
+    assert (state["kind"], state["attempts"], state["last_error"]) == (
+        "breaker_open",
+        4,
+        "unexpected exit: exit 1",
+    )
+
+    probe.verdict = DaemonProbe.up("repaired")
+    await monitor.run_round()
+    closed = recorder.events("root_unit_breaker_closed")
+    assert len(closed) == 1
+    assert closed[0]["unit"] == "svc" and "open_for_s" in closed[0]
+    assert not monitor.snapshot()["svc"].breaker_open
+
+
+async def test_an_operator_stop_closes_the_breaker(clock: FakeClock, recorder: _Recorder) -> None:
+    probe = CellProbe(DaemonProbe.down("no"))
+    stub = StubSupervisor()
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_ladder_config())
+    for wait in (0, 60, 300):
+        _advance(clock, wait)
+        await monitor.run_round()
+    assert monitor.snapshot()["svc"].breaker_open
+    stub.deferrals["svc"] = "held down"
+    stub.failure_facts = UnitFailureFacts(intent_running=False, restart_failed=None)
+    await monitor.run_round()
+    assert len(recorder.events("root_unit_breaker_closed")) == 1
+    assert not monitor.snapshot()["svc"].breaker_open
+
+
+async def test_database_recovery_restarts_inside_the_round(clock: FakeClock) -> None:
+    db = CellProbe(DaemonProbe.down("database unreachable"))
+    stub = StubSupervisor()
+    monitor = HealthMonitor(
+        stub,
+        _registry("svc", CellProbe(DaemonProbe.down("no"))),
+        config=_ladder_config(),
+        db_recovery_probe=db,
+    )
+    for wait in (0, 60, 300, 60):
+        _advance(clock, wait)
+        await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 3
+    assert db.calls == 1
+    db.verdict = DaemonProbe.up("database answered")
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 4
+    assert monitor.snapshot()["svc"].breaker_open
+
+
+async def test_a_usable_database_grants_one_attempt_per_episode(clock: FakeClock) -> None:
+    db = CellProbe(DaemonProbe.up("database answered"))
+    stub = StubSupervisor()
+    monitor = HealthMonitor(
+        stub,
+        _registry("svc", CellProbe(DaemonProbe.down("no"))),
+        config=_ladder_config(),
+        db_recovery_probe=db,
+    )
+    for wait in (0, 60, 300, 60):
+        _advance(clock, wait)
+        await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 4
+    assert db.calls == 1
+    for _ in range(3):
+        _advance(clock, 60)
+        await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 4
+    assert monitor.snapshot()["svc"].breaker_open

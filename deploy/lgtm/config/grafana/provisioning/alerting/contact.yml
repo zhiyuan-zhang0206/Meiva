@@ -41,13 +41,17 @@
 #   credential (the only form the Grafana-13 notifier can send without
 #   plaintext storage).
 #
-# A second, direct contact point exists for the one outage the webhook cannot
-# report: the gateway itself being down. Grafana's native Telegram notifier posts
-# to the Bot API with the bot token and owner chat id converge renders from the
-# telegram settings (MEIVA_ALERTS_TELEGRAM_BOT_TOKEN / MEIVA_ALERTS_TELEGRAM_CHAT_ID;
-# inert placeholders when the home has no bot). Only `attributes_check="gateway_liveness"`
-# alerts and the health probe's dead-man rule (`metric="health_probe_silent"`) are
-# routed to it, in addition to the webhook.
+# A second, direct contact point exists for the outages the webhook cannot
+# report: the gateway itself being down, and a database outage. The webhook's
+# ingest stores the alert in Postgres before the IM fan-out, so an alert *about*
+# a stalled database never lands. Grafana's native Telegram notifier posts to the
+# Bot API with the bot token and owner chat id converge renders from the telegram
+# settings (MEIVA_ALERTS_TELEGRAM_BOT_TOKEN / MEIVA_ALERTS_TELEGRAM_CHAT_ID;
+# inert placeholders when the home has no bot). `attributes_check="gateway_liveness"`
+# alerts, the health probe's dead-man rule (`metric="health_probe_silent"`) and the
+# root unit's open circuit breaker (`metric="root_unit_restart_attempts_exhausted"`,
+# which is what a database outage leaves behind) are routed to it, in addition to
+# the webhook.
 #
 # disableResolveMessage: false — resolution webhooks ARE wanted: the ingest
 # flips the row to resolved and sends the recovery IM line.
@@ -116,6 +120,18 @@ policies:
       - receiver: meiva-alerts-telegram
         object_matchers:
           - [metric, "=", health_probe_silent]
+        continue: true
+        group_by: [alertname]
+        group_wait: 0s
+        group_interval: 5m
+        repeat_interval: 4h
+      # An open unit breaker is what a database outage leaves behind (2026-10-18:
+      # four machines, 36 minutes, nothing delivered — the webhook's own path was
+      # the one that had stalled). It gets the direct route too; the webhook keeps
+      # its copy so the alert row and the IM history stay complete.
+      - receiver: meiva-alerts-telegram
+        object_matchers:
+          - [metric, "=", root_unit_restart_attempts_exhausted]
         continue: true
         group_by: [alertname]
         group_wait: 0s

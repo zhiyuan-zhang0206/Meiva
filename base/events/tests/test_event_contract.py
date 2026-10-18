@@ -68,7 +68,15 @@ def test_root_restart_payloads_name_the_evidence() -> None:
 def test_root_unit_failure_payloads_name_the_evidence() -> None:
     from base.events.contract import payload_keys
 
-    assert payload_keys("root_unit_failure_state") == ("unit", "kind", "detail")
+    assert payload_keys("root_unit_failure_state") == (
+        "unit",
+        "kind",
+        "detail",
+        "attempts",
+        "last_error",
+    )
+    assert payload_keys("root_unit_breaker_open") == ("unit", "attempts", "detail")
+    assert payload_keys("root_unit_breaker_closed") == ("unit", "open_for_s", "detail")
     assert payload_keys("root_unit_not_revivable") == ("unit", "detail")
 
 

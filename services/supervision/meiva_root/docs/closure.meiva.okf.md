@@ -44,8 +44,11 @@ During an automatic health replacement, that timeout remains the unit's recorded
 grouped refusals), keeps the spent restart attempt and continues observing other
 units. A generation that survived its window is gone, so a replacement may start;
 a refused stop keeps the original generation owned and no replacement starts.
-Exhausting the existing finite restart budget leaves observation and failure
-reporting active. Unknown errors, including leaves of a mixed exception
+Exhausting the finite restart budget opens the unit's circuit breaker: observation
+and failure reporting stay active, and the unit keeps its place on the ladder's
+capped cadence, or one immediate attempt per dependency-recovery grant while the
+breaker is open, so a refused stop never becomes a silent dead end (task #5315).
+Unknown errors, including leaves of a mixed exception
 group, and cancellation still propagate to root. Explicit stop, restart and
 daemon shutdown continue to report refusals to their callers.
 

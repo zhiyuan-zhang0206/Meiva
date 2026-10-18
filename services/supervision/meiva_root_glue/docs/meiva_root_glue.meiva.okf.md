@@ -33,7 +33,10 @@ root generation. No service probe starts a session or an OS job.
 
 Each round `HealthMonitor` emits `root_unit_failure_state` for every unit in a
 failure state ([[services/supervision/meiva_root/docs/meiva_root.meiva.okf.md]]); the drill
-assembly shares that path.
+assembly shares that path. Wiring also supplies the breaker's dependency probe:
+`diagnostic_probes.database_recovery_probe` runs one bounded `SELECT 1` per round
+while any unit's breaker is open, so a machine whose hosts died with the
+database comes back by itself once the database answers.
 
 `RootHealthRounds` drives one service health round and the independent
 [[services/supervision/meiva_root_glue/docs/diagnostics.meiva.okf.md|diagnostic roster]]. Diagnostic

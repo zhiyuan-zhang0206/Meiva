@@ -1,9 +1,13 @@
-"""Root-owned service health, with bounded observation and finite process restarts.
-
-Only observed DOWN results can request replacement through the supervisor.
-Unknown identity, inspection errors, timeouts, and foreign listeners are terminal
-observations until fresh evidence resolves them. Health is the service retry scheduler.
-"""
+# meiva:note
+# Root-owned service health: bounded observation and spaced process restarts. Only
+# observed DOWN results may request replacement; unknown identity, inspection
+# errors, timeouts and foreign listeners stay terminal until fresh evidence
+# resolves them. Consecutive replacements are spaced by one backoff ladder, and a
+# unit that spends that budget opens a circuit breaker whose only escapes are the
+# ladder's capped cadence and a dependency-recovery grant: one attempt on the
+# first usable database this monitor observes and one per unavailable-to-answering
+# edge (task #5315).
+# meiva:link services/supervision/meiva_root/docs/meiva_root.meiva.okf.md
 
 from __future__ import annotations
 
@@ -11,14 +15,14 @@ import asyncio
 import logging
 import math
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from threading import Event, Thread
-from typing import Protocol
+from typing import Final, Protocol
 
-from base.daemon.health import DaemonProbe
+from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.deploy.progress_timeout import DEFAULT_STARTUP_GRACE_S, ROOT_HEALTH_INTERVAL_S
 from base.native_process.ownership import OwnedProcess
 from services.supervision.meiva_root.failure_state import UnitFailureFacts, derive_kind, describe
@@ -29,9 +33,27 @@ from services.supervision.meiva_root.stopping import UnitStopTimeoutError
 _log = logging.getLogger(__name__)
 
 
+# meiva:note
+# The continuous-outage retry ladder: the first replacement of a fresh outage stays
+# immediate, and only consecutive failures are spaced — 60s, 5m, then 15m for every
+# attempt after. On 2026-10-18 a fleet-wide database stall made every machine's
+# `agent_host` exit within seconds; unspaced, each machine spent its three restarts
+# in four minutes and then sat silent for 36 (task #5315).
+DEFAULT_RESTART_BACKOFF_S: Final[tuple[float, ...]] = (60.0, 300.0, 900.0)
+
+
 def monotonic() -> float:
     """Wall-independent startup clock, replaceable in tests."""
     return time.monotonic()
+
+
+# meiva:note
+# Seconds to wait before the attempt that follows `attempts` spent ones: none for
+# the first of an outage, then the ladder entry for its index, capped at the last.
+def restart_delay_s(attempts: int, ladder: Sequence[float]) -> float:
+    if attempts <= 0:
+        return 0.0
+    return ladder[min(attempts - 1, len(ladder) - 1)]
 
 
 class RevivalHost(Protocol):
@@ -75,8 +97,12 @@ class HealthConfig:
     startup_grace_s: float = DEFAULT_STARTUP_GRACE_S
     """Generic generation startup budget; deployment supplies per-unit readiness tiers."""
 
+    # meiva:note
+    # `max_restart_attempts` is what one continuous outage may spend before its
+    # circuit breaker opens; spending it leaves only the ladder's capped cadence
+    # (see DEFAULT_RESTART_BACKOFF_S) or a dependency-recovery signal.
     max_restart_attempts: int = 3
-    """Actual restarts allowed during one continuous outage, per root process."""
+    restart_backoff_s: tuple[float, ...] = DEFAULT_RESTART_BACKOFF_S
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.startup_grace_s) or self.startup_grace_s < 0:
@@ -87,6 +113,10 @@ class HealthConfig:
             raise ValueError("interval_s must be positive")
         if self.max_restart_attempts < 1:
             raise ValueError("max_restart_attempts must be at least 1")
+        if not self.restart_backoff_s:
+            raise ValueError("restart_backoff_s must hold at least one delay")
+        if any(not math.isfinite(value) or value < 0 for value in self.restart_backoff_s):
+            raise ValueError("restart_backoff_s delays must be finite and nonnegative")
 
 
 @dataclass(slots=True)
@@ -102,6 +132,19 @@ class UnitHealth:
     restart_attempts: int = 0
     """Actual automatic restart calls since ALIVE or an observed operator stop."""
 
+    # meiva:note
+    # `next_restart_at` is the monotonic deadline the next attempt waits for.
+    # `breaker_open` is the *reported* edge, never the predicate (which is
+    # `restart_attempts >= max_restart_attempts`): it remembers which side of the
+    # transition was already signalled, so each crossing emits exactly one event.
+    # `breaker_since` is the monotonic second it opened, for the close event.
+    # `db_recovery_pending` is a dependency-recovery grant this unit has not spent
+    # yet; it survives the rounds that cannot act on it (task #5315).
+    next_restart_at: float | None = None
+    breaker_open: bool = False
+    breaker_since: float | None = None
+    db_recovery_pending: bool = False
+
     last_verdict: str | None = None
     """Value of the last probe verdict (`alive` / `down` / `port-taken` / `unavailable`)."""
 
@@ -112,6 +155,9 @@ class UnitHealth:
 # Explicit stop is expected; every other deferral remains visible as a warning.
 _HELD_DOWN = "held down"
 _NO_REVIVAL_VERB = "no revival verb (not a tree unit)"
+# meiva:note
+# Unfinished-observation name of the breaker's dependency probe.
+_DB_RECOVERY = "db-recovery"
 
 
 class _ProbeObservation:
@@ -229,11 +275,15 @@ class HealthMonitor:
         tasks: asyncio.TaskGroup | None = None,
         gate: HealthGate | None = None,
         startup_graces: Mapping[str, float] | None = None,
+        db_recovery_probe: Probe | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._registry = registry
         self._config = config if config is not None else HealthConfig()
         self._gate = gate
+        self._db_recovery_probe = db_recovery_probe
+        self._db_runner = ProbeRunner()
+        self._db_verdict: ProbeVerdict | None = None
         self._startup_graces = dict(startup_graces or {})
         if any(not math.isfinite(value) or value < 0 for value in self._startup_graces.values()):
             raise ValueError("startup grace overrides must be nonnegative")
@@ -248,9 +298,55 @@ class HealthMonitor:
         """Probe every unit once, in registration order."""
         if self._closed:
             raise RuntimeError("root health admission closed")
+        await self._grant_dependency_recovery()
         for unit_id in self._registry.unit_ids():
             await self._check_unit(unit_id)
+            self._sync_breaker(unit_id, self._unit_state(unit_id))
         self._report_failure_states()
+
+    # meiva:note
+    # One dependency probe per round while a breaker is open on a unit that is not
+    # held down, and only then (a held-down unit must not be restarted, so the probe
+    # by itself would be a database dial `meiva stop` cannot justify). A usable
+    # database *grants* one immediate attempt per open breaker: on the first
+    # observation (the monitor cannot tell a recovered database from one that never
+    # failed) and on every unavailable-to-answering edge. The grant is a latch, not a
+    # round's boolean: the rounds that cannot act on it — a terminal verdict, a
+    # startup grace, a maintenance gate — must not consume it, or a database that
+    # recovers in one of them costs a full capped interval. A database observed
+    # failing withdraws the grant, and a unit that never held one keeps its cadence.
+    async def _grant_dependency_recovery(self) -> None:
+        probe = self._db_recovery_probe
+        waiting = [
+            state
+            for unit_id, state in self._units.items()
+            if state.breaker_open and self._deferral(unit_id) != _HELD_DOWN
+        ]
+        if probe is None or not waiting:
+            self._db_verdict = None
+            return
+        result = await self._db_runner.observe(probe, self._config.probe_timeout_s)
+        previous = self._db_verdict
+        self._db_verdict = result.verdict
+        if not result.alive:
+            for state in waiting:
+                state.db_recovery_pending = False
+            _log.info(
+                "[health] database still unavailable while a breaker is open (%s)", result.detail
+            )
+            return
+        if previous is ProbeVerdict.ALIVE:
+            return
+        for state in waiting:
+            state.db_recovery_pending = True
+        if previous is None:
+            _log.warning(
+                "[health] database answers while a breaker is fresh — one immediate attempt"
+            )
+        else:
+            _log.warning(
+                "[health] database answered again — every open unit breaker may restart once now"
+            )
 
     def _report_failure_states(self) -> None:
         """Emit one `root_unit_failure_state` per unit sitting in a failure state.
@@ -280,6 +376,8 @@ class HealthMonitor:
                 unit=unit_id,
                 kind=kind.value,
                 detail=describe(facts, kind, state.last_detail if state is not None else ""),
+                attempts=0 if state is None else state.restart_attempts,
+                last_error=facts.last_error or "",
             )
 
     async def start(self) -> None:
@@ -297,6 +395,7 @@ class HealthMonitor:
         self._closed = True
         for runner in self._runners.values():
             runner.close()
+        self._db_runner.close()
         task = self._task
         self._task = None
         failures: list[BaseException] = []
@@ -315,6 +414,11 @@ class HealthMonitor:
                     unfinished.append(unit_id)
             except BaseException as exc:
                 failures.append(exc)
+        try:
+            if not self._db_runner.stop(max(0.0, deadline - time.monotonic())):
+                unfinished.append(_DB_RECOVERY)
+        except BaseException as exc:
+            failures.append(exc)
         self.unfinished_probes = tuple(unfinished)
         if unfinished:
             _log.warning("root health stopped with unfinished observations: %s", unfinished)
@@ -336,13 +440,30 @@ class HealthMonitor:
                 "restart_limit_reached": (
                     state.restart_attempts >= self._config.max_restart_attempts
                 ),
+                "breaker_open": state.breaker_open,
+                "db_recovery_pending": state.db_recovery_pending,
+                "next_restart_in_s": self._restart_due_in_s(state),
                 "last_verdict": state.last_verdict,
                 "last_detail": state.last_detail,
             }
         return units
 
+    # meiva:note
+    # Seconds until this unit's next attempt may start, or None when none is
+    # pending; an unspent dependency-recovery grant makes it due now.
+    @staticmethod
+    def _restart_due_in_s(state: UnitHealth) -> float | None:
+        if state.db_recovery_pending:
+            return 0.0
+        if state.next_restart_at is None:
+            return None
+        return max(0.0, state.next_restart_at - monotonic())
+
+    # meiva:note
+    # A quiesced tree holds every unit down, which resets its breaker, so the
+    # dependency probe stays idle for the whole stop window.
     async def _loop(self) -> None:
-        # quiesce-exempt: probes service health endpoints and process state; no database
+        # quiesce-exempt: probes endpoints and processes; DB only while a breaker is open
         while True:
             await asyncio.sleep(self._config.interval_s)
             await self.run_round()
@@ -420,16 +541,38 @@ class HealthMonitor:
         if deferral is not None:
             self._report_terminal(unit_id, f"{result.detail}; restart deferred: {deferral}")
             return
-        if state.restart_attempts >= self._config.max_restart_attempts:
-            return  # The per-round failure-state signal reports exhausted attempts.
+        breaker_open = state.restart_attempts >= self._config.max_restart_attempts
+        if not self._attempt_due(state):
+            return
+        recovery = state.db_recovery_pending
+        state.db_recovery_pending = False
         state.restart_attempts += 1
-        _log.warning(
-            "[health] unit %s: down (%s), restarting (%d/%d)",
-            unit_id,
-            result.detail,
-            state.restart_attempts,
-            self._config.max_restart_attempts,
-        )
+        delay_s = restart_delay_s(state.restart_attempts, self._config.restart_backoff_s)
+        state.next_restart_at = monotonic() + delay_s
+        if breaker_open and recovery:
+            _log.warning(
+                "[health] unit %s: down (%s), the database answered — restarting now "
+                "(the breaker closes when a generation is alive)",
+                unit_id,
+                result.detail,
+            )
+        elif breaker_open:
+            _log.warning(
+                "[health] unit %s: down (%s), restarting on the breaker's %.0fs cadence "
+                "(%d attempts)",
+                unit_id,
+                result.detail,
+                delay_s,
+                state.restart_attempts,
+            )
+        else:
+            _log.warning(
+                "[health] unit %s: down (%s), restarting (%d/%d)",
+                unit_id,
+                result.detail,
+                state.restart_attempts,
+                self._config.max_restart_attempts,
+            )
         try:
             await self._supervisor.restart(unit_id)
         except* UnitStopTimeoutError as exc:
@@ -437,6 +580,59 @@ class HealthMonitor:
             # This attempt remains spent; other errors still reach root's owner.
             _log.warning("[health] unit %s: replacement stop refused", unit_id, exc_info=exc)
         # Spawn acceptance is not readiness. The next ordinary round observes it.
+
+    # meiva:note
+    # Only two things restart a unit behind an open breaker: the ladder's capped
+    # cadence coming due, and an unspent dependency-recovery grant. The grant turns a
+    # fifteen-minute wait back into the two minutes the 2026-10-18 outage needed. A
+    # held attempt is not silent either: the per-round failure-state signal reports it.
+    def _attempt_due(self, state: UnitHealth) -> bool:
+        if state.db_recovery_pending:
+            return True
+        return state.next_restart_at is None or monotonic() >= state.next_restart_at
+
+    # meiva:note
+    # Signal each circuit-breaker transition exactly once: the per-round
+    # `root_unit_failure_state` stream carries the condition while it holds (the
+    # sustained alert), while these two events carry the failure count, the last
+    # error and the time the breaker held.
+    def _sync_breaker(self, unit_id: str, state: UnitHealth) -> None:
+        open_now = state.restart_attempts >= self._config.max_restart_attempts
+        if open_now == state.breaker_open:
+            return
+        state.breaker_open = open_now
+        from base.log import logger
+
+        if open_now:
+            state.breaker_since = monotonic()
+            logger.warning(
+                "[health] unit {unit}: circuit breaker OPEN after {attempts} failed automatic "
+                "restarts — only the ladder's capped cadence or a database recovery restarts it "
+                "now ({detail})",
+                event="root_unit_breaker_open",
+                unit=unit_id,
+                attempts=state.restart_attempts,
+                detail=self._last_error(unit_id, state),
+            )
+            return
+        held_for = 0.0 if state.breaker_since is None else monotonic() - state.breaker_since
+        state.breaker_since = None
+        logger.info(
+            "[health] unit {unit}: circuit breaker CLOSED after {open_for_s:.0f}s ({detail})",
+            event="root_unit_breaker_closed",
+            unit=unit_id,
+            open_for_s=max(0.0, held_for),
+            detail=self._last_error(unit_id, state),
+        )
+
+    # meiva:note
+    # The unit's recorded exit error, else the detail of its last observation.
+    def _last_error(self, unit_id: str, state: UnitHealth) -> str:
+        try:
+            facts = self._supervisor.unit_failure_facts(unit_id)
+        except UnknownUnitError:
+            return state.last_detail
+        return facts.last_error or state.last_detail
 
     @staticmethod
     def _report_terminal(unit_id: str, detail: str) -> None:
@@ -499,3 +695,5 @@ class HealthMonitor:
     def _reset(state: UnitHealth) -> None:
         """A healthy observation or expected stop ends the continuous outage."""
         state.restart_attempts = 0
+        state.next_restart_at = None
+        state.db_recovery_pending = False

@@ -129,6 +129,33 @@ def browser_reach() -> DaemonProbe:
     return protocol_probe.probe_protocol(protocol)
 
 
+# meiva:note
+# One bounded `SELECT 1` — the dependency signal that closes an open breaker. The
+# 2026-10-18 outage made every machine's agent host exit on a database renewal
+# failure, and once the database answered again nothing brought them back (task
+# #5315); while a breaker is open, one cheap round trip per health round says
+# whether the dependency recovered. A wedged cluster fails the observation, never
+# the process: the probe runner's deadline turns an overdue worker into UNAVAILABLE,
+# and an unobserved database never closes a breaker.
+# meiva:link services/supervision/meiva_root_glue/docs/meiva_root_glue.meiva.okf.md
+def database_recovery_probe(database: Callable[[], Database]) -> Callable[[], DaemonProbe]:
+
+    def probe() -> DaemonProbe:
+        import psycopg
+
+        try:
+            with database().connect(autocommit=True) as conn, conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+        except psycopg.OperationalError as exc:
+            return DaemonProbe.down(f"database unreachable: {type(exc).__name__}")
+        except Exception as exc:
+            return DaemonProbe.unavailable(f"database probe failed: {type(exc).__name__}")
+        return DaemonProbe.up("database answered")
+
+    return probe
+
+
 class StationProbe:
     """Gateway-only remote protocol observation."""
 
