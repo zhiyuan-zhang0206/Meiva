@@ -33,7 +33,6 @@ callers import them from there.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.cluster.machine import MachineIdentity, MachineRoles
@@ -240,27 +239,3 @@ def services_for_capabilities(
         for s, reason in services_for_capabilities_annotated(roles, machine=machine, host=host)
         if reason is None
     )
-
-
-@dataclass(frozen=True)
-class Spec:
-    """A host's desired state — the roster it should run and (as it converges
-    here) the data plane it should run against.
-
-    Slice 1 fills in the service roster. The data-plane desired state (per-cluster instance / ports / bind / redis-ACL
-    users) lands after the data-plane retirement PR, whose model it will read from
-    rather than re-derive. See ``future/infra/ops-module.md`` for the full
-    Spec content and the batch sequence.
-    """
-
-    roles: MachineRoles
-    machine: MachineIdentity
-    host: Host
-
-    def services(self) -> tuple[ServiceSpec, ...]:
-        """The start roster for this host's capabilities (gated-out dropped)."""
-        return services_for_capabilities(self.roles, machine=self.machine, host=self.host)
-
-    def services_annotated(self) -> tuple[tuple[ServiceSpec, str | None], ...]:
-        """The diagnostic roster — every capability-matched service + its gate reason."""
-        return services_for_capabilities_annotated(self.roles, machine=self.machine, host=self.host)
