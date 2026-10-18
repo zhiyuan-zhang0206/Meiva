@@ -30,6 +30,13 @@ verified or pruned either hides a broken chain or fills the bucket. It is one co
   JSON status is read, because WAL-G exits 0 while reporting a gap. `FAILURE` in either
   check fails the run; `WARNING` (segments still uploading) does not; an unknown status
   is an error, never a pass.
+- **Recorded gaps** (`gaps.py`, `wal-gaps.json`): a WAL range this cluster has accepted
+  as permanently missing is listed in the file beside the module — start and end
+  segment, segment count, reason and date. A `MISSING_LOST` range the file names leaves
+  the effective integrity status `OK` and is printed in the verify line; any range it
+  does not name keeps the run failing. The file is code: accepting a gap is a reviewed
+  change, never a verifier setting. The first entry is the 2026-10-17 rename window
+  (`61/EB` → `69/6B`, 1921 segments, PostgreSQL down 14:44:54–15:09:07).
 - **Guarded retention** (`retention.py`, `backups.py`): `delete retain FULL 3
   --use-sentinel-time` first without `--confirm`. The listed keys are audited into the
   report and must satisfy three invariants: every key is under `basebackups_005/` or
