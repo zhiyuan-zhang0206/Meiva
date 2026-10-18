@@ -11,9 +11,6 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InspectorPanel } from "./inspector-panel";
-import { useTimelineStore } from "@/lib/timeline/timeline-store";
-
-import { InspectorToggle } from "./inspector-toggle";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
 import type * as TimeFormat from "@/lib/format/time";
 import { formatAbsolute, formatRelative, formatUpcoming } from "@/lib/format/time";
