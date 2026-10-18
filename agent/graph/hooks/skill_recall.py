@@ -9,12 +9,13 @@ from langgraph.types import Overwrite
 
 from agent import state as _state
 from agent.graph.hooks.compact import auto_compact_will_fire
-from agent.graph.prompt.capabilities import recall_candidates
+from agent.graph.prompt.capabilities import RecallCandidate, recall_candidates
 from agent.graph.recall.skill_recall import SkillRecall, peer_gate_passes, recall_skills
 from agent.hooks import Hook
 from agent.messages import last_agent_inbound_text, tail_has_skill_recall_inbound
 from agent.state import SkillRecallState
 from base.agents.context import MeivaContext, agent_id_from_config
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 
 _LABEL = "skill-recall"
@@ -49,21 +50,8 @@ class SkillRecallHook(Hook):
             update["skill_reads"] = Overwrite([])
             update["skill_recall"] = SkillRecallState(window=version)
 
-        eligible = tail_has_skill_recall_inbound(state.messages)
-        if not eligible and agent.skill_recall.skill_recall_peer_messages:
-            peer_text = last_agent_inbound_text(state.messages)
-            if peer_text is not None:
-                eligible = await peer_gate_passes(
-                    peer_text,
-                    agent=agent,
-                    catalog=runtime.context.require_catalog(),
-                    agent_id=agent_id_from_config(config),
-                )
-        recall = (
-            await self._offer(state, runtime, config, excluded=read | prompted)
-            if eligible
-            else None
-        )
+        candidates = await self._candidates(state, runtime, agent, config, read | prompted)
+        recall = await self._offer(state, runtime, config, candidates) if candidates else None
         if recall is not None:
             update["messages"] = [recall.note]
             update["skill_recall"] = SkillRecallState(
@@ -71,15 +59,23 @@ class SkillRecallHook(Hook):
             )
         return update or None
 
-    async def _offer(
+    # meiva:note
+    # Everything that can make an offer impossible is decided before any model call:
+    # candidates can be exhausted for a whole window, and a predicted auto-compact would wipe
+    # the note this turn. Paying the peer gate first would spend one request per inbound on a
+    # session that can no longer be offered anything.
+    # meiva:link agent/graph/docs/skill-recall.meiva.okf.md
+    async def _candidates(
         self,
         state: _state.AgentState,
         runtime: Runtime[MeivaContext],
+        agent: AgentSlices,
         config: RunnableConfig,
-        *,
         excluded: set[str],
-    ) -> SkillRecall | None:
-        agent = runtime.context.require_agent()
+    ) -> list[RecallCandidate]:
+        candidates = [c for c in recall_candidates(agent.prompt) if c.identifier not in excluded]
+        if not candidates:
+            return []
         catalog = runtime.context.require_catalog()
         if auto_compact_will_fire(state, agent, catalog=catalog):
             logger.info(
@@ -88,10 +84,28 @@ class SkillRecallHook(Hook):
                 body="defer: auto-compact predicted, skipping skill recall this turn",
                 event="skill_recall",
             )
-            return None
-        candidates = [c for c in recall_candidates(agent.prompt) if c.identifier not in excluded]
-        if not candidates:
-            return None
+            return []
+        if tail_has_skill_recall_inbound(state.messages):
+            return candidates
+        if not agent.skill_recall.skill_recall_peer_messages:
+            return []
+        peer_text = last_agent_inbound_text(state.messages)
+        if peer_text is None:
+            return []
+        passed = await peer_gate_passes(
+            peer_text, agent=agent, catalog=catalog, agent_id=agent_id_from_config(config)
+        )
+        return candidates if passed else []
+
+    async def _offer(
+        self,
+        state: _state.AgentState,
+        runtime: Runtime[MeivaContext],
+        config: RunnableConfig,
+        candidates: list[RecallCandidate],
+    ) -> SkillRecall | None:
+        agent = runtime.context.require_agent()
+        catalog = runtime.context.require_catalog()
         deadline = agent.skill_recall.skill_recall_deadline_seconds
         try:
             return await asyncio.wait_for(
