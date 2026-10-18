@@ -559,11 +559,6 @@ class IMBridgeCore(SpawnMenuMixin):
         if task is not None:
             task.cancel()
 
-    async def _deliver_item(self, state: ChatState, it: dict[str, Any], agent_id: int) -> None:
-        """Push one fresh dialog item as a message."""
-
-        await self._accept_timeline(state, agent_id, [it])
-
     # -- subscription push ----------------------------------------------------
 
     async def restore_subscriptions(self) -> None:

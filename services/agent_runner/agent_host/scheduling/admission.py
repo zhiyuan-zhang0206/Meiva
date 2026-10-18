@@ -101,11 +101,6 @@ class TurnAdmission:
         """
         return agent_id in self._waiting
 
-    def waiting_agents(self) -> dict[int, float]:
-        """Current waiters and how long each has queued, in seconds."""
-        now = time.monotonic()
-        return {agent_id: now - started for agent_id, started in self._waiting.items()}
-
     def long_waiters(self, threshold_s: float) -> list[tuple[int, float]]:
         """Waiters at or past ``threshold_s``, each reported once per episode.
 
