@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import psycopg
+from psycopg.rows import TupleRow
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.db import create_agent
 from base.events.live.bus import EventBus
 from base.events.notifications.notices import deliver_notice_notification
+
+
+def _pool(db_url: str) -> ConnectionPool[psycopg.Connection[TupleRow]]:
+    return ConnectionPool(db_url, min_size=1, max_size=1, open=True)
 
 
 def _notice(conn: psycopg.Connection, agent_id: int, *, require_response: bool) -> int:
@@ -35,7 +40,7 @@ async def test_a_response_notice_is_delivered(
     agent_id = create_agent(db_conn)
     db_conn.commit()
     notice_id = _notice(db_conn, agent_id, require_response=True)
-    with ConnectionPool(db_url, min_size=1, max_size=1, open=True) as pool:
+    with _pool(db_url) as pool:
         delivered = await deliver_notice_notification(
             pool, event_bus, agent_id=agent_id, notice_id=notice_id
         )
@@ -53,7 +58,7 @@ async def test_an_fyi_notice_is_off_until_the_user_turns_it_on(
     agent_id = create_agent(db_conn)
     db_conn.commit()
     notice_id = _notice(db_conn, agent_id, require_response=False)
-    with ConnectionPool(db_url, min_size=1, max_size=1, open=True) as pool:
+    with _pool(db_url) as pool:
         assert (
             await deliver_notice_notification(
                 pool, event_bus, agent_id=agent_id, notice_id=notice_id
@@ -81,7 +86,7 @@ async def test_a_second_post_of_the_same_notice_does_not_notify_twice(
     agent_id = create_agent(db_conn)
     db_conn.commit()
     notice_id = _notice(db_conn, agent_id, require_response=True)
-    with ConnectionPool(db_url, min_size=1, max_size=1, open=True) as pool:
+    with _pool(db_url) as pool:
         first = await deliver_notice_notification(
             pool, event_bus, agent_id=agent_id, notice_id=notice_id
         )

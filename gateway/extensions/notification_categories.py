@@ -26,12 +26,12 @@ def declared_categories() -> dict[str, NotificationCategory]:
         categories: list[NotificationCategory] = []
         for item in declared:
             category = NotificationCategory(
-                id=cast(str, item["id"]),
-                label=cast(str, item["label"]),
-                description=cast(str, item["description"]),
-                importance=cast(Any, item["importance"]),
-                default_enabled=cast(bool, item["defaultEnabled"]),
-                dedupe_window_seconds=cast(int, item["dedupeWindowSeconds"]),
+                id=item["id"],
+                label=item["label"],
+                description=item["description"],
+                importance=item["importance"],
+                default_enabled=item["defaultEnabled"],
+                dedupe_window_seconds=item["dedupeWindowSeconds"],
             )
             if not category.id.startswith(f"{name}."):
                 raise ValueError(
