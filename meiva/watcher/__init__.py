@@ -17,6 +17,7 @@ import datetime
 from base.daemon.schedules.watcher import (
     CronExprError as CronExprError,
 )
+from meiva.shell import SessionHandle
 from meiva.watcher import plans, spawn, wiring
 
 __all_for_meiva__ = [
@@ -28,7 +29,9 @@ __all_for_meiva__ = [
 type WatcherTimeout = float | datetime.timedelta | str
 
 
-def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str | None = None) -> int:
+def launch(
+    code: str, timeout: WatcherTimeout, *, name: str, notify: str | None = None
+) -> SessionHandle:
     """Run `code` as a background watcher, bounded by `timeout`.
 
     `code` calls `meiva.agents.send_message(meiva.self.AGENT_ID, content)` to wake you;
@@ -40,7 +43,9 @@ def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str | None 
         name: a lowercase slug like `"ci-monitor"`.
         notify: omit to use the agent policy; `"always"` delivers every completion immediately.
     Returns:
-        The watcher's session id — it is one of your shell sessions while running.
+        The same handle `run_background` returns: `session_id` (it is one of your
+        shell sessions while running) and `output_path` (the log its output
+        streams to). Kill or capture it through `sessions`.
     """
     request = plans.plan_launch(code, timeout, name, notify)
     return spawn.run(request, wiring.spawn_deps())
@@ -54,7 +59,7 @@ def cron(
     end_time: datetime.datetime | datetime.timedelta | str | None = None,
     name: str,
     notify: str | None = None,
-) -> int:
+) -> SessionHandle:
     """Runs until `end_time`, or until you kill its session.
 
     `end_time` defaults to now + 7 days; pass an explicit one for a longer
@@ -71,7 +76,8 @@ def cron(
         name: a lowercase slug like `"daily-check-in"`.
         notify: omit to use the agent policy; `"always"` delivers every completion immediately.
     Returns:
-        The watcher's session id; kill it to stop the schedule.
+        The same handle `run_background` returns: `session_id` (kill it to stop
+        the schedule) and `output_path` (the log its output streams to).
     """
     from base.clock import Clock
     from base.config import host_tz_name
@@ -98,7 +104,7 @@ def at(
     *,
     name: str,
     notify: str | None = None,
-) -> int:
+) -> SessionHandle:
     """Wake you once at a future time, then finish the watcher.
 
     Args:
@@ -108,7 +114,8 @@ def at(
         notify: omit to use the agent policy; `"always"` delivers every completion immediately.
 
     Returns:
-        The watcher's session id; kill that session to cancel.
+        The same handle `run_background` returns: `session_id` (kill that session
+        to cancel) and `output_path` (the log its output streams to).
     """
     from base.clock import Clock
 

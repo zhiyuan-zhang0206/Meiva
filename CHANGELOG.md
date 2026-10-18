@@ -8,6 +8,11 @@ and the matching GitHub Releases.
 ## [Unreleased]
 
 ### Changed
+- `run_background` and the watcher entries (`launch`, `at`, `cron`) return one
+  `SessionHandle(session_id, output_path)`: a watcher's log path is known at launch, so the
+  handle carries it instead of a bare session id. `sessions.send`, `send_keys`, `capture`,
+  `renew` and `kill` accept the handle or its `session_id`, so `sessions.kill(watcher.launch(...))`
+  and stored ids keep working ([meiva-shell](meiva/shell/docs/shell.meiva.okf.md)).
 - Root's health monitor spaces consecutive replacements of a DOWN unit by one backoff ladder
   (60s, 5m, then 15m) instead of restarting it every round, and opens a per-unit circuit breaker
   when the restart budget is spent. While a breaker is open, one bounded `SELECT 1` per round tells

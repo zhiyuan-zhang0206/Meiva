@@ -62,6 +62,6 @@ def launch_watcher() -> Callable[..., int]:
             sessions=_Sessions(send=send, create_session=create_session),
             live_session_ids=live_session_ids or deps.live_session_ids,
         )
-        return spawn.run(plans.plan_launch(code, timeout, name, None), deps)
+        return spawn.run(plans.plan_launch(code, timeout, name, None), deps).session_id
 
     return launch

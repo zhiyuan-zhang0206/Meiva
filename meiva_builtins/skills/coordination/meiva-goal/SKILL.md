@@ -77,7 +77,7 @@ below apply only when you choose this pattern.
    watcher_session_id = meiva.watcher.launch(watcher, timeout="6h", name="goal-idle")
    ```
 
-   Record the returned session ID with your run notes.
+   Record the returned handle's `session_id` (and `output_path` for its log) with your run notes.
 
    The watcher subscribes to the target's lifecycle updates and, the moment the
    target goes idle, sends you a reminder. Then it exits (one-shot). `timeout` is

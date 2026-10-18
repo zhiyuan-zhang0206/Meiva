@@ -332,9 +332,8 @@ def test_class_child_expands_namedtuple_fields_under_future_annotations() -> Non
 
 
 def test_shell_help_renders_background_run_fields() -> None:
-    """`run_background` returns a BackgroundRun; its fields must be visible in help."""
     out = _render(meiva.shell)
-    assert "class BackgroundRun" in out
+    assert "class SessionHandle" in out
     assert "    session_id: int" in out
     assert "    output_path: str" in out
 
