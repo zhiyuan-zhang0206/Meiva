@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from base.host.permissions_helper.grants import gate, probe, triggers
-from base.host.permissions_helper.grants.catalog import Grant, PermissionItem
+from base.host.permissions_helper.grants.catalog import PermissionItem
 from base.host.permissions_helper.grants.gate import GateReport, GateState
 from base.host.permissions_helper.grants.probe import HelperChannel, PermissionsProbeError
 from base.paths import meiva_home
@@ -167,12 +167,6 @@ def observations(report: GateReport) -> dict[str, str]:
     return {status.item.id: status.grant.value for status in report.items}
 
 
-def deferred_flag(*, host: GateHost | None = None) -> bool:
-    seat = host or local_host()
-    record = gate.read_record(seat.record_path)
-    return bool(record.deferred) if record is not None else False
-
-
 def defer(*, now: datetime | None = None, host: GateHost | None = None) -> None:
     seat = host or local_host()
     gate.mark_deferred(now=now, path=seat.record_path)
@@ -195,10 +189,6 @@ def missing_summary(report: GateReport) -> str:
         return ""
     names = ", ".join(status.item.title for status in report.missing)
     return f"{len(report.missing)} permission(s) still missing: {names}"
-
-
-def grant_values(report: GateReport) -> dict[str, Grant]:
-    return {status.item.id: status.grant for status in report.items}
 
 
 class GateService:

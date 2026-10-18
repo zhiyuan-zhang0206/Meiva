@@ -329,13 +329,6 @@ def apply_cluster_timezone() -> None:
 settings = cast("Settings", _lite.settings_view())
 
 
-def _settings_instance() -> Any:
-    """The constructed Settings singleton — building the eager chain (once) if
-    this process is still lite. Asking for the real object means wanting the
-    eager chain; the boot-lite runtime replays any pending overlay writes."""
-    return _lite.upgrade("_settings_instance()")
-
-
 def refresh_data_plane_settings() -> None:
     """Rebuild the data-plane sub-model from the current environment.
 
