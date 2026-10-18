@@ -90,8 +90,6 @@ it("lays the inspector over the document instead of replacing it", async () => {
   snapshot.inspectorOpen = true;
   renderPanel();
   expect(await screen.findByTestId("inspector-view")).toBeTruthy();
-  // The To user document is the panel's primary content: it stays mounted and
-  // visible underneath, and the inspector is a secondary sheet on top of it.
   const document = screen.getByTestId("shared-document");
   expect(document.getAttribute("hidden")).toBeNull();
   expect(screen.getByTestId("document-view")).toBeTruthy();

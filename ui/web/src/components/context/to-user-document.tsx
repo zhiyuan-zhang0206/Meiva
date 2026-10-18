@@ -19,6 +19,9 @@ function pushedEntry(): boolean {
   return (window.history.state as Record<string, unknown> | null)?.[PUSHED_ENTRY] === true;
 }
 
+// meiva:note
+// The inspector trigger is optional: `onInspect` decides whether the bar renders
+// it at all, and `inspecting` drives its pressed state.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
 export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, onInspect }: {
   agentId: number;
@@ -27,9 +30,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   pending: boolean;
   refresh: () => void;
   mobile: boolean;
-  /** Whether the inspector sheet is open (drives the trigger's pressed state). */
   inspecting?: boolean;
-  /** Opens/closes the inspector. Omitted surfaces render no trigger. */
   onInspect?: () => void;
 }) {
   const t = useTranslations("toUser");
