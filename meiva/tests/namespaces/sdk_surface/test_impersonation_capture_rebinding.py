@@ -39,7 +39,7 @@ class _CaptureOwner:
     def __init__(self, gate: capture.LocalCaptureGate) -> None:
         self.gate = gate
 
-    def admit_sdk_call(self) -> capture.LocalCaptureAdmission | None:
+    def admit_sdk_call(self, fn: str) -> capture.LocalCaptureAdmission | None:
         admission = self.gate.admit()
         if admission is None:
             raise RuntimeError("external attachment is closing")
