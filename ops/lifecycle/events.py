@@ -10,6 +10,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TypedDict
 
+from psycopg_pool import ConnectionPool
+
 from base.events.live.bus import EventBus
 from base.events.live.projection import (
     InboundArrived,
@@ -17,6 +19,7 @@ from base.events.live.projection import (
     NoticeResolved,
     PageClosed,
 )
+from base.events.notifications.notices import deliver_notice_notification
 
 
 async def publish_inbound_arrived(
@@ -84,6 +87,11 @@ async def publish_notice_resolved(
     await bus.publish_best_effort(ev.model_dump_json(), context="notice_resolved")
 
 
+# meiva:note
+# With `pool`, the same post is also delivered to the user: the spine reads the
+# committed notice row and records `core.needs_input` or `core.notice`. Delivery
+# runs after the live hint and never fails the post.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 async def publish_notice_posted(
     bus: EventBus,
     agent_id: int,
@@ -91,6 +99,8 @@ async def publish_notice_posted(
     priority: str,
     title: str,
     task_id: int | None = None,
+    *,
+    pool: ConnectionPool | None = None,
 ) -> None:
     """Publish NoticePosted so the frontend refreshes the open Inbox queue.
     Best-effort, never raises. `task_id` groups the feed by task without a
@@ -99,3 +109,5 @@ async def publish_notice_posted(
         agent_id=agent_id, notice_id=notice_id, priority=priority, title=title, task_id=task_id
     )
     await bus.publish_best_effort(ev.model_dump_json(), context="notice_posted")
+    if pool is not None:
+        await deliver_notice_notification(pool, bus, agent_id=agent_id, notice_id=notice_id)

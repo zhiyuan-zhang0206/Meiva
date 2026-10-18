@@ -304,6 +304,7 @@
         document.getElementById("server").value = target;
         document.getElementById("gateway").value = config.gatewayUrl || "";
         document.getElementById("background-service").checked = config.backgroundService;
+        document.getElementById("background-service").closest("label").hidden = desktop;
         document.getElementById("notifications").checked = config.notifications;
         document.getElementById("secret-field").hidden = desktop;
         document.getElementById("setup-cancel").hidden = !target;

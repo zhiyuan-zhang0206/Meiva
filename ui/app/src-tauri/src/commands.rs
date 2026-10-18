@@ -54,7 +54,7 @@ impl AppConfig {
                     false
                 }
             },
-            notifications: cfg!(target_os = "android") && settings.notifications,
+            notifications: settings.notifications,
             background_service: cfg!(target_os = "android") && settings.background_service,
         }
     }
@@ -197,6 +197,10 @@ pub async fn app_save_settings(
             crate::android::request_notification_permission_async(app.clone()).await;
         }
     }
+    #[cfg(not(target_os = "android"))]
+    if patch.notifications == Some(true) {
+        crate::desktop::request_notification_permission(&app);
+    }
     let handle = app.clone();
     // Deferring lets the invoke response flush before the window changes.
     // Android refreshes its prelude then navigates the responding webview;
@@ -230,8 +234,9 @@ pub fn app_open_settings(app: AppHandle) {
     window::open_settings(&app);
 }
 
-/// Raise a local notification. Android only — on desktop the console window is
-/// already the notification surface, so this logs and returns.
+/// Raise a local notification for one delivered notification event. The decision
+/// to deliver was already made by the gateway's notification spine; this only
+/// renders it with the platform's own notification surface.
 #[tauri::command]
 pub async fn app_notify(
     app: AppHandle,
@@ -239,20 +244,15 @@ pub async fn app_notify(
     title: String,
     body: String,
 ) -> Result<(), String> {
+    if !state.settings().notifications || title.trim().is_empty() {
+        return Ok(());
+    }
+    let title = title.chars().take(120).collect::<String>();
+    let body = body.chars().take(500).collect::<String>();
     #[cfg(target_os = "android")]
-    {
-        if !state.settings().notifications {
-            return Ok(());
-        }
-        let title = title.chars().take(120).collect::<String>();
-        let body = body.chars().take(500).collect::<String>();
-        crate::android::show_notification(app, title, body).await;
-    }
+    crate::android::show_notification(app, title, body).await;
     #[cfg(not(target_os = "android"))]
-    {
-        let _ = (&app, &state, &title, &body);
-        log::debug!("notification suppressed off Android: {title}");
-    }
+    crate::desktop::show_notification(&app, title, body);
     Ok(())
 }
 
