@@ -90,6 +90,7 @@ async def _generate_original(
             target_model,
             overrides=ctx.require_agent().overrides,
             single_attempt=True,
+            meter=False,
             catalog=ctx.require_catalog(),
             llm_override=settings.lm.llm_override,
         )

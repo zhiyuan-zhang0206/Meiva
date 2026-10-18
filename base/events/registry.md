@@ -218,8 +218,9 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `wake_degraded` | RedisInboundListener wake path degraded (instant pub/sub wake off) | anomaly | — | — | events | — |
 | `wake_restored` | RedisInboundListener wake path recovered (clean consume restored instant wake) | noise | — | — | events | — |
 | `launch_failures` | this start could not read the launch-failure report, so the unlaunched sessions it recorded stay unreported to the rollout aftermath block | anomaly | — | — | events | — |
-| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, unpriced, usage_kind, source | — | events | ✓ |
+| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, unpriced, usage_kind, attribution, source | — | events | ✓ |
 | `turn_end` | one turn finished | observation | ok, duration_seconds | — | events | ✓ |
+| `llm_usage_metering_failed` | direct model call accounting failed (the call ran; its llm_usage row is dropped) | anomaly | model, error_type, failures | — | events | ✓ |
 | `llm_turn_aborted` | turn aborted after retries | anomaly | — | LLM_ERROR | events | ✓ |
 | `recovery_breaker_halt` | recovery circuit breaker tripped — consecutive permanent provider rejections halted every automatic recovery path until a turn succeeds (task #3617) | anomaly | — | — | events | — |
 | `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events | — |

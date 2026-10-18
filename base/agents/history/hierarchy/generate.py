@@ -75,6 +75,7 @@ def build_generation_llm(
     p = params or GenParams()
     return build_chat_model(
         model,
+        meter=False,
         catalog=catalog,
         llm_override=llm_override,
         reasoning_effort=p.reasoning_effort,

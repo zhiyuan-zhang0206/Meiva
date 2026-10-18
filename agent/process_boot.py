@@ -93,6 +93,7 @@ async def boot_agent_scope(
         llm_model,
         agent_id=agent_id,
         overrides=overrides,
+        meter=False,
         catalog=catalog,
         llm_override=llm_override,
     )
