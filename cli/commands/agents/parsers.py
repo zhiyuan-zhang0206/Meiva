@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 
 
 def _validated_source(value: str) -> str:
@@ -147,6 +148,29 @@ def _h_notices_clear(args: argparse.Namespace) -> int:
     from cli.commands.agents.notices import cmd_notices_clear
 
     return cmd_notices_clear(agent_id=args.agent, force=args.force, stale=args.stale)
+
+
+def _h_notices_audit(args: argparse.Namespace) -> int:
+    from cli.commands.agents.notices_audit import cmd_notices_audit
+
+    return cmd_notices_audit(
+        database_factory=args.database_factory,
+        days=args.days,
+        category=args.category,
+        tz_name=args.tz,
+        now=args.now,
+        simulate=args.simulate or (),
+    )
+
+
+def _instant(value: str) -> datetime:
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"--now is not an ISO 8601 instant: {value!r}") from exc
+    if moment.tzinfo is None:
+        raise argparse.ArgumentTypeError("--now needs an offset, e.g. 2026-10-18T21:00:00+08:00")
+    return moment
 
 
 def _add_timeline_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -329,3 +353,26 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         help="clear open notices of terminated agents (not --agent)",
     )
     notices_clear_p.set_defaults(func=_h_notices_clear)
+
+    notices_audit_p = notices_sub.add_parser(
+        "audit",
+        help="replay a window of notification candidates through the delivery policy",
+    )
+    notices_audit_p.add_argument("--days", type=int, default=7, help="window length in days")
+    notices_audit_p.add_argument(
+        "--category", default=None, help="one modelled category (default: all of them)"
+    )
+    notices_audit_p.add_argument(
+        "--tz", default=None, help="IANA zone for the day and hour buckets (default: local)"
+    )
+    notices_audit_p.add_argument(
+        "--now", type=_instant, default=None, help="window end as an ISO instant (default: now)"
+    )
+    notices_audit_p.add_argument(
+        "--simulate",
+        action="append",
+        default=None,
+        metavar="SWITCH=on|off",
+        help="flip one input: turn_finished=on|off, requestion=on|off (repeatable)",
+    )
+    notices_audit_p.set_defaults(func=_h_notices_audit)

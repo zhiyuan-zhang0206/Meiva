@@ -27,11 +27,14 @@ tags:
 - `meiva agents ls/send/cancel/restart/resurrect/terminate/kill`: `ls` renders the
   authenticated agent summary projection as stable `id / status / machine /
   label` columns. It does not expose runner-local workspace paths.
-- `meiva notices list/resolve/clear`: `resolve` reports success only when the
+- `meiva notices list/resolve/clear/audit`: `resolve` reports success only when the
   gateway accepts the action. A 409 conflict is an error, including an absent
   notice, an action-kind mismatch, or an already-resolved answer/dismissal.
   Bare reads of resolved notices retain the gateway's successful response.
   Resolution is one keyed attempt (`principal-v1`) with a fresh key per invocation.
+  `audit` replays a window of producer candidates through the delivery policy and
+  writes nothing; it reads the runtime database directly, so it reports a switch's
+  effect on a window in which that category was already switched off.
 - `meiva memory init`: explicitly provisions the memory-pool checkout and
   plugin-owned templates. Branch validation runs here, never during converge or
   start.

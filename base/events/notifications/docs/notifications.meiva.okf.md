@@ -63,6 +63,26 @@ which measured 227 closes (37.8 a day, 27 in the busiest hour) over 2026-10-12..
 The console task board already shows every close, so the ping is an interruption
 the user opts into rather than one they must switch off.
 
+## Auditing a window
+
+`meiva notices audit` replays the producer stream for a window through this
+policy. It reads the producers rather than `notification_events` because the log
+holds only what was delivered — a switched-off category has no rows to count, and
+a switch cannot be simulated from the rows its own policy dropped.
+
+- `core.needs_input` comes from `agent_notices` rows that need a response. One
+  row is one candidate, or two when the agent added a question after posting: the
+  spine keys a re-ask by the question the notice carries now, so the post is keyed
+  question-less and the edit by its question.
+- `core.turn_finished` comes from the agent host's clean turn ends in
+  `telemetry_events` (`halt` with `no tool_call (idle)` or `system_halt`), which is
+  where the hosted runner emits the notification. A terminated agent's halt is a
+  death, not a finished turn, and the runner reports nothing for it.
+
+Two simulations are modelled, one flipped input at a time: turning
+`core.turn_finished` on or off, and keying a notice by `notice:<id>` instead of
+`notice:<id>:<question fingerprint>` (the re-ask switch).
+
 ## Transports
 
 `ui/app/src-tauri/scripts/notify-bridge.js` renders the delivered event on
