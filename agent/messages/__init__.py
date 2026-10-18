@@ -294,6 +294,28 @@ def tail_has_agent_inbound(messages: list[AnyMessage]) -> bool:
     return any(s.startswith("agent:") for s in _tail_inbound_sources(messages))
 
 
+# meiva:note
+# The newest `agent:`-sourced inbound after the last assistant turn: the one message a peer
+# gate reads, never the conversation. Reads `meiva_source` by index, not `.get`, because every
+# inbound-typed message carries the contract field and a missing source must surface as a
+# KeyError instead of being silently skipped.
+# meiva:link agent/messages/docs/message-format.meiva.okf.md
+def last_agent_inbound_text(messages: list[AnyMessage]) -> str | None:
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage):
+            return None
+        if not isinstance(msg, HumanMessage):
+            continue
+        if read_meiva_kwargs(msg).get("meiva_msg_type") != MeivaMsgType.INBOUND:
+            continue
+        source = msg.additional_kwargs["meiva_source"]  # pyright: ignore[reportUnknownMemberType]
+        if not (isinstance(source, str) and source.startswith("agent:")):
+            continue
+        content = msg.content
+        return content if isinstance(content, str) else None
+    return None
+
+
 def has_conversation(messages: list[AnyMessage]) -> bool:
     """Whether anything has been *said* in this context window yet.
 

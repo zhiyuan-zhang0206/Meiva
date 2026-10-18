@@ -126,6 +126,7 @@ async def recall_skills(
     agent: AgentSlices,
     catalog: ModelCatalog,
     agent_id: int,
+    peer_turn: bool = False,
 ) -> SkillRecall | None:
     """Score `candidates` against the recent conversation and render the best matches as a
     note to inject, or `None` when there is nothing to offer.
@@ -169,9 +170,10 @@ async def recall_skills(
         )
         return None
     scores = {identifier: d.probability("true") for identifier, d in decisions.items()}
-    picked = pick_skills(
-        scores, threshold=settings.skill_recall_threshold, limit=settings.skill_recall_max
+    threshold = (
+        settings.skill_recall_peer_threshold if peer_turn else settings.skill_recall_threshold
     )
+    picked = pick_skills(scores, threshold=threshold, limit=settings.skill_recall_max)
     logger.info(
         "[{label}] {body}",
         label=_LABEL,
@@ -186,3 +188,80 @@ async def recall_skills(
         note=render_note([by_identifier[identifier] for identifier in picked]),
         identifiers=set(picked),
     )
+
+
+# meiva:note
+# A peer-woken turn is scored only when this two-question gate passes: the message must ask
+# for work and must not already carry the method. Uncertain answers pass, because a missed
+# offer costs a redo while an extra offer costs one line. The gate reads one message, never
+# the conversation: measured 2026-10-18 at $0.000036 per call against $0.0006 per recall pass.
+# meiva:link agent/graph/docs/skill-recall.meiva.okf.md
+PEER_GATE_PREAMBLE = "One message another agent sent to this agent:\n\n"
+
+PEER_GATE_WORK = YesNo(
+    question=(
+        "Does this message ask the recipient to do a concrete piece of work -- a new task, "
+        "a fix, a review, an investigation, a delivery or a decision?"
+    ),
+    true_if="Yes: the message asks the recipient to act or decide.",
+    false_if="No: the message only reports status, acknowledges, confirms, notifies or chats.",
+)
+
+PEER_GATE_METHOD = YesNo(
+    question=(
+        "Does this message already state how to do that work -- steps, criteria, commands or "
+        "acceptance checks -- so the recipient can act without looking anything up?"
+    ),
+    true_if="Yes: the message itself gives the method or the criteria.",
+    false_if="No: the message says what is wanted, not how to do it.",
+)
+
+
+# meiva:note
+# `True` when the message may ask for work and does not already carry the method; `False` for
+# a clear status/acknowledgement message, a brief that states the method, or a failed decision
+# call. A gate failure falls back to the behaviour before peer messages were considered, so a
+# broken gate never changes what an agent sees.
+# meiva:link agent/graph/docs/skill-recall.meiva.okf.md
+async def peer_gate_passes(
+    text: str,
+    *,
+    agent: AgentSlices,
+    catalog: ModelCatalog,
+    agent_id: int,
+) -> bool:
+    settings = agent.skill_recall
+    stripped = text.strip()
+    if not stripped:
+        return False
+    try:
+        decisions = await decide(
+            settings.skill_recall_model,
+            PEER_GATE_PREAMBLE + stripped[: settings.skill_recall_peer_gate_max_chars],
+            {"work": PEER_GATE_WORK, "method_given": PEER_GATE_METHOD},
+            catalog=catalog,
+            usage_kind="skill_recall_peer_gate",
+            for_agent_id=agent_id,
+            timeout=settings.skill_recall_peer_gate_deadline_seconds,
+        )
+    except DecisionError as exc:
+        logger.warning(
+            "[{label}] {body}",
+            label=_LABEL,
+            body=f"peer gate failed, no skill note this turn ({type(exc).__name__}: {exc})",
+            event="skill_recall",
+        )
+        return False
+    work = decisions["work"].probability("true")
+    method = decisions["method_given"].probability("true")
+    passed = (
+        work > settings.skill_recall_peer_gate_work_floor
+        and method < settings.skill_recall_peer_gate_method_ceiling
+    )
+    logger.info(
+        "[{label}] {body}",
+        label=_LABEL,
+        body=f"peer gate {'passes' if passed else 'skips'} (work={work:.2f}, method={method:.2f})",
+        event="skill_recall",
+    )
+    return passed

@@ -15,21 +15,21 @@ The `# Capabilities` index asks the agent to match every task against it by hand
 
 ## When it fires
 
-`agent/graph/hooks/skill_recall.py:SkillRecallHook` is a framework `before_llm` hook, registered after compact's reminder and before the capability-index drift check (drift stays last). It fires when the messages added since the last assistant turn include an inbound from a **person** (`user`, `ui:page:<name>`) or a **schedule** (`schedule:<id>`); `agent/messages/__init__.py:tail_has_skill_recall_inbound` is the gate. A peer agent (`agent:`), a system notice, and watcher or shell completions never trigger it, and the wider gate memory recall uses (`tail_has_recallable_inbound`) is untouched. It also stays quiet in an eval-isolated run and on a turn where auto-compact is predicted (the note would be wiped with the history).
+`agent/graph/hooks/skill_recall.py:SkillRecallHook` is a framework `before_llm` hook, registered after compact's reminder and before the capability-index drift check (drift stays last). It fires when the messages added since the last assistant turn include an inbound from a **person** (`user`, `ui:page:<name>`) or a **schedule** (`schedule:<id>`); `agent/messages/__init__.py:tail_has_skill_recall_inbound` is that gate. With `skill_recall_peer_messages` on (off by default), a peer agent's message also fires, after the peer gate below. A system notice and watcher or shell completions never trigger it, and the wider gate memory recall uses (`tail_has_recallable_inbound`) is untouched. It also stays quiet in an eval-isolated run and on a turn where auto-compact is predicted (the note would be wiped with the history).
 
 ## What is asked
 
 `agent/graph/recall/skill_recall.py` sends **one** `decide()` request (`usage_kind="skill_recall"`, billed to the agent):
 
 - **State** (sent once): a fixed preamble plus the recent conversation, built by `agent/graph/recall/conversation_query.py:build_conversation_query` (the last 6 real dialogue messages, at most 2000 characters), which is also the query memory recall searches with.
-- **Questions** (one `YesNo` per candidate, keyed by the skill's display identifier): "if the agent loads this skill now and follows it, will that clearly help it handle the latest request?" with the skill's index-line description. The wording lives in `skill_recall.py` and nowhere else. The question keeps the display spelling it was calibrated on (`meiva.skills.<identifier>`); the offered note spells each skill as its loadable path (`meiva.skills.web_ai.deep_research`), like the index.
+- **Questions** (one `YesNo` per candidate, keyed by the skill's display identifier): "if the agent loads this skill now and follows it, will that clearly help it handle the latest request?" with the skill's index-line description. The wording lives in `skill_recall.py` and nowhere else. The question keeps the display spelling it was calibrated on (`meiva.skills.<identifier>`); the offered note spells each skill as its loadable path (`meiva.skills.web_ai.deep_research`).
 - **Candidates**: `agent/graph/prompt/capabilities.py:recall_candidates`: everything `indexed_skills()` covers (entry skills and sub-skills), described by exactly the text its index line quotes (`_one_line`, at most 300 characters). A skill whose description the index withholds as security-flagged is not a candidate, and neither is one `skills_to_expand_at_start` preloaded. Read and already-offered skills are removed by the hook.
 
 The prompt, the model (`skill_recall_model`, default `jev-1.13.0`) and `skill_recall_threshold` (0.60) were calibrated together by the 2026-10-11 benchmark. They are one unit: change the wording, the description format or the model and the threshold needs recalibrating.
 
 ## From scores to a note
 
-Skills whose probability of "yes" reaches the threshold are ranked best first, with the identifier breaking ties (the model's probabilities are coarse, so ties are common), and the top `skill_recall_max` (2) are named in one note in the index's own line shape, with the framing "load with `meiva.help(meiva.skills.<path>)`". Nothing at or over the threshold means no note.
+Skills whose probability of "yes" reaches the threshold are ranked best first, with the identifier breaking ties (the model's probabilities are coarse, so ties are common), and the top `skill_recall_max` (2) are named in one note in the index's own line shape, with the framing "load with `meiva.help(meiva.skills.<path>)`".
 
 ## The per-window record
 
@@ -42,10 +42,18 @@ When `compact.version` is past `window` the hook clears both (`Overwrite([])` an
 
 ## Failure semantics
 
-The hook runs before every inbound turn's LLM call, so nothing it does may kill the turn. The whole pass runs under `skill_recall_deadline_seconds` (3.0; independent of `memory_recall_deadline_seconds`); a timeout, any `DecisionError` (provider failure, missing key, unknown model) and a `DecisionInputTooLargeError` are logged under `event=skill_recall` and the turn proceeds with no note. The request grows with the catalog (about 150 tokens per question), so a catalog of roughly 400 skills reaches Jev's 64K request limit; `decide()` then raises `DecisionInputTooLargeError` before sending anything. The state is never truncated and the candidate list is never chunked or sampled: a partial score would offer the best of an arbitrary subset. Such an agent gets no recall until its catalog shrinks or the limit grows, and the warning says so.
+The hook runs before every inbound turn's LLM call, so nothing it does may kill the turn. The whole pass runs under `skill_recall_deadline_seconds` (3.0; independent of `memory_recall_deadline_seconds`); a timeout, any `DecisionError` (provider failure, missing key, unknown model) and a `DecisionInputTooLargeError` are logged under `event=skill_recall` and the turn proceeds with no note. The request grows with the catalog (about 150 tokens per question), so a catalog of roughly 400 skills reaches Jev's 64K request limit; `decide()` then raises `DecisionInputTooLargeError` before sending anything. The state is never truncated and the candidate list is never chunked or sampled: a partial score would offer the best of an arbitrary subset. Such an agent gets no recall until its catalog shrinks or the limit grows.
 
 ## Configuration
 
-`AgentSkillRecallSettings` (`base/config/domains/agent/skill_recall.py`, the `SkillRecall` slice in `base/host/env/agent_slices.py`, all per-agent and live): `skill_recall_enabled` (on), `skill_recall_model`, `skill_recall_threshold`, `skill_recall_max`, `skill_recall_deadline_seconds`. An overlay naming `skill_recall_model` is checked against the catalog's **decision** table (`validate_config_overlay(..., decision_models=...)`); a chat model id is rejected.
+`AgentSkillRecallSettings` (`base/config/domains/agent/skill_recall.py`, the `SkillRecall` slice in `base/host/env/agent_slices.py`, all per-agent and live): `skill_recall_enabled` (on), `skill_recall_model`, `skill_recall_threshold`, `skill_recall_peer_threshold` (the peer path's own cut, 0.75), `skill_recall_max`, `skill_recall_deadline_seconds`, plus the peer path: `skill_recall_peer_messages`, `skill_recall_peer_gate_work_floor`, `skill_recall_peer_gate_method_ceiling`, `skill_recall_peer_gate_max_chars` (4000), `skill_recall_peer_gate_deadline_seconds` (1.5). An overlay naming `skill_recall_model` is checked against the catalog's **decision** table (`validate_config_overlay(..., decision_models=...)`); a chat model id is rejected.
+
+## Peer messages
+
+A peer agent's message is scored only after one cheap two-question gate (`peer_gate_passes`, `usage_kind="skill_recall_peer_gate"`) over that one message: does it ask the recipient to do work, and does it already state the method. It skips when work is at or below `skill_recall_peer_gate_work_floor` (0.30) or method is at or above `skill_recall_peer_gate_method_ceiling` (0.70); the band between passes, because a missed offer costs a redo and an extra offer costs one line. A failed gate call skips the turn — the behaviour before peer messages existed.
+
+Replay of 150 real peer messages, 2026-10-18 (jev-1.13.0): work>=0.70 64 (42.7%), work>0.30 90 (60.0%), gate passed 67 (44.7%), method>=0.70 25 (16.7%), work>=0.70 with method<=0.30 11 (7.3%). A gate call averaged 856 input tokens and $0.000036, against $0.000528 for the recall pass.
+
+A turn the gate lets through is scored against `skill_recall_peer_threshold` (0.75), not the person cut. Peer traffic is mostly status and watcher notices, so it carries its own cut: in the same replay 0.60 offered on 112 and 0.75 on 50; every offer a reader judged would change the agent's next action scored at least 0.72, and behind the gate the higher cut kept all 7 while dropping 26 of 56.
 
 Parent: [[agent/graph/docs/graph.meiva.okf.md|Graph]].
