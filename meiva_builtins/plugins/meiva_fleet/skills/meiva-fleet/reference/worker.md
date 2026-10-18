@@ -32,6 +32,11 @@ Results land at your delegator. When you finish, send the result with `meiva.age
 meiva.agents.send_message(spawner_id, "Done. Output at ~/path/to/result.md. Key findings: ...")
 ```
 
+Every message must carry four parts: what happened, what you did (with the pointer),
+what you need from your delegator, and what slips if they don't act. If it is only
+progress, write it to the task record. Ask once; if the answer hasn't come, wait —
+don't resend.
+
 Report the **aggregate**, not raw lines. "Auth branch converging, one open question on token TTL" — not five collaborators' raw output. Your delegator aggregates across workers before anything reaches the user's queue.
 
 Follow the brief's [single reporter contract](../SKILL.md#one-reporter-per-milestone).

@@ -71,9 +71,11 @@ def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
     )
 
     assert prompt.count("one reporter per milestone") == 1
-    assert "directly to whoever must act" in prompt
+    assert (
+        "only when the recipient must reply, decide, act, or know something to continue" in prompt
+    )
+    assert "otherwise record status in the task" in prompt
     assert "do not relay unchanged results" in prompt
-    assert "actionable updates" in prompt
     assert "duplicate task-log writes" in prompt
 
 
