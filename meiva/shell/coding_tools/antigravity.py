@@ -21,7 +21,7 @@ from uuid import UUID
 
 from base.agents.impersonation.host_transport import antigravity_rpc
 
-from ._common import init_file, worker_bootstrap
+from ._common import init_file, worker_bootstrap, write_task_file_header
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
 from ._common import session_uuid as session_uuid
@@ -34,6 +34,7 @@ def launch(
     *,
     skill_dir: Path,
     prompt: str | None = None,
+    provenance: str | None = None,
 ) -> int:
     """Start a new Antigravity conversation on ``workspace``.
 
@@ -52,11 +53,13 @@ def launch(
             raise ValueError("a supervised launch needs its task and work files")
         init_file(tasks_file, "")
         init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
+        write_task_file_header(tasks_file, provenance or "")
         initial_prompt = worker_bootstrap(
             skill_dir / "references" / "collaboration_protocol.md",
             workspace,
             tasks_file,
             work_file,
+            provenance=provenance,
         )
 
     response = antigravity_rpc(

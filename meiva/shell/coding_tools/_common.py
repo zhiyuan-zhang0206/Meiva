@@ -4,6 +4,7 @@ owner generation, owner-record status and cancel."""
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import sys
 import uuid
 from collections.abc import Callable
@@ -13,6 +14,7 @@ from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, Gatewa
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.log import logger
 from base.sessions import coding_session_owner
+from base.sessions import provenance as provenance_block
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 from meiva import agents
 from meiva.sdk_surface import agent_identity
@@ -52,6 +54,10 @@ def init_file(path: Path, initial: str) -> None:
     path.write_text(initial, encoding="utf-8")
 
 
+# meiva:note
+# An already-rendered dispatch block leads the message, so the worker reads who dispatched it before
+# the contract and the two file paths. A takeover never reaches this function: its briefing carries
+# the three-line form and creates no files.
 def worker_bootstrap(
     contract: Path,
     workspace: Path,
@@ -59,6 +65,7 @@ def worker_bootstrap(
     work_file: Path,
     *,
     resumed: bool = False,
+    provenance: str | None = None,
 ) -> str:
     """The supervised worker's first message: the contract and both file paths.
 
@@ -71,7 +78,7 @@ def worker_bootstrap(
         if resumed
         else ""
     )
-    return (
+    return (f"{provenance}\n\n" if provenance else "") + (
         f"{interrupted}Read the collaboration contract at {contract} and follow it. "
         f"Your workspace is {workspace}. "
         f"Your task file (read-only for you) is {tasks_file}. "
@@ -82,6 +89,93 @@ def worker_bootstrap(
             else "Now read the task file and start working."
         )
     )
+
+
+# meiva:note
+# Only the agent directory is queried, through the same gateway client the launch already uses for
+# owner liveness; a failure there degrades the block to an unknown dispatcher instead of blocking
+# the launch. The three sources are parameters so a test passes its own instead of patching the SDK.
+def build_dispatch_provenance(
+    *,
+    for_task: int | None,
+    why: str,
+    task_label: str | None = None,
+    priority: str | None = None,
+    now: dt.datetime | None = None,
+    agent_id: Callable[[], int] | None = None,
+    ancestors: Callable[[int], list[agents.Neighbor]] | None = None,
+    directory: Callable[..., agents.AgentDirectoryPage] | None = None,
+) -> provenance_block.DispatchProvenance:
+    read_agent_id = agent_id or agent_identity.require_agent_id
+    read_ancestors = ancestors or agents.get_ancestors
+    read_directory = directory or agents.list_agents
+    parent_id: int | None = None
+    try:
+        parent_id = read_agent_id()
+    except Exception:
+        logger.opt(exception=True).warning("dispatch provenance: no agent identity")
+
+    chain: tuple[str, ...] = ()
+    label: str | None = None
+    if parent_id is not None:
+        chain = _spawn_chain(parent_id, read_ancestors)
+        label = _agent_label(parent_id, read_directory)
+    return provenance_block.DispatchProvenance(
+        parent_agent_id=parent_id,
+        parent_label=label,
+        spawn_chain=chain,
+        dispatched_at=now or dt.datetime.now(dt.UTC),
+        why=why,
+        task_id=for_task,
+        task_label=task_label,
+        priority=priority,
+    )
+
+
+def _spawn_chain(
+    agent_id: int, read_ancestors: Callable[[int], list[agents.Neighbor]]
+) -> tuple[str, ...]:
+    try:
+        ancestors = read_ancestors(agent_id)
+    except Exception:
+        logger.opt(exception=True).warning("dispatch provenance: ancestor lookup failed")
+        return ()
+    chain = [*(str(neighbor.agent_id) for neighbor in reversed(ancestors)), str(agent_id)]
+    return tuple(chain[-5:])
+
+
+def _agent_label(
+    agent_id: int, read_directory: Callable[..., agents.AgentDirectoryPage]
+) -> str | None:
+    try:
+        page = read_directory(scope="all", query=str(agent_id), limit=5)
+    except Exception:
+        logger.opt(exception=True).warning("dispatch provenance: agent lookup failed")
+        return None
+    for row in page.agents:
+        if row.agent_id == agent_id:
+            return row.label
+    return None
+
+
+# meiva:note
+# The task file belongs to the operator, so an existing block is never rewritten and the operator's
+# text keeps its order below the generated one. A file that already carries the marker is left
+# alone, which makes a relaunch of the same workspace idempotent.
+def write_task_file_header(tasks_file: Path, block: str) -> None:
+    if not block:
+        return
+    try:
+        existing = tasks_file.read_text(encoding="utf-8") if tasks_file.exists() else ""
+    except OSError:
+        logger.opt(exception=True).warning(
+            "dispatch provenance: cannot read {}; leaving the task file alone", tasks_file
+        )
+        return
+    if provenance_block.has_marker(existing):
+        return
+    tasks_file.parent.mkdir(parents=True, exist_ok=True)
+    tasks_file.write_text(f"{block}\n\n{existing}", encoding="utf-8")
 
 
 def owner_terminated(agent_id: int) -> bool:

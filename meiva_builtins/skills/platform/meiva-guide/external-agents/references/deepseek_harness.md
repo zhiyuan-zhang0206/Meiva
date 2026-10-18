@@ -29,6 +29,7 @@ Run from your own execution context, prompt inline:
 
 ```bash
 .venv/bin/python scripts/spawn_dsh.py <workspace-dir> \
+  --why 'why this takeover is needed' \
   --prompt '<the full takeover prompt>'
 ```
 

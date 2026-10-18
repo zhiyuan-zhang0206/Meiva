@@ -4,7 +4,7 @@ For an interactive (persistent) session, use the spawn script instead of
 launching by hand — it pre-trusts the directory and sends the contract message:
 
 ```bash
-.venv/bin/python scripts/spawn_codex.py <workspace-dir>
+.venv/bin/python scripts/spawn_codex.py <workspace-dir> --why 'why this work is delegated'
 ```
 
 Manual launch (for full control):
