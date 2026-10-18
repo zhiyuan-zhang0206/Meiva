@@ -441,6 +441,131 @@ class TestRemind:
         )
         assert run_reminders(pool, database, event_bus, 3600.0) == 0
 
+    # meiva:note
+    # A domain container is a roll-up, not a work item: while it has an open direct child, its own
+    # overdue window never produces a digest.
+    def test_parent_with_open_child_is_not_a_reminder_candidate(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: list[tuple[int, str]],
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
+        owner = _make_agent(db_conn)
+        parent = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=7200)
+        _make_task(db_conn, owner=owner, parent_id=parent, updated_s_ago=0)
+
+        assert run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert deliver == []
+
+    def test_overdue_child_under_a_parent_reminds_on_its_own(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: list[tuple[int, str]],
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
+        owner = _make_agent(db_conn)
+        parent = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=7200)
+        child = _make_task(
+            db_conn,
+            owner=owner,
+            parent_id=parent,
+            remind_interval_seconds=1800,
+            updated_s_ago=7200,
+        )
+
+        assert run_reminders(pool, database, event_bus, 3600.0) == 1
+        assert len(deliver) == 1
+        message = deliver[0][1]
+        assert f'- #{child} "' in message
+        assert f'- #{parent} "' not in message
+        parent_row = _task_row(db_conn, parent)
+        assert parent_row is not None
+        # meiva:note
+        # The parent's cadence stays untouched: it is not reminded, so only the candidate's
+        # counters advance.
+        assert parent_row[2] == 0
+        assert parent_row[3] is None
+
+    # meiva:note
+    # Skipping containers is not a permanent mute: once no direct child is open, the parent is a
+    # work item again and its overdue window counts.
+    @pytest.mark.parametrize("child_status", ["done", "cancelled"])
+    def test_parent_returns_to_candidates_after_children_close(
+        self,
+        child_status: str,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: list[tuple[int, str]],
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
+        owner = _make_agent(db_conn)
+        parent = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=7200)
+        _make_task(
+            db_conn,
+            status=child_status,
+            owner=owner,
+            parent_id=parent,
+            updated_s_ago=0,
+        )
+
+        assert run_reminders(pool, database, event_bus, 3600.0) == 1
+        assert f'- #{parent} "' in deliver[0][1]
+
+    def test_task_without_children_still_reminds(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: list[tuple[int, str]],
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
+        owner = _make_agent(db_conn)
+        leaf = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
+
+        assert run_reminders(pool, database, event_bus, 3600.0) == 1
+        assert f'- #{leaf} "' in deliver[0][1]
+
+    # meiva:note
+    # The skip is by direct child, so a two-level container chain drops both container levels and
+    # leaves only the leaf as a candidate.
+    def test_grandparent_with_open_container_child_is_not_a_candidate(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: list[tuple[int, str]],
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
+        owner = _make_agent(db_conn)
+        grandparent = _make_task(
+            db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=7200
+        )
+        container = _make_task(
+            db_conn,
+            owner=owner,
+            parent_id=grandparent,
+            remind_interval_seconds=1800,
+            updated_s_ago=7200,
+        )
+        leaf = _make_task(
+            db_conn,
+            owner=owner,
+            parent_id=container,
+            remind_interval_seconds=1800,
+            updated_s_ago=7200,
+        )
+
+        assert run_reminders(pool, database, event_bus, 3600.0) == 1
+        message = deliver[0][1]
+        assert f'- #{leaf} "' in message
+        assert f'- #{container} "' not in message
+        assert f'- #{grandparent} "' not in message
+
     def test_backoff_blocks_duplicate_reminder(
         self,
         pool: ConnectionPool,
