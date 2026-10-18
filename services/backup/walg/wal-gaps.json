@@ -1,0 +1,11 @@
+{
+  "gaps": [
+    {
+      "start_segment": "0000000100000061000000EB",
+      "end_segment": "00000001000000690000006B",
+      "segments": 1921,
+      "reason": "Ava-to-Meiva rename migration: PostgreSQL was shut down at 14:44:54 and restored under the new home at 15:09:07 on 2026-10-17, so archive_command did not run for that window.",
+      "occurred_on": "2026-10-17"
+    }
+  ]
+}
