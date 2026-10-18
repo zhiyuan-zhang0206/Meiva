@@ -70,16 +70,6 @@ export const STATUS_DOT: Record<PublicAgentStatus, string> = {
   terminated: "bg-destructive",
 };
 
-// i18n keys (under the "agentRow" namespace) for the status titles — the row
-// renders the translated title when the component has a translator. (The
-// pre-i18n STATUS_TITLE literal map was removed as dead.).
-export const STATUS_TITLE_KEY: Record<PublicAgentStatus, string> = {
-  running: "statusRunning",
-  idling: "statusIdling",
-  impersonated: "statusImpersonated",
-  terminated: "statusTerminated",
-};
-
 export interface AgentRowProps {
   agent: AgentRow;
   label: string | undefined; // undefined → default `#N`
