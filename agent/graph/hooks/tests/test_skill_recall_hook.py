@@ -761,20 +761,19 @@ async def test_a_failed_gate_keeps_the_behaviour_before_peer_messages(
     assert len(scorer.calls) == 1
 
 
-async def test_the_gate_reads_only_the_configured_prefix_of_the_message(
+async def test_the_gate_reads_only_the_first_four_thousand_characters(
     three_skills: Path, database: Database
 ) -> None:
     scorer = _Scorer({"work": 0.95, "method_given": 0.05, "beta": 0.9})
 
     await _run(
         database,
-        _state(_tail("agent:402", "x" * 500)),
+        _state(_tail("agent:402", "x" * 5000)),
         scorer,
         skill_recall_peer_messages=True,
-        skill_recall_peer_gate_max_chars=100,
     )
 
-    assert scorer.calls[0][0] == PEER_GATE_PREAMBLE + "x" * 100
+    assert scorer.calls[0][0] == PEER_GATE_PREAMBLE + "x" * 4000
 
 
 async def test_a_person_message_still_skips_the_gate(

@@ -196,6 +196,14 @@ async def recall_skills(
 # meiva:link agent/graph/docs/skill-recall.meiva.okf.md
 PEER_GATE_PREAMBLE = "One message another agent sent to this agent:\n\n"
 
+# meiva:note
+# Bounds, not knobs: the gate already reads one message, so its worst-case cost and latency
+# are set here once. A message longer than this is truncated; a slower provider times out and
+# the turn skips the offer (today's behaviour), so neither value needs a per-agent switch.
+# meiva:link agent/graph/docs/skill-recall.meiva.okf.md
+PEER_GATE_MAX_CHARS = 4000
+PEER_GATE_TIMEOUT_SECONDS = 1.5
+
 PEER_GATE_WORK = YesNo(
     question=(
         "Does this message ask the recipient to do a concrete piece of work -- a new task, "
@@ -235,12 +243,12 @@ async def peer_gate_passes(
     try:
         decisions = await decide(
             settings.skill_recall_model,
-            PEER_GATE_PREAMBLE + stripped[: settings.skill_recall_peer_gate_max_chars],
+            PEER_GATE_PREAMBLE + stripped[:PEER_GATE_MAX_CHARS],
             {"work": PEER_GATE_WORK, "method_given": PEER_GATE_METHOD},
             catalog=catalog,
             usage_kind="skill_recall_peer_gate",
             for_agent_id=agent_id,
-            timeout=settings.skill_recall_peer_gate_deadline_seconds,
+            timeout=PEER_GATE_TIMEOUT_SECONDS,
         )
     except DecisionError as exc:
         logger.warning(
