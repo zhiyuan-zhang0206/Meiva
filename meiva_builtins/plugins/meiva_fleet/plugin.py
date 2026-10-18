@@ -39,15 +39,13 @@ __description__: str = (
 )
 
 import uuid
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
 
 import meiva
-import meiva.agents
 import meiva.sdk_surface.agent_identity
 from base.agents.tasks.priority import validate_priority
-from base.packages.plugins.extensions import PluginContributions, SdkMember, SdkNamespace, SdkWrap
+from base.packages.plugins.extensions import PluginContributions, SdkMember, SdkNamespace
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 
 from . import task_registry
@@ -354,48 +352,6 @@ def _observe_open_notice_id(agent_id: int) -> int | None:
 # so agents discover meiva.tasks.* without drilling in.
 
 
-# ── wrap meiva.agents.spawn to add the fleet-only `label` arg ─────────────────
-# Replace-wrapper: it re-implements spawn to expose `label` (adding a keyword to
-# the surface, per the wrap contract) by calling `meiva.agents.spawn_impl`
-# directly instead of `inner`. Declared short-circuit — `label` cannot thread
-# through the core spawn signature, so the wrapper owns the whole call; `inner`
-# is accepted only to satisfy the wrap protocol.
-def _spawn_with_label(
-    inner: Callable[..., int],  # noqa: ARG001 — replace-wrapper; short-circuits inner (see note above)
-    prompt: str | None = None,
-    fork_from: int | None = None,
-    machine: str | None = None,
-    config_overlay: dict[str, object] | None = None,
-    label: str | None = None,
-    *,
-    idempotency_key: str,
-) -> int:
-    """Start a new agent; does not block.
-
-    Args:
-        prompt: the first message — make it self-contained, the new agent has
-            no context about why you spawned it. Omit to leave it idling.
-        fork_from: copy that agent's conversation state into the new one. A fork taken while that
-            agent is inside a tool call carries the call without its result: the new agent sees it
-            as already interrupted, not as work still running, so it checks whether the call
-            already took effect instead of repeating it.
-        machine: defaults to your own.
-        config_overlay: per-agent settings overlay, e.g. {"llm_model": ...};
-            a preset is named inside it as {"preset": "name"}.
-        label: initial role name; omitted = auto-named.
-        idempotency_key: required operation identity for creation or fork; reuse
-            the same key, inputs and caller identity to recover the original agent.
-    """
-    return meiva.agents.spawn_impl(
-        prompt=prompt,
-        fork_from=fork_from,
-        machine=machine,
-        config=config_overlay,
-        label=label,
-        idempotency_key=idempotency_key,
-    )
-
-
 def contribute() -> PluginContributions:
     """What this plugin declares for the SDK surface."""
     return PluginContributions(
@@ -406,5 +362,4 @@ def contribute() -> PluginContributions:
             SdkMember("ui", "dismiss_notice", dismiss_notice),
             SdkMember("self", "set_label", set_label),
         ),
-        sdk_wraps=(SdkWrap("agents.spawn", _spawn_with_label),),
     )

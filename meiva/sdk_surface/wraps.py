@@ -1,63 +1,63 @@
-"""The wrap registration primitive — `meiva.extend.wrap` and its introspection.
-
-Agent visibility is governed by the `__all_for_meiva__` whitelist in
-`meiva/__init__.py`, not by a name's underscore prefix: this module stays out of
-the agent's `meiva.help()` view because it is absent from `__all_for_meiva__`. A
-plugin declares a wrap in its `contribute()`:
-
-    def audit_writes(inner, path, content):
-        log_audit("write", path, len(content))
-        return inner(path, content)
-
-    def contribute() -> PluginContributions:
-        return PluginContributions(sdk_wraps=(SdkWrap("files.write", audit_writes),))
-
-`meiva.sdk_surface.install` applies it through `apply_wrap(target, wrapper, plugin, layers)`, which
-installs `wrapper` around the callable at the dotted `meiva` path `target` (`"files.read"`,
-`"shell.run"`, `"agents.spawn"`, `"understand"`) and returns the undo. `layers` is the
-install's build ledger (`{target: [WrapLayer, ...]}`, registration order); it is frozen
-into the `Installation` at the end of the build, and `stack` / `wrappers` read it back. The curated
-`meiva.extend` surface keeps the introspection (`stack`, `wrappers`). The wrapper's first parameter receives the current callable
-(`inner`) — the original, or the previous plugin's wrap when several layers
-stack — and the wrapper decides whether, when, and how many times to call it.
-`inner(*args, **kwargs) -> result`; the wrapper is Turing-complete Python and
-can express before / after / replace / retry with no schema ceremony. That is
-the point: a schema'd hook registry would cap extensions at anticipated shapes.
-
-**Why this exists instead of bare `setattr`.** A plugin monkey-patching
-`meiva.files.read = my_read` leaves no record of who changed it, in what order, or
-how to undo it — the old code compensated with a hand-rolled "I am the sole
-wrapper" assert on every target. The layer table here makes the wrap stack
-enumerable (`meiva.extend.stack(target)` / `meiva.extend.wrappers()`), deterministic
-(declaration order = plugin load order, and plugins load in sorted name order),
-and reversible (each `apply_wrap` returns its undo, run in reverse by
-`meiva.sdk_surface.install.uninstall`), so the assert is gone and layering is allowed.
-
-**Lawfulness contract (enforced at review, not by types).** A wrapper is
-Turing-complete, so nothing mechanically stops it from misbehaving; three rules
-keep a stack composable and are checked in review:
-
-1. Preserve the inner signature. Extend it by *adding* keyword arguments only
-   (see `meiva_fleet`'s `label`); never drop or reorder what callers pass to
-   `inner`.
-2. Never swallow an exception silently. Let it propagate, or re-raise with
-   context — a wrapper that eats errors turns a fail-fast core into a guessing
-   game.
-3. Document any short-circuit (not calling `inner`) or multiple calls of
-   `inner`. The next author reading the stack must be able to reason about
-   control flow from the docstring.
-
-Rule 3's cases are also the ones worth measuring, so a plugin layer that calls
-`inner` anything other than exactly once emits one `plugin_activation` event
-(`base/packages/plugins/activation.py`) — the runtime half of the plugin attribution,
-and philosophy §6's obsolescence gauge for wrap-shaped shims. A layer that
-passes straight through records nothing: it always runs once installed, so
-counting it would measure the installation rather than the shim.
-
-The plugin *loader* (by-path import, fail-soft containment, the external
-`plugins/` directory scan) is a separate concern and lives in
-`base/packages/plugins/loading/plugin_loader.py`.
-"""
+# meiva:note
+# The wrap registration primitive — `meiva.extend.wrap` and its introspection.
+#
+# Agent visibility is governed by the `__all_for_meiva__` whitelist in
+# `meiva/__init__.py`, not by a name's underscore prefix: this module stays out of
+# the agent's `meiva.help()` view because it is absent from `__all_for_meiva__`. A
+# plugin declares a wrap in its `contribute()`:
+#
+#     def audit_writes(inner, path, content):
+#         log_audit("write", path, len(content))
+#         return inner(path, content)
+#
+#     def contribute() -> PluginContributions:
+#         return PluginContributions(sdk_wraps=(SdkWrap("files.write", audit_writes),))
+#
+# `meiva.sdk_surface.install` applies it through `apply_wrap(target, wrapper, plugin, layers)`, which
+# installs `wrapper` around the callable at the dotted `meiva` path `target` (`"files.read"`,
+# `"shell.run"`, `"agents.spawn"`, `"understand"`) and returns the undo. `layers` is the
+# install's build ledger (`{target: [WrapLayer, ...]}`, registration order); it is frozen
+# into the `Installation` at the end of the build, and `stack` / `wrappers` read it back. The curated
+# `meiva.extend` surface keeps the introspection (`stack`, `wrappers`). The wrapper's first parameter receives the current callable
+# (`inner`) — the original, or the previous plugin's wrap when several layers
+# stack — and the wrapper decides whether, when, and how many times to call it.
+# `inner(*args, **kwargs) -> result`; the wrapper is Turing-complete Python and
+# can express before / after / replace / retry with no schema ceremony. That is
+# the point: a schema'd hook registry would cap extensions at anticipated shapes.
+#
+# **Why this exists instead of bare `setattr`.** A plugin monkey-patching
+# `meiva.files.read = my_read` leaves no record of who changed it, in what order, or
+# how to undo it — the old code compensated with a hand-rolled "I am the sole
+# wrapper" assert on every target. The layer table here makes the wrap stack
+# enumerable (`meiva.extend.stack(target)` / `meiva.extend.wrappers()`), deterministic
+# (declaration order = plugin load order, and plugins load in sorted name order),
+# and reversible (each `apply_wrap` returns its undo, run in reverse by
+# `meiva.sdk_surface.install.uninstall`), so the assert is gone and layering is allowed.
+#
+# **Lawfulness contract (enforced at review, not by types).** A wrapper is
+# Turing-complete, so nothing mechanically stops it from misbehaving; three rules
+# keep a stack composable and are checked in review:
+#
+# 1. Preserve the inner signature. Extend it by *adding* keyword arguments only;
+#    never drop or reorder what callers pass to `inner`.
+# 2. Never swallow an exception silently. Let it propagate, or re-raise with
+#    context — a wrapper that eats errors turns a fail-fast core into a guessing
+#    game.
+# 3. Document any short-circuit (not calling `inner`) or multiple calls of
+#    `inner`. The next author reading the stack must be able to reason about
+#    control flow from the docstring.
+#
+# Rule 3's cases are also the ones worth measuring, so a plugin layer that calls
+# `inner` anything other than exactly once emits one `plugin_activation` event
+# (`base/packages/plugins/activation.py`) — the runtime half of the plugin attribution,
+# and philosophy §6's obsolescence gauge for wrap-shaped shims. A layer that
+# passes straight through records nothing: it always runs once installed, so
+# counting it would measure the installation rather than the shim.
+#
+# The plugin *loader* (by-path import, fail-soft containment, the external
+# `plugins/` directory scan) is a separate concern and lives in
+# `base/packages/plugins/loading/plugin_loader.py`.
+#
 
 from __future__ import annotations
 

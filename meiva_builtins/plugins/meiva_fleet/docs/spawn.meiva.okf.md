@@ -12,11 +12,11 @@ tags:
 
 ## Responsibility
 
-Agent creation, copying, termination, restart, resurrection — dynamic member management for the fleet. spawn/fork/terminate/restart/resurrect are `meiva.agents` **core** methods, the fleet plugin does not register them. However, **the `label=` parameter of `spawn` is fleet-only**: wrapped around core spawn by `meiva_builtins/plugins/meiva_fleet/plugin.py:_spawn_with_label` (:328-353) via monkeypatch (**not** `register_namespace_member`); after disabling fleet, `spawn(label=…)` raises `TypeError`, and `create_and_assign` also disappears.
+Agent creation, copying, termination, restart, resurrection — dynamic member management for the fleet. spawn/fork/terminate/restart/resurrect, including the `label=` keyword, are `meiva.agents` **core** methods: the fleet plugin does not register or wrap them. Disabling fleet removes `create_and_assign` and the fleet-only `self.set_label` member, not `spawn`.
 
 ## API
 
-### `meiva.agents.spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, label=None) -> int`
+### `meiva.agents.spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, label=None, *, idempotency_key) -> int`
 
 Creates a new agent, returns its agent_id.
 
@@ -26,7 +26,7 @@ Creates a new agent, returns its agent_id.
 | `fork_from` | Copy that agent's conversation state to the new agent |
 | `machine` | Target machine; omit = current machine (`meiva.self.MACHINE_SPEC.name`) |
 | `config_overlay` | Per-field config override, e.g. `{"llm_model": "..."}` |
-| `label` | Initial role/name; omit = auto-named. **fleet-only**: provided by fleet's spawn wrap; unavailable when fleet is disabled |
+| `label` | Initial role/name; omit = auto-named |
 
 ### `meiva.agents.fork_from` (parameter of spawn, not a standalone function)
 

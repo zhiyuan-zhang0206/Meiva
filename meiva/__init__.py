@@ -324,16 +324,19 @@ for _entry in (
 # `__getattr__` (kept dormant above so `import meiva` never triggers it).
 _init_complete = True
 
+# meiva:note
 # Eager load for agent-launched children (a bare `python x.py` in a persistent
 # shell session has no bootstrap to hook). The lazy-on-miss path above cannot
-# cover plugin WRAPPERS on existing members — `meiva.agents.spawn(label=...)`
-# resolves the unwrapped core function without ever missing, then TypeErrors —
-# so such a child loads plugins at import, and lazy-on-miss stays as the
-# backstop. The agent host binds identities per turn and does not
-# export a process-wide MEIVA_AGENT_ID; gateway / cli do not carry it either.
-# Only an agent-launched child reaches this load — the one import-time trigger
-# the ambient-state lint keeps for the meiva package. Metering installs with the
-# SDK surface (`meiva.sdk_surface.install.install`), not here.
+# cover plugin WRAPPERS on existing members — a wrapped member such as
+# `meiva.files.write` resolves the unwrapped core function without ever missing,
+# silently skipping the wrapper — so such a child loads plugins at import, and
+# lazy-on-miss stays as the backstop. The agent host binds identities per turn
+# and does not export a process-wide MEIVA_AGENT_ID; gateway / cli do not carry
+# it either. Only an agent-launched child reaches this load — the one
+# import-time trigger the ambient-state lint keeps for the meiva package.
+# Metering installs with the SDK surface (`meiva.sdk_surface.install.install`),
+# not here.
+#
 # The formal execution entry validates its request and supplies its own boot
 # owner before loading the surface. An arbitrary request env string in a bare
 # launched script cannot select this posture; the interpreter entry owns it.

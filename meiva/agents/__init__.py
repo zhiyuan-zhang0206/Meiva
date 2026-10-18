@@ -399,6 +399,7 @@ def spawn(
     fork_from: int | None = None,
     machine: str | None = None,
     config_overlay: dict[str, object] | None = None,
+    label: str | None = None,
     *,
     idempotency_key: str,
 ) -> int:
@@ -410,12 +411,14 @@ def spawn(
     execution, and uncertain transport outcomes are not automatically retried.
 
     `prompt` is the first message — make it self-contained; omit it to leave the agent idling.
-    `machine` defaults to yours. `config_overlay` carries per-agent config fields; keys it does
-    not name follow the shared default. Identity config you do not name (model, reasoning effort,
-    the inject/expand lists, prompt shaping) is frozen at spawn; operational knobs follow the
-    shared default. `fork_from` copies another agent's conversation and keeps its config: the
-    overlay may then only add entries to `skills_to_inject_into_system_prompt` /
-    `skills_to_expand_at_start` (anything else raises ForkConfigChangeNotAllowed).
+    `label` names the new agent's role, which peers and the fleet view show; omit it to let the
+    system name the agent. `machine` defaults to yours. `config_overlay` carries per-agent config
+    fields; keys it does not name follow the shared default. Identity config you do not name
+    (model, reasoning effort, the inject/expand lists, prompt shaping) is frozen at spawn;
+    operational knobs follow the shared default. `fork_from` copies another agent's conversation
+    and keeps its config: the overlay may then only add entries to
+    `skills_to_inject_into_system_prompt` / `skills_to_expand_at_start` (anything else raises
+    ForkConfigChangeNotAllowed).
     A fork taken while that agent is inside a tool call carries the call without its result: the
     new agent sees it as already interrupted, not as work still running, so it checks whether the
     call already took effect instead of repeating it.
@@ -427,7 +430,7 @@ def spawn(
         fork_from=fork_from,
         machine=machine,
         config=config_overlay,
-        label=None,
+        label=label,
         idempotency_key=idempotency_key,
     )
 

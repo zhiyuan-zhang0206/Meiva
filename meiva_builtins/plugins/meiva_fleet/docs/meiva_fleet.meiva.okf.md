@@ -34,7 +34,7 @@ tags:
 
 - **Self** only injects `set_label` (declared as an `SdkMember` in `plugin.py`) — other members of core meiva.self are not affected by this plugin; **Notify**'s `ui.notify` family is entirely declared by `plugin.py`
 - **Tasks** is implemented by `task_registry.py`, with update validation and database-write helpers in `_task_update.py`; the public registry remains the sub-module registered by the plugin
-- **Neighbors** and **Spawn** are `meiva.agents` SDK core; the fleet plugin uses system prompts to let agents understand their usage conventions — the plugin itself does not register these methods (the only exception: the fleet-only `label=` parameter of `spawn` is added by `_spawn_with_label` monkeypatch)
+- **Neighbors** and **Spawn** are `meiva.agents` SDK core; the fleet plugin uses system prompts to let agents understand their usage conventions — the plugin itself does not register or wrap these methods
 - **Task Maintenance** is a gateway-side daemon registered by this plugin into the ops service roster (overdue task reminders + escalation) — declared via `services()` in `plugins/meiva_fleet/services.py` with `ServiceSpec`, discovered by `services/supervision/roster/plugin_services.py:plugin_services()` based on plugin code "existence" and folded into single-source `build_services()`. Note it is a machine-level daemon, **its life/death is not determined by agent-side plugin enable/disable** (that is the agent surface aspect); the host-owned gate is `FleetConfig.task_maintenance_enabled` in the plugin config image. See [[task_maintenance.meiva.okf.md|Task Maintenance]] for details
 - **Skills**: the plugin also carries two skills (converge syncs to `~/.meiva/skills/meiva_fleet/`) — `meiva_fleet` (fleet collaboration outline, default injected into system prompt allowlist) + `reduce-context-switch-for-human` (interrupt discipline, added in #620). See [[meiva_builtins/plugins/meiva_fleet/docs/skills/skills.meiva.okf.md|Fleet Skills]] for details
 
@@ -53,7 +53,7 @@ tags:
 ## Configuration
 
 - Enable/disable uses per-machine `~/.meiva/plugins_config.json` (`base/packages/plugins/enable_config.py:set_local_enabled` is the only writer), CLI `meiva plugins enable/disable <name>` — no `MEIVA_FLEET_ENABLED` or similar env switch
-- After disabling: `meiva.ui` falls back to pure page mode (no notifications), `meiva.self`'s log/label methods disappear, `meiva.tasks` namespace disappears, `spawn(label=…)` raises TypeError
+- After disabling: `meiva.ui` falls back to pure page mode (no notifications), `meiva.self`'s log/label methods disappear, `meiva.tasks` namespace disappears; `meiva.agents.spawn` keeps working unchanged, `label` included
 
 ## Workflow boundary
 
