@@ -109,13 +109,6 @@ fixture/incident scope.
 - **last-verified**: 2026-10-19
 
 
-### docs-aging:.github/PULL_REQUEST_TEMPLATE.md:tech-debt-registration
-- **class**: docs-aging
-- **status**: open
-- **evidence**: This ledger's header says a PR that knowingly introduces debt registers it "through the PR template", but the section that carried that obligation (`## Tech-debt registration` — add or extend a fingerprinted entry here, write `none` otherwise) was deleted in 76c7f51bc ("Consolidate contributor documentation and preserve domain history", 2026-10-05) together with the checklist and five other sections; `git log --follow -- .github/PULL_REQUEST_TEMPLATE.md` shows no later restore, and the current template has two sections (What and why, Validation). `docs/contributing.md` never names the ledger; the surviving instruction is one sentence in `docs/conventions/engineering/tech-debt.md` ("If a broad repair is outside the authorized change, record actionable evidence in the ledger"), which addresses an audit, not a PR author. Someone must decide the owner: restore the section, or retire the claim in this header and name the registration path that replaces it. This sweep is the evidence that the gap bites — three entries below came from PR bodies that recorded debt no PR registered.
-- **first-seen**: 2026-10-19 (sweep)
-- **last-verified**: 2026-10-19
-
 ## Wontfix
 
 ### docstring-budget:meiva/security.py:module
