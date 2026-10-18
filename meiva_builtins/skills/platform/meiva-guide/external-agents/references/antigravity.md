@@ -3,7 +3,8 @@
 Launch a persistent Antigravity session in a workspace with `spawn_antigravity.py`:
 
 ```bash
-.venv/bin/python scripts/spawn_antigravity.py <workspace-dir> --prompt '<initial message>'
+.venv/bin/python scripts/spawn_antigravity.py <workspace-dir> \
+  --why 'why this launch is needed' --prompt '<initial message>'
 ```
 
 Without `--prompt`, `spawn_antigravity.py` creates `tasks.md` and `work.md` (unless already present), opens an `meiva.shell.sessions` PTY running `agy chat -a <workspace>`, and sends the file-driven collaboration contract. With `--prompt`, it launches `agy chat -a <workspace>` and sends your inline message verbatim (no task/work files are created).
