@@ -7,6 +7,9 @@ The e2e tests run through a real pty-sessions service + real bash
 import contextlib
 import os
 import shlex
+import shutil
+import signal
+import subprocess
 import sys
 import threading
 import time
@@ -37,12 +40,18 @@ def test_notified_line_structure(tmp_path: Path) -> None:
         output_path=log,
         keep=False,
     )
+    # meiva:note
     # Subshell so the pipeline covers a compound cmd; command exit code pinned
-    # before anything else runs; CLI notice with source + tail; close after delivery.
+    # before anything else runs; the shell waits for the exit marker to land in
+    # the log before the notice, so a session close cannot eat the tee's buffered
+    # tail; CLI notice with source + tail; close after delivery.
     assert line.startswith(
         f"exec 3> >(tee {log}); ( make build ) >&3 2>&1; _ec=$?; "
-        f"printf '[exit %s]\\n' \"$_ec\" >&3; exec 3>&-; "
+        f"printf '[exit %s]\\n' \"$_ec\" >&3; exec 3>&-; _polls=0; while "
     )
+    assert f"$(tail -c {background.EXIT_TAIL_BYTES} {log} 2>/dev/null)" in line
+    assert "break;; esac; sleep " in line
+    assert line.index("_polls=0") < line.index("agents send 5")
     assert "agents send 5" in line
     assert "Background command 'build' finished. Full output at" in line
     assert "exited with code" not in line
@@ -64,6 +73,53 @@ def test_notified_line_keep_leaves_session_open(tmp_path: Path) -> None:
     assert not line.endswith("&& exit")
     assert not line.endswith("; exit $_ec")
     assert "agents send 5" in line
+    # meiva:note
+    # A retained session is not closing, so the tee cannot be killed under the
+    # notice: the notice still fires at command exit, as documented.
+    assert "_polls" not in line
+
+
+def test_closing_run_waits_for_its_log_to_catch_up(tmp_path: Path) -> None:
+    # meiva:note
+    # The session holds the only copy of a closing run's log until the writer
+    # drains the pipe, and the session's process group is killed the moment the
+    # shell exits. A writer that is still starting up makes the ordering visible
+    # on any host: if the shell can return before its writer drains, the log is
+    # still missing the command's own lines at that instant, so the read below
+    # fails without the wait and succeeds with it.
+    real_tee = shutil.which("tee")
+    assert real_tee is not None
+    slow_bin = tmp_path / "bin"
+    slow_bin.mkdir()
+    slow_tee = slow_bin / "tee"
+    slow_tee.write_text(f'#!/bin/sh\nsleep 0.3\nexec {shlex.quote(real_tee)} "$@"\n')
+    slow_tee.chmod(0o755)
+    fake_cli = tmp_path / "fake-meiva"
+    fake_cli.write_text("#!/bin/sh\nexit 0\n")
+    fake_cli.chmod(0o755)
+    log = tmp_path / "run.log"
+    line = background.notified_line(
+        "echo long-bg; exit 3",
+        agent_id=5,
+        label="Background command 'long-bg'",
+        source="shell:1",
+        output_path=log,
+        keep=False,
+        cli=fake_cli,
+    )
+    proc = subprocess.Popen(  # noqa: S603
+        ["bash", "-c", line],
+        env={**os.environ, "PATH": f"{slow_bin}:{os.environ['PATH']}"},
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert proc.wait(timeout=30) == 3
+        assert log.read_text() == "long-bg\n[exit 3]\n"
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
 
 
 @pytest.mark.parametrize(
@@ -219,7 +275,8 @@ def test_run_background_line_and_handle(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert Path(handle.output_path).exists()  # tailable immediately
     assert shlex.split(captured["cmd"]) == [".", str(Path(handle.output_path).with_suffix(".sh"))]
     cmd = Path(handle.output_path).with_suffix(".sh").read_text().splitlines()[1]
-    assert cmd.startswith("exec 3> >(tee ")
+    assert cmd.startswith(f"exec 3> >(tee {handle.output_path})")
+    assert f"$(tail -c {background.EXIT_TAIL_BYTES} {handle.output_path} 2>/dev/null)" in cmd
     assert "( echo hi ) >&3 2>&1" in cmd
     assert "_ec=$?" in cmd
     assert "--source shell:7" in cmd

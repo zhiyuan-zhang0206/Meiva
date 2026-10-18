@@ -45,10 +45,18 @@ creation-time rule; a later `cd` does not change it.
 
 Page servers opened with `meiva.ui.serve` run in your own sessions (`page-<name>`, one entry per open page; the label grammar is owned by `base/sessions/page_session.py`) and appear in `sessions.list()`; see the [[meiva/docs/ui.meiva.okf.md]] server lifecycle for closure through `close()` or TTL expiry — killing the entry does not close the page, and a terminate's `kill_all_shell_sessions` spares them.
 
-A background command's completion notice fires when the command subshell exits,
-not when the tee pipeline reaches EOF. A grandchild that inherits stdout and
-outlives the command must not postpone the notice; tee keeps draining into the
-log and session capture in the background. The log's last line is `[exit N]`,
+A background command's completion notice fires when the command subshell exits —
+except that a closing run (`keep=False`) first waits, bounded at one second, for
+the run's own `[exit N]` line to reach the end of its log. The session close kills
+the process group the moment the shell exits, so a `tee` caught mid-drain died
+with the command's last lines still in the pipe, leaving a log file that existed
+and stayed empty; that line is the proof the log is complete, and the shell does
+not exit before it lands. The wait is on the file rather than on the writer: a
+process substitution is not a waitable child in bash 3.2, which macOS still
+ships. The bound only bites when a grandchild inherits stdout and outlives the
+command. A retained session (`keep=True`) never closes on the command, so it
+fires at the subshell exit and a grandchild must not postpone it; the writer keeps
+draining into the log and session capture in the background. The log's last line is `[exit N]`,
 written before the pipe closes, so the notice's tail — and any later read of the
 log — carries the command's own status; the message text still names no status. The launch line is sourced from disk
 to keep long paths out of a canonical-mode PTY input buffer, and it preserves
