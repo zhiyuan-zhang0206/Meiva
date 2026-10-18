@@ -181,6 +181,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "understanding_group_calls",
     "understanding_builds",
     "understanding_rebuilds",
+    "notification_events",
     "user_settings",
     "web_sessions",
     "extensions",

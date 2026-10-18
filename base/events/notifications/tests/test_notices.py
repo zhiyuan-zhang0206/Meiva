@@ -76,8 +76,6 @@ async def test_an_fyi_notice_is_off_until_the_user_turns_it_on(
         )
     assert delivered is not None
     assert _categories(db_conn, agent_id) == ["core.notice"]
-    db_conn.execute("DELETE FROM user_settings WHERE key = 'notifications.categories'")
-    db_conn.commit()
 
 
 async def test_a_second_post_of_the_same_notice_does_not_notify_twice(

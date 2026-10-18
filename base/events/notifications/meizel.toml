@@ -5,4 +5,4 @@ exports = ["catalog.py", "notices.py", "policy.py", "publish.py", "store.py", "t
 "notices.py" = ["publish.py"]
 "policy.py" = ["catalog.py"]
 "publish.py" = ["catalog.py", "policy.py", "store.py"]
-"tests" = ["catalog.py", "notices.py", "policy.py", "publish.py", "store.py"]
+"tests" = ["catalog.py", "notices.py", "policy.py", "publish.py"]
