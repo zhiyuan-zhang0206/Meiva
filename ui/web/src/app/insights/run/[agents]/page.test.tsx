@@ -510,6 +510,41 @@ describe("zoom and pan", () => {
     expect(summaryText()).not.toBe(zoomed);
   });
 
+  it("keeps painted rows and a fixed status slot while a pan loads another range", async () => {
+    const recent = {
+      ...lifetimeResponse, snapshot: "stable", nodes: [], units: [],
+      window: { from: "2026-10-04T14:00:00.000Z", to: LIFETIME.to },
+    };
+    let resolve: (data: RunTimelineResponse) => void = () => undefined;
+    getRunTimeline.mockResolvedValueOnce(recent)
+      .mockImplementationOnce((_id, options) => Promise.resolve({
+        ...lifetimeResponse, snapshot: "stable", window: { from: options!.from!, to: options!.to! },
+      }))
+      .mockImplementation(() => new Promise((done) => { resolve = done; }));
+    render();
+    const chart = await screen.findByTestId("run-timeline-chart");
+    const status = screen.getByTestId("run-timeline-window-status-42");
+    expect(status.textContent).toBe("");
+    wheel(chart, { deltaX: -400, clientX: 600 });
+    await screen.findByTestId("run-timeline-row-level-2");
+    await waitFor(() => expect(status.textContent).toBe(""));
+    await paintFrame();
+    const canvas = screen.getByTestId("run-timeline-canvas-level-2");
+    expect(drawn("level-2").some((shape) => shape.op === "fill")).toBe(true);
+
+    wheel(chart, { deltaX: -100, clientX: 600 });
+    expect(screen.getByTestId("run-timeline-canvas-level-2")).toBe(canvas);
+    expect(screen.getByTestId("run-timeline-window-status-42")).toBe(status);
+    expect(status.textContent).toContain("Loading this time range");
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(3));
+    await paintFrame();
+    expect(screen.getByTestId("run-timeline-canvas-level-2")).toBe(canvas);
+    expect(drawn("level-2").some((shape) => shape.op === "fill")).toBe(true);
+    act(() => resolve({ ...lifetimeResponse, snapshot: "stable" }));
+    await waitFor(() => expect(status.textContent).toBe(""));
+    expect(screen.getByTestId("run-timeline-canvas-level-2")).toBe(canvas);
+  });
+
   it("a drag pans and its release does not select the block under the pointer", async () => {
     render();
     const chart = await screen.findByTestId("run-timeline-chart");
