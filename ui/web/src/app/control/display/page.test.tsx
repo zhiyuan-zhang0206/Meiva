@@ -14,6 +14,7 @@ vi.mock("@/lib/transport/api", () => ({
     putSetting: vi.fn(),
     getModels: vi.fn(),
     getUiContributions: vi.fn(),
+    getNotificationCategories: vi.fn(),
   },
 }));
 
@@ -56,6 +57,7 @@ beforeEach(() => {
   vi.mocked(api.getSettings).mockResolvedValue({ settings: [] });
   vi.mocked(api.getModels).mockResolvedValue({ providers: {}, models: {}, default: "" });
   vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [], nav: [], stats: [] });
+  vi.mocked(api.getNotificationCategories).mockResolvedValue({ categories: [] });
 });
 
 async function replySuggestionsToggle(): Promise<HTMLButtonElement> {
@@ -105,6 +107,39 @@ describe("DisplaySettingsPage", () => {
     expect(screen.getByText("Confirm before terminate")).toBeTruthy();
     expect(screen.getByText("Confirm before restart")).toBeTruthy();
     expect(screen.getByText("Confirm before force kill")).toBeTruthy();
+  });
+
+  it("renders one switch per delivered category and writes the whole map", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({
+      settings: [{ key: "notifications.categories", value: {}, updated_at: "2026-10-18T00:00:00Z" }],
+    });
+    vi.mocked(api.getNotificationCategories).mockResolvedValue({
+      categories: [
+        {
+          id: "core.notice",
+          label: "Agent posted a notice",
+          description: "An agent posted a notice that needs no response.",
+          importance: "normal",
+          enabled: false,
+        },
+      ],
+    });
+    vi.mocked(api.putSetting).mockResolvedValue({
+      key: "notifications.categories", value: {}, updated_at: "2026-10-18T00:00:00Z",
+    });
+    renderPage();
+
+    const label = await screen.findByText("Agent posted a notice");
+    const toggle = label.parentElement?.parentElement?.parentElement?.querySelector<HTMLButtonElement>(
+      '[role="switch"]',
+    );
+    if (!toggle) throw new Error("notification category toggle not found");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(api.putSetting).toHaveBeenCalledWith("notifications.categories", { "core.notice": true }),
+    );
   });
 
   it("reply suggestions are on by default and the toggle persists the opt-out", async () => {

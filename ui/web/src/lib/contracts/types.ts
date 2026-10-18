@@ -799,6 +799,21 @@ export interface UserSettingRow {
   readonly updated_at: string;
 }
 
+// meiva:note
+// One delivery category the cluster can notify about, with the user's switch
+// already applied by the gateway (`enabled` includes the category default).
+// meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+export interface NotificationCategoryItem {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  readonly importance: string;
+  readonly enabled: boolean;
+}
+export interface NotificationCategoriesResponse {
+  readonly categories: NotificationCategoryItem[];
+}
+
 export interface UserSettingListResponse {
   readonly settings: readonly UserSettingRow[];
 }

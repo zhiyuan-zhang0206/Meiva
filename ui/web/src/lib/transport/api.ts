@@ -5,6 +5,7 @@ import { API_BASE } from "./api-base";
 import { track } from "../telemetry/telemetry";
 import type { ToUserDocument, NoticesFeed,
   UserSettingListResponse,
+  NotificationCategoriesResponse,
   UserSettingRow,
   AgentInspectStatistics,
   AgentInspectLive,
@@ -810,6 +811,10 @@ export const api = {
 
   getSettings: (): Promise<UserSettingListResponse> => {
     return f("/api/settings").then(ok<UserSettingListResponse>);
+  },
+
+  getNotificationCategories: (): Promise<NotificationCategoriesResponse> => {
+    return f("/api/notifications/categories").then(ok<NotificationCategoriesResponse>);
   },
 
   putSetting: (key: string, value: unknown): Promise<UserSettingRow> => {
