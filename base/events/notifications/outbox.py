@@ -36,6 +36,16 @@ def republish_pending(
         return 0
     announced = 0
     for notification_id in pending_sync(pool, min_age_seconds=min_age_seconds, limit=limit):
-        if announce_sync(pool, bus, notification_id):
-            announced += 1
+        # meiva:note
+        # One row's failure must not decide the rest of the batch. The row stays
+        # unannounced, so the next sweep returns to it, while the deliveries
+        # behind it go out now instead of waiting for it to clear.
+        # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+        try:
+            if announce_sync(pool, bus, notification_id):
+                announced += 1
+        except Exception:
+            _log.exception(
+                "announce failed for notification %s; the row stays owed", notification_id
+            )
     return announced
