@@ -9,7 +9,6 @@ from pathlib import Path
 from base.host.permissions_helper.grants.catalog import (
     CATALOG,
     ITEMS_BY_ID,
-    REQUIRED_ITEMS,
     Grant,
     PermissionItem,
     RequestMode,
@@ -246,10 +245,6 @@ def remember(report: GateReport, *, deferred: bool, path: Path | None = None) ->
     record = OnboardingRecord.from_report(report, deferred=deferred and not report.complete)
     write_record(record, path)
     return record
-
-
-def required_ids() -> tuple[str, ...]:
-    return tuple(item.id for item in REQUIRED_ITEMS)
 
 
 def item_for(item_id: str) -> PermissionItem:

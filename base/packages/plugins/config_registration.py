@@ -464,10 +464,6 @@ def _field_is_sensitive(extra: object) -> bool:
     return extras.get("sensitive") is True
 
 
-def registered_plugin_config_names(configs: Mapping[str, BaseModel]) -> tuple[str, ...]:
-    return tuple(sorted(configs))
-
-
 def is_per_agent_field(plugin: str, field: str, configs: Mapping[str, BaseModel]) -> bool:
     instance = configs.get(plugin)
     if instance is None:

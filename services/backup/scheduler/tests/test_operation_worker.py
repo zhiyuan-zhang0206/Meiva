@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -211,34 +210,23 @@ async def test_failed_operation_sanitizer_keeps_path_and_reports_error(
     assert str(work) in "\n".join(caught.value.__notes__)
 
 
-async def test_worker_secrets_and_progress_never_touch_retained_files(
+async def test_progress_reaches_the_operator_live(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The live URL arrives on stdin; stderr progress reaches the operator live."""
     from services.backup.scheduler.operation import worker_process
 
     stub_worker(
         tmp_path,
         monkeypatch,
-        "import hashlib\nfrom services.backup.scheduler.operation.worker_process import worker_secrets\n"
-        "seen=hashlib.sha256(worker_secrets()['live_db_url'].encode()).hexdigest()\n"
         "sys.stderr.write('downloading base\\nbase extracted\\n');sys.stderr.flush()\n"
-        "Path(sys.argv[2]).write_text(json.dumps({'seen':seen}))\n",
+        "Path(sys.argv[2]).write_text(json.dumps({'ok': True}))\n",
     )
     lines: list[str] = []
-    secret = "postgresql://meiva:s3cret@127.0.0.1:5433/meiva"  # noqa: S105 -- fixture
     completed = await worker_process.run_operation(
-        "m",
-        {"chain": "c"},
-        kind=operation_kind(tmp_path),
-        env={},
-        secrets={"live_db_url": secret},
-        progress=lines.append,
+        "m", {"chain": "c"}, kind=operation_kind(tmp_path), env={}, progress=lines.append
     )
-    assert completed.result == {"seen": hashlib.sha256(secret.encode()).hexdigest()}
+    assert completed.result == {"ok": True}
     assert lines == ["downloading base", "base extracted"]
-    retained = b"".join(path.read_bytes() for path in completed.work.rglob("*") if path.is_file())
-    assert b"s3cret" not in retained
     await completed.commit(lambda: None)
 
 

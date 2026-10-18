@@ -229,11 +229,6 @@ def status_if_conflict(helper_root_status):
     return status if status.get("state") == "conflict" else None
 
 
-def _probe_pids(probe: Path) -> set[int]:
-    """Every live unit-probe process of this workdir, whoever spawned it."""
-    return {int(pid) for pid in _run(["pgrep", "-f", str(probe)], check=False).stdout.split()}
-
-
 def relaunched_helper(label: str, old_pid: int):
     pid = job_pid(label)
     if pid is None or pid == old_pid:

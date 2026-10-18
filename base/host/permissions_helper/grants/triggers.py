@@ -8,7 +8,6 @@ from pathlib import Path
 from base.host.permissions_helper.grants.catalog import (
     AUTOMATION_TARGETS,
     FOLDER_ITEMS,
-    Grant,
     PermissionItem,
 )
 from base.host.permissions_helper.grants.probe import HelperChannel, read_result, spawn_child
@@ -92,11 +91,3 @@ def request_item(
         if text is not None:
             return classify(text)
     return "unresolved (timed out)"
-
-
-def verdict_grant(verdict: str) -> Grant:
-    if verdict == "granted":
-        return Grant.GRANTED
-    if verdict.startswith("denied"):
-        return Grant.DENIED
-    return Grant.UNKNOWN
