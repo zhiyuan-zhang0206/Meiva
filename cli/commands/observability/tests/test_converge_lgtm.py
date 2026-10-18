@@ -248,7 +248,14 @@ def test_native_provisioning_webhook_stays_loopback_without_observatory(
     _assert_rendered_provisioning(native_dir, webhook="$__env{MEIVA_ALERTS_WEBHOOK_URL}")
 
 
-def test_native_provisioning_preserves_user_edited_rendered_files(
+# meiva:note
+# A rendered provisioning file that drifted from its record is restored from the
+# checkout and converge reports the drift, because the checkout owns this tree:
+# preserving a stale copy let two retired alert rules keep evaluating while
+# converge skipped the file on every run. The rendered URLs are $__env{}
+# references resolved from runtime.env, so a hardcoded URL is a meaningful edit.
+# meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
+def test_native_provisioning_restores_user_edited_rendered_files(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -257,8 +264,6 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A rendered provisioning file the user hand-edited is warned about and
-    preserved on the next converge — never overwritten (web-sources precedent)."""
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
@@ -272,8 +277,6 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
         machine=command_runtime.machine,
     )
     datasources = native_dir / "config/provisioning/datasources/datasources.yml"
-    # The rendered tree carries $__env{} references (URLs live in runtime.env),
-    # so a meaningful user edit replaces a reference with a hardcoded URL.
     user_edit = datasources.read_text(encoding="utf-8").replace(
         "$__env{MEIVA_TELEMETRY_LOKI_URL}", "http://user.example:3100"
     )
@@ -289,9 +292,9 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
         machine=command_runtime.machine,
     )
 
-    assert "http://user.example:3100" in datasources.read_text(encoding="utf-8")
-    assert "$__env{MEIVA_TELEMETRY_LOKI_URL}" not in datasources.read_text(encoding="utf-8")
-    assert "modified locally" in capsys.readouterr().err
+    assert "http://user.example:3100" not in datasources.read_text(encoding="utf-8")
+    assert "$__env{MEIVA_TELEMETRY_LOKI_URL}" in datasources.read_text(encoding="utf-8")
+    assert "modified locally; overwritten from the rendered source" in capsys.readouterr().err
 
 
 def test_native_provisioning_removes_stale_rendered_files(

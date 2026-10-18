@@ -54,6 +54,46 @@ def test_preserve_hit_reports_converge_file_preserved(
     ]
 
 
+# meiva:note
+# A repository-owned surface is restored and the drift is still reported: the
+# render wins, and the fact that someone edited it does not go silent. The
+# record follows the restore, so the next converge is a clean write.
+# meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
+def test_overwrite_policy_restores_the_render_and_reports_the_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    emitted = _capture_emit(monkeypatch)
+
+    target = tmp_path / "rendered.yaml"
+    hashes = tmp_path / "rendered-hashes.json"
+    assert write_rendered_guarded(target, "v1", hashes, "k", surface="test-surface") is None
+
+    target.write_text("hand-edited", encoding="utf-8")
+    message = write_rendered_guarded(
+        target, "v2", hashes, "k", surface="test-surface", on_local_edit="overwrite"
+    )
+
+    assert message is not None and "overwritten from the rendered source" in message
+    assert target.read_text(encoding="utf-8") == "v2"
+    assert emitted == [
+        (
+            "telemetry",
+            "converge_file_overwritten",
+            {
+                "level": "warning",
+                "source": "converge",
+                "attributes": {"path": str(target), "key": "k", "surface": "test-surface"},
+            },
+        )
+    ]
+    assert (
+        write_rendered_guarded(
+            target, "v2", hashes, "k", surface="test-surface", on_local_edit="overwrite"
+        )
+        is None
+    )
+
+
 class _PoolStub:
     def __enter__(self) -> _PoolStub:
         return self

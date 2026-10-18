@@ -107,6 +107,8 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
   [[cli/docs/fleet-update.meiva.okf.md]].
 - Host-level Application Firewall and Redis bridge wiring are one subject:
   [[cli/commands/converge/docs/converge-host-wiring.meiva.okf.md]].
+- Converge-managed copies and their drift policy:
+  [[cli/commands/converge/docs/rendered-files.meiva.okf.md]].
 - Explicit editable-install inspection and write-window primitives are described
   in [[editable-install-guard.meiva.okf.md]]. Ordinary start and converge never
   repair or reinstall a separate production virtualenv.
