@@ -97,9 +97,12 @@ _LIVENESS_BEAT_STEP_S = 30.0
 
 # ── Reminder pass ──────────────────────────────────────────────────────────────
 
+# meiva:note
 # Tasks whose remind_interval_seconds has elapsed AND the owner hasn't been reminded
 # within this overdue window (last_reminded_at gates it within
 # max(backoff, remind_interval_seconds) — each task repeats at its own cadence).
+# A task that still has an open direct child is a container, not a work item: its
+# children carry the reminders, and repeating them on the parent adds nothing.
 # Terminated owners remain eligible: direct delivery records without reviving them.
 _REMINDER_SQL = """
     SELECT id, owner, title, remind_interval_seconds,
@@ -111,6 +114,10 @@ _REMINDER_SQL = """
       AND remind_interval_seconds IS NOT NULL
       AND NOT is_root
       AND now() - updated_at > make_interval(secs => remind_interval_seconds)
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_tasks child
+          WHERE child.parent_id = agent_tasks.id AND child.status = 'in_progress'
+      )
       AND (
           last_reminded_at IS NULL
           OR now() - last_reminded_at > make_interval(secs => GREATEST(%s, remind_interval_seconds))
