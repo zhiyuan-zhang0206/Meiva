@@ -3070,3 +3070,45 @@ DO $$ BEGIN
             run_timeline_message_facts, run_timeline_blocks TO meiva_runner;
     END IF;
 END $$;
+
+
+-- ─────────────── notification_events ───────────────
+-- The notification spine's delivery log: one row per delivered user
+-- notification, written by whichever process decides it (the runner for a
+-- settled turn, the gateway for a notice). Not an inbox — rows are never
+-- answered, resolved or superseded; `agent_notices` stays the inbox. Every
+-- transport (Android, macOS, console, Telegram) renders from these rows and the
+-- matching live `notification` event, so no client derives its own trigger.
+CREATE TABLE IF NOT EXISTS notification_events (
+    id              BIGSERIAL PRIMARY KEY,
+    category        TEXT NOT NULL,
+    subject         TEXT NOT NULL,
+    body            TEXT,
+    href            TEXT,
+    -- Deduplication identity. NULL opts the category out of deduplication.
+    dedupe_key      TEXT,
+    importance      TEXT NOT NULL CHECK (importance IN ('low', 'normal', 'high')),
+    -- Producing agent, or 0 for a system-level notification.
+    agent_id        BIGINT NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS notification_events_created_idx
+    ON notification_events (created_at DESC);
+
+-- The dedupe lookup: the newest delivery for one (category, dedupe_key).
+CREATE INDEX IF NOT EXISTS notification_events_dedupe_idx
+    ON notification_events (category, dedupe_key, created_at DESC)
+    WHERE dedupe_key IS NOT NULL;
+
+-- meiva_runner surface: the hosted runtime settles a turn and records the
+-- delivery itself. Append-only — UPDATE/DELETE stay out, and the ledger is never
+-- rewritten. Gated on the role's existence for the fresh-bootstrap path;
+-- base/cluster/authority/groups.py::ensure_groups re-affirms it at birth.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT ON notification_events TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE notification_events_id_seq TO meiva_runner;
+    END IF;
+END $$;

@@ -493,6 +493,10 @@ export function applySystemEvent(
     case "task_updated":
       // task board — useTasks invalidate-refetches on these; they never enter
       // the per-agent timeline.
+    case "notification":
+      // meiva:note
+      // Delivered-notification log: the device transports render it, and the
+      // console's inbox is driven by notices, so it never enters a timeline.
     case "timeline_snapshot":
       // Handled by store.processSseEvent before applySystemEvent —
       // does not go through the delta reducer; uses mergeSnapshotWithStreaming directly.

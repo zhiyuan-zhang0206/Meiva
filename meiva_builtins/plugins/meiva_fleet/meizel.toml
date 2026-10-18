@@ -1,4 +1,4 @@
-exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task_registry.py", "tests"]
+exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task_notifications.py", "task_registry.py", "tests"]
 
 [uses]
 "_task_receipts.py" = ["_task_update.py"]
@@ -6,7 +6,8 @@ exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task
 "plugin.py" = ["task_registry.py"]
 "services.py" = ["default_config.py"]
 "task_maintenance" = ["default_config.py"]
-"task_registry.py" = ["_task_assignment.py", "_task_creation_receipts.py", "_task_receipts.py", "_task_update.py"]
+"task_notifications.py" = []
+"task_registry.py" = ["_task_assignment.py", "_task_creation_receipts.py", "_task_receipts.py", "_task_update.py", "task_notifications.py"]
 "tests" = ["_task_creation_receipts.py", "_task_receipts.py", "_task_update.py", "agent_runtime.py", "default_config.py", "plugin.py", "services.py", "task_maintenance", "task_registry.py"]
 
 [debt.private-name]

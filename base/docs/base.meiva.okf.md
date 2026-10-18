@@ -47,6 +47,8 @@ The base-layer public entry points: [[base/docs/entry-points.meiva.okf.md]].
 
 ## Notes
 
+- **Notifications** (`base/events/notifications/`): one delivery decision behind every
+  transport; see [[base/events/notifications/docs/notifications.meiva.okf.md]].
 - `base/host/system/macos_firewall.py` — declarative macOS Application Firewall manifest,
   audit, status renderer, and rootless-first reconciliation with bounded
   `sudo -n` / manual-command fallback; see

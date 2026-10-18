@@ -47,9 +47,10 @@ pub fn run() {
             None,
         ));
 
+    let builder = builder.plugin(tauri_plugin_notification::init());
+
     #[cfg(target_os = "android")]
     let builder = builder
-        .plugin(tauri_plugin_notification::init())
         .plugin(android::background_plugin())
         .plugin(android::secret_plugin())
         .plugin(android::cookie_plugin())
