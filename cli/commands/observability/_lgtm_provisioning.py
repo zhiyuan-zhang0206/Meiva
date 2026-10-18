@@ -1,12 +1,3 @@
-"""Converge rendering of the Grafana provisioning tree (task #3697).
-
-Split out of ``observability.lgtm_native`` when the runtime-rendered dashboard (S3) pushed
-that module over the per-file line ceiling. Every provisioning file is
-copied VERBATIM under the content-hash user-edit guard — except
-``dashboards/meiva-ops-main.json``, which is generated from the metric
-registries through ``base.packages.dashboard_supply``.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -167,6 +158,14 @@ def record_rendered_hash(
     hashes_path.write_text(json.dumps(recorded, indent=2) + "\n", encoding="utf-8")
 
 
+# meiva:note
+# Every provisioning file is copied verbatim, and the checkout owns the tree: a
+# rendered copy that drifted from its recorded hash is restored and reported as
+# converge_file_overwritten rather than preserved. The datasource and webhook
+# URLs stay Grafana-native $__env{} references resolved from runtime.env, and
+# Grafana reads the rendered tree through MEIVA_PROVISIONING_PATH, so a rollout
+# that swaps the checkout cannot feed the running instance a half-rendered tree.
+# meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
 def render_provisioning(
     repo: Path,
     native_dir: Path,
@@ -174,22 +173,6 @@ def render_provisioning(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
 ) -> None:
-    """Render the Grafana provisioning tree into the native config dir.
-
-    Every provisioning file (datasources, alert rules, READMEs) is copied
-    VERBATIM — except ``dashboards/meiva-ops-main.json``, which is generated
-    from the metric registries (task #3697 S3) — the datasource and webhook
-    URLs are Grafana-native $__env{} references resolved from the process
-    env (runtime.env), so the checkout file is always a valid configuration
-    and the rendered copy never
-    rewrites URLs. Each file is written atomically through the content-hash
-    user-modification guard (web-sources precedent): a file the user
-    hand-edited since the last converge write is warned about and preserved,
-    never overwritten. Grafana reads this rendered tree via
-    {{MEIVA_PROVISIONING_PATH}} — the deployment state is decoupled from the
-    source checkout, so a rollout that swaps the checkout cannot feed the
-    running instance a half-rendered tree.
-    """
     source_dir = repo / "deploy/lgtm/config/grafana/provisioning"
     if not source_dir.is_dir():
         return
@@ -214,6 +197,7 @@ def render_provisioning(
             rel.as_posix(),
             surface="lgtm-provisioning",
             writer=atomic_write,
+            on_local_edit="overwrite",
         )
         if warning is not None:
             print(f"  ! lgtm native: {warning}", file=sys.stderr)

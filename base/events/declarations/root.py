@@ -271,6 +271,16 @@ class ConvergeFilePreserved(TypedDict):
     surface: str
 
 
+# meiva:note
+# One row per repository-owned converge destination that drifted from the record
+# and was restored from its source.
+# meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
+class ConvergeFileOverwritten(TypedDict):
+    path: str
+    key: str
+    surface: str
+
+
 EVENTS: dict[str, EventSpec] = {
     "lgtm_dashboard_render_failed": telemetry_event(
         "lgtm_dashboard_render_failed",
@@ -289,6 +299,17 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site=(
             "base/telemetry/converge_report.py:report_converge_preserve "
+            'telemetry.emit("telemetry", ...)'
+        ),
+    ),
+    "converge_file_overwritten": telemetry_event(
+        "converge_file_overwritten",
+        "converge restored a repo-owned destination from its source — the current content no "
+        "longer matched the recorded render, and this surface follows the checkout",
+        payload=ConvergeFileOverwritten,
+        tier="anomaly",
+        site=(
+            "base/telemetry/converge_report.py:report_converge_overwrite "
             'telemetry.emit("telemetry", ...)'
         ),
     ),
