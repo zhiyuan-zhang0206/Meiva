@@ -416,6 +416,9 @@ def spawn(
     shared default. `fork_from` copies another agent's conversation and keeps its config: the
     overlay may then only add entries to `skills_to_inject_into_system_prompt` /
     `skills_to_expand_at_start` (anything else raises ForkConfigChangeNotAllowed).
+    A fork taken while that agent is inside a tool call carries the call without its result: the
+    new agent sees it as already interrupted, not as work still running, so it checks whether the
+    call already took effect instead of repeating it.
     `{"eval_isolation": True, "eval_network_allowlist": ["web"]}` isolates the agent, allowing
     only the listed `web` / `understand`; `mcps` and `ui` are off.
     """
