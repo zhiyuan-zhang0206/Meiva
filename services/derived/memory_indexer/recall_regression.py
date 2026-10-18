@@ -1,9 +1,9 @@
 # meiva:note
-# Passive recall's regression set: 30 real inbound turns on which a note the agent needed was
-# retrieved but scored below the injection threshold, each with the rank and score it held on
-# 2026-10-18. A change to the ranking question, the model, the candidate count or the chunker
-# moves these numbers; this module turns a fresh run into held/slipped/lost so the change is
-# judged by what recall did, not by what the code says it should do.
+# Passive recall fails in two directions, so its regression set has two halves: 30 real inbound
+# turns where a note the agent needed was retrieved but never delivered, and 20 where nothing in
+# the pool applied yet the ranking was confident. A lower injection threshold should move the
+# first half up and the second half down; a change that moves both the same way has not been
+# judged. The ranking threshold and cap are read from the agent config, never copied here.
 # meiva:link services/docs/gateway_side/memory_indexer/memory-recall-regression.meiva.okf.md
 
 from __future__ import annotations
@@ -16,21 +16,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from base.config import settings
+
 CASES_PATH = Path(__file__).resolve().parent / "tests" / "recall_cases.jsonl"
-DEFAULT_TOP = 5
-DEFAULT_THRESHOLD = 0.72
+RECALL = "recall"
+PRECISION = "precision"
 
 
 @dataclass(frozen=True)
 class Case:
     id: str
+    group: str
     gloss: str
     language: str
     shape: str
     message: str
-    path: str
-    baseline_rank: int
+    path: str | None
+    baseline_rank: int | None
     baseline_score: float
+    baseline_delivered: bool
 
 
 @dataclass(frozen=True)
@@ -38,20 +42,29 @@ class Outcome:
     case: Case
     rank: int | None
     score: float | None
+    threshold: float
+    cap: int
+
+    @property
+    def delivered(self) -> bool:
+        return (
+            self.rank is not None
+            and self.rank <= self.cap
+            and (self.score or 0.0) >= self.threshold
+        )
 
     @property
     def verdict(self) -> str:
+        if self.case.group == PRECISION:
+            return "fired" if self.delivered else "silent"
         if self.rank is None:
             return "lost"
-        return "held" if self.rank <= self.case.baseline_rank else "slipped"
+        return "held" if self.rank <= (self.case.baseline_rank or 0) else "slipped"
 
-    def delivered(self, threshold: float) -> bool:
-        return (
-            self.rank is not None
-            and self.rank <= 3
-            and self.score is not None
-            and self.score >= threshold
-        )
+
+def injection_policy() -> tuple[float, int]:
+    memory = settings.agent
+    return memory.memory_recall_inject_threshold, memory.memory_recall_inject_max
 
 
 def _text(value: object) -> str:
@@ -72,15 +85,19 @@ def _case_of(raw: object) -> Case:
     if not isinstance(expect, dict):
         raise TypeError(f"case {row.get('id')!r}: expect must be an object")
     match = cast(dict[str, object], expect)
+    path = match.get("path")
+    rank = match.get("baseline_rank")
     return Case(
         id=_text(row["id"]),
+        group=_text(row["group"]),
         gloss=_text(row["gloss"]),
         language=_text(row.get("language", "")),
         shape=_text(row.get("shape", "")),
         message=_text(row["message"]),
-        path=_text(match["path"]),
-        baseline_rank=int(_number(match["baseline_rank"])),
+        path=None if path is None else _text(path),
+        baseline_rank=None if rank is None else int(_number(rank)),
         baseline_score=_number(match["baseline_score"]),
+        baseline_delivered=bool(match["baseline_delivered"]),
     )
 
 
@@ -94,43 +111,79 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
         seen.add(case.id)
         if not case.message.strip():
             raise ValueError(f"case {case.id!r}: empty message")
-        if case.baseline_rank < 1:
-            raise ValueError(f"case {case.id!r}: baseline_rank must be >= 1")
+        if case.group not in (RECALL, PRECISION):
+            raise ValueError(f"case {case.id!r}: unknown group {case.group!r}")
+        if case.group == RECALL:
+            if case.path is None or case.baseline_rank is None:
+                raise ValueError(f"case {case.id!r}: a recall case needs path and baseline_rank")
+            if case.baseline_rank < 1:
+                raise ValueError(f"case {case.id!r}: baseline_rank must be >= 1")
+        elif case.path is not None:
+            raise ValueError(f"case {case.id!r}: a precision case expects no path")
     return cases
 
 
-def evaluate(case: Case, ranked: Sequence[tuple[str, float]]) -> Outcome:
+def evaluate(
+    case: Case, ranked: Sequence[tuple[str, float]], *, threshold: float, cap: int
+) -> Outcome:
     for position, (path, score) in enumerate(ranked, 1):
-        if path == case.path:
-            return Outcome(case=case, rank=position, score=float(score))
-    return Outcome(case=case, rank=None, score=None)
+        if case.path is not None and path == case.path:
+            return Outcome(
+                case=case, rank=position, score=float(score), threshold=threshold, cap=cap
+            )
+    return Outcome(case=case, rank=None, score=None, threshold=threshold, cap=cap)
 
 
-def report(outcomes: Iterable[Outcome], *, threshold: float = DEFAULT_THRESHOLD) -> str:
+def evaluate_precision(
+    case: Case, ranked: Sequence[tuple[str, float]], *, threshold: float, cap: int
+) -> Outcome:
+    top = list(ranked)[:1]
+    if top and cap > 0 and top[0][1] >= threshold:
+        return Outcome(case=case, rank=1, score=float(top[0][1]), threshold=threshold, cap=cap)
+    return Outcome(case=case, rank=None, score=None, threshold=threshold, cap=cap)
+
+
+def _with_verdict(rows: Iterable[Outcome], verdict: str) -> list[Outcome]:
+    return [outcome for outcome in rows if outcome.verdict == verdict]
+
+
+def _movement_line(outcome: Outcome) -> str:
+    if outcome.rank is None:
+        return f"    {outcome.verdict} {outcome.case.id}: {outcome.case.path} no longer returned"
+    return (
+        f"    {outcome.verdict} {outcome.case.id}: {outcome.case.path} "
+        f"rank {outcome.case.baseline_rank} -> {outcome.rank}, "
+        f"score {outcome.case.baseline_score:.2f} -> {outcome.score:.2f}"
+    )
+
+
+def _newly_firing_line(outcome: Outcome) -> str:
+    return (
+        f"    newly firing {outcome.case.id}: nothing applied to this turn, "
+        f"top score {outcome.case.baseline_score:.2f} -> {outcome.score:.2f}"
+    )
+
+
+def report(outcomes: Iterable[Outcome], *, threshold: float, cap: int) -> str:
     rows = list(outcomes)
-    held = [o for o in rows if o.verdict == "held"]
-    slipped = [o for o in rows if o.verdict == "slipped"]
-    lost = [o for o in rows if o.verdict == "lost"]
-    delivered = [o for o in rows if o.delivered(threshold)]
+    recall = [outcome for outcome in rows if outcome.case.group == RECALL]
+    precision = [outcome for outcome in rows if outcome.case.group == PRECISION]
+    delivered = [outcome for outcome in recall if outcome.delivered]
+    fired = _with_verdict(precision, "fired")
+    newly = [outcome for outcome in fired if not outcome.case.baseline_delivered]
+    movements = _with_verdict(recall, "slipped") + _with_verdict(recall, "lost")
     lines = [
-        f"recall regression: {len(rows)} cases, threshold {threshold:.2f}",
-        f"  delivered {len(delivered):>3}  (top three, at or above the threshold)",
-        f"  held      {len(held):>3}",
-        f"  slipped   {len(slipped):>3}",
-        f"  lost      {len(lost):>3}",
+        f"recall regression: {len(rows)} cases, threshold {threshold:.2f}, cap {cap}",
+        f"  recall set (a usable note existed): {len(recall)} cases",
+        f"    delivered {len(delivered):>3}   held {len(_with_verdict(recall, 'held')):>3}"
+        f"   slipped {len(movements) - len(_with_verdict(recall, 'lost')):>3}"
+        f"   lost {len(_with_verdict(recall, 'lost')):>3}",
+        f"  precision set (nothing usable existed): {len(precision)} cases",
+        f"    fired {len(fired):>3}   silent {len(precision) - len(fired):>3}"
+        f"   newly firing {len(newly):>3}",
     ]
-    for label, group in (("slipped", slipped), ("lost", lost)):
-        for outcome in group:
-            if outcome.rank is None:
-                lines.append(
-                    f"    {label} {outcome.case.id}: {outcome.case.path} no longer returned"
-                )
-            else:
-                lines.append(
-                    f"    {label} {outcome.case.id}: {outcome.case.path} "
-                    f"rank {outcome.case.baseline_rank} -> {outcome.rank}, "
-                    f"score {outcome.case.baseline_score:.2f} -> {outcome.score:.2f}"
-                )
+    lines.extend(_movement_line(outcome) for outcome in movements)
+    lines.extend(_newly_firing_line(outcome) for outcome in newly)
     return "\n".join(lines)
 
 
@@ -161,12 +214,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--cases", type=Path, default=CASES_PATH, help="fixture to evaluate against"
     )
     parser.add_argument(
-        "--threshold", type=float, default=DEFAULT_THRESHOLD, help="injection threshold in force"
+        "--threshold", type=float, default=None, help="defaults to the agent config"
     )
-    parser.add_argument(
-        "--top", type=int, default=DEFAULT_TOP, help="matches per case the run compared"
-    )
+    parser.add_argument("--cap", type=int, default=None, help="defaults to the agent config")
     args = parser.parse_args(argv)
+    threshold, cap = injection_policy()
+    if args.threshold is not None:
+        threshold = args.threshold
+    if args.cap is not None:
+        cap = args.cap
 
     decoded: object = json.loads(args.results.read_text(encoding="utf-8"))
     if not isinstance(decoded, dict):
@@ -176,8 +232,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     missing = [case.id for case in cases if case.id not in payload]
     if missing:
         raise SystemExit(f"results are missing {len(missing)} case(s), e.g. {missing[0]}")
-    outcomes = [evaluate(case, _ranked_from(payload[case.id])[: args.top]) for case in cases]
-    sys.stdout.write(report(outcomes, threshold=args.threshold) + "\n")
+    outcomes: list[Outcome] = []
+    for case in cases:
+        ranked = _ranked_from(payload[case.id])
+        if case.group == RECALL:
+            outcomes.append(evaluate(case, ranked, threshold=threshold, cap=cap))
+        else:
+            outcomes.append(evaluate_precision(case, ranked, threshold=threshold, cap=cap))
+    sys.stdout.write(report(outcomes, threshold=threshold, cap=cap) + "\n")
     return 0
 
 
