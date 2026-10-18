@@ -280,6 +280,8 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events | — |
 | `audit_write_failed` | an audit event could not be recorded in audit_events (the record is missing; the Loki projection of the same event still went out) | anomaly | event_name, error_class, error | — | events | — |
 | `telemetry_store_failed` | a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror and Loki still hold them) | anomaly | rows, consecutive_failures, error_class, error | — | events | — |
+| `env_audit_history` | the env-write audit history holds unreadable records in its tail window; the listing is incomplete | anomaly | — | — | events | — |
+| `lgtm_dashboard` | a provisioned LGTM dashboard JSON could not be read or is not a JSON object; it is not provisioned this pass | anomaly | — | — | events | — |
 | `lgtm_dashboard_render_failed` | meiva-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events | — |
 | `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events | — |
 | `converge_file_overwritten` | converge restored a repo-owned destination from its source — the current content no longer matched the recorded render, and this surface follows the checkout | anomaly | path, key, surface | — | events | — |
