@@ -17,9 +17,18 @@ _SELECT_NOTICE = (
 )
 
 
-def _question_fingerprint(question: object) -> str:
+def question_fingerprint(question: object) -> str:
     payload = json.dumps(question, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()[:12]
+
+
+# meiva:note
+# The key format has one owner: the delivery path that writes it and the audit
+# that replays a window must agree, or the replay silently measures a different
+# policy than the one the spine runs.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def notice_dedupe_key(notice_id: int, question: object) -> str:
+    return f"notice:{notice_id}:{question_fingerprint(question)}"
 
 
 def _deliver(pool: ConnectionPool, agent_id: int, notice_id: int) -> NotificationRecord | None:
@@ -35,7 +44,7 @@ def _deliver(pool: ConnectionPool, agent_id: int, notice_id: int) -> Notificatio
         category_id="core.needs_input",
         subject=title,
         body=content,
-        dedupe_key=f"notice:{notice_id}:{_question_fingerprint(question)}",
+        dedupe_key=notice_dedupe_key(notice_id, question),
         agent_id=agent_id,
     )
 
