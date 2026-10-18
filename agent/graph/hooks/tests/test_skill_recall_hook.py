@@ -787,14 +787,13 @@ async def test_a_person_message_still_skips_the_gate(
     assert set(scorer.calls[0][1]) == {"alpha", "beta", "gamma"}
 
 
-async def test_a_peer_turn_uses_the_peer_threshold_which_config_can_lower(
+async def test_a_peer_turn_uses_the_peer_threshold_not_the_person_cut(
     three_skills: Path, database: Database
 ) -> None:
+    scorer = _Scorer({"work": 0.95, "method_given": 0.05, "gamma": 0.65})
     state = _state(_tail("agent:402", "have a look at the staging alerts"))
-    scorer = _Scorer({"work": 0.95, "method_given": 0.05, "gamma": 0.70})
     assert await _run(database, state, scorer, skill_recall_peer_messages=True) is None
-
     update = await _run(
-        database, state, scorer, skill_recall_peer_messages=True, skill_recall_peer_threshold=0.65
+        database, state, scorer, skill_recall_peer_messages=True, skill_recall_peer_threshold=0.60
     )
-    assert _offered(update) == ["gamma"]
+    assert _offered(update) == ["gamma"], "0.65 clears the person cut and misses the peer cut"

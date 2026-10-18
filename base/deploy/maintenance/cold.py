@@ -5,6 +5,7 @@ An expired lease is insufficient: a persisted END and actual native absence
 must agree before cold preparation can retain that idle intent.
 """
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.checkpoint_serializer import CheckpointSerializer
 from base.agents.incarnation import exec_request_evidence
+from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import meiva_home
 from base.sessions import backend
@@ -82,9 +84,10 @@ def _require_no_unsettled_exec(conn: psycopg.Connection[Any], agent_id: int) -> 
         )
 
 
-def require_no_consumer_process() -> None:
+def require_no_consumer_process(*, processes: Iterable[Any] | None = None) -> None:
     home = meiva_home().resolve()
-    for process in psutil.process_iter():
+    unreadable = 0
+    for process in psutil.process_iter() if processes is None else processes:
         try:
             argv = process.cmdline() or []
         except (psutil.Error, OSError, SystemError):
@@ -92,6 +95,7 @@ def require_no_consumer_process() -> None:
             # the way psutil's ad_value=None already skipped AccessDenied, and
             # keep scanning — a read failure must not abort the check (task
             # #4964).
+            unreadable += 1
             continue
         if not any(
             argv[i] == "-m" and argv[i + 1] in _CONSUMER_MODULES for i in range(len(argv) - 1)
@@ -105,6 +109,12 @@ def require_no_consumer_process() -> None:
             raise RuntimeError("cannot identify a native consumer's home") from exc
         if raw_home is None or Path(raw_home).resolve() == home:
             raise RuntimeError(f"native consumer still exists during cold prepare: {process.pid}")
+    if unreadable:
+        logger.warning(
+            "the cold-prepare consumer scan could not read the argv of {n} process(es); any of "
+            "them may be a native consumer, so absence is proven only for the processes it read",
+            n=unreadable,
+        )
 
 
 def require_persisted_end(conn: psycopg.Connection[Any], agent_id: int) -> str:
