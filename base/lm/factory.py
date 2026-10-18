@@ -319,6 +319,23 @@ def resolve_override(override: str, model: str, *, agent_id: int | None = None) 
     return result
 
 
+# meiva:note
+# Exactly one layer owns a call's llm_usage row. Every build is metered by default, so a
+# model built and called directly cannot spend money invisibly; a caller that emits its own
+# row (the turn loop, compaction, the shared request helpers, the labeler, reply suggestions)
+# builds with meter=False or strips an injected build with unmeter(), and the meter's
+# message stamp stops a second row for the same response.
+# meiva:link base/lm/docs/usage.meiva.okf.md
+def _metered(
+    client: BaseChatModel, *, meter: bool, model: str, catalog: ModelCatalog
+) -> BaseChatModel:
+    if not meter:
+        return client
+    from base.lm.metering import install_usage_meter
+
+    return install_usage_meter(client, model_name=model, catalog=catalog)
+
+
 def build_chat_model(
     model: str,
     *,
@@ -332,6 +349,7 @@ def build_chat_model(
     base_url: str | None = None,
     overrides: ModelOverrides,
     single_attempt: bool = False,
+    meter: bool = True,
     catalog: ModelCatalog,
     llm_override: str,
 ) -> BaseChatModel:
@@ -417,6 +435,7 @@ def build_chat_model(
         base_url=base_url,
         overrides=overrides,
         single_attempt=single_attempt,
+        meter=meter,
         catalog=catalog,
         llm_override=llm_override,
     )[0]
@@ -440,6 +459,7 @@ def build_chat_model_bound(
     base_url: str | None = None,
     overrides: ModelOverrides,
     single_attempt: bool = False,
+    meter: bool = True,
     catalog: ModelCatalog,
     llm_override: str,
 ) -> tuple[BaseChatModel, provider_api.ProviderBinding | None]:
@@ -449,6 +469,8 @@ def build_chat_model_bound(
     # all agents through a fake LLM, and production observability must be fail-loud.
     if type(single_attempt) is not bool:
         raise ValueError("single_attempt must be a boolean")
+    if type(meter) is not bool:
+        raise ValueError("meter must be a boolean")
     override = llm_override
     if override:
         if single_attempt:
@@ -456,7 +478,15 @@ def build_chat_model_bound(
         logger.warning(
             f"MEIVA_LLM_OVERRIDE active: model={model!r} does not go through real LLM, routed via {override!r}"
         )
-        return resolve_override(override, model, agent_id=agent_id), None
+        return (
+            _metered(
+                resolve_override(override, model, agent_id=agent_id),
+                meter=meter,
+                model=model,
+                catalog=catalog,
+            ),
+            None,
+        )
 
     # The composition root supplies a complete catalog, including for services
     # that never load agent-side plugin.py.
@@ -516,7 +546,7 @@ def build_chat_model_bound(
                 )
             )
 
-            return client, binding
+            return _metered(client, meter=meter, model=model, catalog=catalog), binding
 
     raise ValueError(
         f"Unknown model {model!r} — add a {model.split('-', maxsplit=1)[0]}-* "

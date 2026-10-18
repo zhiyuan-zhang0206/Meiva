@@ -103,7 +103,11 @@ def test_latency_ms_rides_payload(loguru_records):
     assert "latency" not in out  # never in the human-readable line
     assert loguru_records[0]["extra"]["latency_ms"] == 1234.5
     loguru_records.clear()  # pyright: ignore[reportUnknownMemberType]
-    log_llm_usage(msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog())
+    second = AIMessage(
+        content="",
+        usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+    )
+    log_llm_usage(second, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog())
     assert loguru_records[0]["extra"]["latency_ms"] is None
 
 
@@ -129,8 +133,16 @@ def test_decode_ms_rides_payload(loguru_records):
     assert loguru_records[0]["extra"]["decode_ms"] == 800.0
     assert loguru_records[0]["extra"]["latency_ms"] == 1234.5
     loguru_records.clear()  # pyright: ignore[reportUnknownMemberType]
+    second = AIMessage(
+        content="",
+        usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+    )
     log_llm_usage(
-        msg, agent_id=7, model="deepseek-v4-pro", latency_ms=1234.5, catalog=build_model_catalog()
+        second,
+        agent_id=7,
+        model="deepseek-v4-pro",
+        latency_ms=1234.5,
+        catalog=build_model_catalog(),
     )
     assert loguru_records[0]["extra"]["decode_ms"] is None
 
@@ -340,6 +352,7 @@ _EVENT_KEYS = (
     "price_out",
     "price_write_5m",
     "price_write_1h",
+    "attribution",
 )
 
 

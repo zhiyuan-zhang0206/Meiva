@@ -23,6 +23,14 @@ tags:
 - Cache fields are absent when a provider supplies no cache metering (including current decision and embedding calls). A reported `cache_read=0` is a measured miss; absence is N/A, never an inferred miss. Usage, price, latency and billing still record every completed call. Cache rates use only input from the calls reporting cache reads in both numerator and denominator.
 - Previously emitted synthetic zeroes remain historical observations; they are not rewritten as unknown. Inspector projections preserve the legacy denominator for old rows without the new measured-input counter.
 
+## Direct callers
+
+`build_chat_model(...)` meters its own calls: `base/lm/metering.py` attaches one LangChain callback handler to the built model, and every completed provider call (`invoke`, `ainvoke`, `stream`, `astream`, `batch`) writes the same `llm_usage` event `log_usage_from_message` writes, with `usage_kind="direct"`. Before this, a worker or script that built a model and called it directly spent money with no row at all (task #5327).
+
+Exactly one layer owns a call's row. The factory owns it by default. A caller that emits the row itself — with its own `usage_kind`, `source` or agent id — builds with `meter=False`, or strips the meter from an injected build with `unmeter(model)`. The meter also stamps `msg.additional_kwargs["meiva_usage"]`, and `log_usage_from_message` refuses a message that already carries the stamp, so a caller that logs the same response cannot produce a second row.
+
+`attribution` says how a row's agent identity was established: `caller` (the emitter supplied `for_agent_id`), `process` (the identity bound at telemetry startup), or `unattributed` (no identity was available, `agent_id` is NULL). A meter that cannot account for a call reports one `llm_usage_metering_failed` event and a rate-limited warning; it never fails the model call.
+
 ## Notes
 
 - Usage events keep price snapshots at the time of use so cost accounting remains stable when catalog rates later change.

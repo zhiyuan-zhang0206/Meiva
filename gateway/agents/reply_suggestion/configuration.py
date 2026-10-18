@@ -50,6 +50,7 @@ def reply_suggestion_service(
             model,
             reasoning_effort=ReasoningEffort.NONE,
             timeout=DRAFT_TIMEOUT_S,
+            meter=False,
             catalog=catalog,
             llm_override=config.view.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
