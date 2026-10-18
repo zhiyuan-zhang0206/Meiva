@@ -67,7 +67,7 @@ def test_the_restore_carries_its_own_statement_budget() -> None:
     restore(conn, gate=_Gate())
 
     statement, kwargs = conn.executed[0]
-    budget_ms = int(settings.agent.db_pool_restore_timeout_seconds * 1000)
+    budget_ms = int(settings.data_plane.db_pool_restore_timeout_seconds * 1000)
     assert statement == f"RESET ALL; SET statement_timeout = {budget_ms}"
     assert kwargs == {"prepare": False}, (
         "the two statements must stay one simple-protocol round trip"
@@ -100,7 +100,9 @@ def test_a_cancelled_restore_reports_one_event_and_propagates(events: list[dict[
     reported = [event for event in events if event.get("event") == "db_pool_restore_timeout"]
     assert len(reported) == 1
     assert reported[0]["name"] == "tests:restore"
-    assert reported[0]["budget_ms"] == int(settings.agent.db_pool_restore_timeout_seconds * 1000)
+    assert reported[0]["budget_ms"] == int(
+        settings.data_plane.db_pool_restore_timeout_seconds * 1000
+    )
     assert reported[0]["elapsed_ms"] >= int((time.monotonic() - started) * 1000) - 5
 
 
