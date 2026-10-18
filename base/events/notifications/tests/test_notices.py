@@ -49,8 +49,10 @@ async def test_a_response_notice_is_delivered(
         "SELECT category, subject, dedupe_key FROM notification_events WHERE agent_id = %s",
         (agent_id,),
     ).fetchone()
+    assert row is not None
     category, subject, dedupe_key = row
     assert (category, subject) == ("core.needs_input", "Need a decision")
+    assert isinstance(dedupe_key, str)
     assert dedupe_key.startswith(f"notice:{notice_id}:")
 
 
