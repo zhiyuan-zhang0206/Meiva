@@ -6,17 +6,23 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
+from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.events.live.projection import NotificationEmitted
 from base.events.notifications.catalog import NotificationCategory, core_catalog
 from base.events.notifications.policy import decide
 from base.events.notifications.store import (
+    insert,
     insert_async,
-    insert_sync,
+    mark_announced_async,
+    mark_announced_sync,
+    read_inputs,
     read_inputs_async,
-    read_inputs_sync,
+    unannounced_async,
+    unannounced_sync,
 )
 
 _log = logging.getLogger("base.events.notifications")
@@ -78,8 +84,15 @@ def _record(
     return declared, params
 
 
-def deliver_sync(
-    pool: ConnectionPool,
+# meiva:note
+# The producing transaction stages its own delivery: a notice that needs an answer
+# commits its `notification_events` row with the notice, so the debt exists before
+# any process could die. `announced_at` stays NULL until the transport accepts the
+# publication, which is why the dedupe lookup counts an unannounced row too -- the
+# outbox sweep converges it to delivered rather than a second delivery row.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def deliver_in_transaction(
+    conn: psycopg.Connection,
     *,
     category_id: str,
     subject: str,
@@ -92,7 +105,7 @@ def deliver_sync(
     catalog: Mapping[str, NotificationCategory] | None = None,
 ) -> NotificationRecord | None:
     declared = category(category_id, catalog)
-    inputs = read_inputs_sync(pool, category=declared.id, dedupe_key=dedupe_key)
+    inputs = read_inputs(conn, category=declared.id, dedupe_key=dedupe_key)
     prepared = _record(
         category_id,
         subject=subject,
@@ -109,7 +122,7 @@ def deliver_sync(
         return None
     declared, params = prepared
     return NotificationRecord(
-        id=insert_sync(pool, params),
+        id=insert(conn, params),
         category=declared.id,
         subject=subject,
         body=body,
@@ -117,6 +130,34 @@ def deliver_sync(
         importance=declared.importance,
         agent_id=agent_id,
     )
+
+
+def deliver_sync(
+    pool: ConnectionPool,
+    *,
+    category_id: str,
+    subject: str,
+    body: str | None = None,
+    href: str | None = None,
+    dedupe_key: str | None = None,
+    agent_id: int = 0,
+    overrides: dict[str, bool] | None = None,
+    now: datetime | None = None,
+    catalog: Mapping[str, NotificationCategory] | None = None,
+) -> NotificationRecord | None:
+    with write_transaction(pool) as conn:
+        return deliver_in_transaction(
+            conn,
+            category_id=category_id,
+            subject=subject,
+            body=body,
+            href=href,
+            dedupe_key=dedupe_key,
+            agent_id=agent_id,
+            overrides=overrides,
+            now=now,
+            catalog=catalog,
+        )
 
 
 async def deliver_async(
@@ -160,35 +201,62 @@ async def deliver_async(
     )
 
 
-def _emitted(record: NotificationRecord) -> NotificationEmitted:
+def _emitted(
+    notification_id: int,
+    category: str,
+    subject: str,
+    body: str | None,
+    href: str | None,
+    importance: str,
+    agent_id: int,
+) -> NotificationEmitted:
     return NotificationEmitted(
-        agent_id=record.agent_id,
-        notification_id=record.id,
-        category=record.category,
-        subject=record.subject,
-        body=record.body,
-        href=record.href,
-        importance=record.importance,
-    )
-
-
-async def announce(bus: EventBus | None, record: NotificationRecord) -> None:
-    if bus is None:
-        return
-    await bus.publish_best_effort(
-        _emitted(record).model_dump_json(), context="notification_emitted"
+        agent_id=agent_id,
+        notification_id=notification_id,
+        category=category,
+        subject=subject,
+        body=body,
+        href=href,
+        importance=importance,
     )
 
 
 # meiva:note
-# The sync-context counterpart of `announce`: a producer outside the event loop
-# (the task-maintenance daemon) publishes the same one live event, so no producer
-# has to reach for a weaker delivery.
+# Announcing is one step with two outcomes: the transport accepted the live event
+# and the row is marked `announced_at`, or the publish failed (the transport
+# returns None for a known Redis/network failure) and the row stays unannounced
+# for the outbox sweep. A crash between publish and mark re-announces — an
+# at-least-once push the client already deduplicates on `notification_id` — and is
+# never a lost one.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-def announce_sync(bus: EventBus | None, record: NotificationRecord) -> None:
+async def announce(
+    pool: AsyncConnectionPool[Any], bus: EventBus | None, notification_id: int
+) -> bool:
     if bus is None:
-        return
-    bus.publish_best_effort_sync(_emitted(record).model_dump_json(), context="notification_emitted")
+        return False
+    row = await unannounced_async(pool, notification_id)
+    if row is None:
+        return False
+    published = await bus.publish_best_effort(
+        _emitted(*row).model_dump_json(), context="notification_emitted"
+    )
+    if published is None:
+        return False
+    return await mark_announced_async(pool, notification_id)
+
+
+def announce_sync(pool: ConnectionPool, bus: EventBus | None, notification_id: int) -> bool:
+    if bus is None:
+        return False
+    row = unannounced_sync(pool, notification_id)
+    if row is None:
+        return False
+    published = bus.publish_best_effort_sync(
+        _emitted(*row).model_dump_json(), context="notification_emitted"
+    )
+    if published is None:
+        return False
+    return mark_announced_sync(pool, notification_id)
 
 
 # meiva:note
@@ -204,5 +272,5 @@ async def publish_notification(
     record = await deliver_async(pool, **fields)
     if record is None:
         return None
-    await announce(bus, record)
+    await announce(pool, bus, record.id)
     return record.id

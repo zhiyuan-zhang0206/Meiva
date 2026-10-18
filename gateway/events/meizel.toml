@@ -1,4 +1,4 @@
-exports = ["agent_events.py", "computer_traces.py", "metrics.py", "resolutions.py", "router.py", "schemas.py", "sse.py", "system.py", "telemetry_rows.py"]
+exports = ["agent_events.py", "computer_traces.py", "metrics.py", "notification_outbox.py", "resolutions.py", "router.py", "schemas.py", "sse.py", "system.py", "telemetry_rows.py"]
 
 [uses]
 "agent_events.py" = ["schemas.py", "sse.py", "telemetry_rows.py"]

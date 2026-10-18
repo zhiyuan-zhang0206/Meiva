@@ -96,6 +96,41 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    notification_outbox_interval_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        alias="MEIVA_NOTIFICATION_OUTBOX_INTERVAL_SECONDS",
+        description=(
+            "Gateway notification-outbox sweep interval (seconds): how often a delivery "
+            "row left unannounced (a failed Redis announce, or a crash between the "
+            "producing commit and the publish) is re-announced. A row younger than one "
+            "interval is left to the producer that staged it."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    notification_outbox_batch: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        alias="MEIVA_NOTIFICATION_OUTBOX_BATCH",
+        description=(
+            "Deliveries one notification-outbox sweep may re-announce. Bounds the work "
+            "one pass holds; a backlog larger than this drains over later sweeps."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     timeline_compact_history: int = Field(
         default=1,
         ge=-1,

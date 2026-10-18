@@ -11,6 +11,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.tasks.status import TaskStatus
 from base.db.transaction import write_transaction
+from base.events.notifications.notices import stage_notice_notification
 from base.packages.plugins.flags import read_declared_flag
 from meiva_builtins.plugins.meiva_fleet.default_config import contribute
 
@@ -23,12 +24,13 @@ class EscalationReceipt:
     inbound_id: int | None
     content: str
     # meiva:note
-    # The committed `agent_notices` row of the user leg (None for a delegator
-    # digest, which is an inbound note rather than an inbox notice). The daemon
-    # delivers that row through the notification spine after this transaction
-    # commits, exactly like a gateway-posted notice.
+    # The staged `notification_events` row of the user leg, None when the spine
+    # suppressed it (the category is switched off, or the dedupe window is open)
+    # and for a delegator digest, which is an inbound note rather than an inbox
+    # notice. The daemon announces it after this transaction commits; a lost
+    # announce leaves the row unannounced and the outbox sweep retries it.
     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-    notice_id: int | None = None
+    notification_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -70,7 +72,9 @@ def _lock_candidates(cur: psycopg.Cursor, threshold: int) -> tuple[list[int], di
     return [row[0] for row in candidates], locked
 
 
-def _user_notice(cur: psycopg.Cursor, task: _Task) -> EscalationReceipt | None:
+def _user_notice(
+    cur: psycopg.Cursor, conn: psycopg.Connection, task: _Task
+) -> EscalationReceipt | None:
     if task.owner is None:
         raise ValueError("human escalation requires a task owner")
     cur.execute(
@@ -103,7 +107,8 @@ def _user_notice(cur: psycopg.Cursor, task: _Task) -> EscalationReceipt | None:
     row = cur.fetchone()
     if row is None:
         raise RuntimeError("escalation notice insert returned no row")
-    return EscalationReceipt(task.owner, [task.id], "user", None, content, int(row[0]))
+    staged = stage_notice_notification(conn, agent_id=task.owner, notice_id=int(row[0]))
+    return EscalationReceipt(task.owner, [task.id], "user", None, content, staged)
 
 
 def _delegator_note(cur: psycopg.Cursor, owner: int, tasks: list[_Task]) -> EscalationReceipt:
@@ -168,7 +173,7 @@ def accept_escalations(pool: ConnectionPool, threshold: int) -> list[EscalationR
             _delegator_note(cur, owner, tasks) for owner, tasks in sorted(delegated.items())
         ]
         for task in human:
-            receipt = _user_notice(cur, task)
+            receipt = _user_notice(cur, conn, task)
             if receipt is not None:
                 receipts.append(receipt)
         return receipts
