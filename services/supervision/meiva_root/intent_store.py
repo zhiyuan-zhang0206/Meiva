@@ -32,7 +32,11 @@ from typing import cast
 _log = logging.getLogger(__name__)
 
 _DIRECTORY = "intent"
-_RECORD_FIELDS = frozenset({"intent", "source", "restart_failed", "updated_at"})
+_RECORD_FIELDS = frozenset({"intent", "source", "restart_failed", "updated_at", "caller"})
+_LEGACY_RECORD_FIELDS = frozenset({"intent", "source", "restart_failed", "updated_at"})
+_CALLER_FIELDS = frozenset(
+    {"pid", "ppid", "uid", "cwd", "argv", "agent_id", "machine", "operation_id", "env_keys"}
+)
 _FAILURE_FIELDS = frozenset({"stage", "since", "detail"})
 
 
@@ -72,11 +76,34 @@ class RestartFailure:
     detail: str
 
 
+# meiva:note
+# Who asked for the state change this record carries: pid/ppid/uid/cwd/argv name
+# the requesting process locally, `machine` names its host, and `env_keys`
+# carries variable *names* only. Persisted so the attribution outlives it.
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+@dataclass(frozen=True, slots=True)
+class CallerFacts:
+    pid: int
+    ppid: int
+    uid: int
+    cwd: str
+    argv: tuple[str, ...]
+    agent_id: str | None
+    machine: str
+    operation_id: str | None
+    env_keys: tuple[str, ...]
+
+    def summary(self) -> str:
+        who = self.agent_id or "no-agent"
+        return f"{who} pid={self.pid} uid={self.uid} on {self.machine} ({self.cwd})"
+
+
 @dataclass(frozen=True, slots=True)
 class IntentRecord:
     intent: UnitIntent
     source: IntentSource
     restart_failed: RestartFailure | None
+    caller: CallerFacts | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +206,7 @@ def _encode(record: IntentRecord) -> str:
         if failure is None
         else {"stage": failure.stage.value, "since": failure.since, "detail": failure.detail},
         "updated_at": time(),
+        "caller": None if record.caller is None else _encode_caller(record.caller),
     }
     return json.dumps(body, separators=(",", ":"), sort_keys=True) + "\n"
 
@@ -187,11 +215,59 @@ def _decode(raw: object) -> IntentRecord:
     if not isinstance(raw, dict):
         raise TypeError("record must be an object")
     values = cast("Mapping[str, object]", raw)
-    if frozenset(values) != _RECORD_FIELDS:
+    fields = frozenset(values)
+    if fields not in (_RECORD_FIELDS, _LEGACY_RECORD_FIELDS):
         raise ValueError(f"record must contain exactly {sorted(_RECORD_FIELDS)}")
     intent = _member(UnitIntent, values["intent"], "intent")
     source = _member(IntentSource, values["source"], "source")
-    return IntentRecord(intent, source, _decode_failure(values["restart_failed"]))
+    return IntentRecord(
+        intent,
+        source,
+        _decode_failure(values["restart_failed"]),
+        _decode_caller(values.get("caller")),
+    )
+
+
+def _encode_caller(caller: CallerFacts) -> dict[str, object]:
+    return {
+        "pid": caller.pid,
+        "ppid": caller.ppid,
+        "uid": caller.uid,
+        "cwd": caller.cwd,
+        "argv": list(caller.argv),
+        "agent_id": caller.agent_id,
+        "machine": caller.machine,
+        "operation_id": caller.operation_id,
+        "env_keys": list(caller.env_keys),
+    }
+
+
+# meiva:note
+# A caller block written by an older root, or none at all, reads as absent:
+# attribution is evidence, never a boot gate.
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+def _decode_caller(raw: object) -> CallerFacts | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    values = cast("Mapping[str, object]", raw)
+    if frozenset(values) != _CALLER_FIELDS:
+        return None
+    try:
+        return CallerFacts(
+            pid=int(cast("int", values["pid"])),
+            ppid=int(cast("int", values["ppid"])),
+            uid=int(cast("int", values["uid"])),
+            cwd=str(values["cwd"]),
+            argv=tuple(str(item) for item in cast("list[object]", values["argv"])),
+            agent_id=None if values["agent_id"] is None else str(values["agent_id"]),
+            machine=str(values["machine"]),
+            operation_id=None if values["operation_id"] is None else str(values["operation_id"]),
+            env_keys=tuple(str(item) for item in cast("list[object]", values["env_keys"])),
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def _decode_failure(raw: object) -> RestartFailure | None:

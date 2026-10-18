@@ -28,6 +28,10 @@ from cli.commands.lifecycle import _temporary_stop
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import force_close_terminals
 from cli.database import OperatorDatabaseFactory
+from cli.database.lifecycle_audit import (
+    lifecycle_audit,
+    operator_request_recorder,
+)
 from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
 
@@ -302,22 +306,23 @@ def cmd_stop(
     helper: HelperFactory | None,
 ) -> int:
     """Stop this unit, including terminals and infrastructure; retain its data."""
-    return do_stop(
-        repo_root(),
-        require_confirmation=require_confirmation,
-        keep_infra=keep_infra,
-        preserve_sessions=preserve_sessions,
-        keep_browser=not stop_browser,
-        announce=True,
-        teardown_extras=True,
-        force=force,
-        timeout=timeout,
-        retained_children=retained_children,
-        database_factory=database_factory,
-        producer=producer,
-        machine=machine,
-        helper=helper,
-    )
+    with lifecycle_audit(operator_request_recorder(database_factory=database_factory)):
+        return do_stop(
+            repo_root(),
+            require_confirmation=require_confirmation,
+            keep_infra=keep_infra,
+            preserve_sessions=preserve_sessions,
+            keep_browser=not stop_browser,
+            announce=True,
+            teardown_extras=True,
+            force=force,
+            timeout=timeout,
+            retained_children=retained_children,
+            database_factory=database_factory,
+            producer=producer,
+            machine=machine,
+            helper=helper,
+        )
 
 
 def release_self_heal_pause(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
@@ -582,10 +587,11 @@ def cmd_restart(
     command: CommandRuntime,
 ) -> int:
     """Stop then start without a confirmation prompt."""
-    return _cmd_restart_body(
-        mode=mode,
-        retained_children=retained_children,
-        database_factory=database_factory,
-        producer=producer,
-        command=command,
-    )
+    with lifecycle_audit(operator_request_recorder(database_factory=database_factory)):
+        return _cmd_restart_body(
+            mode=mode,
+            retained_children=retained_children,
+            database_factory=database_factory,
+            producer=producer,
+            command=command,
+        )

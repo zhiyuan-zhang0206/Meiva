@@ -9,9 +9,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from time import monotonic, time
-from typing import Protocol
+from typing import Protocol, cast
 
 import psutil
 
@@ -31,6 +32,7 @@ from base.native_process.root_control.ipc import (
 from services.supervision.meiva_root import intent_store
 from services.supervision.meiva_root.failure_state import UnitFailureFacts
 from services.supervision.meiva_root.intent_store import (
+    CallerFacts,
     IntentRecord,
     IntentSource,
     RestartFailure,
@@ -63,6 +65,35 @@ class MetricsSource(Protocol):
     def metrics_snapshot(self) -> dict[str, object]:
         """The B7 metrics block (the chain gauges)."""
         ...
+
+
+# meiva:note
+# The wire validates the caller block; this binds it to the record the root
+# persists, so the attribution outlives the requesting process and the root
+# generation that served it.
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+def _caller_facts(raw: object) -> CallerFacts | None:
+    if not isinstance(raw, dict):
+        return None
+    values = cast("Mapping[str, object]", raw)
+    argv = values.get("argv")
+    env_keys = values.get("env_keys")
+    return CallerFacts(
+        pid=int(cast("int", values["pid"])),
+        ppid=int(cast("int", values["ppid"])),
+        uid=int(cast("int", values["uid"])),
+        cwd=str(values["cwd"]),
+        argv=tuple(
+            str(item) for item in cast("list[object]", argv if isinstance(argv, list) else [])
+        ),
+        agent_id=None if values.get("agent_id") is None else str(values["agent_id"]),
+        machine=str(values["machine"]),
+        operation_id=None if values.get("operation_id") is None else str(values["operation_id"]),
+        env_keys=tuple(
+            str(item)
+            for item in cast("list[object]", env_keys if isinstance(env_keys, list) else [])
+        ),
+    )
 
 
 class Supervisor(StoppingMixin):
@@ -190,17 +221,19 @@ class Supervisor(StoppingMixin):
 
     # ── control verbs ────────────────────────────────────────────────────────
 
-    async def up(self, unit_id: str) -> dict[str, object]:
+    async def up(self, unit_id: str, *, caller: CallerFacts | None = None) -> dict[str, object]:
         """Ensure a unit and its subtree are running; idempotent per unit."""
         async with self._lock:
-            return await self._up_locked(unit_id)
+            return await self._up_locked(unit_id, caller=caller)
 
-    async def _up_locked(self, unit_id: str) -> dict[str, object]:
+    async def _up_locked(
+        self, unit_id: str, *, caller: CallerFacts | None = None
+    ) -> dict[str, object]:
         self._require_admission()
         results: list[dict[str, object]] = []
         for member in self._registry.subtree(unit_id):
             runtime = self._units[member]
-            self._set_intent(runtime, UnitIntent.RUNNING, IntentSource.OPERATOR)
+            self._set_intent(runtime, UnitIntent.RUNNING, IntentSource.OPERATOR, caller=caller)
             if self._is_active(runtime):
                 action = "already-running"
             else:
@@ -209,23 +242,29 @@ class Supervisor(StoppingMixin):
             results.append(self._unit_result(runtime, action))
         return {"verb": Verb.UP.value, "units": results}
 
-    async def down(self, unit_id: str, *, force: bool = False) -> dict[str, object]:
+    async def down(
+        self, unit_id: str, *, force: bool = False, caller: CallerFacts | None = None
+    ) -> dict[str, object]:
         """Stop a unit and its subtree, children before parents."""
         async with self._lock:
-            return await self._down_locked(unit_id, force=force)
+            return await self._down_locked(unit_id, force=force, caller=caller)
 
-    async def _down_locked(self, unit_id: str, *, force: bool = False) -> dict[str, object]:
+    async def _down_locked(
+        self, unit_id: str, *, force: bool = False, caller: CallerFacts | None = None
+    ) -> dict[str, object]:
         results: list[dict[str, object]] = []
         for member in self._registry.stop_order(unit_id):
             runtime = self._units[member]
-            self._set_intent(runtime, UnitIntent.STOPPED, IntentSource.OPERATOR)
+            self._set_intent(runtime, UnitIntent.STOPPED, IntentSource.OPERATOR, caller=caller)
             was_active = self._is_active(runtime)
             await self._stop_unit(runtime, force=force)
             action = "stopped" if was_active else "already-stopped"
             results.append(self._unit_result(runtime, action))
         return {"verb": Verb.DOWN.value, "units": results}
 
-    async def restart(self, unit_id: str) -> dict[str, object]:
+    async def restart(
+        self, unit_id: str, *, caller: CallerFacts | None = None
+    ) -> dict[str, object]:
         """Stop then replace a subtree under one mutation lock.
 
         A restart means "keep it running, replace it": it never turns a failed
@@ -244,7 +283,9 @@ class Supervisor(StoppingMixin):
             for member in members:
                 runtime = self._units[member]
                 if runtime.intent is not UnitIntent.RUNNING:
-                    self._set_intent(runtime, UnitIntent.RUNNING, IntentSource.OPERATOR)
+                    self._set_intent(
+                        runtime, UnitIntent.RUNNING, IntentSource.OPERATOR, caller=caller
+                    )
             refusals: list[Exception] = []
             refused: set[str] = set()
             for member in self._registry.stop_order(unit_id):
@@ -426,29 +467,45 @@ class Supervisor(StoppingMixin):
                 return error_response(
                     ErrorCode.INVALID_REQUEST, f"verb {verb.value!r} requires a name"
                 )
+            caller = _caller_facts(request.get("caller"))
             if verb is Verb.UP:
-                return ok_response(await self.up(name))
+                return ok_response(await self.up(name, caller=caller))
             if verb in {Verb.DOWN, Verb.FORCE_DOWN}:
-                return ok_response(await self.down(name, force=verb is Verb.FORCE_DOWN))
+                return ok_response(
+                    await self.down(name, force=verb is Verb.FORCE_DOWN, caller=caller)
+                )
             if verb is Verb.RESTART:
-                return ok_response(await self.restart(name))
+                return ok_response(await self.restart(name, caller=caller))
         except UnknownUnitError as exc:
             return error_response(ErrorCode.UNKNOWN_UNIT, str(exc))
         raise AssertionError(f"unhandled verb {verb}")
 
     # ── internals ────────────────────────────────────────────────────────────
 
-    def _set_intent(self, runtime: UnitRuntime, intent: UnitIntent, source: IntentSource) -> None:
+    def _set_intent(
+        self,
+        runtime: UnitRuntime,
+        intent: UnitIntent,
+        source: IntentSource,
+        *,
+        caller: CallerFacts | None = None,
+    ) -> None:
         """Record a unit's policy fact and persist it for the next root."""
         runtime.intent = intent
         runtime.intent_source = source
+        runtime.intent_caller = caller
         self._write_record(runtime)
 
     def _write_record(self, runtime: UnitRuntime) -> None:
         intent_store.write(
             self._run_dir,
             runtime.manifest.id,
-            IntentRecord(runtime.intent, runtime.intent_source, runtime.restart_failed),
+            IntentRecord(
+                runtime.intent,
+                runtime.intent_source,
+                runtime.restart_failed,
+                runtime.intent_caller,
+            ),
         )
 
     def _boot_intent(self, runtime: UnitRuntime) -> None:
