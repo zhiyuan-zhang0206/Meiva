@@ -71,11 +71,23 @@ def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
     )
 
     assert prompt.count("one reporter per milestone") == 1
-    assert "only when the recipient must decide, act, or rely on what you send" in prompt
-    assert "a handoff, a commitment, a blocker, or evidence that changes their next step" in prompt
-    assert "otherwise record status in the task or your working notes" in prompt
+    assert "Message another agent only when they must reply" in prompt
+    assert "directly to whoever must act" in prompt
     assert "do not relay unchanged results" in prompt
     assert "duplicate task-log writes" in prompt
+
+
+def test_prompt_section_states_the_message_threshold(load_activity_plugin: None):
+    prompt = build_system_prompt(
+        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+    )
+    assert prompt.count("Message another agent only when they must reply") == 1
+    assert (
+        "Message another agent only when they must reply, decide, act, or know something to "
+        "continue"
+    ) in prompt
+    assert "otherwise record status in the task or your working notes" in prompt
+    assert "Say what happened, what you need, and what breaks without it" in prompt
 
 
 def test_enabled_fleet_preserves_parallel_work_policy(load_activity_plugin: None):
