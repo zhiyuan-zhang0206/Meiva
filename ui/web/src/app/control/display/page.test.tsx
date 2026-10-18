@@ -116,10 +116,10 @@ describe("DisplaySettingsPage", () => {
     vi.mocked(api.getNotificationCategories).mockResolvedValue({
       categories: [
         {
-          id: "core.notice",
-          label: "Agent posted a notice",
-          description: "An agent posted a notice that needs no response.",
-          importance: "normal",
+          id: "core.needs_input",
+          label: "Agent is waiting on your answer",
+          description: "An agent posted a notice that needs a response.",
+          importance: "high",
           enabled: false,
         },
       ],
@@ -129,7 +129,7 @@ describe("DisplaySettingsPage", () => {
     });
     renderPage();
 
-    const label = await screen.findByText("Agent posted a notice");
+    const label = await screen.findByText("Agent is waiting on your answer");
     const toggle = label.parentElement?.parentElement?.parentElement?.querySelector<HTMLButtonElement>(
       '[role="switch"]',
     );
@@ -138,7 +138,9 @@ describe("DisplaySettingsPage", () => {
 
     fireEvent.click(toggle);
     await waitFor(() =>
-      expect(api.putSetting).toHaveBeenCalledWith("notifications.categories", { "core.notice": true }),
+      expect(api.putSetting).toHaveBeenCalledWith("notifications.categories", {
+        "core.needs_input": true,
+      }),
     );
   });
 

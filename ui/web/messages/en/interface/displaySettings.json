@@ -51,7 +51,6 @@
   "categories": {
     "coreTurnFinished": "Agent finished its turn",
     "coreNeedsInput": "Agent is waiting on your answer",
-    "coreNotice": "Agent posted a notice",
     "fleetTaskClosed": "Task closed"
   }
 }

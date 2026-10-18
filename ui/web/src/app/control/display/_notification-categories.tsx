@@ -23,7 +23,6 @@ const SWITCHES_KEY = "notifications.categories";
 const KNOWN_LABELS = {
   "core.turn_finished": "coreTurnFinished",
   "core.needs_input": "coreNeedsInput",
-  "core.notice": "coreNotice",
   "meiva_fleet.task_closed": "fleetTaskClosed",
 } as const;
 
