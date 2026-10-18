@@ -56,7 +56,12 @@ A plugin delivers through `POST /api/agents/{id}/notifications` with
 `category`, `subject` and an optional `dedupe_key`; the endpoint resolves the
 category against the merged catalog (422 when undeclared), writes the delivery
 and announces it. `meiva_fleet` registers `meiva_fleet.task_closed` and emits it
-from the task update path after the row commits, keyed by task id.
+from the task update path after the row commits, keyed by task id. It ships
+switched off like `core.turn_finished`: the category fires once per closed task,
+which measured 227 closes (37.8 a day, 27 in the busiest hour) over 2026-10-12..18,
+64% of them agents closing their own bookkeeping and 42% between 23:00 and 06:00.
+The console task board already shows every close, so the ping is an interruption
+the user opts into rather than one they must switch off.
 
 ## Transports
 
