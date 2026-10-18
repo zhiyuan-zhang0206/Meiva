@@ -126,6 +126,7 @@ async def recall_skills(
     agent: AgentSlices,
     catalog: ModelCatalog,
     agent_id: int,
+    peer_turn: bool = False,
 ) -> SkillRecall | None:
     """Score `candidates` against the recent conversation and render the best matches as a
     note to inject, or `None` when there is nothing to offer.
@@ -169,9 +170,10 @@ async def recall_skills(
         )
         return None
     scores = {identifier: d.probability("true") for identifier, d in decisions.items()}
-    picked = pick_skills(
-        scores, threshold=settings.skill_recall_threshold, limit=settings.skill_recall_max
+    threshold = (
+        settings.skill_recall_peer_threshold if peer_turn else settings.skill_recall_threshold
     )
+    picked = pick_skills(scores, threshold=threshold, limit=settings.skill_recall_max)
     logger.info(
         "[{label}] {body}",
         label=_LABEL,
@@ -195,14 +197,6 @@ async def recall_skills(
 # the conversation: measured 2026-10-18 at $0.000036 per call against $0.0006 per recall pass.
 # meiva:link agent/graph/docs/skill-recall.meiva.okf.md
 PEER_GATE_PREAMBLE = "One message another agent sent to this agent:\n\n"
-
-# meiva:note
-# Bounds, not knobs: the gate already reads one message, so its worst-case cost and latency
-# are set here once. A message longer than this is truncated; a slower provider times out and
-# the turn skips the offer (today's behaviour), so neither value needs a per-agent switch.
-# meiva:link agent/graph/docs/skill-recall.meiva.okf.md
-PEER_GATE_MAX_CHARS = 4000
-PEER_GATE_TIMEOUT_SECONDS = 1.5
 
 PEER_GATE_WORK = YesNo(
     question=(
@@ -243,12 +237,12 @@ async def peer_gate_passes(
     try:
         decisions = await decide(
             settings.skill_recall_model,
-            PEER_GATE_PREAMBLE + stripped[:PEER_GATE_MAX_CHARS],
+            PEER_GATE_PREAMBLE + stripped[: settings.skill_recall_peer_gate_max_chars],
             {"work": PEER_GATE_WORK, "method_given": PEER_GATE_METHOD},
             catalog=catalog,
             usage_kind="skill_recall_peer_gate",
             for_agent_id=agent_id,
-            timeout=PEER_GATE_TIMEOUT_SECONDS,
+            timeout=settings.skill_recall_peer_gate_deadline_seconds,
         )
     except DecisionError as exc:
         logger.warning(

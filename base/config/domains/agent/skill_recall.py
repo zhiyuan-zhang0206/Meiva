@@ -69,6 +69,30 @@ class AgentSkillRecallSettings(EnvSettings):
         },
     )
 
+    skill_recall_peer_threshold: float = Field(
+        default=0.75,
+        gt=0,
+        le=1,
+        alias="MEIVA_SKILL_RECALL_PEER_THRESHOLD",
+        description=(
+            "Lowest probability of 'yes' at which a skill is offered on a turn woken by "
+            "another agent's message, instead of skill_recall_threshold. Peer traffic is a "
+            "different distribution from person and schedule messages -- most of it is status, "
+            "acknowledgement and watcher notices -- so it carries its own cut. Measured "
+            "2026-10-18 on 150 real peer messages: 0.60 offers on 112, 0.75 on 50, and every "
+            "offer whose playbook would have changed the agent's next action scored at least "
+            "0.72. Only used when skill_recall_peer_messages is on."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
     skill_recall_max: int = Field(
         default=2,
         ge=0,
@@ -161,6 +185,44 @@ class AgentSkillRecallSettings(EnvSettings):
             "ceiling. A brief that carries its own method does not need a playbook offered on "
             "top of it; the same split made the batch-review episodes score 'not applicable' in "
             "the 2026-10-17 evaluation."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    skill_recall_peer_gate_max_chars: int = Field(
+        default=4000,
+        gt=0,
+        alias="MEIVA_SKILL_RECALL_PEER_GATE_MAX_CHARS",
+        description=(
+            "Peer gate: only the first this-many characters of the peer message are sent to the "
+            "decision model. The gate reads one message, never the conversation, which is what "
+            "makes it about 15x cheaper than the recall pass it guards."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    skill_recall_peer_gate_deadline_seconds: float = Field(
+        default=1.5,
+        gt=0,
+        alias="MEIVA_SKILL_RECALL_PEER_GATE_DEADLINE_SECONDS",
+        description=(
+            "Wall-clock budget (seconds) for the peer gate. It runs before the recall pass, so "
+            "a peer-woken turn can spend this budget plus skill_recall_deadline_seconds when "
+            "both calls are slow; the gate reads one message (p50 about 0.6s)."
         ),
         json_schema_extra={
             "restart_required": "agent",
