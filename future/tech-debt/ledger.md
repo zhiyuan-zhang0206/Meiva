@@ -13,7 +13,7 @@ records an ordinary fingerprinted entry here with its own class. PRs that
 knowingly introduce debt register it here through the PR template, and a
 requested reconciliation checks this ledger.
 
-<!-- watermark: last-swept-sha=a2495ca1f last-swept-date=2026-09-23 -->
+<!-- watermark: last-swept-sha=aa53f847e last-swept-date=2026-10-19 -->
 
 ## Entry format
 
@@ -48,40 +48,73 @@ fixture/incident scope.
 ### boundary:supervisor-intent-fixture-stop-window
 - **class**: boundary
 - **status**: open
-- **evidence**: The original `services/supervision/meiva_root/tests/test_meiva_root_intent.py:_supervisor` fixture coupled up-half intent tests to a 0.2s real-process stop budget. In `test_restart_up_half_failure_retry_replaces_and_clears`, attempt 1 of [PR #4321, run 37318714866, shard 10](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/37318714866/job/111792197420) exhausted that window on the first `await owner.restart("svc")` (before the intentional up-half seal failure) in `services/supervision/meiva_root/stopping.py:_stop_posix_generation`. The loop classified leader PID 10633 as living before tree capture and durable custody I/O; the trace does not establish its state after that I/O at the deadline. It retained ownership rather than certifying closure without evidence. The next configured attempt passed this test; it failed a separate single-box port fixture instead. The three up-half/episode tests now terminate their captured disposable sleeper and await the real watcher before calling the unchanged stop boundary; input-seal failure, durable intent, episode clearing and fresh generation identity remain exercised. Restoring the old fixture executes a real live TERM stop and fails the regression's dependency assertion after the expected seal failure and retry; the spy delegates to the unchanged implementation rather than injecting a stop failure. Native down-refusal and `test_meiva_root_stop_window.py` retain real TERM/deadline coverage. A separate native gate-controlled regression demonstrates a stale-read defect: a captured TERM-handling child exits during delegated custody I/O, but the old expiry branch refuses using its earlier live snapshot. The stop now rechecks captured births at expiry and still requires the real watcher and empty-group proof before releasing custody; a fresh live birth or unproven group retains the existing refusal. The regression fails the old implementation and passes the repair without increasing the stop window. This does not identify the historical PID 10633 cause, which remains open: that trace does not establish CPU load or signal-delivery failure. Diagnose that incident before changing its timeout or claiming its root cause resolved.
+- **evidence**: Re-verified 2026-10-19 at main@aa53f847. The fixture coupling this entry recorded is still repaired: `services/supervision/meiva_root/tests/test_meiva_root_intent.py:67:_supervisor` builds `SupervisorConfig(stop_timeout_s=0.2)`, and `:73:_up_failure_supervisor` SIGKILLs and awaits the captured disposable sleeper before delegating to the unchanged `_stop_unit`, so the up-half/episode tests never enter a live TERM stop window; input-seal failure, durable intent, episode clearing and fresh generation identity remain exercised. The stop path itself has been rewritten since this entry was written: `stopping.py:_stop_posix_generation` no longer exists, and `services/supervision/meiva_root/stopping.py:72:_stop_generation` now runs TERM → bounded graceful wait → one SIGKILL escalation → reap (PR #6198), so the tree-capture / birth-recheck description in the previous evidence describes code that is gone. `test_meiva_root_stop_window.py` retains real TERM/deadline coverage. The open item is unchanged: attempt 1 of PR #4321 (run 37318714866, shard 10) overran the 0.2s window on leader PID 10633, and the trace does not establish that process's state after tree capture and durable custody I/O at the deadline; no repro and no CPU-load or signal-delivery evidence exists. Diagnose that incident before changing `stop_timeout_s` or claiming its root cause resolved.
 - **first-seen**: 2026-10-05 (PR #4321)
-- **last-verified**: 2026-10-06
+- **last-verified**: 2026-10-19
 
 
 ### boundary:pty-kill-verdict-job-readiness
 - **class**: boundary
 - **status**: open
-- **evidence**: In [PR #4356, run 37405453654, shard 14](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/37405453654/job/112082738845), the raw first-attempt JUnit report (`junit-backend-shard-14-a1.xml`) records `base/sessions/tests/test_pty_backend.py::test_kill_session_with_verdict_reports_whether_work_was_cut_short` receiving `(True, "forced", False)` after its busy-shell predicate saw a child. The job's configured retry passed; that is not a repair or proof of the first child's identity. The test waited for any child, not the intended `sleep 300`; `base/sessions/pty/tests/job_wait.py:wait_for_job` already documents transient login-shell helpers and matches actual argv. The backend test now waits for a bare ready output line and then that exact job, preserving its real kill/verdict assertion, using the same arrangement as `services/agent_runner/pty_sessions/tests/test_sessions.py::test_kill_a_session_with_work_reports_interrupted`. The missing intended-job precondition is repaired. The observed first-attempt child's identity was not captured, so the original failure's cause remains unproven; do not infer a production membership defect or close the Bash/TERM incidents from this change.
+- **evidence**: Re-verified 2026-10-19 at main@aa53f847. `base/sessions/tests/test_pty_backend.py:251:test_kill_session_with_verdict_reports_whether_work_was_cut_short` waits for the exact job (`wait_for_job(shell_process(...), ["sleep", "300"])` at `:264`, imported from `base/sessions/pty/tests/job_wait.py:wait_for_job` at `:33`), so the missing intended-job precondition stays repaired and the real kill/verdict assertion is unchanged. The cross-reference in the previous evidence is stale: `services/agent_runner/pty_sessions/tests/test_sessions.py::test_kill_a_session_with_work_reports_interrupted` was removed by 466219fc4 ("Simplify PTY closure to bounded best effort", 2026-10-06) together with the retired whole-tree proof, so the backend test is now the only kill/verdict case. The 2026-10-06 first-attempt failure (verdict `(True, "forced", False)` on a child whose identity was never captured) still has no proven cause: do not infer a production membership defect or close the Bash/TERM incidents from this.
 - **first-seen**: 2026-10-06 (PR #4356)
-- **last-verified**: 2026-10-06
+- **last-verified**: 2026-10-19
 
 
 ### boundary:interactive-bash-smoke-first-write
 - **class**: boundary
 - **status**: open
-- **evidence**: `meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_impersonation_launch.py::test_app_server_command_executes_in_an_interactive_bash` blocked on macOS at the first `os.write(master, export-PATH)` before submitting the app-server command. The unchanged main node also exceeded a 65-second bound with a fresh temporary `MEIVA_HOME`; a separate 25-second diagnostic with a 10-second faulthandler dump located that write. This stand-in pane is created with `pty.openpty` and `Popen(start_new_session=True)`, while the service uses `pty.fork`; that difference is an investigation lead, not a proven cause. A fresh macOS exact-node run on 2026-10-06 passed; this does not resolve the recorded hang. A native probe found both this fixture and production `fork_shell` had their shell PID as session leader and terminal foreground group after startup, disproving missing controlling-terminal ownership at that point. The existing master was blocking, the first export was 106 bytes, startup had reached the shell prompt, and that probe wrote all bytes in about 21 microseconds. Neither the startup/write ordering nor the earlier blocked write has a demonstrated root cause. The Linux CI check remains selected. Do not infer an app-server or production transport defect, add a timeout, or skip the check from this evidence.
+- **evidence**: Re-verified 2026-10-19 at main@aa53f847. The test and its arrangement are unchanged: `meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_impersonation_launch.py:152:test_app_server_command_executes_in_an_interactive_bash` still writes the export-PATH line and then the app-server command through `_start_pane` (`:134`), which uses `pty.openpty` plus `Popen(start_new_session=True)`, while production `services/agent_runner/pty_sessions/session.py:82:fork_shell` uses `pty.fork`; that difference remains the only investigation lead and is not a proven cause. The recorded observations stand: the macOS first `os.write` blocked, the unchanged main node exceeded a 65-second bound with a fresh temporary `MEIVA_HOME`, and a 25-second faulthandler run located that write; a fresh macOS exact-node run passed on 2026-10-06 and a native probe disproved missing controlling-terminal ownership at the shell prompt, neither of which explains the hang. The Linux CI check remains selected. Do not infer an app-server or production transport defect, add a timeout, or skip the check from this evidence.
 - **first-seen**: 2026-10-05 (literal coding-session refresh)
-- **last-verified**: 2026-10-06
+- **last-verified**: 2026-10-19
 
 
 ### boundary:checkpoint-postgres-historical-walk-patch
 - **class**: boundary
 - **status**: open
-- **evidence**: `base/agents/history/checkpoint_postgres_walks.py:CheckpointWalks` overrides private `BasePostgresSaver._try_advance_walks` only on Meiva's explicit saver subclasses for checkpoint-postgres 3.1.2. It keeps an unseen historical target out of the cached walk cursor until a later page arrives; gateway readers and the host's pooled saver construct those adapters. Construction guards the dependency version, method identity and signature. Upstream classes and shared serializers remain unchanged, but the private upstream extension seam is still temporary debt. Once langgraph#8448 / #8556 is released, run `base/agents/history/tests/test_checkpoint_postgres_walks.py`, remove the pagination override (retaining the message-reset suffix reader until upstream supports it), then upgrade the checkpoint-postgres pin (405 tracks the follow-up).
+- **evidence**: Re-verified 2026-10-19 at main@aa53f847. `base/agents/history/checkpoint_postgres_walks.py:69:CheckpointWalks` still overrides private `BasePostgresSaver._try_advance_walks`, and `:41:validate_checkpoint_postgres_api` still refuses any `langgraph-checkpoint-postgres` other than 3.1.2 and re-checks the method identity and parameter list (`:26:_EXPECTED_PARAMETERS`). Four production sites construct the adapters: `base/agents/history/checkpoint.py`, `checkpoint_segment.py`, `services/agent_runner/agent_host/invocation/compact/checkpoint.py` and `agent_host/pooled_checkpoint.py`. The upstream condition this entry waited on is now met: langgraph#8556 ("fix(checkpoint-postgres): derive the delta walk cursor once the target loads") merged 2026-09-30 and appears in the `checkpointpostgres==3.1.3` release notes, 3.2.0 is current, and `uv pip list --outdated` at main@aa53f847 reports 3.1.2 -> 3.2.0. The previous evidence's "langgraph#8448" is not a langgraph pull request (the API answers 404); the landed fix is #8556. Remaining work, in this order: raise the pin past the version guard, run `base/agents/history/tests/test_checkpoint_postgres_walks.py`, delete the pagination override, and keep the message-reset suffix reader until upstream supports that boundary. 405 tracks the follow-up.
 - **first-seen**: 2026-09-23 (PR for task #4518)
-- **last-verified**: 2026-10-10
+- **last-verified**: 2026-10-19
 
-### deps:playwright-1.62to1.63
+
+### boundary:exec-node-runner-test-seam
+- **class**: boundary
+- **status**: open
+- **evidence**: PR #6233 shipped the exec-family telemetry attribution (`exec` / `exec_failed` records carrying `agent_id`; the emit site is `agent/graph/exec/node.py:399`) with the llm-side injected test only (`agent/graph/llm/tests/test_turn_end_attribution.py`); its body records why the exec-side case was omitted — injecting a fake runner means monkeypatching `agent.graph.exec.node.run_agent_code` around the private `_exec_node_impl`, and `agent/graph/exec/tests/meizel.toml:16 [debt.first-party-patch]` ratchets every existing patch site (`test_cross_agent_findings.py:68`, `test_exec_attach_drain.py:95,136`, ...), so a new one may not be added. The PR states the fix and the priority: "Tech debt (P3, 405's ruling): the exec path's injected test needs a public seam for the runner ... a seam is its own change." Not registered in this ledger at merge time.
+- **first-seen**: 2026-10-18 (PR #6233)
+- **last-verified**: 2026-10-19
+
+
+### boundary:notification-manifest-default-conversion
+- **class**: boundary
+- **status**: open
+- **evidence**: `base/events/notifications/catalog.py:76:category_from_manifest` is the single owner of the manifest-to-category mapping (`defaultEnabled` into `default_enabled`, `dedupeWindowSeconds`, and the `<plugin>.` namespace check); `gateway/extensions/notification_categories.py:31` and `cli/commands/agents/notices_audit.py:190` are its only callers, and no test file references it — `base/events/notifications/tests/test_catalog.py` covers catalog merge and validation, not this conversion. PR #6228 flipped `meiva_fleet.task_closed` to `defaultEnabled: false` through that path and recorded the gap in its own body: "the conversion ... has no direct test coverage ... The right place for a regression test is that module, applied to every plugin category rather than this one; it is out of scope here and follows as its own task." Not registered in this ledger at merge time. (The PR named `gateway/extensions/notification_categories.py` as the owner; the conversion moved to `catalog.py` in the same day's notification-spine work.)
+- **first-seen**: 2026-10-18 (PR #6228)
+- **last-verified**: 2026-10-19
+
+
+### boundary:notices-audit-sql
+- **class**: boundary
+- **status**: open
+- **evidence**: `cli/commands/agents/notices_audit.py:35,44,52` hold the three SELECTs behind `meiva notices audit` — `telemetry_events` halts for `core.turn_finished`, `agent_notices` for `core.needs_input`, `agent_tasks` for `meiva_fleet.task_closed` — executed at `:112`, `:120` and `:145` against a psycopg cursor. `cli/commands/agents/tests/test_notices_audit.py` exercises only the in-memory candidate and replay path; nothing reaches the query text, because unit CI carries no database. Both PRs that introduced it say so in their bodies: #6229 ("the SQL has no automated test (no database in unit CI); it was exercised against the live runtime database") and #6238 ("Not covered: the SQL still has no automated test"), and #6238 added `--explain` on top of it. Column renames and policy changes break this query silently.
+- **first-seen**: 2026-10-18 (PRs #6229, #6238)
+- **last-verified**: 2026-10-19
+
+
+### deps:playwright-1.62to1.64
 - **class**: deps
 - **status**: open
-- **evidence**: `uv pip list --outdated` (synced worktree venv, 2026-09-23) reports playwright 1.62.0 -> 1.63.0; PyPI latest re-confirmed 1.63.0. `uv.lock` pins 1.62.0. Chromium follows the wheel — the CI jobs that need a browser install it with `uv run playwright install chromium` plus its system deps through the hardened `install-deps` step, cached on the `uv.lock` hash — so the bump is the wheel alone.
+- **evidence**: `uv pip list --outdated` (worktree venv at main@aa53f847, 2026-10-19) reports playwright 1.62.0 -> 1.64.0, and PyPI's JSON API confirms 1.64.0 is the latest release; `uv.lock` pins 1.62.0. Chromium follows the wheel — `.github/workflows/ci.yml:2004` installs it with `uv run playwright install chromium` and `cache-warm.yml` warms the same `~/.cache/ms-playwright` cache keyed on the `uv.lock` hash — and no `PLAYWRIGHT_VERSION`, Dockerfile pin or npm playwright dependency remains, so the bump is the wheel alone.
 - **first-seen**: 2026-09-21
-- **last-verified**: 2026-09-23
+- **last-verified**: 2026-10-19
+
+
+### docs-aging:.github/PULL_REQUEST_TEMPLATE.md:tech-debt-registration
+- **class**: docs-aging
+- **status**: open
+- **evidence**: This ledger's header says a PR that knowingly introduces debt registers it "through the PR template", but the section that carried that obligation (`## Tech-debt registration` — add or extend a fingerprinted entry here, write `none` otherwise) was deleted in 76c7f51bc ("Consolidate contributor documentation and preserve domain history", 2026-10-05) together with the checklist and five other sections; `git log --follow -- .github/PULL_REQUEST_TEMPLATE.md` shows no later restore, and the current template has two sections (What and why, Validation). `docs/contributing.md` never names the ledger; the surviving instruction is one sentence in `docs/conventions/engineering/tech-debt.md` ("If a broad repair is outside the authorized change, record actionable evidence in the ledger"), which addresses an audit, not a PR author. Someone must decide the owner: restore the section, or retire the claim in this header and name the registration path that replaces it. This sweep is the evidence that the gap bites — three entries below came from PR bodies that recorded debt no PR registered.
+- **first-seen**: 2026-10-19 (sweep)
+- **last-verified**: 2026-10-19
 
 ## Wontfix
 
