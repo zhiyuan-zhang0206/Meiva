@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import psycopg
 
+from base.api_contracts.idempotency import keyed_headers
+from base.events.live.bus import EventBus
 from tests.fixtures.gateway_config import gateway_test_client
 
 
@@ -64,3 +66,64 @@ def test_an_empty_subject_is_rejected(db_conn: psycopg.Connection) -> None:
             json={"category": "core.turn_finished", "subject": "   "},
         )
     assert resp.status_code == 422
+
+
+def _deliveries(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str, object]]:
+    rows = conn.execute(
+        "SELECT category, subject, announced_at FROM notification_events "
+        "WHERE agent_id = %s ORDER BY id",
+        (agent_id,),
+    ).fetchall()
+    return [(row[0], row[1], row[2]) for row in rows]
+
+
+# meiva:note
+# A notice that needs an answer is staged in the notice's own transaction and
+# announced after it commits, so the row exists and is marked delivered.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def test_a_response_notice_is_staged_and_announced(
+    db_conn: psycopg.Connection, event_bus: EventBus
+) -> None:
+    agent_id = _agent(db_conn)
+    with gateway_test_client() as client:
+        resp = client.post(
+            f"/api/agents/{agent_id}/notices",
+            json={"title": "Need a decision", "require_response": True},
+            headers=keyed_headers("staged-announced"),
+        )
+    assert resp.status_code == 201
+    deliveries = _deliveries(db_conn, agent_id)
+    assert [(category, subject) for category, subject, _ in deliveries] == [
+        ("core.needs_input", "Need a decision")
+    ]
+    assert deliveries[0][2] is not None
+
+
+# meiva:note
+# The replay branch repairs the delivery instead of skipping it: a post whose
+# announce was lost (the client retried because the response never arrived) is
+# announced by the retry, and the row is not duplicated.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def test_a_replayed_post_repairs_a_lost_announce(
+    db_conn: psycopg.Connection, event_bus: EventBus
+) -> None:
+    agent_id = _agent(db_conn)
+    headers = keyed_headers("replay-repair")
+    payload = {"title": "Need a decision", "require_response": True}
+    with gateway_test_client() as client:
+        first = client.post(f"/api/agents/{agent_id}/notices", json=payload, headers=headers)
+        assert first.status_code == 201
+        # meiva:note
+        # The announce never happened: the process died right after the commit.
+        # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+        db_conn.execute(
+            "UPDATE notification_events SET announced_at = NULL WHERE agent_id = %s",
+            (agent_id,),
+        )
+        db_conn.commit()
+        replay = client.post(f"/api/agents/{agent_id}/notices", json=payload, headers=headers)
+    assert replay.status_code == 201
+    assert replay.json() == first.json()
+    deliveries = _deliveries(db_conn, agent_id)
+    assert len(deliveries) == 1
+    assert deliveries[0][2] is not None
