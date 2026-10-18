@@ -8,7 +8,11 @@ import logging
 from psycopg_pool import ConnectionPool
 
 from base.events.live.bus import EventBus
-from base.events.notifications.publish import NotificationRecord, announce, deliver_sync
+from base.events.notifications.publish import (
+    NotificationRecord,
+    announce_sync,
+    deliver_sync,
+)
 
 _log = logging.getLogger("base.events.notifications.notices")
 
@@ -48,17 +52,28 @@ def _deliver(pool: ConnectionPool, agent_id: int, notice_id: int) -> Notificatio
 # act on is noise. The dedupe key carries the question fingerprint rather than the
 # notice id alone, so editing a container to add a question is a new delivery
 # while a retried post of the same content stays silent. A delivery failure never
-# fails the notice — the row is already committed by the time this runs.
+# fails the notice — the row is already committed by the time this runs. The sync
+# entry exists for producers outside an event loop (the task-maintenance daemon);
+# the async one delegates to it, so there is one decision and one live event
+# rather than a weaker second path.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-async def deliver_notice_notification(
+def deliver_notice_notification_sync(
     pool: ConnectionPool, bus: EventBus | None, *, agent_id: int, notice_id: int
 ) -> int | None:
     try:
-        record = await asyncio.to_thread(_deliver, pool, agent_id, notice_id)
+        record = _deliver(pool, agent_id, notice_id)
     except Exception:
         _log.exception("notice notification failed for notice %s", notice_id)
         return None
     if record is None:
         return None
-    await announce(bus, record)
+    announce_sync(bus, record)
     return record.id
+
+
+async def deliver_notice_notification(
+    pool: ConnectionPool, bus: EventBus | None, *, agent_id: int, notice_id: int
+) -> int | None:
+    return await asyncio.to_thread(
+        deliver_notice_notification_sync, pool, bus, agent_id=agent_id, notice_id=notice_id
+    )
