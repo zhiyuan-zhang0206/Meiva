@@ -1,8 +1,7 @@
-exports = ["cancel_fixture.py", "peer_recall_replay.py"]
+exports = ["cancel_fixture.py"]
 
 [uses]
 "conftest.py" = ["cancel_fixture.py"]
-"test_skill_recall_peer_threshold.py" = ["peer_recall_replay.py"]
 
 [debt.first-party-patch]
 "cancel_fixture.py#monkeypatch.setattr agent.graph.hooks.compact.subscribe_interrupt" = 1

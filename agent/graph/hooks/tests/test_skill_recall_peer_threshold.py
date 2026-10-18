@@ -1,20 +1,28 @@
-"""The peer recall threshold is the cut the 2026-10-18 replay selects.
-
-`peer_recall_replay.ROWS` is that replay: one row per real peer message, holding the top
-skill's probability of "yes" and whether the message actually asked the recipient to do work
-(majority of three judges, 86% unanimous). The default is a measurement, not a taste: at 0.70
-the cut offers on 40% of turns, covers 63% of the work requests and 69% of the offers land on
-one; 0.75 covers only 45% at 75%, and 0.60 falls to 58% precision. A missed dispatch costs a
-redo while an extra offer costs one line, so coverage wins the tie.
-
-Changing the default re-opens this test on purpose: if a new replay supports a different cut,
-move the number together with the rows.
-"""
+# meiva:note
+# The peer recall threshold is the cut the 2026-10-18 replay selects: 999 real peer messages,
+# each with the top skill's probability and whether the message asked the recipient to do work
+# (majority of three judges, 86% unanimous). At 0.70 the cut offers on 40% of turns, covers 63%
+# of the work requests and 69% of the offers land on one; 0.75 covers only 45% at 75%, and 0.60
+# falls to 58% precision. A missed dispatch costs a redo while an extra offer costs one line, so
+# coverage wins the tie. Changing the default re-opens this test on purpose: move the number
+# together with the rows.
 
 from __future__ import annotations
 
-from agent.graph.hooks.tests.peer_recall_replay import ROWS
+import json
+from pathlib import Path
+
 from base.config import settings
+
+# meiva:note
+# The replay rows: one per peer message, the top skill's probability and whether the message
+# asked the recipient to do work.
+ROWS: tuple[tuple[float, int], ...] = tuple(
+    (score, work)
+    for score, work in json.loads(Path(__file__).with_name("peer_recall_replay.json").read_text())[
+        "rows"
+    ]
+)
 
 
 def _precision_and_recall(threshold: float) -> tuple[float, float]:
