@@ -163,6 +163,7 @@ def test_global_roles_is_low_frequency_subset_of_system_roles():
         "notice_resolved",
         "task_created",
         "task_updated",
+        "notification",
     } == GLOBAL_ROLES
 
 
