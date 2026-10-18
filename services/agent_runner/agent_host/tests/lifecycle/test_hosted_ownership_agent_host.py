@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 import services.agent_runner.agent_host.host as agent_host_host
@@ -153,6 +154,12 @@ async def test_a_completed_turn_records_one_notification(
     from services.agent_runner.agent_host.runtime import TurnOutcome
 
     agent_id = _agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO user_settings (key, value) VALUES ('notifications.categories', %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        (Jsonb({"core.turn_finished": True}),),
+    )
+    db_conn.commit()
     host = cast(AgentHost, SimpleNamespace(_pool=aops_pool, _bus=event_bus))
     await AgentHost._notify_turn_finished(host, agent_id, TurnOutcome(exited=False, crashed=False))
     rows = db_conn.execute(
@@ -170,6 +177,12 @@ async def test_an_interrupted_turn_records_no_notification(
     from services.agent_runner.agent_host.runtime import TurnOutcome
 
     agent_id = _agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO user_settings (key, value) VALUES ('notifications.categories', %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        (Jsonb({"core.turn_finished": True}),),
+    )
+    db_conn.commit()
     host = cast(AgentHost, SimpleNamespace(_pool=aops_pool, _bus=event_bus))
     await AgentHost._notify_turn_finished(host, agent_id, TurnOutcome(exited=False, crashed=True))
     assert db_conn.execute(

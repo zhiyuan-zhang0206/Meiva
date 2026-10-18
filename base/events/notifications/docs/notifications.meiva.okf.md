@@ -23,7 +23,9 @@ the inbox already carries it.
 ## Categories
 
 A category carries a label, an importance, a default switch and a dedupe window.
-Core categories live in `catalog.CORE_CATEGORIES`. A plugin declares its own in
+Core categories live in `catalog.CORE_CATEGORIES`. `core.turn_finished` ships
+switched off: a fleet-wide "turn finished" ping is dozens of interruptions an
+hour, so it is one the user opts into. `core.needs_input` ships on. A plugin declares its own in
 `contributions.notifications` in `meiva-plugin.json`, under its own
 `<plugin>.` id prefix; `gateway/extensions/notification_categories.py` merges the
 manifests with the core set, and `GET /api/notifications/categories` returns that
@@ -43,8 +45,10 @@ A hosted turn that ran to completion records `core.turn_finished` from
 says nothing, because the notification lives on the turn path rather than on the
 settlement path that also fires for no-work parks. A posted notice
 records `core.needs_input` from `ops/lifecycle/events.py`, keyed by the notice
-id so an edit or a retried post cannot notify twice; the spine reads the notice
-row itself rather than trusting either post path to pass the right shape.
+id plus a fingerprint of its question, so a retried post stays silent while
+editing a container to add a question delivers again — a new question is what the
+user has to act on. The spine reads the notice row itself rather than trusting
+either post path to pass the right shape.
 
 ## Plugin emission
 

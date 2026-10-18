@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import psycopg
 from psycopg.rows import TupleRow
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.db import create_agent
@@ -48,7 +49,9 @@ async def test_a_response_notice_is_delivered(
         "SELECT category, subject, dedupe_key FROM notification_events WHERE agent_id = %s",
         (agent_id,),
     ).fetchone()
-    assert row == ("core.needs_input", "Need a decision", f"notice:{notice_id}")
+    category, subject, dedupe_key = row
+    assert (category, subject) == ("core.needs_input", "Need a decision")
+    assert dedupe_key.startswith(f"notice:{notice_id}:")
 
 
 async def test_an_fyi_notice_is_never_a_notification(
@@ -65,6 +68,29 @@ async def test_an_fyi_notice_is_never_a_notification(
             is None
         )
     assert _categories(db_conn, agent_id) == []
+
+
+async def test_adding_a_question_to_the_same_notice_notifies_again(
+    db_conn: psycopg.Connection, db_url: str, event_bus: EventBus
+) -> None:
+    agent_id = create_agent(db_conn)
+    db_conn.commit()
+    notice_id = _notice(db_conn, agent_id, require_response=True)
+    with _pool(db_url) as pool:
+        first = await deliver_notice_notification(
+            pool, event_bus, agent_id=agent_id, notice_id=notice_id
+        )
+        db_conn.execute(
+            "UPDATE agent_notices SET question = %s WHERE id = %s",
+            (Jsonb({"type": "text"}), notice_id),
+        )
+        db_conn.commit()
+        second = await deliver_notice_notification(
+            pool, event_bus, agent_id=agent_id, notice_id=notice_id
+        )
+    assert first is not None
+    assert second is not None
+    assert _categories(db_conn, agent_id) == ["core.needs_input", "core.needs_input"]
 
 
 async def test_a_second_post_of_the_same_notice_does_not_notify_twice(
