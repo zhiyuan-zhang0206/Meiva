@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -84,7 +83,7 @@ def synthesize_failure(case: Case, promise: str, *, case_id: str) -> Case:
     )
 
 
-def calibrate(cases: Sequence[Case], judge: Judge) -> Calibration:
+def _check_balanced(cases: Sequence[Case]) -> tuple[int, int]:
     if not cases:
         raise ValueError("calibration needs at least one case")
     expected_pass = sum(1 for c in cases if c.expected == "pass")
@@ -93,22 +92,27 @@ def calibrate(cases: Sequence[Case], judge: Judge) -> Calibration:
         raise ValueError(
             "calibration needs both expected-pass and expected-fail cases; a one-sided set scores the sample, not the judge"
         )
+    return expected_pass, expected_fail
 
+
+def _collect_verdicts(cases: Sequence[Case], judge: Judge) -> list[Verdict]:
     verdicts = [judge(c) for c in cases]
     for case, verdict in zip(cases, verdicts, strict=True):
         if verdict not in VERDICTS:
             raise ValueError(
                 f"case {case.case_id}: judge returned {verdict!r}, expected one of {VERDICTS}"
             )
+    return verdicts
 
-    correct = sum(1 for c, v in zip(cases, verdicts, strict=True) if v == c.expected)
-    caught = sum(
-        1 for c, v in zip(cases, verdicts, strict=True) if c.expected == "fail" and v == "fail"
-    )
-    cleared = sum(
-        1 for c, v in zip(cases, verdicts, strict=True) if c.expected == "pass" and v == "pass"
-    )
-    n = len(cases)
+
+def _tally(cases: Sequence[Case], verdicts: Sequence[Verdict], expected_pass: int) -> Calibration:
+    pairs = list(zip(cases, verdicts, strict=True))
+    n = len(pairs)
+    expected_fail = n - expected_pass
+    correct = sum(1 for c, v in pairs if v == c.expected)
+    caught = sum(1 for c, v in pairs if c.expected == "fail" and v == "fail")
+    cleared = sum(1 for c, v in pairs if c.expected == "pass" and v == "pass")
+    abstained = sum(1 for _, v in pairs if v == "uncertain")
     return Calibration(
         n=n,
         expected_pass=expected_pass,
@@ -116,10 +120,15 @@ def calibrate(cases: Sequence[Case], judge: Judge) -> Calibration:
         accuracy=round(correct / n, 3),
         sensitivity=round(caught / expected_fail, 3),
         specificity=round(cleared / expected_pass, 3),
-        abstain_rate=round(sum(1 for v in verdicts if v == "uncertain") / n, 3),
+        abstain_rate=round(abstained / n, 3),
         always_pass_accuracy=round(expected_pass / n, 3),
         always_fail_accuracy=round(expected_fail / n, 3),
     )
+
+
+def calibrate(cases: Sequence[Case], judge: Judge) -> Calibration:
+    expected_pass, _ = _check_balanced(cases)
+    return _tally(cases, _collect_verdicts(cases, judge), expected_pass)
 
 
 def format_report(cal: Calibration) -> str:
@@ -151,26 +160,14 @@ def stub_judge(name: str) -> Judge:
     return stubs[name]
 
 
-def load_judge(spec: str) -> Judge:
-    if ":" not in spec:
-        return stub_judge(spec)
-    module_name, _, attr = spec.partition(":")
-    target: Any = importlib.import_module(module_name)
-    for part in attr.split("."):
-        target = getattr(target, part)
-    if not callable(target):
-        raise TypeError(f"{spec} is not callable")
-    return cast(Judge, target)
-
-
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Score a judge against trivial baselines on a balanced case set."
     )
     parser.add_argument("--cases", required=True, help="JSON case file")
-    parser.add_argument("--judge", default="always-pass", help="stub name or module:function")
+    parser.add_argument("--judge", default="always-pass", help="stub name")
     args = parser.parse_args(list(argv) if argv is not None else None)
-    cal = calibrate(load_cases(args.cases), load_judge(args.judge))
+    cal = calibrate(load_cases(args.cases), stub_judge(args.judge))
     print(format_report(cal))
     return 0 if cal.beats_baselines else 1
 

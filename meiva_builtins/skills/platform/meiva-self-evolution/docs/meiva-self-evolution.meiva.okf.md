@@ -51,9 +51,9 @@ agreement measured there describes the sample, not the judge.
 
 `tests/fixtures/eval_calibration/cases.json` holds 24 synthetic cases (12 pass, 12 fail) covering
 promise-only finals and false claims of an external effect; `synthesize_failure` derives new fail
-cases from passing packets. Run the baselines with `--judge always-pass`, or score a real judge
-with `--judge my_pkg.judge:evaluate`. The process exits non-zero when the judge does not beat both
-baselines.
+cases from passing packets. Run the baselines with `--judge always-pass`; a real judge is plugged
+in from code as `calibrate(load_cases(path), my_judge)` — the CLI does not import judges
+dynamically. The process exits non-zero when the judge does not beat both baselines.
 
 ## Key dependencies
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — full skills catalog
