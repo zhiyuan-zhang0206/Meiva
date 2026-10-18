@@ -22,6 +22,21 @@ _OUTPUT_DIRNAME = ".shell_logs"
 # does not grow unbounded across a long-lived agent.
 OUTPUT_KEEP = 20
 
+# meiva:note
+# How long a closing run (keep=False) waits for its log to catch up, and how
+# often it looks. The shell exits the moment the command does, and the session
+# close then kills the process group; a `tee` still draining the pipe dies with
+# the command's last lines in it, leaving a log that exists (`allocate_output_path`
+# touches it) and stays empty. The wait is bounded so a grandchild that inherited
+# stdout cannot postpone the notice, and it costs one `tail` in the normal case.
+LOG_FLUSH_WAIT_S = 1.0
+LOG_FLUSH_POLL_S = 0.05
+# meiva:note
+# Bytes read from the end of the log when looking for the run's exit marker —
+# enough to cover the marker plus a command line written without a trailing
+# newline.
+EXIT_TAIL_BYTES = 128
+
 # Characters that stay shell-active inside a double-quoted string.
 _DQUOTE_UNSAFE = re.compile(r'[$`"\\]')
 _NOTIFY_POLICIES = ("always",)
@@ -99,6 +114,7 @@ def notified_line(
     output_path: Path,
     keep: bool,
     notify: str | None = None,
+    cli: Path | None = None,
 ) -> str:
     # meiva:link meiva/shell/docs/shell.meiva.okf.md
     notify = validate_notify(notify)
@@ -117,13 +133,27 @@ def notified_line(
     q_path = shlex.quote(str(output_path))
     notice = f"{label} finished. Full output at {output_path}."
     send_notice = (
-        f'{shlex.quote(str(cli_path()))} agents send {agent_id} "{notice}" '
+        f'{shlex.quote(str(cli if cli is not None else cli_path()))} agents send {agent_id} "{notice}" '
         f"--source {source} --tail-file {q_path}"
     )
+    # meiva:note
+    # The join is on the log, not on the writer: `exec 3> >(tee ...)` is not a
+    # waitable child on bash 3.2 (what macOS ships), so the shell waits for the
+    # run's own exit marker to appear at the end of the log instead. That marker
+    # is the last thing the writer appends, which makes "the log is complete" the
+    # exact condition the shell waits for, on any bash.
     line = (
         f"exec 3> >(tee {q_path}); ( {cmd} ) >&3 2>&1; _ec=$?; "
         f"printf '[exit %s]\\n' \"$_ec\" >&3; exec 3>&-; "
     )
+    if not keep:
+        polls = int(LOG_FLUSH_WAIT_S / LOG_FLUSH_POLL_S)
+        line += (
+            f'_polls=0; while [ "$_polls" -lt {polls} ]; do '
+            f'case "$(tail -c {EXIT_TAIL_BYTES} {q_path} 2>/dev/null)" in '
+            f'*"[exit $_ec]") break;; esac; '
+            f"sleep {LOG_FLUSH_POLL_S}; _polls=$((_polls + 1)); done; "
+        )
     line += send_notice if notify == "always" else f"{send_notice} --completion"
     if not keep:
         line += "; exit $_ec"
