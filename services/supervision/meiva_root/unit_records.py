@@ -28,6 +28,7 @@ class Generation:
 
     proc: asyncio.subprocess.Process
     started_at: float
+    seq: int = 0
     identity: OwnedProcess | None = None
     """The leader's native birth; None when the leader exited before root read it.
 
@@ -53,6 +54,7 @@ class UnitRuntime:
     state: UnitState = UnitState.STOPPED
     generation: Generation | None = None
     restart_count: int = 0
+    spawn_seq: int = 0
     last_exit: str | None = None
     last_error: str | None = None
     watch_task: asyncio.Task[None] | None = None

@@ -153,7 +153,7 @@ class Supervisor(StoppingMixin):
                 runtime = self._units[unit_id]
                 self._set_intent(runtime, UnitIntent.STOPPED, IntentSource.SELF)
                 try:
-                    await self._stop_unit(runtime)
+                    await self._stop_unit(runtime, escalate=False)
                 except Exception as exc:
                     refusals.append(exc)
         return refusals
@@ -572,9 +572,11 @@ class Supervisor(StoppingMixin):
             identity = OwnedProcess.capture(psutil.Process(proc.pid))
         except psutil.NoSuchProcess:
             identity = None
+        runtime.spawn_seq += 1
         generation = Generation(
             proc=proc,
             started_at=monotonic(),
+            seq=runtime.spawn_seq,
             identity=identity,
         )
         runtime.generation = generation

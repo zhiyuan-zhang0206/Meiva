@@ -19,7 +19,7 @@ from threading import Event, Thread
 from typing import Protocol
 
 from base.daemon.health import DaemonProbe
-from base.deploy.progress_timeout import DEFAULT_STARTUP_GRACE_S
+from base.deploy.progress_timeout import DEFAULT_STARTUP_GRACE_S, ROOT_HEALTH_INTERVAL_S
 from base.native_process.ownership import OwnedProcess
 from services.supervision.meiva_root.failure_state import UnitFailureFacts, derive_kind, describe
 from services.supervision.meiva_root.manifest import UnknownUnitError
@@ -66,7 +66,7 @@ controllers do not run inside this service observer.
 class HealthConfig:
     """Timing policy for the health runner (seconds unless noted)."""
 
-    interval_s: float = 60.0
+    interval_s: float = ROOT_HEALTH_INTERVAL_S
     """Delay between completed rounds."""
 
     probe_timeout_s: float = 20.0

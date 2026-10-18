@@ -44,6 +44,18 @@ AGENT_LEASE_RENEW_INTERVAL_S = 15.0
 # recovery.
 AGENT_LEASE_TTL_S = 600.0
 
+# meiva:note
+# The root health monitor's round interval. A unit's declared stop window may not
+# exceed it: a replacement stop runs inside the round, so a longer window would
+# stall every other unit's probe for that long.
+ROOT_HEALTH_INTERVAL_S = 60.0
+
+# meiva:note
+# After SIGKILL, how long root waits for the child to be reaped before reporting
+# the stop as failed. Short on purpose: the kernel reaps a killed child promptly,
+# so a longer wait only delays the honest failure.
+STOP_KILL_REAP_S = 2.0
+
 # How long a crash-marked idling row may sit dead before the agent_host beat's
 # corpse reaper stamps it terminated ('reaper'). Deliberately longer than
 # AGENT_LEASE_TTL_S so a corpse first decays offline (renew skips marked rows)

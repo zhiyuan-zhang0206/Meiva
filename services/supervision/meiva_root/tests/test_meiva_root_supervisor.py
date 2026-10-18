@@ -131,25 +131,26 @@ async def test_restart_refuses_changed_inputs_before_native_birth(
         await owner.shutdown()
 
 
-async def test_live_child_timeout_requires_explicit_force(tmp_path: Path) -> None:
+async def test_a_child_ignoring_term_is_escalated_at_the_hard_budget(tmp_path: Path) -> None:
     ready = tmp_path / "ready"
-    owner = root(
-        tmp_path,
-        "ignore_term",
-        str(ready),
+    unit = UnitManifest(
+        "worker",
+        (sys.executable, "-u", str(_CHILD), "ignore_term", str(ready)),
+        RestartPolicy.ALWAYS,
+        "root",
+        stop_timeout_s=0.5,
     )
+    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path, config=SupervisorConfig())
     await owner.start()
     await wait_file(ready)
     pid = (await row(owner))["pid"]
     try:
-        with pytest.raises(RuntimeError, match="did not stop"):
-            await owner.down("worker")
-        assert psutil.pid_exists(pid)
+        result = await owner.down("worker")
+        assert cast("list[dict[str, Any]]", result["units"])[0]["action"] == "stopped"
+        assert not psutil.pid_exists(pid)
         assert not (tmp_path / "custody").exists()
     finally:
-        await owner.down("worker", force=True)
         await owner.shutdown()
-    assert not psutil.pid_exists(pid)
 
 
 def child_exited(child: psutil.Process) -> bool:

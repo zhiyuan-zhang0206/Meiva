@@ -80,6 +80,16 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.GATEWAY_PREFLIGHT_BUDGET_S,
         "agent-runner start preflight's per-dial gateway budget",
     ),
+    "ROOT_HEALTH_INTERVAL_S": Clock(
+        "deploy",
+        lambda: deploy.ROOT_HEALTH_INTERVAL_S,
+        "the root health monitor's round interval; a stop window may not exceed it",
+    ),
+    "STOP_KILL_REAP_S": Clock(
+        "deploy",
+        lambda: deploy.STOP_KILL_REAP_S,
+        "how long root waits for a SIGKILLed child to be reaped before reporting the stop as failed",
+    ),
     "SERVICE_READY_TIMEOUT_S": Clock(
         "deploy",
         lambda: deploy.SERVICE_READY_TIMEOUT_S,
