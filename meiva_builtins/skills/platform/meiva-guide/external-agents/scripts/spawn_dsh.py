@@ -41,6 +41,7 @@ from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, Gatewa
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
+from meiva.shell.coding_tools import add_lineage_arguments, require_lineage
 
 _HERE = Path(__file__).resolve().parent
 _PLUGIN = _HERE / "meiva-relay-dsh" / "meiva-relay.mjs"
@@ -238,7 +239,7 @@ def _launch(workspace: Path, prompt: str, ttl_seconds: float) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Launch DeepSeek Harness in a persistent shell session."
     )
@@ -263,7 +264,8 @@ def main() -> int:
         default=None,
         help="Initial prompt text submitted to the new dsh session.",
     )
-    args = parser.parse_args()
+    add_lineage_arguments(parser)
+    args = parser.parse_args(argv)
     if args.status or args.cancel_generation:
         if args.prompt is not None:
             parser.error("--prompt requires a new launch")
@@ -274,12 +276,13 @@ def main() -> int:
     if args.prompt is None or not args.prompt.strip():
         parser.error("new dsh launch requires a non-empty --prompt")
     workspace = _resolve_dir(args.workspace)
+    prompt = f"{require_lineage(parser, args, takeover=True)}\n\n{args.prompt}"
     from meiva.sdk_surface.agent_identity import require_agent_id
 
     require_agent_id()
     return _launch(
         workspace,
-        args.prompt,
+        prompt,
         args.ttl_seconds,
     )
 

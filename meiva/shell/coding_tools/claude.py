@@ -35,6 +35,7 @@ from ._common import (
     init_file,
     kill_session_after_failed_launch,
     worker_bootstrap,
+    write_task_file_header,
 )
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
@@ -140,11 +141,13 @@ def run_supervised_launch(
     *,
     resume: bool,
     prompt: str | None = None,
+    provenance: str | None = None,
     check_session_exists: Callable[[str], bool] | None = None,
 ) -> int:
     if tasks_file is not None and work_file is not None:
         init_file(tasks_file, "")
         init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
+        write_task_file_header(tasks_file, provenance or "")
     pretrust(workspace)
 
     session_name = f"claude-{workspace.name}"
@@ -176,7 +179,15 @@ def run_supervised_launch(
         else:
             assert tasks_file is not None and work_file is not None  # noqa: S101
             sessions.send(
-                sid, worker_bootstrap(contract, workspace, tasks_file, work_file, resumed=resume)
+                sid,
+                worker_bootstrap(
+                    contract,
+                    workspace,
+                    tasks_file,
+                    work_file,
+                    resumed=resume,
+                    provenance=provenance,
+                ),
             )
     except BaseException:
         kill_session_after_failed_launch(sid)
@@ -206,6 +217,7 @@ def launch(
     skill_dir: Path,
     resume: str | None = None,
     prompt: str | None = None,
+    provenance: str | None = None,
     preset_first_run: bool = True,
     check_session_exists: Callable[[str], bool] | None = None,
 ) -> int:
@@ -239,5 +251,6 @@ def launch(
         claude_session,
         resume=resume is not None,
         prompt=prompt,
+        provenance=provenance,
         check_session_exists=check_session_exists,
     )

@@ -7,6 +7,18 @@ you through two files, not by watching your screen. Follow this contract exactly
 are not always at a fixed place in the workspace. Below they are called the
 **task file** and the **work file**.
 
+## Who dispatched you
+
+Your launch message and the top of your task file carry the same generated
+block: the agent that dispatched you and the spawn chain behind it, the task you
+serve (`for_task`), one line saying why you were chosen, and `report_to` — the
+agent your result goes back to. Reply and escalate to that agent, not to a
+person. The block is generated: quote it when you report, never edit it.
+
+When you set `STATUS: DONE`, name the `for_task` id and the paths you delivered.
+If the block says `for_task: none (ad-hoc)`, write that in the log rather than
+inventing an id.
+
 ## The two files — single writer each
 
 - the **task file** — **read-only for you.** The operator appends tasks,
