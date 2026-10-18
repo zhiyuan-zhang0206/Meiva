@@ -19,7 +19,6 @@ from base.deploy.lifecycle import status_journal
 from base.deploy.tests.maintenance_factory import WHEN
 from base.native_process import ownership
 from base.native_process.ownership import OwnedProcess
-from base.sessions.posixproc import process_group_has_live_members
 from base.sessions.pty import closure
 from base.sessions.record import SessionRecord
 from cli.commands.data_plane import maintenance_stop_report as report
@@ -27,6 +26,7 @@ from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import service_stop as stop
 from cli.commands.lifecycle.tests.stop.stop_support import (
     Launcher,
+    assert_group_drained,
     closed_session,
     identity_of,
     launched_processes,
@@ -184,7 +184,7 @@ def test_literal_session_installs_requested_signal_behavior(
                 process.wait(timeout=0.2)
         else:
             assert process.wait(timeout=5) == result
-    assert not process_group_has_live_members(process.pid)
+    assert_group_drained(process.pid)
     assert process.stdout is not None and process.stdout.closed
     assert process.stderr is not None and process.stderr.closed
 
@@ -212,7 +212,7 @@ def test_literal_child_is_armed_in_the_owned_group_and_cleanup_preserves_failure
     assert raised.value is original
     assert parent is not None
     assert parent.returncode == -signal.SIGKILL
-    assert not process_group_has_live_members(parent.pid)
+    assert_group_drained(parent.pid)
     assert parent.stdout is not None and parent.stdout.closed
     assert parent.stderr is not None and parent.stderr.closed
 
