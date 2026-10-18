@@ -128,7 +128,10 @@ export function ContextButton(props: ContextButtonProps) {
           // would refuse to wrap and get silently clipped by overflow-x-
           // hidden instead of flowing across lines like the rest of the
           // panel.
-          className="absolute bottom-full left-0 z-50 mb-2 min-w-80 max-w-[min(28rem,90vw)] max-h-[50vh] overflow-x-hidden overflow-y-auto whitespace-normal rounded-md border border-border bg-popover p-2.5 text-popover-foreground shadow-md"
+          className={cn(
+            "absolute left-0 z-50 min-w-80 max-w-[min(28rem,90vw)] max-h-[50vh] overflow-x-hidden overflow-y-auto whitespace-normal rounded-md border border-border bg-popover p-2.5 text-popover-foreground shadow-md",
+            "bottom-full mb-2",
+          )}
         >
           <div className={cn("mb-2 items-start justify-between gap-2", FLEX)}>
             <p className="text-sm font-semibold">{t("title")}</p>

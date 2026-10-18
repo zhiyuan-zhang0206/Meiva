@@ -395,7 +395,7 @@ describe("ContextButton", () => {
     expect(group.className).toContain("tabular-nums");
   });
 
-  it("splits the occupancy summary into two lines: tokens, then wind-down · auto-compact", async () => {
+  it("splits the occupancy summary into two lines: tokens, then the soft and hard limits", async () => {
     getContextBreakdown.mockResolvedValue(breakdown);
     wrap(<Harness agentId={7} {...meterProps} />);
     fireEvent.click(screen.getByTestId("context-meter-button"));
@@ -404,7 +404,7 @@ describe("ContextButton", () => {
     const lines = [...total.querySelectorAll("span.block")];
     expect(lines.map((l) => l.textContent)).toEqual([
       "1.0k / 1.00M tokens",
-      "wind-down 600.0k · auto-compact 800.0k",
+      "soft 600.0k · hard 800.0k",
     ]);
   });
 
@@ -465,7 +465,7 @@ describe("ContextBreakdownCard (P4-3)", () => {
     const lines = [...screen.getByTestId("context-breakdown-total").querySelectorAll("span.block")];
     expect(lines.map((l) => l.textContent)).toEqual([
       "1.0k / 2.00M tokens",
-      "wind-down 1.20M · auto-compact 1.60M",
+      "soft 1.20M · hard 1.60M",
     ]);
   });
 
@@ -483,7 +483,7 @@ describe("ContextBreakdownCard (P4-3)", () => {
     const total = screen.getByTestId("context-breakdown-total");
     expect([...total.querySelectorAll("span.block")].map((l) => l.textContent)).toEqual([
       "1.0k / 1.00M tokens",
-      "wind-down 600.0k · auto-compact 800.0k",
+      "soft 600.0k · hard 800.0k",
     ]);
     expect(screen.getByText("Agent messages")).toBeTruthy();
     expect(screen.getByText("System notes")).toBeTruthy();

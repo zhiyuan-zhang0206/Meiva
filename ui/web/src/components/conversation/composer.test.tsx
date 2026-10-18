@@ -867,12 +867,12 @@ describe("Composer context meter (opt-in)", () => {
     expect(screen.queryByTestId("context-meter")).toBeNull();
     expect(screen.queryByTestId("context-meter-button")).toBeNull();
     expect(screen.queryByTestId("context-meter-ghost")).toBeNull();
-    expect(screen.getByTestId("composer-meta").textContent).toBe(" ");
+    expect(screen.queryByTestId("composer-meta")).toBeNull();
   });
 
-  it("keeps the layout spacer when the agent has no LLM call yet", () => {
+  it("renders no meta line when the agent has no LLM call yet and no hint", () => {
     render(<Composer {...baseProps} mode="idle" contextTokens={0} showContextMeter />);
-    expect(screen.getByTestId("composer-meta").textContent).toBe(" ");
+    expect(screen.queryByTestId("composer-meta")).toBeNull();
   });
 
   it("shows the loading ghost while the token snapshot is pending (cold switch)", () => {
@@ -966,7 +966,7 @@ describe("Composer file upload (drag + paste)", () => {
     const upload = screen.getByRole("button", { name: "Upload file" });
     const input = screen.getByTestId("composer-input");
     expect(upload.parentElement).toBe(input.parentElement);
-    expect(screen.getByTestId("composer-meta").contains(upload)).toBe(false);
+    expect(screen.queryByTestId("composer-meta")).toBeNull();
   });
 
   it("does not show the file-upload hint when no file delivery is in flight", () => {
@@ -1234,7 +1234,7 @@ describe("Composer slash commands", () => {
     const meta = () => screen.getByTestId("composer-meta").textContent;
     fireEvent.change(ta, { target: { value: "/recap" } });
     await screen.findByTestId("slash-option-recap");
-    expect(meta()).toBe(" ");
+    expect(screen.queryByTestId("composer-meta")).toBeNull();
     fireEvent.change(ta, { target: { value: "/recap " } });
     await waitFor(() => expect(meta()).toBe("a focus"));
   });
@@ -1376,15 +1376,14 @@ describe("Composer slash commands", () => {
     moveCaret(ta, "/compact ping /recap the".length);
     await waitFor(() => expect(meta()).toBe("an instruction hint"));
     moveCaret(ta, "/compact".length);
-    await waitFor(() => expect(meta()).toBe(" "));
+    await waitFor(() => expect(screen.queryByTestId("composer-meta")).toBeNull());
   });
 
   it("mid-message slash does not surface a hint (#836)", async () => {
     commandList = [recap, compact];
     render(<Composer {...baseProps} mode="idle" />);
-    const meta = () => screen.getByTestId("composer-meta").textContent;
     typeInto(input(), "heads up /compact ping");
-    await waitFor(() => expect(meta()).toBe(" "));
+    await waitFor(() => expect(screen.queryByTestId("composer-meta")).toBeNull());
   });
 
   it("a later command in the message gets no dropdown (#836)", async () => {

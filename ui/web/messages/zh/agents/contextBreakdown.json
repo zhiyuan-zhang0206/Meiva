@@ -8,7 +8,7 @@
   "retry": "重试",
   "empty": "暂无上下文记录——agent 首个回合后出现明细。",
   "tokensUnit": "tokens",
-  "thresholds": "软阈值 {soft} · 自动压缩 {hard}",
+  "thresholds": "软 {soft} · 硬 {hard}",
   "sections": "系统提示词分节",
   "expand": "展开 {target}",
   "collapse": "收起 {target}",

@@ -150,15 +150,17 @@ describe("To user navigation history", () => {
 });
 
 describe("To user document bar", () => {
-  it("groups the document time with the refresh control at the right edge", () => {
-    show(document("# Status", "2026-10-17T06:00:00Z"));
+  it("orders the bar as shared context, then the update time with refresh, with the inspector alone at the right", () => {
+    show(document("# Status", "2026-10-17T06:00:00Z"), { onInspect: vi.fn() });
     const status = screen.getByTestId("document-status");
-    expect(status.parentElement?.lastElementChild).toBe(status);
-    expect(status.className).toContain("ml-auto");
-    expect(status.className).toContain("shrink-0");
+    const bar = screen.getByTestId("document-bar");
+    expect(bar.firstElementChild?.getAttribute("aria-label")).toBe("home");
+    expect(screen.getByText("sharedContext").nextElementSibling).toBe(status);
     expect(within(status).getByText("updated")).toBeTruthy();
     expect(within(status).getByRole("button", { name: "refresh" })).toBeTruthy();
-    expect(screen.getByText("sharedContext").contains(status)).toBe(false);
+    const trigger = screen.getByTestId("open-inspector");
+    expect(trigger.parentElement?.className).toContain("ml-auto");
+    expect(bar.lastElementChild).toBe(trigger.parentElement);
   });
 
   it("does not repeat the panel title in the mobile reading view", () => {
