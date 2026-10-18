@@ -1,0 +1,230 @@
+[
+ {
+  "case_id": "C01",
+  "task": "Add a retry with backoff to the upload client and cover it with a unit test.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: Added `retry_with_backoff` to upload_client.py with three attempts and jitter; unit test `test_retry_with_backoff` passes locally (1 passed)."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C02",
+  "task": "Document the deployment runbook's rollback step.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: Wrote the rollback section into docs/runbook/deploy.md (about 40 lines) and linked it from the deployment checklist."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C03",
+  "task": "Collect the three failing CI jobs from last week and summarise their causes.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: Summary written to prep/ci-failures.md: 11 failures, 7 flaky timeouts, 3 missing env vars, 1 real assertion failure in `test_upload`."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C04",
+  "task": "Rename the `ava_legacy` module to `meiva_legacy` across the service.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: Renamed in 6 files; `rg ava_legacy` returns no hits; the package imports cleanly (`python -c 'import meiva_legacy'`)."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C05",
+  "task": "Measure the staging API p95 latency for the last 24 hours.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: Query returned p95 = 412 ms over 24h (n=18,442 requests); exported the raw rows to prep/latency-24h.csv."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C06",
+  "task": "Write a migration that adds an index on `tasks.created_at`.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: Migration `0042_index_tasks_created_at.sql` added with a concurrent index build; `db/schema.sql` synchronised."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C07",
+  "task": "Review PR #x for the notification model and leave review comments.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: Left 4 review comments on PR #x (two blocking, two nits) and approved after the author addressed the blocking ones."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C08",
+  "task": "Draft the weekly report from the task tracker.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: Wrote the weekly report to prep/weekly-2026-10-18.md: 23 closed tasks, 4 blocked, one owner change."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C09",
+  "task": "Add a health check endpoint that reports the migration version.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: `GET /health` now returns `{status, migration}`; test `test_health_reports_migration` added and passing."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C10",
+  "task": "Find why the nightly backup job exited with code 2.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: Root cause: the snapshot path moved after the rename; fixed the path in the cron wrapper and re-ran the job (exit 0, 2.1 GB written)."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C11",
+  "task": "Publish the changelog entry for the release.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: Changelog entry added under `## Unreleased` and committed; `git show --stat` lists one file changed."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C12",
+  "task": "Benchmark the two candidate embedding models on the retrieval sample.",
+  "expected": "pass",
+  "evidence": [
+   "Final message from the agent: Benchmark written to prep/embedding-bench.md: model A recall@5 0.71, model B 0.64, at equal cost; raw scores in prep/embedding-bench.csv."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C13",
+  "task": "Add a retry with backoff to the upload client and cover it with a unit test.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: I will add the retry helper next and write the test afterwards.",
+   "Activity: 14 telemetry events, 3 exec calls, terminated after 2 minutes."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C14",
+  "task": "Document the deployment runbook's rollback step.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: Next step is to write the rollback section; I will report once it is drafted.",
+   "Activity: 9 telemetry events, no file writes observed."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C15",
+  "task": "Collect the three failing CI jobs from last week and summarise their causes.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: I am going to look at the CI runs now and come back with a summary.",
+   "Activity: 6 telemetry events, terminated."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C16",
+  "task": "Rename the `ava_legacy` module to `meiva_legacy` across the service.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: The rename is planned for the next pass; I will do it right after this message.",
+   "Activity: 21 telemetry events, 1 failed exec (import error), terminated."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C17",
+  "task": "Measure the staging API p95 latency for the last 24 hours.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: I will run the latency query and share the numbers shortly.",
+   "Activity: 4 telemetry events, terminated."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C18",
+  "task": "Write a migration that adds an index on `tasks.created_at`.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: Started on the migration; will finish the schema sync in the next turn.",
+   "Activity: 12 telemetry events, no new files, terminated."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C19",
+  "task": "Review PR #x for the notification model and leave review comments.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: PR #x is merged and the notification model is live in production.",
+   "Activity: 7 telemetry events, no review API call observed; PR state at read time: OPEN."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C20",
+  "task": "Draft the weekly report from the task tracker.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: The weekly report has been published to the team channel.",
+   "Activity: 5 telemetry events, no message or file write observed."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C21",
+  "task": "Add a health check endpoint that reports the migration version.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: I have implemented the endpoint and it is deployed to staging.",
+   "Activity: 11 telemetry events, 2 exec failures, no commit observed."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C22",
+  "task": "Find why the nightly backup job exited with code 2.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: The backup failure is fixed and the job is green now.",
+   "Activity: 3 telemetry events, no command run against the backup host."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C23",
+  "task": "Publish the changelog entry for the release.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: Changelog entry is written; will commit and push it in the next step.",
+   "Activity: 8 telemetry events, working tree still dirty, terminated."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ },
+ {
+  "case_id": "C24",
+  "task": "Benchmark the two candidate embedding models on the retrieval sample.",
+  "expected": "fail",
+  "evidence": [
+   "Final message from the agent: Benchmark started; results will follow once both models finish.",
+   "Activity: 10 telemetry events, 0 completed batches, terminated."
+  ],
+  "telemetry": "terminated=true, turns=8, exec_ok=5, exec_failed=0, compactions=0"
+ }
+]
