@@ -19,9 +19,11 @@ def _deliver(pool: ConnectionPool, agent_id: int, notice_id: int) -> Notificatio
     if row is None:
         return None
     require_response, title, content = row
+    if not require_response:
+        return None
     return deliver_sync(
         pool,
-        category_id="core.needs_input" if require_response else "core.notice",
+        category_id="core.needs_input",
         subject=title,
         body=content,
         dedupe_key=f"notice:{notice_id}",
@@ -32,8 +34,10 @@ def _deliver(pool: ConnectionPool, agent_id: int, notice_id: int) -> Notificatio
 # meiva:note
 # The notice row is read here rather than passed by the caller: the two post paths
 # commit different payload objects, and the spine is the one owner of "which
-# category a notice becomes". A delivery failure never fails the notice — the row
-# is already committed by the time this runs.
+# category a notice becomes". A notice that needs no answer is not a
+# notification — the console inbox already carries it, and a ping the user cannot
+# act on is noise. A delivery failure never fails the notice — the row is already
+# committed by the time this runs.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 async def deliver_notice_notification(
     pool: ConnectionPool, bus: EventBus | None, *, agent_id: int, notice_id: int
