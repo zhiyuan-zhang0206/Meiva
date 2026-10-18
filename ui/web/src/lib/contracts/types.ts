@@ -502,6 +502,20 @@ export interface TaskUpdatedEvent extends BaseEvent {
   readonly role: "task_updated";
   readonly task_id: number;
 }
+// meiva:note
+// One notification the gateway's spine delivered. The console renders its inbox
+// from notices; this role exists so every client sees the same delivered set the
+// device transports render.
+// meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+export interface NotificationEvent extends BaseEvent {
+  readonly role: "notification";
+  readonly notification_id: number;
+  readonly category: string;
+  readonly subject: string;
+  readonly body: string | null;
+  readonly href: string | null;
+  readonly importance: string;
+}
 
 export type SystemEvent =
   | ChatStartEvent
@@ -534,7 +548,8 @@ export type SystemEvent =
   | NoticePostedEvent
   | NoticeResolvedEvent
   | TaskCreatedEvent
-  | TaskUpdatedEvent;
+  | TaskUpdatedEvent
+  | NotificationEvent;
 
 
 
