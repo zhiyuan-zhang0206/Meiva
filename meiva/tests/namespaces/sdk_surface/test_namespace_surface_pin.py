@@ -64,7 +64,7 @@ _SURFACE: dict[str, list[str]] = {
     "web": ["ReasoningEffort", "SearchResult", "fetch", "search"],
     "skills": [],
     "files": ["append", "delete", "edit", "glob", "read", "write"],
-    "shell": ["BackgroundRun", "run", "run_background", "sessions"],
+    "shell": ["SessionHandle", "run", "run_background", "sessions"],
     # Not a top-level namespace: the scan the other namespaces run their results through. Its
     # three names are still what `meiva.help` and the docs lint treat as its surface.
     "security": ["SecurityFindingEntry", "is_flagged", "scan_content"],

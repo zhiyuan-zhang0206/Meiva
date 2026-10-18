@@ -1,13 +1,12 @@
 """Shell operations: one-shot run, background run with completion notice,
 and persistent sessions."""
 
-__all_for_meiva__ = ["BackgroundRun", "run", "run_background", "sessions"]
+__all_for_meiva__ = ["SessionHandle", "run", "run_background", "sessions"]
 
 import contextlib
 import os
 import subprocess
 from pathlib import Path
-from typing import NamedTuple
 
 from base.log import logger
 from base.paths import workspace_dir
@@ -17,6 +16,7 @@ from meiva.security import scan_content
 
 from . import background
 from . import sessions as sessions
+from .handle import SessionHandle as SessionHandle
 
 
 class ShellResult(str):
@@ -116,14 +116,6 @@ def run(
     )
 
 
-class BackgroundRun(NamedTuple):
-    """A background command: the session it runs in and the log file its output
-    streams to."""
-
-    session_id: int
-    output_path: str
-
-
 def run_background(
     cmd: str,
     *,
@@ -132,7 +124,7 @@ def run_background(
     keep: bool = False,
     ttl: float,
     notify: str | None = None,
-) -> BackgroundRun:
+) -> SessionHandle:
     """You get a message when it finishes — no polling.
 
     `cmd` is a single line (join steps with `;` / `&&`, or run a script file); `name` is a
@@ -182,4 +174,4 @@ def run_background(
                 session_id,
             )
         raise
-    return BackgroundRun(session_id=session_id, output_path=str(output_path))
+    return SessionHandle(session_id=session_id, output_path=str(output_path))

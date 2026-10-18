@@ -227,6 +227,28 @@ def test_send_capture_roundtrip_by_id(_agent_row: int) -> None:
         shell.sessions.kill(sid)
 
 
+@pytest.mark.flaky
+def test_sessions_accept_a_handle_or_its_session_id(_agent_row: int) -> None:
+    handle = shell.run_background("echo handle-ready; sleep 60", name="test-handle-args", ttl=120)
+    try:
+        assert isinstance(handle, shell.SessionHandle)
+        for label, target in (("handle", handle), ("id", handle.session_id)):
+            marker = f"accepted-{label}"
+            shell.sessions.renew(target, ttl=120)
+            shell.sessions.send(target, f"echo {marker}")
+            deadline = time.time() + 10
+            out = ""
+            while time.time() < deadline and marker not in out:
+                time.sleep(0.1)
+                out = shell.sessions.capture(target)
+            assert marker in out
+        shell.sessions.kill(handle)
+        assert handle.session_id not in shell.sessions.list()
+    finally:
+        with contextlib.suppress(ValueError, RuntimeError):
+            shell.sessions.kill(handle.session_id)
+
+
 def test_list_returns_id_and_name(_agent_row: int) -> None:
     sid = shell.sessions.new("alpha", ttl=120)
     named = shell.sessions.new("dev-server", ttl=120)

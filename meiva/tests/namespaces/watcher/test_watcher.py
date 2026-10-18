@@ -51,6 +51,18 @@ def _watchers_dir() -> pathlib.Path:
     return wiring.spawn_deps().watchers_dir
 
 
+def _launch(*args: Any, **kwargs: Any) -> int:
+    return watcher.launch(*args, **kwargs).session_id
+
+
+def _cron(*args: Any, **kwargs: Any) -> int:
+    return watcher.cron(*args, **kwargs).session_id
+
+
+def _at(*args: Any, **kwargs: Any) -> int:
+    return watcher.at(*args, **kwargs).session_id
+
+
 def _boot_text(wid: int) -> str:
     return (_watchers_dir() / f"watcher_{wid}_boot.py").read_text()
 
@@ -58,7 +70,7 @@ def _boot_text(wid: int) -> str:
 def test_launch_creates_watcher_session(_agent_row: int) -> None:
     # A long-running watcher keeps its session alive and listed under its name.
     code = "import time\ntime.sleep(60)\n"
-    wid = watcher.launch(code, timeout="1h", name="test-launch")
+    wid = _launch(code, timeout="1h", name="test-launch")
     try:
         assert isinstance(wid, int)
         assert _is_live_watcher(wid, "test-launch")
@@ -85,7 +97,7 @@ def test_launch_registers_ttl_row_from_timeout(
     """Task #2614: a launch watcher records its timeout as the session TTL —
     the shell monitor page must show a deadline for every session."""
     before = datetime.datetime.now(datetime.UTC)
-    wid = watcher.launch("import time\ntime.sleep(60)\n", timeout="30m", name="test-launch-ttl")
+    wid = _launch("import time\ntime.sleep(60)\n", timeout="30m", name="test-launch-ttl")
     try:
         deadline = _ttl_deadline(db_conn, _agent_row, wid)
         assert deadline is not None
@@ -105,7 +117,7 @@ def test_cron_registers_ttl_folded_to_end_time(
     registration's end_time (defaulted to now + 7 days, task #2617), folded
     as `deadline - now` at mount time — never the old 24h placeholder."""
     before = datetime.datetime.now(datetime.UTC)
-    wid = watcher.cron("0 4 * * *", "wake", name="test-cron-ttl")
+    wid = _cron("0 4 * * *", "wake", name="test-cron-ttl")
     try:
         deadline = _ttl_deadline(db_conn, _agent_row, wid)
         assert deadline is not None
@@ -123,7 +135,7 @@ def test_cron_registers_ttl_from_explicit_end(db_conn: psycopg.Connection, _agen
     """An explicit end_time beyond the user-session cap still folds exactly:
     the watcher TTL is the stored deadline, uncapped (task #3411)."""
     end = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=30)
-    wid = watcher.cron("0 4 * * *", "wake", end_time=end, name="test-cron-ttl-explicit")
+    wid = _cron("0 4 * * *", "wake", end_time=end, name="test-cron-ttl-explicit")
     try:
         deadline = _ttl_deadline(db_conn, _agent_row, wid)
         assert deadline is not None
@@ -138,7 +150,7 @@ def test_launch_timeout_beyond_24h_is_not_capped(
     """Task #3411: a launch watcher's timeout IS its deadline — a 48h
     watchdog registers a ~48h session TTL. The 24h cap protects user sessions
     (sessions.new / run_background), not system watchers."""
-    wid = watcher.launch("import time\ntime.sleep(60)\n", timeout="48h", name="test-cap-ttl")
+    wid = _launch("import time\ntime.sleep(60)\n", timeout="48h", name="test-cap-ttl")
     try:
         deadline = _ttl_deadline(db_conn, _agent_row, wid)
         assert deadline is not None
@@ -159,7 +171,7 @@ def test_at_registers_ttl_row_from_fires_at_plus_grace(
     from base.daemon.schedules.watcher import AT_SESSION_TTL_GRACE_SECONDS
 
     when = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
-    wid = watcher.at(when, "wake", name="test-at-ttl")
+    wid = _at(when, "wake", name="test-at-ttl")
     try:
         deadline = _ttl_deadline(db_conn, _agent_row, wid)
         assert deadline is not None
@@ -201,7 +213,7 @@ def test_watcher_child_dies_when_the_pty_service_dies(
         "while True:\n"
         "    time.sleep(60)\n"
     )
-    wid = watcher.launch(code, timeout="1h", name="test-orphan-guard")
+    wid = _launch(code, timeout="1h", name="test-orphan-guard")
 
     deadline = time.time() + 20
     # The child publishes the ready file atomically after its contents are
@@ -246,11 +258,11 @@ def test_watcher_child_dies_when_the_pty_service_dies(
 def test_launch_requires_timeout_and_name() -> None:
     # Both timeout and name are required
     with pytest.raises(TypeError):
-        watcher.launch("import meiva\n")  # type: ignore[call-arg]
+        _launch("import meiva\n")  # type: ignore[call-arg]
     with pytest.raises(TypeError):
-        watcher.launch("import meiva\n", timeout="1h")  # type: ignore[call-arg]
+        _launch("import meiva\n", timeout="1h")  # type: ignore[call-arg]
     with pytest.raises(TypeError):
-        watcher.launch("import meiva\n", name="test")  # type: ignore[call-arg]
+        _launch("import meiva\n", name="test")  # type: ignore[call-arg]
 
 
 def test_launch_arms_watchdog_in_boot_file(
@@ -354,7 +366,7 @@ def test_boot_self_cleans_generated_files(tmp_path: pathlib.Path) -> None:
 def test_shell_kill_stops_watcher(_agent_row: int) -> None:
     # A watcher is an ordinary session — the generic session kill stops it.
     code = "import time\ntime.sleep(60)\n"
-    wid = watcher.launch(code, timeout="1h", name="test-launch")
+    wid = _launch(code, timeout="1h", name="test-launch")
     meiva.shell.sessions.kill(wid)
     # Poll instead of a fixed sleep: session teardown latency varies under CPU
     # contention (audit round-2 cc-docs-tests P2).
@@ -439,7 +451,7 @@ def test_watcher_plans_forward_failure_notify() -> None:
 
 def test_watcher_rejects_unknown_notify(_agent_row: int) -> None:
     with pytest.raises(ValueError, match="notify must be one of"):
-        watcher.launch("pass", timeout="1h", name="test-invalid-notify", notify="success")
+        _launch("pass", timeout="1h", name="test-invalid-notify", notify="success")
 
 
 def test_launch_carries_agent_and_session_to_child(
@@ -537,7 +549,7 @@ def test_watcher_completion_notice_e2e(
 
     # `exit 7` exits the shell subshell wrapping the python command — use a
     # python-level SystemExit instead so the exit code flows through the child.
-    wid = watcher.launch("raise SystemExit(7)\n", timeout="1h", name="test-e2e")
+    wid = _launch("raise SystemExit(7)\n", timeout="1h", name="test-e2e")
 
     deadline = time.time() + 15
     while time.time() < deadline and not argv_file.exists():
@@ -584,7 +596,7 @@ def test_watcher_launch_during_shell_startup_with_long_paths(
     wid = spawn.run(
         plans.plan_launch("raise SystemExit(7)\n", "1h", "test-long-path", None),
         dataclasses.replace(wiring.spawn_deps(), watchers_dir=carrier_dir),
-    )
+    ).session_id
     assert wait_for(argv_file.exists, timeout=15), meiva.shell.sessions.capture(wid, lines=30)
     argv = argv_file.read_text().splitlines()
     assert "finished." in argv[3]
@@ -643,7 +655,7 @@ def test_watcher_child_sees_agent_identity(
     fake_cli.chmod(0o755)
     monkeypatch.setattr(background, "cli_path", lambda: fake_cli)
 
-    wid = watcher.launch(code, timeout="1h", name="test-identity")
+    wid = _launch(code, timeout="1h", name="test-identity")
 
     deadline = time.time() + 15
     while time.time() < deadline and not out.exists():
@@ -731,7 +743,7 @@ def test_watcher_child_overrides_stale_session_identity(
         forward_env,
     )
 
-    wid = watcher.launch(code, timeout="1h", name="test-stale-id")
+    wid = _launch(code, timeout="1h", name="test-stale-id")
 
     deadline = time.time() + 15
     while time.time() < deadline and not out.exists():
@@ -756,8 +768,8 @@ def test_cron_registered_twice_yields_two_independent_sessions(_agent_row: int) 
     """Calling cron() again with the same expression + timezone no longer
     dedupes, renews, or supersedes anything — it starts a second, independent
     session, and both keep running until killed."""
-    first = watcher.cron("0 4 * * *", "wake", timezone="UTC", name="test-cron-dup-1")
-    second = watcher.cron("0 4 * * *", "wake", timezone="UTC", name="test-cron-dup-2")
+    first = _cron("0 4 * * *", "wake", timezone="UTC", name="test-cron-dup-1")
+    second = _cron("0 4 * * *", "wake", timezone="UTC", name="test-cron-dup-2")
     try:
         assert first != second
         alive = meiva.shell.sessions.list()

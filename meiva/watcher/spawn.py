@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from base.daemon.schedules.watcher import session_deadline
+from meiva.shell import SessionHandle
 from meiva.watcher import files
 
 __all__ = ["SESSION_ID_ENV", "SpawnDeps", "SpawnRequest", "build_boot", "run"]
@@ -247,7 +248,7 @@ def build_boot(script_path: Path, watchdog_secs: float | None, agent_id: int) ->
     )
 
 
-def run(request: SpawnRequest, deps: SpawnDeps) -> int:
+def run(request: SpawnRequest, deps: SpawnDeps) -> SessionHandle:
     """Start a watcher child running ``request.code``; return its watcher id.
 
     A watcher is nothing more than a shell session running a generated
@@ -371,4 +372,4 @@ def run(request: SpawnRequest, deps: SpawnDeps) -> int:
                 exc_info=True,
             )
         raise
-    return session_id
+    return SessionHandle(session_id=session_id, output_path=str(output_path))
