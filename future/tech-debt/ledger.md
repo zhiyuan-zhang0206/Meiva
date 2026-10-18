@@ -69,14 +69,6 @@ fixture/incident scope.
 - **last-verified**: 2026-10-19
 
 
-### boundary:checkpoint-postgres-historical-walk-patch
-- **class**: boundary
-- **status**: open
-- **evidence**: Re-verified 2026-10-19 at main@aa53f847. `base/agents/history/checkpoint_postgres_walks.py:69:CheckpointWalks` still overrides private `BasePostgresSaver._try_advance_walks`, and `:41:validate_checkpoint_postgres_api` still refuses any `langgraph-checkpoint-postgres` other than 3.1.2 and re-checks the method identity and parameter list (`:26:_EXPECTED_PARAMETERS`). Four production sites construct the adapters: `base/agents/history/checkpoint.py`, `checkpoint_segment.py`, `services/agent_runner/agent_host/invocation/compact/checkpoint.py` and `agent_host/pooled_checkpoint.py`. The upstream condition this entry waited on is now met: langgraph#8556 ("fix(checkpoint-postgres): derive the delta walk cursor once the target loads") merged 2026-09-30 and appears in the `checkpointpostgres==3.1.3` release notes, 3.2.0 is current, and `uv pip list --outdated` at main@aa53f847 reports 3.1.2 -> 3.2.0. The previous evidence's "langgraph#8448" is not a langgraph pull request (the API answers 404); the landed fix is #8556. Remaining work, in this order: raise the pin past the version guard, run `base/agents/history/tests/test_checkpoint_postgres_walks.py`, delete the pagination override, and keep the message-reset suffix reader until upstream supports that boundary. 405 tracks the follow-up.
-- **first-seen**: 2026-09-23 (PR for task #4518)
-- **last-verified**: 2026-10-19
-
-
 ### boundary:exec-node-runner-test-seam
 - **class**: boundary
 - **status**: open
