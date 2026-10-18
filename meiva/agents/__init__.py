@@ -422,6 +422,8 @@ def spawn(
     A fork taken while that agent is inside a tool call carries the call without its result: the
     new agent sees it as already interrupted, not as work still running, so it checks whether the
     call already took effect instead of repeating it.
+    The copy is the whole conversation: the child carries it and pays its size on every call, and
+    the parent's own history is unchanged.
     `{"eval_isolation": True, "eval_network_allowlist": ["web"]}` isolates the agent, allowing
     only the listed `web` / `understand`; `mcps` and `ui` are off.
     """

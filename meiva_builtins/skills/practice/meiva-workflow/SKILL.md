@@ -97,8 +97,11 @@ loop; do not add a separate pilot to every task.
 
 ## Delegation decisions
 
-Proactively parallelize independent work. Fork when your existing context is
-valuable to the task; otherwise spawn fresh or reuse a suitable, available agent.
+Proactively parallelize independent work. Do not let a separate piece of work
+queue behind your current one: fork when the child needs your context — it inherits
+this conversation and starts already oriented — or spawn a fresh agent with a written
+brief when it does not. Forking does not shrink your own window, and the child pays
+this context's size on every call.
 Keep short or dependent steps with the current agent. Choose tools by demonstrated
 capability for the task, not fixed file-count thresholds.
 For Meiva's external-worker launch, supervision, resume, or takeover mechanics,

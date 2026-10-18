@@ -64,6 +64,9 @@ without the result, and the new agent's next turn settles that pair as interrupt
 re-running anything. The interrupted call is therefore not a task to finish: its effects may
 already exist, so the new agent inspects state before repeating it.
 
+The copy is the whole conversation, so the child carries that history and pays its size on every
+call; the parent's own history is unchanged.
+
 `get_launch_attempt(agent_id)` observes the current attempt UUID. Explicit guarded
 `retry_launch` retains that observation and a caller key; see [[launch-retry.meiva.okf.md]].
 

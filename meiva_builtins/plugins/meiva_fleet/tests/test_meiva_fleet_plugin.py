@@ -100,8 +100,8 @@ def test_enabled_fleet_preserves_parallel_work_policy(load_activity_plugin: None
     assert "Workflow selection belongs to `meiva-workflow`" in prompt
     assert "enabling Fleet does not require a registry task or a management tree" in prompt
     assert prompt.count("Proactively parallelize independent work.") == 1
-    assert "Fork when your existing context is valuable to the task" in prompt
-    assert "otherwise spawn fresh or reuse a suitable, available agent." in prompt
+    assert "Do not let a separate piece of work queue behind your current one" in prompt
+    assert "spawn a fresh agent with a written brief when it does not." in prompt
     assert "Before using Fleet coordination or task tracking" in prompt
     assert "accepted assignments determine reporting" in prompt
     assert "With no delegator, deliver directly" in prompt

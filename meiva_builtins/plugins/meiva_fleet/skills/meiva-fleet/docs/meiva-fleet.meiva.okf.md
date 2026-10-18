@@ -16,10 +16,12 @@ The master outline of the fleet collaboration methodology (`plugins/meiva_fleet/
 
 ## Parallel Work
 
-Proactively parallelize independent work. Fork when existing context is valuable
-to the task; otherwise spawn fresh or reuse a suitable, available agent. Keep
-short or dependent work local, respect existing ownership, and continue other
-actionable work while delegates run. The orchestrator reference describes
+Proactively parallelize independent work. Do not let a separate piece of work
+queue behind your current one: fork when the child needs your context — it inherits
+this conversation and starts already oriented — or spawn a fresh agent with a written
+brief when it does not. Forking does not shrink your own window, and the child pays
+this context's size on every call. Keep short or dependent work local, respect
+existing ownership, and continue other actionable work while delegates run. The orchestrator reference describes
 context selection and assignment boundaries.
 
 ## Communication Bisection (#620 Revision)
