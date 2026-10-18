@@ -98,3 +98,30 @@ def test_json_output_reports_each_panel(
     payload = json.loads(capsys.readouterr().out)
     assert code == 0
     assert payload[0]["passed"] is True and payload[0]["panel"] == str(panel)
+
+
+def test_known_vocabulary_keeps_its_english_form(tmp_path: Path, rules: Path) -> None:
+    body = (
+        "# \u72b6\u6001\n\n"
+        "MCP \u548c LLM \u90fd\u7528\u539f\u8bcd\uff1bwatcher \u5728\u8dd1\uff0c"
+        "\u6211\u7528 self-terminate \u7ed3\u675f\u81ea\u5df1\u3002"
+    )
+    panel = _panel(tmp_path, body)
+    findings, _entries, passed = gate.evaluate(panel, gate.load_ruleset(rules))
+    assert findings == [] and passed
+
+
+def test_invented_translation_names_the_original_term(tmp_path: Path, rules: Path) -> None:
+    body = (
+        "# \u72b6\u6001\n\n"
+        "watcher \u5199\u6210\u4e86\u503c\u5b88\u8fdb\u7a0b\uff0c"
+        "self-terminate \u5199\u6210\u4e86\u81ea\u6211\u7ec8\u7ed3\u3002"
+    )
+    panel = _panel(tmp_path, body)
+    findings, _entries, passed = gate.evaluate(panel, gate.load_ruleset(rules))
+    details = {finding.detail for finding in findings if finding.rule == "invented-translation"}
+    assert details == {
+        "\u503c\u5b88\u8fdb\u7a0b -> watcher",
+        "\u81ea\u6211\u7ec8\u7ed3 -> self-terminate",
+    }
+    assert passed

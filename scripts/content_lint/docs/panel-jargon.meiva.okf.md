@@ -20,4 +20,23 @@ are counted against the configured budget. It never edits a panel.
 
 The body of a panel — everything before the first evidence heading — carries no bare internal identifier, issue number or batch codeword: those are hard findings that exit non-zero. Soft findings (repository paths, unglossed acronyms) and the number of glossary entries are bounded by the same rule file, and exceeding either budget also exits non-zero. Identifiers inside the evidence area are never reported, the rule file is the only place patterns and budgets live, and the gate is read-only.
 
+
+## Known vocabulary stays as written
+
+The gate reports internal identifiers, not English. Terms the reader already uses
+(`agent`, `watcher`, `skill`, `MCP`, `task`, `PR`, `CI`, `checkpoint`, `rollout`,
+`gateway`, `runner`, `context`, `prompt`, `token`, `session`, `sandbox`,
+`subagent`, `self-terminate`, `Trunk`, `Grafana`) keep their original form: a panel
+explains what the thing does on first use and afterwards uses the same word. The
+`keep_terms` list records that vocabulary, and `allowed_acronyms` adds the
+uppercase forms (`MCP`, `LLM`, `CLI`, `SQL`, `YAML`, ...) so the acronym rule never
+pushes a writer toward a translation.
+
+The one soft rule in this direction, `invented-translation`, is deliberately
+narrow: it lists the few Chinese replacements seen in review (`watcher` written as
+`\u503c\u5b88\u8fdb\u7a0b`, `self-terminate` as `\u81ea\u6211\u7ec8\u7ed3`, ...) and
+names the original term to restore. It is not a translation dictionary, and
+extending it beyond observed cases would recreate the over-correction it exists
+to prevent.
+
 Parent: [[scripts/content_lint/docs/content_lint.meiva.okf.md]].

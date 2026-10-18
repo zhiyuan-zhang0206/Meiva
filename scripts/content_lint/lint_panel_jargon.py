@@ -33,6 +33,8 @@ class Ruleset:
     max_body_findings: int
     max_glossary_entries: int
     allowed_acronyms: tuple[str, ...]
+    keep_terms: tuple[str, ...]
+    invented: tuple[tuple[str, tuple[str, ...]], ...]
     rules: tuple[Rule, ...]
 
 
@@ -80,6 +82,11 @@ def load_ruleset(path: Path | None = None) -> Ruleset:
         max_body_findings=int(panel["max_body_findings"]),
         max_glossary_entries=int(panel["max_glossary_entries"]),
         allowed_acronyms=tuple(acronym.upper() for acronym in panel.get("allowed_acronyms", ())),
+        keep_terms=tuple(data.get("keep_terms", ())),
+        invented=tuple(
+            (term, tuple(replacements))
+            for term, replacements in data.get("invented_translation", {}).items()
+        ),
         rules=tuple(rules),
     )
 
@@ -156,6 +163,26 @@ def _acronym_findings(
     return findings
 
 
+def _invented_findings(
+    body_lines: Sequence[str],
+    invented: tuple[tuple[str, tuple[str, ...]], ...],
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for term, replacements in invented:
+        for number, line in enumerate(body_lines, start=1):
+            for replacement in replacements:
+                if replacement in line:
+                    findings.append(
+                        Finding(
+                            line=number,
+                            rule="invented-translation",
+                            detail=f"{replacement} -> {term}",
+                            hard=False,
+                        )
+                    )
+    return findings
+
+
 # meiva:link scripts/content_lint/docs/panel-jargon.meiva.okf.md
 def scan_panel(path: Path, ruleset: Ruleset) -> tuple[list[Finding], int]:
     body, _evidence, glossary = split_body(path.read_text(encoding="utf-8"), ruleset)
@@ -172,7 +199,9 @@ def scan_panel(path: Path, ruleset: Ruleset) -> tuple[list[Finding], int]:
                         hard=rule.hard,
                     )
                 )
-    findings.extend(_acronym_findings(body, terms, ruleset.allowed_acronyms))
+    known = tuple(ruleset.allowed_acronyms) + tuple(term.upper() for term in ruleset.keep_terms)
+    findings.extend(_acronym_findings(body, terms, known))
+    findings.extend(_invented_findings(body, ruleset.invented))
     return sorted(findings, key=lambda finding: (finding.line, finding.rule)), len(terms)
 
 

@@ -11,7 +11,22 @@ glossary_headings = ["\u540d\u8bcd\u8868", "\u672f\u8bed\u8868", "Glossary"]
 glossary_table_headers = ["\u8bcd", "\u672f\u8bed", "term", "word"]
 max_body_findings = 5
 max_glossary_entries = 8
-allowed_acronyms = ["CI", "PR", "API", "SDK", "URL", "HTTP", "JSON", "UI", "DB", "ID", "CPU", "GPU"]
+allowed_acronyms = ["CI", "PR", "API", "SDK", "URL", "HTTP", "HTTPS", "JSON", "UI", "DB", "ID", "CPU", "GPU", "MCP", "LLM", "CLI", "SQL", "YAML", "TOML", "SSH", "TLS", "RPC", "CSV", "HTML", "CSS", "OAuth", "JWT"]
+
+# Vocabulary the user already knows by its English name. Keep every term as
+# written: a panel explains what it does, never renames it. The gate treats these
+# as known and reports only the narrow set of invented replacements below, so a
+# writer is never pushed toward a translation.
+keep_terms = ["agent", "watcher", "skill", "MCP", "task", "PR", "CI", "checkpoint", "rollout", "gateway", "runner", "context", "prompt", "token", "session", "sandbox", "subagent", "self-terminate", "Trunk", "Grafana"]
+
+# Narrow on purpose: only the replacements seen in review, not a translation
+# dictionary. Each key is the term to keep; values are the invented Chinese forms
+# that replace it. Every hit is a soft finding naming the original term.
+[invented_translation]
+watcher = ["\u503c\u5b88\u8fdb\u7a0b", "\u5b88\u591c\u7a0b\u5e8f", "\u5b88\u591c\u8fdb\u7a0b"]
+self-terminate = ["\u81ea\u6211\u7ec8\u7ed3", "\u81ea\u6211\u88c1\u64a4", "\u81ea\u88c1"]
+agent = ["\u667a\u80fd\u4f53"]
+prompt = ["\u63d0\u793a\u8bcd"]
 
 [[rule]]
 id = "bare-identifier"
