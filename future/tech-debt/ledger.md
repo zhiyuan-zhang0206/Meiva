@@ -101,6 +101,13 @@ fixture/incident scope.
 - **last-verified**: 2026-10-19
 
 
+### docs-aging:agent/startup/__init__.py:wrap_saver_writes_with_nstep_interval
+- **class**: docs-aging
+- **status**: open
+- **evidence**: the docstring at `agent/startup/__init__.py:219` says a delta fold "within one checkpoint ... sorts by opaque task-id hash". Since checkpoint-postgres 3.1.3 (PR #6295) the fold orders one checkpoint's writes by `writes_sort_key` = (`task_path`, `task_id`, `idx`), and `base/agents/history/checkpoint_postgres_walks.py` uses that order for its reset cut. The conclusion the sentence supports (a skipped or re-homed batch scrambles the replay) still holds, so this is wording, not a behaviour defect. Not fixed in #6295: the docstring is unchanged legacy prose, and any edit to it trips the `check-code-comments` free-comment gate, which would force the whole 50-line explanation into `meiva:note` blocks.
+- **first-seen**: 2026-10-19 (PR #6295)
+- **last-verified**: 2026-10-19
+
 ## Wontfix
 
 ### docstring-budget:meiva/security.py:module
