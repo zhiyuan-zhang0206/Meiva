@@ -34,7 +34,20 @@ class Capability(StrEnum):
     TASKS_WRITE = "tasks.write"
     UI = "ui"
     SCHEDULE = "schedule"
+    EXTERNAL_MODEL = "external.model"
 
+
+# meiva:note
+# `external.model` is its own capability, not `read`, because `meiva.understand` is
+# the one surface that both spends the user's money and sends local file content to
+# a model outside the cluster. Classifying it as `read` would keep it out of sight
+# of an approval surface that decides what may leave the machine and what may cost
+# money; a separate name lets a lease grant reading without granting that.
+# The implication runs one way only: granting `external.model` does expose local
+# file content, because the caller names the paths, so an approval surface must
+# read this capability as export too - the gate maps one entry to one capability
+# and cannot require `read` beside it.
+# meiva:link base/agents/impersonation/docs/capabilities.meiva.okf.md
 
 # meiva:note
 # A profile is a named bundle of capabilities; the lease stores the expanded set,
