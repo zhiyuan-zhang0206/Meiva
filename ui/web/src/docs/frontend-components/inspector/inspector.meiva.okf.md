@@ -35,11 +35,10 @@ areas are not promised by it (plugins have their own generic placeholder).
 **Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating-overlay
 ruling on desktop).** At ≥ lg the panel fills the resizable right-side panel;
 below lg it is a full-screen overlay with a backdrop, matching the mobile sidebar
-drawer. At ≥ lg the top-bar InspectorToggle is the panel's one close control
-(user ruling 2026-08-24 — a header X here duplicated its "Close inspector"
-affordance, QA sweep 2026-09-18 F2); below lg the overlay header X closes it (the
-overlay covers the toggle, so the X is the only reachable close) and the backdrop
-closes it too. Escape deliberately does not close either form (user ruling
+drawer. At ≥ lg the document bar's inspector trigger (ScanSearch) is the panel's
+one open/close control — it replaced the header-bar InspectorToggle on
+2026-10-18 — and the panel renders no header of its own; below lg the overlay
+header X closes it and the backdrop closes it too. Escape deliberately does not close either form (user ruling
 2026-08-24), and clicking outside the desktop panel does not close it either.
 
 **Rendering while closed.** Closing renders nothing — desktop releases the
