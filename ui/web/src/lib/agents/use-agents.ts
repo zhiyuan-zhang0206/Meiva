@@ -86,4 +86,3 @@ export function useAgents(showError: (msg: string) => void) {
   }, [queryClient]);
   return { agents, ancestors, activeAgent, activeId, setActiveId, isLoading: roster.isLoading, refresh, ...actions };
 }
-export type UseAgentsResult = ReturnType<typeof useAgents>;
