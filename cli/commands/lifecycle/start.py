@@ -432,6 +432,25 @@ def _critical_launch_failures(launch: Any) -> tuple[str, ...]:
     return tuple(name for name in launch.failed if name in names)
 
 
+# meiva:note
+# The gateway is serving, so its Postgres is up: assert once that it carries the
+# archive settings this code configures (services/backup/walg/startup.py). The gate
+# is the machine's role, not what this start launched, so a start against an
+# already-running tree still checks; a gateway among the unready units skips it.
+def _assert_archive_after_readiness(
+    wait: Any, *, roles: MachineRoles, machine: MachineIdentity
+) -> None:
+    if "gateway" not in roles or any(spec.session == "gateway" for spec in wait.unready):
+        return
+    from base.config import settings as _settings
+    from services.backup.walg.startup import assert_configured_archive
+
+    assert_configured_archive(
+        machine=machine.name(),
+        path_reader=lambda: _settings.walg.walg_config_file,
+    )
+
+
 def readiness_verdict(launch: Any, wait: Any) -> int | None:
     """Report all failures, but gate serving only on selected core services."""
     import cli.commands.probe as _probe_commands
@@ -564,6 +583,8 @@ def cmd_start_body(
     rc = readiness_verdict(launch, wait)
     if rc is not None:
         return rc
+
+    _assert_archive_after_readiness(wait, roles=state.roles, machine=state.command.machine)
 
     if not start_serving.mark_serving(serving_generation, runtime=runtime.identity()):
         print("  ✗ this start lost its serving generation", file=sys.stderr)
