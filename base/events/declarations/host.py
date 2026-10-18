@@ -70,6 +70,7 @@ class ImpersonationCapabilityRefused(TypedDict):
     lease_id: str
     entry: str
     capability: str
+    capabilities: list[str]
     mode: str
 
 
@@ -339,7 +340,8 @@ EVENTS: dict[str, EventSpec] = {
         "an SDK call fell outside its impersonation lease's declared capabilities; "
         "`warn` records it and lets the call through, `enforce` records it and refuses it. "
         "Carries the lease, the dotted SDK entry, the capability it needed (empty when "
-        "nobody classified the entry) and the enforcement mode in force",
+        "nobody classified the entry; the primary one when the entry needs several), the "
+        "full requirement set, and the enforcement mode in force",
         payload=ImpersonationCapabilityRefused,
         tier="anomaly",
         site="meiva/impersonation/attachment.py:_record_capability_refusal (positional emit)",
