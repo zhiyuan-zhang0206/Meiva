@@ -1,5 +1,11 @@
 # Project one operator skill to external agent clients
 
+Superseded in part (2026-10-18): the published skills are now `meiva-guide` and
+`impersonator-guide`, the client set is a registry of six tools, and an installed
+program now counts as presence. The ownership, staging and conflict rules below
+still hold; see [[docs/skills/external-agent-operator-bridge.meiva.okf.md]] and
+[the supported-client matrix](../../../../meiva_builtins/skills/platform/meiva-guide/external-agents/references/supported-clients.md).
+
 ## Context
 
 The 2026-08-20 distribution decision stopped converging Meiva's real

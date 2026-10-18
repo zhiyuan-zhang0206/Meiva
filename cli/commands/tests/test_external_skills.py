@@ -15,6 +15,7 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 SKILL_NAME = "meiva-guide"
+PUBLISHED = ("meiva-guide", "impersonator-guide")
 
 
 @pytest.fixture
@@ -25,7 +26,7 @@ def home(tmp_path: Path) -> Path:
 
 
 def _write_source(repo: Path) -> None:
-    for name in (SKILL_NAME,):
+    for name in PUBLISHED:
         source = repo / "meiva_builtins" / "skills" / "platform" / name
         source.mkdir(parents=True)
         (source / "SKILL.md").write_text("operator guidance\n")

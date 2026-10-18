@@ -51,6 +51,15 @@ with `--remote`, and `codex_app_server=<endpoint>` printed so a takeover request
 can record it (`--codex-remote`) and the relay delivers into the same server. Notifications
 use non-resurrecting system notes.
 
+## Published copies
+
+`meiva start` publishes this sub-skill's parent guide and `impersonator-guide`
+into the global skill directory of each external agent surface it finds (Codex,
+Claude Code, Gemini CLI, Grok, Qwen Code, Cursor Agent, Antigravity App/IDE and
+CLI, DeepSeek Harness), so a session can read them without the Meiva checkout. `references/supported-clients.md` is the matrix of
+those directories with its evidence, the presence rule, duplicate visibility and
+the tools deliberately left out.
+
 ## Key dependencies
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — full skills catalog
 - [[meiva/shell/docs/shell.meiva.okf.md|meiva.shell]] — `sessions` (new/send/send_keys/capture/kill) session primitive itself
