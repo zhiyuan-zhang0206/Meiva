@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 from uuid import uuid4
 
@@ -152,11 +153,8 @@ async def test_a_completed_turn_records_one_notification(
     from services.agent_runner.agent_host.runtime import TurnOutcome
 
     agent_id = _agent(db_conn)
-    await AgentHost._notify_turn_finished(
-        SimpleNamespace(_pool=aops_pool, _bus=event_bus),
-        agent_id,
-        TurnOutcome(exited=False, crashed=False),
-    )
+    host = cast(AgentHost, SimpleNamespace(_pool=aops_pool, _bus=event_bus))
+    await AgentHost._notify_turn_finished(host, agent_id, TurnOutcome(exited=False, crashed=False))
     rows = db_conn.execute(
         "SELECT category, subject FROM notification_events WHERE agent_id = %s", (agent_id,)
     ).fetchall()
@@ -172,11 +170,8 @@ async def test_an_interrupted_turn_records_no_notification(
     from services.agent_runner.agent_host.runtime import TurnOutcome
 
     agent_id = _agent(db_conn)
-    await AgentHost._notify_turn_finished(
-        SimpleNamespace(_pool=aops_pool, _bus=event_bus),
-        agent_id,
-        TurnOutcome(exited=False, crashed=True),
-    )
+    host = cast(AgentHost, SimpleNamespace(_pool=aops_pool, _bus=event_bus))
+    await AgentHost._notify_turn_finished(host, agent_id, TurnOutcome(exited=False, crashed=True))
     assert db_conn.execute(
         "SELECT count(*) FROM notification_events WHERE agent_id = %s", (agent_id,)
     ).fetchone() == (0,)
