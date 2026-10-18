@@ -325,4 +325,10 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
     ),
     "last_msg": telemetry_event("last_msg", "last-message check", tier="noise"),
+    "pty_transcript": telemetry_event(
+        "pty_transcript",
+        "a pty session's transcript append failed (full disk, closed fd); the session keeps "
+        "running with an incomplete transcript",
+        tier="anomaly",
+    ),
 }
