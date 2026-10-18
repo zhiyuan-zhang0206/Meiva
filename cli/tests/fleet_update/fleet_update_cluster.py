@@ -46,6 +46,7 @@ class Cluster:
         self.output = ""
         self.stored_schedules: tuple[int, list[str]] = (0, [])
         self.roster_lag = 0
+        self.incomplete: dict[str, str] = {}
         self.roster_reads = 0
         self.now = 0.0
         self.silence_open = False
@@ -136,8 +137,15 @@ class Cluster:
             return 0
         if stdin == fleet_update.silence_program():
             return self._silence(alias, command, emit)
+        if "converge-incomplete.json" in command:
+            return self._incomplete(alias, emit)
         if "verify" in command:
             return self._verify(alias, command, emit)
+        return self._effect_for(alias, host, command, emit)
+
+    def _effect_for(
+        self, alias: str, host: dict[str, Any], command: str, emit: Callable[[str], None]
+    ) -> int:
         kinds = {
             "git fetch": "fetch",
             "stop -y": "stop",
@@ -151,6 +159,14 @@ class Cluster:
         if kind == "refresh":
             emit("  summary: applied 2, conflict 1")
         return self._effect(kind, alias, host, command)
+
+    def _incomplete(self, alias: str, emit: Callable[[str], None]) -> int:
+        recorded = self.incomplete.get(alias)
+        if recorded is None:
+            return 1
+        for line in recorded.splitlines():
+            emit(line)
+        return 0
 
     def _silence(self, alias: str, command: str, emit: Callable[[str], None]) -> int:
         assert alias == "gw", "the silence is Grafana's: it runs on the gateway host"

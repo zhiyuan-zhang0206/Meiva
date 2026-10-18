@@ -568,17 +568,45 @@ def converge_host(
     is_prod_install = is_default_home(ctx.meiva_home) and not repo_is_worktree
 
     print("\n→ converge host")
-    for step in steps:
-        reason = _skip_reason(ctx, step, is_prod_install=is_prod_install)
-        if reason is not None:
-            print(f"  · {step.name}: skipped ({reason})")
-            continue
-        try:
-            step.apply(ctx)
-        except Exception as e:
-            print(f"  ✗ {step.name}: {e}", file=sys.stderr)
-            raise
-        print(f"  ✓ {step.name}")
+    failed_step = ""
+    try:
+        for step in steps:
+            reason = _skip_reason(ctx, step, is_prod_install=is_prod_install)
+            if reason is not None:
+                print(f"  · {step.name}: skipped ({reason})")
+                continue
+            try:
+                step.apply(ctx)
+            except Exception as e:
+                failed_step = step.name
+                print(f"  ✗ {step.name}: {e}", file=sys.stderr)
+                raise
+            print(f"  ✓ {step.name}")
+    except Exception as exc:
+        # meiva:note
+        # The host's services may still come up (meiva start continues past the
+        # converge), so the marker is the only durable trace of an unapplied step.
+        # meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
+        record_incomplete(
+            resolved_home, step=failed_step, error=str(exc), prod_install=is_prod_install
+        )
+        raise
+    if is_prod_install:
+        from cli.commands.converge import incomplete
+
+        incomplete.clear_incomplete(resolved_home)
+
+
+# meiva:note
+# Only the host's prod install owns the marker: a dev cluster's converge must
+# never clear or set the prod home's record.
+# meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
+def record_incomplete(meiva_home: Path, *, step: str, error: str, prod_install: bool) -> None:
+    if not prod_install:
+        return
+    from cli.commands.converge import incomplete
+
+    incomplete.record_incomplete(meiva_home, step=step, error=error)
 
 
 def _skip_reason(ctx: ConvergeCtx, step: ConvergeStep, *, is_prod_install: bool) -> str | None:

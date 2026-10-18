@@ -53,7 +53,7 @@ def test_run_does_not_start_after_a_failed_down(
     assert cluster.silence_open
 
 
-@pytest.mark.parametrize("failing", [("start", "gw"), ("smoke", "gw"), ("plugins-verify", "lin")])
+@pytest.mark.parametrize("failing", [("smoke", "gw"), ("plugins-verify", "lin")])
 def test_run_reports_up_failure_without_repeating_down(
     env: tuple[Cluster, Callable[..., int]],
     capsys: pytest.CaptureFixture[str],
@@ -67,6 +67,37 @@ def test_run_reports_up_failure_without_repeating_down(
     output = capsys.readouterr().out
     assert "Failed phase: up" in output and "rerun `up`" in output
     assert cluster.silence_open
+
+
+# meiva:note
+# A host whose converge aborted leaves the rest of the cluster running: the run
+# names that host's step and reason, keeps going, and exits 3 — distinct from a
+# refusal (2) and from a failure before any host started (1).
+# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+def test_a_host_that_fails_to_start_does_not_stop_the_others(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.fail[("start", "lin")] = 1
+    cluster.incomplete = {
+        "lin": json.dumps(
+            {
+                "at": "2026-10-18T10:02:33+00:00",
+                "step": "permissions helper build + sign + load",
+                "error": "the login keychain is not unlocked",
+            }
+        )
+    }
+
+    assert run("up") == fleet_update.PARTIAL_FAILURE_EXIT
+
+    assert [a for k, a in cluster.effects if k in ("start", "oneshot")] == ["gw", "mac", "lin"]
+    output = capsys.readouterr().out
+    assert "lin failed at 'permissions helper build + sign + load'" in output
+    assert "the login keychain is not unlocked" in output
+    assert "up incomplete: 1 host(s) failed" in output
+    assert not cluster.silence_open
 
 
 def test_run_dry_run_plans_both_halves_without_mutation(
