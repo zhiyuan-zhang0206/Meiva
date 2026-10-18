@@ -328,9 +328,12 @@ def test_plugin_quota_rows_wrap_inside_statistics_popover(
     if width < 768:
         page.get_by_role("button", name="Open sidebar", exact=True).click()
     elif collapsed:
-        page.get_by_role("button", name="Collapse sidebar", exact=True).click()
-        expect(page.get_by_role("button", name="Expand sidebar", exact=True)).to_be_visible()
-        expect(page.get_by_role("button", name="Collapse sidebar", exact=True)).to_have_count(0)
+        page.get_by_role("button", name="Hide sidebar", exact=True).click()
+        expect(page.get_by_role("button", name="Show sidebar", exact=True)).to_be_visible()
+        expect(page.get_by_role("button", name="Hide sidebar", exact=True)).to_have_count(0)
+        expect(page.get_by_role("button", name="Statistics", exact=True)).to_have_count(0)
+        page.get_by_role("button", name="Show sidebar", exact=True).click()
+        expect(page.get_by_role("button", name="Statistics", exact=True)).to_be_visible()
     page.get_by_role("button", name="Statistics", exact=True).click()
     dialog = page.get_by_role("dialog").filter(has=page.get_by_text(label, exact=True))
     dialog.wait_for(state="visible")
@@ -380,6 +383,7 @@ def _stub_quota_sidebar_dependencies(page: Page) -> None:
         lambda route: route.fulfill(json={"providers": {}, "models": {}, "default": ""}),
     )
     settings: dict[str, object] = {"display.sidebar_collapsed": True}
+    page.route("**/api/frontend-telemetry", lambda route: route.fulfill(json={"ok": True}))
 
     def _settings(route: Route) -> None:
         if route.request.method == "PUT":
