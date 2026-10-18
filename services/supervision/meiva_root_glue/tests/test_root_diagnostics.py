@@ -16,6 +16,7 @@ from base.agents.context.clients import ClientSet
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.health import DaemonProbe
+from base.db import Database
 from base.host import proc
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
@@ -609,3 +610,73 @@ def test_each_root_roster_owns_its_helper_episode_reporter(
         len([event for event in events if event.get("event") == "permissions_helper_unhealthy"])
         == 2
     )
+
+
+class _ProbeCursor:
+    def __init__(self, error: BaseException | None) -> None:
+        self._error = error
+        self.executed: list[str] = []
+
+    def execute(self, sql: str) -> None:
+        self.executed.append(sql)
+        if self._error is not None:
+            raise self._error
+
+    def fetchone(self) -> tuple[int]:
+        return (1,)
+
+    def __enter__(self) -> _ProbeCursor:
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+
+class _ProbeConnection:
+    def __init__(self, error: BaseException | None) -> None:
+        self._error = error
+        self.autocommit: bool | None = None
+        self.cursor_instance = _ProbeCursor(error)
+
+    def cursor(self) -> _ProbeCursor:
+        return self.cursor_instance
+
+    def __enter__(self) -> _ProbeConnection:
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+
+class _ProbeDatabase:
+    def __init__(self, error: BaseException | None = None) -> None:
+        self.connection = _ProbeConnection(error)
+        self.dials = 0
+
+    def connect(self, *, autocommit: bool = False) -> _ProbeConnection:
+        self.dials += 1
+        self.connection.autocommit = autocommit
+        return self.connection
+
+
+def test_database_recovery_probe_answers_with_select_one() -> None:
+    database = _ProbeDatabase()
+    result = probes.database_recovery_probe(lambda: cast("Database", database))()
+    assert result.alive
+    assert database.dials == 1
+    assert database.connection.autocommit is True
+    assert database.connection.cursor_instance.executed == ["SELECT 1"]
+
+
+def test_database_recovery_probe_separates_unreachable_from_unobserved() -> None:
+    import psycopg
+
+    unreachable = _ProbeDatabase(psycopg.OperationalError("connection refused"))
+    down = probes.database_recovery_probe(lambda: cast("Database", unreachable))()
+    assert down.verdict.value == "down"
+    assert "OperationalError" in down.detail
+
+    unobserved = _ProbeDatabase(RuntimeError("gate refused"))
+    unavailable = probes.database_recovery_probe(lambda: cast("Database", unobserved))()
+    assert unavailable.verdict.value == "unavailable"
+    assert "RuntimeError" in unavailable.detail

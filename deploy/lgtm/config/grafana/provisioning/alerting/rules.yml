@@ -2921,7 +2921,7 @@ groups:
           metric: root_unit_restart_failed
           team: meiva-ops
         annotations:
-          summary: "Root unit {{ $labels.attributes_unit }}: replacement failed and is being retried"
+          summary: "Root unit {{ $labels.attributes_unit }} on {{ $labels.machine }}: replacement failed and is being retried"
           description: >-
             The unit's intent is running and its last replacement failed at its down or up half; the health
             monitor may retry within its finite budget. root_unit_failure_state is emitted on every health round
@@ -2938,7 +2938,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum by (attributes_unit) (count_over_time({service_name="unknown_service",
+                sum by (machine, attributes_unit) (count_over_time({service_name="unknown_service",
                 event_name="root_unit_failure_state"} | json | cluster=".meiva" | category="telemetry" |
                 attributes_kind="restart_failed" [3m]))
               instant: true
@@ -2991,12 +2991,18 @@ groups:
           metric: root_unit_restart_attempts_exhausted
           team: meiva-ops
         annotations:
-          summary: "Root unit {{ $labels.attributes_unit }}: automatic restart attempts exhausted"
+          summary: "Root unit {{ $labels.attributes_unit }} on {{ $labels.machine }}: circuit breaker open after its automatic restarts were exhausted"
           description: >-
-            The unit used its finite automatic restart budget during a continuous outage. Only normal
-            health rounds now observe it; an operator must act. A fresh ALIVE observation resets the
-            budget. Units with a recorded replacement error report restart_failed instead and use that
-            alert. The query also accepts historical breaker_open events during a version transition.
+            The unit spent its restart budget on one continuous outage, so its circuit breaker is open:
+            the backoff ladder (60s, 5m, then 15m) replaced it three times and only its capped 15m
+            cadence — or a database that answers again after the root saw it unavailable — still replaces
+            it. A fresh ALIVE observation resets the count and closes the breaker; an unrelated cause
+            needs an operator. Each event carries the failure count and the last error on
+            attributes_attempts / attributes_last_error, and root_unit_breaker_open /
+            root_unit_breaker_closed mark the two transitions. Check `meiva status` and the unit's own
+            log on that machine. Units with a recorded replacement error report restart_failed instead
+            and use that alert. The query also accepts historical breaker_open events during a version
+            transition.
         data:
           - refId: A
             datasourceUid: loki
@@ -3008,7 +3014,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum by (attributes_unit) (count_over_time({service_name="unknown_service",
+                sum by (machine, attributes_unit) (count_over_time({service_name="unknown_service",
                 event_name="root_unit_failure_state"} | json | cluster=".meiva" | category="telemetry" |
                 attributes_kind=~"restarts_exhausted|breaker_open" [3m]))
               instant: true

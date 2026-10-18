@@ -28,10 +28,13 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import build_pipeline
 from services.supervision.meiva_root.health import HealthConfig, HealthMonitor
-from services.supervision.meiva_root.probes import ProbeError, ProbeRegistry
+from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry
 from services.supervision.meiva_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.supervision.meiva_root.wiring import WiringContext, WiringParticipant
-from services.supervision.meiva_root_glue.diagnostic_probes import build_diagnostics
+from services.supervision.meiva_root_glue.diagnostic_probes import (
+    build_diagnostics,
+    database_recovery_probe,
+)
 from services.supervision.meiva_root_glue.diagnostics import (
     DiagnosticMonitor,
     RootHealthRounds,
@@ -93,6 +96,7 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     return assemble(
         context,
         registry,
+        db_recovery_probe=database_recovery_probe(database),
         rounds_factory=lambda monitor: RootHealthRounds(
             monitor,
             DiagnosticMonitor(build_diagnostics(requested, database=database, machine=machine)),
@@ -113,6 +117,7 @@ def assemble(
     selfcheck_config: SelfCheckConfig | None = None,
     rounds_factory: Callable[[HealthMonitor], RootHealthRounds] | None = None,
     startup_graces: Mapping[str, float] | None = None,
+    db_recovery_probe: Probe | None = None,
 ) -> list[WiringParticipant]:
     """Build the two monitors over `registry` and attach their status surfaces."""
     monitor = HealthMonitor(
@@ -121,6 +126,7 @@ def assemble(
         config=health_config,
         tasks=context.participant_tasks,
         startup_graces=startup_graces,
+        db_recovery_probe=db_recovery_probe,
     )
     check = TreeSelfCheck(
         context.supervisor, config=selfcheck_config, tasks=context.participant_tasks

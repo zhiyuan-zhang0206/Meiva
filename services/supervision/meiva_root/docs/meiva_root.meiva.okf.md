@@ -66,32 +66,22 @@ full stop/start leaves no mixed state.
 
 ## Failure-state signals
 
+How a dying unit is retried — the backoff ladder, the circuit breaker and the
+dependency-recovery probe that closes it:
+[[services/supervision/meiva_root/docs/restart-policy.meiva.okf.md]].
+
+
 The health monitor derives one condition per unit each round: the unit's intent
 is running and it sits in an explicit failure state — a recorded replacement
 failure or exhausted automatic restart attempts
 (`services/supervision/meiva_root/failure_state.py`). The condition is a state, so every
 round that finds it holding emits `root_unit_failure_state` (unit, kind,
-detail); the observability stack's rules own the debounce and the notification,
+detail, attempts, last error); the observability stack's rules own the debounce and the notification,
 and the signal stops on its own when the condition clears. A terminal probe
 verdict (unknown identity, inspection error, foreign listener) emits
 `root_unit_not_revivable` on every round it is observed, at WARNING. `root_restart_failed` records a replacement error. The exhaustion state uses
 `kind=restarts_exhausted`; alert rules also accept historical `breaker_open`
 events during a version transition.
-
-## Finite automatic restart policy
-
-Each ordinary health round can restart a DOWN unit once. Three actual calls
-exhaust the continuous-outage budget; later rounds observe and warn. The next
-ordinary round observes readiness: spawn acceptance is not ALIVE. There is no
-confirmation poll, adaptive backoff, failure threshold or restart breaker.
-Generation startup grace remains.
-
-ALIVE or an observed operator stop resets the count. UNKNOWN, foreign owners,
-NEVER policy, probe-only units and maintenance holds neither spend nor replenish
-it. A `CODE_BEHIND_MINIMUM_EXIT_CODE` exit requires updating the host; root warns
-without restarting it. The count is process-local and resets across root
-restarts. Explicit operator up/restart retains authority. Service restart never
-authorizes replaying agent execution or UNKNOWN work.
 
 ## Control contract
 

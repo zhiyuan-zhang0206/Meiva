@@ -116,6 +116,7 @@ def _monitor(supervisor: _Supervisor, probe: Callable[[], DaemonProbe]) -> Healt
         "interval_s": 0.01,
         "startup_grace_s": 0.0,
         "max_restart_attempts": 3,
+        "restart_backoff_s": (0.0,),
     }
     return HealthMonitor(supervisor, registry, config=HealthConfig(**values))
 

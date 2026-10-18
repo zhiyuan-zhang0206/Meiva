@@ -22,16 +22,23 @@ class FailureKind(StrEnum):
     RESTART_FAILED = "restart_failed"
     """A replacement failed at its down or up half; the monitor may retry within its finite budget."""
 
+    # meiva:note
+    # The restart budget is spent and the unit's circuit breaker is open: only the
+    # backoff ladder's capped cadence, or a recovered database while that breaker is
+    # open, still replaces it — an unrelated cause needs an operator (task #5315).
     RESTARTS_EXHAUSTED = "restarts_exhausted"
-    """The finite automatic restart budget is spent; an operator must act."""
 
 
 @dataclass(frozen=True, slots=True)
 class UnitFailureFacts:
     """The supervisor-side facts of one unit (`Supervisor.unit_failure_facts`)."""
 
+    # meiva:note
+    # `last_error` is the unit's recorded exit or spawn error: the evidence its
+    # breaker and failure-state signals report (task #5315).
     intent_running: bool
     restart_failed: RestartFailure | None
+    last_error: str | None = None
 
 
 def derive_kind(facts: UnitFailureFacts, *, restart_limit_reached: bool) -> FailureKind | None:
