@@ -292,6 +292,26 @@ async def test_only_results_reaching_the_threshold_are_injected(
     assert result.paths == {"hi.md", "edge.md"}
 
 
+async def test_the_default_threshold_is_the_one_that_ships(
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
+) -> None:
+    # meiva:note
+    # The calibrated default is a live setting, not decoration: at 0.72 a note scoring exactly
+    # 0.72 is injected and one scoring 0.71 is not. Guards a re-calibration that changes the field
+    # without changing what recall actually does.
+    for name in ("edge", "lo"):
+        _write_note(memory_root, f"{name}.md", name)
+    _set_search(
+        search,
+        [_result("edge.md", score=0.72), _result("lo.md", score=0.71)],
+    )
+
+    result = await _recall(context)
+
+    assert result is not None
+    assert result.paths == {"edge.md"}
+
+
 async def test_nothing_is_injected_when_no_result_reaches_the_threshold(
     memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
@@ -405,8 +425,11 @@ async def test_search_is_issued_for_recall_not_as_an_agent_search(
 
 
 def test_defaults_are_the_calibrated_values() -> None:
-    """Calibrated by the 2026-10-11 benchmark for the default rerank model and prompts."""
-    assert settings.agent.memory_recall_inject_threshold == 0.80
+    # meiva:note
+    # 0.72 comes from the 2026-10-18 replay of real inbound traffic; both values are calibrated
+    # for the default rerank model and prompts.
+    # meiva:link docs/decisions/agents/context/2026-10-18-passive-recall-threshold.md
+    assert settings.agent.memory_recall_inject_threshold == 0.72
     assert settings.agent.memory_recall_inject_max == 3
 
 
