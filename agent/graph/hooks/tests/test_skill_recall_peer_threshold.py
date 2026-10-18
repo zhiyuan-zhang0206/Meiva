@@ -34,7 +34,7 @@ def _precision_and_recall(threshold: float) -> tuple[float, float]:
     return hits / len(offered), hits / positives
 
 
-def test_the_replay_fixture_covers_a_full_week_of_peer_traffic() -> None:
+def test_the_replay_fixture_holds_999_messages_and_428_work_requests() -> None:
     assert len(ROWS) == 999
     assert sum(work for _score, work in ROWS) == 428
 
@@ -46,8 +46,10 @@ def test_the_shipped_default_keeps_coverage_without_collapsing_on_precision() ->
     assert precision >= 0.55, f"precision fell to {precision:.0%}: the note would mostly be noise"
 
 
-def test_the_person_cut_is_noisier_than_the_peer_cut() -> None:
-    person_precision, _recall = _precision_and_recall(settings.agent.skill_recall_threshold)
+def test_the_person_cut_would_be_noisier_than_the_peer_cut() -> None:
+    # meiva:note
+    # 0.60 is pinned: this compares the two measured cuts, not whatever the person default becomes.
+    person_precision, _recall = _precision_and_recall(0.60)
     peer_precision, _recall = _precision_and_recall(settings.agent.skill_recall_peer_threshold)
 
     assert person_precision < peer_precision - 0.05
