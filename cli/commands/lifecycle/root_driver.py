@@ -18,6 +18,7 @@ from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.sessions.helperproc import HELPER_PROTOCOLS, helper_wire_ok
 from cli.commands.data_plane.config import data_plane_config_from_settings
+from cli.database.lifecycle_audit import record_lifecycle_request
 from cli.start_runtime import StartRuntime
 from services.supervision.roster import service_spec
 from services.supervision.roster.service_spec import ServiceSpec
@@ -422,6 +423,25 @@ def stop_root_process(
     raise RootDriverError(f"meiva-root at {run_dir} did not stop within {timeout_s:.0f}s")
 
 
+def _units_to_resume(
+    roster: tuple[ServiceSpec, ...], status: dict[str, Any], *, honor_restart_budget: bool
+) -> list[ServiceSpec]:
+    units = root_units(status)
+    health = cast("dict[str, dict[str, Any]]", status.get("health") or {})
+    pending: list[ServiceSpec] = []
+    for spec in roster:
+        unit = units[spec.session]
+        if honor_restart_budget and health.get(spec.session, {}).get("restart_limit_reached"):
+            print(
+                f"  · {session_name(spec.session)} has an open restart breaker — "
+                "the health monitor keeps retrying it"
+            )
+            continue
+        if unit.get("state") != "running" or unit.get("intent") != "running":
+            pending.append(spec)
+    return pending
+
+
 def reconcile_units(
     roster: tuple[ServiceSpec, ...],
     client: Any,
@@ -438,26 +458,21 @@ def reconcile_units(
     # breaker is open — that unit is not given up on, the health monitor keeps
     # retrying it on its backoff ladder, so the boot job does not race it (#5315).
     units = root_units(status)
-    health = cast("dict[str, dict[str, Any]]", status.get("health") or {})
     from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 
-    for spec in roster:
+    pending = _units_to_resume(roster, status, honor_restart_budget=honor_restart_budget)
+    if pending:
+        record_lifecycle_request("up", [spec.session for spec in pending])
+    for spec in pending:
         unit = units[spec.session]
-        if honor_restart_budget and health.get(spec.session, {}).get("restart_limit_reached"):
-            print(
-                f"  · {session_name(spec.session)} has an open restart breaker — "
-                "the health monitor keeps retrying it"
-            )
-            continue
-        if unit.get("state") != "running" or unit.get("intent") != "running":
-            reason = unit.get("last_error") or unit.get("last_exit") or unit.get("state")
-            print(f"  ↑ meiva-root unit {session_name(spec.session)} ({reason}) — bringing it up")
-            try:
-                _call_ok(client.up(spec.session), f"up {spec.session}")
-            except RootDriverError as exc:
-                if spec.session in CRITICAL_SERVICE_SESSIONS:
-                    raise
-                print(f"  ✗ optional service {spec.session}: {exc}", file=sys.stderr)
+        reason = unit.get("last_error") or unit.get("last_exit") or unit.get("state")
+        print(f"  ↑ meiva-root unit {session_name(spec.session)} ({reason}) — bringing it up")
+        try:
+            _call_ok(client.up(spec.session), f"up {spec.session}")
+        except RootDriverError as exc:
+            if spec.session in CRITICAL_SERVICE_SESSIONS:
+                raise
+            print(f"  ✗ optional service {spec.session}: {exc}", file=sys.stderr)
     refreshed = root_status(client)
     return refreshed if refreshed is not None else status
 
@@ -698,6 +713,7 @@ def stop_root_service_tree(
     if not stop_ids and preserved:
         print("  meiva-root: every unit is preserved — tree left running")
         return
+    record_lifecycle_request("force-down" if force else "down", stop_ids)
     for unit_id in stop_ids:
         remaining_s = deadline - time.monotonic()
         if remaining_s <= 0:
