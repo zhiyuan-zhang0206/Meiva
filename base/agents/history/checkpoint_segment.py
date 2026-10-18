@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import cast
 
-from psycopg.rows import dict_row
+from psycopg import Connection
+from psycopg.rows import DictRow, dict_row
 
 from base.agents.history.checkpoint import CheckpointReadError, FullHistory, single_segment_history
 from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver
@@ -19,7 +20,7 @@ def read_checkpoint_segment(db: Database, agent_id: int, checkpoint_id: str) -> 
     pool = db.pool(autocommit=True, row_factory=dict_row)
     try:
         with pool.connection() as conn:
-            saver = HistoryPostgresSaver(conn=conn, serde=serde)
+            saver = HistoryPostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
             value = saver.get_tuple(
                 {
                     "configurable": {
