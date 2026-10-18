@@ -1,8 +1,9 @@
-exports = ["catalog.py", "notices.py", "policy.py", "publish.py", "store.py", "tests"]
+exports = ["catalog.py", "notices.py", "outbox.py", "policy.py", "publish.py", "store.py", "tests"]
 
 [uses]
 "__init__.py" = ["catalog.py", "policy.py", "publish.py"]
 "notices.py" = ["publish.py"]
+"outbox.py" = ["publish.py", "store.py"]
 "policy.py" = ["catalog.py"]
 "publish.py" = ["catalog.py", "policy.py", "store.py"]
-"tests" = ["catalog.py", "notices.py", "policy.py", "publish.py"]
+"tests" = ["catalog.py", "notices.py", "outbox.py", "policy.py", "publish.py"]

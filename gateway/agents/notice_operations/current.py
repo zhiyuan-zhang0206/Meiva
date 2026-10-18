@@ -10,6 +10,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from base.db.transaction import write_transaction
+from base.events.notifications.notices import stage_notice_notification
 from gateway.agents.notices import existing_receipt, save_receipt
 from gateway.agents.schemas import NoticeEditIn, NoticeItem
 from gateway.http.auth.request_principal import (
@@ -55,6 +56,11 @@ class GuardedNoticeEdit(NoticeEditIn, ObservedNotice):
 class NoticeAcceptance:
     record: NoticeItem
     replayed: bool
+    # meiva:note
+    # The edit's staged delivery: an edit re-notifies through the same spine,
+    # inside the same transaction that changed the notice.
+    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+    notification_id: int | None = None
 
 
 def operation_key(
@@ -119,8 +125,12 @@ def mutate(
         if previous is not None:
             return NoticeAcceptance(NoticeItem.model_validate(previous), replayed=True)
         record = _target(conn, agent_id, body.observed_notice_id)
+        notification_id = None
         if isinstance(body, GuardedNoticeEdit):
             _edit(conn, record, body)
+            notification_id = stage_notice_notification(
+                conn, agent_id=agent_id, notice_id=record.id
+            )
         else:
             conn.execute(
                 "UPDATE agent_notices SET resolved_at=now(), resolution='withdrawn' WHERE id=%s",
@@ -128,7 +138,7 @@ def mutate(
             )
         updated = _snapshot(conn, record.id)
         save_receipt(conn, path, key, payload, updated.model_dump(mode="json"))
-    return NoticeAcceptance(updated, replayed=False)
+    return NoticeAcceptance(updated, replayed=False, notification_id=notification_id)
 
 
 def _edit(conn: Connection, record: NoticeItem, body: GuardedNoticeEdit) -> None:

@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from base.events.notifications.publish import announce, deliver_sync
+from base.events.notifications.publish import announce_sync, deliver_sync
 from base.events.notifications.store import read_overrides_sync
 from gateway.extensions.notification_categories import declared_categories
 
@@ -87,5 +87,5 @@ async def post_notification(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if record is None:
         return {"delivered": False, "id": None}
-    await announce(request.app.state.bus, record)
+    await asyncio.to_thread(announce_sync, pool, request.app.state.bus, record.id)
     return {"delivered": True, "id": record.id}
