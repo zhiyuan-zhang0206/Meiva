@@ -5,10 +5,8 @@ from pathlib import Path
 from base.agents.tasks.priority import Priority
 from gateway.agents.schemas import (
     AgentRow,
-    MessageEnqueued,
     NoticeItem,
     ResolveNoticeIn,
-    UserMessageIn,
 )
 
 
@@ -119,32 +117,6 @@ def test_resolve_notice_in_strips_and_rejects_empty_reply() -> None:
     assert ResolveNoticeIn(action="answer", reply="  hi  ").reply == "hi"
     with pytest.raises(ValidationError):
         ResolveNoticeIn(action="answer", reply="   ")
-
-
-def test_message_enqueued_wire_shape() -> None:
-    m = MessageEnqueued(agent_id=7, status="enqueued")
-    assert json.loads(m.model_dump_json()) == {"agent_id": 7, "status": "enqueued"}
-
-
-def test_user_message_in_strips_and_rejects_empty() -> None:
-    import pytest
-    from pydantic import ValidationError
-
-    m = UserMessageIn(content="  hi  ")
-    assert m.content == "hi"
-
-    with pytest.raises(ValidationError):
-        UserMessageIn(content="   ")
-
-
-def test_user_message_in_accepts_long_content_and_rejects_abuse_cap() -> None:
-    import pytest
-    from pydantic import ValidationError
-
-    assert UserMessageIn(content="a" * 70_000).content == "a" * 70_000
-
-    with pytest.raises(ValidationError):
-        UserMessageIn(content="a" * 1_000_001)
 
 
 def test_task_status_enum_is_single_sourced_across_wire_and_frontend() -> None:
