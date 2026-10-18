@@ -12,7 +12,7 @@ tags:
 
 ## What It Is
 
-The `meiva_fleet` plugin, besides registering SDK surfaces (notify / tasks / self / spawn-label), **carries skills**: `plugins/meiva_fleet/skills/` is synced by converge to `~/.meiva/skills/meiva_fleet/` (plugin name = top-level namespace). Agents load them via `meiva.help(meiva.skills.meiva_fleet.<name>)`.
+The `meiva_fleet` plugin, besides registering SDK surfaces (notify / tasks / self), **carries skills**: `plugins/meiva_fleet/skills/` is synced by converge to `~/.meiva/skills/meiva_fleet/` (plugin name = top-level namespace). Agents load them via `meiva.help(meiva.skills.meiva_fleet.<name>)`.
 
 - [[meiva_builtins/plugins/meiva_fleet/skills/meiva-fleet/docs/meiva-fleet.meiva.okf.md|meiva_fleet]] — fleet collaboration master outline: orchestrator decomposition / fork worker / aggregation judgment + task↔fleet interaction rules + communication dichotomy
 - [[meiva_builtins/plugins/meiva_fleet/skills/reduce-context-switch-for-human/docs/reduce-context-switch-for-human.meiva.okf.md|reduce-context-switch-for-human]] — interrupt discipline (added in #620): default queuing via `meiva.ui.notify`, batch by manager subtree, progress rolls up, push only for truly urgent matters

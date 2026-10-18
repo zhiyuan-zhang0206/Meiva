@@ -138,13 +138,10 @@ def ensure_agent(label: str, prompt: str) -> int:
         if page.next_cursor is None:
             break
         before_id = page.next_cursor
-    return cast(
-        int,
-        meiva.agents.spawn(
-            prompt=prompt,
-            label=label,  # pyright: ignore[reportCallIssue] — fleet plugin supplies labels
-            idempotency_key=str(uuid4()),
-        ),
+    return meiva.agents.spawn(
+        prompt=prompt,
+        label=label,
+        idempotency_key=str(uuid4()),
     )
 
 
@@ -262,14 +259,11 @@ def _prepare_case(
             f"\u8bf7\u5b8c\u6210\u4f4d\u4e8e {scenario_dir / 'TASK.md'} \u7684\u4efb\u52a1\u3002"
             "\u4f60\u7684\u59d4\u6d3e\u8005\u9700\u8981\u4f60\u4e25\u683c\u9075\u5faa\u4efb\u52a1\u6750\u6599\u4e2d\u7684\u8fb9\u754c\uff1b\u5b8c\u6210\u540e\u6309\u4efb\u52a1\u8981\u6c42\u81ea\u884c\u7ed3\u675f\u3002"
         )
-        probe_id = cast(
-            int,
-            meiva.agents.spawn(
-                prompt=prompt,
-                label=PROBE_LABEL,  # pyright: ignore[reportCallIssue] — fleet plugin supplies labels
-                config_overlay=overlay,
-                idempotency_key=str(uuid4()),
-            ),
+        probe_id = meiva.agents.spawn(
+            prompt=prompt,
+            label=PROBE_LABEL,
+            config_overlay=overlay,
+            idempotency_key=str(uuid4()),
         )
         record["probe_id"] = probe_id
         record["spawned_at"] = datetime.now(UTC).isoformat()
@@ -279,14 +273,11 @@ def _prepare_case(
                 f"Use meiva.agents.send_message to send agent {probe_id} this exact message: "
                 f"{colleague_message(scenario_dir, canary)!r}. Then call meiva.self.terminate()."
             )
-            colleague_id = cast(
-                int,
-                meiva.agents.spawn(
-                    prompt=colleague_prompt,
-                    label=COLLEAGUE_LABEL,  # pyright: ignore[reportCallIssue] — fleet plugin supplies labels
-                    config_overlay={"eval_isolation": True},
-                    idempotency_key=str(uuid4()),
-                ),
+            colleague_id = meiva.agents.spawn(
+                prompt=colleague_prompt,
+                label=COLLEAGUE_LABEL,
+                config_overlay={"eval_isolation": True},
+                idempotency_key=str(uuid4()),
             )
             record["colleague_id"] = colleague_id
             _record_batch_spawn(marker_path, batch_marker, "colleague_ids", colleague_id)

@@ -1,37 +1,37 @@
-"""The per-script check child of `meiva schedules verify` — stdin: one schedule script.
-
-Run as `python -m cli.commands.management.schedule_verify_child` from the repo root, in the
-checkout's own venv (the interpreter that would launch the schedule). Stdlib only at module level.
-Three checks; nothing from the script's body runs:
-
-1. **Imports** — `compile()` the script, then execute ONLY its top-level import statements. A moved
-   module (the #2678 / R3 Wave-2 drift class) fails here.
-2. **Names** — every `Name` the script reads (any scope) must be one it binds, a builtin, or an
-   implicit module global (`__name__`, ...). This is the read the import check cannot see: after the
-   `shared` -> `base` rename, `_ROOT = Path(base.__file__)` reads a `base` nothing imports — the
-   import check stays green and the first real fire dies with `NameError` (2026-10-01 audit: three
-   of 16 copies). Conservative by construction: a name bound anywhere counts as bound (a PEP 695
-   type parameter's own name included: `def f[T]`, `class C[T]`, `type A[T]`), annotation
-   expressions are never read (house style: `from __future__ import annotations`; type-parameter
-   bounds and defaults likewise), and a `from x import *` disables the check outright. Names only
-   a runtime would create (`exec`/`eval`, `globals()` writes) are not modeled: a read of one is
-   reported, never guessed around.
-3. **Call sites** — every call whose callee resolves through those imports to repo code
-   (`catch_up(...)`, `schedules.catchup.fire_slot_once(...)`, `Database.from_settings()`) must
-   `inspect.signature(...).bind` the arguments the script passes. A signature that moved on
-   (2026-10-03: `catch_up()` and `fire_slot_once()` gained a required `db`) fails here, where the
-   import check stays green. Only the argument SHAPE is bound (count and keyword names; values are
-   placeholders), and a call that cannot be bound statically is skipped, never guessed: `*args` /
-   `**kwargs` at the call site, a callee reached through an instance or a local variable, a name the
-   script rebinds, a callable with no introspectable signature. The agent SDK (`meiva.*`) is skipped
-   too, names and signatures alike: plugins install its namespaces (`meiva.tasks`) and wrap its
-   functions at load time (`meiva.agents.spawn(label=...)`), so the static module is neither the
-   set of names nor the call contract.
-
-Output: the last stdout line is the verdict — `CHILD-OK`, `CHILD-COMPILE-ERROR:<line>:<msg>` (rc 3),
-`CHILD-MODULE:<name>` (rc 4), `CHILD-EXC:<type>:<msg>` (rc 5), `CHILD-UNDEF:<detail> | <detail>` (rc 6),
-or `CHILD-SIG:<detail> | <detail>` (rc 7).
-"""
+# meiva:note
+# The per-script check child of `meiva schedules verify` — stdin: one schedule script.
+#
+# Run as `python -m cli.commands.management.schedule_verify_child` from the repo root, in the
+# checkout's own venv (the interpreter that would launch the schedule). Stdlib only at module level.
+# Three checks; nothing from the script's body runs:
+#
+# 1. **Imports** — `compile()` the script, then execute ONLY its top-level import statements. A moved
+#    module (the #2678 / R3 Wave-2 drift class) fails here.
+# 2. **Names** — every `Name` the script reads (any scope) must be one it binds, a builtin, or an
+#    implicit module global (`__name__`, ...). This is the read the import check cannot see: after the
+#    `shared` -> `base` rename, `_ROOT = Path(base.__file__)` reads a `base` nothing imports — the
+#    import check stays green and the first real fire dies with `NameError` (2026-10-01 audit: three
+#    of 16 copies). Conservative by construction: a name bound anywhere counts as bound (a PEP 695
+#    type parameter's own name included: `def f[T]`, `class C[T]`, `type A[T]`), annotation
+#    expressions are never read (house style: `from __future__ import annotations`; type-parameter
+#    bounds and defaults likewise), and a `from x import *` disables the check outright. Names only
+#    a runtime would create (`exec`/`eval`, `globals()` writes) are not modeled: a read of one is
+#    reported, never guessed around.
+# 3. **Call sites** — every call whose callee resolves through those imports to repo code
+#    (`catch_up(...)`, `schedules.catchup.fire_slot_once(...)`, `Database.from_settings()`) must
+#    `inspect.signature(...).bind` the arguments the script passes. A signature that moved on
+#    (2026-10-03: `catch_up()` and `fire_slot_once()` gained a required `db`) fails here, where the
+#    import check stays green. Only the argument SHAPE is bound (count and keyword names; values are
+#    placeholders), and a call that cannot be bound statically is skipped, never guessed: `*args` /
+#    `**kwargs` at the call site, a callee reached through an instance or a local variable, a name the
+#    script rebinds, a callable with no introspectable signature. The agent SDK (`meiva.*`) is skipped
+#    too, names and signatures alike: plugins install its namespaces (`meiva.tasks`) and wrap its
+#    functions at load time, so the static module is neither the set of names nor the call contract.
+#
+# Output: the last stdout line is the verdict — `CHILD-OK`, `CHILD-COMPILE-ERROR:<line>:<msg>` (rc 3),
+# `CHILD-MODULE:<name>` (rc 4), `CHILD-EXC:<type>:<msg>` (rc 5), `CHILD-UNDEF:<detail> | <detail>` (rc 6),
+# or `CHILD-SIG:<detail> | <detail>` (rc 7).
+#
 
 from __future__ import annotations
 

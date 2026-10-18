@@ -22,7 +22,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal, Sequence, cast
+from typing import Any, Literal, Sequence
 from zoneinfo import ZoneInfo
 
 import meiva
@@ -130,10 +130,7 @@ def ensure_worker(label: str, prompt: str) -> WorkerDispatch:
             break
         before_id = page.next_cursor
     return WorkerDispatch(
-        agent_id=cast(
-            int,
-            meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4())),  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
-        ),
+        agent_id=meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4())),
         action="spawned",
     )
 

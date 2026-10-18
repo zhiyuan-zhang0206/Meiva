@@ -267,15 +267,15 @@ def test_task_conversion_absent_when_plugin_disabled(**changes: Any):
     assert "One reporter per milestone" not in prompt
 
 
-def test_spawn_label_param_gated_on_plugin(load_activity_plugin: None):
-    assert [p for p, _ in meiva.extend.stack("agents.spawn")] == ["meiva_fleet"]
+def test_spawn_takes_label_without_a_plugin_layer(load_activity_plugin: None):
+    assert [p for p, _ in meiva.extend.stack("agents.spawn")] == []
     assert "label" in inspect.signature(meiva.agents.spawn).parameters
 
 
-def test_core_spawn_has_no_label_arg():
+def test_core_spawn_owns_the_label_keyword():
     importlib.reload(meiva.agents)
     assert meiva.agents.spawn.__module__ == "meiva.agents"
-    assert "label" not in inspect.signature(meiva.agents.spawn).parameters
+    assert "label" in inspect.signature(meiva.agents.spawn).parameters
 
 
 def _label_of(db_conn: psycopg.Connection, agent_id: int) -> str | None:

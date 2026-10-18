@@ -59,7 +59,7 @@ def ensure_agent(label, prompt):
         if page.next_cursor is None:
             break
         before_id = page.next_cursor
-    return meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
+    return meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))
 
 
 def fire_memory_maintenance(_slot: datetime, message: str) -> None:

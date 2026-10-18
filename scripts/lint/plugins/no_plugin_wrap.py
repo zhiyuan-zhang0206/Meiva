@@ -1,47 +1,54 @@
-"""Forbid bare monkey-patching of `meiva.*` in plugins — wraps must be declared as `SdkWrap`.
+# meiva:note
+# Forbid bare monkey-patching of `meiva.*` in plugins — wraps must be declared as `SdkWrap`.
+#
+# Run: `.venv/bin/python scripts/lint/plugins/no_plugin_wrap.py [path ...]` (defaults to scanning
+# `meiva_builtins/plugins/`, the built-in plugins; a missing default dir is an error;
+# an explicit path that does not exist is an error (stderr + exit 1) rather than a
+# silent no-op). Also run automatically via pre-commit hook before commit.
+#
 
-Run: `.venv/bin/python scripts/lint/plugins/no_plugin_wrap.py [path ...]` (defaults to scanning
-`meiva_builtins/plugins/`, the built-in plugins; a missing default dir is an error;
-an explicit path that does not exist is an error (stderr + exit 1) rather than a
-silent no-op). Also run automatically via pre-commit hook before commit.
+# meiva:note
+# ## Why
+#
+# A plugin's `contribute()` declares `SdkWrap(target, wrapper)` to extend
+# SDK behavior; the SDK install applies it: it makes the wrap stack enumerable (`meiva.extend.stack`),
+# deterministic (registration = plugin load order), and reversible (originals
+# restored on reload). A plugin that instead does `meiva.files.read = my_read`
+# (or `setattr(meiva.files, "read", my_read)`) monkey-patches invisibly — no record
+# of who changed it or in what order, and a reload double-wraps. That bypass is
+# what this lint bans, so the introspectable stack stays the single source of
+# truth for "what did plugins inject."
+#
 
-## Why
+# meiva:note
+# ## Rule
+#
+# In every `plugin.py` (and sibling modules) under `meiva_builtins/plugins/`, an assignment
+# whose target is an `meiva`-rooted attribute path ending in a function-style name
+# is an error:
+#
+#     meiva.files.read = _wrapped_read          # error -> SdkWrap("files.read", ...)
+#     meiva.agents.spawn = _spawn_with_role     # error -> SdkWrap("agents.spawn", ...)
+#     setattr(meiva.files, "read", _wrapped)    # error -> SdkWrap(...)
+#
+# Not flagged: dunder assignments (`meiva.files.__doc__ = ...` — a legitimate
+# module-docstring override) and ALL-CAPS constant assignments
+# (`meiva.memory.PATH = ...`). New namespaces / members are declared as
+# `SdkNamespace` / `SdkMember` (Call nodes, never matched here).
+#
+# Known gap: assignment through a module alias (`import meiva.files as f; f.read = x`)
+# is not caught — the target must be a literal `meiva.…` attribute chain. The
+# primitive is the obvious path; this catches the naive regression.
+#
 
-A plugin's `contribute()` declares `SdkWrap(target, wrapper)` to extend
-SDK behavior; the SDK install applies it: it makes the wrap stack enumerable (`meiva.extend.stack`),
-deterministic (registration = plugin load order), and reversible (originals
-restored on reload). A plugin that instead does `meiva.files.read = my_read`
-(or `setattr(meiva.files, "read", my_read)`) monkey-patches invisibly — no record
-of who changed it or in what order, and a reload double-wraps. That bypass is
-what this lint bans, so the introspectable stack stays the single source of
-truth for "what did plugins inject."
-
-## Rule
-
-In every `plugin.py` (and sibling modules) under `meiva_builtins/plugins/`, an assignment
-whose target is an `meiva`-rooted attribute path ending in a function-style name
-is an error:
-
-    meiva.files.read = _wrapped_read          # error -> SdkWrap("files.read", ...)
-    meiva.agents.spawn = _spawn_with_label    # error -> SdkWrap("agents.spawn", ...)
-    setattr(meiva.files, "read", _wrapped)    # error -> SdkWrap(...)
-
-Not flagged: dunder assignments (`meiva.files.__doc__ = ...` — a legitimate
-module-docstring override) and ALL-CAPS constant assignments
-(`meiva.memory.PATH = ...`). New namespaces / members are declared as
-`SdkNamespace` / `SdkMember` (Call nodes, never matched here).
-
-Known gap: assignment through a module alias (`import meiva.files as f; f.read = x`)
-is not caught — the target must be a literal `meiva.…` attribute chain. The
-primitive is the obvious path; this catches the naive regression.
-
-## Exemption
-
-Append `# wrap-ok: <reason>` on the offending line for a deliberate, reviewed
-bare assignment (rare). A test file (any `tests/` directory under the plugins,
-e.g. `meiva_builtins/plugins/<plugin>/tests/`) is exempt: a test stubs the SDK on
-purpose. Error format `file:line: <line>` + non-zero exit.
-"""
+# meiva:note
+# ## Exemption
+#
+# Append `# wrap-ok: <reason>` on the offending line for a deliberate, reviewed
+# bare assignment (rare). A test file (any `tests/` directory under the plugins,
+# e.g. `meiva_builtins/plugins/<plugin>/tests/`) is exempt: a test stubs the SDK on
+# purpose. Error format `file:line: <line>` + non-zero exit.
+#
 
 from __future__ import annotations
 
