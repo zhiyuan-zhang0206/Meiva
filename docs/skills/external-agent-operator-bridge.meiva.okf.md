@@ -1,7 +1,7 @@
 ---
 type: doc
 title: External-agent operator skill bridge
-description: Prod host convergence copies the complete Meiva Guide package into already-present Codex and Claude Code global skill roots, with externally bound ownership and serialized recovery that preserve conflicts.
+description: Prod host convergence copies the complete Meiva Guide and impersonator guide into the global skill roots of every supported external agent surface present on the host (Codex, Claude Code, Gemini CLI, Grok, Qwen Code, Cursor Agent, Antigravity App/IDE and CLI, DeepSeek Harness), with externally bound ownership and serialized recovery that preserve conflicts.
 tags:
 - extensions
 - agent-instruction
@@ -11,12 +11,24 @@ tags:
 # External-agent operator skill bridge
 
 `cli/commands/extensions/external_skills.py` is a dedicated host-global
-converge step. It reads
-`<repo>/meiva_builtins/skills/platform/meiva-guide/` and considers exactly two client
-homes: `~/.codex` and `~/.claude`. A missing client home is a no-op; the step
-does not create either top-level directory. Because the step has
-`host_global=True`, `converge_host` runs it only from the default-home prod
-checkout and skips both `.worktrees/` and `.claude/worktrees/` checkouts.
+converge step. It publishes two complete skills —
+`<repo>/meiva_builtins/skills/platform/meiva-guide/` and
+`<repo>/meiva_builtins/skills/platform/impersonator-guide/` — into the
+user-level skill directory of every external agent surface the user has.
+`_CLIENTS` is the one owner of that set: one row per surface (Codex, Claude Code,
+Gemini CLI, Grok, Qwen Code, Cursor Agent, Antigravity App/IDE, Antigravity CLI,
+DeepSeek Harness) carrying the surface's home directory, its program name — absent
+for a desktop app that has none — and the skills subdirectory it scans. A client
+is present when its home directory exists or its program resolves on `PATH`; a
+surface with no program is known only by its directory. With neither mark the step
+writes nothing and leaves no directory behind. An installed CLI that has never
+run has no home yet, so publication creates that home (mode `0700`) together
+with `skills/<skill>` instead of waiting for the tool's first run. The layout
+each tool documents, with its evidence and unconfirmed items, is
+`meiva_builtins/skills/platform/meiva-guide/external-agents/references/supported-clients.md`.
+Because the step has `host_global=True`, `converge_host` runs it only from the
+default-home prod checkout and skips both `.worktrees/` and `.claude/worktrees/`
+checkouts.
 
 For each present client, the target is
 `<client-home>/skills/<skill-name>`. Meiva creates a complete staged copy
@@ -38,7 +50,9 @@ their no-replace renames. Recovery reconciles source and destination presence
 against the transaction marker, digest, and manifest; a merely colliding or
 otherwise ambiguous generation-shaped path never becomes Meiva-owned.
 
-The guide uses `<client>-meiva-guide.json` and `<client>-meiva-guide.lock`. Legacy
+Each client and skill owns `<client>-<skill>.json` and `.lock`, so the guide is
+`<client>-meiva-guide.json` and the executor manual is
+`<client>-impersonator-guide.json`. Legacy
 operator (`<client>.json`) and deployment (`<client>-deploy-meiva-cluster.json`)
 ledgers and their targets are preserved and no longer refreshed. The bridge
 never adopts them as the guide or removes their user content. A conflict at the
@@ -70,6 +84,12 @@ The copy model uses ordinary directories and files. Per-client
 path, lock, and rename failures are labelled warnings and do not abort core
 converge; source-integrity failures remain fatal.
 
+A conflict is per client and per skill: an unmanaged or user-modified copy of one
+skill in one home is preserved and reported while every other target still
+publishes. Cursor and Grok additionally read other tools' skill directories for
+compatibility, so one skill may be visible to them through more than one path;
+the copies are identical because a single snapshot produces all of them.
+
 The external projection writes no Meiva install-registry row. The canonical
 Meiva Guide package separately enters Meiva's load directory through normal skill
 convergence and the core update channel (`meiva packages refresh`); the
@@ -77,7 +97,10 @@ convergence and the core update channel (`meiva packages refresh`); the
 external copy includes its nested skills, scripts, and references.
 Its reading links stay within the published Guide tree, including the single
 shared skill evaluation contract at `references/evaluation.md`.
-Only the existing Codex and Claude Code home integrations are supported.
+Only the rows in `_CLIENTS` are supported. A tool without a documented
+user-level skills directory is not published to — Aider, for example, reads a
+`CONVENTIONS.md` the user adds explicitly and has no skill directory — and Meiva
+never writes the shared `~/.agents/skills`, which several tools already read.
 
 ## Key dependencies
 

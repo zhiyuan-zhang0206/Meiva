@@ -108,3 +108,10 @@ references carry the launch variants, auth traps and headless notes:
 - [OpenAI Codex (`codex`)](references/codex.md)
 - [Google Antigravity (`agy`)](references/antigravity.md)
 - [DeepSeek Harness (`dsh`)](references/deepseek_harness.md)
+
+A host that runs `meiva start` also copies this guide and `impersonator-guide`
+into the global skill directory of each external agent surface it finds — CLIs and,
+where a desktop app documents one, its skill directory — so a spawned session can
+read them without the Meiva checkout. Which directories those are, and the
+evidence for each, is [client skill
+directories](references/supported-clients.md).
