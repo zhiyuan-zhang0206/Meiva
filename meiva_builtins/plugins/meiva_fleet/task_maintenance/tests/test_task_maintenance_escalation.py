@@ -24,6 +24,7 @@ from psycopg_pool import ConnectionPool
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.notifications.outbox import republish_pending
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import escalation
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_escalate
 
@@ -141,6 +142,16 @@ def notifications(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str]
             (agent_id,),
         )
         return cur.fetchall()
+
+
+def unannounced(db: psycopg.Connection, agent_id: int) -> int:
+    db.rollback()
+    row = db.execute(
+        "SELECT count(*) FROM notification_events WHERE agent_id = %s AND announced_at IS NULL",
+        (agent_id,),
+    ).fetchone()
+    assert row is not None
+    return int(row[0])
 
 
 def inbound_messages(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
@@ -308,7 +319,9 @@ def test_user_escalation_survives_a_lost_announce(
 ) -> None:
     # meiva:note
     # A Redis outage costs the live push, never the escalation: the inbox notice
-    # and the delivery row are committed before anything is announced.
+    # and the delivery row are committed before anything is announced, and the
+    # outbox sweep publishes that delivery once the transport is back. The stall
+    # is delayed, never dropped.
     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
     owner, _tid, _parent = human_leg_subtask(db_conn)
     live = _RecordingBus()
@@ -321,6 +334,12 @@ def test_user_escalation_survives_a_lost_announce(
         "core.needs_input"
     ]
     assert live.notifications() == []
+    assert unannounced(db_conn, owner) == 1
+
+    live.drop = False
+    assert republish_pending(pool, live, min_age_seconds=0, limit=10) == 1
+    assert [event["category"] for event in live.notifications()] == ["core.needs_input"]
+    assert unannounced(db_conn, owner) == 0
 
 
 def test_delegator_escalation_is_not_a_user_notification(

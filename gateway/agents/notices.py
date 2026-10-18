@@ -1,26 +1,6 @@
-"""The meiva.ui.notify() agent_notices endpoints (user-facing).
-
-- GET  /api/notices/open     — cross-fleet open FYI notices (require_response false).
-- POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve — resolve one open notice
-  (the handler lives here; `notice_operations.router` mounts it).
-
-The unified agent->user queue lives in agent_notices (migration 0053). An agent
-calls meiva.ui.notify() to post a notice at one of three rungs (require_response x
-blocking). Notices that need a response ride the agent snapshot inline (a bounded
-worklist); FYI notices (require_response false) stay off the snapshot — the
-snapshot carries only unread_notice_count — so GET /api/notices/open is the FYI
-feed's content source. Both kinds surface in the resolved page of
-GET /api/notices once resolved.
-
-A notice is resolved by the user (answer / dismiss / read) via the POST here, or
-withdrawn by the agent via meiva.ui.dismiss_notice(); either sets resolved_at +
-resolution. When the user supplies a reply it is cached on the row (reply column)
-and delivered to the agent as a chat inbound — the reply column is a cache, not
-the delivery channel. Every notice resolution is a notice-system event, not
-user speech: a user reply is delivered as `system:notice-reply` and a bare
-dismiss as `system:notice-dismiss` — both system-sourced inbounds, so no
-user-role message is consumed and nothing asks for a reply.
-"""
+# meiva:note
+# The agent-facing notice surface: post, resolve or withdraw, and the inbox feeds.
+# meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
 
 from __future__ import annotations
 
@@ -44,6 +24,8 @@ from base.config import settings
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
+from base.events.notifications.notices import stage_notice_notification
+from base.events.notifications.publish import announce_sync
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.notice_answers import resolution_answer, resolution_inbound
 from gateway.agents.schemas import (
@@ -68,14 +50,12 @@ _SELECT = (
     "FROM agent_notices n JOIN agents t ON t.id = n.agent_id "
 )
 
-# action -> stored resolution. Explicit map (never inferred from reply presence).
+# meiva:note
+# `_ACTION_RESOLUTION` maps an action to its stored resolution explicitly, never
+# inferred from reply presence. The caps bound one response's payload; the
+# configurable surface is the *default* window (user ruling 2026-09-17 / #3696).
+# meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
 _ACTION_RESOLUTION = {"answer": "answered", "dismiss": "dismissed", "read": "read"}
-
-# Protective caps on the query parameters - constants, not config (user ruling
-# 2026-09-17; task #3696 exception inventory): the configurable surface is the
-# *default* window
-# ``display.notices_open_default_limit`` / ``display.notices_resolved_default_page``;
-# these ceilings bound one response's payload and stay fixed.
 _OPEN_FEED_MAX_LIMIT = 500
 _RESOLVED_PAGE_MAX_LIMIT = 100
 
@@ -85,9 +65,9 @@ def publish_response_required_hint(bus: EventBus, agent_id: int) -> None:
     try:
         publish_agent_updated_sync(bus, agent_id)
     except Exception:
-        # The notice row is already durable. Like every live announce, an
-        # unavailable projection refresh must not turn a successful SDK write
-        # into an error; the next roster fetch reconciles it.
+        # meiva:note
+        # The row is durable; a failed projection refresh must not fail the write.
+        # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
         _log.exception(
             "unable to publish response-required notice hint", extra={"agent_id": agent_id}
         )
@@ -514,6 +494,7 @@ async def post_notice_create(
         list[dict[str, object]],
         list[_ops.NoticeResolutionFacts],
         bool,
+        int | None,
     ]:
         with write_transaction(pool) as conn, conn.cursor() as cur:
             previous = existing_receipt(conn, request.url.path, idempotency_key, request_body)
@@ -526,6 +507,7 @@ async def post_notice_create(
                     cast(list[dict[str, object]], previous["pending_notices"]),
                     [],
                     True,
+                    cast(int | None, previous.get("notification_id")),
                 )
             validate_creation_state(conn, body)
             # Serialize all creations for an agent, including different keys:
@@ -610,6 +592,9 @@ async def post_notice_create(
             if row is None:  # pragma: no cover — RETURNING always yields
                 raise RuntimeError("notice insert returned no row")
             notice_global_id, notice_local_id = int(row[0]), int(row[1])
+            notification_id = stage_notice_notification(
+                conn, agent_id=agent_id, notice_id=notice_global_id
+            )
             cur.execute(
                 "SELECT local_id AS id, title, created_at, priority "
                 "FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL "
@@ -631,6 +616,7 @@ async def post_notice_create(
                     "superseded_global": superseded_global,
                     "superseded": superseded_local,
                     "pending_notices": pending,
+                    "notification_id": notification_id,
                 },
             )
             # Publish only after the durable rows are visible to the snapshot
@@ -646,6 +632,7 @@ async def post_notice_create(
                 pending,
                 superseded_details,
                 False,
+                notification_id,
             )
 
     pool = request.app.state.db_pool
@@ -657,6 +644,7 @@ async def post_notice_create(
         pending,
         superseded_details,
         replayed,
+        notification_id,
     ) = await asyncio.to_thread(_create, pool)
     # Events after the commit: superseded notices first (the feed drops them),
     # then the new posted notice. Best-effort, never raises. Events publish by
@@ -677,10 +665,10 @@ async def post_notice_create(
             body.priority,
             body.title,
             body.task_id,
-            pool=request.app.state.db_pool,
         )
     else:
         await asyncio.to_thread(publish_response_required_hint, request.app.state.bus, agent_id)
+    await announce_notice_delivery(request, notification_id)
     return {
         "id": int(notice_local_id),
         "pending_count": len(pending),
@@ -698,6 +686,18 @@ def notice_key(request: Request, key: str) -> str:
         return request_key(request, key, method="POST", path=request.url.path)
     except PrincipalScopeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+# meiva:note
+# `announce_sync` publishes only an unannounced row, so a replay repairs a lost
+# announce without pushing one that already landed.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+async def announce_notice_delivery(request: Request, notification_id: int | None) -> None:
+    if notification_id is None:
+        return
+    await asyncio.to_thread(
+        announce_sync, request.app.state.db_pool, request.app.state.bus, notification_id
+    )
 
 
 def existing_receipt(
