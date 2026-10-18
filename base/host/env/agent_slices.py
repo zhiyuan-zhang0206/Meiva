@@ -50,6 +50,11 @@ class SkillRecall:
     skill_recall_threshold: float
     skill_recall_max: int
     skill_recall_deadline_seconds: float
+    skill_recall_peer_messages: bool
+    skill_recall_peer_gate_work_floor: float
+    skill_recall_peer_gate_method_ceiling: float
+    skill_recall_peer_gate_max_chars: int
+    skill_recall_peer_gate_deadline_seconds: float
 
 
 @dataclass(frozen=True)
