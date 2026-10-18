@@ -41,6 +41,9 @@ class RootRestartCleared(TypedDict):
     failed_for_s: float
 
 
+# meiva:note
+# `attempts` counts the replacement attempts this outage spent and `last_error` is
+# the unit's recorded exit error (task #5315).
 class RootUnitFailureState(TypedDict):
     """One root unit sits in an explicit failure state (task #4872).
 
@@ -53,6 +56,28 @@ class RootUnitFailureState(TypedDict):
 
     unit: str
     kind: str
+    detail: str
+    attempts: int
+    last_error: str
+
+
+# meiva:note
+# One transition, once: the unit spent its restart budget on a continuous outage,
+# so only the backoff ladder's capped cadence, or a database that answers again
+# after this monitor saw it unavailable, replaces it now. `detail` is the last
+# error the unit left behind (task #5315).
+class RootUnitBreakerOpen(TypedDict):
+    unit: str
+    attempts: int
+    detail: str
+
+
+# meiva:note
+# One transition, once: a fresh ALIVE observation or an observed operator stop ended
+# the episode, and `open_for_s` is how long the breaker held it (task #5315).
+class RootUnitBreakerClosed(TypedDict):
+    unit: str
+    open_for_s: float
     detail: str
 
 
@@ -404,6 +429,23 @@ EVENTS: dict[str, EventSpec] = {
         "(task #4872)",
         payload=RootUnitFailureState,
         tier="anomaly",
+    ),
+    "root_unit_breaker_open": telemetry_event(
+        "root_unit_breaker_open",
+        "root unit spent its automatic restart budget on one continuous outage — the "
+        "circuit breaker is open, so only the backoff ladder's capped cadence or a "
+        "recovered database replaces it (task #5315)",
+        payload=RootUnitBreakerOpen,
+        tier="anomaly",
+        site="services/supervision/meiva_root/health.py:HealthMonitor._sync_breaker",
+    ),
+    "root_unit_breaker_closed": telemetry_event(
+        "root_unit_breaker_closed",
+        "root unit's open circuit breaker closed again — a fresh ALIVE observation or "
+        "an observed operator stop ended the outage (task #5315)",
+        payload=RootUnitBreakerClosed,
+        tier="noise",
+        site="services/supervision/meiva_root/health.py:HealthMonitor._sync_breaker",
     ),
     "root_unit_not_revivable": telemetry_event(
         "root_unit_not_revivable",

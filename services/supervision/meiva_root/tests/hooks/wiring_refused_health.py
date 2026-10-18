@@ -24,7 +24,12 @@ def build(context: WiringContext) -> HealthMonitor:
     monitor = HealthMonitor(
         context.supervisor,
         registry,
-        config=HealthConfig(interval_s=0.03, probe_timeout_s=1, startup_grace_s=0),
+        config=HealthConfig(
+            interval_s=0.03,
+            probe_timeout_s=1,
+            startup_grace_s=0,
+            restart_backoff_s=(0.0,),
+        ),
         tasks=context.participant_tasks,
     )
     context.supervisor.attach_health(monitor)
