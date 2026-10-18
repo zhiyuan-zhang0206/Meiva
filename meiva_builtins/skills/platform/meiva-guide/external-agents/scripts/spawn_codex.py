@@ -15,7 +15,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from meiva.shell.coding_tools import add_lineage_arguments, codex, require_lineage
+from meiva.shell.coding_tools import (
+    add_capability_arguments,
+    add_lineage_arguments,
+    announce_capability,
+    codex,
+    require_lineage,
+)
 
 _SKILL_DIR = Path(__file__).resolve().parent.parent
 
@@ -69,6 +75,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Stop and terminalize exactly this generation.",
     )
     add_lineage_arguments(parser)
+    add_capability_arguments(parser)
     return parser
 
 
@@ -91,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.status and not args.cancel_generation:
         workspace = codex.resolve_dir(args.workspace)
     if args.status:
-        return codex.status(workspace)
+        return codex.status(workspace, mode=args.mode, force=args.force_mode)
     if args.cancel_generation:
         return codex.cancel(workspace, args.cancel_generation)
     tasks_file = None
@@ -105,6 +112,9 @@ def main(argv: list[str] | None = None) -> int:
         prompt = f"{require_lineage(parser, args, takeover=True)}\n\n{args.prompt}"
     elif args.resume is None:
         provenance = require_lineage(parser, args)
+    refusal = announce_capability("codex", mode=args.mode, force=args.force_mode)
+    if refusal:
+        return refusal
     return codex.launch(
         workspace,
         tasks_file,

@@ -389,11 +389,13 @@ def _print_owner(owner: coding_session_owner.CodingSessionOwner) -> None:
         print(f"work_file={owner.work_file}")
 
 
-def status(workspace: Path) -> int:
+def status(workspace: Path, *, mode: str = "auto", force: bool = False) -> int:
     """Print every generation recorded for the workspace."""
     return _owner_status(
         coding_session_owner.canonical_key(workspace, tool="codex"),
         _print_owner,
+        mode=mode,
+        force=force,
     )
 
 

@@ -18,7 +18,26 @@ parse and it vanishes on restart; a file the agent writes is structured, durable
 and diffable. Make a shared work folder the interface and demote keystrokes to a
 nudge.
 
-### Set up the workspace
+### What the launcher checks first
+
+Before launching, the script probes the CLI's version and the flags it declares it
+needs — `--version` and `--help` only, never a login or a session — and prints one
+line. `--status` prints the same line, previewing the decision for the `--mode` and
+`--force-mode` it is given:
+
+```
+harness: claude=2.1.284 [/usr/local/bin/claude] features=[resume,stream_json_in,stream_json_out] decision=pty
+```
+
+`--mode pty|auto` selects the execution path; only `pty` exists today, so
+`--mode stream-json` is refused with a message instead of silently running the
+other path, and `--status --mode stream-json` exits 2 for the same reason, so a
+preview cannot pass for a launch that would be refused. `--force-mode` lets a
+launch proceed when only the recorded version floor is against it. An unreadable or missing CLI is reported as `unknown` — never
+as "not installed", since the binary may sit outside `PATH` — and the launch still
+runs on the path that exists.
+
+## Set up the workspace
 
 - Give the agent its **own workspace** to work in, so it doesn't collide with
   other parallel work. Which directory that is follows the task: for writing

@@ -13,7 +13,7 @@ from pathlib import Path
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.log import logger
-from base.sessions import coding_session_owner
+from base.sessions import coding_session_owner, tool_capabilities
 from base.sessions import provenance as provenance_block
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 from meiva import agents
@@ -144,6 +144,9 @@ def _spawn_chain(
     return tuple(chain[-5:])
 
 
+# meiva:note
+# A missing label is not an error: the directory may not know the agent yet, and the block still
+# names it by id. Only the id is load-bearing.
 def _agent_label(
     agent_id: int, read_directory: Callable[..., agents.AgentDirectoryPage]
 ) -> str | None:
@@ -176,6 +179,19 @@ def write_task_file_header(tasks_file: Path, block: str) -> None:
         return
     tasks_file.parent.mkdir(parents=True, exist_ok=True)
     tasks_file.write_text(f"{block}\n\n{existing}", encoding="utf-8")
+
+
+# meiva:note
+# One line for the operator and for the launch log: what this machine's CLI is, which declared
+# features it has, and which path the launcher will therefore use. A tool with no declared
+# capabilities reports nothing rather than inventing a version string.
+def capability_report(tool: str, *, mode: str = "auto", force: bool = False) -> tuple[str, int]:
+    spec = tool_capabilities.TOOLS.get(tool)
+    if spec is None:
+        return "", 0
+    probe = tool_capabilities.probe_tool(spec)
+    decision = tool_capabilities.decide(spec, requested=mode, force=force, probe=probe)
+    return tool_capabilities.render(tool, decision, probe), 2 if decision.refused else 0
 
 
 def owner_terminated(agent_id: int) -> bool:
@@ -258,7 +274,18 @@ def cancel(
     return 0
 
 
-def status(key: coding_session_owner.CodingSessionKey, print_owner: OwnerPrinter) -> int:
+# meiva:note
+# `--status` answers what the next launch would do, so it forwards the same execution-path request the
+# launch would receive: a refusal has to be visible in the preview and in its exit code, not only
+# once an operator has already asked for the launch.
+def status(
+    key: coding_session_owner.CodingSessionKey,
+    print_owner: OwnerPrinter,
+    *,
+    mode: str = "auto",
+    force: bool = False,
+    report: Callable[..., tuple[str, int]] = capability_report,
+) -> int:
     """Print every generation recorded for the workspace; exit 1 when one is invalid."""
     owners = coding_session_owner.list_generations(key)
     if not owners:
@@ -269,4 +296,9 @@ def status(key: coding_session_owner.CodingSessionKey, print_owner: OwnerPrinter
         print_owner(owner)
         if owner.error:
             print(f"error={owner.error}", file=sys.stderr)
+    line, refusal = report(key.tool, mode=mode, force=force)
+    if line:
+        print(line)
+    if refusal:
+        return refusal
     return 1 if any(owner.status == CodingSessionStatus.INVALID for owner in owners) else 0
