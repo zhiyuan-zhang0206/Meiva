@@ -400,6 +400,13 @@ unwritable (the old thread stays frozen as cold history; resumability is lost).
   x-series experiments, and the pre-cutover drill suite were read/run on these pins. The
   delta on-disk representation is documented beta; the pin is our contract — a version move
   re-runs the drill gate before deployment.
+  *2026-10-19 follow-up (task #5345):* checkpoint-postgres moved to 3.1.3 and
+  langgraph-checkpoint to 4.3.0 for langgraph#8556 (the walk cursor starts at the requested
+  target). Both releases ship no new migration and no DDL change — `task_path` already
+  exists — so the on-disk contract is unchanged. What did change is the replay order within
+  one super-step (`writes_sort_key` over task path, task id, index) and the floor itself: the
+  pinned equality check is gone, the requirement is now `>=3.1.3`. The pre-cutover drill gate
+  has not been re-run for this move; run it before the next checkpointer deployment.
 - **Beta API.** `DeltaChannel` is documented beta with an explicitly unstable on-disk
   contract. Mitigations in place: pinned version, the read-compat layer as defense in
   depth, the drill gate, and an independent
