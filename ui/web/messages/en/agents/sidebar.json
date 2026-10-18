@@ -52,5 +52,9 @@
   "archiveRetry": "History unavailable. Retry",
   "archiveLatest": "Latest",
   "archiveOlder": "Older",
-  "archiveSearch": "Search agent history"
+  "archiveSearch": "Search agent history",
+  "showSidebar": "Show sidebar",
+  "hideSidebar": "Hide sidebar",
+  "showContextPanel": "Show shared context",
+  "hideContextPanel": "Hide shared context"
 }

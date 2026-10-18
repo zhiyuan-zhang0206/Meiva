@@ -13,7 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
+import { BAR_DIVIDER_CLASS } from "@/lib/layout/layout";
 import { SIDEBAR_SORT_DEFAULT, type StatsWindowHours } from "@/lib/agents/sidebar";
 import type * as SidebarModule from "@/lib/agents/sidebar";
 import type { AgentRow, OpenNotice, PluginStat, StatsDashboard, UiStatContribution } from "@/lib/contracts/types";
@@ -352,7 +352,7 @@ beforeEach(() => {
 });
 
 describe("DesktopSidebar collapse/expand", () => {
-  it("collapsed=true → blank rail: expand button only, no agent list / spawn / dots", () => {
+  it("collapsed=true → the sidebar renders nothing at all", () => {
     state.sidebarCollapsed = true;
     state.pendingSpawnCount = 1;
     state.agents = [
@@ -360,56 +360,24 @@ describe("DesktopSidebar collapse/expand", () => {
       makeAgent({ agent_id: 2, status: "running" }),
     ];
     const { container } = wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByLabelText("Expand sidebar")).toBeTruthy();
-    // Completely quiet: no mini agent list, no spawn button, no status dots,
-    // no spinners — nothing that could leak dynamic change while collapsed.
+    expect(container.querySelector("aside")).toBeNull();
+    expect(screen.queryByLabelText("Expand sidebar")).toBeNull();
     expect(screen.queryByText("#1")).toBeNull();
-    expect(screen.queryByText("#2")).toBeNull();
     expect(screen.queryByLabelText("Spawn agent")).toBeNull();
     expect(container.querySelectorAll(".animate-spin").length).toBe(0);
     expect(container.querySelectorAll(".animate-pulse").length).toBe(0);
   });
 
-  it("collapsed=false → shows ChevronLeft + 'Meiva' title", () => {
+  it("collapsed=false → 'Meiva' title, no in-sidebar collapse button", () => {
     wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByLabelText("Collapse sidebar")).toBeTruthy();
     expect(screen.getByText("Meiva")).toBeTruthy();
+    expect(screen.queryByLabelText("Collapse sidebar")).toBeNull();
     expect(screen.queryByLabelText("Drag to resize width")).toBeNull();
-  });
-
-  it("collapsed rail fills the resizable panel frame", () => {
-    state.sidebarCollapsed = true;
-    const { container } = wrap(<AgentSidebar {...handlers} />);
-    const rail = screen.getByLabelText("Expand sidebar").closest("aside");
-    expect(rail?.className).toContain("w-full");
-    // no unbounded/scrollable overflow inside the collapsed rail
-    expect(container.querySelectorAll("aside").length).toBeGreaterThan(0);
   });
 
   it("leaves the vertical separator to the owning layout handle", () => {
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.getByText("Meiva").closest("aside")?.className).not.toContain("border-r");
-    cleanup();
-
-    state.sidebarCollapsed = true;
-    wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByLabelText("Expand sidebar").closest("aside")?.className).not.toContain(
-      "border-r",
-    );
-  });
-
-  it("expanded header and collapsed-rail toggle share the same BAR_HEIGHT_CLASS", () => {
-    wrap(<AgentSidebar {...handlers} />);
-    const expandedHeader = screen.getByText("Meiva").closest("header");
-    expect(expandedHeader?.className).toContain(BAR_HEIGHT_CLASS);
-    cleanup();
-
-    state.sidebarCollapsed = true;
-    wrap(<AgentSidebar {...handlers} />);
-    // The rail's BAR_HEIGHT_CLASS moved to the buttons' flex-row container
-    // (each button is flex-1 inside it, #723).
-    const collapsedToggle = screen.getByLabelText("Expand sidebar");
-    expect(collapsedToggle.parentElement?.className).toContain(BAR_HEIGHT_CLASS);
   });
 
   it("insets the expanded title divider", () => {
@@ -433,19 +401,6 @@ describe("DesktopSidebar collapse/expand", () => {
     const aside = screen.getByText("Meiva").closest("aside");
     expect(aside?.className).toContain("flex");
     expect(aside?.className).toContain("flex-col");
-  });
-
-  it("click collapsed expand button → setCollapsed(false)", () => {
-    state.sidebarCollapsed = true;
-    wrap(<AgentSidebar {...handlers} />);
-    fireEvent.click(screen.getByLabelText("Expand sidebar"));
-    expect(state.setSidebarCollapsed).toHaveBeenCalledWith(false);
-  });
-
-  it("click expanded collapse button → setCollapsed(true)", () => {
-    wrap(<AgentSidebar {...handlers} />);
-    fireEvent.click(screen.getByLabelText("Collapse sidebar"));
-    expect(state.setSidebarCollapsed).toHaveBeenCalledWith(true);
   });
 
   it("click Spawn (expanded header) → onSpawn is called", () => {
@@ -1239,58 +1194,8 @@ describe("Header layout + search overlay (task #723)", () => {
     wrap(<AgentSidebar {...handlers} />);
     const header = screen.getByText("Meiva").closest("header")!;
     const labels = Array.from(header.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
-    // Expanded-state top button order: search -> collapse (collapse rightmost); Meiva title leftmost
-    expect(labels.filter(Boolean)).toEqual(["Search agents", "Collapse sidebar"]);
+    expect(labels.filter(Boolean)).toEqual(["Search agents"]);
     expect(screen.getByText("Meiva")).toBeTruthy();
-  });
-
-  it("collapsed rail: expand on top, search below it, nav shortcuts stacked at the bottom", () => {
-    state.sidebarCollapsed = true;
-    state.agents = [makeAgent({ agent_id: 1 })];
-    wrap(<AgentSidebar {...handlers} />);
-    const aside = document.querySelector("aside")!;
-    const labels = Array.from(aside.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
-    // Top (user ruling 2026-08-05 21:50): expand at the very top, search
-    // directly below it — stacked vertically, never side by side. Bottom:
-    // the statistics popover trigger + the four nav shortcuts, so the
-    // collapsed rail is not a lone expand button.
-    expect(labels.filter(Boolean)).toEqual([
-      "Expand sidebar",
-      "Search agents",
-      "Statistics",
-      "Memory graph",
-      "Fleet",
-      "Insights",
-      "Control",
-    ]);
-    // Collapsed rail top buttons carry no border-b divider
-    const searchBtn = screen.getByLabelText("Search agents");
-    const expandBtn = screen.getByLabelText("Expand sidebar");
-    expect(searchBtn.className).not.toContain("border-b");
-    expect(expandBtn.className).not.toContain("border-b");
-  });
-
-  it("collapsed rail nav shortcut pushes the route", () => {
-    state.sidebarCollapsed = true;
-    state.agents = [makeAgent({ agent_id: 1 })];
-    wrap(<AgentSidebar {...handlers} />);
-    fireEvent.click(screen.getByLabelText("Insights"));
-    expect(pushSpy).toHaveBeenCalledWith("/insights");
-  });
-
-  it("Fleet shortcuts carry the last-viewed agent in expanded and collapsed layouts", () => {
-    state.activeId = 405;
-    state.agents = [makeAgent({ agent_id: 405 })];
-    wrap(<AgentSidebar {...handlers} />);
-    fireEvent.click(screen.getByLabelText("Fleet"));
-    expect(pushSpy).toHaveBeenLastCalledWith("/fleet?agent_id=405");
-
-    cleanup();
-    pushSpy.mockClear();
-    state.sidebarCollapsed = true;
-    wrap(<AgentSidebar {...handlers} />);
-    fireEvent.click(screen.getByLabelText("Fleet"));
-    expect(pushSpy).toHaveBeenLastCalledWith("/fleet?agent_id=405");
   });
 
   it("clicking the search button opens the floating overlay", () => {

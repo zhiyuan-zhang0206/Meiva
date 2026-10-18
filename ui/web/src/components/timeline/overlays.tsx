@@ -121,8 +121,9 @@ export function ScrollToBottomButton({
           </svg>
           <span role="status" className="sr-only">{t("loadingLatest")}</span>
         </>
-      ) : null}
-      <ArrowDown data-testid="scroll-to-bottom-arrow" className="size-4" />
+      ) : (
+        <ArrowDown data-testid="scroll-to-bottom-arrow" className="size-4" />
+      )}
     </button>
   );
 }

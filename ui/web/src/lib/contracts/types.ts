@@ -833,6 +833,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.language": "en",
   "display.time_mode": "last_active",
   "display.show_terminated": false,
+  "display.context_panel_open": true,
   "display.date_format": "relative",
   "display.show_activity_line": false,
   "display.show_agent_status": false,

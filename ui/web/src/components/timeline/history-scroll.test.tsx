@@ -279,13 +279,13 @@ describe("agent switch reading positions", () => {
     expect(button.className).toContain("opacity-100");
     expect(button.querySelector(".animate-spin")).not.toBeNull();
     expect(screen.getByTestId("latest-loading-ring")).toBeTruthy();
-    const arrow = screen.getByTestId("scroll-to-bottom-arrow");
+    expect(screen.queryByTestId("scroll-to-bottom-arrow")).toBeNull();
     expect(button.hasAttribute("disabled")).toBe(false);
     expect(button.getAttribute("aria-label")).toBe("Scroll to bottom");
     rerender(<TimelineView items={items} threadKey="spinner" />);
     expect(screen.getByTestId("scroll-to-bottom")).toBe(button);
     expect(button.querySelector(".animate-spin")).toBeNull();
-    expect(screen.getByTestId("scroll-to-bottom-arrow")).toBe(arrow);
+    expect(screen.getByTestId("scroll-to-bottom-arrow")).toBeTruthy();
     expect(viewport().scrollTop).toBe(position);
   });
 });
@@ -344,12 +344,12 @@ it("captures the departing reading position before the native pull reserve is re
   expect(viewport().scrollTop).toBe(700);
 });
 
-it("keeps the arrow actionable while the loading ring is visible", () => {
+it("shows the loading ring instead of the arrow while new messages arrive", () => {
   render(<QueryClientProvider client={client}><TimelineView items={items} threadKey="ring-click" loadingNew /></QueryClientProvider>);
   act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
   const scrollTo = vi.spyOn(viewport(), "scrollTo");
   fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
   expect(screen.getByTestId("latest-loading-ring")).toBeTruthy();
-  expect(screen.getByTestId("scroll-to-bottom-arrow")).toBeTruthy();
+  expect(screen.queryByTestId("scroll-to-bottom-arrow")).toBeNull();
   expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: "smooth" });
 });
