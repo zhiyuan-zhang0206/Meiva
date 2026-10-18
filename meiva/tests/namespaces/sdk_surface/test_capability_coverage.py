@@ -22,7 +22,7 @@ def test_every_agent_visible_entry_has_a_capability() -> None:
     assert len(fqs) > 40, (
         f"the surface walk found only {len(fqs)} entries: it is looking in the wrong place"
     )
-    unclassified = [fq for fq in fqs if capabilities.capability_for(fq) is None]
+    unclassified = [fq for fq in fqs if capabilities.required_capabilities(fq) is None]
     assert unclassified == [], (
         "these agent-visible SDK entries have no declared capability; classify each one in "
         f"meiva/impersonation/capabilities.py: {unclassified}"
@@ -30,8 +30,8 @@ def test_every_agent_visible_entry_has_a_capability() -> None:
 
 
 def test_dynamic_mcp_tools_need_machine_authority() -> None:
-    assert capabilities.capability_for("mcps.chrome.navigate") is Capability.SHELL
-    assert capabilities.capability_for("mcps.notion.API-post-page") is Capability.SHELL
+    assert capabilities.required_capabilities("mcps.chrome.navigate") == (Capability.SHELL,)
+    assert capabilities.required_capabilities("mcps.notion.API-post-page") == (Capability.SHELL,)
 
 
 # meiva:note
@@ -40,7 +40,10 @@ def test_dynamic_mcp_tools_need_machine_authority() -> None:
 # spend money or ship files. These assertions pin the ruling, not just the mapping -
 # in particular, no profile grants it, so a defaulted takeover cannot gain it.
 def test_understand_needs_external_model_not_read() -> None:
-    assert capabilities.capability_for("understand") is Capability.EXTERNAL_MODEL
+    assert capabilities.required_capabilities("understand") == (
+        Capability.READ,
+        Capability.EXTERNAL_MODEL,
+    )
 
 
 def test_no_profile_grants_external_model() -> None:
@@ -48,13 +51,19 @@ def test_no_profile_grants_external_model() -> None:
 
 
 def test_an_unclassified_entry_has_no_capability() -> None:
-    assert capabilities.capability_for("no.such.entry") is None
+    assert capabilities.required_capabilities("no.such.entry") is None
 
 
 # meiva:note
 # A capability nothing requires is dead vocabulary; a rename would hide there.
 def test_every_capability_in_the_vocabulary_is_reachable() -> None:
-    used = set(capabilities.ENTRY_CAPABILITIES.values()) | {
-        capability for _prefix, capability in capabilities.PREFIX_CAPABILITIES
+    used = {
+        capability
+        for requirements in capabilities.ENTRY_CAPABILITIES.values()
+        for capability in requirements
+    } | {
+        capability
+        for _prefix, requirements in capabilities.PREFIX_CAPABILITIES
+        for capability in requirements
     }
     assert used == set(Capability), f"unused capabilities: {set(Capability) - used}"

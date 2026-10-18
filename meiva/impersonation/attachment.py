@@ -47,7 +47,7 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from meiva.boot import initialize_context, process_clients
-from meiva.impersonation.capabilities import capability_for
+from meiva.impersonation.capabilities import primary_capability, required_capabilities
 from meiva.sdk_surface import process_context
 
 # meiva:note
@@ -305,30 +305,33 @@ class Attachment:
     # a declaration is a pre-vocabulary one and keeps the full surface it was issued
     # with; NULL never means "minimal". Everything else is closed by default: an
     # entry nobody classified is refused, because a silent allowance is how a
-    # surface grows past its owner.
+    # surface grows past its owner. An entry that needs several capabilities passes
+    # only when the lease holds every one of them - partial authority is not authority.
     def _check_capability(self, fn: str, lease: Mapping[str, Any]) -> None:
         declared = declared_capabilities(lease)
         if declared is None:
             return
-        capability = capability_for(fn)
-        if capability is not None and capability in declared:
+        required = required_capabilities(fn)
+        if required is not None and set(required) <= declared:
             return
         mode = self._capability_mode_reader()
         if mode not in CAPABILITY_MODES:
             raise RuntimeError(f"unknown impersonation_capability_enforcement value: {mode!r}")
         if mode == "off":
             return
-        self._record_capability_refusal(fn, capability, mode, lease)
+        self._record_capability_refusal(fn, required, mode, lease)
         if mode == "enforce":
-            raise CapabilityDenied(fn, capability, mode)
+            raise CapabilityDenied(fn, required, mode)
 
     # meiva:note
-    # One event per refused (or would-be-refused) call. `capability` stays empty when
-    # no capability classifies the entry: that is the finding, not a missing field.
+    # One event per refused (or would-be-refused) call. `capability` keeps the entry's
+    # primary requirement and stays empty when no capability classifies the entry -
+    # that is the finding, not a missing field. `capabilities` carries the whole
+    # requirement set so a reader can see every missing piece, not just the first.
     def _record_capability_refusal(
         self,
         fn: str,
-        capability: Capability | None,
+        required: tuple[Capability, ...] | None,
         mode: str,
         lease: Mapping[str, Any],
     ) -> None:
@@ -342,7 +345,8 @@ class Attachment:
             attributes={
                 "lease_id": str(lease.get("id", self.lease_id)),
                 "entry": fn,
-                "capability": "" if capability is None else capability.value,
+                "capability": "" if required is None else primary_capability(required).value,
+                "capabilities": [] if required is None else [item.value for item in required],
                 "mode": mode,
             },
         )

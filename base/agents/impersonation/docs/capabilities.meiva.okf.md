@@ -31,9 +31,9 @@ Three stored states are distinct:
 The vocabulary names authority, not convenience: `external.model` (the
 `meiva.understand` surface) is separate from `read` because that call bills the
 user and sends local file content to a model outside the cluster, so a lease that
-may read must not thereby gain it. The implication runs one way: granting
-`external.model` does expose any local file the caller names, so an approval
-surface must read that capability as export as well.
+may read must not thereby gain it, and granting `external.model` alone does not
+gain it either: the SDK map makes that one entry require both capabilities, and a
+lease passes only when it holds every requirement of an entry.
 
 A caller-made request that declares nothing gets the minimal set (read plus
 messaging). An automatic takeover that declares nothing keeps the historical

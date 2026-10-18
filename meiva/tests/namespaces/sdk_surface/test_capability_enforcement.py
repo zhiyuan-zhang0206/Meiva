@@ -63,6 +63,7 @@ def test_an_empty_declaration_grants_nothing(emitted_events: EmittedEvents) -> N
         attachment._check_capability("files.read", _scoped())
 
     assert refused.value.capability is Capability.READ
+    assert refused.value.required == (Capability.READ,)
     assert refused.value.entry == "files.read"
 
 
@@ -76,6 +77,7 @@ def test_warn_records_the_call_and_lets_it_run(emitted_events: EmittedEvents) ->
             "lease_id": "lease",
             "entry": "agents.spawn",
             "capability": "agents.spawn",
+            "capabilities": ["agents.spawn"],
             "mode": "warn",
         }
     ]
@@ -111,7 +113,9 @@ def test_an_unclassified_entry_is_refused_in_enforce(emitted_events: EmittedEven
         attachment._check_capability("some.future.entry", _scoped(Capability.READ))
 
     assert refused.value.capability is None
+    assert refused.value.required is None
     assert emitted_events.attributes(_REFUSED)[0]["capability"] == ""
+    assert emitted_events.attributes(_REFUSED)[0]["capabilities"] == []
 
 
 def test_off_neither_records_nor_refuses(emitted_events: EmittedEvents) -> None:
@@ -127,3 +131,44 @@ def test_an_unknown_mode_fails_loudly(emitted_events: EmittedEvents) -> None:
 
     with pytest.raises(RuntimeError, match="impersonation_capability_enforcement"):
         attachment._check_capability("files.read", _scoped())
+
+
+# meiva:note
+# `understand` needs two capabilities, so either half alone must leave the paid,
+# off-cluster call refused - that is the whole point of the multi-requirement shape:
+# `read` alone no longer ships files out, and `external.model` alone no longer reads
+# the paths it names.
+def test_understand_refuses_either_half_alone(emitted_events: EmittedEvents) -> None:
+    attachment = _attachment("enforce")
+
+    for granted in ((Capability.READ,), (Capability.EXTERNAL_MODEL,)):
+        with pytest.raises(CapabilityDenied) as refused:
+            attachment._check_capability("understand", _scoped(*granted))
+
+        assert refused.value.required == (Capability.READ, Capability.EXTERNAL_MODEL)
+        assert refused.value.capability is Capability.EXTERNAL_MODEL
+
+    assert emitted_events.attributes(_REFUSED) == [
+        {
+            "lease_id": "lease",
+            "entry": "understand",
+            "capability": "external.model",
+            "capabilities": ["read", "external.model"],
+            "mode": "enforce",
+        },
+        {
+            "lease_id": "lease",
+            "entry": "understand",
+            "capability": "external.model",
+            "capabilities": ["read", "external.model"],
+            "mode": "enforce",
+        },
+    ]
+
+
+def test_understand_passes_with_both(emitted_events: EmittedEvents) -> None:
+    attachment = _attachment("enforce")
+
+    attachment._check_capability("understand", _scoped(Capability.READ, Capability.EXTERNAL_MODEL))
+
+    assert emitted_events.names() == []

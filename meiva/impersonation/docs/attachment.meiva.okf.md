@@ -39,8 +39,9 @@ or claiming an export that did not finish.
 Every public SDK entry is wrapped by the usage recorder, which admits the call
 through `Attachment.admit_sdk_call(fn)` before the body runs. The gate compares
 `fn` with the lease's declared capabilities
-(`meiva/impersonation/capabilities.py` maps a dotted entry to one capability; MCP
-tool calls resolve as `mcps.<server>.<tool>` and need machine authority). A lease
+(`meiva/impersonation/capabilities.py` maps a dotted entry to the capabilities it
+requires, an entry passes only when the lease holds every one of them, and MCP tool
+calls resolve as `mcps.<server>.<tool>` and need machine authority). A lease
 with no declaration is legacy-full and is never checked. Otherwise an entry the
 declaration does not cover — including one no capability classifies — is recorded
 as `impersonation_capability_refused` and then, per

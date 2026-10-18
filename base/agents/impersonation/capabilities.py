@@ -42,11 +42,9 @@ class Capability(StrEnum):
 # the one surface that both spends the user's money and sends local file content to
 # a model outside the cluster. Classifying it as `read` would keep it out of sight
 # of an approval surface that decides what may leave the machine and what may cost
-# money; a separate name lets a lease grant reading without granting that.
-# The implication runs one way only: granting `external.model` does expose local
-# file content, because the caller names the paths, so an approval surface must
-# read this capability as export too - the gate maps one entry to one capability
-# and cannot require `read` beside it.
+# money; a separate name lets a lease grant reading without granting that. The SDK
+# map requires both `read` and `external.model` for `meiva.understand`, so neither
+# half alone opens the call in either direction.
 # meiva:link base/agents/impersonation/docs/capabilities.meiva.okf.md
 
 # meiva:note
@@ -90,18 +88,25 @@ class CapabilityError(RuntimeError):
 
 # meiva:note
 # `CapabilityDenied` names the outcome the caller handles, not an error kind, so it
-# keeps the N818 exemption the repository uses for outcome-style names.
+# keeps the N818 exemption the repository uses for outcome-style names. It carries the
+# entry's whole requirement tuple: an entry can need more than one capability, and a
+# message naming only one of them would send the reader to change half of what it
+# takes. `capability` stays the entry's primary (most specific) requirement for callers
+# written against the single-capability shape.
 class CapabilityDenied(CapabilityError):  # noqa: N818
-    def __init__(self, entry: str, capability: Capability | None, mode: str) -> None:
+    def __init__(self, entry: str, required: tuple[Capability, ...] | None, mode: str) -> None:
         self.entry = entry
-        self.capability = capability
+        self.required = required
+        self.capability = None if required is None else required[-1]
         self.mode = mode
         needed = (
-            "no declared capability" if capability is None else f"capability {capability.value!r}"
+            "a capability no declaration can name"
+            if required is None
+            else "capabilities " + ", ".join(repr(capability.value) for capability in required)
         )
         super().__init__(
-            f"meiva.{entry} needs {needed}; this impersonation lease does not grant it "
-            f"(enforcement={mode}). Ask the Meiva side for a takeover that declares it."
+            f"meiva.{entry} needs {needed}; this impersonation lease does not grant what it "
+            f"needs (enforcement={mode}). Ask the Meiva side for a takeover that declares it."
         )
 
 
