@@ -1,32 +1,16 @@
-"""The visible half of the converge preserve contract.
-
-A converge-managed destination whose current content no longer matches the
-recorded render was hand-edited: the renderers warn and preserve it instead of
-overwriting — see cli/commands/converge/rendered_file.py (LGTM provisioning +
-otel-collector config), cli/commands/extensions/skills_sync.py and
-cli/commands/extensions/materialize.py. Before this
-reporter those warnings lived only in converge output, and a frozen LGTM
-dashboard survived three consecutive rollouts unnoticed (task #3689). Mirrors
-base/packages/plugins/load_report.py: one `converge_file_preserved` telemetry event per
-preserve hit, so the drift is visible on the observability surface without
-reading the converge log. The event name is registered in
-base/events/declarations/root.py next to the dashboard render-failure guard.
-"""
-
 from __future__ import annotations
 
 from base.log import logger
 from base.telemetry.emitter import emit
 
 
+# meiva:note
+# One event per preserve hit: the renderer kept local content instead of the
+# render, so the drift stays visible without reading converge output. `path` is
+# the preserved destination, `key` the hash-sidecar key (or managed name),
+# `surface` the renderer.
+# meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
 def report_converge_preserve(*, path: str, key: str, surface: str) -> None:
-    """Report one preserved converge destination. Never raises.
-
-    ``path`` is the destination that was preserved; ``key`` is the render key
-    (hash-sidecar key, or the managed name for skills); ``surface`` names the
-    renderer (``lgtm-provisioning``, ``otel-collector``,
-    ``skills``, ``extensions``).
-    """
     try:
         emit(
             "telemetry",
@@ -40,6 +24,26 @@ def report_converge_preserve(*, path: str, key: str, surface: str) -> None:
         # re-enter it. Converge must continue.
         logger.bind(_no_emitter=True).opt(exception=True).warning(
             "converge_file_preserved event for {path} was not emitted; the preserve is "
+            "visible only in converge output",
+            path=path,
+        )
+
+
+# meiva:note
+# The mirror of report_converge_preserve for a surface the repository owns
+# outright: the destination drifted from the record and converge restored it.
+def report_converge_overwrite(*, path: str, key: str, surface: str) -> None:
+    try:
+        emit(
+            "telemetry",
+            "converge_file_overwritten",
+            level="warning",
+            source="converge",
+            attributes={"path": path, "key": key, "surface": surface},
+        )
+    except Exception:
+        logger.bind(_no_emitter=True).opt(exception=True).warning(
+            "converge_file_overwritten event for {path} was not emitted; the restore is "
             "visible only in converge output",
             path=path,
         )

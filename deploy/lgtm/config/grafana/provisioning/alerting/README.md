@@ -52,9 +52,11 @@ Native Grafana on the LGTM host (port 3003 by default, 53003 on the station via
 `MEIVA_LGTM_GRAFANA_PORT`) evaluates these rules from the converge-rendered
 provisioning tree (`$MEIVA_HOME/lgtm/native/config/
 provisioning/`, copied verbatim by `cli/commands/observability/lgtm_native.py` from the
-source checkout's `deploy/lgtm/config/grafana/provisioning` — rendered files
-carry content-hash user-edit protection; the webhook URL is a Grafana-native
-`$__env{MEIVA_ALERTS_WEBHOOK_URL}` reference resolved from the process env).
+source checkout's `deploy/lgtm/config/grafana/provisioning` — a rendered copy
+that drifted from its recorded hash is restored from the checkout and reported as
+`converge_file_overwritten`, because the checkout owns this tree; the webhook URL
+is a Grafana-native `$__env{MEIVA_ALERTS_WEBHOOK_URL}` reference resolved from
+the process env).
 The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
 address when `MEIVA_OBSERVABILITY_URL` points at a remote station.
