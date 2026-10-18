@@ -46,11 +46,6 @@ export function resetMockSettings(initial: Record<string, unknown> = {}): void {
   emit();
 }
 
-export function setMockLoading(value: boolean): void {
-  loading = value;
-  emit();
-}
-
 /** Imperatively set a value (as if the server pushed it). */
 export function setMockSetting(key: string, value: unknown): void {
   store = { ...store, [key]: value };
