@@ -160,3 +160,62 @@ def test_the_sweep_recovers_a_committed_notice_with_no_announce(
     delivered = bus.notifications()
     assert len(delivered) == 1
     assert delivered[0]["subject"] == "Need a decision"
+
+
+# meiva:note
+# A sweep reaches rows one at a time, and one row that raises must not hold the
+# deliveries behind it: the failing row stays unannounced for the next sweep, the
+# rest go out now. The failure is the transport's own — an exception out of the
+# publish call, not the `None` it returns for a known Redis failure.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+class ExplodingBus(RecordingBus):
+    def __init__(self, subject: str) -> None:
+        super().__init__()
+        self.subject = subject
+
+    def publish_best_effort_sync(
+        self,
+        payload: str,
+        *,
+        channel: str | None = None,
+        decode_responses: bool = True,
+        context: str = "",
+    ) -> int | None:
+        import json
+
+        if json.loads(payload).get("subject") == self.subject:
+            raise RuntimeError("transport exploded")
+        return super().publish_best_effort_sync(
+            payload, channel=channel, decode_responses=decode_responses, context=context
+        )
+
+
+def test_one_failing_row_does_not_hold_the_rest_of_the_sweep(
+    db_conn: psycopg.Connection, db_url: str
+) -> None:
+    agent_id = create_agent(db_conn)
+    db_conn.commit()
+    with _pool(db_url) as pool:
+        records = [
+            deliver_sync(
+                pool,
+                category_id="core.needs_input",
+                subject=f"needs an answer {index}",
+                agent_id=agent_id,
+            )
+            for index in range(3)
+        ]
+        ids = [record.id for record in records if record is not None]
+        assert len(ids) == 3
+        for notification_id in ids:
+            _age(db_conn, notification_id, 120)
+        broken = ids[1]
+        assert (
+            republish_pending(pool, ExplodingBus("needs an answer 1"), min_age_seconds=30, limit=10)
+            == 2
+        )
+        assert _announced_at(db_conn, ids[0]) is not None
+        assert _announced_at(db_conn, broken) is None
+        assert _announced_at(db_conn, ids[2]) is not None
+        assert republish_pending(pool, RecordingBus(), min_age_seconds=30, limit=10) == 1
+        assert _announced_at(db_conn, broken) is not None

@@ -49,7 +49,7 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("INSERT, UPDATE", ("agent_shell_ttls",)),
     ("SELECT, INSERT", ("agent_shell_ttl_renewals",)),
     ("SELECT, INSERT", ("heartbeat_pause_log",)),
-    ("SELECT, INSERT, UPDATE", ("notification_events",)),
+    ("SELECT, INSERT", ("notification_events",)),
     ("SELECT, INSERT", ("audit_events",)),
     ("SELECT, INSERT", ("telemetry_events",)),
     ("SELECT, INSERT, UPDATE", ("plugin_stats",)),
@@ -132,6 +132,15 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
     for privileges, tables in _RUNNER_TABLE_GRANTS:
         for table in tables:
             _grant(conn, f"GRANT {privileges} ON {{}} TO {{}}", table, runner)
+    # meiva:note
+    # The runner writes one column of the delivery log — the mark that its live
+    # event was published — so that write is granted by column. A table-wide
+    # UPDATE would also let the role rewrite a delivery's subject or body, which
+    # no runner path does. The table-level UPDATE is revoked first so convergence
+    # narrows a cluster that already carries the wide grant.
+    # meiva:link base/cluster/authority/docs/group-grants.meiva.okf.md
+    _grant(conn, "REVOKE UPDATE ON {} FROM {}", "notification_events", runner)
+    _grant(conn, "GRANT UPDATE (announced_at) ON {} TO {}", "notification_events", runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
 
     _grant(

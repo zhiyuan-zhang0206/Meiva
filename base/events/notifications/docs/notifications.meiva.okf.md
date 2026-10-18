@@ -25,7 +25,11 @@ published; a NULL means the delivery is still owed. A producer stages the row
 when it decides (a notice's row commits with the notice, so a crash between the
 commit and the publish leaves a deliverable debt rather than a silent loss), and
 `announce` marks the row only after the transport accepted the publication — a
-known Redis failure returns None and marks nothing. The gateway sweeps
+known Redis failure returns None and marks nothing. A publish with no subscriber
+is accepted too: Redis took the message and nobody was listening, so the row is
+marked delivered and a client that was offline gets it from the recovery read,
+not from the live event. The outbox closes the failures the transport reports,
+never the silence of an empty subscriber list. The gateway sweeps
 `announced_at IS NULL` rows older than one sweep interval
 (`notification_outbox_interval_seconds`) and re-announces them
 (`notification_outbox_batch` bounds one pass). A row younger than an interval is
