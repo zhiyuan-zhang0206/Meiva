@@ -3157,6 +3157,9 @@ CREATE TABLE IF NOT EXISTS notification_events (
     announced_at    TIMESTAMPTZ
 );
 
+COMMENT ON COLUMN notification_events.announced_at IS
+    'When the live notification event was published; NULL means the delivery is still owed and the outbox sweep retries it.';
+
 CREATE INDEX IF NOT EXISTS notification_events_created_idx
     ON notification_events (created_at DESC);
 
