@@ -34,7 +34,10 @@ tags:
   Resolution is one keyed attempt (`principal-v1`) with a fresh key per invocation.
   `audit` replays a window of producer candidates through the delivery policy and
   writes nothing; it reads the runtime database directly, so it reports a switch's
-  effect on a window in which that category was already switched off.
+  effect on a window in which that category was already switched off. `--out json`
+  prints the same report as one object (window, switches, sources, per-day and
+  per-category deliveries, hour buckets, candidate suppression, simulations) for
+  another tool to consume.
 - `meiva memory init`: explicitly provisions the memory-pool checkout and
   plugin-owned templates. Branch validation runs here, never during converge or
   start.
