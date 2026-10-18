@@ -49,14 +49,6 @@ CORE_CATEGORIES: tuple[NotificationCategory, ...] = (
         default_enabled=True,
         dedupe_window_seconds=3600,
     ),
-    NotificationCategory(
-        id="core.notice",
-        label="Agent posted a notice",
-        description="An agent posted a notice that needs no response.",
-        importance="normal",
-        default_enabled=False,
-        dedupe_window_seconds=3600,
-    ),
 )
 
 

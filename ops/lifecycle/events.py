@@ -88,9 +88,9 @@ async def publish_notice_resolved(
 
 
 # meiva:note
-# With `pool`, the same post is also delivered to the user: the spine reads the
-# committed notice row and records `core.needs_input` or `core.notice`. Delivery
-# runs after the live hint and never fails the post.
+# With `pool`, a notice that needs an answer is also delivered to the user: the
+# spine reads the committed row and records `core.needs_input`. Delivery runs
+# after the live hint and never fails the post.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 async def publish_notice_posted(
     bus: EventBus,

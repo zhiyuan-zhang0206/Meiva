@@ -17,7 +17,8 @@ publishes one live event every transport consumes.
 `notification_events` holds one row per delivered notification. It is a delivery
 log, not an inbox: rows are never answered, resolved or superseded. The inbox is
 `agent_notices`; a notice that needs an answer posts a `core.needs_input`
-notification as a side effect.
+notification as a side effect, and a notice that needs no answer posts nothing —
+the inbox already carries it.
 
 ## Categories
 
@@ -41,10 +42,9 @@ A hosted turn that ran to completion records `core.turn_finished` from
 `services/agent_runner/agent_host/host.py`; a crashed, cancelled or truncated turn
 says nothing, because the notification lives on the turn path rather than on the
 settlement path that also fires for no-work parks. A posted notice
-records `core.needs_input` or `core.notice` from `ops/lifecycle/events.py`,
-keyed by the notice id so an edit or a retried post cannot notify twice; the
-spine reads the notice row itself rather than trusting either post path to pass
-the right shape.
+records `core.needs_input` from `ops/lifecycle/events.py`, keyed by the notice
+id so an edit or a retried post cannot notify twice; the spine reads the notice
+row itself rather than trusting either post path to pass the right shape.
 
 ## Plugin emission
 

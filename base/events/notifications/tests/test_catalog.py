@@ -32,7 +32,7 @@ def _category(
 
 def test_core_ids_are_unique_and_namespaced() -> None:
     merged = merge_catalog((CORE_CATEGORIES,))
-    assert set(merged) == {"core.turn_finished", "core.needs_input", "core.notice"}
+    assert set(merged) == {"core.turn_finished", "core.needs_input"}
     assert all(category_id.startswith("core.") for category_id in merged)
 
 

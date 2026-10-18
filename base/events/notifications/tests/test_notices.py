@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import psycopg
 from psycopg.rows import TupleRow
-from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.db import create_agent
@@ -52,7 +51,7 @@ async def test_a_response_notice_is_delivered(
     assert row == ("core.needs_input", "Need a decision", f"notice:{notice_id}")
 
 
-async def test_an_fyi_notice_is_off_until_the_user_turns_it_on(
+async def test_an_fyi_notice_is_never_a_notification(
     db_conn: psycopg.Connection, db_url: str, event_bus: EventBus
 ) -> None:
     agent_id = create_agent(db_conn)
@@ -65,17 +64,7 @@ async def test_an_fyi_notice_is_off_until_the_user_turns_it_on(
             )
             is None
         )
-        db_conn.execute(
-            "INSERT INTO user_settings (key, value) VALUES ('notifications.categories', %s) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-            (Jsonb({"core.notice": True}),),
-        )
-        db_conn.commit()
-        delivered = await deliver_notice_notification(
-            pool, event_bus, agent_id=agent_id, notice_id=notice_id
-        )
-    assert delivered is not None
-    assert _categories(db_conn, agent_id) == ["core.notice"]
+    assert _categories(db_conn, agent_id) == []
 
 
 async def test_a_second_post_of_the_same_notice_does_not_notify_twice(

@@ -22,8 +22,8 @@ def test_categories_report_the_core_set_with_switches(db_conn: psycopg.Connectio
         resp = client.get("/api/notifications/categories")
     assert resp.status_code == 200
     categories = {item["id"]: item for item in resp.json()["categories"]}
-    assert {"core.turn_finished", "core.needs_input", "core.notice"} <= set(categories)
-    assert categories["core.notice"]["enabled"] is False
+    core = {item_id for item_id in categories if item_id.startswith("core.")}
+    assert core == {"core.turn_finished", "core.needs_input"}
     assert categories["core.turn_finished"]["enabled"] is True
 
 

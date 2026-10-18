@@ -37,8 +37,10 @@ A separate, small delivery spine owns the decision:
 
 Producers: a hosted turn that ran to completion (`core.turn_finished`, emitted on
 the turn path, not the settlement path that also fires for no-work parks), a
-posted notice (`core.needs_input` / `core.notice`, read from the committed row and
-keyed by notice id), and `meiva_fleet.task_closed` through the plugin endpoint.
+posted notice that needs an answer (`core.needs_input`, read from the committed
+row and keyed by notice id), and `meiva_fleet.task_closed` through the plugin
+endpoint. A notice that needs no answer notifies nobody: the console inbox already
+carries it, and a ping the user cannot act on is noise.
 
 ## Consequences
 
