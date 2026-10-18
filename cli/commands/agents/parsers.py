@@ -161,6 +161,7 @@ def _h_notices_audit(args: argparse.Namespace) -> int:
         now=args.now,
         simulate=args.simulate or (),
         out=args.out,
+        explain=args.explain,
     )
 
 
@@ -371,6 +372,11 @@ def _add_notices_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser
     )
     notices_audit_p.add_argument(
         "--now", type=_instant, default=None, help="window end as an ISO instant (default: now)"
+    )
+    notices_audit_p.add_argument(
+        "--explain",
+        action="store_true",
+        help="also list every candidate with why it was delivered or held back",
     )
     notices_audit_p.add_argument(
         "--out",

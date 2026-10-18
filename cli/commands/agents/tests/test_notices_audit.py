@@ -259,3 +259,53 @@ def test_json_and_text_report_the_same_totals() -> None:
     text = "\n".join(render_text(parsed, tz=ZoneInfo("Asia/Shanghai")))
     assert "meiva_fleet.task_closed" in text
     assert "Simulations" in text
+
+
+# meiva:note
+# `--explain` answers the question the summary cannot: for one candidate, was it
+# delivered, and if not, was it the switch or the dedupe window (and how long the
+# agent had waited). The JSON carries the same rows so a report can be built on them.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def test_explain_names_the_outcome_of_every_candidate() -> None:
+    result = replay(
+        [_notice(0, 1, {"ask": "a"}), _notice(10, 1, {"ask": "a"}), _notice(120, 1, {"ask": "a"})],
+        categories=_CATALOG,
+        switches={},
+        explain=True,
+    )
+
+    outcomes = [item.outcome for item in result.explained]
+    assert outcomes[0] == "delivered"
+    assert outcomes[1].startswith("duplicate")
+    assert outcomes[2] == "delivered"
+
+
+def test_explain_marks_a_switched_off_category() -> None:
+    result = replay(
+        [Candidate(_TURN_FINISHED, _at(0), 3, None)],
+        categories=_CATALOG,
+        switches={_TURN_FINISHED: False},
+        explain=True,
+    )
+
+    assert [item.outcome for item in result.explained] == ["off"]
+
+
+def test_the_report_carries_the_explanation_and_the_text_lists_it() -> None:
+    window = window_for(days=1, tz_name="UTC", now=_at(60 * 24))
+    candidates = [_notice(0, 1, {"ask": "a"}), _notice(5, 1, {"ask": "a"})]
+    baseline = replay(candidates, categories=_CATALOG, switches={}, explain=True)
+    report = build_report(
+        window=window,
+        categories=[_CATALOG[_NEEDS_INPUT]],
+        switches={_NEEDS_INPUT: True},
+        baseline=baseline,
+        variants=[],
+    )
+
+    rows = report["explain"]
+    assert [row["outcome"].split()[0] for row in rows] == ["delivered", "duplicate"]
+    assert {row["category"] for row in rows} == {_NEEDS_INPUT}
+    rendered = "\n".join(render_text(report, tz=window.tz))
+    assert "Why each candidate was or was not delivered" in rendered
+    assert "duplicate" in rendered
