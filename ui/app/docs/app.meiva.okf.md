@@ -84,9 +84,8 @@ Inbox at `/fleet#inbox`: after its SSE opens, the bridge consumes the per-tap
 flag once and navigates the same window.
 The overlay also keeps the JNI-named
 Tauri plugin classes and reflectively discovered commands through release
-minification. The injected SSE bridge listens to
-`/api/system` and notifies only on busy-to-idle completion or a newly
-awaiting-response notice. Notification IPC also rechecks persisted consent
+minification. The injected SSE bridge listens to `/api/system` and renders the
+delivered `notification` events; it decides nothing itself (see below). Notification IPC also rechecks persisted consent
 natively. The bridge starts from a fresh prelude or waits once for its
 `meiva-app-config` event. All Android plugin calls leave the main looper before waiting for
 their JNI response; direct synchronous mobile-plugin calls would deadlock it.
@@ -117,6 +116,20 @@ the mutable `app-latest` release carries the stable `latest.json` endpoint.
 `release-android.yml` injects `versionCode = 1_000_000 + github.run_number`
 through a Tauri `--config` overlay, reads it back from the APK with `aapt2`, and
 refuses a publish that would not advance the advertised code.
+
+## Notification surface
+
+One bridge serves both platforms: `scripts/notify-bridge.js` subscribes to the
+gateway's `/api/system` broadcast and renders only the `notification` role,
+whose delivery the gateway's spine already decided — category switches,
+deduplication and the delivery log are server-side. The bridge keeps one job the
+server cannot do: deduplicating by `notification_id` inside the webview session
+and turning a native notification tap into the Inbox deep link.
+
+Android posts through the notification plugin's mobile path off the main looper;
+macOS posts through the same plugin's desktop path from `desktop.rs`, and the
+permission prompt follows the switch in settings rather than the first event.
+Neither platform decides *what* is worth notifying.
 
 ## Limits
 

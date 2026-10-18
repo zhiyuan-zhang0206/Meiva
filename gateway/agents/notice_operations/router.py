@@ -58,6 +58,7 @@ async def edit_current(
             record.priority,
             record.title,
             record.task_id,
+            pool=request.app.state.db_pool,
         )
     return record
 
