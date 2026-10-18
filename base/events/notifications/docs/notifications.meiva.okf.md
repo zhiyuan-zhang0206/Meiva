@@ -83,6 +83,29 @@ Two simulations are modelled, one flipped input at a time: turning
 `core.turn_finished` on or off, and keying a notice by `notice:<id>` instead of
 `notice:<id>:<question fingerprint>` (the re-ask switch).
 
+## Auditing a window
+
+`meiva notices audit` replays the producer stream for a window through this
+policy. It reads the producers rather than `notification_events` because the log
+holds only what was delivered — a switched-off category has no rows to count, and
+a switch cannot be simulated from the rows its own policy dropped.
+
+- `core.needs_input` comes from `agent_notices` rows that need a response. One
+  row is one candidate, or two when the agent added a question after posting: the
+  spine keys a re-ask by the question the notice carries now, so the post is keyed
+  question-less and the edit by its question.
+- `core.turn_finished` comes from the agent host's clean turn ends in
+  `telemetry_events` (`halt` with `no tool_call (idle)` or `system_halt`), which is
+  where the hosted runner emits the notification. A terminated agent's halt is a
+  death, not a finished turn, and the runner reports nothing for it.
+- `meiva_fleet.task_closed` comes from `agent_tasks` rows that reached `done`:
+  the plugin delivers once per close, keyed by task id, and `updated_at` is that
+  close stamp for a task nothing has touched since.
+
+Two simulations are modelled, one flipped input at a time: turning
+`core.turn_finished` on or off, and keying a notice by `notice:<id>` instead of
+`notice:<id>:<question fingerprint>` (the re-ask switch).
+
 ## Transports
 
 `ui/app/src-tauri/scripts/notify-bridge.js` renders the delivered event on
