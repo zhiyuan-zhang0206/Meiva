@@ -66,4 +66,6 @@ down runs the keep decision as a subprocess of scripts/host_ops/fleet_update_kee
 
 down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry --silence-hours (default 4); up expires it after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
 
+up starts every listed host even when one fails: a host whose start or converge aborts is reported with the step and reason recorded by that host's incomplete-converge marker ([[cli/commands/converge/docs/converge-incomplete.meiva.okf.md]]), the remaining hosts still start, and the run exits 3 (partial) after listing each failure — distinct from 2 (refused before any effect) and 1 (a failure before any host started). Roster, smoke and drift checks are skipped on a partial up; the silence still expires.
+
 Parent: [[cli/docs/fleet-update.meiva.okf.md]].

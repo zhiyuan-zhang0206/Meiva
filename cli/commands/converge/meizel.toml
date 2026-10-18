@@ -1,4 +1,4 @@
-exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py", "health_preflight.py", "os_jobs.py", "ownership_preflight.py", "redis_bridge.py", "rendered_file.py", "spec.py", "steps.py", "walg.py"]
+exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py", "health_preflight.py", "incomplete.py", "os_jobs.py", "ownership_preflight.py", "redis_bridge.py", "rendered_file.py", "spec.py", "steps.py", "walg.py"]
 
 [uses]
 "brew_pin.py" = ["spec.py"]
