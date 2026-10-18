@@ -73,7 +73,8 @@ the user opts into rather than one they must switch off.
 
 ## Auditing a window
 
-`meiva notices audit` replays the producer stream for a window through this
+`meiva notices audit` replays the producer stream for a window (`--days`, 7 by
+default; `--now` and `--tz` place its end and its day/hour buckets) through this
 policy. It reads the producers rather than `notification_events` because the log
 holds only what was delivered — a switched-off category has no rows to count, and
 a switch cannot be simulated from the rows its own policy dropped.
