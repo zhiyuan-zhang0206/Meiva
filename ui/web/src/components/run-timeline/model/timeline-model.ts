@@ -221,10 +221,6 @@ export function viewportOf(window: TimelineWindow): Viewport {
   return { from: Date.parse(window.from), to: Date.parse(window.to) };
 }
 
-export function viewportWindow(view: Viewport): TimelineWindow {
-  return { from: new Date(view.from).toISOString(), to: new Date(view.to).toISOString() };
-}
-
 /** Keeps a viewport of unchanged span inside the base extent; one wider than the base becomes the base. */
 export function clampViewport(view: Viewport, base: Viewport): Viewport {
   const span = view.to - view.from;

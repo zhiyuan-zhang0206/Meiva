@@ -135,3 +135,21 @@ def test_consumer_scan_skips_a_process_whose_cmdline_read_fails(
     monkeypatch.setattr(cold.psutil, "process_iter", process_iter)
     with pytest.raises(RuntimeError, match="native consumer still exists during cold prepare"):
         cold.require_no_consumer_process()
+
+
+def test_consumer_scan_reports_a_process_whose_cmdline_it_cannot_read(
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    from base.deploy.maintenance import cold
+
+    class _ReadFails:
+        pid = 424242
+
+        def cmdline(self) -> list[str]:
+            raise SystemError("psutil: cmdline read failed mid-iteration")
+
+    cold.require_no_consumer_process(processes=[_ReadFails()])
+
+    assert any(
+        "could not read the argv of 1 process" in record["message"] for record in loguru_records
+    ), "an argv the scan could not read was skipped without a word; it may be a consumer"
