@@ -67,7 +67,7 @@ full stop/start leaves no mixed state.
 ## Failure-state signals
 
 How a dying unit is retried — the backoff ladder, the circuit breaker and the
-dependency-recovery probe that closes it:
+dependency-recovery probe that may replace it early:
 [[services/supervision/meiva_root/docs/restart-policy.meiva.okf.md]].
 
 

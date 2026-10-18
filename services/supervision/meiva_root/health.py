@@ -440,13 +440,23 @@ class HealthMonitor:
                     state.restart_attempts >= self._config.max_restart_attempts
                 ),
                 "breaker_open": state.breaker_open,
-                "next_restart_in_s": None
-                if state.next_restart_at is None
-                else max(0.0, state.next_restart_at - monotonic()),
+                "db_recovery_pending": state.db_recovery_pending,
+                "next_restart_in_s": self._restart_due_in_s(state),
                 "last_verdict": state.last_verdict,
                 "last_detail": state.last_detail,
             }
         return units
+
+    # meiva:note
+    # Seconds until this unit's next attempt may start, or None when none is
+    # pending; an unspent dependency-recovery grant makes it due now.
+    @staticmethod
+    def _restart_due_in_s(state: UnitHealth) -> float | None:
+        if state.db_recovery_pending:
+            return 0.0
+        if state.next_restart_at is None:
+            return None
+        return max(0.0, state.next_restart_at - monotonic())
 
     # meiva:note
     # A quiesced tree holds every unit down, which resets its breaker, so the

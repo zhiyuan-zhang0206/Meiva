@@ -696,6 +696,7 @@ async def test_a_successful_start_resets_the_ladder(clock: FakeClock) -> None:
     await monitor.run_round()
     state = monitor.snapshot()["svc"]
     assert (state.restart_attempts, state.next_restart_at) == (0, None)
+    assert state.db_recovery_pending is False
     probe.verdict = DaemonProbe.down("a fresh outage")
     await monitor.run_round()
     assert stub.restart_calls == ["svc", "svc"]
