@@ -4,10 +4,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
-import { formatShort } from "@/lib/format/time";
 import { externalAgentName, EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
-import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 import {
   blockClass,
@@ -34,7 +31,7 @@ import {
 } from "./model/timeline-nav";
 import { navigateAcross, type AgentSelection, type ViewAgent } from "./agent-view/agent-view-nav";
 import { AgentGroupHeader, AgentPending } from "./agent-view/agent-view-group";
-import { useLinkEndLabel, useLinkKindLabels } from "./agent-view/agent-view-link-labels";
+import { useLinkKindLabels } from "./agent-view/agent-view-link-labels";
 import { LinkRowGroup } from "./agent-view/agent-view-link-group";
 import { LinksCanvas, type LinkHit, type LinkHitResult } from "./canvas/run-timeline-links-canvas";
 import {
@@ -133,7 +130,6 @@ export function RunTimelineRows({
   const onSelectLink = (key: string) => onSelectLinks([key]);
   const t = useTranslations("runTimeline");
   const linkLabels = useLinkKindLabels();
-  const endLabel = useLinkEndLabel();
   const [hover, setHover] = useState<AgentSelection | null>(null);
 
   const [hoverArrow, setHoverArrow] = useState<LinkHitResult | null>(null);
@@ -365,7 +361,7 @@ export function RunTimelineRows({
     const chart = chartRef.current;
     if (!chart) return;
     const onClick = (event: MouseEvent) => {
-      if (overItem.current || (event.target instanceof Element && event.target.closest("[data-testid=run-timeline-link-tick]"))) return;
+      if (overItem.current || (event.target instanceof Element && event.target.closest("button, input, select, textarea, a, [data-testid=run-timeline-link-tick]"))) return;
       const hit = hitRef.current(event.clientX, event.clientY);
       if (hit !== null) onLinks.current(hit.members);
     };
@@ -434,27 +430,6 @@ export function RunTimelineRows({
     const line = readoutText(target.selection, { data: owner.data, t, unitLabel, sourceLabel });
     return line !== null && agents.length > 1 ? t("readoutAgent", { id: target.agent, line }) : line;
   };
-  const hoveredLinks = hoverArrow === null ? [] : links.filter((l) => hoverKeys.has(l.key));
-  const readout = (() => {
-    if (hoveredLinks.length === 0) return describe(hover);
-    const first = hoveredLinks[0];
-
-    const same = (pick: (l: ResolvedLink) => number | null, label: string | null) => (hoveredLinks.every((l) => pick(l) === pick(first)) ? endLabel(pick(first)) : (label ?? ""));
-    const common = {
-      kind: linkLabels[first.kind],
-      from: same((l) => l.link.sender, t("otherAgents")),
-      to: same((l) => l.link.receiver, t("otherAgents")),
-    };
-    if (hoveredLinks.length === 1) return t("readoutLink", { ...common, time: formatShort(first.link.ts) });
-    const times = hoveredLinks.map((l) => Date.parse(l.link.ts));
-    return t("readoutLinkGroup", {
-      ...common,
-      count: hoveredLinks.length,
-      start: formatShort(new Date(Math.min(...times)).toISOString()),
-      end: formatShort(new Date(Math.max(...times)).toISOString()),
-    });
-  })();
-
   const paintStateOf = (agent: ViewAgent): PaintState => {
     const mine = hover?.agent === agent.id ? hover.selection : null;
     return {
@@ -522,10 +497,11 @@ export function RunTimelineRows({
 
         <RowShell label={t("messagesRow")} height="h-10" testId="run-timeline-row-units">
           {data.units_omitted > 0 ? (
-            <p className={cn(FLEX, "h-full items-center text-xs text-muted-foreground")} data-testid="run-timeline-zoom-details">
+            <p className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-card/80 text-xs text-muted-foreground" data-testid="run-timeline-zoom-details">
               {t("zoomForDetails", { count: data.units_omitted })}
             </p>
-          ) : canvasFor(agent, UNITS_ROW, UNIT_ROW_PX, (p, layout) =>
+          ) : null}
+          {canvasFor(agent, UNITS_ROW, UNIT_ROW_PX, (p, layout) =>
             paintUnits(p, layout, paintState, decoFor(agent.id, UNITS_ROW), unitHeights, barTop(UNITS_ROW, data)),
           )}
         </RowShell>
@@ -564,15 +540,6 @@ export function RunTimelineRows({
       <p role="status" aria-live="polite" data-testid="run-timeline-selection-live" className="sr-only">
         {spoken ?? ""}
       </p>
-      <div className={cn(FLEX, "h-4 items-center gap-2 pl-[88px]")}>
-        <p
-          data-testid="run-timeline-readout"
-          data-hovering={readout === null ? undefined : ""}
-          className={cn(MIN_W_0, "grow truncate font-mono text-[10px] text-muted-foreground")}
-        >
-          {readout ?? t("readoutIdle")}
-        </p>
-      </div>
 
       {entries.map((entry) => {
         if (entry.status !== "loaded") {
