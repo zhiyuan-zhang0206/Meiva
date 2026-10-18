@@ -189,6 +189,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "plugin_stats",
     "audit_events",
     "telemetry_events",
+    "telemetry_owner_inference",
     "weixin_ingress_receipts",
     "weixin_ingress_cursors",
     "weixin_ingress_bindings",

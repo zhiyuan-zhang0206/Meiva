@@ -28,7 +28,11 @@ GUIDE = REPO / "meiva_builtins" / "skills" / "platform" / "meiva-guide"
 
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
-    shutil.copytree(GUIDE, repo / "meiva_builtins" / "skills" / "platform" / "meiva-guide")
+    for name in ("meiva-guide", "impersonator-guide"):
+        shutil.copytree(
+            REPO / "meiva_builtins" / "skills" / "platform" / name,
+            repo / "meiva_builtins" / "skills" / "platform" / name,
+        )
     shutil.copytree(
         REPO / "meiva_builtins" / "skills" / "practice" / "meiva-workflow",
         repo / "meiva_builtins" / "skills" / "practice" / "meiva-workflow",

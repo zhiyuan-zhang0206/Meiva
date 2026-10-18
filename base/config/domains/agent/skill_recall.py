@@ -70,7 +70,7 @@ class AgentSkillRecallSettings(EnvSettings):
     )
 
     skill_recall_peer_threshold: float = Field(
-        default=0.75,
+        default=0.70,
         gt=0,
         le=1,
         alias="MEIVA_SKILL_RECALL_PEER_THRESHOLD",
@@ -78,10 +78,14 @@ class AgentSkillRecallSettings(EnvSettings):
             "Lowest probability of 'yes' at which a skill is offered on a turn woken by "
             "another agent's message, instead of skill_recall_threshold. Peer traffic is a "
             "different distribution from person and schedule messages -- most of it is status, "
-            "acknowledgement and watcher notices -- so it carries its own cut. Measured "
-            "2026-10-18 on 150 real peer messages: 0.60 offers on 112, 0.75 on 50, and every "
-            "offer whose playbook would have changed the agent's next action scored at least "
-            "0.72. Only used when skill_recall_peer_messages is on."
+            "acknowledgement and watcher notices -- so it carries its own cut. Calibrated on "
+            "999 real peer messages (2026-10-18 replay): against 'this message asks for work', "
+            "0.60 offers on 65% of turns at 58% precision, 0.70 on 40% at 69%, 0.75 on 26% at "
+            "75% and 0.85 on 5% at 94%. Precision is one rater panel's estimate; an independent "
+            "reader on 50 messages put 0.70 at 56%, so quote 56-69%. The band the cut adds over 0.75 is 57% "
+            "work on this sample, the weakest one. 0.70 is the default because a missed dispatch "
+            "costs a redo while an extra offer costs one line. Only used when "
+            "skill_recall_peer_messages is on."
         ),
         json_schema_extra={
             "restart_required": "agent",
