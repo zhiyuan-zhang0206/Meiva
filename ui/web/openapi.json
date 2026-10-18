@@ -4550,6 +4550,75 @@
         }
       }
     },
+    "/api/notifications/categories": {
+      "get": {
+        "summary": "Get Notification Categories",
+        "operationId": "get_notification_categories_api_notifications_categories_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationCategoriesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/notifications": {
+      "post": {
+        "summary": "Post Notification",
+        "operationId": "post_notification_api_agents__agent_id__notifications_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Post Notification Api Agents  Agent Id  Notifications Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/schedules": {
       "get": {
         "summary": "List Schedules",
@@ -14678,6 +14747,106 @@
         ],
         "title": "NoticesFeed",
         "description": "GET /api/notices — the unified inbox feed (Task #1024, R4 layer 2,\ndecision Q1=A). One request carries the whole Inbox panel: the OPEN\nqueue split by kind (open = FYI notices that need no response, awaiting\n= require_response notices that ride the agent snapshot today) plus one\nkeyset page of the RESOLVED history.\n\nThe contract shape was chosen so a panel = one request = one hook:\nthe client no longer merges three independent pipes (agent snapshot +\n/api/notices/open + the resolved history). `next_cursor` is None when\n`resolved_page` is the last page (short page or exhausted); pass it back\nas before_at/before_id for the next strictly-older page."
+      },
+      "NotificationCategoriesResponse": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationCategoryItem"
+            },
+            "type": "array",
+            "title": "Categories"
+          }
+        },
+        "type": "object",
+        "required": [
+          "categories"
+        ],
+        "title": "NotificationCategoriesResponse"
+      },
+      "NotificationCategoryItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "importance": {
+            "type": "string",
+            "title": "Importance"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "description",
+          "importance",
+          "enabled"
+        ],
+        "title": "NotificationCategoryItem"
+      },
+      "NotificationCreateIn": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "dedupe_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "subject"
+        ],
+        "title": "NotificationCreateIn"
       },
       "Object": {
         "properties": {

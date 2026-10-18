@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -9,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.events.live.bus import EventBus
 from base.events.live.projection import NotificationEmitted
-from base.events.notifications.catalog import CORE_CATEGORIES, NotificationCategory
+from base.events.notifications.catalog import NotificationCategory, core_catalog
 from base.events.notifications.policy import decide
 from base.events.notifications.store import (
     insert_async,
@@ -32,11 +33,13 @@ class NotificationRecord:
     agent_id: int
 
 
-def category(category_id: str) -> NotificationCategory:
-    for declared in CORE_CATEGORIES:
-        if declared.id == category_id:
-            return declared
-    raise ValueError(f"unknown notification category: {category_id}")
+def category(
+    category_id: str, catalog: Mapping[str, NotificationCategory] | None = None
+) -> NotificationCategory:
+    declared = (catalog if catalog is not None else core_catalog()).get(category_id)
+    if declared is None:
+        raise ValueError(f"unknown notification category: {category_id}")
+    return declared
 
 
 def _record(
@@ -50,8 +53,9 @@ def _record(
     overrides: dict[str, bool] | None,
     now: datetime | None,
     inputs: tuple[dict[str, bool], datetime | None],
+    catalog: Mapping[str, NotificationCategory] | None = None,
 ) -> tuple[NotificationCategory, tuple[Any, ...]] | None:
-    declared = category(category_id)
+    declared = category(category_id, catalog)
     if not subject.strip():
         raise ValueError(f"notification {declared.id} needs a subject")
     stored_overrides, last = inputs
@@ -85,8 +89,9 @@ def deliver_sync(
     agent_id: int = 0,
     overrides: dict[str, bool] | None = None,
     now: datetime | None = None,
+    catalog: Mapping[str, NotificationCategory] | None = None,
 ) -> NotificationRecord | None:
-    declared = category(category_id)
+    declared = category(category_id, catalog)
     inputs = read_inputs_sync(pool, category=declared.id, dedupe_key=dedupe_key)
     prepared = _record(
         category_id,
@@ -98,6 +103,7 @@ def deliver_sync(
         overrides=overrides,
         now=now,
         inputs=inputs,
+        catalog=catalog,
     )
     if prepared is None:
         return None
@@ -124,8 +130,9 @@ async def deliver_async(
     agent_id: int = 0,
     overrides: dict[str, bool] | None = None,
     now: datetime | None = None,
+    catalog: Mapping[str, NotificationCategory] | None = None,
 ) -> NotificationRecord | None:
-    declared = category(category_id)
+    declared = category(category_id, catalog)
     inputs = await read_inputs_async(pool, category=declared.id, dedupe_key=dedupe_key)
     prepared = _record(
         category_id,
@@ -137,6 +144,7 @@ async def deliver_async(
         overrides=overrides,
         now=now,
         inputs=inputs,
+        catalog=catalog,
     )
     if prepared is None:
         return None
