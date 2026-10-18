@@ -250,6 +250,32 @@ async def test_purpose_selects_the_state_lead_in_and_the_question(
     assert "\n\nExisting memory note:\n" in seen["dedup"][0]
 
 
+async def test_the_dedup_question_is_the_measured_wording(
+    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # meiva:note
+    # The 2026-10-19 decision measured this exact prompt; a paraphrase is a different question,
+    # so the three strings that reach the model are pinned here.
+    _write(tmp_path, "a.md", "---\ntype: Memory\n---\n\nbody a")
+    judge = _FakeJudge()
+    _install(monkeypatch, judge)
+
+    await _rank(tmp_path, catalog, [_hit(tmp_path, "a.md")], purpose="dedup")
+
+    _, _, question = judge.calls[0]
+    assert question.question == (
+        "The existing note states the same rule or decision as the new note: an agent that "
+        "read either one would take the same action, and the two are two records of one "
+        "decision rather than two different decisions. Different wording, more or less "
+        "detail, or a later exception added to one of them does not make the decisions "
+        "different."
+    )
+    assert question.true_if == "The two notes record the same rule or decision."
+    assert question.false_if == (
+        "They are two different decisions on the same subject, or share only a topic."
+    )
+
+
 async def test_duplicate_check_is_billed_apart_from_search(
     tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
