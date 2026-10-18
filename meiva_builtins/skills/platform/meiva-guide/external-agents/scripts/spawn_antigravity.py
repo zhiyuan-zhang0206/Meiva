@@ -26,7 +26,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from meiva.shell.coding_tools import antigravity
+from meiva.shell.coding_tools import add_lineage_arguments, antigravity, require_lineage
 
 _SKILL_DIR = Path(__file__).resolve().parent.parent
 
@@ -78,6 +78,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=antigravity.session_uuid,
         help="Force-stop an existing Antigravity conversation tree.",
     )
+    add_lineage_arguments(parser)
     return parser
 
 
@@ -102,9 +103,9 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
             parser.error("--prompt must be non-empty")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     _validate_args(parser, args)
 
     if args.send is not None:
@@ -121,11 +122,18 @@ def main() -> int:
     if args.prompt is None:
         tasks_file = antigravity.resolve_file(workspace, args.tasks_file or "tasks.md")
         work_file = antigravity.resolve_file(workspace, args.work_file or "work.md")
+    provenance = None
+    prompt = None
+    if args.prompt is not None:
+        prompt = f"{require_lineage(parser, args, takeover=True)}\n\n{args.prompt}"
+    else:
+        provenance = require_lineage(parser, args)
     return antigravity.launch(
         workspace,
         tasks_file,
         work_file,
-        prompt=args.prompt,
+        prompt=prompt,
+        provenance=provenance,
         skill_dir=_SKILL_DIR,
     )
 
