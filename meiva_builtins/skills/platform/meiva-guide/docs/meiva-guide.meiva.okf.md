@@ -12,7 +12,8 @@ tags:
 `meiva_builtins/skills/platform/meiva-guide/` is the canonical guide package.
 Meiva loads it at `$MEIVA_HOME/skills/meiva-guide/`; the open-standard mirror is
 `.agents/skills/meiva-guide`. Host-global convergence projects the complete
-package into already-present Codex and Claude Code skill homes.
+package, with `impersonator-guide`, into the skill homes of the supported external
+clients present on the host.
 
 ## Audience and execution surface
 
@@ -66,8 +67,9 @@ when to read the relevant reference.
 
 Package and schedule draft endpoints load `meiva.skills.meiva_guide.packages.install`
 and `meiva.skills.meiva_guide.schedules`. External copies use independent
-`<client>-meiva-guide` ledgers; legacy deployment/operator copies and their ledgers
-are preserved and are no longer refreshed by this bridge.
+`<client>-<skill>` ledgers — `<client>-meiva-guide` for this guide and
+`<client>-impersonator-guide` for the executor manual; legacy deployment/operator
+copies and their ledgers are preserved and are no longer refreshed by this bridge.
 
 - [[docs/skills/external-agent-operator-bridge.meiva.okf.md]] — external publication and ownership
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md]] — built-in catalog

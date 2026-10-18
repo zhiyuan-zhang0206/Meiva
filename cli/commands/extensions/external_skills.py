@@ -10,9 +10,11 @@ from __future__ import annotations
 import stat
 import sys
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from base.host.system.hostport import Host
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.paths.private_dir import ensure_private_dir
 from cli.commands.converge.spec import ConvergeCtx
@@ -46,9 +48,46 @@ from cli.commands.extensions.external_skill_host.ledger import (
     write_ledger,
 )
 
-_SKILL_NAMES: tuple[str, ...] = ("meiva-guide",)
+_SKILL_NAMES: tuple[str, ...] = ("meiva-guide", "impersonator-guide")
 _MARKER_NAME = ".meiva-managed.json"
-_CLIENTS = (("Codex", ".codex", "codex"), ("Claude Code", ".claude", "claude"))
+
+
+# meiva:note
+# One external agent surface Meiva publishes whole skills into: `home_dir` is the
+# tool's own directory under the user's home, `skills_subpath` the directory under
+# it the tool scans for `<skill>/SKILL.md`, `key` the stable per-surface name used
+# in ledger filenames, and `binary` the program that marks the tool as installed —
+# `None` for a surface that has no program of its own and is known only by its home.
+# meiva:link meiva_builtins/skills/platform/meiva-guide/external-agents/references/supported-clients.md
+@dataclass(frozen=True)
+class _Client:
+    label: str
+    key: str
+    home_dir: str
+    binary: str | None
+    skills_subpath: str
+
+
+# meiva:note
+# Publishing writes `<home_dir>/<skills_subpath>/<skill>/`, so an unproven layout
+# would plant files the tool never reads: only tools whose own documentation names
+# a user-level skills directory are listed.
+# meiva:link meiva_builtins/skills/platform/meiva-guide/external-agents/references/supported-clients.md
+_CLIENTS: tuple[_Client, ...] = (
+    _Client("Codex", "codex", ".codex", "codex", "skills"),
+    _Client("Claude Code", "claude", ".claude", "claude", "skills"),
+    _Client("Gemini CLI", "gemini", ".gemini", "gemini", "skills"),
+    _Client("Grok", "grok", ".grok", "grok", "skills"),
+    _Client("Qwen Code", "qwen", ".qwen", "qwen", "skills"),
+    _Client("Cursor Agent", "cursor", ".cursor", "cursor-agent", "skills"),
+    # meiva:note
+    # The App and the IDE share one global skill directory, and neither has a
+    # program on PATH, so only the directory marks them as installed.
+    # meiva:link meiva_builtins/skills/platform/meiva-guide/external-agents/references/supported-clients.md
+    _Client("Antigravity App/IDE", "antigravity", ".gemini/config", None, "skills"),
+    _Client("Antigravity CLI", "antigravity-cli", ".gemini/antigravity-cli", "agy", "skills"),
+    _Client("DeepSeek Harness", "dsh", ".dsh", "dsh", "skills"),
+)
 
 
 def _prepared_stage_path(ledger_path: Path, generation_id: str) -> Path:
@@ -301,12 +340,17 @@ def _ensure_ledger_root(ctx: ConvergeCtx) -> Path:
     return root
 
 
-def _skills_root_of(client_home: Path) -> Path:
-    """The client's `skills/` directory, created when absent; refuses a non-directory."""
+# meiva:note
+# An installed CLI that has never run has no home yet, and its own first run would
+# create one; publication creates the home (mode 0700) together with the skills
+# instead of skipping the tool until someone uses it. A non-directory is refused.
+def _skills_root_of(client_home: Path, client: _Client) -> Path:
+    if not exists(client_home):
+        client_home.mkdir(mode=0o700)
     home_stat = lstat(client_home)
     if not stat.S_ISDIR(home_stat.st_mode):
         raise ClientConflictError("client home is not a regular directory")
-    skills_root = client_home / "skills"
+    skills_root = client_home / client.skills_subpath
     if not exists(skills_root):
         skills_root.mkdir()
     if not stat.S_ISDIR(lstat(skills_root).st_mode):
@@ -360,17 +404,16 @@ def _converge_locked(
     snapshot: SourceSnapshot,
     source_manifest: list[dict[str, Any]],
     source_digest: str,
+    client: _Client,
     client_home: Path,
-    client_key: str,
-    label: str,
     ledger_path: Path,
     *,
     skill_name: str = SKILL_NAME,
 ) -> None:
-    skills_root = _skills_root_of(client_home)
+    skills_root = _skills_root_of(client_home, client)
     target = skills_root / skill_name
-    ledger = _ledger_for(ledger_path, client_key, target)
-    _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
+    ledger = _ledger_for(ledger_path, client.key, target)
+    _cleanup_garbage(ledger_path, ledger, skills_root, client.label, skill_name=skill_name)
     if ledger["transaction"] is not None:
         # An earlier converge was cut off mid-publication. Nothing here finishes
         # or rolls it back: the claimed/staged paths belong to that run, so the
@@ -395,39 +438,58 @@ def _converge_locked(
         )
     except (OSError, SourceIntegrityError):
         if _abandon_transaction(ledger_path, ledger, skills_root, skill_name=skill_name):
-            _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
+            _cleanup_garbage(ledger_path, ledger, skills_root, client.label, skill_name=skill_name)
         raise
     try:
         action = _activate(ledger_path, ledger, skills_root, target)
     except (OSError, ClientConflictError):
         if _abandon_transaction(ledger_path, ledger, skills_root, skill_name=skill_name):
-            _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
+            _cleanup_garbage(ledger_path, ledger, skills_root, client.label, skill_name=skill_name)
         raise
-    print(f"  · {label} external operator skill {action}: skills/{skill_name}")
-    _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
+    print(
+        f"  · {client.label} external operator skill {action}: {client.skills_subpath}/{skill_name}"
+    )
+    _cleanup_garbage(ledger_path, ledger, skills_root, client.label, skill_name=skill_name)
 
 
+# meiva:note
+# The two marks are independent on purpose: a tool that has been used has a home, a
+# tool installed but never started has only its program, and with neither mark the
+# user does not have the tool and Meiva leaves no directory behind. Whether a
+# program is installed is a host fact, so the caller's `Host` answers it.
+# meiva:link meiva_builtins/skills/platform/meiva-guide/external-agents/references/supported-clients.md
+def _present_clients(home: Path, host: Host) -> list[_Client]:
+    return [
+        client
+        for client in _CLIENTS
+        if exists(home / client.home_dir)
+        or (client.binary is not None and host.which(client.binary) is not None)
+    ]
+
+
+# meiva:note
+# Every supported tool is one `_CLIENTS` row, and a tool whose home the user does
+# not have is never created without the program installed.
+# meiva:note
+# Legacy standalone targets and their ledgers remain untouched: each client and
+# skill owns a separate ledger and the step never adopts or overwrites them.
+# meiva:link meiva_builtins/skills/platform/meiva-guide/external-agents/references/supported-clients.md
 def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = None) -> None:
-    """Copy the complete Meiva Guide into present Codex and Claude Code homes.
-
-    Legacy standalone targets and their ledgers remain untouched; the guide
-    uses a separate per-client ledger and never adopts or overwrites them.
-    """
     home = Path.home() if host_home is None else host_home
     try:
         _validate_directory(home, "host home is not a regular directory")
     except (OSError, ClientConflictError) as exc:
-        for label, _, _ in _CLIENTS:
-            _warn(label, f"host home unavailable ({type(exc).__name__})")
+        for client in _CLIENTS:
+            _warn(client.label, f"host home unavailable ({type(exc).__name__})")
         return
-    present = [client for client in _CLIENTS if exists(home / client[1])]
+    present = _present_clients(home, ctx.host)
     if not present:
         return
     try:
         ledger_root = _ensure_ledger_root(ctx)
     except (OSError, RuntimeError) as exc:
-        for label, _, _ in present:
-            _warn(label, f"private ownership ledger unavailable ({type(exc).__name__})")
+        for client in present:
+            _warn(client.label, f"private ownership ledger unavailable ({type(exc).__name__})")
         return
     for skill_name in _SKILL_NAMES:
         source = ctx.repo / "meiva_builtins" / "skills" / "platform" / skill_name
@@ -435,8 +497,8 @@ def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = 
         snapshot = source_snapshot(source)
         source_manifest = snapshot.manifest()
         source_digest = manifest_digest(source_manifest)
-        for label, home_name, client_key in present:
-            ledger_name = client_key if skill_name == SKILL_NAME else f"{client_key}-{skill_name}"
+        for client in present:
+            ledger_name = client.key if skill_name == SKILL_NAME else f"{client.key}-{skill_name}"
             ledger_path = ledger_root / f"{ledger_name}.json"
             lock_path = ledger_root / f"{ledger_name}.lock"
             try:
@@ -446,13 +508,12 @@ def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = 
                         snapshot,
                         source_manifest,
                         source_digest,
-                        home / home_name,
-                        client_key,
-                        label,
+                        client,
+                        home / client.home_dir,
                         ledger_path,
                         skill_name=skill_name,
                     )
             except ClientConflictError as exc:
-                _warn(label, str(exc))
+                _warn(client.label, str(exc))
             except (LockTimeoutError, OSError) as exc:
-                _warn(label, f"conflict ({type(exc).__name__})")
+                _warn(client.label, f"conflict ({type(exc).__name__})")

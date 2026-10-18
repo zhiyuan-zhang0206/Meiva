@@ -2,8 +2,8 @@
 
 Read this when defining or running an evaluation for a new skill, changed
 instructions, or trigger description. `skill-creator` owns this authoring
-evaluation contract. The canonical file is bundled with Meiva Guide so its external
-Codex and Claude Code copies include every reading dependency. Skill Creator
+evaluation contract. The canonical file is bundled with Meiva Guide so every external
+client copy includes its reading dependencies. Skill Creator
 links here rather than maintaining a second copy. This is an instruction-level
 workflow, not a new runtime API or automatic evaluation service.
 
