@@ -73,10 +73,17 @@ def _no_counts() -> Counter[str]:
 
 
 @dataclass(frozen=True)
+class Explained:
+    candidate: Candidate
+    outcome: str
+
+
+@dataclass(frozen=True)
 class Replay:
     delivered: tuple[Candidate, ...]
     switched_off: Counter[str] = field(default_factory=_no_counts)
     deduplicated: Counter[str] = field(default_factory=_no_counts)
+    explained: tuple[Explained, ...] = ()
 
     @property
     def candidates(self) -> int:
@@ -189,11 +196,13 @@ def replay(
     *,
     categories: Mapping[str, NotificationCategory],
     switches: Mapping[str, bool],
+    explain: bool = False,
 ) -> Replay:
     last_delivered: dict[tuple[str, str], datetime] = {}
     delivered: list[Candidate] = []
     switched_off: Counter[str] = Counter()
     deduplicated: Counter[str] = Counter()
+    explained: list[Explained] = []
     for candidate in sorted(candidates, key=lambda item: (item.at, item.category, item.agent_id)):
         declared = categories[candidate.category]
         previous = (
@@ -205,13 +214,22 @@ def replay(
         if not decision.deliver:
             if decision.reason is SuppressionReason.DISABLED:
                 switched_off[candidate.category] += 1
+                outcome = "off"
             else:
                 deduplicated[candidate.category] += 1
+                waited = (
+                    "" if previous is None else f" {(candidate.at - previous).total_seconds():.0f}s"
+                )
+                outcome = f"duplicate{waited}"
+            if explain:
+                explained.append(Explained(candidate, outcome))
             continue
         delivered.append(candidate)
+        if explain:
+            explained.append(Explained(candidate, "delivered"))
         if candidate.dedupe_key is not None:
             last_delivered[(candidate.category, candidate.dedupe_key)] = candidate.at
-    return Replay(tuple(delivered), switched_off, deduplicated)
+    return Replay(tuple(delivered), switched_off, deduplicated, tuple(explained))
 
 
 def load_candidates(
@@ -443,7 +461,7 @@ def build_report(
         )
     base_total = len(baseline.delivered)
     origins = {source.category: source.origin for source in _SOURCES}
-    return {
+    report: dict[str, Any] = {
         "window": {
             "start": window.start.isoformat(),
             "end": window.end.isoformat(),
@@ -470,6 +488,22 @@ def build_report(
             for name, result in variants
         ],
     }
+    if baseline.explained:
+        report["explain"] = explained_rows(baseline.explained, tz=window.tz)
+    return report
+
+
+def explained_rows(items: Sequence[Explained], *, tz: tzinfo) -> list[dict[str, Any]]:
+    return [
+        {
+            "at": item.candidate.at.astimezone(tz).isoformat(),
+            "category": item.candidate.category,
+            "agent_id": item.candidate.agent_id,
+            "dedupe_key": item.candidate.dedupe_key,
+            "outcome": item.outcome,
+        }
+        for item in items
+    ]
 
 
 def _per_day_section(report: Mapping[str, Any]) -> list[str]:
@@ -546,6 +580,30 @@ def _simulation_section(report: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _explain_section(report: Mapping[str, Any]) -> list[str]:
+    rows = cast(list[dict[str, Any]], report.get("explain") or [])
+    if not rows:
+        return []
+    stamp = "%Y-%m-%d %H:%M"
+    return [
+        "",
+        "Why each candidate was or was not delivered",
+        *_table(
+            ["at", "category", "agent", "outcome", "dedupe key"],
+            [
+                [
+                    datetime.fromisoformat(row["at"]).strftime(stamp),
+                    row["category"],
+                    row["agent_id"],
+                    row["outcome"],
+                    row["dedupe_key"] or "-",
+                ]
+                for row in rows
+            ],
+        ),
+    ]
+
+
 def render_text(report: Mapping[str, Any], *, tz: tzinfo) -> list[str]:
     window = cast(dict[str, Any], report["window"])
     stamp = "%Y-%m-%d %H:%M"
@@ -566,6 +624,7 @@ def render_text(report: Mapping[str, Any], *, tz: tzinfo) -> list[str]:
         *_per_hour_section(report),
         *_candidates_section(report),
         *_simulation_section(report),
+        *_explain_section(report),
     ]
 
 
@@ -593,6 +652,7 @@ def cmd_notices_audit(
     now: datetime | None,
     simulate: Sequence[str],
     out: str = "text",
+    explain: bool = False,
 ) -> int:
     try:
         window = window_for(days=days, tz_name=tz_name, now=now)
@@ -615,7 +675,7 @@ def cmd_notices_audit(
         categories=selected,
         requestion=True,
     )
-    baseline = replay(candidates, categories=catalog, switches=overrides)
+    baseline = replay(candidates, categories=catalog, switches=overrides, explain=explain)
     report = build_report(
         window=window,
         categories=declared,
