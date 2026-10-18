@@ -40,6 +40,8 @@ class LeaseRecord(TypedDict):
     agent_id: Any
     applied_version: Any
     automatic: Any
+    capabilities: Any
+    capability_declared_by: Any
     consent_version: Any
     delta_version: Any
     expires_at: Any

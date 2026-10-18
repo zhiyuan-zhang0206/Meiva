@@ -83,11 +83,14 @@ def emit(
 @contextlib.contextmanager
 def _event_capture_admission(
     owner: SdkCaptureOwner | None,
+    fn: str,
 ) -> Generator[SdkCaptureAdmission | None, None, None]:
     """Use the optional gate; invalid capture code rejects the SDK call before its body."""
     from base.agents.impersonation.manifest import admitted_local_sdk_call
 
-    with admitted_local_sdk_call(None if owner is None else owner.admit_sdk_call) as admission:
+    with admitted_local_sdk_call(
+        None if owner is None else lambda: owner.admit_sdk_call(fn)
+    ) as admission:
         yield admission
 
 
@@ -107,7 +110,7 @@ def _measure(
     caller_identity = dict(identity)
     # Retain this call's original gate until its event is captured. Attachment
     # close can reject new entries but cannot seal this receipt before drain.
-    with _event_capture_admission(capture_owner) as admission:
+    with _event_capture_admission(capture_owner, fn) as admission:
         t0 = time.monotonic()
         primary: BaseException | None = None
         try:

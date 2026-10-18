@@ -527,7 +527,7 @@ async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
     current_gate = capture.LocalCaptureGate(current)
 
     class Owner:
-        def admit_sdk_call(self) -> capture.LocalCaptureAdmission | None:
+        def admit_sdk_call(self, fn: str) -> capture.LocalCaptureAdmission | None:
             return previous_gate.admit()
 
         def capture_local_event(self, event: Event) -> Event:
