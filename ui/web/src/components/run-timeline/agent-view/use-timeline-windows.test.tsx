@@ -40,8 +40,9 @@ function mount() {
   });
 }
 afterEach(() => {
+  vi.useRealTimers();
   clients.splice(0).forEach((client) => client.clear());
-  vi.clearAllMocks();
+  getRunTimeline.mockReset();
 });
 
 describe("timeline viewport reads", () => {
@@ -122,5 +123,95 @@ describe("timeline viewport reads", () => {
     getRunTimeline.mockResolvedValue(response(older));
     act(() => result.current.retry(42));
     await waitFor(() => expect(result.current.reads[0]?.data).toEqual(response(older)));
+  });
+
+  it("keeps the last range through another pan, debounce, failure and retry", async () => {
+    const next = { from: older.from - DAY / 2, to: older.to - DAY / 2 };
+    let reject: (error: Error) => void = () => undefined;
+    getRunTimeline.mockResolvedValueOnce(first).mockResolvedValueOnce(response(older))
+      .mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const { result, rerender } = mount();
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(first));
+    rerender({ ids: IDS, view: older });
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(response(older)));
+
+    rerender({ ids: IDS, view: next });
+    expect(result.current.reads[0]?.data).toEqual(response(older));
+    expect(result.current.reads[0]?.pending).toBe(true);
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(3));
+    expect(result.current.reads[0]?.data).toEqual(response(older));
+    act(() => reject(new Error("offline")));
+    await waitFor(() => expect(result.current.reads[0]?.windowError).toBe(true));
+    expect(result.current.reads[0]?.data).toEqual(response(older));
+
+    getRunTimeline.mockResolvedValue(response(next));
+    act(() => result.current.retry(42));
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(response(next)));
+    rerender({ ids: IDS, view: { from: END - DAY / 2, to: END } });
+    expect(result.current.reads[0]?.data).toEqual(first);
+    expect(result.current.reads[0]?.pending).toBe(false);
+  });
+
+  it("never retains a range from a replaced snapshot or another agent", async () => {
+    const next = { from: older.from - DAY, to: older.to - DAY };
+    getRunTimeline.mockResolvedValueOnce(first).mockResolvedValueOnce(response(older))
+      .mockRejectedValueOnce(Object.assign(new Error("expired"), { status: 409 }))
+      .mockResolvedValueOnce({ ...first, snapshot: "replacement" })
+      .mockImplementation(() => new Promise(() => undefined));
+    const { result, rerender } = mount();
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(first));
+    rerender({ ids: IDS, view: older });
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(response(older)));
+    rerender({ ids: IDS, view: next });
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(5));
+    expect(result.current.reads[0]?.data).toEqual({ ...first, snapshot: "replacement" });
+
+    const other = { ...first, agent_id: 99 };
+    getRunTimeline.mockResolvedValueOnce(other);
+    rerender({ ids: [99], view: null });
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(other));
+    rerender({ ids: [99], view: older });
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(7));
+    expect(result.current.reads[0]?.data).toEqual(other);
+  });
+
+  it("retains the displayed cached window rather than the last downloaded window", async () => {
+    const second = { from: older.from - DAY, to: older.to - DAY };
+    const third = { from: second.from - DAY, to: second.to - DAY };
+    getRunTimeline.mockResolvedValueOnce(first).mockResolvedValueOnce(response(older))
+      .mockResolvedValueOnce(response(second)).mockImplementation(() => new Promise(() => undefined));
+    const { result, rerender } = mount();
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(first));
+    rerender({ ids: IDS, view: older });
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(response(older)));
+    rerender({ ids: IDS, view: second });
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(response(second)));
+    rerender({ ids: IDS, view: older });
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(response(older)));
+    expect(getRunTimeline).toHaveBeenCalledTimes(3);
+    rerender({ ids: IDS, view: third });
+    expect(result.current.reads[0]?.data).toEqual(response(older));
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(4));
+    expect(result.current.reads[0]?.data).toEqual(response(older));
+  });
+
+  it("keeps a displayed range alive past cache GC while a later range fails", async () => {
+    const next = { from: older.from - DAY, to: older.to - DAY };
+    getRunTimeline.mockResolvedValueOnce(first).mockResolvedValueOnce(response(older))
+      .mockRejectedValue(new Error("offline"));
+    const { result, rerender } = mount();
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(first));
+    rerender({ ids: IDS, view: older });
+    await waitFor(() => expect(result.current.reads[0]?.data).toEqual(response(older)));
+    vi.useFakeTimers();
+    rerender({ ids: IDS, view: next });
+    await act(() => vi.advanceTimersByTimeAsync(350));
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(result.current.reads[0]?.windowError).toBe(true);
+    await act(() => vi.advanceTimersByTimeAsync(60_001));
+    rerender({ ids: IDS, view: { from: next.from - 1000, to: next.to - 1000 } });
+    expect(result.current.reads[0]?.data).toEqual(response(older));
+    await act(() => vi.advanceTimersByTimeAsync(350));
+    expect(result.current.reads[0]?.data).toEqual(response(older));
   });
 });

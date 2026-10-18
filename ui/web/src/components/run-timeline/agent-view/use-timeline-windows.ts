@@ -23,8 +23,36 @@ function covers(data: RunTimelineResponse | undefined, view: Viewport | null): b
   return window.from <= view.from && window.to >= view.to;
 }
 
-// meiva:note
-// The initial read requests the latest 24 hours and at most 5000 message blocks. Settled viewport reads wait 300 ms, reuse the initial snapshot, and skip windows already completely covered. Removing an agent cancels its request. Preparation retries only explicit queued/indexing/busy states; permanent failures surface. A snapshot-expired error from a window, message or context read invalidates the initial owner. Failed ranges retain initial data and manual retry targets active queries only.
+function windowQuery(id: number, snapshot: RunTimelineResponse["snapshot"], range: Viewport | null) {
+  return {
+    queryKey: ["run-timeline-window", id, snapshot, range?.from, range?.to],
+    queryFn: ({ signal }: { signal: AbortSignal }) => {
+      if (range === null) throw new Error("a timeline window must have bounds");
+      return api.getRunTimeline(id, {
+        from: new Date(range.from).toISOString(),
+        to: new Date(range.to).toISOString(),
+        maxUnits: MAX_UNITS,
+        snapshot: snapshot ?? undefined,
+        signal,
+      });
+    },
+    staleTime: Infinity,
+    gcTime: 60_000,
+    retry: false,
+  };
+}
+
+interface ShownWindow {
+  id: number;
+  snapshot: RunTimelineResponse["snapshot"];
+  range: Viewport | null;
+}
+
+function sameWindow(a: ShownWindow, b: ShownWindow | undefined) {
+  return a.id === b?.id && a.snapshot === b.snapshot &&
+    a.range?.from === b.range?.from && a.range?.to === b.range?.to;
+}
+
 // meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
 export function useTimelineWindows(ids: readonly number[], viewport: Viewport | null) {
   const client = useQueryClient();
@@ -33,38 +61,43 @@ export function useTimelineWindows(ids: readonly number[], viewport: Viewport | 
     const timer = setTimeout(() => setSettled(viewport), 300);
     return () => clearTimeout(timer);
   }, [viewport]);
-  const initial = useQueries({
-    queries: ids.map((id) => ({
-      queryKey: ["run-timeline", id],
-      queryFn: ({ signal }: { signal: AbortSignal }) => api.getRunTimeline(id, { recentHours: 24, maxUnits: MAX_UNITS, signal }),
-      staleTime: Infinity,
-      gcTime: 60_000,
-      retry: (attempt: number, error: Error) => preparing(error) && attempt < 30,
-      retryDelay: 2_000,
-    })),
-    combine: pickRead,
-  });
+  const initialQueries = ids.map((id) => ({
+    queryKey: ["run-timeline", id],
+    queryFn: ({ signal }: { signal: AbortSignal }) => api.getRunTimeline(id, { recentHours: 24, maxUnits: MAX_UNITS, signal }),
+    staleTime: Infinity,
+    gcTime: 60_000,
+    retry: (attempt: number, error: Error) => preparing(error) && attempt < 30,
+    retryDelay: 2_000,
+  }));
+  const initial = useQueries({ queries: initialQueries, combine: pickRead });
   const windows = useQueries({
     queries: ids.map((id, i) => {
       const data = initial.at(i)?.data;
       return {
-        queryKey: ["run-timeline-window", id, data?.snapshot, settled?.from, settled?.to],
-        queryFn: ({ signal }: { signal: AbortSignal }) => {
-          if (settled === null) throw new Error("a timeline window must have bounds");
-          return api.getRunTimeline(id, {
-          from: new Date(settled.from).toISOString(),
-          to: new Date(settled.to).toISOString(),
-          maxUnits: MAX_UNITS,
-          snapshot: data?.snapshot ?? undefined,
-          signal,
-          });
-        },
+        ...windowQuery(id, data?.snapshot, settled),
         enabled: data !== undefined && settled !== null && !covers(data, settled),
-        staleTime: Infinity,
-        gcTime: 60_000,
-        retry: false,
       };
     }),
+    combine: pickRead,
+  });
+
+  const [shown, setShown] = useState<ShownWindow[]>([]);
+  const ready = viewport?.from === settled?.from && viewport?.to === settled?.to;
+  const nextShown = ids.map((id, i): ShownWindow => {
+    const data = initial.at(i)?.data;
+    const snapshot = data?.snapshot;
+    if (viewport === null || covers(data, viewport)) return { id, snapshot, range: null };
+    if (ready && windows.at(i)?.data !== undefined) return { id, snapshot, range: settled };
+    return shown.find((window) => window.id === id && window.snapshot === snapshot) ?? { id, snapshot, range: null };
+  });
+  if (shown.length !== nextShown.length || nextShown.some((window, i) => !sameWindow(window, shown[i]))) {
+    setShown(nextShown);
+  }
+  const displayed = useQueries({
+    queries: nextShown.map(({ id, snapshot, range }, i) => ({
+      ...(range === null ? initialQueries[i] : windowQuery(id, snapshot, range)),
+      enabled: false,
+    })),
     combine: pickRead,
   });
 
@@ -84,15 +117,14 @@ export function useTimelineWindows(ids: readonly number[], viewport: Viewport | 
   const reads = useMemo(() => initial.map((first, i) => {
     const needed = viewport !== null && !covers(first.data, viewport);
     const current = windows.at(i);
-    const ready = viewport?.from === settled?.from && viewport?.to === settled?.to;
     return {
-      data: needed && ready && current?.data !== undefined ? current.data : first.data,
+      data: displayed.at(i)?.data,
       isError: first.isError,
       preparing: !first.isError && preparing(first.failureReason),
       pending: needed && (!ready || current?.isFetching === true),
       windowError: needed && ready && current?.isError === true,
     };
-  }), [initial, windows, viewport, settled]);
+  }), [displayed, initial, windows, viewport, ready]);
   const retry = (id: number) => {
     const i = ids.indexOf(id);
     const key = initial.at(i)?.data === undefined ? "run-timeline" : "run-timeline-window";

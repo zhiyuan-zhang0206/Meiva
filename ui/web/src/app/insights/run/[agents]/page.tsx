@@ -235,21 +235,29 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
       ) : null)}
       {base && view ? (
         <>
-          <p className="text-xs text-muted-foreground" data-testid="run-timeline-window">
-            {t("windowSummary", {
-              from: formatAbsolute(new Date(view.from).toISOString()),
-              to: formatAbsolute(new Date(view.to).toISOString()),
-              nodes: loaded.reduce((sum, { data }) => sum + data.nodes.length, 0),
-              units: loaded.reduce((sum, { data }) => sum + data.units.length + data.units_omitted, 0),
-            })}
-          </p>
-          {reads.map((read, i) => read.pending ? (
-            <p key={ids[i]} role="status" className="text-xs text-muted-foreground">{t("windowLoading", { id: ids[i] })}</p>
-          ) : read.windowError ? (
-            <p key={ids[i]} role="alert" className="text-xs text-destructive">
-              {t("windowFailed", { id: ids[i] })} <button type="button" onClick={() => retry(ids[i])}>{t("retry")}</button>
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <p data-testid="run-timeline-window">
+              {t("windowSummary", {
+                from: formatAbsolute(new Date(view.from).toISOString()),
+                to: formatAbsolute(new Date(view.to).toISOString()),
+                nodes: loaded.reduce((sum, { data }) => sum + data.nodes.length, 0),
+                units: loaded.reduce((sum, { data }) => sum + data.units.length + data.units_omitted, 0),
+              })}
             </p>
-          ) : null)}
+            {reads.map((read, i) => (
+              <p
+                key={ids[i]}
+                role={read.windowError ? "alert" : "status"}
+                data-testid={`run-timeline-window-status-${ids[i]}`}
+                className={cn(FLEX, "h-4 items-center gap-1", read.windowError && "text-destructive")}
+              >
+                <span className="truncate">
+                  {read.pending ? t("windowLoading", { id: ids[i] }) : read.windowError ? t("windowFailed", { id: ids[i] }) : ""}
+                </span>
+                {read.windowError && !read.pending ? <button type="button" className="shrink-0" onClick={() => retry(ids[i])}>{t("retry")}</button> : null}
+              </p>
+            ))}
+          </div>
           <RunTimelineRows
             entries={entries}
             base={base}
