@@ -16,9 +16,22 @@ publishes one live event every transport consumes.
 
 `notification_events` holds one row per delivered notification. It is a delivery
 log, not an inbox: rows are never answered, resolved or superseded. The inbox is
-`agent_notices`; a notice that needs an answer posts a `core.needs_input`
-notification as a side effect, and a notice that needs no answer posts nothing —
-the inbox already carries it.
+`agent_notices`; a notice that needs an answer stages a `core.needs_input`
+delivery in its own transaction, and a notice that needs no answer stages
+nothing — the inbox already carries it.
+
+The table is also the outbox. `announced_at` is when the live event was
+published; a NULL means the delivery is still owed. A producer stages the row
+when it decides (a notice's row commits with the notice, so a crash between the
+commit and the publish leaves a deliverable debt rather than a silent loss), and
+`announce` marks the row only after the transport accepted the publication — a
+known Redis failure returns None and marks nothing. The gateway sweeps
+`announced_at IS NULL` rows older than one sweep interval
+(`notification_outbox_interval_seconds`) and re-announces them
+(`notification_outbox_batch` bounds one pass). A row younger than an interval is
+left to the producer still working inside its request. Re-announcing after a
+lost mark is at-least-once on purpose: clients deduplicate on `notification_id`,
+and a duplicate ping is cheaper than a missing decision.
 
 ## Categories
 
@@ -52,11 +65,12 @@ user has to act on. The spine reads the notice row itself rather than trusting
 either post path to pass the right shape.
 
 The task-maintenance daemon's stall escalation is the same producer on a sync
-path: its user leg commits a `require_response` notice inside the escalation
-transaction and then calls `deliver_notice_notification_sync`, so a stall that
-needs a human decision reaches the push transports as `core.needs_input` instead
-of stopping at the console inbox. Its delegator leg is an agent note and
-deliberately produces no user notification.
+path: its user leg commits a `require_response` notice and stages the
+`core.needs_input` delivery inside the escalation transaction, then announces it
+after the commit, so a stall that needs a human decision reaches the push
+transports as `core.needs_input` instead of stopping at the console inbox — and
+an announce lost to a crash stays owed for the sweep. Its delegator leg is an
+agent note and deliberately produces no user notification.
 
 ## Plugin emission
 
@@ -75,26 +89,6 @@ the user opts into rather than one they must switch off.
 
 `meiva notices audit` replays the producer stream for a window (`--days`, 7 by
 default; `--now` and `--tz` place its end and its day/hour buckets) through this
-policy. It reads the producers rather than `notification_events` because the log
-holds only what was delivered — a switched-off category has no rows to count, and
-a switch cannot be simulated from the rows its own policy dropped.
-
-- `core.needs_input` comes from `agent_notices` rows that need a response. One
-  row is one candidate, or two when the agent added a question after posting: the
-  spine keys a re-ask by the question the notice carries now, so the post is keyed
-  question-less and the edit by its question.
-- `core.turn_finished` comes from the agent host's clean turn ends in
-  `telemetry_events` (`halt` with `no tool_call (idle)` or `system_halt`), which is
-  where the hosted runner emits the notification. A terminated agent's halt is a
-  death, not a finished turn, and the runner reports nothing for it.
-
-Two simulations are modelled, one flipped input at a time: turning
-`core.turn_finished` on or off, and keying a notice by `notice:<id>` instead of
-`notice:<id>:<question fingerprint>` (the re-ask switch).
-
-## Auditing a window
-
-`meiva notices audit` replays the producer stream for a window through this
 policy. It reads the producers rather than `notification_events` because the log
 holds only what was delivered — a switched-off category has no rows to count, and
 a switch cannot be simulated from the rows its own policy dropped.

@@ -9,8 +9,12 @@ script in your Meiva execution context:
 
 ```bash
 .venv/bin/python scripts/spawn_codex.py <workspace-dir> \
+  --why 'why this takeover is needed' \
   --prompt '<briefing + instructions to read impersonator-guide and run meiva impersonate request>'
 ```
+
+`--why` is required and becomes the three-line provenance header of the briefing
+(`requested_by`, `why`, `return_to`); a takeover still creates no files.
 
 The `--prompt` text is sent as the initial message the new session wakes up
 with: include your agent id (`meiva.self.AGENT_ID`), the current goal, decisions,
@@ -31,12 +35,12 @@ working directory (other locations are not forbidden; this is the recommended
 default).
 
 All four launchers accept `--prompt`:
-- `spawn_codex.py <workspace-dir> --prompt '...'` — starts the shared app server
+- `spawn_codex.py <workspace-dir> --why '...' --prompt '...'` — starts the shared app server
   (`codex_app_server=<endpoint>`) and launches Codex connected with `--remote`.
-- `spawn_claude.py <workspace-dir> --prompt '...'` — launches Claude Code and
+- `spawn_claude.py <workspace-dir> --why '...' --prompt '...'` — launches Claude Code and
   sends the prompt; the executor requests the lease with `--provider claude` and
   arms its `Monitor` watch.
-- `spawn_antigravity.py <workspace-dir> --prompt '...'` — launches `agy chat -a <workspace>`
+- `spawn_antigravity.py <workspace-dir> --why '...' --prompt '...'` — launches `agy chat -a <workspace>`
   and sends the prompt; the executor requests the lease with `--provider antigravity`
   (the runtime starts and supervises the ConnectRPC relay).
 - `spawn_dsh.py <workspace-dir> --prompt '...'` — boots dsh's `headless` profile

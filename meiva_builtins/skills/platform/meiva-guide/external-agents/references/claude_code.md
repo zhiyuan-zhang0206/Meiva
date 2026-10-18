@@ -13,7 +13,7 @@ desktop app's; run `claude auth login` once as the host user
 (`claude auth status` shows it):
 
 ```bash
-.venv/bin/python scripts/spawn_claude.py <workspace-dir>
+.venv/bin/python scripts/spawn_claude.py <workspace-dir> --why 'why this work is delegated'
 ```
 
 Every launch chooses the Claude session id up front (`--session-id`) and prints

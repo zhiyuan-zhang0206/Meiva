@@ -80,10 +80,15 @@ Launch it from your own execution context, passing the takeover prompt inline:
 
 ```bash
 .venv/bin/python scripts/spawn_codex.py <workspace-dir> \
+  --why 'why this takeover is needed' \
   --prompt '<the full takeover briefing + meiva impersonate request instructions>'
 ```
 
-With `--prompt`, no task or work files are created and no file watcher runs.
+Every launch requires `--why` (one line). It is the only field a person writes:
+the launcher generates the rest of the provenance block — dispatching agent,
+`--for-task <id>` when the work serves a task, and the return address — and
+delivers it inline for a takeover. With `--prompt`, no task or work files are
+created and no file watcher runs.
 The same `--prompt` pattern works with `spawn_claude.py`, `spawn_antigravity.py`,
 and `spawn_dsh.py` ([DeepSeek Harness](references/deepseek_harness.md),
 takeover-only). The full procedure is [Let the coding agent take over your

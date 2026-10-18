@@ -50,14 +50,30 @@ skill's directory:
 
 ```bash
 # Claude Code
-.venv/bin/python scripts/spawn_claude.py <workspace-dir>
+.venv/bin/python scripts/spawn_claude.py <workspace-dir> \
+  --why 'why this work is delegated'
 
 # OpenAI Codex
-.venv/bin/python scripts/spawn_codex.py <workspace-dir>
+.venv/bin/python scripts/spawn_codex.py <workspace-dir> \
+  --why 'why this work is delegated' --for-task 12345
 
 # Relocate either file (absolute, or relative to the workspace)
-.venv/bin/python scripts/spawn_claude.py <workspace-dir> --work-file notes/progress.md
+.venv/bin/python scripts/spawn_claude.py <workspace-dir> --work-file notes/progress.md \
+  --why 'why this work is delegated'
 ```
+
+`--why` is required: one line saying why this work is delegated. It is the only
+field a person writes. The launcher generates the rest of a provenance block —
+dispatching agent and spawn chain, the task id when you pass `--for-task` (with
+optional `--task-label` and `--priority`), and `report_to` — and puts it at the
+top of both the launch message and the task file. The block is read-only: the
+worker quotes it when reporting, never edits it, and answers to the agent in
+`report_to` rather than to a person.
+
+`--for-task` is not checked against the task registry: the launcher does not query
+it, because a spawn subprocess has no task SDK and a launch must not block on a
+lookup. Confirm the id in your own turn (`meiva.tasks.get(id)`) before you pass
+it — a mistyped id travels into the worker's block unchanged.
 
 On success it prints one `key=value` per line:
 

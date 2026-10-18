@@ -1,7 +1,8 @@
 exports = ["antigravity.py", "claude.py", "codex.py"]
 
 [uses]
+"__init__.py" = ["_common.py"]
 "antigravity.py" = ["_common.py"]
 "claude.py" = ["_claude_checks.py", "_common.py", "_first_run.py"]
 "codex.py" = ["_common.py"]
-"tests" = ["_claude_checks.py", "_common.py", "_first_run.py", "antigravity.py", "claude.py", "codex.py"]
+"tests" = ["__init__.py", "_claude_checks.py", "_common.py", "_first_run.py", "antigravity.py", "claude.py", "codex.py"]

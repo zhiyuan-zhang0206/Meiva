@@ -42,6 +42,7 @@ from ._common import (
     new_generation,
     terminate_generation_after_failed_launch,
     worker_bootstrap,
+    write_task_file_header,
 )
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
@@ -418,6 +419,7 @@ class LaunchRequest:
     prompt: str | None
     skill_dir: Path
     resume: str | None
+    provenance: str | None = None
 
 
 def _checked_prompt(
@@ -474,6 +476,7 @@ def start_codex(
             request.tasks_file,
             request.work_file,
             resumed=request.resume is not None,
+            provenance=request.provenance,
         )
     sessions.send(sid, message)
     verify_submitted(sid)
@@ -538,6 +541,7 @@ def launch(
     skill_dir: Path,
     resume: str | None = None,
     prompt: str | None = None,
+    provenance: str | None = None,
 ) -> int:
     """Launch a Codex session in a persistent shell with a shared app server.
 
@@ -559,11 +563,13 @@ def launch(
         _checked_prompt(prompt, tasks_file, work_file),
         skill_dir,
         resume,
+        provenance,
     )
     launch_caller_assignment("codex", caller_instance)
     if tasks_file is not None and work_file is not None:
         init_file(tasks_file, "")
         init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
+        write_task_file_header(tasks_file, provenance or "")
     key = coding_session_owner.canonical_key(workspace, tool="codex")
     owner = new_generation(key, tasks_file=tasks_file, work_file=work_file, ttl_seconds=ttl_seconds)
     active, remote, codex_session = _start_generation(key, owner, request)

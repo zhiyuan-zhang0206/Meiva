@@ -15,7 +15,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from meiva.shell.coding_tools import codex
+from meiva.shell.coding_tools import add_lineage_arguments, codex, require_lineage
 
 _SKILL_DIR = Path(__file__).resolve().parent.parent
 
@@ -68,6 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="GENERATION",
         help="Stop and terminalize exactly this generation.",
     )
+    add_lineage_arguments(parser)
     return parser
 
 
@@ -81,9 +82,9 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
             parser.error("--prompt must be non-empty")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     _validate_args(parser, args)
 
     workspace = Path(args.workspace).expanduser().resolve()
@@ -98,6 +99,12 @@ def main() -> int:
     if args.prompt is None:
         tasks_file = codex.resolve_file(workspace, args.tasks_file or "tasks.md")
         work_file = codex.resolve_file(workspace, args.work_file or "work.md")
+    provenance = None
+    prompt = None
+    if args.prompt is not None:
+        prompt = f"{require_lineage(parser, args, takeover=True)}\n\n{args.prompt}"
+    elif args.resume is None:
+        provenance = require_lineage(parser, args)
     return codex.launch(
         workspace,
         tasks_file,
@@ -105,7 +112,8 @@ def main() -> int:
         args.ttl_seconds,
         args.caller_instance,
         resume=args.resume,
-        prompt=args.prompt,
+        prompt=prompt,
+        provenance=provenance,
         skill_dir=_SKILL_DIR,
     )
 

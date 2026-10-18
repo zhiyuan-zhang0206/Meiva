@@ -11,7 +11,11 @@ from gateway.agents.notice_operations.current import (
     mutate,
     operation_key,
 )
-from gateway.agents.notices import post_notice_resolve, publish_response_required_hint
+from gateway.agents.notices import (
+    announce_notice_delivery,
+    post_notice_resolve,
+    publish_response_required_hint,
+)
 from gateway.agents.schemas import AgentMessageEnqueued, NoticeItem, ResolveNoticeIn
 from ops import lifecycle
 
@@ -58,8 +62,8 @@ async def edit_current(
             record.priority,
             record.title,
             record.task_id,
-            pool=request.app.state.db_pool,
         )
+        await announce_notice_delivery(request, acceptance.notification_id)
     return record
 
 
