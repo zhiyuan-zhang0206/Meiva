@@ -330,9 +330,11 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep("meiva on PATH", ensure_meiva_on_path, host_global=True),
     ConvergeStep("~/.local/bin on PATH", ensure_local_bin_on_path, host_global=True),
     ConvergeStep("$MEIVA_HOME dir skeleton", ensure_meiva_home_dirs),
-    # Codex and Claude Code own their global homes. This prod-only host step
-    # contributes exactly the Meiva operator skill when those homes already exist.
-    # The private ownership ledger lives under the skeleton created above.
+    # meiva:note
+    # External agent CLIs own their global homes: this prod-only host step
+    # contributes exactly Meiva's two skills, and only to the clients registered in
+    # `external_skills._CLIENTS` that are present on this host. The private
+    # ownership ledger lives under the skeleton created above.
     ConvergeStep(
         "external agent operator skill",
         converge_external_agent_skill,
