@@ -33,13 +33,16 @@ screenshots, and FAQ: **[QUICKSTART.md](../QUICKSTART.md)**.
 ### 1. Self-Evolving — the cluster upgrades itself
 
 Meiva's cluster upgrades itself. New code lands on `main`, and the fleet update
-script (`python -m cli.fleet_update down` / `up`) updates every unit: agents
+script (`python -m cli.fleet_update run`) updates every unit: agents
 drain at their turn boundary (a wedged process holds the stop until its
 timeout; only the operator's explicit `--force` cuts it short), the cluster
 stops, each unit's source checkout switches to the released commit, and the
 units start again. An update is an attended, full-cluster outage by design,
 and it never rolls back on its own: a failure stops the half, the operator
-fixes the cause and reruns it — each half is idempotent.
+fixes the cause and reruns it — each half is idempotent. An authorized operator
+agent can submit the complete update to an OS-owned job, then drain and resume
+with the rest of the cluster; see the
+[agent update guide](../meiva_builtins/skills/platform/meiva-guide/ops/references/agent-update.md).
 
 → [Why: self-rolling release](decisions/runtime/updates/release/2026-05-09-self-rolling-release.md)
 

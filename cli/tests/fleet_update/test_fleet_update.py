@@ -17,10 +17,13 @@ from cli import fleet_update
 from cli.tests.fleet_update.fleet_update_cluster import Cluster, git
 
 
-def test_runners_stop_first_and_start_last(env: tuple[Cluster, Callable[..., int]]) -> None:
+@pytest.mark.parametrize("command", ["run", "split"])
+def test_runners_stop_first_and_start_last(
+    env: tuple[Cluster, Callable[..., int]], command: str
+) -> None:
     cluster, run = env
-    assert run("down") == 0
-    assert run("up") == 0
+    for step in ("down", "up") if command == "split" else ("run",):
+        assert run(step) == 0
     kinds = [kind for kind, _ in cluster.effects if not kind.startswith("silence-")]
     assert [a for k, a in cluster.effects if k == "stop"] == ["mac", "lin", "gw"]
     assert kinds.index("stop") > kinds.index("fetch") and kinds.index("switch") > max(
@@ -30,6 +33,94 @@ def test_runners_stop_first_and_start_last(env: tuple[Cluster, Callable[..., int
     assert kinds[-10:-4] == ["smoke"] * 3 + ["refresh"] * 3
     assert set(kinds[-4:]) == {"schedules-verify", "plugins-verify"}
     assert [a for k, a in cluster.effects if k == "refresh"] == ["gw", "mac", "lin"]
+    assert all(h["up"] and h["head"] == cluster.new for h in cluster.hosts.values())
+    assert not cluster.silence_open
+
+
+@pytest.mark.parametrize("failing", [("stop", "mac"), ("switch", "lin")])
+def test_run_does_not_start_after_a_failed_down(
+    env: tuple[Cluster, Callable[..., int]],
+    capsys: pytest.CaptureFixture[str],
+    failing: tuple[str, str],
+) -> None:
+    cluster, run = env
+    cluster.fail[failing] = 1
+    assert run("run") == 1
+    assert cluster.effects[-1] == failing
+    assert not {"start", "oneshot", "smoke", "refresh"} & {k for k, _ in cluster.effects}
+    output = capsys.readouterr().out
+    assert "Failed phase: down" in output and "rerun `down`" in output
+    assert cluster.silence_open
+
+
+@pytest.mark.parametrize("failing", [("start", "gw"), ("smoke", "gw"), ("plugins-verify", "lin")])
+def test_run_reports_up_failure_without_repeating_down(
+    env: tuple[Cluster, Callable[..., int]],
+    capsys: pytest.CaptureFixture[str],
+    failing: tuple[str, str],
+) -> None:
+    cluster, run = env
+    cluster.fail[failing] = 1
+    assert run("run") == 1
+    assert [a for k, a in cluster.effects if k == "stop"] == ["mac", "lin", "gw"]
+    assert [a for k, a in cluster.effects if k == "switch"] == ["gw", "mac", "lin"]
+    output = capsys.readouterr().out
+    assert "Failed phase: up" in output and "rerun `up`" in output
+    assert cluster.silence_open
+
+
+def test_run_dry_run_plans_both_halves_without_mutation(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("run", "--dry-run") == 0
+    assert cluster.effects == [("pre-verify", "gw")]
+    assert all(h["up"] and h["head"] == cluster.old for h in cluster.hosts.values())
+    output = capsys.readouterr().out
+    assert "phase: down" in output and "phase: up" in output
+    assert "stop -y" in output and "launchctl bootstrap" in output
+    assert "smoke MACHINE" in output and "plugins verify" in output
+
+
+def test_run_uses_one_log_and_accepts_both_halves_options(
+    env: tuple[Cluster, Callable[..., int]], tmp_path: Path
+) -> None:
+    cluster, run = env
+    assert (
+        run(
+            "run",
+            "--stop-timeout",
+            "30",
+            "--start-timeout",
+            "60",
+            "--smoke-timeout",
+            "45",
+            "--roster-timeout",
+            "15",
+            "--restart-all",
+            "--silence-hours",
+            "2",
+        )
+        == 0
+    )
+    logs = list((tmp_path / "logs").glob("*.log"))
+    assert len(logs) == 1 and logs[0].name.endswith("-run.log")
+    output = logs[0].read_text()
+    assert "stop -y --timeout 30" in output and " -ge 12 " in output
+    assert "smoke gw 45" in output and "every service stops" in output
+    assert "down complete" in output and "up complete" in output
+    assert "run `up` when ready" not in output
+    assert cluster.silence_hours == 2
+
+
+def test_run_requires_a_target_before_contacting_hosts(
+    env: tuple[Cluster, Callable[..., int]], tmp_path: Path
+) -> None:
+    cluster, _ = env
+    with pytest.raises(SystemExit) as exc:
+        fleet_update.main(["run", "--gateway", "gw", "--log-dir", str(tmp_path / "logs")])
+    assert exc.value.code == 2
+    assert cluster.commands == []
 
 
 def test_drift_checks_run_after_the_smoke_and_the_refresh(
@@ -101,12 +192,13 @@ def test_stored_schedules_are_checked_against_new_before_anything_stops(
     assert kinds.index("pre-verify") < kinds.index("stop")
 
 
+@pytest.mark.parametrize("command", ["run", "down"])
 def test_a_red_stored_schedule_refuses_down_before_any_stop(
-    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str], command: str
 ) -> None:
     cluster, run = env
     cluster.stored_schedules = (1, ["RESULT ts=t checked=13 green=12 red=1 rc=1", _RED_ROW])
-    assert run("down") == 2
+    assert run(command) == 2
     out = capsys.readouterr().out
     assert _RED_ROW in out and "--allow-red-schedules" in out and "would crash-loop" in out
     assert {k for k, _ in cluster.effects} & {"stop", "switch"} == set()
@@ -317,12 +409,13 @@ def test_preflight_refuses(
     assert cluster.effects == []
 
 
+@pytest.mark.parametrize("command", ["run", "down", "up"])
 def test_refuses_inside_an_meiva_agent(
-    env: tuple[Cluster, Callable[..., int]], monkeypatch: pytest.MonkeyPatch
+    env: tuple[Cluster, Callable[..., int]], monkeypatch: pytest.MonkeyPatch, command: str
 ) -> None:
     cluster, run = env
     monkeypatch.setenv("MEIVA_AGENT_ID", "7")
-    assert run("down") == 2
+    assert run(command) == 2
     assert cluster.effects == []
 
 

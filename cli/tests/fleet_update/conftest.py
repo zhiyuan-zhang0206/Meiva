@@ -38,7 +38,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Calla
     ]
 
     def run(half: str, *extra: str) -> int:
-        new = ["--new", cluster.new] if half == "down" else []
+        new = ["--new", cluster.new] if half in ("run", "down") else []
         cluster.run_started_at = len(cluster.effects)
         return fleet_update.main([half, *hosts, *new, *extra])
 

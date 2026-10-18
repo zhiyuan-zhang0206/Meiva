@@ -311,7 +311,8 @@ def down(s: Session, args: argparse.Namespace) -> None:
             f"{HOME}; git checkout -q --detach {new} && {_VENV_DIRS} && "
             f"env -u VIRTUAL_ENV uv sync --frozen --compile-bytecode && {CLEAN}",
         )
-    s.say(f"down complete: every host is stopped on {new[:12]}; run `up` when ready")
+    next_step = "continuing with `up`" if args.half == "run" else "run `up` when ready"
+    s.say(f"down complete: every host is stopped on {new[:12]}; {next_step}")
 
 
 def gui_oneshot(alias: str, timeout_s: int) -> str:
@@ -436,16 +437,20 @@ def up(s: Session, args: argparse.Namespace) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m cli.fleet_update",
-        description="Update a networked source-mode cluster over SSH, in two halves",
+        description="Update a networked source-mode cluster over SSH",
     )
     halves = parser.add_subparsers(dest="half", required=True)
-    for half in ("down", "up"):
-        p = halves.add_parser(half)
+    for half, help_text in (
+        ("run", "complete the update: down, then up and verification"),
+        ("down", "stop and switch every host; leave stopped for manual release steps"),
+        ("up", "start and verify the cluster, including recovery after a failed up"),
+    ):
+        p = halves.add_parser(half, help=help_text)
         p.add_argument("--gateway", required=True, metavar="SSH_ALIAS")
         p.add_argument("--runner", action="append", default=[], metavar="SSH_ALIAS")
         p.add_argument("--log-dir", type=Path, required=True)
         p.add_argument("--dry-run", action="store_true", help="read-only preflight, print effects")
-        if half == "down":
+        if half in ("run", "down"):
             p.add_argument("--new", required=True, help="commit to switch every host to")
             p.add_argument("--allow-python-change", action="store_true")
             p.add_argument("--stop-timeout", type=int, default=600)
@@ -466,23 +471,30 @@ def main(argv: list[str] | None = None) -> int:
                 action="store_true",
                 help="skip the keep decision and stop every service, untouched components included",
             )
-        else:
+        if half in ("run", "up"):
             p.add_argument("--start-timeout", type=int, default=1800)
             p.add_argument("--smoke-timeout", type=int, default=300)
             p.add_argument("--roster-timeout", type=int, default=90)
     args = parser.parse_args(argv)
     if "MEIVA_AGENT_ID" in os.environ:
         print(
-            "refused: run from a plain login shell, not an Meiva agent's shell (a stop closes it)"
+            "refused: run from a plain login shell or an OS-owned job, not an Meiva "
+            "agent's shell (a stop closes it); submit the job and return so the agent can drain"
         )
         return 2
     s = Session(args)
+    phase = "down" if args.half == "run" else args.half
     try:
         hosts = [args.gateway, *args.runner]
         s.os = {host: s.run(host, "uname -s", effect=False).split()[-1] for host in hosts}
-        (down if args.half == "down" else up)(s, args)
+        for phase in ("down", "up") if args.half == "run" else (args.half,):
+            s.say(f"phase: {phase}")
+            (down if phase == "down" else up)(s, args)
     except FailedError as exc:
-        s.say(f"FAILED: {exc}\nNothing rolled back. Fix it, then rerun `{args.half}` (idempotent).")
+        s.say(
+            f"FAILED: {exc}\nFailed phase: {phase}. Nothing rolled back. "
+            f"Fix it, then rerun `{phase}` (idempotent)."
+        )
         return 2 if str(exc).startswith("refused") else 1
     finally:
         s.log.close()
