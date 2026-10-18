@@ -99,12 +99,17 @@ def _fake_llm_seq(*summaries: str) -> Any:
     return llm
 
 
-def runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
+def runtime_with_llm(
+    llm: Any,
+    database_gate: ProcessDbGate,
+    *,
+    pins: Mapping[str, Any] | None = None,
+) -> Runtime[MeivaContext]:
     ctx = MeivaContext(
         ops_pool=None,
         llm=llm,
         event_publisher=MagicMock(),
-        agent=pinned_slices(),
+        agent=pinned_slices(pins),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -247,6 +252,26 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
         "event": "compaction_completed",
         "msg": None,
     }
+
+
+async def test_auto_compact_hook_keeps_the_configured_tail(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+):
+    patch_compact_config(monkeypatch, auto_compact_tokens=1)
+    state = _over_threshold_state()
+
+    fake_llm = make_fake_llm(LONG_SUMMARY)
+    result = await auto_compact_for_llm(
+        state,
+        runtime_with_llm(fake_llm, database_gate=database_gate, pins={"keep_tail_messages": 2}),
+        fake_config(),
+    )
+
+    assert result is not None
+    tail = result["context_reset"].tail
+    assert isinstance(tail[0], HumanMessage)
+    assert tail[0].content == compose_summary_message(LONG_SUMMARY)
+    assert [m.content for m in tail[1:]] == [m.content for m in state.messages[-2:]]
 
 
 async def test_auto_compact_hook_skips_when_no_conversation(

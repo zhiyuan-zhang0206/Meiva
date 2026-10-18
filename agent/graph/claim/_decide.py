@@ -119,6 +119,8 @@ async def _compact_outcome(
         resume=st.next_goto,
         extra_msgs=extra_msgs,
         summary_kwargs={"additional_kwargs": summary_kwargs},
+        discarded=state.messages,
+        keep_tail=ctx.require_agent().read("agent", "keep_tail_messages"),
     )
     return _Outcome(
         command=Command[ClaimGoto](

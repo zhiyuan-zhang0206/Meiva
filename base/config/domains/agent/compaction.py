@@ -152,6 +152,34 @@ class AgentCompactionSettings(EnvSettings):
         },
     )
 
+    keep_tail_messages: int = Field(
+        default=0,
+        alias="MEIVA_COMPACT_KEEP_TAIL_MESSAGES",
+        description=(
+            "How many trailing conversation messages a compaction keeps verbatim "
+            "after the summary. 0 (the default) keeps none — the fresh context is "
+            "the summary plus standing notes only. A retained window is made "
+            "self-contained first: a leading tool result is dropped, a tool call "
+            "survives only with every result of it, and the `meiva.self.compact` "
+            "call that triggered the compaction is removed together with its "
+            "`[system halt]` result, because a replaced context that still showed "
+            "the request would read as if the replacement had not happened. The "
+            "count is in messages, so the kept window can be shorter. Raising it "
+            "lets the agent resume from the last exchange instead of only from "
+            "the summary; the extra tokens are spent on every compaction in the "
+            "segment, so change it after measuring recovery against the "
+            "summary-only baseline."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
     history_dump_keep: int = Field(
         default=5,
         alias="MEIVA_COMPACT_HISTORY_DUMP_KEEP",

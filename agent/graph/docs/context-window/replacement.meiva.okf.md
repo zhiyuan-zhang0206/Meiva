@@ -13,9 +13,13 @@ Preserving the request prefix preserves its cache opportunity. Forced summarizat
 
 ## Clean replacement
 
-Every applied compact clears the entire messages channel and parks its summary behind a newly established standing head through INIT_CONTEXT. Raw conversation is never retained as a tail; claim defers co-batched chats to pending and finalizes previously claimed history before replacement.
+Every applied compact clears the entire messages channel and parks its summary behind a newly established standing head through INIT_CONTEXT. Raw conversation survives only as the retained tail; the setting keeps none by default. Claim defers co-batched chats to pending and finalizes previously claimed history before replacement.
 
 Framework lifecycle markers may follow the summary. A security note attached to a deferred chat goes with that chat; the fresh delivery scans it again. RemoveMessage operations are channel instructions, not summary content. History dumps are taken before the wipe and their notes go only into the fresh tail: inserting a note inside an AI/tool pair would break provider message ordering. Both paths stamp the summary message type and, when present, the live compact run id so timeline readers can join it to the running operation.
+
+## Retained tail
+
+A replacement parks a configured number of trailing messages verbatim — the `keep_tail_messages` setting, zero by default — after the summary and its standing notes, and before any human message that arrived while the compaction ran: retained history precedes everything that happened after the replacement began, so the last message the agent reads is still the last thing that happened. The window is made self-contained first. It never starts with a tool result, a tool call survives only with every result of it, and the `meiva.self.compact` call that triggered the replacement is dropped together with its `[system halt]` result: keeping the request would show the agent a compaction call inside a context that was already replaced, which reads as if the replacement had not happened.
 
 ## Compact failure boundary
 

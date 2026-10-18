@@ -1,11 +1,11 @@
 __description__ = "Auto-compact history when token count exceeds threshold"
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.modifier import RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
@@ -374,6 +374,8 @@ async def auto_compact_for_llm(
         resume=CLAIM,
         extra_msgs=([history_dump_note(dump_path)] if dump_path is not None else None),
         summary_kwargs=summary_kwargs,
+        discarded=state.messages,
+        keep_tail=agent.read("agent", "keep_tail_messages"),
     )
     await stamp_compact_boundary(
         runtime.context.ops_pool,
@@ -387,6 +389,67 @@ async def auto_compact_for_llm(
     return transition
 
 
+def _is_compact_request(message: AnyMessage) -> bool:
+    if not isinstance(message, AIMessage):
+        return False
+    for call in message.tool_calls:
+        args = call.get("args")
+        code = args.get("code") if isinstance(args, dict) else None
+        if isinstance(code, str) and "self.compact(" in code:
+            return True
+    return False
+
+
+def _keep_tool_calls(message: AnyMessage, answered: set[str]) -> bool:
+    if not isinstance(message, AIMessage) or not message.tool_calls:
+        return True
+    ids = [str(call["id"]) for call in message.tool_calls if call.get("id")]
+    if len(ids) != len(message.tool_calls) or not set(ids) <= answered:
+        return False
+    return not _is_compact_request(message)
+
+
+def _drop_unpaired(window: list[AnyMessage]) -> list[AnyMessage]:
+    answered = {m.tool_call_id for m in window if isinstance(m, ToolMessage)}
+    dropped: set[str] = set()
+    kept: list[AnyMessage] = []
+    for message in window:
+        if _keep_tool_calls(message, answered):
+            kept.append(message)
+        elif isinstance(message, AIMessage):
+            dropped.update(str(call["id"]) for call in message.tool_calls if call.get("id"))
+    if dropped:
+        kept = [
+            message
+            for message in kept
+            if not (isinstance(message, ToolMessage) and message.tool_call_id in dropped)
+        ]
+    while kept and isinstance(kept[0], ToolMessage):
+        kept.pop(0)
+    return kept
+
+
+# meiva:note
+# A replacement keeps at most the configured number of trailing messages, made
+# self-contained: no leading tool result, no tool call without every result of
+# it, and never the meiva.self.compact request that triggered the replacement
+# (its context is already gone, so keeping it would replay a finished request).
+# meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
+def retained_tail(messages: Sequence[AnyMessage], limit: int) -> list[AnyMessage]:
+    if limit <= 0:
+        return []
+    window = list(messages)[-limit:]
+    while True:
+        kept = _drop_unpaired(window)
+        if kept == window:
+            return kept
+        window = kept
+
+
+# meiva:note
+# A replacement parks the summary, then the standing notes, then the retained
+# history, and only then a message that arrived while the compaction ran: the
+# retained window stays the last thing the agent read unless something is newer.
 # meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 def build_compact_transition(
     summary: str,
@@ -394,16 +457,21 @@ def build_compact_transition(
     resume: NodeName,
     extra_msgs: list[AnyMessage] | None = None,
     summary_kwargs: dict[str, Any] | None = None,
+    discarded: Sequence[AnyMessage] = (),
+    keep_tail: int = 0,
 ) -> dict[str, Any]:
     summary_msg_kwargs = summary_kwargs or {}
+    parked = list(extra_msgs or [])
+    split = next((i for i, m in enumerate(parked) if isinstance(m, HumanMessage)), len(parked))
     tail_msgs: list[AnyMessage] = [
         HumanMessage(
             content=compose_summary_message(summary),
             **summary_msg_kwargs,
         ),
+        *parked[:split],
+        *retained_tail(discarded, keep_tail),
+        *parked[split:],
     ]
-    if extra_msgs:
-        tail_msgs.extend(extra_msgs)
     return {
         "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)],
         "context_reset": ContextReset(

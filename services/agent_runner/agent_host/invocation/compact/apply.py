@@ -84,6 +84,8 @@ async def apply_prepared(
                 "meiva_compact_id": str(command.acceptance.command_id),
             },
         },
+        discarded=values.get("messages") or [],
+        keep_tail=ctx.require_agent().read("agent", "keep_tail_messages"),
     )
     update.update(
         {
