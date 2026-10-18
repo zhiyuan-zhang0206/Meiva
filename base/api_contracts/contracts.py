@@ -316,6 +316,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT, note="script edits append versions and can restart the process"
     ),
     ("DELETE", "/api/schedules/{schedule_id}"): RouteContract(note="delete — repeats are harmless"),
+    ("GET", "/api/notifications"): RouteContract(),
     ("GET", "/api/notifications/categories"): RouteContract(),
     ("POST", "/api/agents/{agent_id}/notifications"): RouteContract(
         Idempotency.NON_IDEMPOTENT,

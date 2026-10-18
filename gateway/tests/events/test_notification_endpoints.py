@@ -127,3 +127,47 @@ def test_a_replayed_post_repairs_a_lost_announce(
     deliveries = _deliveries(db_conn, agent_id)
     assert len(deliveries) == 1
     assert deliveries[0][2] is not None
+
+
+def _insert_delivery(conn: psycopg.Connection, agent_id: int, subject: str) -> int:
+    row = conn.execute(
+        "INSERT INTO notification_events (category, subject, importance, agent_id) "
+        "VALUES ('core.needs_input', %s, 'high', %s) RETURNING id",
+        (subject, agent_id),
+    ).fetchone()
+    conn.commit()
+    assert row is not None
+    return int(row[0])
+
+
+# meiva:note
+# The recovery read: a client that was offline asks for what it missed, and gets
+# the newest deliveries after its cursor plus the newest id so a first run can set
+# a cursor without replaying history.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def test_the_pull_path_returns_deliveries_after_a_cursor(
+    db_conn: psycopg.Connection, event_bus: EventBus
+) -> None:
+    agent_id = _agent(db_conn)
+    first = _insert_delivery(db_conn, agent_id, "first")
+    second = _insert_delivery(db_conn, agent_id, "second")
+    with gateway_test_client() as client:
+        caught_up = client.get(f"/api/notifications?after_id={first}")
+        from_scratch = client.get("/api/notifications?after_id=0&limit=100")
+    assert caught_up.status_code == 200
+    body = caught_up.json()
+    assert [item["id"] for item in body["notifications"]] == [second]
+    assert body["notifications"][0]["subject"] == "second"
+    assert body["latest_id"] == second
+    ids = [item["id"] for item in from_scratch.json()["notifications"]]
+    assert first in ids and second in ids
+
+
+def test_the_pull_path_keeps_the_newest_rows_of_a_long_gap(
+    db_conn: psycopg.Connection, event_bus: EventBus
+) -> None:
+    agent_id = _agent(db_conn)
+    ids = [_insert_delivery(db_conn, agent_id, f"n{index}") for index in range(3)]
+    with gateway_test_client() as client:
+        resp = client.get("/api/notifications?after_id=0&limit=2")
+    assert [item["id"] for item in resp.json()["notifications"]] == ids[1:]
