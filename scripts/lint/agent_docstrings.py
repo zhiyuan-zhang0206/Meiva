@@ -212,6 +212,45 @@ def docstring_violations(
     return violations
 
 
+# meiva:note
+# Violations inside `doc_variants(...)` texts. A declared variant replaces the docstring for
+# the models whose `sdk_doc_style` names it, so it reaches the prompt exactly the way a
+# docstring does and obeys the same rules.
+def variant_doc_violations(
+    tree: ast.Module,
+    source_lines: list[str],
+    *,
+    extra: list[tuple[re.Pattern[str], str]] | None = None,
+) -> list[tuple[int, str]]:
+    violations: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = (
+            func.id
+            if isinstance(func, ast.Name)
+            else func.attr
+            if isinstance(func, ast.Attribute)
+            else ""
+        )
+        if name != "doc_variants":
+            continue
+        for keyword in node.keywords:
+            value = keyword.value
+            if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+                continue
+            for offset, line in enumerate(value.value.splitlines()):
+                line_no = value.lineno + offset
+                if (
+                    0 < line_no <= len(source_lines)
+                    and "lint-docstring: ok" in source_lines[line_no - 1]
+                ):
+                    continue
+                violations.extend(_line_violations(line, line_no, extra))
+    return violations
+
+
 def _docstring_of(node: ast.AST) -> tuple[str, int] | None:
     """`(raw docstring text, 1-indexed line of its opening triple-quote)`, if the node has one."""
     # ast.get_docstring returns the cleaned string; we want raw text and
@@ -409,6 +448,9 @@ def _check_file(path: Path) -> list[tuple[Path, int, str]]:
             out.append((path, line_no, reason))
         for line_no, reason in module_doc_child_reference_violations(tree, source_lines):
             out.append((path, line_no, reason))
+
+    for line_no, reason in variant_doc_violations(tree, source_lines, extra=extra):
+        out.append((path, line_no, reason))
 
     # Walk top-level functions/classes only. Nested defs (closures, methods)
     # are not directly agent-visible from `help(meiva.X)`.

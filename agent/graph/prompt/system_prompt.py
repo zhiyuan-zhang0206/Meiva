@@ -106,14 +106,13 @@ def sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     if not wanted:
         return ""
     import meiva
+    from meiva.sdk_surface.help import ModelHelpProfile
     from meiva.sdk_surface.help import render as render_help
 
     pieces: list[str] = []
     seen_targets: set[int] = set()
 
-    hidden: frozenset[str] = meiva.sdk_surface.attachment_transport.media_gated_members(
-        slices.brain.llm_model, catalog=catalog
-    )
+    profile = ModelHelpProfile.for_model(slices.brain.llm_model, catalog=catalog)
     for path in wanted:
         if disabled_by_sdk_config(path, slices.prompt.sdk_disable):
             continue
@@ -142,7 +141,7 @@ def sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         seen_targets.add(id(target))
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            render_help(target, compact_classes=True, hidden_members=hidden)
+            render_help(target, compact_classes=True, profile=profile)
         pieces.append(buf.getvalue().rstrip())
 
     if not pieces:

@@ -120,6 +120,34 @@ function's signature does. A skill child renders as a Markdown heading at its
 FQN depth with the one-line description below (skills are documents, not
 Python surfaces, so they keep heading form rather than stub form).
 
+
+## Per-model help: what a model sees, and in which words
+
+Help is a function of the model as well as of the code. Two mechanisms make that explicit, and
+both are declared data — never a second copy of a contract:
+
+- **Visibility.** `ModelSpec.sdk_hidden_members` names dotted `meiva` paths that model's help
+  omits; the render merges them with the capability gate (a text-only model's help drops
+  `meiva.self.attach` on its own). A hidden member still exists and still calls — hide what the
+  model should not read, not what it cannot use (`MEIVA_SDK_DISABLE` is the removal knob).
+- **Text.** `@doc_variants(terse="...")` on a function, class or module declares alternative
+  contracts; `ModelSpec.sdk_doc_style` selects one per model. The docstring stays the default,
+  and an undeclared style falls back to it.
+
+Both are consumed through one `ModelHelpProfile`, built from the model catalog by the prompt's
+SDK reference and by `meiva.help()` in an exec turn.
+
+Rules for a variant:
+
+1. It is a **complete contract**, not a diff. Write what that model should read, from the first
+   sentence.
+2. It must say something **different**, not the same fact in other words. A restatement is a
+   review defect: two copies of one truth drift.
+3. It obeys every docstring rule above, and `scripts/lint/agent_docstrings.py` enforces them on
+   variant text too.
+4. Name styles after the *audience need* (`terse`, `explicit`), not after a model id — several
+   models may share a style, and the same model may change.
+
 ## Other rules
 
 1. **Module docstring writes high-level only, never restates children** — `help()` renders

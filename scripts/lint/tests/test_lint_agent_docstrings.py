@@ -15,6 +15,7 @@ from scripts.lint.agent_docstrings import (
     docstring_violations,
     is_in_scope,
     module_doc_child_reference_violations,
+    variant_doc_violations,
 )
 
 
@@ -250,3 +251,43 @@ def test_real_repo_surface_excludes_underscore_and_includes_init_modules() -> No
     assert (repo_root / "meiva/sdk_surface/agent_identity.py").resolve() not in surface
     assert (repo_root / "meiva/sdk_surface/wraps.py").resolve() not in surface
     assert (repo_root / "base/packages/plugins/loading/plugin_loader.py").resolve() not in surface
+
+
+def test_doc_variant_text_is_held_to_the_docstring_rules() -> None:
+    tree, lines = _parse(
+        """
+        @doc_variants(terse="Keep it short: **bold** wins.")
+        def f():
+            \"\"\"Do the thing.\"\"\"
+        """
+    )
+
+    reasons = [reason for _, reason in variant_doc_violations(tree, lines)]
+
+    assert reasons and "Markdown emphasis" in reasons[0]
+
+
+def test_chinese_in_a_doc_variant_is_flagged() -> None:
+    tree, lines = _parse(
+        """
+        @doc_variants(terse="\u77ed\u4e00\u70b9\u3002")
+        def f():
+            \"\"\"Do the thing.\"\"\"
+        """
+    )
+
+    reasons = [reason for _, reason in variant_doc_violations(tree, lines)]
+
+    assert reasons and "Chinese characters" in reasons[0]
+
+
+def test_a_clean_doc_variant_passes() -> None:
+    tree, lines = _parse(
+        """
+        @doc_variants(terse="Do the thing, briefly.")
+        def f():
+            \"\"\"Do the thing.\"\"\"
+        """
+    )
+
+    assert variant_doc_violations(tree, lines) == []
