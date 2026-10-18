@@ -35,7 +35,7 @@ and update-age tooltips remain.
 
 ## Home shell chrome
 
-The three columns' title bars and the composer's read-only Details summary:
+The three columns' title bars and where the timeline's Details mode lives:
 [[ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md|Home shell chrome]].
 
 ## Code blocks
