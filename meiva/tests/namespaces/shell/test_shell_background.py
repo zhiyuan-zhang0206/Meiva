@@ -39,7 +39,10 @@ def test_notified_line_structure(tmp_path: Path) -> None:
     )
     # Subshell so the pipeline covers a compound cmd; command exit code pinned
     # before anything else runs; CLI notice with source + tail; close after delivery.
-    assert line.startswith(f"exec 3> >(tee {log}); ( make build ) >&3 2>&1; _ec=$?; exec 3>&-; ")
+    assert line.startswith(
+        f"exec 3> >(tee {log}); ( make build ) >&3 2>&1; _ec=$?; "
+        f"printf '[exit %s]\\n' \"$_ec\" >&3; exec 3>&-; "
+    )
     assert "agents send 5" in line
     assert "Background command 'build' finished. Full output at" in line
     assert "exited with code" not in line
@@ -283,8 +286,9 @@ def test_run_background_e2e_notice_log_and_close(
     _poll_until(argv_file.exists, 15)
     assert argv_file.exists(), "completion notice never fired"
 
-    log = _poll_log(Path(handle.output_path), lambda text: "hello-bg" in text)
+    log = _poll_log(Path(handle.output_path), lambda text: "[exit 3]" in text)
     assert "hello-bg" in log, log
+    assert log.strip().endswith("[exit 3]"), log
     _assert_completion_notice_argv(argv_file.read_text().splitlines(), handle)
 
     # Default keep=False: the session closes unconditionally after the notice
@@ -413,8 +417,8 @@ def test_background_long_paths_during_shell_startup(
     _poll_until(argv_file.exists, 15)
     assert argv_file.exists(), meiva.shell.sessions.capture(handle.session_id, lines=30)
     _assert_completion_notice_argv(argv_file.read_text().splitlines(), handle)
-    log = _poll_log(Path(handle.output_path), lambda text: text.strip() == "long-bg")
-    assert log.strip() == "long-bg", log
+    log = _poll_log(Path(handle.output_path), lambda text: text.strip().endswith("[exit 3]"))
+    assert log.strip() == "long-bg\n[exit 3]", log
     _poll_until(lambda: handle.session_id not in meiva.shell.sessions.list(), 10)
     assert handle.session_id not in meiva.shell.sessions.list()
     assert not Path(handle.output_path).with_suffix(".sh").exists()
