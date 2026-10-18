@@ -359,34 +359,6 @@ export function nodeChildren(node: RunTimelineNode, nodes: readonly RunTimelineN
   return nodes.filter((candidate) => candidate.parent === node.id).sort((a, b) => a.span_start - b.span_start);
 }
 
-/**
- * The message index the context breakdown follows: a selected block's own (the card reads the request
- * at or after it), a selected node's first; with nothing selected, the last LLM request (the first
- * block of an AIMessage with its usage) sent inside the viewport, else the last one before it, else
- * the first. Null when the agent made no request.
- */
-export function contextPoint(
-  selection: Selection | null,
-  nodes: readonly RunTimelineNode[],
-  units: readonly RunTimelineUnit[],
-  view: Viewport,
-): number | null {
-  if (selection?.kind === "unit") return selection.i0;
-  if (selection?.kind === "node") return nodes.find((node) => node.id === selection.id)?.span_start ?? null;
-  const requests = new Map<number, RunTimelineUnit>();
-  for (const unit of units) {
-    const seen = requests.get(unit.i0);
-    if (unit.request !== null && (seen === undefined || unit.start < seen.start)) requests.set(unit.i0, unit);
-  }
-  const sent = [...requests.values()]
-    .map((unit) => ({ unit, at: Date.parse(unit.start) }))
-    .sort((a, b) => a.unit.i0 - b.unit.i0);
-  const inside = sent.filter(({ at }) => at >= view.from && at <= view.to);
-  const before = sent.filter(({ at }) => at < view.from);
-  const pick = inside.at(-1) ?? before.at(-1) ?? sent.at(0);
-  return pick?.unit.i0 ?? null;
-}
-
 /** The blocks the Context size row draws: those a request has read. */
 export function contextUnits(units: readonly RunTimelineUnit[]): RunTimelineUnit[] {
   return units.filter((unit) => unit.context_total !== null);

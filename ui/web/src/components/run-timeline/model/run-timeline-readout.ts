@@ -1,4 +1,4 @@
-// The one-line readout above the run timeline: what the pointer is over.
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
 
 import type { useTranslations } from "next-intl";
 
@@ -31,7 +31,8 @@ function nodeReadout(t: Translate, node: RunTimelineNode): string {
   return `${line} · ${t("readoutUnitTokens", { tokens: `${approx(node.estimated)}${formatTokensCompact(node.context_tokens)}` })}`;
 }
 
-/** The readout of what is hovered, or null when nothing is (or it is no longer in the data). */
+// meiva:note
+// Accessible announcement for a selection that is still in the loaded history.
 export function readoutText(
   target: Hover | null,
   ctx: {

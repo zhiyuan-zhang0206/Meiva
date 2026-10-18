@@ -30,7 +30,6 @@ import {
   unitColor,
   categoryClass,
   classCategory,
-  contextPoint,
   hoverLit,
   inboundSources,
   matchesHighlight,
@@ -348,21 +347,6 @@ describe("highlight and hover model", () => {
     reply(8, "2026-10-04T12:50:00Z", 20, true),
     unit({ kind: "inbound", i0: 9, i1: 9, start: "2026-10-04T12:55:00Z", end: "2026-10-04T12:55:00Z" }),
   ];
-  const view = (from: string, to: string) => ({ from: Date.parse(from), to: Date.parse(to) });
-
-  it("follows a selection's own block, else the last LLM request in view, else the nearest", () => {
-    const whole = view("2026-10-04T12:00:00Z", "2026-10-04T13:00:00Z");
-    expect(contextPoint({ kind: "unit", i0: 5, i1: 5, unitKind: "text" }, nodes, blocks, whole)).toBe(5);
-    expect(contextPoint({ kind: "node", id: "b" }, nodes, blocks, whole)).toBe(5);
-    // A block that was no request (3, 9) is never the default point.
-    expect(contextPoint(null, nodes, blocks, whole)).toBe(8);
-    expect(contextPoint(null, nodes, blocks, view("2026-10-04T12:00:00Z", "2026-10-04T12:30:00Z"))).toBe(2);
-    // nothing in view: the last one before it
-    expect(contextPoint(null, nodes, blocks, view("2026-10-04T12:20:00Z", "2026-10-04T12:30:00Z"))).toBe(2);
-    expect(contextPoint(null, nodes, blocks, view("2026-10-04T11:00:00Z", "2026-10-04T11:30:00Z"))).toBe(2);
-    expect(contextPoint(null, nodes, [], whole)).toBeNull();
-  });
-
   it("scales Context size to the largest context total and Messages to the largest block", () => {
     expect(contextUnits(blocks).map((x) => x.i0)).toEqual([2, 3, 8]);
     expect(maxContextTotal(blocks)).toBe(60);

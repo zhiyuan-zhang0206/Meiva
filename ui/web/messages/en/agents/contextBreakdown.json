@@ -26,7 +26,7 @@
     "tool_response": "Tool responses"
   },
   "pointTitle": "Context at request · session {session} of {sessions} · {time}",
-  "pointSubtitle": "Follows the selected block; with none selected, the last request in view",
+  "pointSubtitle": "Context for the selected block or node",
   "pointEmpty": "The agent has made no LLM request yet.",
   "categoryToggle": "Highlight {category} blocks on the timeline"
 }

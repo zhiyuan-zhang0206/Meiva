@@ -1,12 +1,14 @@
 "use client";
 
 import { useQueries, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { RunTimelineResponse } from "@/lib/contracts/types";
 import { api, ApiError } from "@/lib/transport/api";
 
 import { viewportOf, type Viewport } from "../model/timeline-model";
+
+import { completeRanges, mergeWindows, omittedIn, overlaps, padded, uncovered } from "./timeline-window-cache";
 
 const MAX_UNITS = 5000;
 const pickRead = (results: { data: RunTimelineResponse | undefined; isError: boolean; isFetching: boolean; error: Error | null; failureReason: Error | null }[]) =>
@@ -15,12 +17,6 @@ const pickRead = (results: { data: RunTimelineResponse | undefined; isError: boo
 function preparing(error: Error | null): boolean {
   return error instanceof ApiError &&
     ["timeline_index_queued", "timeline_index_indexing", "timeline_index_busy"].includes(error.code ?? "");
-}
-
-function covers(data: RunTimelineResponse | undefined, view: Viewport | null): boolean {
-  if (data === undefined || view === null || data.units_omitted > 0) return false;
-  const window = viewportOf(data.window);
-  return window.from <= view.from && window.to >= view.to;
 }
 
 function windowQuery(id: number, snapshot: RunTimelineResponse["snapshot"], range: Viewport | null) {
@@ -42,25 +38,39 @@ function windowQuery(id: number, snapshot: RunTimelineResponse["snapshot"], rang
   };
 }
 
-interface ShownWindow {
+interface RequestedWindow {
   id: number;
   snapshot: RunTimelineResponse["snapshot"];
-  range: Viewport | null;
+  range: Viewport;
 }
 
-function sameWindow(a: ShownWindow, b: ShownWindow | undefined) {
-  return a.id === b?.id && a.snapshot === b.snapshot &&
-    a.range?.from === b.range?.from && a.range?.to === b.range?.to;
+function sameWindow(a: RequestedWindow, b: RequestedWindow) {
+  return a.id === b.id && a.snapshot === b.snapshot && a.range.from === b.range.from && a.range.to === b.range.to;
+}
+
+function useRequestView(viewport: Viewport | null) {
+  const [view, setView] = useState(viewport);
+  const latest = useRef(viewport);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    latest.current = viewport;
+    if (timer.current !== null) return;
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      setView(latest.current);
+    }, 80);
+  }, [viewport]);
+  useEffect(() => () => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  }, []);
+  return viewport === null ? null : view;
 }
 
 // meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
 export function useTimelineWindows(ids: readonly number[], viewport: Viewport | null) {
   const client = useQueryClient();
-  const [settled, setSettled] = useState<Viewport | null>(null);
-  useEffect(() => {
-    const timer = setTimeout(() => setSettled(viewport), 300);
-    return () => clearTimeout(timer);
-  }, [viewport]);
+  const requestView = useRequestView(viewport);
   const initialQueries = ids.map((id) => ({
     queryKey: ["run-timeline", id],
     queryFn: ({ signal }: { signal: AbortSignal }) => api.getRunTimeline(id, { recentHours: 24, maxUnits: MAX_UNITS, signal }),
@@ -70,36 +80,34 @@ export function useTimelineWindows(ids: readonly number[], viewport: Viewport | 
     retryDelay: 2_000,
   }));
   const initial = useQueries({ queries: initialQueries, combine: pickRead });
-  const windows = useQueries({
-    queries: ids.map((id, i) => {
-      const data = initial.at(i)?.data;
-      return {
-        ...windowQuery(id, data?.snapshot, settled),
-        enabled: data !== undefined && settled !== null && !covers(data, settled),
-      };
-    }),
-    combine: pickRead,
+  const [requested, setRequested] = useState<RequestedWindow[]>([]);
+  const active = useMemo(() => requested.filter((item) => {
+    const index = ids.indexOf(item.id);
+    const first = index < 0 ? undefined : initial[index]?.data;
+    return first !== undefined && first.snapshot === item.snapshot;
+  }), [requested, ids, initial]);
+  const windows = useQueries({ queries: active.map(({ id, snapshot, range }) => windowQuery(id, snapshot, range)), combine: pickRead });
+  const next = [...active];
+  initial.forEach(({ data: first }, i) => {
+    if (first === undefined || requestView === null || first.lifetime === null) return;
+    const lifetime = viewportOf(first.lifetime);
+    const visible = padded(requestView, lifetime, 0);
+    if (visible.from >= visible.to) return;
+    const mine = active.map((item, index) => ({ ...item, read: windows[index] })).filter((item) => item.id === ids[i]);
+    const data = [first, ...mine.flatMap(({ read }) => read.data === undefined ? [] : [read.data])];
+    const complete = completeRanges(data);
+    const attempted = mine.filter(({ read }) => read.data === undefined).map(({ range }) => range);
+    const dense = data.some((item) => item.units_omitted > 0 && overlaps(viewportOf(item.window), visible));
+    const target = dense ? visible : padded(visible, lifetime, 1);
+    const covered = [...complete, ...attempted];
+    if (uncovered(dense ? visible : padded(visible, lifetime, 0.25), covered).length === 0) return;
+    const ranges = uncovered(target, covered);
+    for (const range of ranges) {
+      const candidate = { id: ids[i], snapshot: first.snapshot, range };
+      if (!next.some((item) => sameWindow(candidate, item))) next.push(candidate);
+    }
   });
-
-  const [shown, setShown] = useState<ShownWindow[]>([]);
-  const ready = viewport?.from === settled?.from && viewport?.to === settled?.to;
-  const nextShown = ids.map((id, i): ShownWindow => {
-    const data = initial.at(i)?.data;
-    const snapshot = data?.snapshot;
-    if (viewport === null || covers(data, viewport)) return { id, snapshot, range: null };
-    if (ready && windows.at(i)?.data !== undefined) return { id, snapshot, range: settled };
-    return shown.find((window) => window.id === id && window.snapshot === snapshot) ?? { id, snapshot, range: null };
-  });
-  if (shown.length !== nextShown.length || nextShown.some((window, i) => !sameWindow(window, shown[i]))) {
-    setShown(nextShown);
-  }
-  const displayed = useQueries({
-    queries: nextShown.map(({ id, snapshot, range }, i) => ({
-      ...(range === null ? initialQueries[i] : windowQuery(id, snapshot, range)),
-      enabled: false,
-    })),
-    combine: pickRead,
-  });
+  if (next.length !== requested.length || next.some((item, i) => !sameWindow(item, requested[i]))) setRequested(next);
 
   useEffect(() => client.getQueryCache().subscribe((event) => {
     if (event.type !== "updated" || event.action.type !== "error") return;
@@ -114,21 +122,33 @@ export function useTimelineWindows(ids: readonly number[], viewport: Viewport | 
     }
   }), [client, ids]);
 
-  const reads = useMemo(() => initial.map((first, i) => {
-    const needed = viewport !== null && !covers(first.data, viewport);
-    const current = windows.at(i);
+  const collections = useMemo(() => initial.map((first, i) => {
+    const mine = active.map((item, index) => ({ ...item, read: windows[index] })).filter((item) => item.id === ids[i]);
+    const data = [first.data, ...mine.map(({ read }) => read.data)].filter((item): item is RunTimelineResponse => item !== undefined);
+    const merged = mergeWindows(data, null);
+    const counts = new Set([0, ...data.map((item) => item.units_omitted)]);
+    const displays = merged === undefined ? [] : [...counts].map((count) => count === merged.units_omitted ? merged : { ...merged, units_omitted: count });
+    return { first, mine, data, merged, displays };
+  }), [active, ids, initial, windows]);
+  const reads = useMemo(() => collections.map(({ first, mine, data, merged, displays }) => {
+    const visible = viewport === null || first.data?.lifetime == null ? null : padded(viewport, viewportOf(first.data.lifetime), 0);
+    const needed = visible !== null && uncovered(visible, completeRanges(data)).length > 0;
+    const relevant = mine.filter(({ range }) => visible !== null && overlaps(range, visible));
+    const failed = relevant.some(({ read }) => read.isError);
+    const omitted = data.some((item) => item.units_omitted > 0 && visible !== null && overlaps(viewportOf(item.window), visible));
+    const count = visible === null ? merged?.units_omitted : omittedIn(data, visible);
     return {
-      data: displayed.at(i)?.data,
+      data: displays.find((item) => item.units_omitted === count),
       isError: first.isError,
       preparing: !first.isError && preparing(first.failureReason),
-      pending: needed && (!ready || current?.isFetching === true),
-      windowError: needed && ready && current?.isError === true,
+      pending: needed && (relevant.some(({ read }) => read.isFetching) || (!failed && !omitted)),
+      windowError: needed && failed,
     };
-  }), [displayed, initial, windows, viewport, ready]);
+  }), [collections, viewport]);
   const retry = (id: number) => {
     const i = ids.indexOf(id);
     const key = initial.at(i)?.data === undefined ? "run-timeline" : "run-timeline-window";
-    void client.refetchQueries({ queryKey: [key, id], type: "active" });
+    void client.refetchQueries({ queryKey: [key, id], type: "active", predicate: (query) => query.state.status === "error" });
   };
   return { reads, retry, initial };
 }

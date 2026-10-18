@@ -334,8 +334,9 @@ describe("the default window", () => {
     expect(screen.queryByRole("button", { name: "Compact session" })).toBeNull();
   });
 
-  it("shows the context of the last LLM request in view, not the agent's current context", async () => {
+  it("shows the context of a selected request, not the agent's current context", async () => {
     render();
+    clickItem(await unitOf("thinking"));
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenCalledWith(42, 7));
     expect(getContextBreakdown).not.toHaveBeenCalled();
     expect((await screen.findByTestId("context-breakdown-heading")).textContent).toContain("request · session 2 of 2");
@@ -510,17 +511,15 @@ describe("zoom and pan", () => {
     expect(summaryText()).not.toBe(zoomed);
   });
 
-  it("keeps painted rows and a fixed status slot while a pan loads another range", async () => {
+  it("keeps painted rows and a fixed status slot while nearby pans reuse prefetched data", async () => {
     const recent = {
       ...lifetimeResponse, snapshot: "stable", nodes: [], units: [],
       window: { from: "2026-10-04T14:00:00.000Z", to: LIFETIME.to },
     };
-    let resolve: (data: RunTimelineResponse) => void = () => undefined;
     getRunTimeline.mockResolvedValueOnce(recent)
       .mockImplementationOnce((_id, options) => Promise.resolve({
         ...lifetimeResponse, snapshot: "stable", window: { from: options!.from!, to: options!.to! },
-      }))
-      .mockImplementation(() => new Promise((done) => { resolve = done; }));
+      }));
     render();
     const chart = await screen.findByTestId("run-timeline-chart");
     const status = screen.getByTestId("run-timeline-window-status-42");
@@ -535,12 +534,12 @@ describe("zoom and pan", () => {
     wheel(chart, { deltaX: -100, clientX: 600 });
     expect(screen.getByTestId("run-timeline-canvas-level-2")).toBe(canvas);
     expect(screen.getByTestId("run-timeline-window-status-42")).toBe(status);
-    expect(status.textContent).toContain("Loading this time range");
-    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(3));
+    expect(status.textContent).toBe("");
+    await act(() => new Promise((resolve) => setTimeout(resolve, 150)));
+    expect(getRunTimeline).toHaveBeenCalledTimes(2);
     await paintFrame();
     expect(screen.getByTestId("run-timeline-canvas-level-2")).toBe(canvas);
     expect(drawn("level-2").some((shape) => shape.op === "fill")).toBe(true);
-    act(() => resolve({ ...lifetimeResponse, snapshot: "stable" }));
     await waitFor(() => expect(status.textContent).toBe(""));
     expect(screen.getByTestId("run-timeline-canvas-level-2")).toBe(canvas);
   });
@@ -747,6 +746,7 @@ describe("legend highlight", () => {
 
   it("links to the context breakdown rows: a row lights its class, and the legend lights its row", async () => {
     render();
+    clickItem(await unitOf("thinking"));
     const row = await screen.findByTestId("context-breakdown-category-user_input");
     expect(row.getAttribute("aria-pressed")).toBe("false");
 
@@ -757,7 +757,7 @@ describe("legend highlight", () => {
     expect(row.getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.click(screen.getByTestId("run-timeline-legend-human"));
-    expect(row.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByTestId("context-breakdown-category-user_input").getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(screen.getByTestId("run-timeline-legend-thinking"));
     expect(screen.getByTestId("context-breakdown-category-reasoning").getAttribute("aria-pressed")).toBe("true");
   });
@@ -795,31 +795,21 @@ describe("legend highlight", () => {
 });
 
 describe("hover", () => {
-  const readout = () => screen.getByTestId("run-timeline-readout").textContent;
-
   const ringAfter = async (item: Item) => ringOf(item);
 
-  it("reads a block's kind, message span, read time, source and preview, and restores on leave", async () => {
+  it("highlights hovered items without visible text or selection announcements", async () => {
     render();
-    const idle = (await screen.findByTestId("run-timeline-readout")).textContent;
     const human = await unitOf("inbound");
+    const live = screen.getByTestId("run-timeline-selection-live");
     hoverItem(human);
-    expect(readout()).toContain("Human message · 1 message · read");
-    expect(readout()).toContain("user · please fix the bug");
-    leaveItem(human);
-    expect(readout()).toBe(idle);
-  });
-
-  it("reads a node's level, span, summary first line and the agent's own usage", async () => {
-    render();
+    expect(await ringOf(human)).toBe("hover");
+    expect(live.textContent).toBe("");
+    expect(screen.queryByTestId("run-timeline-readout")).toBeNull();
     hoverItem(await nodeOf("1"));
-    const text = readout();
-    expect(text).toContain("Level 1");
-    expect(text).toContain("5 messages");
-    expect(text).toContain("The agent read the repo");
-    expect(text).not.toContain("and planned");
-    expect(text).toContain("3 calls · 3.0k in · 120 out");
-    expect(text).toContain("~4.2k tokens");
+    expect(await ringOf(await nodeOf("1"))).toBe("hover");
+    expect(live.textContent).toBe("");
+    leaveItem(await nodeOf("1"));
+    expect(await ringOf(await nodeOf("1"))).toBe("none");
   });
 
   it("lights a hovered block's ancestor chain softly", async () => {
@@ -891,10 +881,10 @@ describe("side panel links", () => {
   });
 });
 
-describe("context breakdown follows the point", () => {
+describe("context breakdown follows selection", () => {
   it("follows a selected block, then a selected node, and is titled with its session and time", async () => {
     render();
-    await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 7));
+    expect(getRunTimelineContext).not.toHaveBeenCalled();
     clickItem(await unitOf("text"));
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 2));
     await waitFor(() =>
@@ -907,30 +897,27 @@ describe("context breakdown follows the point", () => {
     );
   });
 
-  it("without a selection follows the last request inside the viewport", async () => {
-    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
-      const wide = this.hasAttribute("data-track");
-      return { left: 100, top: 0, width: wide ? 1000 : 0, height: 0, right: 1100, bottom: 0, x: 100, y: 0, toJSON: () => ({}) };
-    });
+  it("does not read context on pan and keeps a selected context through pan and zoom", async () => {
     render();
     const chart = await screen.findByTestId("run-timeline-chart");
-    await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 7));
-
     wheel(chart, { deltaY: -600, clientX: 100 });
+    expect(getRunTimelineContext).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("context-breakdown-heading")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Reset zoom" }));
+    clickItem(await unitOf("text"));
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 2));
-    vi.restoreAllMocks();
+    const calls = getRunTimelineContext.mock.calls.length;
+    wheel(chart, { deltaY: -600, clientX: 100 });
+    wheel(chart, { deltaX: 800, clientX: 100 });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+    expect(getRunTimelineContext).toHaveBeenCalledTimes(calls);
+    expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 2);
   });
 
-  it("says so when the agent has made no request", async () => {
-    getRunTimeline.mockResolvedValue({ ...lifetimeResponse, units: lifetimeResponse.units.map((u) => ({ ...u, context_tokens: null, context_total: null, request: null })) });
-    render();
-    expect((await screen.findByTestId("context-breakdown-empty")).textContent).toContain("no LLM request");
-    expect(getRunTimelineContext).not.toHaveBeenCalled();
-  });
 });
 
 describe("context size row", () => {
-  it("draws one bar per block, as tall as the context through it, and reads its value on hover", async () => {
+  it("draws one bar per block, as tall as the context through it, with visual hover only", async () => {
     render();
     await screen.findByTestId("run-timeline-chart");
     await paintFrame();
@@ -947,7 +934,9 @@ describe("context size row", () => {
     expect(first?.color).toContain("#3b82f6");
     expect(second?.color).toContain("#f59e0b");
     pointAt("input", xOf(key("uthinking-7-7")));
-    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("~20 tokens · context through it 420");
+    await paintFrame();
+    expect(await ringOf(await unitOf("thinking"))).toBe("hover");
+    expect(screen.queryByTestId("run-timeline-readout")).toBeNull();
   });
 
   it("has exactly the blocks of the Messages row, to the pixel", async () => {

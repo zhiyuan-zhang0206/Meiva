@@ -21,7 +21,6 @@ import {
   classCategory,
   clampViewport,
   MIN_VIEW_MS,
-  contextPoint,
   levelsTopFirst,
   nodeAncestors,
   nodeChildren,
@@ -51,7 +50,7 @@ const NO_AGENTS: number[] = [];
 const pathFor = (ids: readonly number[]) => `/insights/run/${ids.join(",")}`;
 
 // meiva:note
-// The URL preserves agents in addition order without duplicates and the last agent cannot be removed. Message indices belong to their snapshot: replacing it invalidates the selection before effects run. Block selection and arrow selection exclude each other. The context card follows the selected agent and selected message/node, otherwise the last request in view of the first loaded agent. The page owns legend highlighting so zoom and pan retain it.
+// The URL preserves agents in addition order without duplicates and the last agent cannot be removed. Message indices belong to their snapshot: replacing it invalidates the selection before effects run. Block selection and arrow selection exclude each other. The context card follows only the selected agent and message/node, independently of the viewport. The page owns legend highlighting so zoom and pan retain it.
 // meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
 export default function AgentViewPage({ params }: { params: Promise<{ agents: string }> }) {
   const t = useTranslations("runTimeline");
@@ -180,8 +179,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
         )
       : undefined;
 
-  const contextAt = focusData && view && (focusData.units_omitted === 0 || selectedNode !== undefined || selectedUnit !== undefined)
-    ? contextPoint(mine, focusData.nodes, focusData.units, view) : undefined;
+  const contextAt = selectedUnit?.i0 ?? selectedNode?.span_start;
   const categoryHighlight: CategoryHighlight = {
     active: highlight === null ? null : classCategory(highlight.cls),
     has: (category) => categoryClass(category) !== null,

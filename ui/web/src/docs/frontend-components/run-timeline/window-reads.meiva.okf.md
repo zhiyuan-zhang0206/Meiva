@@ -12,14 +12,23 @@ or leaving the page cancels its request. Timeouts use the per-agent failure and
 Retry flow; selection cancellation is not a business failure. This client budget
 does not impose a backend history-reconstruction deadline.
 
-**Pan continuity.** During the gesture debounce, a range request and a failed
-range retry, the chart keeps the last displayed range from that agent's
-current snapshot in the TanStack Query cache. It does not switch back to the
-initial day between requests, including when revisiting cached windows. A disabled
-query observer keeps that displayed cache entry alive through failures and retries;
-only its query identity is retained as local view state. Returning inside the
-complete initial day uses that data immediately. Snapshot replacement drops the old range from display.
-Each agent's range status has a reserved single line beside the window summary,
-so loading, success and retry do not move the chart vertically.
+**Pan continuity.** Viewport changes are sampled every 80 ms during a gesture,
+without waiting for it to end. Approaching the edge of loaded coverage (within a
+quarter viewport) requests missing ranges with one viewport of padding on each
+side, clamped to the agent lifetime. Pending ranges prevent duplicate reads;
+panning does not cancel a read that can fill the cache.
+
+Every visited range stays observed in TanStack Query until its agent leaves or
+its snapshot changes. Local state holds query identities, never copies of server
+data. The display merges all loaded nodes and units by their stable identities,
+so revisiting any loaded subrange paints immediately and selected blocks remain
+available outside the viewport. Complete coverage is an interval union: the
+merged display's bounding window must not be mistaken for coverage of gaps.
+Dense responses are not complete message coverage; a narrower visible-range read
+can recover detail, and a still-dense range offers zoom without a retry loop.
+Already loaded bars remain painted alongside that hint. Failed reads keep all
+loaded data and can be retried explicitly. Each agent's range status has a
+reserved single line beside the window summary, so loading, success and retry do
+not move the chart vertically. Snapshot replacement drops all old ranges.
 
 Parent: [[ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md]].

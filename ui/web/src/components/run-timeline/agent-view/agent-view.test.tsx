@@ -355,17 +355,21 @@ describe("arrows between agents", () => {
     expect(strokes().some((d) => d.color === BLUE)).toBe(true);
   });
 
-  it("shows the arrow under the pointer in the readout, and a block over it wins", async () => {
+  it("highlights the arrow under the pointer, and a block over it wins", async () => {
     await ready();
     const { x: arrowX, y: middleY } = messageArrowMiddle();
     fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: arrowX, clientY: middleY });
-    expect(screen.getByTestId("run-timeline-readout").textContent).toContain("Message · #7 → #8");
+    await paintFrame();
+    expect(strokes().find((d) => d.color === BLUE)?.lineWidth).toBeGreaterThan(1.25);
+    expect(screen.queryByTestId("run-timeline-readout")).toBeNull();
     fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: 900, clientY: middleY });
-    expect(screen.getByTestId("run-timeline-readout").textContent).not.toContain("→");
+    await paintFrame();
+    expect(strokes().find((d) => d.color === BLUE)?.lineWidth).toBe(1.25);
 
     fireEvent.pointerMove(canvasOf(7, "units"), { clientX: itemX(BY_AGENT[7], "units", "utext-0-0", 1000, BASE_78) });
     fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: arrowX, clientY: middleY });
-    expect(screen.getByTestId("run-timeline-readout").textContent).not.toContain("→");
+    await paintFrame();
+    expect(strokes().find((d) => d.color === BLUE)?.lineWidth).toBe(1.25);
   });
 
   it("selects an arrow by a click on it and shows the event in the details", async () => {
@@ -539,13 +543,14 @@ describe("arrows between agents", () => {
     for (const key of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]) {
       const p = curvePoint(curveOf(key, group.x, group.y, group.x + group.w, group.y + group.h), 0.5);
       fireEvent.pointerMove(chart, { clientX: p.x, clientY: p.y });
-      if (screen.getByTestId("run-timeline-readout").textContent.includes("merged")) {
+      await paintFrame();
+      if (strokes().some((d) => d.lineWidth > 1.25)) {
         point = { clientX: p.x, clientY: p.y };
         break;
       }
     }
     expect(point).not.toBeNull();
-    expect(screen.getByTestId("run-timeline-readout").textContent).toMatch(/Message · #7 → #8 · \d+ merged · /);
+    expect(screen.queryByTestId("run-timeline-readout")).toBeNull();
     fireEvent.click(chart, point as { clientX: number; clientY: number });
     const detail = await screen.findByTestId("run-timeline-link-group-detail");
     const items = within(detail).getAllByTestId("run-timeline-link-group-item");
