@@ -1,24 +1,37 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from base.events.notifications.catalog import core_catalog
+from base.events.notifications.catalog import NotificationCategory, core_catalog
 from base.events.notifications.notices import notice_dedupe_key
 from cli.commands.agents.notices_audit import (
     MODELLED_CATEGORIES,
     Candidate,
+    build_report,
     notice_candidates,
     notice_key,
     parse_simulation,
     per_day,
     per_hour,
+    render_json,
+    render_text,
     replay,
+    window_for,
 )
 
 _CATALOG = core_catalog()
+_FLEET = NotificationCategory(
+    id="meiva_fleet.task_closed",
+    label="Task closed",
+    description="A fleet task reached a closed state.",
+    importance="normal",
+    default_enabled=True,
+)
+_MODEL = {**_CATALOG, _FLEET.id: _FLEET}
 _NEEDS_INPUT = "core.needs_input"
 _TURN_FINISHED = "core.turn_finished"
 
@@ -193,5 +206,56 @@ def test_an_edit_after_the_window_is_not_a_candidate() -> None:
     assert len(candidates) == 1
 
 
-def test_modelled_categories_each_have_a_producer_source() -> None:
-    assert set(MODELLED_CATEGORIES) == set(_CATALOG)
+def test_the_plugin_category_is_modelled_beside_the_core_ones() -> None:
+    assert set(_CATALOG) < set(MODELLED_CATEGORIES)
+    assert "meiva_fleet.task_closed" in MODELLED_CATEGORIES
+
+
+def _report(categories: list[str] | None = None):
+    names = categories or ["core.needs_input", "meiva_fleet.task_closed"]
+    window = window_for(
+        days=2, tz_name="Asia/Shanghai", now=datetime(2026, 10, 2, 0, 0, tzinfo=UTC)
+    )
+    baseline = replay(
+        [_notice(0, 1, {"ask": "a"}), _notice(30, 1, {"ask": "a"})],
+        categories=_MODEL,
+        switches={},
+    )
+    return build_report(
+        window=window,
+        categories=[_MODEL[name] for name in names],
+        switches={"core.needs_input": True, "meiva_fleet.task_closed": True},
+        baseline=baseline,
+        variants=[("baseline", baseline)],
+    )
+
+
+def test_the_report_carries_every_section_a_consumer_reads() -> None:
+    report = _report()
+
+    assert report["window"]["days"] == 2
+    assert report["delivered"]["total"] == 1
+    assert [row["day"] for row in report["delivered"]["per_day"]] == [
+        "2026-09-30",
+        "2026-10-01",
+        "2026-10-02",
+    ]
+    assert len(report["delivered"]["per_hour"]) == 24
+    assert report["delivered"]["per_category"]["core.needs_input"] == 1
+    assert report["candidates"][0]["candidates"] == 2
+    assert report["candidates"][0]["suppressed"] == 1
+    assert report["simulations"] == [
+        {"variant": "baseline", "delivered": 1, "delta": 0, "per_day": 0.5}
+    ]
+    assert report["sources"]["meiva_fleet.task_closed"].startswith("agent_tasks")
+
+
+def test_json_and_text_report_the_same_totals() -> None:
+    report = _report()
+    parsed = json.loads(render_json(report))
+
+    assert parsed == report
+    assert sum(parsed["delivered"]["per_category"].values()) == parsed["delivered"]["total"]
+    text = "\n".join(render_text(parsed, tz=ZoneInfo("Asia/Shanghai")))
+    assert "meiva_fleet.task_closed" in text
+    assert "Simulations" in text
