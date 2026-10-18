@@ -108,6 +108,13 @@ fixture/incident scope.
 - **first-seen**: 2026-10-19 (PR #6295)
 - **last-verified**: 2026-10-19
 
+### docs-aging:future/infra/data/checkpoint-storage-rebuild.md:appendix-a-drill-assets
+- **class**: docs-aging
+- **status**: open
+- **evidence**: Appendix A of `future/infra/data/checkpoint-storage-rebuild.md` records the pre-cutover drill suite — behavioral matrix, crash replay, production-clone fingerprint subset — as living "with the author (#6095)", never in the repository. `~/.meiva/workspaces/6095` no longer exists on macmini and the 3180 workspace is empty, so no later version move can rerun that gate as specified: the 3.1.3 move (PR #6295) could only be checked by a reconstructed behavioural matrix. The doc now carries a dated note; the remaining repair is to keep verification assets with the decision that defines them (or name a durable location) the next time such a gate is written.
+- **first-seen**: 2026-10-19 (PR #6295)
+- **last-verified**: 2026-10-19
+
 ## Wontfix
 
 ### docstring-budget:meiva/security.py:module
