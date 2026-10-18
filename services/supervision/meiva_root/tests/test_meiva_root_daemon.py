@@ -723,8 +723,9 @@ def _assert_budget_and_observation(run_dir: Path, current: dict[str, object]) ->
         assert health[unit_id]["last_verdict"] == "alive"
 
 
-def test_health_stop_refusal_preserves_root_and_serving_siblings(short_tmp: Path) -> None:
-    """Real root/children and HTTP representatives; no gateway application is booted."""
+def test_health_replacement_kills_a_stuck_unit_and_keeps_serving_siblings(
+    short_tmp: Path,
+) -> None:
     run_dir, ready, release = short_tmp / "run", short_tmp / "ready", short_tmp / "release"
     child_script = Path(__file__).with_name("child_unit.py")
     units: list[dict[str, object]] = [
@@ -732,7 +733,7 @@ def test_health_stop_refusal_preserves_root_and_serving_siblings(short_tmp: Path
             "id": "agent-host",
             "exec": [sys.executable, str(child_script), "restart_down", str(ready), str(release)],
             "restart": "always",
-            "stop_timeout_s": 0.1,
+            "stop_timeout_s": 0.5,
         }
     ]
     (short_tmp / "reply").write_text("still serving")
@@ -770,28 +771,16 @@ def test_health_stop_refusal_preserves_root_and_serving_siblings(short_tmp: Path
             initial = cast("dict[str, object]", client.status().get("result"))
             (run_dir / "fail-health").touch()
             _wait_for(
-                lambda: (
-                    proc.poll() is not None
-                    or _read_log(log).count("failure state restart_failed") >= 5
-                ),
-                "health rounds stopped after a unit refused TERM",
+                lambda: proc.poll() is not None or _read_log(log).count("escaped_term_window") >= 1,
+                "health rounds stopped while replacing a unit stuck in TERM",
             )
             assert proc.poll() is None, _read_log(log)
             current = cast("dict[str, object]", client.status().get("result"))
-            assert _status_births(current) == _status_births(initial)
-            _assert_refused_generation(current)
-            _assert_budget_and_observation(run_dir, current)
+            assert _status_births(current) != _status_births(initial), "stuck generation kept"
+            replaced = _units_of(client.status())[0]
+            assert replaced["state"] == "running" and replaced["restart_failed"] is None
             _assert_serving_siblings(run_dir)
-            release.touch()
-            _wait_for(
-                lambda: _units_of(client.status())[0]["state"] == "stopped",
-                "refused generation was not reaped after release",
-            )
-            assert client.restart("agent-host")["ok"]
-            repaired = _units_of(client.status())[0]
-            assert repaired["restart_failed"] is None and repaired["state"] == "running"
         finally:
             release.touch()
-            # Keep the sentinel until the child consumes it, even if root failed first.
             _wait_for(lambda: not original_child.live(), "released child did not exit")
     assert proc.returncode == 0, _read_log(log)

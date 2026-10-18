@@ -21,6 +21,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
+from base.deploy.progress_timeout import ROOT_HEALTH_INTERVAL_S
 from services.supervision.meiva_root.inputs import InputSeal, parse_inputs
 
 # The implicit tree root. Units attach here by default; it is never a unit
@@ -151,7 +152,7 @@ def _parse_exec(raw: object, origin: str) -> tuple[str, ...]:
     return tuple(argv)
 
 
-def _parse_stop_timeout(raw: object, origin: str) -> float | None:
+def _parse_stop_timeout(raw: object, origin: str, field: str = "stop_timeout_s") -> float | None:
     if raw is None:
         return None
     if (
@@ -160,7 +161,12 @@ def _parse_stop_timeout(raw: object, origin: str) -> float | None:
         or not math.isfinite(raw)
         or raw <= 0
     ):
-        raise ManifestError(f"{origin}: stop_timeout_s must be a positive finite number of seconds")
+        raise ManifestError(f"{origin}: {field} must be a positive finite number of seconds")
+    if field == "stop_timeout_s" and raw > ROOT_HEALTH_INTERVAL_S:
+        raise ManifestError(
+            f"{origin}: stop_timeout_s must not exceed the root health interval "
+            f"({ROOT_HEALTH_INTERVAL_S:g}s) — a replacement stop runs inside a health round"
+        )
     return float(raw)
 
 
