@@ -1,6 +1,7 @@
 """Cooperative same-machine leases; the native agent remains the checkpoint owner."""
 
 import secrets
+from collections.abc import Iterable
 from typing import Any
 from uuid import uuid4
 
@@ -35,6 +36,15 @@ from base.agents.impersonation._store import (
 from base.agents.impersonation._store import (
     require_native as require_native,
 )
+from base.agents.impersonation.capabilities import (
+    DECLARED_CALLER_DEFAULT,
+    DECLARED_EXPLICIT,
+    DECLARED_LAUNCHER_DEFAULT,
+    DECLARED_LEGACY,
+    MACHINE_PROFILE,
+    MINIMAL_PROFILE,
+    parse_capabilities,
+)
 from base.agents.impersonation.history import append, capture_pending, set_actor
 from base.agents.impersonation.status import LOG_PROTOCOL_VERSION, ImpersonationStatus, parse_lease
 from base.agents.impersonation.wake import wake_agent as wake_agent
@@ -61,6 +71,30 @@ def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:
         not isinstance(invoked_python, str) or not invoked_python.strip()
     ):
         raise ValueError("process_metadata.invoked_python must be a nonempty string")
+
+
+# meiva:note
+# Resolve one request's declaration and how it arose. An automatic takeover that
+# declares nothing keeps the surface a takeover has always had (`machine`), but
+# records that nobody chose it: the compatibility window exists so launchers can
+# start declaring, not so the default can stay silent. A caller-made request that
+# declares nothing gets the minimal set.
+def _declare_capabilities(
+    capabilities: Iterable[str] | None,
+    *,
+    automatic: bool,
+) -> tuple[tuple[str, ...], str]:
+    if capabilities is not None:
+        return parse_capabilities(capabilities), DECLARED_EXPLICIT
+    if automatic:
+        return (
+            tuple(sorted(capability.value for capability in MACHINE_PROFILE)),
+            DECLARED_LAUNCHER_DEFAULT,
+        )
+    return (
+        tuple(sorted(capability.value for capability in MINIMAL_PROFILE)),
+        DECLARED_CALLER_DEFAULT,
+    )
 
 
 def _validate_request(
@@ -110,6 +144,11 @@ def _reject_open_previous(conn: Connection[Any], agent_id: int) -> None:
         raise ImpersonationError("Agent already has a request, lease, or unapplied state")
 
 
+# meiva:note
+# `capabilities` declares what the controller may use (see
+# base/agents/impersonation/capabilities.py). Omitted, a caller-made request gets
+# the minimal set and an automatic one keeps the `machine` set recording
+# `launcher-default`; both land on the row so a later reader never has to guess.
 def request(
     db: Database,
     bus: EventBus,
@@ -127,10 +166,12 @@ def request(
     executor_name: str = "",
     process_metadata: dict[str, Any] | None = None,
     automatic: bool = False,
+    capabilities: Iterable[str] | None = None,
     local_machine: str,
 ) -> dict[str, Any]:
     """Prepare a controller lease and return its scoped relay credential."""
     ttl = _ttl(ttl_seconds)
+    declared, declared_by = _declare_capabilities(capabilities, automatic=automatic)
     _validate_request(
         caller,
         automatic=automatic,
@@ -158,9 +199,10 @@ def request(
             "INSERT INTO agent_impersonations(id,agent_id,source,machine,reason,"
             "status,ttl_seconds,expires_at,relay_provider,relay_thread_id,relay_codex_remote,"
             "relay_token_hash,relay_batch_window_seconds,name,executor_name,process_metadata,automatic,"
-            "ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version) "
+            "ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version,"
+            "capabilities,capability_declared_by) "
             "VALUES(%s,%s,%s,%s,%s,'requested',%s,clock_timestamp()+%s*interval '1 second',"
-            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 lease_id,
                 agent_id,
@@ -181,9 +223,13 @@ def request(
                 delivery_config["impersonation_ack_window_seconds"],
                 delivery_config["impersonation_max_delivery_attempts"],
                 event_delivery_protocol_version,
+                Jsonb(list(declared)),
+                declared_by,
             ),
         )
         result = public(lock_lease(conn, str(lease_id)))
+    if declared_by == DECLARED_LAUNCHER_DEFAULT:
+        _record_launcher_default(agent_id, str(lease_id), declared)
     wake_agent(db, bus, agent_id, roster_changed=True)
     if relay_token is not None:
         return result | {"relay_token": relay_token}
@@ -193,6 +239,26 @@ def request(
 def event_protocol_for_new_lease(*, automatic: bool) -> int | None:
     """New automatic leases log their events at the source; manual leases keep no event log."""
     return LOG_PROTOCOL_VERSION if automatic else None
+
+
+# meiva:note
+# The compatibility window keeps the historical surface, so this event is the only
+# durable trace that a launcher declared nothing. Emitted once per lease at request
+# time, where the decision is made.
+def _record_launcher_default(agent_id: int, lease_id: str, declared: tuple[str, ...]) -> None:
+    from base import telemetry
+
+    telemetry.emit(
+        "telemetry",
+        "impersonation_capability_defaulted",
+        level="warning",
+        agent_id=agent_id,
+        attributes={
+            "lease_id": lease_id,
+            "declared_by": DECLARED_LAUNCHER_DEFAULT,
+            "capabilities": list(declared),
+        },
+    )
 
 
 def get(
@@ -410,6 +476,10 @@ def native_status(
     return result
 
 
+# meiva:note
+# A renewed pre-vocabulary lease stays legacy-full: the marker records how its
+# (absent) declaration arose, and `capabilities` stays NULL so a reader keeps
+# seeing the surface the lease was issued with.
 def renew(
     db: Database,
     bus: EventBus,
@@ -429,8 +499,9 @@ def renew(
         ttl = lease["ttl_seconds"] if ttl_seconds is None else _ttl(ttl_seconds)
         conn.execute(
             "UPDATE agent_impersonations SET ttl_seconds=%s,expires_at=clock_timestamp()+"
-            "%s*interval '1 second' WHERE id=%s",
-            (ttl, ttl, lease_id),
+            "%s*interval '1 second',capability_declared_by="
+            "COALESCE(capability_declared_by,%s) WHERE id=%s",
+            (ttl, ttl, DECLARED_LEGACY, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
     wake_agent(db, bus, lease["agent_id"])

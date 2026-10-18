@@ -1,10 +1,11 @@
-exports = ["impersonation_support.py", "test_history.py", "test_host_transport.py"]
+exports = ["impersonation_support.py", "test_history.py", "test_host_transport.py", "test_request_capabilities.py"]
 
 [uses]
 "test_event_log.py" = ["test_history.py"]
 "test_history.py" = ["impersonation_support.py"]
 "test_impersonation_attestation.py" = ["impersonation_support.py"]
 "test_impersonation_database_attestation.py" = ["impersonation_support.py"]
+"test_request_capabilities.py" = ["impersonation_support.py"]
 "test_transport_lifecycle.py" = ["impersonation_support.py"]
 
 [debt.env-patch]

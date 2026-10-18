@@ -188,6 +188,21 @@ def add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentPa
         "(routine arrivals — not user chats, not cancels — coalesce into one "
         "hint per window when set)",
     )
+    request.add_argument(
+        "--profile",
+        choices=("minimal", "machine"),
+        help="capability base for this lease: minimal (read, message) or machine "
+        "(read, files.write, shell, message). Omitted, a caller-made request gets "
+        "minimal; the launcher path (automatic) keeps machine and records "
+        "launcher-default until launchers declare their own",
+    )
+    request.add_argument(
+        "--capability",
+        dest="capabilities",
+        action="append",
+        metavar="NAME",
+        help="add one capability to the base (repeatable), e.g. tasks.write",
+    )
     request.set_defaults(func=_h_impersonate)
     parsers: dict[str, argparse.ArgumentParser] = {}
     listing = commands.add_parser("list", help="page permanent session history")
