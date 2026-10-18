@@ -71,6 +71,28 @@ system of record and the unified stream its projection, and a database that is
 already down is exactly the state `meiva start` repairs — the record must never
 fail the command that repairs it.
 
+## Protocol compatibility
+
+The `caller` field is **not** backward compatible. A root older than this change
+rejects the whole request (`invalid_request: unknown request field(s): ['caller']`),
+and the client surfaces it — so `meiva stop` fails against an old root, while
+`meiva start` answers with a generation/digest mismatch and asks for a stop
+first. The supported flow is unaffected: the fleet stops on the old checkout
+before pulling. A bare `git pull` followed by `meiva restart` on a dev box is
+not — stop with the old checkout, or kill the root, before pulling.
+
+## Known boundaries
+
+- A cold start (`meiva start` with no live root) boots the tree from the
+  manifest without an `up` request per unit, so it records no
+  `lifecycle_request` row. The record covers operator requests against a live
+  root.
+- `meiva stop` sends `down` with `force=True`, so its rows carry
+  `verb="force-down"` while a restart's down leg carries `"down"`. The field is
+  faithful to the wire verb; use `caller.argv` for the command that was run.
+- `MEIVA_AGENT_ID` is self-declared and forgeable. The caller block is
+  **evidence, not authentication**.
+
 ## What this does not do
 
 It records, it does not authorize: the block is not authenticated beyond the

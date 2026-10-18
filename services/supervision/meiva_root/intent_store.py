@@ -206,8 +206,9 @@ def _encode(record: IntentRecord) -> str:
         if failure is None
         else {"stage": failure.stage.value, "since": failure.since, "detail": failure.detail},
         "updated_at": time(),
-        "caller": None if record.caller is None else _encode_caller(record.caller),
     }
+    if record.caller is not None:
+        body["caller"] = _encode_caller(record.caller)
     return json.dumps(body, separators=(",", ":"), sort_keys=True) + "\n"
 
 

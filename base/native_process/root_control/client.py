@@ -24,6 +24,7 @@ import psutil
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import (
     MAX_MESSAGE_BYTES,
+    STATE_VERBS,
     CallerPayload,
     ProtocolError,
     ResponsePayload,
@@ -31,8 +32,6 @@ from base.native_process.root_control.ipc import (
     parse_response,
     parse_status_response,
 )
-
-_STATE_VERBS = frozenset({"up", "down", "force-down", "restart", "shutdown"})
 
 _DEFAULT_TIMEOUT_S = 30.0
 
@@ -44,7 +43,9 @@ _ARGV_ITEMS = 32
 _ARG_CHARS = 200
 _REDACTED = "<redacted>"
 _SENSITIVE_VALUE_FLAGS = frozenset({"-p", "--password", "--passwd", "--token", "--secret", "--key"})
-_SENSITIVE_FLAG = re.compile(r"^--?[a-z0-9-]*(token|secret|password|passwd|key|credential)", re.I)
+_SENSITIVE_NAME = re.compile(
+    r"^--?[a-z0-9_-]*(?:tokens?|secrets?|passwords?|passwd|keys?|credentials?|dsn)$", re.I
+)
 _SENSITIVE_ENV = re.compile(r"(TOKEN|SECRET|PASSWORD|PASSWD|KEY|CREDENTIAL|BEARER)", re.I)
 
 
@@ -155,13 +156,23 @@ def redacted_argv(argv: list[str]) -> list[str]:
             out.append(arg)
             redact_next = True
             continue
-        if _SENSITIVE_FLAG.match(arg):
-            head, separator, _value = arg.partition("=")
-            out.append(f"{head}={_REDACTED}" if separator else arg)
+        short = _sensitive_short_value(arg)
+        if short is not None:
+            out.append(f"{short}={_REDACTED}")
+            continue
+        flag, separator, _value = arg.partition("=")
+        if _SENSITIVE_NAME.match(flag):
+            out.append(f"{flag}={_REDACTED}" if separator else arg)
             redact_next = not separator
             continue
         out.append(arg)
     return out[:_ARGV_ITEMS]
+
+
+def _sensitive_short_value(arg: str) -> str | None:
+    if len(arg) <= 2 or arg.startswith("--") or not arg.startswith("-"):
+        return None
+    return arg[:2] if arg[:2] in _SENSITIVE_VALUE_FLAGS else None
 
 
 # meiva:note
@@ -194,7 +205,7 @@ class RootClient:
         request: dict[str, object] = {"verb": verb}
         if name is not None:
             request["name"] = name
-        if verb in _STATE_VERBS:
+        if verb in STATE_VERBS:
             request["caller"] = caller_identity()
         raw = self._roundtrip(encode(request), status=verb == "status")
         try:
