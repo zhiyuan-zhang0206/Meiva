@@ -71,6 +71,38 @@ class RootUnitNotRevivable(TypedDict):
     detail: str
 
 
+class RootUnitStopEvent(TypedDict):
+    # meiva:note
+    # A stop exhausted its declared window (task #5318).
+    #
+    # root_unit_stop_escalated: the window expired and root killed the captured
+    # leader group with one SIGKILL. root_unit_stop_aborted: the same expiry, but
+    # root refused to signal because the leader identity was never captured
+    # (identity_unavailable) or no longer matched (identity_changed).
+    # graceful_waited_s is the measured wait; starttime is the leader's native
+    # birth reading when root captured one.
+
+    unit: str
+    generation: int
+    pid: int
+    starttime: int | None
+    graceful_waited_s: float
+    reason: str
+
+
+class RootUnitStopped(TypedDict):
+    # meiva:note
+    # One retained generation stopped inside its window (task #5318).
+    #
+    # INFO, one per successful stop, carrying the measured graceful duration so a
+    # unit whose real stop time approaches its declared window is visible before
+    # it hangs.
+
+    unit: str
+    generation: int
+    stopped_in_s: float
+
+
 class RootDiagnostic(TypedDict):
     """`root_diagnostic` payload — services/supervision/meiva_root_glue/diagnostics.py.
 
@@ -341,6 +373,29 @@ EVENTS: dict[str, EventSpec] = {
         "root unit replacement succeeded — the recorded failure state was cleared (task #4872)",
         payload=RootRestartCleared,
         tier="noise",
+    ),
+    "root_unit_stopped": telemetry_event(
+        "root_unit_stopped",
+        "root unit generation exited inside its stop window — one INFO event per "
+        "successful stop, carrying the measured graceful duration (task #5318)",
+        payload=RootUnitStopped,
+        tier="noise",
+    ),
+    "root_unit_stop_escalated": telemetry_event(
+        "root_unit_stop_escalated",
+        "root unit outlived its declared stop window and root killed its captured leader "
+        "group with one SIGKILL (task #5318)",
+        payload=RootUnitStopEvent,
+        tier="anomaly",
+        site="services/supervision/meiva_root/stopping.py:_emit_stop_event",
+    ),
+    "root_unit_stop_aborted": telemetry_event(
+        "root_unit_stop_aborted",
+        "root unit outlived its declared stop window and root refused to kill it because "
+        "the leader identity was never captured or no longer matched (task #5318)",
+        payload=RootUnitStopEvent,
+        tier="anomaly",
+        site="services/supervision/meiva_root/stopping.py:_emit_stop_event",
     ),
     "root_unit_failure_state": telemetry_event(
         "root_unit_failure_state",
