@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 from base.lm.attach.constants import (
     ATTACH_MAX_FILE_BYTES,
@@ -50,11 +51,10 @@ def _gated(unavailable_reason: str | None) -> frozenset[str]:
     return frozenset() if unavailable_reason is None else frozenset({"meiva.self.attach"})
 
 
-def _current_model() -> str:
-    """The agent's configured model resolved through any withdrawal fallback.
-
-    Capability gates judge the model that will actually run, so a withdrawn id
-    is gated as its fallback (task #3212)."""
+# meiva:note
+# The agent's configured model, resolved through any withdrawal fallback: capability gates
+# judge the model that will actually run, so a withdrawn id is gated as its fallback.
+def current_model() -> str:
     from base.lm.registry import resolve_available_model
     from meiva.sdk_surface import settings as _settings
 
@@ -72,7 +72,7 @@ def _attach_unavailable_reason(model: str | None = None, *, catalog: ModelCatalo
     the member and the call fails with this reason (user ruling 2026-08-28)."""
     from base.lm.registry import attach_modalities_for_model
 
-    model = model or _current_model()
+    model = model or current_model()
     if attach_modalities_for_model(
         model,
         models=catalog.models,
@@ -90,7 +90,7 @@ def _validate_modality(suffix: str) -> None:
     from meiva.sdk_surface import settings as sdk_settings
 
     catalog = sdk_settings.model_catalog()
-    model = _current_model()
+    model = current_model()
     mime = ATTACH_MEDIA_MIME[suffix]
     modality = "pdf" if mime == "application/pdf" else mime.split("/", maxsplit=1)[0]
     allowed = attach_modalities_for_model(
@@ -150,7 +150,8 @@ def register(path: str | Path, *, label: str | None, resolve: Callable[[str | Pa
         raise TypeError(
             f"meiva.state_update must stay a dict, got {type(update).__name__} (attachment)"
         )
-    update[_ATTACH_CHANNEL] = [
-        *update.get(_ATTACH_CHANNEL, []),
+    state = cast("dict[str, Any]", update)
+    state[_ATTACH_CHANNEL] = [
+        *state.get(_ATTACH_CHANNEL, []),
         {"path": str(resolved), "label": label},
     ]

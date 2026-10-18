@@ -465,3 +465,27 @@ def test_user_tone_defaults_are_per_family(*, model_catalog: ModelCatalog) -> No
     for model, spec in model_catalog.models.items():
         expected = False if spec.provider == "claude" else None
         assert spec.tuning.prompt_user_tone_enabled is expected, model
+
+
+def test_sdk_hidden_members_must_be_dotted_paths_under_meiva() -> None:
+    with pytest.raises(RuntimeError, match="sdk_hidden_members"):
+        _validate_with(
+            {"probe": ModelSpec(provider="probe", sdk_hidden_members=frozenset({"self.attach"}))}
+        )
+
+
+def test_sdk_doc_style_must_be_an_identifier() -> None:
+    with pytest.raises(RuntimeError, match="sdk_doc_style"):
+        _validate_with({"probe": ModelSpec(provider="probe", sdk_doc_style="terse/verbose")})
+
+
+def test_sdk_help_fields_accept_a_dotted_path_and_a_style() -> None:
+    _validate_with(
+        {
+            "probe": ModelSpec(
+                provider="probe",
+                sdk_hidden_members=frozenset({"meiva.self.attach"}),
+                sdk_doc_style="terse",
+            )
+        }
+    )
