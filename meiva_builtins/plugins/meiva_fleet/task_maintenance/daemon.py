@@ -218,21 +218,20 @@ def announce_reminder(
 
 def run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: int) -> int:
     """Accept current escalation state atomically, then announce committed work."""
-    from base.events.notifications.notices import deliver_notice_notification_sync
+    from base.events.notifications.publish import announce_sync
     from meiva_builtins.plugins.meiva_fleet.task_maintenance.escalation import accept_escalations
 
     receipts = accept_escalations(pool, escalate_n)
     for receipt in receipts:
-        if receipt.notice_id is not None:
+        if receipt.notification_id is not None:
             # meiva:note
-            # The user leg is an inbox notice, so it also becomes a delivered
-            # notification: the same category, dedupe and live event a
-            # gateway-posted notice gets. Without this, an escalation meant to
+            # The escalation transaction staged the user leg's delivery next to
+            # the notice, so announcing it here can only mark what the commit
+            # already promised: the same category, dedupe and live event a
+            # gateway-posted notice gets. Without it, an escalation meant to
             # reach a human reached only the console inbox.
             # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-            deliver_notice_notification_sync(
-                pool, bus, agent_id=receipt.recipient, notice_id=receipt.notice_id
-            )
+            announce_sync(pool, bus, receipt.notification_id)
         if receipt.inbound_id is not None:
             announce_reminder(db, bus, receipt.recipient, receipt.inbound_id, receipt.content)
         else:

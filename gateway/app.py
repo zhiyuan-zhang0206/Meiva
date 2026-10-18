@@ -17,7 +17,7 @@ from base import paths, telemetry
 from base.api_contracts.agent_contract import MeivaAgentError
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
-from base.config import ConfigBoot, Settings
+from base.config import ConfigBoot, Settings, settings
 from base.config.service_read import ConfigAuthority
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.db_authority.api import AcceptanceCache
@@ -53,6 +53,7 @@ from gateway.cluster.status import StatusCache
 from gateway.events import agent_events as agent_events_router
 from gateway.events import computer_traces as computer_traces_router
 from gateway.events import metrics as metrics_router
+from gateway.events import notification_outbox
 from gateway.events import resolutions as event_resolutions_router
 from gateway.events import router as events_router
 from gateway.events import system as system_router
@@ -308,6 +309,14 @@ async def _background_lifetime(
             auth401_flusher = background.create_task(
                 rejection_log.auth401_flusher(app.state.auth401_log)
             )
+            outbox = background.create_task(
+                notification_outbox.run(
+                    app.state.db_pool,
+                    app.state.bus,
+                    interval_seconds=settings.gateway.notification_outbox_interval_seconds,
+                    batch=settings.gateway.notification_outbox_batch,
+                )
+            )
             upload_recovery.start(background)
             try:
                 if mcp_manager is not None:
@@ -318,6 +327,7 @@ async def _background_lifetime(
             finally:
                 latency_flusher.cancel()
                 auth401_flusher.cancel()
+                outbox.cancel()
                 await upload_recovery.close()
     finally:
         app.state.mcp_manager = None
