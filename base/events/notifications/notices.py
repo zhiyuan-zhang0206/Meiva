@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 
 from psycopg_pool import ConnectionPool
@@ -10,7 +12,14 @@ from base.events.notifications.publish import NotificationRecord, announce, deli
 
 _log = logging.getLogger("base.events.notifications.notices")
 
-_SELECT_NOTICE = "SELECT require_response, title, content FROM agent_notices WHERE id = %s"
+_SELECT_NOTICE = (
+    "SELECT require_response, title, content, question FROM agent_notices WHERE id = %s"
+)
+
+
+def _question_fingerprint(question: object) -> str:
+    payload = json.dumps(question, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()[:12]
 
 
 def _deliver(pool: ConnectionPool, agent_id: int, notice_id: int) -> NotificationRecord | None:
@@ -18,7 +27,7 @@ def _deliver(pool: ConnectionPool, agent_id: int, notice_id: int) -> Notificatio
         row = conn.execute(_SELECT_NOTICE, (notice_id,)).fetchone()
     if row is None:
         return None
-    require_response, title, content = row
+    require_response, title, content, question = row
     if not require_response:
         return None
     return deliver_sync(
@@ -26,7 +35,7 @@ def _deliver(pool: ConnectionPool, agent_id: int, notice_id: int) -> Notificatio
         category_id="core.needs_input",
         subject=title,
         body=content,
-        dedupe_key=f"notice:{notice_id}",
+        dedupe_key=f"notice:{notice_id}:{_question_fingerprint(question)}",
         agent_id=agent_id,
     )
 
@@ -36,8 +45,10 @@ def _deliver(pool: ConnectionPool, agent_id: int, notice_id: int) -> Notificatio
 # commit different payload objects, and the spine is the one owner of "which
 # category a notice becomes". A notice that needs no answer is not a
 # notification — the console inbox already carries it, and a ping the user cannot
-# act on is noise. A delivery failure never fails the notice — the row is already
-# committed by the time this runs.
+# act on is noise. The dedupe key carries the question fingerprint rather than the
+# notice id alone, so editing a container to add a question is a new delivery
+# while a retried post of the same content stays silent. A delivery failure never
+# fails the notice — the row is already committed by the time this runs.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 async def deliver_notice_notification(
     pool: ConnectionPool, bus: EventBus | None, *, agent_id: int, notice_id: int

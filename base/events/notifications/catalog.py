@@ -39,7 +39,7 @@ CORE_CATEGORIES: tuple[NotificationCategory, ...] = (
         label="Agent finished its turn",
         description="An agent settled back to idle after working.",
         importance="normal",
-        default_enabled=True,
+        default_enabled=False,
     ),
     NotificationCategory(
         id="core.needs_input",

@@ -12,6 +12,7 @@ async def test_delivery_records_one_row(aops_pool: Any) -> None:
         category_id="core.turn_finished",
         subject="Agent #1 finished its turn",
         agent_id=1,
+        overrides={"core.turn_finished": True},
     )
     assert record is not None
     assert record.id > 0
@@ -22,9 +23,9 @@ async def test_delivery_records_one_row(aops_pool: Any) -> None:
 async def test_disabled_category_records_nothing(aops_pool: Any) -> None:
     record = await deliver_async(
         aops_pool,
-        category_id="core.turn_finished",
-        subject="Agent #1 finished its turn",
-        overrides={"core.turn_finished": False},
+        category_id="core.needs_input",
+        subject="Agent #1 is waiting on your answer",
+        overrides={"core.needs_input": False},
     )
     assert record is None
 

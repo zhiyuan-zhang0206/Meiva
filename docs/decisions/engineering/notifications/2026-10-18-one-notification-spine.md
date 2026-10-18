@@ -35,10 +35,15 @@ A separate, small delivery spine owns the decision:
   just written; every transport renders it, and a reconnecting client deduplicates
   on `notification_id`.
 
+Defaults follow the same conservative rule: a category that fires on every turn of
+every agent ships switched off (`core.turn_finished`), and a notice delivers again
+when its question changes, because a new question is work for the user right now.
+
 Producers: a hosted turn that ran to completion (`core.turn_finished`, emitted on
 the turn path, not the settlement path that also fires for no-work parks), a
 posted notice that needs an answer (`core.needs_input`, read from the committed
-row and keyed by notice id), and `meiva_fleet.task_closed` through the plugin
+row and keyed by the notice id plus a fingerprint of its question, so adding a
+question delivers again), and `meiva_fleet.task_closed` through the plugin
 endpoint. A notice that needs no answer notifies nobody: the console inbox already
 carries it, and a ping the user cannot act on is noise.
 
