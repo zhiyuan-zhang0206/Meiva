@@ -24,7 +24,7 @@ recorded refusal (`last_admission_outcome` plus a `host_admission_refused`
 event), not a crash. See the shipped follow-up in
 [the unowned-termination decision](../../../docs/decisions/agents/lifecycle/2026-09-29-unowned-termination-resurrects.md).
 A stopping host's release is bounded (`services/agent_runner/agent_host/host.py`,
-`_RELEASE_OWNER_TIMEOUT_S`) so the whole stop fits meiva-root's TERM window; with
+`RELEASE_OWNER_TIMEOUT_S`) so the whole stop fits meiva-root's TERM window; with
 the database unreachable it fails and the leases expire by TTL.
 
 Lease TTL and renewal ordering live in `base/deploy/progress_timeout.py` and
