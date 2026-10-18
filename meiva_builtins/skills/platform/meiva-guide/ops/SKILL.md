@@ -128,9 +128,17 @@ installed on the stopped runner with `meiva cluster db-authority install-unit
 
 A production cluster runs every unit from its own source checkout and is updated
 by stopping every unit, switching every checkout and starting again:
-`python -m cli.fleet_update down` and `up`, attended and idempotent per half (the
-runbook's "Updating a networked cluster in source mode"). A result from anywhere
-else does not replace CI, review or operator authorization for production.
+`python -m cli.fleet_update run` completes that sequence and verifies the cluster.
+Use separate `down` and `up` commands only for intermediate release work or
+recovery; each half is idempotent. See the runbook's "Updating a networked cluster
+in source mode". A result from anywhere else does not replace CI, review or
+operator authorization for production.
+
+A Meiva agent acting as the authorized operator can submit the whole update
+from its own shell to a macOS launchd one-shot, then return so it can drain.
+Read [agent-initiated updates](references/agent-update.md) for the submission,
+logs and recovery procedure. The job runs outside the agent and PTY service;
+the fleet command still refuses direct execution inside an agent's shell.
 
 Related local commands:
 

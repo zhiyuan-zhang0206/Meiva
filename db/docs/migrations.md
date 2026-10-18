@@ -11,9 +11,10 @@ There is no standalone migrate command. Pending migrations are applied as a step
 `meiva start` (early in boot, after Postgres is up and before the schema-current assertion), so
 any restart that crosses a schema change catches the DB up automatically.
 
-Production upgrades run `python -m cli.fleet_update down` and `up` (attended, with
+Production upgrades run `python -m cli.fleet_update run` (attended, with
 user approval; see the runbook's "Updating a networked cluster in source mode"):
 the gateway's cold `meiva start` in the `up` half applies the pending migrations.
+Separate `down` and `up` commands allow intermediate manual release work.
 For a manual catch-up, run `meiva start` directly, which applies pending
 migrations on the way up.
 

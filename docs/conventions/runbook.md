@@ -424,10 +424,24 @@ Merging a PR does not deploy it. `meiva stop` asks for confirmation unless `-y` 
 A cluster whose units span machines, each running from `$HOME/.meiva/source`, is
 updated by stopping every unit, switching every checkout and starting again
 ([decision](../decisions/runtime/updates/release/2026-09-30-networked-cluster-stays-on-source-updates.md)).
-`python -m cli.fleet_update` runs it from the operator's development checkout
-over key-based SSH, in two halves; any manual step the release needs goes in
-between. When the operator's Mac is itself a host, it must be able to `ssh` to
+`python -m cli.fleet_update run` runs the complete update from the operator's
+separate development checkout over key-based SSH. Keep that checkout and its
+venv unchanged until completion. When the operator's Mac is itself a host, it must be able to `ssh` to
 itself (its own public key in its own `authorized_keys`):
+
+```bash
+.venv/bin/python -m cli.fleet_update run --new NEW_SHA \
+  --gateway GATEWAY --runner RUNNER [--runner ...] --log-dir DIR
+```
+
+`run` accepts both halves' flags, executes `down` then `up` in one log and stops
+at the first failure. It reports the failed half to repair and rerun; a failed
+`down` never enters `up`. `run --dry-run` previews both halves. An authorized
+Meiva operator agent submits the command to an external OS-owned job and returns
+so it can drain; see the [launchd submission and result procedure](../../meiva_builtins/skills/platform/meiva-guide/ops/references/agent-update.md).
+
+When the release needs intermediate manual work, or when recovering a failed
+half, use the separate commands:
 
 ```bash
 .venv/bin/python -m cli.fleet_update down --new NEW_SHA \

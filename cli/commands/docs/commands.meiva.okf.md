@@ -101,9 +101,10 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 - What `meiva start` treats as already-up, what it waits for, and when an unready
   service becomes exit code 4 are one subject, in
   [[cli/commands/lifecycle/docs/start-readiness.meiva.okf.md]].
-- A fleet update is `python -m cli.fleet_update` (`cli/fleet_update.py`): a down
-  script and an up script per unit, gated by the code version. There are no
-  updater shell chains or bootstrap/continuation commands.
+- A fleet update is `python -m cli.fleet_update run` (`cli/fleet_update.py`):
+  one invocation stops, switches, starts and verifies all listed units. Separate
+  `down` and `up` commands support manual release work and recovery; see
+  [[cli/docs/fleet-update.meiva.okf.md]].
 - Host-level Application Firewall and Redis bridge wiring are one subject:
   [[cli/commands/converge/docs/converge-host-wiring.meiva.okf.md]].
 - Explicit editable-install inspection and write-window primitives are described
