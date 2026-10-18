@@ -192,6 +192,31 @@ def test_installed_program_without_home_publishes_and_creates_only_that_home(
     assert _ledger_names(tmp_path) == {f"gemini-{skill}.json" for skill in PUBLISHED_SKILLS}
 
 
+def test_program_only_presence_creates_a_nested_home_with_its_parents(
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+) -> None:
+    repo = _repo(tmp_path)
+    home = _home(tmp_path)
+    context = _ctx(
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
+    agy = replace(context, host=fake_host(programs={"agy": "/usr/bin/agy"}))
+
+    bridge.converge_external_agent_skill(agy, host_home=home)
+
+    assert [path.name for path in home.iterdir()] == [".gemini"]
+    for skill in PUBLISHED_SKILLS:
+        assert (home / ".gemini" / "antigravity-cli" / "skills" / skill / MARKER_NAME).is_file()
+
+
 def test_second_converge_is_byte_and_timestamp_idempotent_for_new_clients(
     tmp_path: Path,
     operator_database: Callable[[], Any],
