@@ -375,7 +375,10 @@ def _spawn_with_label(
     Args:
         prompt: the first message — make it self-contained, the new agent has
             no context about why you spawned it. Omit to leave it idling.
-        fork_from: copy that agent's conversation state into the new one.
+        fork_from: copy that agent's conversation state into the new one. A fork taken while that
+            agent is inside a tool call carries the call without its result: the new agent sees it
+            as already interrupted, not as work still running, so it checks whether the call
+            already took effect instead of repeating it.
         machine: defaults to your own.
         config_overlay: per-agent settings overlay, e.g. {"llm_model": ...};
             a preset is named inside it as {"preset": "name"}.
