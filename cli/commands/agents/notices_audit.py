@@ -6,20 +6,29 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta, tzinfo
+from typing import Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import psycopg
+
 from base.agents.context.clients import DatabaseFactory
-from base.events.notifications.catalog import NotificationCategory, core_catalog
+from base.events.notifications.catalog import (
+    CORE_CATEGORIES,
+    NotificationCategory,
+    category_from_manifest,
+    merge_catalog,
+)
 from base.events.notifications.notices import notice_dedupe_key
 from base.events.notifications.policy import SuppressionReason, decide
 from base.events.notifications.store import read_overrides_sync
-
-MODELLED_CATEGORIES: tuple[str, ...] = ("core.needs_input", "core.turn_finished")
+from base.packages.plugins import enable_config
+from base.packages.plugins.manifest import load_manifest
 
 _CLEAN_HALT_BODIES: tuple[str, ...] = ("no tool_call (idle)", "system_halt (compact)")
 
@@ -40,14 +49,15 @@ SELECT id, agent_id, created_at, updated_at, question
  ORDER BY created_at, id
 """
 
-_SIMULATED_SWITCHES: tuple[str, ...] = ("turn_finished", "requestion")
+_TASK_CLOSED_SQL = """
+SELECT id, owner, updated_at
+  FROM agent_tasks
+ WHERE status = 'done'
+   AND updated_at >= %s AND updated_at < %s
+ ORDER BY updated_at, id
+"""
 
-_SOURCES: dict[str, str] = {
-    "core.needs_input": "core.needs_input    agent_notices (require_response post and edit)",
-    "core.turn_finished": (
-        "core.turn_finished  telemetry_events 'halt' (a turn that ended cleanly)"
-    ),
-}
+_SIMULATED_SWITCHES: tuple[str, ...] = ("turn_finished", "requestion")
 
 
 @dataclass(frozen=True)
@@ -82,6 +92,96 @@ def notice_key(notice_id: int, question: object, *, requestion: bool) -> str:
     if requestion:
         return notice_dedupe_key(notice_id, question)
     return f"notice:{notice_id}"
+
+
+@dataclass(frozen=True)
+class _Query:
+    start: datetime
+    end: datetime
+    requestion: bool
+
+
+def _load_turn_finished(cur: psycopg.Cursor[Any], query: _Query) -> list[Candidate]:
+    cur.execute(_TURN_FINISHED_SQL, (list(_CLEAN_HALT_BODIES), query.start, query.end))
+    return [
+        Candidate("core.turn_finished", at, int(agent_id or 0), None)
+        for at, agent_id in cur.fetchall()
+    ]
+
+
+def _load_needs_input(cur: psycopg.Cursor[Any], query: _Query) -> list[Candidate]:
+    cur.execute(_NEEDS_INPUT_SQL, (query.start, query.end, query.start, query.end))
+    found: list[Candidate] = []
+    for notice_id, agent_id, created_at, updated_at, question in cur.fetchall():
+        found.extend(
+            notice_candidates(
+                notice_id=int(notice_id),
+                agent_id=int(agent_id),
+                created_at=created_at,
+                updated_at=updated_at,
+                question=question,
+                start=query.start,
+                end=query.end,
+                requestion=query.requestion,
+            )
+        )
+    return found
+
+
+# meiva:note
+# `meiva_fleet` delivers `task_closed` from the task update path once a task reaches
+# `done`, keyed by task id. `agent_tasks.updated_at` is the close stamp for a task
+# that has not been touched since; a later edit moves that stamp, so this counts
+# closes that are still the row's last change.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def _load_task_closed(cur: psycopg.Cursor[Any], query: _Query) -> list[Candidate]:
+    cur.execute(_TASK_CLOSED_SQL, (query.start, query.end))
+    return [
+        Candidate("meiva_fleet.task_closed", at, int(owner or 0), f"task:{task_id}:closed")
+        for task_id, owner, at in cur.fetchall()
+    ]
+
+
+@dataclass(frozen=True)
+class _Source:
+    category: str
+    origin: str
+    load: Callable[[psycopg.Cursor[Any], _Query], list[Candidate]]
+
+
+_SOURCES: tuple[_Source, ...] = (
+    _Source(
+        "core.needs_input",
+        "agent_notices (require_response post and edit)",
+        _load_needs_input,
+    ),
+    _Source(
+        "core.turn_finished",
+        "telemetry_events 'halt' (a turn that ended cleanly)",
+        _load_turn_finished,
+    ),
+    _Source(
+        "meiva_fleet.task_closed",
+        "agent_tasks (a task that reached done)",
+        _load_task_closed,
+    ),
+)
+
+MODELLED_CATEGORIES: tuple[str, ...] = tuple(source.category for source in _SOURCES)
+
+
+def declared_catalog() -> dict[str, NotificationCategory]:
+    installed = enable_config.installed_plugin_dirs()
+    config = enable_config.load_for_runtime(set(installed))
+    groups: list[list[NotificationCategory]] = [list(CORE_CATEGORIES)]
+    for name in sorted(installed):
+        entry = config.plugins.get(name)
+        if entry is None or not entry.enabled:
+            continue
+        manifest = load_manifest(installed[name])
+        declared = cast(list[dict[str, Any]], manifest.contributions.get("notifications") or [])
+        groups.append([category_from_manifest(item, plugin=name) for item in declared])
+    return merge_catalog(groups)
 
 
 def replay(
@@ -123,29 +223,12 @@ def load_candidates(
     requestion: bool,
 ) -> list[Candidate]:
     wanted = set(categories)
+    query = _Query(start=start, end=end, requestion=requestion)
     found: list[Candidate] = []
     with database_factory().connect(autocommit=True) as conn, conn.cursor() as cur:
-        if "core.turn_finished" in wanted:
-            cur.execute(_TURN_FINISHED_SQL, (list(_CLEAN_HALT_BODIES), start, end))
-            found.extend(
-                Candidate("core.turn_finished", at, int(agent_id or 0), None)
-                for at, agent_id in cur.fetchall()
-            )
-        if "core.needs_input" in wanted:
-            cur.execute(_NEEDS_INPUT_SQL, (start, end, start, end))
-            for notice_id, agent_id, created_at, updated_at, question in cur.fetchall():
-                found.extend(
-                    notice_candidates(
-                        notice_id=int(notice_id),
-                        agent_id=int(agent_id),
-                        created_at=created_at,
-                        updated_at=updated_at,
-                        question=question,
-                        start=start,
-                        end=end,
-                        requestion=requestion,
-                    )
-                )
+        for source in _SOURCES:
+            if source.category in wanted:
+                found.extend(source.load(cur, query))
     return found
 
 
@@ -261,7 +344,7 @@ def parse_simulation(spec: str) -> tuple[str, bool]:
 
 
 @dataclass(frozen=True)
-class _Window:
+class Window:
     start: datetime
     end: datetime
     days: int
@@ -269,12 +352,12 @@ class _Window:
     label: str
 
 
-def _window(*, days: int, tz_name: str | None, now: datetime | None) -> _Window:
+def window_for(*, days: int, tz_name: str | None, now: datetime | None) -> Window:
     if days < 1:
         raise ValueError("--days must be at least 1")
     tz, label = _zone(tz_name)
     end = now or datetime.now(UTC)
-    return _Window(start=end - timedelta(days=days), end=end, days=days, tz=tz, label=label)
+    return Window(start=end - timedelta(days=days), end=end, days=days, tz=tz, label=label)
 
 
 def _selection(
@@ -298,7 +381,7 @@ def _variants(
     *,
     simulations: Sequence[tuple[str, bool]],
     selected: Sequence[str],
-    window: _Window,
+    window: Window,
     database_factory: DatabaseFactory,
     catalog: Mapping[str, NotificationCategory],
     overrides: Mapping[str, bool],
@@ -324,47 +407,102 @@ def _variants(
     return variants
 
 
-def _per_day_section(
+def build_report(
     *,
-    window: _Window,
+    window: Window,
     categories: Sequence[NotificationCategory],
+    switches: Mapping[str, bool],
     baseline: Replay,
-) -> tuple[list[str], Counter[str]]:
-    table: list[list[object]] = [["day", *(category.id for category in categories), "total"]]
+    variants: Sequence[tuple[str, Replay]],
+) -> dict[str, Any]:
     totals: Counter[str] = Counter()
+    per_day_rows: list[dict[str, Any]] = []
     for day, counts in per_day(
         baseline.delivered, start=window.start, end=window.end, tz=window.tz
     ):
         totals.update(counts)
-        table.append([day.isoformat(), *(counts[c.id] for c in categories), sum(counts.values())])
-    table.append(["total", *(totals[c.id] for c in categories), sum(totals.values())])
-    lines = ["", "Deliveries per day", *_table(table[0], table[1:])]
-    return lines, totals
+        per_day_rows.append(
+            {
+                "day": day.isoformat(),
+                "by_category": {category.id: counts[category.id] for category in categories},
+                "total": sum(counts.values()),
+            }
+        )
+    candidates_rows: list[dict[str, Any]] = []
+    for category in categories:
+        delivered = [c for c in baseline.delivered if c.category == category.id]
+        keys = {c.dedupe_key for c in delivered if c.dedupe_key is not None}
+        candidates_rows.append(
+            {
+                "category": category.id,
+                "candidates": len(delivered) + baseline.suppressed(category.id),
+                "delivered": len(delivered),
+                "suppressed": baseline.suppressed(category.id),
+                "repeat_deliveries": len(delivered) - len(keys),
+            }
+        )
+    base_total = len(baseline.delivered)
+    origins = {source.category: source.origin for source in _SOURCES}
+    return {
+        "window": {
+            "start": window.start.isoformat(),
+            "end": window.end.isoformat(),
+            "days": window.days,
+            "timezone": window.label,
+        },
+        "switches": dict(switches),
+        "categories": [category.id for category in categories],
+        "sources": {category.id: origins[category.id] for category in categories},
+        "delivered": {
+            "total": base_total,
+            "per_day": per_day_rows,
+            "per_category": {category.id: totals[category.id] for category in categories},
+            "per_hour": per_hour(baseline.delivered, tz=window.tz),
+        },
+        "candidates": candidates_rows,
+        "simulations": [
+            {
+                "variant": name,
+                "delivered": len(result.delivered),
+                "delta": len(result.delivered) - base_total,
+                "per_day": round(len(result.delivered) / window.days, 3),
+            }
+            for name, result in variants
+        ],
+    }
 
 
-def _per_category_section(
-    *, categories: Sequence[NotificationCategory], totals: Counter[str]
-) -> list[str]:
-    grand_total = sum(totals.values()) or 1
+def _per_day_section(report: Mapping[str, Any]) -> list[str]:
+    categories = cast(list[str], report["categories"])
+    rows: list[list[object]] = [["day", *categories, "total"]]
+    totals: Counter[str] = Counter()
+    for row in cast(list[dict[str, Any]], report["delivered"]["per_day"]):
+        counts = cast(dict[str, int], row["by_category"])
+        totals.update(counts)
+        rows.append([row["day"], *(counts[name] for name in categories), row["total"]])
+    rows.append(["total", *(totals[name] for name in categories), sum(totals.values())])
+    return ["", "Deliveries per day", *_table(rows[0], rows[1:])]
+
+
+def _per_category_section(report: Mapping[str, Any]) -> list[str]:
+    delivered = cast(dict[str, int], report["delivered"]["per_category"])
+    grand_total = sum(delivered.values()) or 1
     return [
         "",
         "Per category",
         *_table(
             ["category", "delivered", "share"],
-            [
-                [category.id, totals[category.id], f"{totals[category.id] / grand_total:.1%}"]
-                for category in categories
-            ],
+            [[name, count, f"{count / grand_total:.1%}"] for name, count in delivered.items()],
         ),
     ]
 
 
-def _per_hour_section(*, window: _Window, baseline: Replay) -> list[str]:
-    hours = per_hour(baseline.delivered, tz=window.tz)
+def _per_hour_section(report: Mapping[str, Any]) -> list[str]:
+    hours = cast(list[int], report["delivered"]["per_hour"])
     peak = max(hours) if hours else 0
     return [
         "",
-        f"Per hour ({window.label})",
+        f"Per hour ({report['window']['timezone']})",
         *_table(
             ["hour", "count", ""],
             [[f"{hour:02d}", count, _bar(count, peak)] for hour, count in enumerate(hours)],
@@ -372,80 +510,74 @@ def _per_hour_section(*, window: _Window, baseline: Replay) -> list[str]:
     ]
 
 
-def _suppression_section(
-    *, categories: Sequence[NotificationCategory], baseline: Replay
-) -> list[str]:
-    rows: list[list[object]] = []
-    for category in categories:
-        delivered = [c for c in baseline.delivered if c.category == category.id]
-        keys = {c.dedupe_key for c in delivered if c.dedupe_key is not None}
-        rows.append(
-            [
-                category.id,
-                len(delivered) + baseline.suppressed(category.id),
-                len(delivered),
-                baseline.suppressed(category.id),
-                len(delivered) - len(keys),
-            ]
-        )
+def _candidates_section(report: Mapping[str, Any]) -> list[str]:
+    rows = cast(list[dict[str, Any]], report["candidates"])
     return [
         "",
         "Candidates and suppression",
-        *_table(["category", "candidates", "delivered", "suppressed", "repeat deliveries"], rows),
+        *_table(
+            ["category", "candidates", "delivered", "suppressed", "repeat deliveries"],
+            [
+                [
+                    row["category"],
+                    row["candidates"],
+                    row["delivered"],
+                    row["suppressed"],
+                    row["repeat_deliveries"],
+                ]
+                for row in rows
+            ],
+        ),
     ]
 
 
-def _simulation_section(
-    *, variants: Sequence[tuple[str, Replay]], baseline: Replay, days: int
-) -> list[str]:
-    base_total = len(baseline.delivered)
-    rows = [
-        [
-            name,
-            len(result.delivered),
-            f"{len(result.delivered) - base_total:+d}",
-            f"{len(result.delivered) / days:.1f}",
-        ]
-        for name, result in variants
-    ]
+def _simulation_section(report: Mapping[str, Any]) -> list[str]:
+    rows = cast(list[dict[str, Any]], report["simulations"])
     return [
         "",
         "Simulations (one flipped input at a time, against the configured baseline)",
-        *_table(["variant", "delivered", "delta", "per day"], rows),
+        *_table(
+            ["variant", "delivered", "delta", "per day"],
+            [
+                [row["variant"], row["delivered"], f"{row['delta']:+d}", f"{row['per_day']:.1f}"]
+                for row in rows
+            ],
+        ),
     ]
 
 
-def _source_lines(categories: Sequence[NotificationCategory]) -> list[str]:
-    entries = [_SOURCES[category.id] for category in categories]
-    return [f"sources   {entries[0]}", *(f"          {entry}" for entry in entries[1:])]
-
-
-def render(
-    *,
-    window: _Window,
-    categories: Sequence[NotificationCategory],
-    switches: Mapping[str, bool],
-    baseline: Replay,
-    variants: Sequence[tuple[str, Replay]],
-) -> list[str]:
+def render_text(report: Mapping[str, Any], *, tz: tzinfo) -> list[str]:
+    window = cast(dict[str, Any], report["window"])
     stamp = "%Y-%m-%d %H:%M"
-    per_day_lines, totals = _per_day_section(
-        window=window, categories=categories, baseline=baseline
-    )
+    start = datetime.fromisoformat(cast(str, window["start"])).astimezone(tz)
+    end = datetime.fromisoformat(cast(str, window["end"])).astimezone(tz)
     return [
-        f"Notification audit — {window.days} day{'' if window.days == 1 else 's'} ending "
-        f"{window.end.astimezone(window.tz):{stamp}} {window.label}",
-        f"window    {window.start.astimezone(window.tz):{stamp}}"
-        f" .. {window.end.astimezone(window.tz):{stamp}}",
-        *_source_lines(categories),
+        f"Notification audit — {window['days']} day{'' if window['days'] == 1 else 's'} "
+        f"ending {end:{stamp}} {window['timezone']}",
+        f"window    {start:{stamp}} .. {end:{stamp}}",
+        *_source_lines(cast(dict[str, str], report["sources"])),
         "switches  "
-        + "  ".join(f"{name}={_on_off(value=value)}" for name, value in switches.items()),
-        *per_day_lines,
-        *_per_category_section(categories=categories, totals=totals),
-        *_per_hour_section(window=window, baseline=baseline),
-        *_suppression_section(categories=categories, baseline=baseline),
-        *_simulation_section(variants=variants, baseline=baseline, days=window.days),
+        + "  ".join(
+            f"{name}={_on_off(value=value)}"
+            for name, value in cast(dict[str, bool], report["switches"]).items()
+        ),
+        *_per_day_section(report),
+        *_per_category_section(report),
+        *_per_hour_section(report),
+        *_candidates_section(report),
+        *_simulation_section(report),
     ]
+
+
+def _source_lines(sources: Mapping[str, str]) -> list[str]:
+    entries = list(sources.items())
+    width = max(len(name) for name in sources)
+    head = f"sources   {entries[0][0].ljust(width)}  {entries[0][1]}"
+    return [head, *(f"          {name.ljust(width)}  {origin}" for name, origin in entries[1:])]
+
+
+def render_json(report: Mapping[str, Any]) -> str:
+    return json.dumps(report, indent=2, sort_keys=False)
 
 
 def _on_off(*, value: bool) -> str:
@@ -460,15 +592,20 @@ def cmd_notices_audit(
     tz_name: str | None,
     now: datetime | None,
     simulate: Sequence[str],
+    out: str = "text",
 ) -> int:
     try:
-        window = _window(days=days, tz_name=tz_name, now=now)
+        window = window_for(days=days, tz_name=tz_name, now=now)
         selected, simulations = _selection(category=category, simulate=simulate)
     except ValueError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
         return 2
 
-    catalog = core_catalog()
+    catalog = declared_catalog()
+    missing = [name for name in selected if name not in catalog]
+    if missing:
+        print(f"meiva: category not declared by any plugin: {missing[0]}", file=sys.stderr)
+        return 2
     declared = [catalog[name] for name in selected]
     overrides = read_overrides_sync(database_factory().pool())
     candidates = load_candidates(
@@ -479,7 +616,7 @@ def cmd_notices_audit(
         requestion=True,
     )
     baseline = replay(candidates, categories=catalog, switches=overrides)
-    lines = render(
+    report = build_report(
         window=window,
         categories=declared,
         switches=effective_switches(declared, overrides),
@@ -495,5 +632,8 @@ def cmd_notices_audit(
             baseline=baseline,
         ),
     )
-    print("\n".join(lines))
+    if out == "json":
+        print(render_json(report))
+    else:
+        print("\n".join(render_text(report, tz=window.tz)))
     return 0

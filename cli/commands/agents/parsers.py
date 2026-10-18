@@ -160,6 +160,7 @@ def _h_notices_audit(args: argparse.Namespace) -> int:
         tz_name=args.tz,
         now=args.now,
         simulate=args.simulate or (),
+        out=args.out,
     )
 
 
@@ -312,7 +313,10 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         agents_terminate_p,
         agents_kill_p,
     )
+    _add_notices_parsers(sub)
 
+
+def _add_notices_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     notices_p = sub.add_parser(
         "notices",
         help="inspect and resolve the agent notification queue (Task #949)",
@@ -367,6 +371,12 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     )
     notices_audit_p.add_argument(
         "--now", type=_instant, default=None, help="window end as an ISO instant (default: now)"
+    )
+    notices_audit_p.add_argument(
+        "--out",
+        choices=("text", "json"),
+        default="text",
+        help="text for the operator table, json for another tool",
     )
     notices_audit_p.add_argument(
         "--simulate",
