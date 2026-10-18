@@ -115,6 +115,7 @@ class SkillRecallHook(Hook):
                     agent=agent,
                     catalog=catalog,
                     agent_id=agent_id_from_config(config),
+                    peer_turn=not tail_has_skill_recall_inbound(state.messages),
                 ),
                 timeout=deadline,
             )
