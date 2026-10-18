@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
@@ -26,11 +26,12 @@ def parse_overrides(value: Any) -> dict[str, bool]:
         return {}
     if not isinstance(value, dict):
         raise TypeError(f"{SETTINGS_KEY} must be a JSON object")
+    entries = cast("dict[str, object]", value)
     switches: dict[str, bool] = {}
-    for key, switch in value.items():
-        if not isinstance(switch, bool):
+    for key, item in entries.items():
+        if not isinstance(item, bool):
             raise TypeError(f"{SETTINGS_KEY}.{key} must be a bool")
-        switches[str(key)] = switch
+        switches[key] = item
     return switches
 
 
