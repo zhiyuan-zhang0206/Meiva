@@ -69,14 +69,6 @@ fixture/incident scope.
 - **last-verified**: 2026-10-19
 
 
-### boundary:checkpoint-postgres-historical-walk-patch
-- **class**: boundary
-- **status**: open
-- **evidence**: Re-verified 2026-10-19 at main@aa53f847. `base/agents/history/checkpoint_postgres_walks.py:69:CheckpointWalks` still overrides private `BasePostgresSaver._try_advance_walks`, and `:41:validate_checkpoint_postgres_api` still refuses any `langgraph-checkpoint-postgres` other than 3.1.2 and re-checks the method identity and parameter list (`:26:_EXPECTED_PARAMETERS`). Four production sites construct the adapters: `base/agents/history/checkpoint.py`, `checkpoint_segment.py`, `services/agent_runner/agent_host/invocation/compact/checkpoint.py` and `agent_host/pooled_checkpoint.py`. The upstream condition this entry waited on is now met: langgraph#8556 ("fix(checkpoint-postgres): derive the delta walk cursor once the target loads") merged 2026-09-30 and appears in the `checkpointpostgres==3.1.3` release notes, 3.2.0 is current, and `uv pip list --outdated` at main@aa53f847 reports 3.1.2 -> 3.2.0. The previous evidence's "langgraph#8448" is not a langgraph pull request (the API answers 404); the landed fix is #8556. Remaining work, in this order: raise the pin past the version guard, run `base/agents/history/tests/test_checkpoint_postgres_walks.py`, delete the pagination override, and keep the message-reset suffix reader until upstream supports that boundary. 405 tracks the follow-up.
-- **first-seen**: 2026-09-23 (PR for task #4518)
-- **last-verified**: 2026-10-19
-
-
 ### boundary:exec-node-runner-test-seam
 - **class**: boundary
 - **status**: open
@@ -108,6 +100,20 @@ fixture/incident scope.
 - **first-seen**: 2026-09-21
 - **last-verified**: 2026-10-19
 
+
+### docs-aging:agent/startup/__init__.py:wrap_saver_writes_with_nstep_interval
+- **class**: docs-aging
+- **status**: open
+- **evidence**: the docstring at `agent/startup/__init__.py:219` says a delta fold "within one checkpoint ... sorts by opaque task-id hash". Since checkpoint-postgres 3.1.3 (PR #6295) the fold orders one checkpoint's writes by `writes_sort_key` = (`task_path`, `task_id`, `idx`), and `base/agents/history/checkpoint_postgres_walks.py` uses that order for its reset cut. The conclusion the sentence supports (a skipped or re-homed batch scrambles the replay) still holds, so this is wording, not a behaviour defect. Not fixed in #6295: the docstring is unchanged legacy prose, and any edit to it trips the `check-code-comments` free-comment gate, which would force the whole 50-line explanation into `meiva:note` blocks.
+- **first-seen**: 2026-10-19 (PR #6295)
+- **last-verified**: 2026-10-19
+
+### docs-aging:future/infra/data/checkpoint-storage-rebuild.md:appendix-a-drill-assets
+- **class**: docs-aging
+- **status**: open
+- **evidence**: Appendix A of `future/infra/data/checkpoint-storage-rebuild.md` records the pre-cutover drill suite — behavioral matrix, crash replay, production-clone fingerprint subset — as living "with the author (#6095)", never in the repository. `~/.meiva/workspaces/6095` no longer exists on macmini and the 3180 workspace is empty, so no later version move can rerun that gate as specified: the 3.1.3 move (PR #6295) could only be checked by a reconstructed behavioural matrix. The doc now carries a dated note; the remaining repair is to keep verification assets with the decision that defines them (or name a durable location) the next time such a gate is written.
+- **first-seen**: 2026-10-19 (PR #6295)
+- **last-verified**: 2026-10-19
 
 ## Wontfix
 
