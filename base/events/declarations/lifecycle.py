@@ -132,4 +132,10 @@ EVENTS: dict[str, EventSpec] = {
         "RedisInboundListener wake path recovered (clean consume restored instant wake)",
         tier="noise",
     ),
+    "launch_failures": telemetry_event(
+        "launch_failures",
+        "this start could not read the launch-failure report, so the unlaunched sessions it "
+        "recorded stay unreported to the rollout aftermath block",
+        tier="anomaly",
+    ),
 }

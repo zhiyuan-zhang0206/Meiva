@@ -13,6 +13,7 @@ HTTP boundary — kept together so the lifecycle reads in one place.
 
 from __future__ import annotations
 
+import json
 from itertools import count
 from typing import Any
 
@@ -22,7 +23,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from base.db import Database
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, event_bus_config_from_settings
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import escalation
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_escalate
 
@@ -53,7 +54,7 @@ def make_agent(db: psycopg.Connection) -> int:
 def make_task(
     db: psycopg.Connection,
     *,
-    owner: int,
+    owner: int | None,
     parent_id: int | None = None,
     remind_interval_seconds: int | None = 1800,
     updated_s_ago: float = 0.0,
@@ -99,6 +100,47 @@ def stalled_subtask(db: psycopg.Connection, *, reminder_count: int = 3) -> tuple
         reminder_count=reminder_count,
     )
     return parent_owner, owner, tid
+
+
+# meiva:note
+# A stalled top-level task: (owner, task_id, parent_id). Its parent has no owner,
+# which is the real shape of the user leg — a top-level task descends from the
+# ownerless system root, so no delegating agent exists to catch the stall and
+# the user is told instead.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def human_leg_subtask(db: psycopg.Connection, *, reminder_count: int = 3) -> tuple[int, int, int]:
+    parent = make_task(db, owner=None, remind_interval_seconds=None)
+    owner = make_agent(db)
+    tid = make_task(
+        db,
+        owner=owner,
+        parent_id=parent,
+        remind_interval_seconds=1800,
+        updated_s_ago=7200,
+        reminder_count=reminder_count,
+    )
+    return owner, tid, parent
+
+
+def inbox_notices(db: psycopg.Connection, agent_id: int) -> list[tuple[str, bool]]:
+    db.rollback()
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT title, require_response FROM agent_notices "
+            "WHERE agent_id = %s AND resolved_at IS NULL ORDER BY id",
+            (agent_id,),
+        )
+        return cur.fetchall()
+
+
+def notifications(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str]]:
+    db.rollback()
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT category, subject FROM notification_events WHERE agent_id = %s ORDER BY id",
+            (agent_id,),
+        )
+        return cur.fetchall()
 
 
 def inbound_messages(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
@@ -198,3 +240,104 @@ def test_delegator_escalation_rearms_after_owner_update(
     db_conn.commit()
     assert run_escalate(pool, database, event_bus, 3) == 1
     assert len(inbound_messages(db_conn, parent_owner)) == 2
+
+
+# meiva:note
+# An `EventBus` whose publication is observed instead of sent. `drop` is the
+# Redis outage the transport already models: `publish_best_effort_sync` reports
+# the publication as failed by returning None. The producer must neither record
+# that as delivered nor lose the notice.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+class _RecordingBus(EventBus):
+    def __init__(self) -> None:
+        super().__init__(event_bus_config_from_settings())
+        self.events: list[dict[str, Any]] = []
+        self.drop = False
+
+    def publish_best_effort_sync(
+        self,
+        payload: str,
+        *,
+        channel: str | None = None,
+        decode_responses: bool = True,
+        context: str = "",
+    ) -> int | None:
+        del channel, decode_responses, context
+        if self.drop:
+            return None
+        self.events.append(json.loads(payload))
+        return 1
+
+    def notifications(self) -> list[dict[str, Any]]:
+        return [event for event in self.events if event.get("role") == "notification"]
+
+
+def test_user_escalation_delivers_a_needs_input_notification(
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+) -> None:
+    # meiva:note
+    # A stalled top-level task escalates to the user through the notification
+    # spine, not straight into the inbox: one `core.needs_input` delivery row and
+    # one live `notification` event, next to the inbox notice that was already
+    # there. The defect: the escalation wrote `agent_notices` and published only
+    # an `agent_updated` console refresh, so it never reached a phone or the Mac.
+    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+    owner, tid, _parent = human_leg_subtask(db_conn)
+    live = _RecordingBus()
+
+    assert run_escalate(pool, database, live, 3) == 1
+
+    notices = inbox_notices(db_conn, owner)
+    assert [require_response for _title, require_response in notices] == [True]
+    title = notices[0][0]
+    assert f"#{tid}" in title
+    assert notifications(db_conn, owner) == [("core.needs_input", title)]
+    delivered = live.notifications()
+    assert len(delivered) == 1
+    assert delivered[0]["category"] == "core.needs_input"
+    assert delivered[0]["subject"] == title
+    assert delivered[0]["agent_id"] == owner
+
+
+def test_user_escalation_survives_a_lost_announce(
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+) -> None:
+    # meiva:note
+    # A Redis outage costs the live push, never the escalation: the inbox notice
+    # and the delivery row are committed before anything is announced.
+    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+    owner, _tid, _parent = human_leg_subtask(db_conn)
+    live = _RecordingBus()
+    live.drop = True
+
+    assert run_escalate(pool, database, live, 3) == 1
+
+    assert len(inbox_notices(db_conn, owner)) == 1
+    assert [category for category, _subject in notifications(db_conn, owner)] == [
+        "core.needs_input"
+    ]
+    assert live.notifications() == []
+
+
+def test_delegator_escalation_is_not_a_user_notification(
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    # meiva:note
+    # The delegator leg stays an agent note: telling an agent about a stalled
+    # subtask must not ping the user. The real bus is requested because that leg
+    # also opens the owner's inbound wake directly.
+    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+    parent_owner, owner, _tid = stalled_subtask(db_conn)
+
+    assert run_escalate(pool, database, event_bus, 3) == 1
+
+    assert len(inbound_messages(db_conn, parent_owner)) == 1
+    assert notifications(db_conn, owner) == []
+    assert notifications(db_conn, parent_owner) == []

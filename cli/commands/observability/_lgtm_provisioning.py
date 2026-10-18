@@ -11,6 +11,7 @@ import httpx
 
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
+from base.log import logger
 from base.telemetry import EventPipeline
 from cli.commands.converge.rendered_file import write_rendered_guarded
 
@@ -128,9 +129,22 @@ def _usable_reference(reference: Path, *, error: str, producer: Callable[[], Eve
 def dashboard_document(path: Path) -> dict[str, Any]:
     try:
         document: object = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "dashboard {path} could not be read ({err}); it is not provisioned this pass",
+            path=str(path),
+            err=repr(exc),
+            event="lgtm_dashboard",
+        )
         return {}
-    return cast("dict[str, Any]", document) if isinstance(document, dict) else {}
+    if not isinstance(document, dict):
+        logger.warning(
+            "dashboard {path} is not a JSON object; it is not provisioned this pass",
+            path=str(path),
+            event="lgtm_dashboard",
+        )
+        return {}
+    return cast("dict[str, Any]", document)
 
 
 def dashboard_uid(path: Path) -> str:

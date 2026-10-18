@@ -127,6 +127,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `skill_recall` | skill recall | noise | candidates, offered | — | events | ✓ |
 | `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events | — |
 | `last_msg` | last-message check | noise | — | — | events | — |
+| `pty_transcript` | a pty session's transcript append failed (full disk, closed fd); the session keeps running with an incomplete transcript | anomaly | — | — | events | — |
 | `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to | — | events | — |
 | `inbound_consumed_unknown` | a claimed inbound was consumed without knowing whether its work ran (host crash / aborted turn); the row is marked in its payload and is never redelivered — this event is the only record of what was lost | anomaly | inbound_id, kind, age_s, content_preview | — | events | ✓ |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events | ✓ |
@@ -158,6 +159,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `upload_delivery_held` | a delivered upload batch was held after a permanent copy failure or its last copy attempt; nothing retries it and the person has to upload again | anomaly | agent_id, batch_id, reason | — | events | — |
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events | — |
 | `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events | — |
+| `memory_search_rerank` | memory-search rerank skipped candidate notes it could not read; they are ranked out of this search | anomaly | — | — | events | — |
 | `native_compact_proof_gap` | the actual serialized host could not establish compact source or uncertainty closure; pending intent remains held, carrying agent_id and bounded error_type without payload | anomaly | — | — | events | — |
 | `impersonation_event_log_incomplete` | an impersonation event log cannot complete on its own (ended lease with an open source, or a failed capture source); re-emitted every reaper pass while it holds | anomaly | condition, lease_id, lease_machine, pending_reason, session | — | events | — |
 | `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events | — |
@@ -198,6 +200,8 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `pause_orphan_claim_settled` | preparation consumed (marked done, never redelivered) an ordinary claim whose runtime is gone | anomaly | agent, message_id, age_s | — | events | — |
 | `host_turn_force_terminated` | this hosted turn ended on its own incarnation's applied force terminate (e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate command was applied but not yet observed, the turn's fail-closed guard read refused, and the pump's own boundary observes the command; not a failure | observation | — | — | events | — |
 | `host_held_wake_force_terminated` | a held-controls wake stopped quietly because its incarnation's applied force terminate landed — the pump's boundary owns the command's observation, so the wake had nothing left to do; not a failure | observation | — | — | events | — |
+| `brew_pin` | the brew-pin assertion could not judge this host: brew list (--pinned) raised or exited non-zero, so the installed and pinned sets are unknown, not empty | anomaly | — | — | events | — |
+| `launchd_retirement` | launchctl print still lists a job after its bootout; the retired job keeps running the code it was loaded with while its plist is already gone | anomaly | — | — | events | — |
 | `im_push_failed` | an IM bridge outbound send failed after its single retry (failures = the adapter's consecutive-failure count) | anomaly | channel, failures | — | events | — |
 | `im_feishu_owner_seed_failed` | the feishu owner chat could not be restored at bridge boot; feishu notifications are blind until the user messages the bot | anomaly | reason, chats | — | events | — |
 | `im_push_health` | one per-channel IM bridge push-health sample: age of the last delivered push and pending deliveries, consumed by the leg-staleness alert rule | observation | channel, last_ok_age_s, pending | — | events | — |
@@ -213,6 +217,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `auto_resurrect_failed` | an automatic resurrect failed for a possibly transient reason; the triggering inbound stays queued for a later or manual resurrect | observation | — | — | events | — |
 | `wake_degraded` | RedisInboundListener wake path degraded (instant pub/sub wake off) | anomaly | — | — | events | — |
 | `wake_restored` | RedisInboundListener wake path recovered (clean consume restored instant wake) | noise | — | — | events | — |
+| `launch_failures` | this start could not read the launch-failure report, so the unlaunched sessions it recorded stay unreported to the rollout aftermath block | anomaly | — | — | events | — |
 | `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, unpriced, usage_kind, source | — | events | ✓ |
 | `turn_end` | one turn finished | observation | ok, duration_seconds | — | events | ✓ |
 | `llm_turn_aborted` | turn aborted after retries | anomaly | — | LLM_ERROR | events | ✓ |
@@ -275,6 +280,8 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events | — |
 | `audit_write_failed` | an audit event could not be recorded in audit_events (the record is missing; the Loki projection of the same event still went out) | anomaly | event_name, error_class, error | — | events | — |
 | `telemetry_store_failed` | a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror and Loki still hold them) | anomaly | rows, consecutive_failures, error_class, error | — | events | — |
+| `env_audit_history` | the env-write audit history holds unreadable records in its tail window; the listing is incomplete | anomaly | — | — | events | — |
+| `lgtm_dashboard` | a provisioned LGTM dashboard JSON could not be read or is not a JSON object; it is not provisioned this pass | anomaly | — | — | events | — |
 | `lgtm_dashboard_render_failed` | meiva-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events | — |
 | `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events | — |
 | `converge_file_overwritten` | converge restored a repo-owned destination from its source — the current content no longer matched the recorded render, and this surface follows the checkout | anomaly | path, key, surface | — | events | — |
@@ -309,6 +316,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `boot_retries_exhausted` | the boot-time meiva start failed through its whole attempt budget and is no longer retried | anomaly | attempts, exit_code | — | events | — |
 | `schedule_verify_failed` | meiva schedules verify found in-store schedule scripts that fail dry-import, an undefined-name read or call-signature binding, or the sweep itself failed | anomaly | checked, red, tool_error, detail | — | events | — |
 | `lifecycle_pointer_stuck` | the TTL reaper's hourly scan found agents_meta.lifecycle_command_id pointing at a lifecycle command that nothing will settle on its own: one sitting at done (an out-of-band torn write, task #3678) or an applied force-terminate still unobserved an hour after it was applied (its original host crashed or its machine was decommissioned). Every resurrect of the named agent(s) defers until an operator settles the command | anomaly | count, samples | — | events | — |
+| `throwaway_pg_reap` | pg_ctl stop failed for an orphaned throwaway Postgres whose data directory is deleted next; a surviving postmaster would keep writing into the removed directory | anomaly | — | — | events | — |
 
 ## 4. Log (bare logs, category=log)
 

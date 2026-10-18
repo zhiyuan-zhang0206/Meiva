@@ -17,6 +17,8 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config as runtime_config
 from base.host.env import dotenv_file
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from ops import env_audit as audit
@@ -667,3 +669,21 @@ def test_read_env_write_records_reads_beyond_a_full_tail_window(audit_home: Path
 def test_read_env_write_records_rejects_nonpositive_limit(audit_home: Path) -> None:
     with pytest.raises(ValueError, match="limit"):
         audit.read_env_write_records(0)
+
+
+def test_corrupt_history_line_is_reported_not_silently_dropped(
+    audit_home: Path, loguru_records: LogRecords
+) -> None:
+    env_path = audit_home / ".env"
+    env_path.write_text("A=1\n", encoding="utf-8")
+    history = audit_home / ".env.audit.jsonl"
+    history.write_text(
+        '{"actor": "t", "keys": ["A"]}\n{"actor": "t", "keys": [\n', encoding="utf-8"
+    )
+
+    records = audit.read_env_write_records(5, env_path=env_path)
+
+    assert len(records) == 1
+    [event] = loguru_records.events("env_audit_history")
+    assert event["extra"]["n"] == 1
+    assert ".env.audit.jsonl" in event["message"]

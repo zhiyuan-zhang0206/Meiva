@@ -618,6 +618,12 @@ def _print_pooler_status() -> None:
     print(f"  {'✓' if ok else '✗'} pgbouncer (127.0.0.1:{port}, transaction pooling)")
 
 
+def redis_stop_failure(port: int, *, still_answers: bool) -> str | None:
+    if not still_answers:
+        return None
+    return f"redis still answers on 127.0.0.1:{port} after shutdown"
+
+
 def stop_cluster_instance(
     config: DataPlaneConfig,
     *,
@@ -663,11 +669,16 @@ def stop_cluster_instance(
         report_postgres_stop_escalation(escalation, producer=producer)
     print("  ✓ postgres stopped")
     if port is not None:
-        subprocess.run(
+        shutdown = subprocess.run(
             [instance.redis_cli_bin(config), "-p", str(port), "shutdown", "nosave"],
             env=redis_env,
             check=False,
             capture_output=True,
         )
+        failure = redis_stop_failure(port, still_answers=instance.redis_reachable(config, port))
+        if failure is not None:
+            detail = (shutdown.stderr or b"").decode(errors="replace").strip()[:400]
+            print(f"  ✗ {failure} (rc={shutdown.returncode}): {detail}", file=sys.stderr)
+            return 1
         print("  ✓ redis stopped")
     return 0

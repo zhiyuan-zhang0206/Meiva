@@ -26,6 +26,7 @@ from contextlib import suppress
 from typing import cast
 
 import base.paths
+from base.log import logger
 
 
 def record(sessions: list[str]) -> None:
@@ -65,15 +66,30 @@ def take() -> list[str]:
     target = base.paths.launch_failures_path(base.paths.meiva_home())
     try:
         raw = target.read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        _report_unreadable(target, exc)
         return []
     finally:
         with suppress(OSError):  # see the docstring
             target.unlink(missing_ok=True)
     try:
         parsed: object = json.loads(raw)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        _report_unreadable(target, exc)
         return []
     if not isinstance(parsed, list):
+        _report_unreadable(target, ValueError(f"expected a list, got {type(parsed).__name__}"))
         return []
     return [str(name) for name in cast(list[object], parsed)]
+
+
+def _report_unreadable(target: object, error: BaseException) -> None:
+    logger.warning(
+        "the launch-failure report {path} could not be read ({err}); this start's "
+        "unlaunched sessions are not reported to the rollout aftermath block",
+        path=str(target),
+        err=repr(error),
+        event="launch_failures",
+    )

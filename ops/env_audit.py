@@ -346,17 +346,28 @@ def read_env_write_records(limit: int, env_path: Path | None = None) -> list[dic
     if not audit_path.exists():
         return []
     records: list[dict[str, object]] = []
+    corrupt = 0
     text = audit_path.read_bytes()[-_AUDIT_TAIL_BYTES:].decode("utf-8", errors="replace")
     for line in reversed(text.splitlines()):
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
+            corrupt += 1
             continue
         if not isinstance(record, dict):
+            corrupt += 1
             continue
         records.append(cast("dict[str, object]", record))
         if len(records) >= limit:
             break
+    if corrupt:
+        logger.warning(
+            "the env-write audit history {path} has {n} unreadable record(s) in the tail "
+            "window; the listing is incomplete",
+            path=str(audit_path),
+            n=corrupt,
+            event="env_audit_history",
+        )
     return records
 
 

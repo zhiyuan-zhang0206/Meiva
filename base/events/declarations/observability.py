@@ -293,4 +293,16 @@ EVENTS: dict[str, EventSpec] = {
     "log": EventSpec(
         name="log", category="log", tier="noise", payload=LogPayload, doc="bare log line"
     ),
+    "env_audit_history": telemetry_event(
+        "env_audit_history",
+        "the env-write audit history holds unreadable records in its tail window; the "
+        "listing is incomplete",
+        tier="anomaly",
+    ),
+    "lgtm_dashboard": telemetry_event(
+        "lgtm_dashboard",
+        "a provisioned LGTM dashboard JSON could not be read or is not a JSON object; it is "
+        "not provisioned this pass",
+        tier="anomaly",
+    ),
 }

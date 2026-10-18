@@ -33,9 +33,13 @@ def _path(*, host: Host) -> str:
     return "/work tree/.venv/bin:/usr/bin"
 
 
+_NOT_LOADED = Reply(returncode=113, stderr="Could not find service")
+
+
 def _launchctl() -> tuple[FakeCommands, Host]:
     """A macOS host whose launchctl always succeeds, and the commands it was asked."""
     commands = FakeCommands()
+    commands.on(["launchctl", "print"], _NOT_LOADED, repeat=True)
     commands.on("launchctl", Reply(), repeat=True)
     return commands, fake_host(commands, platform=DARWIN_ARM64, uid=_UID)
 
@@ -109,7 +113,12 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
     )
 
     assert plist.read_text(encoding="utf-8") == first
-    assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap", "bootout", "bootstrap"]
+    assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
+        "bootout",
+        "bootstrap",
+        "bootout",
+        "bootstrap",
+    ]
 
 
 def test_macos_unregister_removes_the_plist_and_is_repeatable() -> None:
@@ -123,7 +132,7 @@ def test_macos_unregister_removes_the_plist_and_is_repeatable() -> None:
     assert (job.unregister_macos(host=host), job.unregister_macos(host=host)) == (0, 0)
 
     assert not plist.exists()
-    assert [argv[1] for argv in commands.argvs][-2:] == ["bootout", "bootout"]
+    assert [argv[1] for argv in commands.argvs if argv[1] != "print"][-2:] == ["bootout", "bootout"]
 
 
 def test_linux_registration_replaces_only_its_own_line(tmp_path: Path) -> None:

@@ -112,6 +112,21 @@ def test_other_failures_are_retried() -> None:
     assert _wait(LLMStreamStallTimeoutError("stall")) is None
 
 
+# meiva:note
+# A stall must ride the host's fatal-stream path, not the generic crash path:
+# the hosted runner routes only `FatalLLMStreamError` / `FatalProviderError` /
+# `CompactionFailedError` into the settled turn abort (`halted=True` plus the
+# user-visible Error event), while a plain `LLMStreamError` was only logged as a
+# crashed turn — the row settled to idling with no message and no error anyone
+# could see (agent 6933, 2026-10-18).
+# meiva:link agent/graph/llm/docs/llm.meiva.okf.md
+def test_a_stream_stall_is_fatal_so_the_turn_abort_is_announced() -> None:
+    stall = LLMStreamStallTimeoutError("LLM stream stalled", stage="ttft")
+
+    assert isinstance(stall, FatalLLMStreamError)
+    assert _wait(stall) is None, "a stall must never re-stream the request"
+
+
 def test_transient_waits_double_from_the_initial_interval_plus_up_to_a_second_of_jitter() -> None:
     initial = settings.lm.llm_retry_initial_interval_seconds
     for attempts in (1, 2, 3):

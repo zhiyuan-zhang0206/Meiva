@@ -13,6 +13,9 @@ def ensure_brew_pin(ctx: ConvergeCtx) -> None:
     if ctx.host.platform.system != "darwin":
         return
     missing = unpinned_formulae(run=ctx.host.run)
+    if missing is None:
+        print("  ! brew-pin: check skipped — brew could not be asked on this host", file=sys.stderr)
+        return
     if not missing:
         return
     commands = ", ".join(f"`brew pin {formula}`" for formula in missing)
