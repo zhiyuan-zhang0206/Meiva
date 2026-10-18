@@ -47,6 +47,7 @@ import { themePackId, useThemePacks } from "@/lib/plugins/use-theme-packs";
 import { useDebouncedSetting, useUserSettings } from "@/lib/state/use-user-settings";
 import { type DetailsMode, useContentToggle, useContentToggleReset } from "@/lib/layout/content-toggle-store";
 import { FLEX } from "@/lib/layout/layout";
+import { NotificationCategoryRows } from "./_notification-categories";
 import { RadioRow, SettingsSection, SliderRow, TimelineColorsSection, ToggleRow } from "./_rows";
 
 // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
@@ -282,6 +283,7 @@ export default function DisplaySettingsPage() {
           value={settings["notification.awaiting_reply"] as boolean}
           onChange={(v) => setSetting("notification.awaiting_reply", v)}
         />
+        <NotificationCategoryRows />
       </SettingsSection>
 
       <SettingsSection id="display-composer" title={t("composer")}>
