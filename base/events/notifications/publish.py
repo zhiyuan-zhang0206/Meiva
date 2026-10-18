@@ -160,10 +160,8 @@ async def deliver_async(
     )
 
 
-async def announce(bus: EventBus | None, record: NotificationRecord) -> None:
-    if bus is None:
-        return
-    event = NotificationEmitted(
+def _emitted(record: NotificationRecord) -> NotificationEmitted:
+    return NotificationEmitted(
         agent_id=record.agent_id,
         notification_id=record.id,
         category=record.category,
@@ -172,7 +170,25 @@ async def announce(bus: EventBus | None, record: NotificationRecord) -> None:
         href=record.href,
         importance=record.importance,
     )
-    await bus.publish_best_effort(event.model_dump_json(), context="notification_emitted")
+
+
+async def announce(bus: EventBus | None, record: NotificationRecord) -> None:
+    if bus is None:
+        return
+    await bus.publish_best_effort(
+        _emitted(record).model_dump_json(), context="notification_emitted"
+    )
+
+
+# meiva:note
+# The sync-context counterpart of `announce`: a producer outside the event loop
+# (the task-maintenance daemon) publishes the same one live event, so no producer
+# has to reach for a weaker delivery.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def announce_sync(bus: EventBus | None, record: NotificationRecord) -> None:
+    if bus is None:
+        return
+    bus.publish_best_effort_sync(_emitted(record).model_dump_json(), context="notification_emitted")
 
 
 # meiva:note
