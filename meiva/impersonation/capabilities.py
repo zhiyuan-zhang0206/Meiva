@@ -1,15 +1,24 @@
 # meiva:note
-# Which capability an agent-facing SDK entry needs. The vocabulary lives in
+# Which capabilities an agent-facing SDK entry needs. The vocabulary lives in
 # `base/agents/impersonation/capabilities.py`; this module owns the SDK side of it:
-# the map from a dotted entry (`files.write`) to the one capability it requires. The
+# the map from a dotted entry (`files.write`) to the capabilities it requires. The
 # keys are the ones the SDK usage meter reports, so a warning or a refusal names
 # exactly what was called.
 #
-# The map is closed. `capability_for` returns None for an entry nobody classified,
-# and the attachment refuses (or, in `warn`, records) that call. A coverage test
-# walks the installed surface with `meiva.sdk_surface.metering.instrument_targets`
-# and fails when an entry has no classification, so adding an SDK entry forces the
-# question at review time instead of after the fact.
+# An entry declares a **tuple**, ordered general -> specific, because one surface can
+# need more than one authority: `meiva.understand` reads local files *and* sends their
+# content to a model outside the cluster, so a lease must hold `read` as well as
+# `external.model`. The last element is the entry's **primary** capability - the one
+# that names what the entry is really about - and it is what a refusal records as
+# `capability`; the whole tuple is recorded as `capabilities`. Singletons are written
+# as one-element tuples, so there is one shape and no special case.
+#
+# The map is closed. `required_capabilities` returns None for an entry nobody
+# classified, and the attachment refuses (or, in `warn`, records) that call. A
+# coverage test walks the installed surface with
+# `meiva.sdk_surface.metering.instrument_targets` and fails when an entry has no
+# classification, so adding an SDK entry forces the question at review time instead
+# of after the fact.
 #
 # Dynamic MCP tools cannot be enumerated: `meiva.mcps.<server>.<tool>` resolves at
 # call time, so the namespace walk never sees it. Those calls are metered as
@@ -24,38 +33,36 @@ from collections.abc import Mapping
 
 from base.agents.impersonation.capabilities import Capability
 
-_READ = Capability.READ
-_FILES_WRITE = Capability.FILES_WRITE
-_SHELL = Capability.SHELL
-_SPAWN = Capability.AGENTS_SPAWN
-_CONTROL = Capability.AGENTS_CONTROL
-_MESSAGE = Capability.AGENTS_MESSAGE
-_SELF = Capability.SELF_LIFECYCLE
-_TASKS = Capability.TASKS_WRITE
-_UI = Capability.UI
-_SCHEDULE = Capability.SCHEDULE
-_EXTERNAL_MODEL = Capability.EXTERNAL_MODEL
+_READ = (Capability.READ,)
+_FILES_WRITE = (Capability.FILES_WRITE,)
+_SHELL = (Capability.SHELL,)
+_SPAWN = (Capability.AGENTS_SPAWN,)
+_CONTROL = (Capability.AGENTS_CONTROL,)
+_MESSAGE = (Capability.AGENTS_MESSAGE,)
+_SELF = (Capability.SELF_LIFECYCLE,)
+_TASKS = (Capability.TASKS_WRITE,)
+_UI = (Capability.UI,)
+_SCHEDULE = (Capability.SCHEDULE,)
+_UNDERSTAND = (Capability.READ, Capability.EXTERNAL_MODEL)
 
 # meiva:note
-# One capability per entry. Observation is read; changing another agent's lifecycle
-# (`agents.control`, `compaction.submit`) is the sharp one; `self.*` is the borrowed
-# identity's own lifecycle and persistent settings; `schedule` outlives the lease.
-# Three rows are not what their names suggest:
-#   * `understand` is `external.model`, never `read`: it bills the user and ships
-#     local file content to a model outside the cluster, so a lease that may read
-#     may not thereby spend money or export files. The reverse holds: granting
-#     `external.model` does expose any local file the caller names, so treat it as
-#     export when approving - one entry maps to one capability, so the gate cannot
-#     also demand `read`.
+# One requirement tuple per entry, general -> specific. Observation is read; changing
+# another agent's lifecycle (`agents.control`, `compaction.submit`) is the sharp one;
+# `self.*` is the borrowed identity's own lifecycle and persistent settings;
+# `schedule` outlives the lease. Three rows are not what their names suggest:
+#   * `understand` needs `read` **and** `external.model`: it bills the user, ships
+#     local file content to a model outside the cluster, and reads the paths the
+#     caller names. Requiring both means a lease granted only one of them cannot
+#     exfiltrate files through it, in either direction.
 #   * `shell.sessions.capture` is `read` because it only observes; the observation
 #     can still contain credentials printed by a previous command, so `read` here
 #     means "may watch this machine", not "the output is safe".
 #   * `mcps.*` is machine authority via the prefix rule: a signed-in browser or a
 #     remote account is the same authority as `shell`, and a tool cannot be
 #     enumerated for a finer split.
-ENTRY_CAPABILITIES: Mapping[str, Capability] = {
+ENTRY_CAPABILITIES: Mapping[str, tuple[Capability, ...]] = {
     "help": _READ,
-    "understand": _EXTERNAL_MODEL,
+    "understand": _UNDERSTAND,
     "cwd.get": _READ,
     "cwd.set": _READ,
     "files.read": _READ,
@@ -120,14 +127,26 @@ ENTRY_CAPABILITIES: Mapping[str, Capability] = {
     "web.fetch": _READ,
 }
 
-PREFIX_CAPABILITIES: tuple[tuple[str, Capability], ...] = (("mcps.", _SHELL),)
+PREFIX_CAPABILITIES: tuple[tuple[str, tuple[Capability, ...]], ...] = (("mcps.", _SHELL),)
 
 
-def capability_for(entry: str) -> Capability | None:
+# meiva:note
+# The requirement tuple for an entry, or None when nobody classified it - the caller
+# refuses that entry rather than guessing a requirement.
+def required_capabilities(entry: str) -> tuple[Capability, ...] | None:
     exact = ENTRY_CAPABILITIES.get(entry)
     if exact is not None:
         return exact
-    for prefix, capability in PREFIX_CAPABILITIES:
+    for prefix, requirements in PREFIX_CAPABILITIES:
         if entry.startswith(prefix):
-            return capability
+            return requirements
     return None
+
+
+# meiva:note
+# The capability an entry is really about: the most specific element of its ordered
+# requirement tuple. A refusal records it as `capability` for continuity with events
+# written before entries could need more than one, while `capabilities` carries the
+# whole set.
+def primary_capability(requirements: tuple[Capability, ...]) -> Capability:
+    return requirements[-1]
