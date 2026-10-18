@@ -37,8 +37,10 @@ silent and returns no row.
 
 ## Producers
 
-A settled hosted turn records `core.turn_finished` from
-`agent/ownership/hosted.py` after its status write commits. A posted notice
+A hosted turn that ran to completion records `core.turn_finished` from
+`services/agent_runner/agent_host/host.py`; a crashed, cancelled or truncated turn
+says nothing, because the notification lives on the turn path rather than on the
+settlement path that also fires for no-work parks. A posted notice
 records `core.needs_input` or `core.notice` from `ops/lifecycle/events.py`,
 keyed by the notice id so an edit or a retried post cannot notify twice; the
 spine reads the notice row itself rather than trusting either post path to pass

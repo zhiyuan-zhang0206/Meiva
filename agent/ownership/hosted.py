@@ -464,35 +464,7 @@ async def settle_hosted_runtime(
         telemetry.emit_prepared(settled_event)
     if changed:
         await publish_agent_updated(bus, incarnation.agent_id)
-        await _notify_turn_finished(pool, bus, incarnation.agent_id)
     return changed
-
-
-# meiva:note
-# A settled turn is a delivered `core.turn_finished` notification, not a state a
-# client re-derives from agent snapshots. Delivery failures are logged and
-# swallowed: a notification is never a reason to fail or retry a turn.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-async def _notify_turn_finished(
-    pool: AsyncConnectionPool, bus: EventBus | None, agent_id: int
-) -> None:
-    from base.events.notifications.publish import publish_notification
-
-    try:
-        async with pool.connection() as conn:
-            cursor = await conn.execute("SELECT label FROM agents WHERE id = %s", (agent_id,))
-            row = await cursor.fetchone()
-        label = None if row is None else row[0]
-        name = label or f"Agent #{agent_id}"
-        await publish_notification(
-            pool,
-            bus,
-            category_id="core.turn_finished",
-            subject=f"{name} finished its turn",
-            agent_id=agent_id,
-        )
-    except Exception:
-        logger.exception("turn-finished notification failed for agent {agent}", agent=agent_id)
 
 
 async def release_hosted_owner(
