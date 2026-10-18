@@ -77,11 +77,14 @@ failure or exhausted automatic restart attempts
 (`services/supervision/meiva_root/failure_state.py`). The condition is a state, so every
 round that finds it holding emits `root_unit_failure_state` (unit, kind,
 detail, attempts, last error); the observability stack's rules own the debounce and the notification,
-and the signal stops on its own when the condition clears. A terminal probe
+and the signal stops on its own when the condition clears. An open circuit
+breaker reports `kind=breaker_open` and outranks a recorded replacement failure,
+because it is the state an operator must act on and the one whose alert still
+reaches a machine whose database is down; the alert rule also accepts the
+historical `restarts_exhausted` value. A terminal probe
 verdict (unknown identity, inspection error, foreign listener) emits
-`root_unit_not_revivable` on every round it is observed, at WARNING. `root_restart_failed` records a replacement error. The exhaustion state uses
-`kind=restarts_exhausted`; alert rules also accept historical `breaker_open`
-events during a version transition.
+`root_unit_not_revivable` on every round it is observed, at WARNING.
+`root_restart_failed` records a replacement error.
 
 ## Control contract
 

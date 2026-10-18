@@ -136,10 +136,13 @@ class UnitHealth:
     # `breaker_open` is the *reported* edge, never the predicate (which is
     # `restart_attempts >= max_restart_attempts`): it remembers which side of the
     # transition was already signalled, so each crossing emits exactly one event.
-    # `breaker_since` is the wall-clock second it opened, for the close event.
+    # `breaker_since` is the monotonic second it opened, for the close event.
+    # `db_recovery_pending` is a dependency-recovery grant this unit has not spent
+    # yet; it survives the rounds that cannot act on it (task #5315).
     next_restart_at: float | None = None
     breaker_open: bool = False
     breaker_since: float | None = None
+    db_recovery_pending: bool = False
 
     last_verdict: str | None = None
     """Value of the last probe verdict (`alive` / `down` / `port-taken` / `unavailable`)."""
@@ -294,35 +297,55 @@ class HealthMonitor:
         """Probe every unit once, in registration order."""
         if self._closed:
             raise RuntimeError("root health admission closed")
-        db_recovered = await self._observe_dependency_recovery()
+        await self._grant_dependency_recovery()
         for unit_id in self._registry.unit_ids():
-            await self._check_unit(unit_id, db_recovered=db_recovered)
+            await self._check_unit(unit_id)
             self._sync_breaker(unit_id, self._unit_state(unit_id))
         self._report_failure_states()
 
     # meiva:note
-    # One dependency probe per round while a breaker is open, and only then. The
-    # breaker closes on a *recovery edge*: a database this monitor already observed
-    # unavailable now answers. A database never seen failing is no evidence that a
-    # unit's own cause is gone, so an unrelated crash loop keeps its slow cadence
-    # instead of restarting every round. Evidence is forgotten while nothing holds.
-    async def _observe_dependency_recovery(self) -> bool:
+    # One dependency probe per round while a breaker is open on a unit that is not
+    # held down, and only then (a held-down unit must not be restarted, so the probe
+    # by itself would be a database dial `meiva stop` cannot justify). A usable
+    # database *grants* one immediate attempt per open breaker: on the first
+    # observation (the monitor cannot tell a recovered database from one that never
+    # failed) and on every unavailable-to-answering edge. The grant is a latch, not a
+    # round's boolean: the rounds that cannot act on it — a terminal verdict, a
+    # startup grace, a maintenance gate — must not consume it, or a database that
+    # recovers in one of them costs a full capped interval. A database observed
+    # failing withdraws the grant, and a unit that never held one keeps its cadence.
+    async def _grant_dependency_recovery(self) -> None:
         probe = self._db_recovery_probe
-        if probe is None or not any(state.breaker_open for state in self._units.values()):
+        waiting = [
+            state
+            for unit_id, state in self._units.items()
+            if state.breaker_open and self._deferral(unit_id) != _HELD_DOWN
+        ]
+        if probe is None or not waiting:
             self._db_verdict = None
-            return False
+            return
         result = await self._db_runner.observe(probe, self._config.probe_timeout_s)
         previous = self._db_verdict
         self._db_verdict = result.verdict
         if not result.alive:
+            for state in waiting:
+                state.db_recovery_pending = False
             _log.info(
                 "[health] database still unavailable while a breaker is open (%s)", result.detail
             )
-            return False
-        if previous is None or previous is ProbeVerdict.ALIVE:
-            return False
-        _log.warning("[health] database answered again — open unit breakers may close")
-        return True
+            return
+        if previous is ProbeVerdict.ALIVE:
+            return
+        for state in waiting:
+            state.db_recovery_pending = True
+        if previous is None:
+            _log.warning(
+                "[health] database answers while a breaker is fresh — one immediate attempt"
+            )
+        else:
+            _log.warning(
+                "[health] database answered again — every open unit breaker may restart once now"
+            )
 
     def _report_failure_states(self) -> None:
         """Emit one `root_unit_failure_state` per unit sitting in a failure state.
@@ -450,7 +473,7 @@ class HealthMonitor:
             )
             return None
 
-    async def _check_unit(self, unit_id: str, *, db_recovered: bool = False) -> None:
+    async def _check_unit(self, unit_id: str) -> None:
         state = self._unit_state(unit_id)
         probe = self._resolvable_probe(unit_id, state)
         if probe is None:
@@ -508,16 +531,17 @@ class HealthMonitor:
             self._report_terminal(unit_id, f"{result.detail}; restart deferred: {deferral}")
             return
         breaker_open = state.restart_attempts >= self._config.max_restart_attempts
-        if not self._attempt_due(state, breaker_open=breaker_open, db_recovered=db_recovered):
+        if not self._attempt_due(state):
             return
+        recovery = state.db_recovery_pending
+        state.db_recovery_pending = False
         state.restart_attempts += 1
-        state.next_restart_at = monotonic() + restart_delay_s(
-            state.restart_attempts, self._config.restart_backoff_s
-        )
-        if breaker_open and db_recovered:
+        delay_s = restart_delay_s(state.restart_attempts, self._config.restart_backoff_s)
+        state.next_restart_at = monotonic() + delay_s
+        if breaker_open and recovery:
             _log.warning(
-                "[health] unit %s: down (%s), database answered again — closing the breaker "
-                "and restarting now",
+                "[health] unit %s: down (%s), the database answered — restarting now "
+                "(the breaker closes when a generation is alive)",
                 unit_id,
                 result.detail,
             )
@@ -527,7 +551,7 @@ class HealthMonitor:
                 "(%d attempts)",
                 unit_id,
                 result.detail,
-                self._config.restart_backoff_s[-1],
+                delay_s,
                 state.restart_attempts,
             )
         else:
@@ -548,12 +572,11 @@ class HealthMonitor:
 
     # meiva:note
     # Only two things restart a unit behind an open breaker: the ladder's capped
-    # cadence coming due, and a database that was observed unavailable and now
-    # answers. The recovery signal turns a fifteen-minute wait back into the two
-    # minutes the 2026-10-18 outage needed. A held attempt is not silent either: the
-    # per-round failure-state signal reports it.
-    def _attempt_due(self, state: UnitHealth, *, breaker_open: bool, db_recovered: bool) -> bool:
-        if breaker_open and db_recovered:
+    # cadence coming due, and an unspent dependency-recovery grant. The grant turns a
+    # fifteen-minute wait back into the two minutes the 2026-10-18 outage needed. A
+    # held attempt is not silent either: the per-round failure-state signal reports it.
+    def _attempt_due(self, state: UnitHealth) -> bool:
+        if state.db_recovery_pending:
             return True
         return state.next_restart_at is None or monotonic() >= state.next_restart_at
 
@@ -570,7 +593,7 @@ class HealthMonitor:
         from base.log import logger
 
         if open_now:
-            state.breaker_since = time.time()
+            state.breaker_since = monotonic()
             logger.warning(
                 "[health] unit {unit}: circuit breaker OPEN after {attempts} failed automatic "
                 "restarts — only the ladder's capped cadence or a database recovery restarts it "
@@ -581,7 +604,7 @@ class HealthMonitor:
                 detail=self._last_error(unit_id, state),
             )
             return
-        held_for = 0.0 if state.breaker_since is None else time.time() - state.breaker_since
+        held_for = 0.0 if state.breaker_since is None else monotonic() - state.breaker_since
         state.breaker_since = None
         logger.info(
             "[health] unit {unit}: circuit breaker CLOSED after {open_for_s:.0f}s ({detail})",
@@ -662,3 +685,4 @@ class HealthMonitor:
         """A healthy observation or expected stop ends the continuous outage."""
         state.restart_attempts = 0
         state.next_restart_at = None
+        state.db_recovery_pending = False

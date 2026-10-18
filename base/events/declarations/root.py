@@ -42,18 +42,15 @@ class RootRestartCleared(TypedDict):
 
 
 # meiva:note
-# `attempts` counts the replacement attempts this outage spent and `last_error` is
-# the unit's recorded exit error (task #5315).
+# One root unit sits in an explicit failure state (task #4872), emitted on EVERY
+# health round while it holds: the unit's intent is running and it has an open
+# circuit breaker or a recorded replacement failure. A rule debounces that stream;
+# silence resolves it. `kind` is `breaker_open` or `restart_failed` (an open breaker
+# outranks a recorded error; rules also accept the historical `restarts_exhausted`),
+# `detail` is the bounded evidence line and never a grouping key, `attempts` counts
+# the replacements this outage spent and `last_error` is the unit's recorded exit
+# error (task #5315).
 class RootUnitFailureState(TypedDict):
-    """One root unit sits in an explicit failure state (task #4872).
-
-    Emitted on EVERY health round while the condition holds — the unit's intent
-    is running and it has a recorded replacement failure or exhausted automatic
-    restart attempts. A rule can debounce that stream; silence resolves it. ``kind`` is ``restart_failed``,
-    ``restarts_exhausted`` (the first that applies in that order);
-    ``detail`` is the bounded evidence line, never a grouping key.
-    """
-
     unit: str
     kind: str
     detail: str
@@ -437,7 +434,6 @@ EVENTS: dict[str, EventSpec] = {
         "recovered database replaces it (task #5315)",
         payload=RootUnitBreakerOpen,
         tier="anomaly",
-        site="services/supervision/meiva_root/health.py:HealthMonitor._sync_breaker",
     ),
     "root_unit_breaker_closed": telemetry_event(
         "root_unit_breaker_closed",
@@ -445,7 +441,6 @@ EVENTS: dict[str, EventSpec] = {
         "an observed operator stop ended the outage (task #5315)",
         payload=RootUnitBreakerClosed,
         tier="noise",
-        site="services/supervision/meiva_root/health.py:HealthMonitor._sync_breaker",
     ),
     "root_unit_not_revivable": telemetry_event(
         "root_unit_not_revivable",
