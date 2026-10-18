@@ -118,10 +118,12 @@ the external effect but before its result becomes durable.
 
 ## Updating and moving the data plane
 
-`python -m cli.fleet_update down` stops every unit with `meiva stop -y`, keeping the
+`python -m cli.fleet_update run` executes the complete update. Its `down` half
+stops every unit with `meiva stop -y`, keeping the
 stateful components whose code the window does not touch (`--keep-service`; the
 [keep decision](../../decisions/runtime/updates/release/2026-10-17-component-scoped-keep-on-update.md)),
 and `up` starts them again (the runbook's "Updating a networked cluster in source mode").
+The separate halves remain available for manual release work and recovery.
 A stored-script upgrade blocked by held business admission uses the
 [script-only maintenance operator entry](../../../schedules/README.md#script-repair-during-maintenance)
 with the existing installed runtime. It preserves the stopped hold and schedule

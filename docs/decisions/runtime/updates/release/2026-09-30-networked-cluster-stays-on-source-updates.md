@@ -103,3 +103,7 @@ Forward link (2026-10-03): `meiva pause` was deleted; a stop with a different ke
 Forward link (2026-10-17): persistent terminals close only when the window's changes reach the
 pty-sessions code; the update keeps the components its window does not touch. See
 [component-scoped keep on update](2026-10-17-component-scoped-keep-on-update.md).
+
+Forward link (2026-10-18): [complete agent-initiated updates](2026-10-18-agent-initiated-fleet-update.md)
+adds `run` for the full sequence and a launchd submission recipe for an authorized
+operator agent; the separate halves remain for manual work and recovery.

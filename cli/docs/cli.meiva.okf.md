@@ -38,6 +38,10 @@ Verbs that act on the cluster rather than on this host's services, on the home
 `MEIVA_HOME` names (else `~/.meiva`): `status` / `destroy` / `health-probe` /
 `cron-*` / other registered commands. Enumerated in [[cli/docs/cluster.meiva.okf.md]].
 
+The standalone `python -m cli.fleet_update run` updates all listed source-mode
+units over SSH; [[cli/docs/fleet-update.meiva.okf.md]] owns the full command
+and its separate `down`/`up` recovery halves.
+
 ### Agent & Ops
 
 Agent lifecycle, context reads, local operations, and package-management command

@@ -16,7 +16,9 @@ for symptom → fix recovery of a broken cluster see `docs/conventions/runbook.m
 
 - The cluster operator owns: disk / worktree / runtime health, opening and
   closing clusters, node recovery (detect + resurrect), and **rollouts are
-  executed only by the operator** (no agent self-updates).
+  executed only by the authorized operator**, which may be a Meiva agent using
+  the detached OS-job procedure in
+  [agent-initiated updates](../ops/references/agent-update.md).
 - Node anomaly detection and resurrection are centralized on the operator —
   any agent finding an anomaly reports to the operator, not to the peer that
   discovered it.

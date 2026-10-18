@@ -12,6 +12,8 @@ The promises `cli.fleet_update` makes around the stops themselves
 refuses the window, what gates it, what it silences, and what must not leak.
 The keep decision itself is
 [[scripts/host_ops/docs/fleet-update-keep.meiva.okf.md]].
+`run` executes both halves in one window, preserving these same gates and
+closing the silence only after `up` passes all verification.
 
 ## Preflight
 
