@@ -77,10 +77,12 @@ Measured trade-off on the same 523 turns (lenient / strict judge):
 - The 2026-10-11 benchmark no longer calibrates this field. It still calibrates
   `memory_dedup_candidates`, and `memory_write_dedup_threshold` keeps its own
   0.80 — the two thresholds answer different questions and now move separately.
-- Per-agent overrides mask the change: an agent pinned at 0.80 keeps it. Rollout
-  is a separate operator action, and the same 523-message harness should be
-  re-run afterwards to confirm the false-injection rate stayed within the
-  measured band.
+- **Scope: the default only.** The setting is `cluster-pinned` and per-agent, so
+  this changes the value an agent gets when nothing else pins it. Any host with
+  `MEIVA_MEMORY_RECALL_INJECT_THRESHOLD` in its env, and any agent with a stored
+  override, keeps 0.80 until that pin is changed. Rollout is a separate operator
+  action, and the same 523-message replay should be run afterwards to confirm the
+  false-injection rate stayed inside the measured band.
 
 ### How the numbers were produced
 
@@ -88,6 +90,16 @@ Measured trade-off on the same 523 turns (lenient / strict judge):
 `purpose=recall`, `k=30`; two independent judge passes (lenient: a judge with a
 written rubric; strict: the same judge required to quote the sentence the agent
 would apply), a shuffled-pair control (3.7% of unrelated pairs called usable),
-and 20 hand-labelled pairs (17 agreed). Measurements, per-turn data and the
-reproducer live in the evaluation workspace, not in this repository:
-`sprint-report.md`, `eval12-data/`, `scripts/repro_example.py`.
+and 20 hand-labelled pairs (17 agreed). Provenance: **2026-10-18, 21:50–22:20 +08**, machine `ubuntu`, agent 6850,
+against cluster `main` at `ffaf8ea87` (the replay used the deployed gateway, so
+its index is the one that commit's release built). Workspace artefacts:
+`~/.meiva/workspaces/6850/sprint-report.md` (the full report),
+`eval12-data/sprint_search_all.json` (per-turn top-30 with scores),
+`eval12-data/sprint_judge_sonnet.json` and `sprint_judge_strict120.json` (the two
+judge passes), `scripts/repro_example.py` (one case, end to end).
+
+The reproducible half now lives in the repository: the 30 turns this decision
+silenced are the recall half of
+`services/derived/memory_indexer/tests/recall_cases.jsonl`, and the evaluator
+next to it scores a fresh run against their recorded ranks and scores (see
+[[services/docs/gateway_side/memory_indexer/memory-recall-regression.meiva.okf.md]]).
