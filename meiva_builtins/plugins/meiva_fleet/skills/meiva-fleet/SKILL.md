@@ -18,8 +18,11 @@ Agents are general-purpose. Every worker already indexes every skill on its mach
 
 ## Choosing a collaborator
 
-Proactively parallelize independent work. Fork when your existing context is
-valuable to the task; otherwise spawn fresh or reuse a suitable, available agent.
+Proactively parallelize independent work. Do not let a separate piece of work
+queue behind your current one: fork when the child needs your context — it inherits
+this conversation and starts already oriented — or spawn a fresh agent with a written
+brief when it does not. Forking does not shrink your own window, and the child pays
+this context's size on every call.
 Check existing ownership to avoid duplicate work; a matching role does not by
 itself mean the agent can take on more work now. Consult nearby peers when
 ownership is unclear, rather than requiring a round of questions before every

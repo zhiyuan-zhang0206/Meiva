@@ -245,8 +245,8 @@ def test_delegation_check_routes_nontrivial_work_without_forcing_methods(
     assert "1% chance" not in text
     assert "Keep it yourself only" not in text
     assert "Proactively parallelize independent work." in text
-    assert "Fork when your existing context is valuable to the task" in text
-    assert "otherwise spawn fresh or reuse a suitable, available agent." in text
+    assert "Do not let a separate piece of work queue behind your current one" in text
+    assert "spawn a fresh agent with a written brief when it does not." in text
     assert "parallelizable work does not require delegation" not in text
 
 

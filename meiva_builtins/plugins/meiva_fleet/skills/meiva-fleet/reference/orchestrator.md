@@ -7,8 +7,11 @@ You are the one who splits work, spawns workers, and judges results. This refere
 
 ### Choosing Context and Capacity
 
-Proactively parallelize independent work. Fork when your existing context is
-valuable to the task; otherwise spawn fresh or reuse a suitable, available agent.
+Proactively parallelize independent work. Do not let a separate piece of work
+queue behind your current one: fork when the child needs your context — it inherits
+this conversation and starts already oriented — or spawn a fresh agent with a written
+brief when it does not. Forking does not shrink your own window, and the child pays
+this context's size on every call.
 
 Check existing ownership to avoid duplicate effort. Use neighbors or the agent
 directory when discovery is needed; consult the owner if responsibility is

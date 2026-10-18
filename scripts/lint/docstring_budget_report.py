@@ -1,9 +1,9 @@
-"""Debt-candidate report, docstring-budget class: Raises sections and soft-zone lengths.
-
-`python -m scripts.lint.docstring_budget_report` from the repository root, as the docstring-budget
-section of `tech_debt_candidates.sh`. Detection only; judgement happens in the sweep. Prints one line
-per finding, or `(none found)`.
-"""
+# meiva:note
+# Debt-candidate report, docstring-budget class: documented Raises sections.
+#
+# `python -m scripts.lint.docstring_budget_report` from the repository root, as the
+# docstring-budget section of `tech_debt_candidates.sh`. Detection only; judgement happens in the
+# sweep. Prints one line per finding, or `(none found)`.
 
 import ast
 import sys
@@ -52,10 +52,6 @@ def file_findings(path: Path) -> list[str]:
             continue
         if "Raises:" in doc:
             found.append(f"{rel}:{line}: {node.name} has a Raises: section")
-        if len(doc.splitlines()) > 12:
-            found.append(
-                f"{rel}:{line}: {node.name} docstring {len(doc.splitlines())} lines (soft cap 12)"
-            )
     return found
 
 
