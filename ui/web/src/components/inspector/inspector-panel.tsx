@@ -2,8 +2,8 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   Bell,
-  DollarSign,
   ExternalLink,
   Gauge,
   HeartPulse,
@@ -15,9 +15,9 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Fragment, useCallback, useRef, type ReactNode, useEffect } from "react";
+import { Fragment, useCallback, useRef, useState, type ReactNode, useEffect } from "react";
 
-import { ContextMeter, CONTEXT_METER_WIDTH_CLASS } from "@/components/inspector/context-meter";
+import { ContextButton } from "@/components/inspector/context-breakdown";
 import { LiveSectionsSkeleton, SectionSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { InspectWidgetSection } from "@/components/inspector/inspector-widgets";
 import { Metric, Section } from "@/components/inspector/inspector-section";
@@ -226,7 +226,7 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     order: INSPECT_SECTION_ORDER.context,
     tie: 0,
     key: "context",
-    node: <ContextSection />,
+    node: <ContextSection agentId={agentId} />,
   });
   sections.push({ order: INSPECT_SECTION_ORDER.page, tie: 0, key: "page", node: <PageSection pages={pages} /> });
   if (liveData) {
@@ -358,8 +358,9 @@ function InspectReadError({ message, retryLabel, pending, onRetry }: {
   );
 }
 
-function ContextSection() {
+function ContextSection({ agentId }: { agentId: number }) {
   const t = useTranslations("inspector");
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
   const contextTokens = useTimelineStore((s) => s.tokenUsage);
   const maxContextTokens = useTimelineStore((s) => s.maxContextTokens);
   const softCompactTokens = useTimelineStore((s) => s.softCompactTokens);
@@ -372,17 +373,19 @@ function ContextSection() {
   return (
     <Section icon={<Gauge className="size-3" />} title={t("sectionContext")} badge={percent}>
       <div className="space-y-1.5">
-        <div className="px-0.5">
-          <ContextMeter
+        <div className="relative px-0.5 py-1">
+          <ContextButton
+            agentId={agentId}
+            open={breakdownOpen}
+            onOpenChange={setBreakdownOpen}
             contextTokens={contextTokens}
             maxContextTokens={maxContextTokens}
             softCompactTokens={softCompactTokens}
             hardCompactTokens={hardCompactTokens}
-            barWidthClassName={CONTEXT_METER_WIDTH_CLASS.wide}
             showText={false}
           />
         </div>
-        <div className="grid grid-cols-2 gap-1">
+        <div className="grid grid-cols-2 gap-2">
           <Metric
             label={t("metricContextUsed")}
             value={hasWindow
@@ -394,7 +397,6 @@ function ContextSection() {
             <Metric
               label={t("metricContextLimits")}
               value={`${formatTokens(softCompactTokens)} / ${formatTokens(hardCompactTokens)}`}
-              sub={t("metricContextLimitsHint")}
               valueTestId="inspector-context-limits"
             />
           ) : null}
@@ -605,7 +607,7 @@ function CostActivitySection({
       : undefined;
   return (
     <Section
-      icon={<DollarSign className="size-3" />}
+      icon={<Activity className="size-3" />}
       title={t("sectionCostActivity")}
       action={
         <span className={cn("shrink-0 items-center gap-1", FLEX)}>

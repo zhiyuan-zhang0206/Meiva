@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ArrowLeft, House, RefreshCw } from "lucide-react";
+import { ArrowLeft, House, RefreshCw, ScanSearch } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
@@ -10,7 +10,7 @@ import { readReferences, withReferences } from "@/lib/context/reference-url";
 import { useToUser } from "@/lib/context/use-to-user";
 import { cn } from "@/lib/format/utils";
 import { formatRelative } from "@/lib/format/time";
-import { COLUMN_TITLE_BAR_WRAP_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { COLUMN_TITLE_BAR_WRAP_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { API_BASE } from "@/lib/transport/api-base";
 
 const PUSHED_ENTRY = "meivaToUserEntry";
@@ -80,12 +80,14 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
         {references.length > 0 && <button title={t("back")} aria-label={t("back")} className="rounded p-1 hover:bg-accent" onClick={goBack}>
           <ArrowLeft className="size-3.5" />
         </button>}
-        {!mobile && <span className={cn("truncate flex-auto", MIN_W_0)}>{t("sharedContext")}</span>}
-        <div data-testid="document-status" className={cn("ml-auto shrink-0 items-center gap-1.5", FLEX)}>
+        {!mobile && <span className="shrink-0 whitespace-nowrap">{t("sharedContext")}</span>}
+        <div data-testid="document-status" className={cn("shrink-0 items-center gap-1.5", FLEX)}>
           {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at) })}</span>}
           <button title={t("refresh")} aria-label={t("refresh")} onClick={() => { if (references.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
             <RefreshCw className="size-3.5" />
           </button>
+        </div>
+        <div className={cn("ml-auto shrink-0 items-center", FLEX)}>
           {onInspect ? (
             <button
               type="button"
@@ -96,7 +98,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
               onClick={onInspect}
               className={cn("rounded p-1 hover:bg-accent", inspecting && "bg-accent text-foreground")}
             >
-              <Activity className="size-3.5" />
+              <ScanSearch className="size-3.5" />
             </button>
           ) : null}
         </div>

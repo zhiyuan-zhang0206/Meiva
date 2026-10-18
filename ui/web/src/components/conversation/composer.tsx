@@ -440,6 +440,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
       )}
     >
       <div className={cn("gap-2 border-t border-border pt-2", FLEX, FLEX_COL)}>
+      {commandHint !== null || (showContextMeter && contextTokens > 0) || (showContextMeter && contextPending) ? (
       <div className={cn("relative items-center gap-2 px-0.5 text-xs text-muted-foreground h-4 leading-4", FLEX, MIN_W_0)}>
         <span data-testid="composer-meta" className={cn("truncate", commandHint && "italic", MIN_W_0)}>
           {commandHint ??
@@ -457,14 +458,11 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
                 />
               ) : contextPending ? (
                 <ContextMeterGhost />
-              ) : (
-                " "
-              )
-            ) : (
-              " "
-            ))}
+              ) : null
+            ) : null)}
         </span>
       </div>
+      ) : null}
       {filesUploading ? (
         <div
           role="status"

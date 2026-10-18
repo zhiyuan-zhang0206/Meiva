@@ -348,7 +348,7 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("142")).toBeTruthy();
     expect(screen.getByText("91.70%")).toBeTruthy();
 
-    const activitySection = screen.getByText("Cost + Activity").closest("section");
+    const activitySection = screen.getByText("Activity").closest("section");
     expect(activitySection).not.toBeNull();
     expect(within(activitySection!).getByText("TPS")).toBeTruthy();
     expect(within(activitySection!).getByText("42.5")).toBeTruthy();
@@ -423,7 +423,7 @@ describe("InspectorPanel", () => {
     expect(screen.getByLabelText("Persistent shells loading")).toBeTruthy();
     expect(screen.getByLabelText("Liveness loading")).toBeTruthy();
     expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
-    expect(screen.getByLabelText("Cost + Activity loading")).toBeTruthy();
+    expect(screen.getByLabelText("Activity loading")).toBeTruthy();
     expect(screen.queryByLabelText("Notice loading")).toBeNull();
     expect(screen.queryByText("Loading…")).toBeNull();
   });
@@ -440,11 +440,11 @@ describe("InspectorPanel", () => {
 
     await waitFor(() => expect(screen.getByText("dev-server")).toBeTruthy());
     expect(screen.queryByLabelText("Persistent shells loading")).toBeNull();
-    expect(screen.getByLabelText("Cost + Activity loading")).toBeTruthy();
+    expect(screen.getByLabelText("Activity loading")).toBeTruthy();
 
     releaseWindowed(fixture({ window_hours: 24 }));
     await waitFor(() => expect(screen.getByText("$0.4213")).toBeTruthy());
-    expect(screen.queryByLabelText("Cost + Activity loading")).toBeNull();
+    expect(screen.queryByLabelText("Activity loading")).toBeNull();
     expect(screen.queryByLabelText("Persistent shells loading")).toBeNull();
   });
 
@@ -489,7 +489,7 @@ describe("InspectorPanel", () => {
       expect(getAgentInspectStatistics).toHaveBeenCalledWith(1, 1, expect.any(AbortSignal)),
     );
     expect(screen.queryByText("$0.4213")).toBeNull();
-    expect(screen.getByLabelText("Cost + Activity loading")).toBeTruthy();
+    expect(screen.getByLabelText("Activity loading")).toBeTruthy();
     expect(screen.getByText("dev-server")).toBeTruthy();
   });
 
@@ -581,8 +581,8 @@ describe("InspectorPanel", () => {
     );
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.queryByLabelText("Cost + Activity loading")).toBeNull());
-    const activitySection = screen.getByText("Cost + Activity").closest("section");
+    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
+    const activitySection = screen.getByText("Activity").closest("section");
     expect(activitySection).not.toBeNull();
     expect(within(activitySection!).getByText(expected)).toBeTruthy();
   });
@@ -601,7 +601,7 @@ describe("InspectorPanel", () => {
     );
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.queryByLabelText("Cost + Activity loading")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
     expect(screen.getByText("24d 3h")).toBeTruthy();
     expect(screen.getAllByText("1h").length).toBeGreaterThanOrEqual(2);
   });
@@ -623,8 +623,8 @@ describe("InspectorPanel", () => {
       fixture({ activity: { active_seconds: 0, alive_seconds: 0, active_rate: 0, llm_seconds: 0, exec_seconds: 0 } }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.queryByLabelText("Cost + Activity loading")).toBeNull());
-    const activitySection = screen.getByText("Cost + Activity").closest("section");
+    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
+    const activitySection = screen.getByText("Activity").closest("section");
     expect(activitySection).not.toBeNull();
     expect(within(activitySection!).getAllByText("—")).toHaveLength(3);
     expect(within(activitySection!).getByText("42.5")).toBeTruthy();
@@ -1269,7 +1269,7 @@ describe("InspectorPanel mobile", () => {
 });
 
 describe("InspectorPanel manual refresh", () => {
-  it("the Cost + Activity refresh re-fires only the windowed statistics read", async () => {
+  it("the Activity refresh re-fires only the windowed statistics read", async () => {
     getAgentInspectStatistics.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
@@ -1284,10 +1284,10 @@ describe("InspectorPanel manual refresh", () => {
     expect(getAgentInspectWidgets.mock.calls.length).toBe(widgetCallsAfterOpen);
   });
 
-  it("keeps the window picker and refresh control inside the Cost + Activity section", async () => {
+  it("keeps the window picker and refresh control inside the Activity section", async () => {
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Cost + Activity")).toBeTruthy());
-    const section = screen.getByText("Cost + Activity").closest("section");
+    await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());
+    const section = screen.getByText("Activity").closest("section");
     expect(section).not.toBeNull();
     expect(within(section!).getByLabelText("Cost + activity window")).toBeTruthy();
     expect(
@@ -1297,31 +1297,53 @@ describe("InspectorPanel manual refresh", () => {
 });
 
 describe("InspectorPanel section layout", () => {
-  it("renders the run timeline entry first, Cost + Activity second, then the runtime sections", async () => {
+  it("renders the run timeline entry first, then page and the runtime sections, with Activity last", async () => {
+    const page = {
+      id: 7,
+      agent_id: 1,
+      name: "task-dashboard",
+      port: 4173,
+      title: "Task dashboard",
+      serve_dir: null,
+      url: "http://gateway.test/pages/7-task-dashboard/",
+      created_at: "2026-08-24T12:00:00Z",
+      closed_at: null,
+    } satisfies PageRow;
+    listPages.mockResolvedValue([page]);
+    act(() => {
+      useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
+    });
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Context")).toBeTruthy());
 
-    const runLink = screen.getByRole("link", { name: "Open run timeline" });
-    const costActivity = screen.getByText("Cost + Activity");
     const shells = screen.getByText("Persistent shells");
     const liveness = screen.getByText("Liveness");
     const configOverlay = screen.getByText("Configuration overlay");
+    const runLink = screen.getByRole("link", { name: "Open run timeline" });
+    const pageSection = screen.getByText("Page");
+    const context = screen.getByText("Context");
+    const activity = screen.getByText("Activity");
     const before = (first: Node, second: Node) =>
       first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING;
-    expect(before(runLink, costActivity)).toBeTruthy();
-    expect(before(costActivity, shells)).toBeTruthy();
+    expect(before(runLink, pageSection)).toBeTruthy();
+    expect(before(pageSection, shells)).toBeTruthy();
     expect(before(shells, liveness)).toBeTruthy();
     expect(before(liveness, configOverlay)).toBeTruthy();
+    expect(before(configOverlay, context)).toBeTruthy();
+    expect(before(context, activity)).toBeTruthy();
+    act(() => { useTimelineStore.getState().applyTokenUsage(0, 0, 0, 0, 0); });
+    listPages.mockResolvedValue([]);
   });
 
   it("embedded: renders without the header bar or the category selector", async () => {
     render(<InspectorPanel agentId={1} embedded />);
-    await waitFor(() => expect(screen.getByText("Cost + Activity")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());
 
     expect(screen.queryByText("Inspector", { selector: "span" })).toBeNull();
     expect(screen.queryByLabelText("Inspector category")).toBeNull();
     const runLink = screen.getByRole("link", { name: "Open run timeline" });
-    const costActivity = screen.getByText("Cost + Activity");
+    const costActivity = screen.getByText("Activity");
     expect(
       runLink.compareDocumentPosition(costActivity) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -1607,7 +1629,7 @@ describe("InspectorPanel plugin widgets", () => {
     render(<InspectorPanel agentId={1} />);
 
     await screen.findByRole("link", { name: "Open run timeline" });
-    await screen.findAllByText("Cost + Activity");
+    await screen.findAllByText("Activity");
     expect(screen.queryByText("Tasks")).toBeNull();
   });
 });
@@ -1698,7 +1720,7 @@ describe("persisted metric evidence is internal (task #3869)", () => {
     data.metadata.lifecycle = { availability: "unavailable", sources: [] };
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
-    await screen.findByText("Cost + Activity");
+    await screen.findByText("Activity");
     await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalled());
     expect(screen.queryByText("$0.0000")).toBeNull();
     expect(screen.queryByText("0.00 tok/s")).toBeNull();
@@ -1751,7 +1773,7 @@ describe("internal duration evidence never renders (task #3869)", () => {
     data.metadata.turns.reason = "missing_turn_durations";
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
-    await screen.findByText("Cost + Activity");
+    await screen.findByText("Activity");
     await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalled());
     expect(
       screen.queryByText("Some recorded turns have no duration; throughput is unavailable."),
@@ -1765,19 +1787,36 @@ describe("InspectorPanel Context section", () => {
     act(() => { useTimelineStore.getState().applyTokenUsage(0, 0, 0, 0, 0); });
   });
 
-  it("shows occupancy and the wind-down/compact thresholds from the live token slice", async () => {
+  it("shows occupancy plus the soft and hard limits on one row", async () => {
     act(() => {
       useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
     });
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Context")).toBeTruthy());
-    expect(screen.getByTestId("inspector-context-used").textContent).toBe("109.6k / 1.00M");
-    expect(screen.getByTestId("inspector-context-limits").textContent).toBe("374.0k / 512.0k");
+    const used = screen.getByTestId("inspector-context-used");
+    const limits = screen.getByTestId("inspector-context-limits");
+    expect(used.textContent).toBe("109.6k / 1.00M");
+    expect(limits.textContent).toBe("374.0k / 512.0k");
+    expect(used.parentElement?.parentElement).toBe(limits.parentElement?.parentElement);
+  });
+
+  it("opens the shared breakdown as a floating panel under the gauge", async () => {
+    act(() => {
+      useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
+    });
+    render(<InspectorPanel agentId={1} />);
+    const trigger = await screen.findByTestId("context-meter-button");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(trigger);
+    const panel = await screen.findByTestId("context-breakdown-panel");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(panel.className).toContain("bottom-full");
+    expect(panel.className).not.toContain("top-full");
   });
 
   it("renders no Context section before the first LLM call", async () => {
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Cost + Activity")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());
     expect(screen.queryByText("Context")).toBeNull();
   });
 });

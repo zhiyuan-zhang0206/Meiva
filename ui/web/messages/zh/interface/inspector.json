@@ -25,7 +25,7 @@
   "sectionShells": "持久 Shell",
   "unnamed": "（未命名）",
   "sectionConfigOverlay": "配置覆盖",
-  "sectionCostActivity": "成本 + 活动",
+  "sectionCostActivity": "活动",
   "metricCost": "成本",
   "metricLlmCalls": "LLM 调用",
   "metricTokens": "Tokens",
@@ -50,6 +50,5 @@
   "jumpNotice": "通知",
   "sectionContext": "上下文",
   "metricContextUsed": "已用",
-  "metricContextLimits": "回收提醒 / 自动压缩",
-  "metricContextLimitsHint": "软 / 硬"
+  "metricContextLimits": "软 / 硬上限"
 }

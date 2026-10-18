@@ -25,7 +25,7 @@
   "sectionShells": "Persistent shells",
   "unnamed": "(unnamed)",
   "sectionConfigOverlay": "Configuration overlay",
-  "sectionCostActivity": "Cost + Activity",
+  "sectionCostActivity": "Activity",
   "metricCost": "Cost",
   "metricLlmCalls": "LLM calls",
   "metricTokens": "Tokens",
@@ -50,6 +50,5 @@
   "jumpNotice": "Notification",
   "sectionContext": "Context",
   "metricContextUsed": "Used",
-  "metricContextLimits": "Wind-down / compact",
-  "metricContextLimitsHint": "soft / hard"
+  "metricContextLimits": "Soft / Hard limit"
 }

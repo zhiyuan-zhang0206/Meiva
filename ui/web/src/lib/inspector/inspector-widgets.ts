@@ -1,12 +1,12 @@
 // meiva:link ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md
 export const INSPECT_SECTION_ORDER = {
-  runLink: 50,
-  costActivity: 75,
-  context: 90,
-  page: 100,
-  shells: 200,
-  liveness: 300,
-  configOverlay: 400,
+  costActivity: 900,
+  context: 600,
+  runLink: 100,
+  page: 200,
+  shells: 300,
+  liveness: 400,
+  configOverlay: 500,
   notice: 800,
 } as const;
 

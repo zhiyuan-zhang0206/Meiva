@@ -8,7 +8,7 @@
   "retry": "Retry",
   "empty": "No context recorded yet — the breakdown appears after the agent's first turn.",
   "tokensUnit": "tokens",
-  "thresholds": "wind-down {soft} · auto-compact {hard}",
+  "thresholds": "soft {soft} · hard {hard}",
   "sections": "System prompt sections",
   "expand": "Expand {target}",
   "collapse": "Collapse {target}",
