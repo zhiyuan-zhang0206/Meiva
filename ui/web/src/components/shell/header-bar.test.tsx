@@ -13,13 +13,13 @@ afterEach(() => {
 
 describe("HeaderBar", () => {
   it("renders label text", () => {
-    render(<HeaderBar label="Agent #5 · idle" onOpenSidebar={vi.fn()} />);
+    render(<HeaderBar label="Agent #5 · idle" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} />);
     expect(screen.getByText("Agent #5 · idle")).toBeTruthy();
   });
 
   it("click sidebar button → onOpenSidebar called", () => {
     const onOpen = vi.fn();
-    render(<HeaderBar label="x" onOpenSidebar={onOpen} />);
+    render(<HeaderBar label="x" onOpenSidebar={onOpen} sidebarCollapsed={false} onToggleSidebar={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
     expect(onOpen).toHaveBeenCalled();
   });
@@ -28,7 +28,7 @@ describe("HeaderBar", () => {
     // User ruling 2026-08-06: the header bar is a floating layer over the
     // full-bleed timeline surface (absolute + backdrop blur), not a sticky
     // row in the content column.
-    const { container } = render(<HeaderBar label="x" onOpenSidebar={vi.fn()} />);
+    const { container } = render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} />);
     const header = container.firstChild as HTMLElement;
     expect([...header.classList]).toContain("absolute");
     expect([...header.classList]).not.toContain("relative");
@@ -39,7 +39,7 @@ describe("HeaderBar", () => {
   });
 
   it("puts the shared title height and inset divider on the outer header", () => {
-    const { container } = render(<HeaderBar label="x" onOpenSidebar={vi.fn()} />);
+    const { container } = render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} />);
     const header = container.querySelector("header")!;
     const inner = container.querySelector("header > div")!;
 
@@ -53,7 +53,7 @@ describe("HeaderBar", () => {
 
   it("maxWidthCss centers the inner content with the timeline column", () => {
     const { container } = render(
-      <HeaderBar label="x" onOpenSidebar={vi.fn()} maxWidthCss="min(40vw, 1280px)" />,
+      <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} maxWidthCss="min(40vw, 1280px)" />,
     );
     const inner = container.querySelector("header > div");
     expect((inner as HTMLElement | null)?.style.maxWidth).toBe("min(40vw, 1280px)");
@@ -66,10 +66,21 @@ describe("HeaderBar", () => {
 
   it("children slot renders custom content on the right", () => {
     render(
-      <HeaderBar label="x" onOpenSidebar={vi.fn()}>
+      <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()}>
         <span data-testid="header-extra">extra</span>
       </HeaderBar>,
     );
     expect(screen.getByTestId("header-extra")).toBeTruthy();
+  });
+
+  it("toggles the agent sidebar from the title bar", () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={onToggle} />,
+    );
+    fireEvent.click(screen.getByTestId("sidebar-toggle"));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    rerender(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={onToggle} />);
+    expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).toBe("Show sidebar");
   });
 });

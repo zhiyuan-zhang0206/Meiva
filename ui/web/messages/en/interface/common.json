@@ -24,5 +24,7 @@
   "failed": "Failed",
   "filesUploadingHint": "Uploading file(s) — Enter sends the text now; files are delivered when the upload finishes.",
   "modelCapabilitiesUnavailable": "Model capabilities are unavailable. You can still send text or request a stop.",
-  "deliveryUnconfirmedToast": "Message receipt could not be confirmed. Your draft has been kept."
+  "deliveryUnconfirmedToast": "Message receipt could not be confirmed. Your draft has been kept.",
+  "openImage": "Open image",
+  "closeImage": "Close image"
 }

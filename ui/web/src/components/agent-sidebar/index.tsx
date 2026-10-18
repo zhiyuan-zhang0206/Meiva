@@ -5,7 +5,7 @@
 // addressable by ID regardless of directory membership.
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 
@@ -18,7 +18,7 @@ import { useUserSettings } from "@/lib/state/use-user-settings";
 
 import { SidebarBody } from "./body";
 import { SidebarFooter } from "./footer";
-import { CollapsedSidebar, SidebarHeader } from "./header";
+import { SidebarHeader } from "./header";
 import { SearchOverlay } from "./search-overlay";
 import type { DesktopProps, MobileProps, Props } from "./types";
 import { FLEX, FLEX_COL } from "@/lib/layout/layout";
@@ -149,11 +149,9 @@ export function AgentSidebar(props: Props) {
 
 function DesktopSidebar(props: DesktopProps) {
   const t = useTranslations("sidebar");
-  const { collapsed, setCollapsed, onSearchOpen } = props;
+  const { collapsed, onSearchOpen } = props;
 
-  if (collapsed) {
-    return <CollapsedSidebar {...props} />;
-  }
+  if (collapsed) return null;
 
   return (
     <aside
@@ -180,13 +178,6 @@ function DesktopSidebar(props: DesktopProps) {
               aria-label={t("searchAgents")}
             >
               <Search className="size-4" />
-            </button>
-            <button
-              onClick={() => setCollapsed(true)}
-              className="p-1 rounded hover:bg-sidebar-accent shrink-0"
-              aria-label={t("collapseSidebar")}
-            >
-              <ChevronLeft className="size-4" />
             </button>
           </>
         }

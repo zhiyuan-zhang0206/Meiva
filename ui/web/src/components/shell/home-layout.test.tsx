@@ -232,7 +232,7 @@ describe("HomeLayout frame contract", () => {
     ]);
   });
 
-  it("collapsed desktop frame is static and cannot write panel layout storage", () => {
+  it("collapsed desktop frame renders nothing of the sidebar and cannot write panel layout storage", () => {
     localStorage.setItem("sentinel", "unchanged");
 
     render(
@@ -246,8 +246,8 @@ describe("HomeLayout frame contract", () => {
     );
 
     expect(screen.queryAllByTestId("resizable-panel-group")).toHaveLength(0);
-    expect(screen.getByTestId("agent-tree").parentElement?.style.flexBasis).toBe("3%");
-    expect(document.querySelector('[data-slot="static-divider"]')).not.toBeNull();
+    expect(screen.queryByTestId("agent-tree")).toBeNull();
+    expect(document.querySelector('[data-slot="static-divider"]')).toBeNull();
     expect(screen.getByTestId("main-timeline")).toBeTruthy();
     expect(localStorage.length).toBe(1);
     expect(localStorage.getItem("sentinel")).toBe("unchanged");

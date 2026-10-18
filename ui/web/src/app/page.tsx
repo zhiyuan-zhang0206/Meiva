@@ -15,6 +15,7 @@ import { ErrorBoundary } from "@/components/connection/error-boundary";
 import { Composer } from "@/components/conversation/composer";
 import { PermissionBanner } from "@/components/permissions/permission-banner";
 import { HeaderBar } from "@/components/shell/header-bar";
+import { ContextPanelToggle } from "@/components/shell/context-panel-toggle";
 import { HomeLayout } from "@/components/shell/home-layout";
 import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { useToUser } from "@/lib/context/use-to-user";
@@ -85,6 +86,7 @@ function HomeShell({ showError }: HomeShellProps) {
     isLoading: sidebarSettingsLoading,
   } = useSidebarCollapsed();
   const sidebarEntryResetDone = useRef(false);
+  const { settings: userSettings } = useUserSettings();
 
   useEffect(() => {
     if (sidebarSettingsLoading || sidebarEntryResetDone.current) return;
@@ -118,7 +120,10 @@ function HomeShell({ showError }: HomeShellProps) {
     .filter((notice) => notice.agent_id === activeId)
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || b.created_at.localeCompare(a.created_at));
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
-  const showContext = isLarge ? activeId != null : mobileContextOpen || inspectorOpen;
+  const contextPanelOpen = userSettings["display.context_panel_open"] !== false;
+  const showContext = isLarge
+    ? activeId != null && contextPanelOpen
+    : mobileContextOpen || inspectorOpen;
 
   const handleSpawn = useCallback(
     async ({
@@ -232,8 +237,9 @@ function HomeContent({
   const timelineText = useTranslations("timeline");
   const contextText = useTranslations("toUser");
   const composerFocusToken = useStore((s) => s.composerFocusToken);
-  const { settings: userSettings, isLoading: userSettingsLoading } = useUserSettings();
-  const { isNarrow } = useBreakpoint();
+  const { settings: userSettings, setSetting, isLoading: userSettingsLoading } = useUserSettings();
+  const { isNarrow, isLarge } = useBreakpoint();
+  const { collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed } = useSidebarCollapsed();
   const contentColumnMaxWidth = isNarrow
     ? undefined
     : timelineMaxWidthCss(userSettings["display.timeline_width_ratio"]);
@@ -377,10 +383,24 @@ function HomeContent({
           <HeaderBar
             label={activeLabel}
             onOpenSidebar={() => setMobileSidebarOpen(true)}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={() => {
+              if (isNarrow) setMobileSidebarOpen(true);
+              else setSidebarCollapsed(!sidebarCollapsed);
+            }}
             maxWidthCss={contentColumnMaxWidth}
           >
             <AlertsBadge />
             {contextAvailable && <button onClick={openContext} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent">{contextText("openContext")}</button>}
+            {isLarge && activeId != null ? (
+              <ContextPanelToggle
+                open={userSettings["display.context_panel_open"] !== false}
+                onToggle={() => setSetting(
+                  "display.context_panel_open",
+                  userSettings["display.context_panel_open"] === false,
+                )}
+              />
+            ) : null}
           </HeaderBar>
           <div className="relative z-20 bg-background">
             <PendingStrip items={visiblePendingMessages} maxWidthCss={composerMaxWidth} />

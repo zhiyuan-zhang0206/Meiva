@@ -18,21 +18,18 @@ import { cn } from "@/lib/format/utils";
 interface ColumnFrame {
   layoutId: string;
   expanded: readonly [sidebar: string, main: string];
-  collapsedSidebarSize: number;
   expandedMinimums: readonly [sidebar: string, main: string];
 }
 
 const DESKTOP_COLUMNS: ColumnFrame = {
   layoutId: "meiva.home.columns.context",
   expanded: ["16%", "84%"],
-  collapsedSidebarSize: 3,
   expandedMinimums: ["12%", "60%"],
 };
 
 const MOBILE_COLUMNS: ColumnFrame = {
   layoutId: "meiva.home.columns.mobile",
   expanded: ["40%", "60%"],
-  collapsedSidebarSize: 5,
   expandedMinimums: ["30%", "40%"],
 };
 
@@ -182,27 +179,12 @@ export function HomeLayout({
   if (sidebarCollapsed) {
     return (
       <>
-        {/* A collapsed rail is not user-resizable, so it stays outside rrp:
-            a group here would register a shape the user can never adjust. */}
-        <div className={cn("h-full w-full", FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
-          <div
-            className={cn(FLEX, MIN_H_0, MIN_W_0)}
-            style={{
-              flexBasis: `${frame.collapsedSidebarSize}%`,
-              flexGrow: 0,
-              flexShrink: 0,
-            }}
-          >
-            {sidebar}
-          </div>
-          <div aria-hidden data-slot="static-divider" className="w-px shrink-0 bg-border" />
-          <div className={cn(FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
-            {isLarge && inspector !== null && inspector !== undefined && inspector !== false ? (
-              <DesktopMain main={main} inspector={inspector} />
-            ) : (
-              main
-            )}
-          </div>
+        <div className={cn("h-full w-full", FLEX, MIN_H_0, MIN_W_0)}>
+          {isLarge && inspector !== null && inspector !== undefined && inspector !== false ? (
+            <DesktopMain main={main} inspector={inspector} />
+          ) : (
+            main
+          )}
         </div>
         {isLarge ? null : inspector}
       </>
