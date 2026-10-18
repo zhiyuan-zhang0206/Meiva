@@ -18,25 +18,28 @@ class LLMStreamError(Exception):
     """
 
 
-class LLMStreamStallTimeoutError(LLMStreamError):
-    """LLM stream inter-chunk timeout — no next chunk received within
-    the per-stage timeout (TTFT for first chunk, inter-chunk for subsequent);
-    abort the current turn to prevent the agent silently hanging when the
-    server hangs.
+class FatalLLMStreamError(LLMStreamError):
+    """An LLM failure that must leave the node without retrying."""
 
-    ``stage`` names WHAT bound expired — ``"ttft"`` (no first chunk),
-    ``"mid-stream"`` (gap after at least one chunk) or ``"total"`` (the
-    per-attempt duration ceiling). It rides the exception for diagnostics
-    without requiring the message to be parsed.
-    """
 
+# meiva:note
+# LLM stream inter-chunk timeout — no next chunk within the per-stage timeout
+# (TTFT for the first chunk, inter-chunk afterwards); the turn aborts instead of
+# hanging on a silent server. It is fatal like every other stream-layer abort,
+# and that is load-bearing: the hosted runner routes `FatalLLMStreamError` into
+# the settled turn abort (`halted=True` plus the user-visible Error event), while
+# a plain `LLMStreamError` escapes into the generic crashed-turn path that only
+# logs — the row settles to idling with no message and no error the user can see
+# (agent 6933, 2026-10-18: the third gemini-4-argon stream produced no first
+# chunk within the 30s TTFT floor and the agent looked silently idle). `stage`
+# names WHAT bound expired — "ttft" (no first chunk), "mid-stream" (gap after at
+# least one chunk) or "total" (the per-attempt duration ceiling); it rides the
+# exception for diagnostics without parsing the message.
+# meiva:link agent/graph/llm/docs/llm.meiva.okf.md
+class LLMStreamStallTimeoutError(FatalLLMStreamError):
     def __init__(self, message: str, *, stage: str = "unknown") -> None:
         super().__init__(message)
         self.stage = stage
-
-
-class FatalLLMStreamError(LLMStreamError):
-    """An LLM failure that must leave the node without retrying."""
 
 
 class LLMRetryBudgetExceededError(FatalLLMStreamError):
