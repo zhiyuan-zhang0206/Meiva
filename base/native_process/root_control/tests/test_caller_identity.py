@@ -34,8 +34,8 @@ def test_a_down_request_carries_its_caller() -> None:
         json.dumps({"verb": "down", "name": "gateway", "caller": _caller()}).encode()
     )
 
-    assert request["caller"] == _caller()
-    assert request["name"] == "gateway"
+    assert request.get("caller") == _caller()
+    assert request.get("name") == "gateway"
 
 
 def test_a_status_request_takes_no_caller() -> None:
