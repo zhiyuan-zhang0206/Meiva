@@ -346,7 +346,11 @@ def _ensure_ledger_root(ctx: ConvergeCtx) -> Path:
 # instead of skipping the tool until someone uses it. A non-directory is refused.
 def _skills_root_of(client_home: Path, client: _Client) -> Path:
     if not exists(client_home):
-        client_home.mkdir(mode=0o700)
+        # meiva:note
+        # `parents=True` because a surface may keep its home below a shared tool
+        # directory (`~/.gemini/antigravity-cli`); only the leaf is Meiva's to
+        # create, so only the leaf gets mode 0700 and the parents keep theirs.
+        client_home.mkdir(mode=0o700, parents=True)
     home_stat = lstat(client_home)
     if not stat.S_ISDIR(home_stat.st_mode):
         raise ClientConflictError("client home is not a regular directory")
