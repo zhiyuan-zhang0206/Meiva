@@ -46,7 +46,7 @@ def test_the_memory_recall_gate_keeps_its_wider_meaning() -> None:
 
 
 def test_last_peer_text_is_the_newest_peer_message_in_the_batch() -> None:
-    tail = [
+    tail: list[AnyMessage] = [
         AIMessage(content="prev", id="a0"),
         inbound_message(content="first ask", source="agent:5", inbound_id=1, body_start=0),
         inbound_message(content="second ask", source="agent:6", inbound_id=2, body_start=0),
@@ -55,7 +55,7 @@ def test_last_peer_text_is_the_newest_peer_message_in_the_batch() -> None:
 
 
 def test_last_peer_text_skips_a_newer_person_message() -> None:
-    tail = [
+    tail: list[AnyMessage] = [
         AIMessage(content="prev", id="a0"),
         inbound_message(content="peer ask", source="agent:5", inbound_id=1, body_start=0),
         inbound_message(content="person ask", source="user", inbound_id=2, body_start=0),
@@ -68,7 +68,7 @@ def test_last_peer_text_is_none_without_a_peer_inbound() -> None:
 
 
 def test_last_peer_text_stops_at_the_last_assistant_turn() -> None:
-    tail = [
+    tail: list[AnyMessage] = [
         _inbound("agent:5"),
         AIMessage(content="answered", id="a1"),
         _inbound("user"),
