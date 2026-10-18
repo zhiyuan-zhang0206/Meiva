@@ -51,7 +51,6 @@
   "categories": {
     "coreTurnFinished": "一轮跑完",
     "coreNeedsInput": "等你回答",
-    "coreNotice": "普通通知",
     "fleetTaskClosed": "任务关闭"
   }
 }
