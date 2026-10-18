@@ -40,9 +40,43 @@ cd "$REPO_ROOT"
 echo "-> create $TEST_DB on $PGHOST:$PGPORT"
 psql -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE $TEST_DB"
 
+# The group roles are created before the baseline so the role-scoped GRANT blocks
+# inside it actually run; without them those blocks are no-ops and an object that
+# only the owner can read still passes this smoke (the 2026-10-18 live incident).
+echo "-> create the reader roles so role-scoped grants are exercised"
+psql -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -q <<'SQL'
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        CREATE ROLE meiva_runner NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN
+        CREATE ROLE meiva_gateway NOLOGIN;
+    END IF;
+END $$;
+SQL
+
 echo "-> apply baseline db/schema.sql"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 -q -f db/schema.sql
 echo "  ok"
+
+# A schema-owner run proves the DDL parses, not that a service can read it.
+# SET ROLE needs a superuser (or membership); CI's throwaway cluster is one.
+echo "-> a service role can read the attribution view and its evidence table"
+if [ "$(psql -d "$TEST_DB" -At -c "SELECT rolsuper FROM pg_roles WHERE rolname = current_user")" = "t" ]; then
+    psql -d "$TEST_DB" -v ON_ERROR_STOP=1 -q -o /dev/null <<'SQL'
+SET ROLE meiva_runner;
+SELECT count(*) FROM telemetry_events_attributed;
+SELECT count(*) FROM telemetry_owner_inference;
+RESET ROLE;
+SET ROLE meiva_gateway;
+SELECT count(*) FROM telemetry_events_attributed;
+RESET ROLE;
+SQL
+    echo "  ok"
+else
+    echo "  skipped: SET ROLE needs a superuser"
+fi
 
 echo "-> retired deploy storage is absent and the version-gate row survives"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
