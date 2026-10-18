@@ -1,9 +1,10 @@
 """Postgres connection guards, URLs, direct connects, and sync + async pools."""
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, LiteralString
+from typing import Any, LiteralString, cast
 from urllib.parse import urlsplit
 
 import psycopg
@@ -134,6 +135,28 @@ PG_POOLED_BASELINE_RESTORE_SQL: tuple[LiteralString, LiteralString] = (
     "RESET ALL",
     f"SELECT {_PG_POOLED_SESSION_SQL}",
 )
+
+
+# meiva:note
+# The scrub plus the statement budget that bounds the rest of this restore, in
+# one simple-protocol round trip: the budget must be in force before the restore
+# touches the server, so it rides with the `RESET ALL` rather than following it
+# — hence the caller's `prepare=False`, the only way two statements travel in
+# one message. It bounds this restore only: the next statement restores the
+# session's standing ceiling (`db_pool_restore_timeout_seconds` owns the
+# value). Read lazily because this module is on the exec child's boot path and
+# must not pull the eager config chain in (task #3621). `budget_seconds`
+# overrides the configured budget for one restore; the pool hooks pass nothing.
+def restore_budget_statement(budget_seconds: float | None = None) -> tuple[LiteralString, int]:
+    from base.config import settings
+
+    if budget_seconds is None:
+        budget_seconds = settings.agent.db_pool_restore_timeout_seconds
+    budget_ms = max(1, int(budget_seconds * 1000))
+    reset = PG_POOLED_BASELINE_RESTORE_SQL[0]
+    return cast(LiteralString, f"{reset}; SET statement_timeout = {budget_ms}"), budget_ms
+
+
 # The second statement on the borrow that also reads the cluster's minimum code
 # version (`base.db.code_version_gate`): same round trip, one more column. A
 # cluster with no `deployment_state` row has recorded no minimum: 0, never a refusal.
@@ -143,7 +166,9 @@ PG_POOLED_RESTORE_WITH_MIN_SQL: LiteralString = (
 )
 
 
-def restore_pooled_session(conn: psycopg.Connection, *, gate: ProcessDbGate) -> None:
+def restore_pooled_session(
+    conn: psycopg.Connection, *, gate: ProcessDbGate, budget_seconds: float | None = None
+) -> None:
     """Scrub a pooled connection back to its baseline session state.
 
     PgBouncer transaction pooling hands any backend to any client transaction
@@ -172,24 +197,48 @@ def restore_pooled_session(conn: psycopg.Connection, *, gate: ProcessDbGate) -> 
     treats as a failed check — the connection is discarded and replaced, the
     same discard path `ConnectionPool.check_connection` feeds.
     """
-    conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[0])
-    name = (gate.application_name(),)
-    read_due = gate.min_read_due()
-    if read_due:
-        # tuple_row: a pool built with a dict row_factory must not change the shape read.
-        with conn.cursor(row_factory=tuple_row) as cur:
-            cur.execute(PG_POOLED_RESTORE_WITH_MIN_SQL, name)
-            row = cur.fetchone()
-        if row is None:
-            raise RuntimeError("the restore statement returned no row")
-        gate.observe_minimum(int(row[2]))
-    else:
-        conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
-    conn.commit()
+    statement, budget_ms = restore_budget_statement(budget_seconds)
+    started = time.monotonic()
+    try:
+        conn.execute(statement, prepare=False)
+        name = (gate.application_name(),)
+        read_due = gate.min_read_due()
+        if read_due:
+            # tuple_row: a pool built with a dict row_factory must not change the shape read.
+            with conn.cursor(row_factory=tuple_row) as cur:
+                cur.execute(PG_POOLED_RESTORE_WITH_MIN_SQL, name)
+                row = cur.fetchone()
+            if row is None:
+                raise RuntimeError("the restore statement returned no row")
+            gate.observe_minimum(int(row[2]))
+        else:
+            conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
+        conn.commit()
+    except psycopg.errors.QueryCanceled:
+        _log_restore_timeout(started, budget_ms=budget_ms, gate=gate)
+        raise
+
+
+# meiva:note
+# One db_pool_restore_timeout event per restore that blew its budget:
+# psycopg_pool treats the raised cancellation as a failed check and retries
+# against its own deadline, so the borrower stops waiting out the stall.
+def _log_restore_timeout(started: float, *, budget_ms: int, gate: ProcessDbGate) -> None:
+    from base.log import logger
+
+    logger.warning(
+        "[db pool] {name} session restore exceeded its {budget_ms}ms budget after "
+        "{elapsed_ms}ms — the pool counts the check as failed and retries, so this "
+        "borrower does not wait out the stall",
+        event="db_pool_restore_timeout",
+        name=gate.application_name(),
+        budget_ms=budget_ms,
+        elapsed_ms=int((time.monotonic() - started) * 1000),
+    )
 
 
 async def restore_pooled_session_async(
-    conn: psycopg.AsyncConnection, *, gate: ProcessDbGate
+    conn: psycopg.AsyncConnection, *, gate: ProcessDbGate, budget_seconds: float | None = None
 ) -> None:
     """Async twin of `restore_pooled_session`: `async_pool()`'s per-borrow check.
 
@@ -197,19 +246,25 @@ async def restore_pooled_session_async(
     statement ceiling, same discard-on-failure semantics (psycopg_pool replaces
     a connection whose check raises), same name and code-version read.
     """
-    await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[0])
-    name = (gate.application_name(),)
-    read_due = gate.min_read_due()
-    if read_due:
-        async with conn.cursor(row_factory=tuple_row) as cur:
-            await cur.execute(PG_POOLED_RESTORE_WITH_MIN_SQL, name)
-            row = await cur.fetchone()
-        if row is None:
-            raise RuntimeError("the restore statement returned no row")
-        gate.observe_minimum(int(row[2]))
-    else:
-        await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
-    await conn.commit()
+    statement, budget_ms = restore_budget_statement(budget_seconds)
+    started = time.monotonic()
+    try:
+        await conn.execute(statement, prepare=False)
+        name = (gate.application_name(),)
+        read_due = gate.min_read_due()
+        if read_due:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(PG_POOLED_RESTORE_WITH_MIN_SQL, name)
+                row = await cur.fetchone()
+            if row is None:
+                raise RuntimeError("the restore statement returned no row")
+            gate.observe_minimum(int(row[2]))
+        else:
+            await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
+        await conn.commit()
+    except psycopg.errors.QueryCanceled:
+        _log_restore_timeout(started, budget_ms=budget_ms, gate=gate)
+        raise
 
 
 # psycopg_pool's own `ConnectionPool(timeout=...)` default, restated as a name so

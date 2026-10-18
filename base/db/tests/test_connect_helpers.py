@@ -243,7 +243,7 @@ class _FakeConn:
         self.executed: list[tuple[str, tuple[str, ...]]] = []
         self.commits = 0
 
-    def execute(self, sql: str, params: tuple[str, ...] = ()) -> None:
+    def execute(self, sql: str, params: tuple[str, ...] = (), **_kwargs: object) -> None:
         self.executed.append((sql, params))
 
     def cursor(self, **_kwargs: object) -> _Cursor:
@@ -269,14 +269,15 @@ def test_the_restore_reads_the_minimum_at_most_every_interval(
     restore(conn, gate=process_gate)
 
     name = (process_gate.application_name(),)
-    reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
+    budget, _ms = connections.restore_budget_statement()
+    _reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
     combined = connections.PG_POOLED_RESTORE_WITH_MIN_SQL
     assert conn.executed == [
-        (reset, ()),
+        (budget, ()),
         (combined, name),
-        (reset, ()),
+        (budget, ()),
         (plain, name),
-        (reset, ()),
+        (budget, ()),
         (combined, name),
     ]
     assert conn.commits == 3
@@ -310,7 +311,7 @@ class _AsyncCursor(_Cursor):
 
 
 class _FakeAsyncConn(_FakeConn):
-    async def execute(self, sql: str, params: tuple[str, ...] = ()) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+    async def execute(self, sql: str, params: tuple[str, ...] = (), **_kwargs: object) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.executed.append((sql, params))
 
     def cursor(self, **_kwargs: object) -> _AsyncCursor:  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -333,14 +334,15 @@ async def test_the_async_restore_follows_the_same_schedule_and_verdict(
     await restore(conn, gate=process_gate)
 
     name = (process_gate.application_name(),)
-    reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
+    budget, _ms = connections.restore_budget_statement()
+    _reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
     combined = connections.PG_POOLED_RESTORE_WITH_MIN_SQL
     assert conn.executed == [
-        (reset, ()),
+        (budget, ()),
         (combined, name),
-        (reset, ()),
+        (budget, ()),
         (plain, name),
-        (reset, ()),
+        (budget, ()),
         (combined, name),
     ]
 
@@ -360,8 +362,9 @@ def test_an_exempt_process_keeps_the_plain_restore(monkeypatch: pytest.MonkeyPat
 
     restore(conn, gate=process_gate)
 
-    reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
-    assert conn.executed == [(reset, ()), (plain, ("meiva:cli",))]
+    budget, _ms = connections.restore_budget_statement()
+    _reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
+    assert conn.executed == [(budget, ()), (plain, ("meiva:cli",))]
 
 
 # ── real Postgres ────────────────────────────────────────────────────────────
