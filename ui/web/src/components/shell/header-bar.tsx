@@ -5,7 +5,7 @@
 // Control) moved to the sidebar footer (2026-08-05, user ruling); the right-
 // side children slot homes the Alerts badge and Inspector toggle.
 
-import { Menu } from "lucide-react";
+import { Menu, PanelLeft } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 
@@ -15,6 +15,8 @@ import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/li
 interface Props {
   label: string;
   onOpenSidebar: () => void;
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
   children?: ReactNode;
   /** Timeline column cap — the bar floats above the timeline surface and
    *  its inner content aligns with the conversation column (user ruling
@@ -22,8 +24,9 @@ interface Props {
   maxWidthCss?: string;
 }
 
-export function HeaderBar({ label, onOpenSidebar, children, maxWidthCss }: Props) {
+export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSidebar, children, maxWidthCss }: Props) {
   const t = useTranslations("nav");
+  const sidebarT = useTranslations("sidebar");
 
   return (
     <header
@@ -50,6 +53,15 @@ export function HeaderBar({ label, onOpenSidebar, children, maxWidthCss }: Props
             aria-label={t("openSidebar")}
           >
             <Menu className="size-5" />
+          </button>
+          <button
+            onClick={onToggleSidebar}
+            className="hidden md:inline-flex p-1 -ml-1 rounded hover:bg-sidebar-accent shrink-0"
+            aria-label={sidebarT(sidebarCollapsed ? "showSidebar" : "hideSidebar")}
+            aria-pressed={!sidebarCollapsed}
+            data-testid="sidebar-toggle"
+          >
+            <PanelLeft className="size-5" />
           </button>
           <span className="truncate">{label}</span>
         </div>

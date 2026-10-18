@@ -170,6 +170,16 @@ describe("To user document bar", () => {
   });
 });
 
+it("opens a document image at full size and closes it on Escape", async () => {
+  show(document("# Status\n\n![shot](https://example.com/shot.png)"));
+  const thumb = await screen.findByTestId("zoomable-image");
+  fireEvent.click(thumb);
+  const lightbox = await screen.findByTestId("image-lightbox");
+  expect(lightbox.getAttribute("role")).toBe("dialog");
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByTestId("image-lightbox")).toBeNull();
+});
+
 it("offers the inspector trigger only when the panel wires it, and reports presses", () => {
   const onInspect = vi.fn();
   const view = show(document("hello"));

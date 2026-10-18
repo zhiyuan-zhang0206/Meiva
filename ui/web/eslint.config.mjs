@@ -182,6 +182,12 @@ export default tseslint.config(
     },
   },
   {
+    files: ["src/components/content/zoomable-image.tsx"],
+    rules: {
+      "@next/next/no-img-element": "off",
+    },
+  },
+  {
     // The focus-managed lightbox closes on the global Escape handler and its
     // backdrop click. Those handlers are covered by timeline tests, but are
     // intentionally not co-located where the static rules can inspect them.

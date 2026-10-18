@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
+import { ZoomableImage } from "@/components/content/zoomable-image";
 import type { ToUserDocument } from "@/lib/contracts/types";
 import { readReferences, withReferences } from "@/lib/context/reference-url";
 import { useToUser } from "@/lib/context/use-to-user";
@@ -110,11 +111,16 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
           {loading ? t("loading") : error ? t("unavailable") : current?.legacy_html ? t("legacyHtml") : t("empty")}
         </div>
       ) : (
-        <div key={references.join("/")} className={cn("overflow-auto p-5 text-sm", MIN_H_0, FLEX_1)}>
+        <div key={references.join("/")} className={cn("overflow-auto p-5 text-[13px] leading-relaxed", MIN_H_0, FLEX_1)}>
           <ChatMarkdown content={content} resolveUrl={(href) => {
             const resource = resources.get(href);
             return resource?.url ?? (/^(https?:|mailto:|#)/i.test(href) ? href : "about:blank");
           }} components={{
+            img: ({ src, alt }) => (
+              typeof src === "string"
+                ? <ZoomableImage src={src} alt={alt ?? ""} />
+                : null
+            ),
             a: ({ href, children }) => {
               const resource = href ? byUrl.get(href) : undefined;
               const external = !href?.startsWith("#");
