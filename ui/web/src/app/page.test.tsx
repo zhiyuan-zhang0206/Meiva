@@ -146,9 +146,6 @@ vi.mock("@/lib/state/store", () => ({
   },
 }));
 
-// Breakpoint: tests default to desktop (isLarge = true). The inspector
-// mount-reset is desktop-only (task #793), so the mobile tests flip this.
-// R4 layer 4: the page consumes useBreakpoint — the single breakpoint source.
 vi.mock("@/lib/layout/breakpoint", () => ({
   useBreakpoint: () => ({
     tier: hooksState.isDesktop ? "xl" : "xs",
@@ -157,8 +154,6 @@ vi.mock("@/lib/layout/breakpoint", () => ({
   }),
 }));
 
-// requestScrollToBottom moved to the timeline store (useTimelineStore) when the
-// timeline split out of the app store; page.tsx reads it from there on send.
 vi.mock("@/lib/timeline/timeline-store", () => ({
   useTimelineStore: <T,>(selector: (s: unknown) => T): T => {
     const fakeState = {
@@ -186,14 +181,12 @@ vi.mock("@/lib/transport/api", () => ({
   },
 }));
 
-// The timeline's scroll memory is keyed by the history entry (router.bfcacheId).
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ bfcacheId: "_b_test_" }),
 }));
 
 
 
-// Child-component stubs — render a recognizable testid + expose key props for assertions
 vi.mock("@/components/agent-sidebar", () => ({
   AgentSidebar: ({ onSpawn }: { onSpawn: (opts: { machine?: string; model?: string }) => void }) => (
     <button data-testid="sidebar-spawn" onClick={() => { onSpawn({}); }}>spawn</button>
@@ -301,8 +294,6 @@ vi.mock("@/components/inspector/inspector-panel", async () => {
   const React = await import("react");
   return {
     InspectorPanel: () => {
-      // Counts committed mounts — the batch-1 switch fix keeps this at 1
-      // across healthy agent switches (task #3894).
       React.useEffect(() => {
         inspectorMockState.mounts += 1;
       }, []);

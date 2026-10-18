@@ -34,8 +34,6 @@ export function UploadButton({ agentId, onUpload, uploading, progress, count, er
     [onUpload],
   );
 
-  // While uploading render the spinner — no new upload allowed (input not in
-  // DOM). For a multi-file batch prefix the file count ("3 files · 42%").
   if (uploading) {
     return (
       <span
