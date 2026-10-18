@@ -203,7 +203,8 @@ class AgentSkillRecallSettings(EnvSettings):
         description=(
             "Peer gate: only the first this-many characters of the peer message are sent to the "
             "decision model. The gate reads one message, never the conversation, which is what "
-            "makes it about 15x cheaper than the recall pass it guards."
+            "makes it about 15x cheaper than the recall pass it guards on typical messages "
+            "(about 3x at this cap)."
         ),
         json_schema_extra={
             "restart_required": "agent",
