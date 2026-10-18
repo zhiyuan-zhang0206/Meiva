@@ -41,7 +41,12 @@ from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, Gatewa
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
-from meiva.shell.coding_tools import add_lineage_arguments, require_lineage
+from meiva.shell.coding_tools import (
+    add_capability_arguments,
+    add_lineage_arguments,
+    announce_capability,
+    require_lineage,
+)
 
 _HERE = Path(__file__).resolve().parent
 _PLUGIN = _HERE / "meiva-relay-dsh" / "meiva-relay.mjs"
@@ -265,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Initial prompt text submitted to the new dsh session.",
     )
     add_lineage_arguments(parser)
+    add_capability_arguments(parser)
     args = parser.parse_args(argv)
     if args.status or args.cancel_generation:
         if args.prompt is not None:
@@ -276,6 +282,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.prompt is None or not args.prompt.strip():
         parser.error("new dsh launch requires a non-empty --prompt")
     workspace = _resolve_dir(args.workspace)
+    refusal = announce_capability("dsh", mode=args.mode, force=args.force_mode)
+    if refusal:
+        return refusal
     prompt = f"{require_lineage(parser, args, takeover=True)}\n\n{args.prompt}"
     from meiva.sdk_surface.agent_identity import require_agent_id
 

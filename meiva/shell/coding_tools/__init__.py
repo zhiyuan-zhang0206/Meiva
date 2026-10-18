@@ -75,3 +75,38 @@ def require_lineage(
         priority=args.priority,
     )
     return provenance_block.render_takeover(block) if takeover else provenance_block.render(block)
+
+
+# meiva:note
+# Visibility before behaviour: the flags exist so an operator can see which path a launch would take
+# and refuse a path this build does not implement, while the launcher still only has one path. An
+# explicit --mode names a decision the operator made; --force-mode lets that decision through when
+# only the recorded version floor is against it.
+def add_capability_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--mode",
+        choices=("auto", "pty", "stream-json"),
+        default="auto",
+        help="Execution path for this launch; auto picks what this build implements.",
+    )
+    parser.add_argument(
+        "--force-mode",
+        action="store_true",
+        help="Use the requested path even when the detected version is below the recorded floor.",
+    )
+
+
+def capability_report(tool: str, *, mode: str = "auto", force: bool = False) -> tuple[str, int]:
+    from ._common import capability_report as report
+
+    return report(tool, mode=mode, force=force)
+
+
+# meiva:note
+# The report is printed before any process starts, so a refusal is visible in the operator's terminal
+# rather than as a launch that quietly took the other path.
+def announce_capability(tool: str, *, mode: str, force: bool) -> int:
+    line, code = capability_report(tool, mode=mode, force=force)
+    if line:
+        print(line)
+    return code

@@ -26,7 +26,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from meiva.shell.coding_tools import add_lineage_arguments, antigravity, require_lineage
+from meiva.shell.coding_tools import (
+    add_capability_arguments,
+    add_lineage_arguments,
+    announce_capability,
+    antigravity,
+    require_lineage,
+)
 
 _SKILL_DIR = Path(__file__).resolve().parent.parent
 
@@ -79,6 +85,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Force-stop an existing Antigravity conversation tree.",
     )
     add_lineage_arguments(parser)
+    add_capability_arguments(parser)
     return parser
 
 
@@ -128,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
         prompt = f"{require_lineage(parser, args, takeover=True)}\n\n{args.prompt}"
     else:
         provenance = require_lineage(parser, args)
+    refusal = announce_capability("antigravity", mode=args.mode, force=args.force_mode)
+    if refusal:
+        return refusal
     return antigravity.launch(
         workspace,
         tasks_file,
