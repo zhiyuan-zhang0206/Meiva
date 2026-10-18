@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Home shell chrome
-description: The home columns' title bars and the composer's read-only Details summary.
+description: The home columns' title bars and where the timeline's Details mode lives now.
 tags:
 - frontend
 ---
@@ -23,16 +23,17 @@ for the same reason. Both variants are `relative`: the rule is the bar's own
 
 Every home column title bar is BAR_HEIGHT_PX tall and paints BAR_DIVIDER_CLASS's inset rule, so the Agent Tree, Timeline and right-panel dividers sit on one line; the right panel's document bar takes the wrapping variant (44px minimum, growing only when its content cannot fit one line) and its notice header takes the fixed variant — neither draws a border on its section.
 
-## Details summary
+## Details mode
 
-The composer's Details chip is a summary, not a control: it renders the mode the
-`display.expand_runs_mode` setting currently holds and links to the row that
-writes it in Display settings. The three modes (All / Last / None) all live on
-that row, which also re-applies the current mode when it is picked again (the
-manual-expansion reset). Because the picker's page unmounts the timeline, the
-reset is recorded as a pending flag in the store and consumed by whichever
-timeline mounts next — the token alone could not survive that gap. The composer
-never writes the setting, so the timeline has one writer for what its blocks
-expand to.
+The Details mode has one writer and one surface: the Display settings row bound to
+`display.expand_runs_mode` (`/control#display-timeline`, "Timeline details"), which
+keeps all three modes (All / Last / None) reachable. Picking a mode — including the
+one already stored — re-applies it and collapses manual expansions. Because the
+picker's page unmounts the timeline, the reset is recorded as a pending flag in
+`lib/layout/content-toggle-store.ts` and consumed by whichever timeline mounts
+next; the token alone could not survive that gap.
 
-The Details mode has one writer: the Display settings row bound to display.expand_runs_mode, which keeps all three modes (All / Last / None) reachable. A pick leaves a pending reset that the next mounted timeline consumes, so re-picking the current mode still collapses manual expansions even though the picker's page had unmounted the timeline. The composer shows the current value read-only — nothing while the stored value is unknown — and links to that row; it never writes the setting.
+The composer carries no Details affordance: the read-only summary chip was
+removed on 2026-10-18, so nothing on the home screen renders the mode or writes
+it. The chip's absence is deliberate — a control that cannot change the value is
+not worth a row in the composer.
