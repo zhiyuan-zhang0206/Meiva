@@ -16,6 +16,7 @@ from base.agents.incarnation.resources import ResourceBirth
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.tests.guarded_compact_support import make_host
 
 
@@ -26,6 +27,7 @@ class AcceptedHost:
     saver: AsyncPostgresSaver
     config: RunnableConfig
     ordinary: list[object]
+    source_ids: list[str]
     path: str
     headers: dict[str, str]
     target: dict[str, Any]
@@ -46,6 +48,7 @@ async def admit(
     monkeypatch: pytest.MonkeyPatch,
     *,
     interval: int = 100,
+    keep_tail: int = 0,
     catalog: ModelCatalog,
     database_gate: ProcessDbGate,
 ) -> AcceptedHost:
@@ -55,7 +58,7 @@ async def admit(
         "UPDATE agents_meta SET incarnation_resources=%s,config_overlay=%s WHERE id=%s",
         (
             Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")),
-            Jsonb({"llm_model": "gpt-6.1-sol"}),
+            Jsonb({"llm_model": "gpt-6.1-sol", "keep_tail_messages": keep_tail}),
             agent,
         ),
     )
@@ -66,6 +69,9 @@ async def admit(
     )
     await host.run_turn(agent)
     assert len(ordinary) == 1
+    source = await cold_reader(saver).aget_tuple(config)
+    assert source is not None
+    source_ids = [m.id for m in source.checkpoint["channel_values"]["messages"]]
     client.headers.pop("Authorization", None)
     assert isinstance(client.app, FastAPI)
     secret: str = client.app.state.gateway_config.cluster_secret
@@ -80,5 +86,14 @@ async def admit(
     accepted = client.post(path + "/compact-history", json=observed.json(), headers=headers)
     assert accepted.status_code == 202, accepted.text
     return AcceptedHost(
-        agent, host, saver, config, ordinary, path, headers, observed.json(), accepted.json()
+        agent,
+        host,
+        saver,
+        config,
+        ordinary,
+        source_ids,
+        path,
+        headers,
+        observed.json(),
+        accepted.json(),
     )

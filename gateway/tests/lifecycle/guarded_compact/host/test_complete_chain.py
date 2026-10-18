@@ -16,7 +16,9 @@ from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddBindings
+from gateway.tests.lifecycle.guarded_compact.host.admission import admit
 from gateway.tests.lifecycle.guarded_compact.host.faults import install
+from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel, make_host
 from tests.fixtures.gateway_config import gateway_test_client
@@ -179,3 +181,57 @@ async def assert_interrupted(
         ).json()
         == interrupted
     )
+
+
+async def test_cold_application_accepts_a_retained_tail(
+    gateway_data_plane: None,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    add_bindings: AddBindings,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    client: TestClient,
+) -> None:
+    del gateway_data_plane
+    binding = model_catalog.bindings["gpt-"]
+    model_catalog = add_bindings(
+        model_catalog,
+        {
+            "gpt-": replace(
+                binding,
+                build_single_attempt=lambda _: SummaryModel(
+                    responses=["Durable original summary. " * 100]
+                ),
+            )
+        },
+    )
+    accepted = await admit(
+        db_conn,
+        aops_pool,
+        client,
+        monkeypatch,
+        keep_tail=2,
+        catalog=model_catalog,
+        database_gate=database_gate,
+    )
+
+    await accepted.host.run_turn(accepted.agent)
+
+    status = client.get(
+        accepted.path + "/compact-commands/" + accepted.acceptance["command_id"],
+        headers=accepted.headers,
+    )
+    assert status.status_code == 200, status.text
+    assert status.json()["outcome"] == "applied", status.text
+    cold = await cold_reader(accepted.saver).aget_tuple(accepted.config)
+    assert cold is not None
+    messages = cold.checkpoint["channel_values"]["messages"]
+    summary_index = next(
+        index
+        for index, message in enumerate(messages)
+        if "Durable original summary." in str(message.content)
+    )
+    window = [message.id for message in messages[summary_index + 1 :]]
+    assert window and window == accepted.source_ids[-len(window) :]

@@ -400,6 +400,14 @@ def _is_compact_request(message: AnyMessage) -> bool:
     return False
 
 
+def _is_halt_result(message: AnyMessage) -> bool:
+    return (
+        isinstance(message, ToolMessage)
+        and "[system halt]" in str(message.content)
+        and "meiva.self.compact" in str(message.content)
+    )
+
+
 def _keep_tool_calls(message: AnyMessage, answered: set[str]) -> bool:
     if not isinstance(message, AIMessage) or not message.tool_calls:
         return True
@@ -409,47 +417,66 @@ def _keep_tool_calls(message: AnyMessage, answered: set[str]) -> bool:
     return not _is_compact_request(message)
 
 
-def _drop_unpaired(window: list[AnyMessage]) -> list[AnyMessage]:
-    answered = {m.tool_call_id for m in window if isinstance(m, ToolMessage)}
-    dropped: set[str] = set()
-    kept: list[AnyMessage] = []
-    for message in window:
-        if _keep_tool_calls(message, answered):
-            kept.append(message)
-        elif isinstance(message, AIMessage):
-            dropped.update(str(call["id"]) for call in message.tool_calls if call.get("id"))
-    if dropped:
-        kept = [
-            message
-            for message in kept
-            if not (isinstance(message, ToolMessage) and message.tool_call_id in dropped)
-        ]
-    while kept and isinstance(kept[0], ToolMessage):
-        kept.pop(0)
-    return kept
+def _without_stale_usage(message: AnyMessage) -> AnyMessage:
+    if isinstance(message, AIMessage) and message.usage_metadata:
+        return message.model_copy(update={"usage_metadata": None})
+    return message
 
 
 # meiva:note
 # A replacement keeps at most the configured number of trailing messages, made
-# self-contained: no leading tool result, no tool call without every result of
-# it, and never the meiva.self.compact request that triggered the replacement
-# (its context is already gone, so keeping it would replay a finished request).
+# self-contained: no system prompt, no leading tool result, no tool call without
+# every result of it, and never the meiva.self.compact request that triggered the
+# replacement (its context is already gone, so keeping it would replay a finished
+# request). A kept tool message carries no usage metadata: the token count it
+# recorded measured the context that was just replaced.
 # meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
+def _window_without_trigger(window: list[AnyMessage]) -> list[AnyMessage]:
+    kept = [
+        message
+        for message in window
+        if not isinstance(message, SystemMessage) and not _is_compact_request(message)
+    ]
+    halted = {
+        message.tool_call_id
+        for message in kept
+        if isinstance(message, ToolMessage) and _is_halt_result(message)
+    }
+    return [
+        message
+        for message in kept
+        if not (isinstance(message, ToolMessage) and message.tool_call_id in halted)
+    ]
+
+
+def _paired(window: list[AnyMessage]) -> list[AnyMessage]:
+    answered = {message.tool_call_id for message in window if isinstance(message, ToolMessage)}
+    kept = [message for message in window if _keep_tool_calls(message, answered)]
+    calls = {
+        str(call["id"])
+        for message in kept
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls
+        if call.get("id")
+    }
+    return [
+        message
+        for message in kept
+        if not isinstance(message, ToolMessage) or message.tool_call_id in calls
+    ]
+
+
 def retained_tail(messages: Sequence[AnyMessage], limit: int) -> list[AnyMessage]:
     if limit <= 0:
         return []
-    window = list(messages)[-limit:]
-    while True:
-        kept = _drop_unpaired(window)
-        if kept == window:
-            return kept
-        window = kept
+    window = _window_without_trigger(list(messages)[-limit:])
+    return [_without_stale_usage(message) for message in _paired(window)]
 
 
 # meiva:note
-# A replacement parks the summary, then the standing notes, then the retained
-# history, and only then a message that arrived while the compaction ran: the
-# retained window stays the last thing the agent read unless something is newer.
+# A replacement parks the summary, then the notes that describe it, then the
+# retained history: the last message is the last thing that happened, and every
+# parked note stays ahead of it.
 # meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 def build_compact_transition(
     summary: str,
@@ -461,16 +488,13 @@ def build_compact_transition(
     keep_tail: int = 0,
 ) -> dict[str, Any]:
     summary_msg_kwargs = summary_kwargs or {}
-    parked = list(extra_msgs or [])
-    split = next((i for i, m in enumerate(parked) if isinstance(m, HumanMessage)), len(parked))
     tail_msgs: list[AnyMessage] = [
         HumanMessage(
             content=compose_summary_message(summary),
             **summary_msg_kwargs,
         ),
-        *parked[:split],
+        *(extra_msgs or []),
         *retained_tail(discarded, keep_tail),
-        *parked[split:],
     ]
     return {
         "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)],

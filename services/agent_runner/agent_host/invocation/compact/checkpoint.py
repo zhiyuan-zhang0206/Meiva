@@ -5,7 +5,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from agent.graph.hooks.compact import compose_summary_message
+from agent.graph.hooks.compact import compose_summary_message, retained_tail
 from agent.state import CompactState, ContextReset
 from base.agents.compaction.execution import CompactCommand
 from base.agents.compaction.models import CompactHeldError, CompactMarker
@@ -48,9 +48,6 @@ async def cold_application(saver: AsyncPostgresSaver, command: CompactCommand) -
     marker = CompactMarker.model_validate(values["native_compact"])
     if marker != marker_for(command):
         return None
-    if not _materialized(values, command, marker):
-        return None
-    messages = values["messages"]
     source = await reader.aget_tuple(
         {
             "configurable": {
@@ -61,13 +58,19 @@ async def cold_application(saver: AsyncPostgresSaver, command: CompactCommand) -
     )
     if source is None:
         return None
-    old_ids = {message.id for message in source.checkpoint["channel_values"].get("messages", [])}
-    if any(message.id in old_ids for message in messages):
+    if not _materialized(
+        values, command, marker, source.checkpoint["channel_values"].get("messages", [])
+    ):
         return None
     return snapshot.checkpoint["id"]
 
 
-def _materialized(values: dict[str, Any], command: CompactCommand, marker: CompactMarker) -> bool:
+def _materialized(
+    values: dict[str, Any],
+    command: CompactCommand,
+    marker: CompactMarker,
+    source_messages: list[Any],
+) -> bool:
     reset = ContextReset.model_validate(values.get("context_reset", {}))
     compact = CompactState.model_validate(values.get("compact", {}))
     if (
@@ -79,22 +82,54 @@ def _materialized(values: dict[str, Any], command: CompactCommand, marker: Compa
         or NativeWorkTarget.model_validate(values.get("native_work")) != marker.execution
     ):
         return False
-    return _replacement_head(values.get("messages", []), command)
+    return _replacement_head(values.get("messages", []), command, source_messages)
 
 
-def _replacement_head(messages: list[Any], command: CompactCommand) -> bool:
+def _is_summary(message: Any, command: CompactCommand) -> bool:
     result = command.result
-    if result is None or not messages or not isinstance(messages[0], SystemMessage):
-        return False
-    summary = messages[-1]
     return (
-        isinstance(summary, HumanMessage)
-        and summary.id == str(result.message_id)
-        and summary.content == compose_summary_message(result.summary)
-        and summary.additional_kwargs.get("meiva_compact_id") == str(command.acceptance.command_id)
-        and all(
-            isinstance(message, HumanMessage)
-            and message.additional_kwargs.get("meiva_msg_type") != MeivaMsgType.INBOUND.value
-            for message in messages[1:-1]
-        )
+        result is not None
+        and isinstance(message, HumanMessage)
+        and message.id == str(result.message_id)
+        and message.content == compose_summary_message(result.summary)
+        and message.additional_kwargs.get("meiva_compact_id") == str(command.acceptance.command_id)
     )
+
+
+def _is_replacement_note(message: Any) -> bool:
+    return (
+        isinstance(message, HumanMessage)
+        and message.additional_kwargs.get("meiva_msg_type") != MeivaMsgType.INBOUND.value
+    )
+
+
+def _replacement_head(
+    messages: list[Any], command: CompactCommand, source_messages: list[Any]
+) -> bool:
+    result = command.result
+    if result is None or len(messages) < 2 or not isinstance(messages[0], SystemMessage):
+        return False
+    summary_index = next(
+        (index for index, message in enumerate(messages) if _is_summary(message, command)),
+        None,
+    )
+    if summary_index is None or not all(
+        _is_replacement_note(message) for message in messages[1:summary_index]
+    ):
+        return False
+    old_ids = {message.id for message in source_messages}
+    if any(message.id in old_ids for message in messages[: summary_index + 1]):
+        return False
+    return _verbatim_suffix(messages[summary_index + 1 :], source_messages)
+
+
+def _verbatim_suffix(window: list[Any], source_messages: list[Any]) -> bool:
+    if not window:
+        return True
+    source_ids = [message.id for message in source_messages]
+    start = next((index for index, mid in enumerate(source_ids) if mid == window[0].id), None)
+    if start is None or source_ids[start:] != [message.id for message in window]:
+        return False
+    return [message.id for message in retained_tail(window, len(window))] == [
+        message.id for message in window
+    ]

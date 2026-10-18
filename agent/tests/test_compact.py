@@ -271,7 +271,10 @@ async def test_auto_compact_hook_keeps_the_configured_tail(
     tail = result["context_reset"].tail
     assert isinstance(tail[0], HumanMessage)
     assert tail[0].content == compose_summary_message(LONG_SUMMARY)
-    assert [m.content for m in tail[1:]] == [m.content for m in state.messages[-2:]]
+    assert tail[1:] == state.messages[-2:]
+    assert all(
+        kept is original for kept, original in zip(tail[1:], state.messages[-2:], strict=True)
+    )
 
 
 async def test_auto_compact_hook_skips_when_no_conversation(

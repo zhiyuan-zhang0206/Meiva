@@ -1,6 +1,7 @@
 """The claim-node test harness: a runtime around a fake LLM, a direct inbound INSERT of any kind, the thread config and the pool-visibility barrier."""
 
 import asyncio
+from collections.abc import Mapping
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -41,6 +42,7 @@ def make_runtime(
     event_publisher: Any | None = None,
     extensions: ExtensionRegistry = EMPTY,
     agent_id: int | None = None,
+    pins: Mapping[str, Any] | None = None,
     database_gate: ProcessDbGate,
 ) -> Runtime[MeivaContext]:
     """Assemble a claim Runtime borrowing the test SDK root's clients and machine.
@@ -61,7 +63,7 @@ def make_runtime(
         ops_pool=ops_pool,
         llm=llm if llm is not None else make_fake_llm(),
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),
-        agent=AgentSlices.resolve(default_reader=defaults()),
+        agent=AgentSlices.resolve(pins, default_reader=defaults()),
         clock_factory=Clock.from_settings,
         extensions=extensions,
         db=Database.from_settings(gate=database_gate),

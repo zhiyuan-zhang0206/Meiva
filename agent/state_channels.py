@@ -150,27 +150,29 @@ class SkillRecallState(BaseModel):
 
 
 class ContextReset(BaseModel):
-    """A pending context (re)establishment, nested under
-    `BaseAgentState.context_reset` — written by whoever clears the history,
-    consumed and cleared by the `init_context` node.
-
-    A compaction empties `messages` (RemoveMessage(REMOVE_ALL)) and hands the
-    standing head back to `init_context` rather than re-assembling it: the node
-    lays down the SystemMessage plus the ordered context notes, then `tail` —
-    the post-compact summary alone (a compact is a clean wipe; chats that
-    arrived while the turn was in flight are re-delivered as pending inbounds
-    by the claim node instead of being parked here) — and routes on to
-    `resume`.
-
-    `resume` exists because a reset is requested from two depths: the forced
-    compaction detours out of `before_llm` mid-turn, while the claim path has
-    already computed where its batch should go next — which may be the graph's
-    END, when a terminate rode in the same batch. Defaults to `claim`, the
-    cold-start path, where nothing has been decided yet.
-
-    Last-value channel (no reducer): one writer per reset, and `init_context`
-    clears it by writing the default back.
-    """
+    # meiva:note
+    # A pending context (re)establishment, nested under
+    # `BaseAgentState.context_reset` -- written by whoever clears the history,
+    # consumed and cleared by the `init_context` node.
+    #
+    # A compaction empties `messages` (RemoveMessage(REMOVE_ALL)) and hands the
+    # standing head back to `init_context` rather than re-assembling it: the node
+    # lays down the SystemMessage plus the ordered context notes, then `tail` --
+    # the summary, the notes that describe the replacement, and, when
+    # `keep_tail_messages` is set, the verbatim window of replaced history (a
+    # compact otherwise wipes everything; chats that arrived while the turn was
+    # in flight are re-delivered as pending inbounds by the claim node instead of
+    # being parked here) -- and routes on to `resume`.
+    #
+    # `resume` exists because a reset is requested from two depths: the forced
+    # compaction detours out of `before_llm` mid-turn, while the claim path has
+    # already computed where its batch should go next -- which may be the graph's
+    # END, when a terminate rode in the same batch. Defaults to `claim`, the
+    # cold-start path, where nothing has been decided yet.
+    #
+    # Last-value channel (no reducer): one writer per reset, and `init_context`
+    # clears it by writing the default back.
+    # meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 
     tail: list[AnyMessage] = Field(default_factory=list)
     resume: NodeName = CLAIM

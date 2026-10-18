@@ -164,11 +164,13 @@ class AgentCompactionSettings(EnvSettings):
             "call that triggered the compaction is removed together with its "
             "`[system halt]` result, because a replaced context that still showed "
             "the request would read as if the replacement had not happened. The "
-            "count is in messages, so the kept window can be shorter. Raising it "
-            "lets the agent resume from the last exchange instead of only from "
-            "the summary; the extra tokens are spent on every compaction in the "
-            "segment, so change it after measuring recovery against the "
-            "summary-only baseline."
+            "count is in messages, so the kept window can be shorter. A kept AI "
+            "message loses its usage metadata: the token count it recorded "
+            "measured the context that was just replaced. Raising it lets the "
+            "agent resume from the last exchange instead of only from the "
+            "summary; size it as a handful of messages — a window near the hard "
+            "ceiling would re-trigger compaction immediately — and change it "
+            "after measuring recovery against the summary-only baseline."
         ),
         json_schema_extra={
             "restart_required": "agent",

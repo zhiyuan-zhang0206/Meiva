@@ -1,31 +1,35 @@
-"""The `init_context` node — sole owner of the agent's standing message head.
+# meiva:note
+# The `init_context` node — sole owner of the agent's standing message head.
+#
+# The head is the SystemMessage plus the ordered context notes
+# (`context_notes.context_notes`), rendered in the rank order that module
+# documents — exec timeout, the shared memory index, the agent id, the per-agent
+# memory index, any preloaded skills, then whatever else plugins register (the
+# two memory indexes when `meiva_memory` is enabled). It has to
+# be laid down twice in an agent's life — once when the agent first wakes with no
+# history, and again after every compaction, which replaces the whole window —
+# and both times in the same order.
+#
+# Those two moments collapse into one condition. A compaction clears the history
+# with `RemoveMessage(REMOVE_ALL)`, so by the time this node runs the channel is
+# empty exactly as it is at cold start: **an empty `messages` means the context
+# needs establishing**. There is no mode flag and no caller-supplied intent —
+# a requester clears the history, parks what should follow the head in
+# `state.context_reset`, and routes here.
+#
+# What follows the head is the `tail` of `ContextReset`: the summary, the notes
+# that describe the replacement, and, when `keep_tail_messages` is set, the
+# verbatim window of replaced history — a compact otherwise wipes everything
+# (the retained window is the one exception, and the run's chats that arrived
+# while the turn was in flight are re-delivered as pending inbounds by the claim
+# node instead of being parked here). Cold start parks nothing, so the tail is
+# empty and the head is the whole message list.
+#
+# A fork is deliberately NOT routed here: it inherits the source agent's full
+# history, so its context is not established from empty. It grafts
+# `context_notes.fork_notes()` onto that history instead (see `_claim`).
+# meiva:link agent/graph/docs/context-window/context-window.meiva.okf.md
 
-The head is the SystemMessage plus the ordered context notes
-(`context_notes.context_notes`), rendered in the rank order that module
-documents — exec timeout, the shared memory index, the agent id, the per-agent
-memory index, any preloaded skills, then whatever else plugins register (the
-two memory indexes when `meiva_memory` is enabled). It has to
-be laid down twice in an agent's life — once when the agent first wakes with no
-history, and again after every compaction, which replaces the whole window —
-and both times in the same order.
-
-Those two moments collapse into one condition. A compaction clears the history
-with `RemoveMessage(REMOVE_ALL)`, so by the time this node runs the channel is
-empty exactly as it is at cold start: **an empty `messages` means the context
-needs establishing**. There is no mode flag and no caller-supplied intent —
-a requester clears the history, parks what should follow the head in
-`state.context_reset`, and routes here.
-
-What follows the head is the `tail` of `ContextReset`: the post-compact summary
-alone — a compact is a clean wipe, and chats that arrived while the turn was
-in flight are re-delivered as pending inbounds by the claim node instead of
-being parked here. Cold start parks nothing, so the tail is empty and the
-head is the whole message list.
-
-A fork is deliberately NOT routed here: it inherits the source agent's full
-history, so its context is not established from empty. It grafts
-`context_notes.fork_notes()` onto that history instead (see `_claim`).
-"""
 
 from __future__ import annotations
 

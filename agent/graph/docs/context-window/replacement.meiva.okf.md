@@ -19,7 +19,9 @@ Framework lifecycle markers may follow the summary. A security note attached to 
 
 ## Retained tail
 
-A replacement parks a configured number of trailing messages verbatim — the `keep_tail_messages` setting, zero by default — after the summary and its standing notes, and before any human message that arrived while the compaction ran: retained history precedes everything that happened after the replacement began, so the last message the agent reads is still the last thing that happened. The window is made self-contained first. It never starts with a tool result, a tool call survives only with every result of it, and the `meiva.self.compact` call that triggered the replacement is dropped together with its `[system halt]` result: keeping the request would show the agent a compaction call inside a context that was already replaced, which reads as if the replacement had not happened.
+A replacement may park a configured number of trailing messages verbatim — the `keep_tail_messages` setting, zero by default. They follow the summary and every note parked with it, so the last message the agent reads is the last thing that happened and no note describing the replacement sits behind it.
+
+The window is made self-contained before it is parked. It never copies the standing system prompt, never starts with a tool result, keeps a tool call only with every result of it, and drops the `meiva.self.compact` call that triggered the replacement together with its `[system halt]` result: keeping the request would show the agent a compaction call inside a context that was already replaced, which reads as if the replacement had not happened. A retained AI message also loses its usage metadata — the token count it recorded measured the context that was just replaced, and keeping it would make the fresh context look full on the next occupancy check.
 
 ## Compact failure boundary
 

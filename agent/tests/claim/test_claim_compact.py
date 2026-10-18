@@ -30,6 +30,7 @@ from agent.tests.claim.claim_status_support import (
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -754,3 +755,41 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
     # Read status on the pool claim_node wrote through; await_status dumps full
     # state on timeout (the CI-only `idling != restarting` flake).
     await await_status(aops_pool, tid, "running")
+
+
+async def test_claim_compact_summary_keeps_the_configured_tail(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+):
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    insert_inbound_kind(db_conn, tid, "agent summary", "compact_summary")
+    del database, event_bus
+    old = HumanMessage(content="old question")
+    state = AgentState(messages=[SystemMessage(content="<test sys prompt>"), old])
+
+    cmd = await claim_node(
+        state,
+        make_runtime(
+            ops_pool=aops_pool, database_gate=database_gate, pins={"keep_tail_messages": 2}
+        ),
+        thread_config(tid),
+    )
+
+    tail = compact_tail(cmd.update)
+    assert tail[0].content == compose_summary_message("agent summary")
+    assert tail[-1] is old
+    assert all(
+        read_meiva_kwargs(message).get("meiva_msg_type") == "system_note" for message in tail[1:-1]
+    )

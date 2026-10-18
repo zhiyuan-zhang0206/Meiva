@@ -15,7 +15,7 @@ Agent context window management — how message history is compressed as it appr
 
 ### Compaction (`meiva.self.compact`)
 - Agent invokes `meiva.self.compact(summary)` to actively compact.
-- Replaces the entire message history with a summary.
+- Replaces the message history with a summary, plus the configured retained tail.
 - The summary must follow a standard format: Requests / Progress / In flight / Dead ends / Pitfalls / Verbatim tail.
 - The SDK docstring owns this contract. Forced compaction appends it to the request because the model cannot call tools there; the standing P95 SDK reference need not expand `self`. Voluntary compaction can load it through `meiva.help(meiva.self.compact)`.
 - Before compaction, flush persistent state to disk (workspace files, handoff docs)
