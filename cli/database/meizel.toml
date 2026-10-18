@@ -1,4 +1,4 @@
-exports = ["runtime.py", "tests"]
+exports = ["lifecycle_audit.py", "runtime.py", "tests"]
 
 [uses]
 "tests" = ["__init__.py", "runtime.py"]

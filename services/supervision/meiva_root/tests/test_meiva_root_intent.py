@@ -16,6 +16,7 @@ from base.native_process.ownership import OwnedProcess
 from services.supervision.meiva_root import intent_store
 from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.intent_store import (
+    CallerFacts,
     IntentRecord,
     IntentSource,
     RestartFailure,
@@ -369,3 +370,52 @@ async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
         )
     finally:
         await second.shutdown()
+
+
+def _caller() -> CallerFacts:
+    return CallerFacts(
+        pid=4821,
+        ppid=4800,
+        uid=501,
+        cwd="/srv/meiva",
+        argv=("meiva", "stop", "-y"),
+        agent_id="1818",
+        machine="macmini",
+        operation_id="local-pause:ubuntu:3696811:a00d0511",
+        env_keys=("MEIVA_API_TOKEN",),
+    )
+
+
+def test_a_caller_round_trips_and_a_legacy_record_still_reads(tmp_path: Path) -> None:
+    record = IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None, _caller())
+    intent_store.write(tmp_path, "svc", record)
+    assert intent_store.read(tmp_path, "svc") == record
+
+    path = tmp_path / "intent" / "svc.json"
+    path.write_text(
+        '{"intent": "stopped", "source": "operator", "restart_failed": null, "updated_at": 1}'
+    )
+    legacy = intent_store.read(tmp_path, "svc")
+    assert legacy is not None and legacy.caller is None
+
+    intent_store.write(
+        tmp_path, "svc", IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None)
+    )
+    assert "caller" not in path.read_text()
+
+
+async def test_the_stop_that_ends_the_tree_keeps_the_caller(tmp_path: Path) -> None:
+    owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER)])
+    await owner.start()
+    try:
+        caller = _caller()
+        await owner.down("svc", caller=caller)
+        recorded = intent_store.read(tmp_path, "svc")
+        assert recorded is not None and recorded.caller == caller
+    finally:
+        await owner.shutdown()
+
+    stored = intent_store.read(tmp_path, "svc")
+    assert stored is not None
+    assert stored.intent is UnitIntent.STOPPED
+    assert stored.caller == caller

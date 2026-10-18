@@ -10,9 +10,12 @@ failures come back as a `{"ok": false, ...}` response for the caller to read.
 from __future__ import annotations
 
 import math
+import os
+import re
 import socket
 import struct
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
@@ -21,6 +24,8 @@ import psutil
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import (
     MAX_MESSAGE_BYTES,
+    STATE_VERBS,
+    CallerPayload,
     ProtocolError,
     ResponsePayload,
     encode,
@@ -29,6 +34,19 @@ from base.native_process.root_control.ipc import (
 )
 
 _DEFAULT_TIMEOUT_S = 30.0
+
+# meiva:note
+# Audit metadata, not a place to leak one: argv is bounded and sensitive values
+# are replaced, and environment *values* never leave the process.
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+_ARGV_ITEMS = 32
+_ARG_CHARS = 200
+_REDACTED = "<redacted>"
+_SENSITIVE_VALUE_FLAGS = frozenset({"-p", "--password", "--passwd", "--token", "--secret", "--key"})
+_SENSITIVE_NAME = re.compile(
+    r"^--?[a-z0-9_-]*(?:tokens?|secrets?|passwords?|passwd|keys?|credentials?|dsn)$", re.I
+)
+_SENSITIVE_ENV = re.compile(r"(TOKEN|SECRET|PASSWORD|PASSWD|KEY|CREDENTIAL|BEARER)", re.I)
 
 
 class RootClientError(RuntimeError):
@@ -94,6 +112,87 @@ def root_process(*, home: Path, timeout: float = 2.0) -> OwnedProcess | None:
     return root if root.live() else None
 
 
+# meiva:note
+# The caller block is what makes a lifecycle request attributable after the fact:
+# pid/ppid/uid/cwd/argv name the local process, `machine` names the host (so two
+# machines cannot be confused, as they were on 2026-10-15), and `env_keys` lists
+# only the *names* of credential-shaped variables that were set.
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+def caller_identity() -> CallerPayload:
+    return CallerPayload(
+        pid=os.getpid(),
+        ppid=os.getppid(),
+        uid=os.getuid(),
+        cwd=_bounded(str(Path.cwd())),
+        argv=redacted_argv(list(sys.argv)),
+        agent_id=os.environ.get("MEIVA_AGENT_ID") or None,
+        machine=_machine_name(),
+        operation_id=_operation_id(),
+        env_keys=sensitive_env_keys(os.environ),
+    )
+
+
+# meiva:note
+# Names of credential-shaped variables, never their values.
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+def sensitive_env_keys(environ: Mapping[str, str]) -> list[str]:
+    return sorted(name for name in environ if _SENSITIVE_ENV.search(name))
+
+
+def _bounded(text: str) -> str:
+    return text[:_ARG_CHARS]
+
+
+def redacted_argv(argv: list[str]) -> list[str]:
+    out: list[str] = []
+    redact_next = False
+    for raw in argv[: _ARGV_ITEMS * 2]:
+        arg = _bounded(raw)
+        if redact_next:
+            out.append(_REDACTED)
+            redact_next = False
+            continue
+        if arg in _SENSITIVE_VALUE_FLAGS:
+            out.append(arg)
+            redact_next = True
+            continue
+        short = _sensitive_short_value(arg)
+        if short is not None:
+            out.append(f"{short}={_REDACTED}")
+            continue
+        flag, separator, _value = arg.partition("=")
+        if _SENSITIVE_NAME.match(flag):
+            out.append(f"{flag}={_REDACTED}" if separator else arg)
+            redact_next = not separator
+            continue
+        out.append(arg)
+    return out[:_ARGV_ITEMS]
+
+
+def _sensitive_short_value(arg: str) -> str | None:
+    if len(arg) <= 2 or arg.startswith("--") or not arg.startswith("-"):
+        return None
+    return arg[:2] if arg[:2] in _SENSITIVE_VALUE_FLAGS else None
+
+
+# meiva:note
+# The host this request came from. The kernel hostname is used rather than the
+# configured cluster name: resolving that one loads base.config, which already
+# reaches this layer and would close an import cycle.
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+def _machine_name() -> str:
+    return socket.gethostname().split(".")[0]
+
+
+# meiva:note
+# The operation an outer lifecycle verb belongs to, when the launcher exported
+# one. Reading run/lifecycle-op.json here would make native_process depend on
+# base.deploy, which already reaches this layer.
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+def _operation_id() -> str | None:
+    return os.environ.get("MEIVA_OPERATION_ID") or None
+
+
 class RootClient:
     """One blocking call per method, one connection per call."""
 
@@ -106,6 +205,8 @@ class RootClient:
         request: dict[str, object] = {"verb": verb}
         if name is not None:
             request["name"] = name
+        if verb in STATE_VERBS:
+            request["caller"] = caller_identity()
         raw = self._roundtrip(encode(request), status=verb == "status")
         try:
             return parse_status_response(raw) if verb == "status" else parse_response(raw)
