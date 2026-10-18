@@ -13,8 +13,11 @@ stream. Desktop gives the narrow agent tree 16% by default, then divides message
 and the shared-context panel 4:3. The document is the panel's body — notifications
 tuck in above it — and it stays present for every selected agent: a missing or
 empty document shows the empty state and a legacy `to_user.html` shows the
-migration placeholder, never a collapsed panel. The panel itself is a lazy
-boundary, loaded when the right panel first renders.
+migration placeholder — an empty document never collapses the panel. The column
+hides only when the user closes it: `display.context_panel_open` (default on) is
+the title bar's PanelRight toggle, and the timeline takes the width until it is
+reopened. The panel itself is a lazy boundary, loaded when the right panel first
+renders.
 
 The inspector is the panel's secondary surface, not a peer tab: a small trigger at
 the end of the document bar lays it over the document (its own queries and ordered
