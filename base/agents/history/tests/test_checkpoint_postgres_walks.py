@@ -11,13 +11,11 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import CheckpointMetadata, CheckpointTuple, DeltaChannelHistory
 from langgraph.checkpoint.base.id import uuid6
 from langgraph.checkpoint.postgres import PostgresSaver as UpstreamPostgresSaver
-from langgraph.checkpoint.postgres.base import BasePostgresSaver
 from langgraph.checkpoint.serde.base import SerializerProtocol
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
-from base.agents.history import checkpoint_postgres_walks
 from base.agents.history.checkpoint import (
     CheckpointReadError,
     load_checkpoint_messages,
@@ -215,39 +213,12 @@ async def test_historical_walk_page_boundary_and_compact_segment(
     assert [message.id for message in segment] == ["write-1"]
 
 
-def test_adapter_validation_leaves_upstream_unchanged() -> None:
-    installed = vars(BasePostgresSaver)["_try_advance_walks"]
-    upstream_read = UpstreamPostgresSaver.get_delta_channel_history
-    PostgresSaver(cast(Any, object()))
-    PostgresSaver(cast(Any, object()))
-    assert vars(BasePostgresSaver)["_try_advance_walks"] is installed
-    assert UpstreamPostgresSaver.get_delta_channel_history is upstream_read
-
-
-def test_adapter_rejects_new_dependency_version(monkeypatch: pytest.MonkeyPatch) -> None:
-    def changed_version(_distribution_name: str) -> str:
-        return "3.1.3"
-
-    monkeypatch.setattr(checkpoint_postgres_walks, "version", changed_version)
-    with pytest.raises(RuntimeError, match=r"requires langgraph-checkpoint-postgres==3.1.2"):
-        checkpoint_postgres_walks.validate_checkpoint_postgres_api()
-
-
-def test_adapter_rejects_changed_signature(monkeypatch: pytest.MonkeyPatch) -> None:
-    def changed(target_id: str) -> None:
-        pass
-
-    changed.__module__ = "langgraph.checkpoint.postgres.base"
-    changed.__qualname__ = "BasePostgresSaver._try_advance_walks"
-    monkeypatch.setattr(BasePostgresSaver, "_try_advance_walks", staticmethod(changed))
-    with pytest.raises(RuntimeError, match="signature or identity changed"):
-        checkpoint_postgres_walks.validate_checkpoint_postgres_api()
-
-
-def test_adapter_rejects_foreign_replacement(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(BasePostgresSaver, "_try_advance_walks", lambda: None)
-    with pytest.raises(TypeError, match="replaced outside Meiva"):
-        checkpoint_postgres_walks.validate_checkpoint_postgres_api()
+# meiva:note
+# langgraph#8556 owns the walk cursor now; shadowing the pager here would silently bring back the historical-target bug.
+def test_meiva_keeps_only_the_message_reset_reader() -> None:
+    assert "_try_advance_walks" not in vars(PostgresSaver)
+    assert "_try_advance_walks" not in vars(AsyncPostgresSaver)
+    assert "get_delta_channel_history" in vars(PostgresSaver)
 
 
 def _config() -> RunnableConfig:
@@ -320,6 +291,7 @@ async def test_delta_read_decode_error_emits_partial_span(loguru_records: list[A
                     "type": "msgpack",
                     "blob": b"\xc1",
                     "task_id": "task",
+                    "task_path": "",
                     "idx": 0,
                 }
             ],
@@ -368,6 +340,7 @@ async def test_checkpoint_reads_leave_shared_serializer_unchanged(
                     "type": "msgpack",
                     "blob": b"\xc1",
                     "task_id": "task",
+                    "task_path": "",
                     "idx": 0,
                 }
             ],
