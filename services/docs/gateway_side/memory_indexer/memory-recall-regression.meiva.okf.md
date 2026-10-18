@@ -1,27 +1,27 @@
 ---
 type: doc
-title: Memory Recall Regression Set — 30 Blocked-Answer Turns
-description: What the passive-recall regression fixture holds, how a fresh run is scored against the 2026-10-18 baseline, and why the cases are the ones the 0.80 threshold used to silence.
+title: Memory Recall Regression Set — Two Directions
+description: A 50-case passive-recall regression set, 30 turns where a usable note was never delivered and 20 where nothing applied yet the ranking fired, with the 2026-10-18 baseline and the held/slipped/lost and fired/silent evaluator.
 ---
 
 # Memory Recall Regression Set
 
-`services/derived/memory_indexer/tests/recall_cases.jsonl` holds 30 real inbound turns on which
-the note the agent needed **was retrieved** but scored below the injection threshold, so the turn
-injected nothing. Each case records the message, the note that should have surfaced, and the rank
-and score it held on 2026-10-18. `recall_regression.py` turns a fresh run into a held / slipped /
-lost report.
+`services/derived/memory_indexer/tests/recall_cases.jsonl` holds 50 real inbound turns in two
+halves, because passive recall fails in two directions and a set that only measures one of them
+cannot judge a threshold:
 
-The cases are the failure mode, not a random sample: 24 sat at rank 1, 6 at rank 2, with scores
-0.65–0.79. They came out of replaying 523 real inbound messages (7 days, 48 agents) through
-`purpose=recall` with 30 candidates; the full measurement, its two judge passes and its
-limitations are in the decision record that lowered the threshold
-(PR #6239, which also lowered the threshold to 0.72).
-Messages containing a machine-local absolute path were left out so the fixture stays portable;
-messages appear as they arrived, capped at the 2,000 characters a query is capped at. They are
-stored with JSON `\uXXXX` escapes because the repository allows no raw CJK, and each case carries
-a one-line English `gloss` so a reviewer can tell what the turn is without decoding it. Read one
-back with `json.loads(line)["message"]`.
+- **recall set — 30 cases.** A note the agent needed *was retrieved* and scored under the
+  injection threshold, so the turn injected nothing. 24 sat at rank 1, 6 at rank 2, scores
+  0.65–0.79; 20 of them are delivered by the shipped 0.72 default, all 30 were silenced by 0.80.
+- **precision set — 20 cases.** Nothing in the pool applied to the turn, yet the ranking was
+  confident: 15 of them fire at the shipped default (top scores 0.72–0.84), 5 stay silent
+  (0.36–0.50). These are receipts, machine readouts and small talk — the traffic that produces
+  a plausible-looking but useless note.
+
+`recall_regression.py` scores a fresh run into **delivered / held / slipped / lost** for the recall
+half and **fired / silent** (plus *newly firing*) for the precision half. The threshold and the cap
+are read from the agent config (`memory_recall_inject_threshold`, `memory_recall_inject_max`), never
+copied into this module, so a re-calibration cannot leave the report judging at a stale cut.
 
 ## Running it
 
@@ -54,19 +54,37 @@ Then:
 .venv/bin/python -m services.derived.memory_indexer.recall_regression --results /tmp/recall.json
 ```
 
-The report counts **delivered** (top three and at or above the current threshold), **held** (same
-rank or better), **slipped** (still returned, ranked lower) and **lost** (no longer returned), and
-names every case that moved with both ranks and both scores. `--threshold` takes the threshold in
-force when the run happened.
+`--threshold` / `--cap` override the config, for judging a run taken under a different setting.
 
-## What a change should look like
+## Reading the pair
 
-- Nothing moved: the ranking change is neutral for this set. Say so in the PR; the set is small
-  and its 30 cases are the boundary band, so silence here is weak evidence, not proof.
-- A case **slipped** or **lost**: the note an agent needed moved further from the top. That is a
-  regression even if the average score rose — check the case by hand before explaining it away.
-- The threshold moved: `delivered` changes by construction. Re-record `baseline_rank` /
-  `baseline_score` only when the retrieval stack itself changed, not when the cut point did.
+The baseline on 2026-10-18 at 0.72 was **delivered 20/30, fired 15/20**. Judge a change by both
+numbers at once:
 
-Re-recording is `--results` on a known-good stack, copying the observed rank and score back into
-the fixture. Do that in the same PR that changes retrieval, and say which stack produced it.
+- **Lowering the threshold** should raise *delivered* and raise *fired* too. That is expected and
+  is not evidence for or against the change by itself; the sizes are what matter.
+- **Raising it** should do the reverse. If only one half moves, the change is not doing what it
+  claims.
+- **A new question, model or chunker** should move neither at first; if it moves either, check the
+  cases by hand before believing the average.
+- **A case that slipped, was lost, or newly fires** is named in the report. Read it before
+  explaining it away.
+
+Re-record `baseline_rank` / `baseline_score` / `baseline_delivered` only when the retrieval stack
+itself changed, never when the cut point moved, and say which stack produced the new numbers.
+
+## When to run it
+
+Run it and paste the report into the PR whenever a change touches retrieval or the recall gate —
+the ranking question, `memory_recall_model`, the candidate count, chunking, `memory_recall_inject_*`
+— and say in the PR whether the two halves moved and how much. Nothing in CI runs it: it needs a
+live gateway, an index and a model, so it is a tool a reviewer reads, not a gate.
+
+## Data
+
+The cases are real internal work traffic from the cluster (one week, 48 agents), kept because a
+synthetic paraphrase would not reproduce the retrieval. They carry no absolute paths, no
+addresses, no tokens and no agent identifiers; messages that had a machine-local path were left
+out. They live in this private repository on purpose. CJK is stored as JSON `\uXXXX` escapes
+because the repository allows no raw CJK, and each case carries a one-line English `gloss` so the
+set is reviewable without decoding it. Read one back with `json.loads(line)["message"]`.
