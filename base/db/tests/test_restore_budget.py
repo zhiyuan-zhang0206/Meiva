@@ -91,7 +91,6 @@ def test_a_cancelled_restore_reports_one_event_and_propagates(events: list[dict[
     cancelled = psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
     conn = _RecordingConnection(failure=cancelled)
     restore: Any = connections.restore_pooled_session
-    started = time.monotonic()
 
     with pytest.raises(psycopg.errors.QueryCanceled):
         restore(conn, gate=_Gate())
@@ -103,7 +102,7 @@ def test_a_cancelled_restore_reports_one_event_and_propagates(events: list[dict[
     assert reported[0]["budget_ms"] == int(
         settings.data_plane.db_pool_restore_timeout_seconds * 1000
     )
-    assert reported[0]["elapsed_ms"] >= int((time.monotonic() - started) * 1000) - 5
+    assert reported[0]["elapsed_ms"] >= 0
 
 
 # meiva:note
@@ -131,13 +130,14 @@ def _restore_in_a_thread(
 # lock stands in for the 2026-10-18 write stall: the backend is waiting on the
 # server and only the statement budget can end the wait. Falsification: the same
 # restore under a budget longer than the wait is still blocked while the
-# short-budget one has already failed.
+# short-budget one has already failed. The connection is the pool's default —
+# non-autocommit — so the restore's closing commit() is a real round trip here.
 def test_the_budget_cancels_a_restore_stuck_on_a_locked_table(
     db_url: str, events: list[dict[str, Any]]
 ) -> None:
     blocker = psycopg.connect(db_url)
     blocker.execute("LOCK TABLE public.deployment_state IN ACCESS EXCLUSIVE MODE")
-    conn = psycopg.connect(db_url, autocommit=True, prepare_threshold=None)
+    conn = psycopg.connect(db_url, prepare_threshold=None)
     threads: list[threading.Thread] = []
     try:
         started = time.monotonic()
@@ -147,11 +147,10 @@ def test_the_budget_cancels_a_restore_stuck_on_a_locked_table(
         assert not thread.is_alive(), "the restore ignored its 1s budget"
         assert time.monotonic() - started < 5.0
         assert failures and isinstance(failures[0], psycopg.errors.QueryCanceled), failures
-        assert [
-            (event["name"], event["budget_ms"])
-            for event in events
-            if event.get("event") == "db_pool_restore_timeout"
-        ] == [("tests:restore", 1000)]
+        (reported,) = [event for event in events if event.get("event") == "db_pool_restore_timeout"]
+        assert (reported["name"], reported["budget_ms"]) == ("tests:restore", 1000)
+        assert reported["elapsed_ms"] >= 900, "the event must carry the wait it measured"
+        conn.rollback()
 
         thread, _failures = _restore_in_a_thread(conn, _Gate(read_due=True), budget_seconds=600.0)
         threads.append(thread)
