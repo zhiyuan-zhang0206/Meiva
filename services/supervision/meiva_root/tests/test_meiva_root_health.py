@@ -720,7 +720,7 @@ async def test_the_breaker_opens_once_then_closes_on_a_healthy_observation(
     assert (opened[0]["attempts"], opened[0]["detail"]) == (3, "unexpected exit: exit 1")
     state = recorder.events("root_unit_failure_state")[-1]
     assert (state["kind"], state["attempts"], state["last_error"]) == (
-        "restarts_exhausted",
+        "breaker_open",
         4,
         "unexpected exit: exit 1",
     )
@@ -768,9 +768,7 @@ async def test_database_recovery_restarts_inside_the_round(clock: FakeClock) -> 
     assert monitor.snapshot()["svc"].breaker_open
 
 
-async def test_a_database_never_seen_failing_never_releases_the_breaker(
-    clock: FakeClock,
-) -> None:
+async def test_a_usable_database_grants_one_attempt_per_episode(clock: FakeClock) -> None:
     db = CellProbe(DaemonProbe.up("database answered"))
     stub = StubSupervisor()
     monitor = HealthMonitor(
@@ -779,9 +777,13 @@ async def test_a_database_never_seen_failing_never_releases_the_breaker(
         config=_ladder_config(),
         db_recovery_probe=db,
     )
-    for wait in (0, 60, 300, 60, 60, 60):
+    for wait in (0, 60, 300, 60):
         _advance(clock, wait)
         await monitor.run_round()
-    assert stub.restart_calls == ["svc"] * 3
-    assert db.calls == 3
+    assert stub.restart_calls == ["svc"] * 4
+    assert db.calls == 1
+    for _ in range(3):
+        _advance(clock, 60)
+        await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 4
     assert monitor.snapshot()["svc"].breaker_open

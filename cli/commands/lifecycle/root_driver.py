@@ -429,14 +429,14 @@ def reconcile_units(
     *,
     honor_restart_budget: bool = False,
 ) -> dict[str, Any]:
-    """Resume stopped units within the same immutable root generation.
-
-    This command is an explicit operator start, so it also resumes a unit
-    whose recorded intent is stopped: `intent` is the supervisor's policy fact
-    and `state` its observed process state (task #4872). The OS boot job's
-    retried start is not an operator: with ``honor_restart_budget`` it leaves a
-    unit down whose meiva-root restart budget is spent.
-    """
+    # meiva:note
+    # Resume stopped units within the same immutable root generation. This command
+    # is an explicit operator start, so it also resumes a unit whose recorded intent
+    # is stopped: `intent` is the supervisor's policy fact and `state` its observed
+    # process state (task #4872). The OS boot job's retried start is not an operator:
+    # with `honor_restart_budget` it leaves a unit down whose meiva-root circuit
+    # breaker is open — that unit is not given up on, the health monitor keeps
+    # retrying it on its backoff ladder, so the boot job does not race it (#5315).
     units = root_units(status)
     health = cast("dict[str, dict[str, Any]]", status.get("health") or {})
     from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
@@ -444,7 +444,10 @@ def reconcile_units(
     for spec in roster:
         unit = units[spec.session]
         if honor_restart_budget and health.get(spec.session, {}).get("restart_limit_reached"):
-            print(f"  · {session_name(spec.session)} spent its restart budget — left down")
+            print(
+                f"  · {session_name(spec.session)} has an open restart breaker — "
+                "the health monitor keeps retrying it"
+            )
             continue
         if unit.get("state") != "running" or unit.get("intent") != "running":
             reason = unit.get("last_error") or unit.get("last_exit") or unit.get("state")

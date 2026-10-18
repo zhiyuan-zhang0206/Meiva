@@ -585,13 +585,13 @@ def cmd_start(
     command: CommandRuntime,
     boot_attempt: bool = False,
 ) -> int:
-    """Converge one configured unit through storage, schema, root and readiness.
-
-    `meiva init` persisted the unit's identity before the public CLI reaches this
-    entry. Internal restart callers reuse that identity and its durable service
-    selection. ``boot_attempt`` marks the OS boot job's retried start, which
-    leaves a unit whose meiva-root restart budget is spent down.
-    """
+    # meiva:note
+    # Converge one configured unit through storage, schema, root and readiness.
+    # `meiva init` persisted the unit's identity before the public CLI reaches this
+    # entry; internal restart callers reuse that identity and its durable service
+    # selection. `boot_attempt` marks the OS boot job's retried start, which leaves
+    # a unit whose meiva-root circuit breaker is open down — the health monitor keeps
+    # retrying that unit on its backoff ladder (task #5315).
     if retained_children is None:
         raise ValueError("start requires its caller-owned PostgreSQL child retention")
     return cmd_start_body(

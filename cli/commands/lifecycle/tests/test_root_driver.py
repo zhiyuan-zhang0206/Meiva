@@ -669,12 +669,13 @@ def test_an_operator_start_brings_up_a_unit_whose_restart_budget_is_spent(
 def test_a_boot_attempt_leaves_a_unit_down_whose_restart_budget_is_spent(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The boot job's retried start must not spend root's budget again."""
+    # meiva:note
+    # The boot job's retried start must not race the health monitor's ladder.
     monkeypatch.setattr(driver, "root_status", _no_refresh)
     client = _UnitClient()
     driver.reconcile_units((spec(),), client, _spent_budget_status(), honor_restart_budget=True)
     assert client.up_calls == []
-    assert "spent its restart budget" in capsys.readouterr().out
+    assert "open restart breaker" in capsys.readouterr().out
 
 
 def test_a_boot_attempt_still_brings_up_a_unit_with_budget_left(
