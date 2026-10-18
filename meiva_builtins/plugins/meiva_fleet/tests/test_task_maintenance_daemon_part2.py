@@ -247,6 +247,41 @@ class TestEscalate:
         assert delivered_owner == parent_owner
         assert "3 reminders" in message
 
+    # meiva:note
+    # The reminder skip is scoped to the reminder candidate query: a task with an open child that
+    # is past the escalation threshold still escalates to its own parent owner, while the reminder
+    # pass leaves the same container alone.
+    def test_container_still_escalates_for_its_own_parent_owner(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: list[tuple[int, str]],
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
+        delegator = _make_agent(db_conn)
+        grandparent = _make_task(db_conn, owner=delegator, remind_interval_seconds=None)
+        stalled = _make_agent(db_conn)
+        container = _make_task(
+            db_conn,
+            owner=stalled,
+            parent_id=grandparent,
+            remind_interval_seconds=1800,
+            updated_s_ago=7200,
+            reminder_count=3,
+        )
+        _make_task(db_conn, owner=stalled, parent_id=container, updated_s_ago=0)
+
+        assert run_escalate(pool, database, event_bus, 3) == 1
+        assert len(deliver) == 1
+        delivered_owner, message = deliver[0]
+        assert delivered_owner == delegator
+        assert f"#{container}" in message
+
+        deliver.clear()
+        assert daemon.run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert deliver == []
+
     def test_below_threshold_is_skipped(
         self,
         pool: ConnectionPool,
