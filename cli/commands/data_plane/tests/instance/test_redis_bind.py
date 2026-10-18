@@ -366,6 +366,7 @@ def test_force_stop_shuts_redis_down_as_admin_not_runtime_user(
     monkeypatch: pytest.MonkeyPatch,
     operator_pipeline: Callable[[], EventPipeline],
     data_plane_config: DataPlaneConfig,
+    redis_access: None,
 ) -> None:
     """The runtime URL's ACL user can neither AUTH as `default` nor SHUTDOWN, so
     the explicit force teardown must authenticate with the admin password."""

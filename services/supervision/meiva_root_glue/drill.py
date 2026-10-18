@@ -90,8 +90,12 @@ def _heartbeat_verdict(heartbeat_dir: Path | None, unit_id: str, pid: int) -> Da
     beat = heartbeat_dir / f"{unit_id}.beat"
     try:
         age = time.time() - beat.stat().st_mtime
-    except OSError:
+    except FileNotFoundError:
         return DaemonProbe.up(f"pid {pid} alive")
+    except OSError as exc:
+        return DaemonProbe.unavailable(
+            f"pid {pid} alive; heartbeat {beat} unreadable: {type(exc).__name__}: {exc}"
+        )
     if age > _HEARTBEAT_TIMEOUT_S:
         return DaemonProbe.down(
             f"pid {pid} alive but heartbeat stale: last beat {age:.1f}s ago"
