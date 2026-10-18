@@ -49,23 +49,6 @@ class LabelPatchRequest(BaseModel):
     source: Literal["user", "self"] = "user"
 
 
-class UserMessageIn(BaseModel):
-    """POST /api/agents/{id}/messages request body — user message to agent.
-
-    Constraints at the schema layer: blank / content over one million
-    characters returns 422 from pydantic; the endpoint does not 400 anymore.
-    """
-
-    content: UserContent
-
-
-class MessageEnqueued(BaseModel):
-    """POST /api/agents/{id}/messages response."""
-
-    agent_id: int
-    status: Literal["enqueued"]
-
-
 class AgentMessageEnqueued(BaseModel):
     """POST /messages receipt — durable inbound id plus current agent status.
 

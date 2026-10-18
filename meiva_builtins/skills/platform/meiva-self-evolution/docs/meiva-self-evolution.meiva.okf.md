@@ -40,6 +40,21 @@ them are specified in
 
 `rubric.scores()` returns `overall=None` and names the missing evidence in `abstain`, instead of scoring a trace it has no evidence for. Scoring saturates at 1.0 when nothing was recorded: `has_output` is the only evidence-bearing completion term, and every efficiency term is best when the run did nothing. The record's `evidence_grade` owns the judgement: anything other than `complete` abstains with the record's own `unknown_reason` (`no_telemetry`, `no_task`, `no_terminal`). Records written before the evidence block exists fall back to the same three checks on their own fields. `evaluate.gather` normalizes `task_prompt` through `task_prompt_of`, keeps abstained replays in `per_task` but out of `n` and the mean, and records `abstain:<reason>` as their verification reason.
 
+## Judge calibration
+
+Any model judge used by the loop is scored against `scripts/calibrate.py` before its verdicts are
+trusted. The harness takes a balanced case set (half expected-pass, half expected-fail) and reports
+sensitivity, specificity, abstain rate and the two trivial baselines; accuracy must strictly beat
+both baselines, and `uncertain` never counts as correct, so a judge cannot score by abstaining.
+On a random run sample almost every run passes, so an always-pass stub outscores a real judge —
+agreement measured there describes the sample, not the judge.
+
+`tests/fixtures/eval_calibration/cases.json` holds 24 synthetic cases (12 pass, 12 fail) covering
+promise-only finals and false claims of an external effect; `synthesize_failure` derives new fail
+cases from passing packets. Run the baselines with `--judge always-pass`; a real judge is plugged
+in from code as `calibrate(load_cases(path), my_judge)` — the CLI does not import judges
+dynamically. The process exits non-zero when the judge does not beat both baselines.
+
 ## Key dependencies
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — full skills catalog
 - [[meiva/skills/docs/skills.meiva.okf.md|Skill System]] — the target of mining regressions is the skill library itself
