@@ -146,10 +146,15 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_recall_inject_threshold: float = Field(
-        # Calibrated on the 2026-10-11 benchmark: jev-1.13.0 with the rerank question and state
-        # templates of services/derived/memory_indexer/rerank.py. Scores are only comparable
-        # under that exact model and wording; changing either means recalibrating this value.
-        default=0.80,
+        # meiva:note
+        # Two calibrations, both for jev-1.13.0 with the rerank question and state templates of
+        # services/derived/memory_indexer/rerank.py (scores are only comparable under that exact
+        # model and wording). 2026-10-11 set 0.80 against a benchmark; 2026-10-18 replayed 523
+        # real inbound messages and found 0.80 injected on 58% of turns while 35% carried a usable
+        # note in the top five that scored below it (median 0.72; rank 1 in two thirds of them).
+        # 0.72 moves recall 59% -> 81% for 94% -> 92% turn precision.
+        # meiva:link docs/decisions/agents/context/2026-10-18-passive-recall-threshold.md
+        default=0.72,
         ge=0,
         le=1,
         alias="MEIVA_MEMORY_RECALL_INJECT_THRESHOLD",
@@ -157,8 +162,9 @@ class AgentMemorySettings(EnvSettings):
             "Minimum relevance score (0..1, the decision model's probability that a "
             "note's best chunk is relevant to the conversation) for passive recall to "
             "inject a note. A turn where no note reaches it injects nothing. The default was "
-            "calibrated for the default memory_rerank_model and the ranking prompts; "
-            "recalibrate it when either changes."
+            "calibrated for the default memory_rerank_model and the ranking prompts, then "
+            "lowered to 0.72 on 2026-10-18 because real inbound traffic scored usable notes "
+            "just under 0.80; recalibrate it when the model or the prompts change."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -238,8 +244,11 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_write_dedup_threshold: float = Field(
-        # Not calibrated: 0.8 is borrowed from memory_recall_inject_threshold. Every duplicate
-        # probability is logged by the check, so the threshold can be calibrated against them.
+        # meiva:note
+        # Not calibrated: 0.8 was inherited from the recall threshold's original value and stays
+        # on its own terms — the two answer different questions and now move separately (recall
+        # became 0.72 on 2026-10-18 evidence). Every duplicate probability is logged by the check,
+        # so this threshold can be calibrated against them.
         default=0.80,
         ge=0,
         le=1,
