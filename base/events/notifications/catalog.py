@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 Importance = Literal["low", "normal", "high"]
 IMPORTANCES: frozenset[str] = frozenset({"low", "normal", "high"})
@@ -66,3 +66,22 @@ def merge_catalog(
 
 def core_catalog() -> dict[str, NotificationCategory]:
     return {category.id: category for category in CORE_CATEGORIES}
+
+
+# meiva:note
+# One owner for the manifest-to-category mapping: the gateway reads plugins to serve
+# the switch list, and the CLI reads the same manifests to replay their categories, so
+# the field names and the `<plugin>.` namespace rule may not be spelled twice.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def category_from_manifest(entry: Mapping[str, Any], *, plugin: str) -> NotificationCategory:
+    category = NotificationCategory(
+        id=entry["id"],
+        label=entry["label"],
+        description=entry["description"],
+        importance=entry["importance"],
+        default_enabled=entry["defaultEnabled"],
+        dedupe_window_seconds=entry["dedupeWindowSeconds"],
+    )
+    if not category.id.startswith(f"{plugin}."):
+        raise ValueError(f"plugin {plugin!r} declared {category.id!r} outside its own namespace")
+    return category
