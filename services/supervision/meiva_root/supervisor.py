@@ -182,7 +182,12 @@ class Supervisor(StoppingMixin):
             self._running = False
             for unit_id in self._registry.all_stop_order():
                 runtime = self._units[unit_id]
-                self._set_intent(runtime, UnitIntent.STOPPED, IntentSource.SELF)
+                self._set_intent(
+                    runtime,
+                    UnitIntent.STOPPED,
+                    IntentSource.SELF,
+                    caller=runtime.intent_caller,
+                )
                 try:
                     await self._stop_unit(runtime, escalate=False)
                 except Exception as exc:
