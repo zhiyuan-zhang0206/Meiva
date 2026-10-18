@@ -677,6 +677,7 @@ async def post_notice_create(
             body.priority,
             body.title,
             body.task_id,
+            pool=request.app.state.db_pool,
         )
     else:
         await asyncio.to_thread(publish_response_required_hint, request.app.state.bus, agent_id)

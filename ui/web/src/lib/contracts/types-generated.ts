@@ -1407,6 +1407,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_notification_categories_api_notifications_categories_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{agent_id}/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["post_notification_api_agents__agent_id__notifications_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedules": {
         parameters: {
             query?: never;
@@ -3340,6 +3372,23 @@ export interface components {
             awaiting: components["schemas"]["NoticeItem"][];
             resolved_page: components["schemas"]["NoticeItem"][];
             next_cursor: components["schemas"]["NoticesCursor"] | null;
+        };
+        NotificationCategoriesResponse: {
+            categories: components["schemas"]["NotificationCategoryItem"][];
+        };
+        NotificationCategoryItem: {
+            id: string;
+            label: string;
+            description: string;
+            importance: string;
+            enabled: boolean;
+        };
+        NotificationCreateIn: {
+            category: string;
+            subject: string;
+            body?: string | null;
+            href?: string | null;
+            dedupe_key?: string | null;
         };
         Object: {
             ordinal: number;
@@ -6806,6 +6855,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserSettingRow"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notification_categories_api_notifications_categories_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationCategoriesResponse"];
+                };
+            };
+        };
+    };
+    post_notification_api_agents__agent_id__notifications_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationCreateIn"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             422: {

@@ -10,6 +10,9 @@ from typing import Any, cast
 from base import paths
 from base.host.git import host_version as host_version_module
 from base.host.git.host_version import Version, parse_version
+from base.packages.plugins.surface.notification_contributions import (
+    validate_notification_contributions,
+)
 from base.packages.plugins.surface.ui_contributions import validate_ui_contributions
 
 MANIFEST_FILENAME = "meiva-plugin.json"
@@ -105,6 +108,7 @@ CONTRIBUTION_KEYS = {
     "skills",
     "commands",
     "mcpServers",
+    "notifications",
     "ui",
 }
 HOST_CAPABILITIES = {
@@ -278,6 +282,9 @@ def _validate_contributions(data: dict[str, Any], errors: list[str]) -> dict[str
             continue
         if key == "ui":
             parsed[key] = validate_ui_contributions(value, errors)
+            continue
+        if key == "notifications":
+            parsed[key] = validate_notification_contributions(value, errors)
             continue
         lst = _str_list(value, f"contributions.{key}", errors)
         if lst is None:

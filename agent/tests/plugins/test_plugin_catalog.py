@@ -257,6 +257,7 @@ def test_install_time_manifest_keys_have_no_runtime_registry():
         "mcpServers",
         "opsServices",
         "ui",
+        "notifications",
     } == catalog_mod.DECLARATION_ONLY_KEYS
 
 

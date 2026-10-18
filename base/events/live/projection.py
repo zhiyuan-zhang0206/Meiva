@@ -532,6 +532,22 @@ class TaskUpdated(_Base):
     task_id: int
 
 
+# meiva:note
+# Published when the notification spine delivers one event; every transport
+# renders from this role instead of deriving its own trigger from agent state. The
+# payload is the row just written to `notification_events`, so a reconnecting
+# client deduplicates on `notification_id`.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+class NotificationEmitted(_Base):
+    role: Literal["notification"] = "notification"
+    notification_id: int
+    category: str
+    subject: str
+    body: str | None = None
+    href: str | None = None
+    importance: str
+
+
 Event = Annotated[
     ChatStart
     | ChatDelta
@@ -563,7 +579,8 @@ Event = Annotated[
     | NoticePosted
     | NoticeResolved
     | TaskCreated
-    | TaskUpdated,
+    | TaskUpdated
+    | NotificationEmitted,
     Field(discriminator="role"),
 ]
 
@@ -604,6 +621,7 @@ _ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (NoticeResolved, True),
     (TaskCreated, True),
     (TaskUpdated, True),
+    (NotificationEmitted, True),
 )
 
 

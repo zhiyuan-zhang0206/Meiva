@@ -37,8 +37,8 @@ pub struct Settings {
     /// Android only: keep a foreground service alive so the console stays
     /// connected while the app is backgrounded.
     pub background_service: bool,
-    /// Android only: raise local notifications for the conservative event
-    /// subset (agent finished / agent needs input / FYI notice).
+    /// Raise local notifications for the events the gateway's notification
+    /// spine decides to deliver. Android and macOS both render them.
     pub notifications: bool,
 }
 

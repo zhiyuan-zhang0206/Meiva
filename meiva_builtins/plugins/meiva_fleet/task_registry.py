@@ -376,6 +376,20 @@ def update_in_context(
     from base.events.live import announce, bus  # deferred (task #3816)
 
     announce.publish_task_updated_sync(bus.EventBus.from_settings(), actor, task_id)
+    _notify_if_closed(status, actor, task_id, title if title is not None else current_title)
+
+
+# meiva:note
+# A closed task is a delivered `meiva_fleet.task_closed` notification. A delivery
+# failure is logged and swallowed: the task row is already committed, and a
+# notification is never a reason to fail an update.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def _notify_if_closed(status: str | None, actor: int, task_id: int, title: str) -> None:
+    if status != "done":
+        return
+    from meiva_builtins.plugins.meiva_fleet.task_notifications import deliver_task_closed
+
+    deliver_task_closed(actor, task_id, title)
 
 
 def _queue_after_update(
