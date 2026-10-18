@@ -228,7 +228,7 @@ def _verify(
     state.update_state(
         verify=VerifyRecord(at=now(), integrity=verdict.integrity, timeline=verdict.timeline)
     )
-    summary = f"integrity {verdict.integrity}, timeline {verdict.timeline}"
+    summary = verdict.summary()
     report(f"verify: {summary}")
     if verdict.failed:
         raise StepFailedError(STEP_VERIFY, f"the archived WAL chain is broken: {summary}")
