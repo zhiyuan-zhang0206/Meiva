@@ -1,104 +1,22 @@
-"""Pinned checkpoint-postgres read adapters: pagination and message reset boundaries.
-
-Remove the pagination override after langgraph#8448 / #8556 ships in a stable
-release. The messages-only reader additionally stops body transfer at a reset
-inside serialized writes; retain it until upstream supports that boundary.
-"""
+# meiva:note
+# checkpoint-postgres 3.1.3 derives the walk cursor from the target itself (langgraph#8556), so only the message-reset suffix reader stays Meiva-owned; delete it once upstream stops body transfer at a reset.
+# meiva:link base/agents/history/docs/checkpoint-replay.meiva.okf.md
 
 from __future__ import annotations
 
 from collections.abc import Generator, Mapping, Sequence
-from importlib.metadata import version
-from inspect import Parameter, signature
 from typing import Any, LiteralString, cast
 
 from langchain_core.messages import RemoveMessage, convert_to_messages
 from langchain_core.runnables import RunnableConfig
 from langgraph.channels.binop import _get_overwrite
-from langgraph.checkpoint.base import DeltaChannelHistory, get_checkpoint_id
+from langgraph.checkpoint.base import DeltaChannelHistory, get_checkpoint_id, writes_sort_key
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.postgres.base import BasePostgresSaver, _DeltaStage2Row
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from base.log import logger
-
-_EXPECTED_PARAMETERS = (
-    "target_id",
-    "channels",
-    "parent_of",
-    "ver_by_i_by_cid",
-    "hb_by_i_by_cid",
-    "inline_by_i_by_cid",
-    "chain_by_ch",
-    "seed_ver_by_ch",
-    "seed_inline_by_ch",
-    "walk_cursor_by_ch",
-    "seeded",
-)
-
-
-def validate_checkpoint_postgres_api() -> None:
-    """Fail at Meiva saver construction if its pinned private extension seam changes."""
-    dependency_version = version("langgraph-checkpoint-postgres")
-    if dependency_version != "3.1.2":
-        raise RuntimeError(
-            "checkpoint-postgres adapter requires langgraph-checkpoint-postgres==3.1.2; "
-            f"found {dependency_version}"
-        )
-    descriptor = vars(BasePostgresSaver)["_try_advance_walks"]
-    if not isinstance(descriptor, staticmethod):
-        raise TypeError("checkpoint-postgres _try_advance_walks was replaced outside Meiva")
-    original = descriptor.__func__
-    method_signature = signature(original)
-    if (
-        original.__module__ != "langgraph.checkpoint.postgres.base"
-        or original.__qualname__ != "BasePostgresSaver._try_advance_walks"
-        or hasattr(original, "__wrapped__")
-        or tuple(method_signature.parameters) != _EXPECTED_PARAMETERS
-        or any(
-            parameter.kind is not Parameter.POSITIONAL_OR_KEYWORD
-            or parameter.default is not Parameter.empty
-            for parameter in method_signature.parameters.values()
-        )
-        or method_signature.return_annotation not in (None, "None")
-    ):
-        raise RuntimeError("checkpoint-postgres _try_advance_walks signature or identity changed")
-
-
-class CheckpointWalks:
-    """Meiva-owned pagination extension; upstream classes remain unchanged."""
-
-    @staticmethod
-    def _try_advance_walks(
-        target_id: str,
-        channels: Sequence[str],
-        parent_of: Mapping[str, str | None],
-        ver_by_i_by_cid: Sequence[Mapping[str, str | None]],
-        hb_by_i_by_cid: Sequence[Mapping[str, bool]],
-        inline_by_i_by_cid: Sequence[Mapping[str, Any]],
-        chain_by_ch: dict[str, list[str]],
-        seed_ver_by_ch: dict[str, str | None],
-        seed_inline_by_ch: dict[str, Any],
-        walk_cursor_by_ch: dict[str, str | None],
-        seeded: set[str],
-    ) -> None:
-        if target_id not in parent_of:
-            return
-        BasePostgresSaver._try_advance_walks(
-            target_id,
-            channels,
-            parent_of,
-            ver_by_i_by_cid,
-            hb_by_i_by_cid,
-            inline_by_i_by_cid,
-            chain_by_ch,
-            seed_ver_by_ch,
-            seed_inline_by_ch,
-            walk_cursor_by_ch,
-            seeded,
-        )
-
 
 # task #3696 exception inventory: transport read guards, not conversation limits.
 # A quarter-MiB batch bounds reset overfetch while reading the measured ~1-MiB
@@ -133,15 +51,15 @@ WITH RECURSIVE ancestors AS (
 SELECT * FROM ancestors ORDER BY depth
 """  # noqa: S608 — only a static column list is interpolated
 _WRITE_KEYS_SQL = """
-SELECT w.checkpoint_id, w.task_id, w.idx, octet_length(w.blob) AS size
+SELECT chain.depth, w.checkpoint_id, w.task_id, w.task_path, w.idx,
+       octet_length(w.blob) AS size
 FROM unnest(%s::text[]) WITH ORDINALITY AS chain(checkpoint_id, depth)
 JOIN checkpoint_writes w USING (checkpoint_id)
 WHERE w.thread_id = %s AND w.checkpoint_ns = %s AND w.channel = 'messages'
-ORDER BY chain.depth, w.task_id DESC, w.idx DESC
 """
 _WRITE_BODIES_SQL = """
 SELECT 'w'::text AS _kind, w.checkpoint_id, w.channel, w.type, w.blob,
-       w.task_id, w.idx, NULL::text AS version
+       w.task_id, w.task_path, w.idx, NULL::text AS version
 FROM unnest(%s::text[], %s::text[], %s::int[]) WITH ORDINALITY
      AS wanted(checkpoint_id, task_id, idx, ordinal)
 JOIN checkpoint_writes w USING (checkpoint_id, task_id, idx)
@@ -150,7 +68,7 @@ ORDER BY wanted.ordinal
 """
 _SEED_SQL = """
 SELECT 'b'::text AS _kind, NULL::text AS checkpoint_id, channel, type, blob,
-       NULL::text AS task_id, NULL::int AS idx, version
+       NULL::text AS task_id, NULL::text AS task_path, NULL::int AS idx, version
 FROM checkpoint_blobs
 WHERE thread_id = %s AND checkpoint_ns = %s AND channel = 'messages' AND version = %s
 """
@@ -170,6 +88,18 @@ def body_key_batches(keys: _Rows) -> Generator[_Rows]:
         size += key["size"]
     if batch:
         yield batch
+
+
+def _replay_order(keys: _Rows) -> _Rows:
+    # meiva:note
+    # The reset cut follows the replay order — chain position first, then writes_sort_key inside one checkpoint — so it never depends on database collation.
+    ordered = sorted(
+        keys,
+        key=lambda key: writes_sort_key(key["task_path"], key["task_id"], key["idx"]),
+        reverse=True,
+    )
+    ordered.sort(key=lambda key: key["depth"])
+    return ordered
 
 
 def _resets_messages(value: Any) -> bool:
@@ -257,6 +187,7 @@ def _history_queries(
     )
     chain = chains["messages"]
     keys = yield _WRITE_KEYS_SQL, (chain, thread, namespace)
+    keys = _replay_order(keys)
     rows, reset = yield from _fetch_suffix(saver, keys, thread, namespace, target)
     # A root can legitimately start without a seed. A missing ancestor cannot:
     # its omitted writes could change every value. A real reset cuts that prefix.
@@ -284,17 +215,11 @@ def _history_queries(
     )
 
 
-class HistoryPostgresSaver(CheckpointWalks, PostgresSaver):
-    """Explicit sync checkpoint reader with pinned pagination and reset suffix reads."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        validate_checkpoint_postgres_api()
-        super().__init__(*args, **kwargs)
-
+class HistoryPostgresSaver(PostgresSaver):
     def get_delta_channel_history(
         self, *, config: RunnableConfig, channels: Sequence[str]
     ) -> Mapping[str, DeltaChannelHistory]:
-        if list(channels) != ["messages"] or get_checkpoint_id(config) is None:
+        if list(channels) != ["messages"] or not get_checkpoint_id(config):
             return super().get_delta_channel_history(config=config, channels=channels)
         queries = _history_queries(self, config)
         rows: _Rows = []
@@ -310,17 +235,11 @@ class HistoryPostgresSaver(CheckpointWalks, PostgresSaver):
                 rows = cursor.fetchall()
 
 
-class HistoryAsyncPostgresSaver(CheckpointWalks, AsyncPostgresSaver):
-    """Explicit async checkpoint reader; sync calls use upstream's loop bridge."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        validate_checkpoint_postgres_api()
-        super().__init__(*args, **kwargs)
-
+class HistoryAsyncPostgresSaver(AsyncPostgresSaver):
     async def aget_delta_channel_history(
         self, *, config: RunnableConfig, channels: Sequence[str]
     ) -> Mapping[str, DeltaChannelHistory]:
-        if list(channels) != ["messages"] or get_checkpoint_id(config) is None:
+        if list(channels) != ["messages"] or not get_checkpoint_id(config):
             return await super().aget_delta_channel_history(config=config, channels=channels)
         queries = _history_queries(self, config)
         rows: _Rows = []

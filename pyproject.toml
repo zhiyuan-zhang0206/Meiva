@@ -23,7 +23,9 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "redis>=7.4.0",
     "pydantic-settings>=2.13.1",
-    "langgraph-checkpoint-postgres>=3.0.5",
+    # 3.1.3 ships langgraph#8556 (the delta walk cursor starts at the target),
+    # so Meiva reads pagination from upstream instead of overriding it.
+    "langgraph-checkpoint-postgres>=3.1.3",
     "fastapi>=0.120",
     "uvicorn[standard]>=0.40",
     "loguru>=0.7.3",
