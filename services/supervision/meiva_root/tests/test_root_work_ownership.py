@@ -12,6 +12,7 @@ from typing import cast
 import pytest
 
 from base.daemon.health import DaemonProbe
+from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.instance_lock import (
     acquire_instance_lock,
     release_instance_lock,
@@ -201,6 +202,16 @@ async def test_cross_generation_watch_errors_are_visible_and_collected_without_p
             peer_release.set()
 
 
+class _NeverSignal(Supervisor):
+    # meiva:note
+    # A supervisor whose leader identity never matches: it never signals.
+    @staticmethod
+    def _signal_owned(identity: OwnedProcess, *, force: bool) -> bool:  # noqa: ARG004
+        # meiva:note
+        # The override keeps the parent signature, so both parameters stay unused.
+        return False
+
+
 async def test_failed_watch_never_certifies_an_unreaped_live_child(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -212,7 +223,9 @@ async def test_failed_watch_never_certifies_an_unreaped_live_child(
         "root",
     )
     owner = Supervisor(
-        UnitRegistry([unit]), run_dir=tmp_path, config=SupervisorConfig(stop_timeout_s=0.02)
+        UnitRegistry([unit]),
+        run_dir=tmp_path,
+        config=SupervisorConfig(stop_timeout_s=0.02, stop_kill_reap_s=0.1),
     )
     error = RuntimeError("wait implementation failed")
 
@@ -282,10 +295,14 @@ async def test_refused_child_keeps_real_reap_and_late_error_at_original_owner(
         f"pathlib.Path({str(ready)!r}).touch(); time.sleep(60)"
     )
     unit = UnitManifest("worker", (sys.executable, "-c", code), RestartPolicy.ALWAYS, "root")
-    owner = Supervisor(
+    owner = _NeverSignal(
         UnitRegistry([unit]),
         run_dir=tmp_path,
-        config=SupervisorConfig(stop_timeout_s=0.02, watch_join_timeout_s=0.02),
+        config=SupervisorConfig(
+            stop_timeout_s=0.02,
+            stop_kill_reap_s=0.1,
+            watch_join_timeout_s=0.02,
+        ),
     )
     original = owner._watch
     error = RuntimeError("late reap bookkeeping failed")

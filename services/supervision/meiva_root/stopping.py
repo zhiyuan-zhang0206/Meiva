@@ -11,22 +11,35 @@ import math
 import os
 import signal
 from dataclasses import dataclass
+from time import monotonic
 
+from base.deploy.progress_timeout import STOP_KILL_REAP_S
+from base.log import logger
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import UnitState
 from services.supervision.meiva_root.unit_records import Generation, UnitRuntime
 
 
 class UnitStopTimeoutError(RuntimeError):
-    """The retained direct child did not exit within its bounded stop window."""
+    # meiva:note
+    # The retained direct child did not exit within its bounded stop window.
+    pass
 
 
 @dataclass(frozen=True, slots=True)
 class SupervisorConfig:
-    """Timing policy for the supervisor (test-tunable)."""
-
+    # meiva:note
+    # Timing policy for the supervisor (test-tunable).
     stop_timeout_s: float = 10.0
-    """Default TERM window; only explicit force permits a later KILL."""
+    # meiva:note
+    # Default TERM window: how long a unit may take to close before root kills it.
+
+    stop_kill_reap_s: float = STOP_KILL_REAP_S
+    # meiva:note
+    # How long root waits for a SIGKILLed child to be reaped before giving up.
+    #
+    # Short by design: the kernel reaps a killed child promptly, so a longer wait
+    # only delays the honest failure report.
 
     watch_join_timeout_s: float = 0.2
     """Independent bounded observation of retained generation watchers at shutdown."""
@@ -36,6 +49,10 @@ class SupervisorConfig:
             raise ValueError("stop_timeout_s must be finite and positive")
         if not math.isfinite(self.watch_join_timeout_s) or self.watch_join_timeout_s < 0:
             raise ValueError("watch_join_timeout_s must be finite and nonnegative")
+        for name in ("stop_kill_reap_s",):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
 
 
 class StoppingMixin:
@@ -43,30 +60,116 @@ class StoppingMixin:
 
     _config: SupervisorConfig
 
-    async def _stop_unit(self, runtime: UnitRuntime, *, force: bool = False) -> None:
+    async def _stop_unit(
+        self, runtime: UnitRuntime, *, force: bool = False, escalate: bool = True
+    ) -> None:
         generation = runtime.generation
         if generation is None:
             runtime.state = UnitState.STOPPED
             return
-        await self._stop_generation(runtime, generation, force=force)
+        await self._stop_generation(runtime, generation, force=force, escalate=escalate)
 
     async def _stop_generation(
-        self, runtime: UnitRuntime, generation: Generation, *, force: bool = False
+        self,
+        runtime: UnitRuntime,
+        generation: Generation,
+        *,
+        force: bool = False,
+        escalate: bool = True,
     ) -> None:
-        """Signal a birth-validated live group and await the direct child's exit."""
+        began = monotonic()
         generation.closing = True
         identity = generation.identity
         if identity is not None:
             self._signal_owned(identity, force=False)
-        window = self._stop_window(runtime)
-        if not await self._wait_exit(generation, window):
-            if force and identity is not None:
-                self._signal_owned(identity, force=True)
-                if await self._wait_exit(generation, window):
-                    return
+        window = 0.0 if force else self._stop_window(runtime)
+        if await self._wait_exit(generation, window):
+            self._log_stopped(runtime, generation, began)
+            return
+        if not escalate:
+            # meiva:note
+            # Whole-tree shutdown stays a bounded graceful stop: root is exiting
+            # anyway, and a child still closing is reported by custody, not killed.
             raise UnitStopTimeoutError(
                 f"unit {runtime.manifest.id} did not stop within its {window:g}s window "
                 f"(pid {generation.proc.pid})"
+            )
+        if identity is None:
+            if generation.exited.is_set():
+                return
+            self._emit_stop_event(
+                "root_unit_stop_aborted",
+                runtime,
+                generation,
+                graceful_waited_s=monotonic() - began,
+                reason="identity_unavailable",
+            )
+            raise UnitStopTimeoutError(
+                f"unit {runtime.manifest.id} outlived its {window:g}s window and root never "
+                f"captured its leader identity, so it did not kill it (pid {generation.proc.pid})"
+            )
+        if not self._signal_owned(identity, force=True):
+            if generation.exited.is_set():
+                return
+            self._emit_stop_event(
+                "root_unit_stop_aborted",
+                runtime,
+                generation,
+                graceful_waited_s=monotonic() - began,
+                reason="identity_changed",
+            )
+            raise UnitStopTimeoutError(
+                f"unit {runtime.manifest.id} outlived its {window:g}s window and its "
+                f"leader identity changed, so root did not kill it (pid {generation.proc.pid})"
+            )
+        self._emit_stop_event(
+            "root_unit_stop_escalated",
+            runtime,
+            generation,
+            graceful_waited_s=monotonic() - began,
+            reason="escaped_term_window",
+        )
+        if await self._wait_exit(generation, self._config.stop_kill_reap_s):
+            self._log_stopped(runtime, generation, began)
+            return
+        raise UnitStopTimeoutError(
+            f"unit {runtime.manifest.id} survived SIGKILL past its "
+            f"{self._config.stop_kill_reap_s:g}s reap window (pid {generation.proc.pid})"
+        )
+
+    @staticmethod
+    def _log_stopped(runtime: UnitRuntime, generation: Generation, began: float) -> None:
+        logger.info(
+            "unit {unit} generation {generation} stopped in {stopped_in_s}s",
+            event="root_unit_stopped",
+            unit=runtime.manifest.id,
+            generation=generation.seq,
+            stopped_in_s=round(monotonic() - began, 3),
+        )
+
+    @staticmethod
+    def _emit_stop_event(
+        event: str,
+        runtime: UnitRuntime,
+        generation: Generation,
+        *,
+        graceful_waited_s: float,
+        reason: str,
+    ) -> None:
+        try:
+            logger.warning(
+                "unit {unit} generation {generation}: {reason}",
+                event=event,
+                unit=runtime.manifest.id,
+                generation=generation.seq,
+                pid=generation.proc.pid,
+                starttime=generation.identity.starttime if generation.identity else None,
+                graceful_waited_s=round(graceful_waited_s, 3),
+                reason=reason,
+            )
+        except Exception:
+            logger.opt(exception=True).error(
+                "unit {}: stop-event fan-out failed ({})", runtime.manifest.id, event
             )
 
     @staticmethod
@@ -83,18 +186,23 @@ class StoppingMixin:
         return self._config.stop_timeout_s if declared is None else declared
 
     @staticmethod
-    def _signal_owned(identity: OwnedProcess, *, force: bool) -> None:
-        """Attempt the captured leader's group only while that leader still lives."""
+    def _signal_owned(identity: OwnedProcess, *, force: bool) -> bool:
+        # meiva:note
+        # Attempt the captured leader's group only while that leader still lives.
+        #
+        # Returns whether a signal was delivered; a vanished or replaced leader is
+        # never signalled, so the caller can record the abort instead of guessing.
         if not identity.live():
-            return
+            return False
         signum = signal.SIGKILL if force else signal.SIGTERM
         try:
             group = os.getpgid(identity.pid)
             if not identity.live():
-                return
+                return False
             if group == identity.pid and group != os.getpgrp():
                 os.killpg(group, signum)
             else:
                 identity.send_signal(signum)
         except ProcessLookupError:
-            return
+            return False
+        return True
