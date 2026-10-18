@@ -145,6 +145,7 @@ class PtySession:
         self._log_fd, created = log_prefix.open_session_log(log_path, name, pid=pid)
         self._log_written = os.fstat(self._log_fd).st_size if created else 0
         self._log_cap = log_cap
+        self._log_write_failures = 0
         # Driven by the service's loop: the initial command waiting on the prompt,
         # and whether the teardown has been requested.
         self.initial: InitialCommand | None = None
@@ -264,8 +265,19 @@ class PtySession:
         room = self._log_cap - self._log_written
         try:
             written = os.write(self._log_fd, data[:room])
-        except OSError:
-            return  # disk full / fd gone: stop trying, keep the session
+        except OSError as exc:
+            # disk full / fd gone: stop trying, keep the session
+            self._log_write_failures += 1
+            if self._log_write_failures == 1 or self._log_write_failures % 50 == 0:
+                logger.warning(
+                    "pty {name}: transcript write failed ({n} time(s)); the session keeps "
+                    "running and its transcript is now incomplete: {err}",
+                    name=self.name,
+                    n=self._log_write_failures,
+                    err=repr(exc),
+                    event="pty_transcript",
+                )
+            return
         self._log_written += written
 
     @property

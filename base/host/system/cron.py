@@ -115,14 +115,38 @@ def reload_launchd_job(label: str, plist_path: Path, *, host: Host) -> int:
     return 0
 
 
-def remove_launchd_job(label: str, plist_path: Path, *, host: Host) -> None:
-    """Unload a LaunchAgent and remove its plist, even when already absent."""
+# meiva:note
+# `launchctl bootout` exits non-zero both when it removed the job and when none was loaded, so
+# its status cannot answer "is it gone"; `launchctl print` can (exit 0 = launchd still holds
+# it, any non-zero = absence). A job that survives its bootout keeps running the code it was
+# loaded with, so an unproven retirement returns False and reports rather than claiming success.
+# meiva:link base/host/docs/host.meiva.okf.md
+def bootout_launchd_job(label: str, *, host: Host) -> bool:
     host.run(
         ["launchctl", "bootout", f"gui/{host.uid}/{label}"],
         capture_output=True,
         timeout=_TOOL_TIMEOUT_S,
     )
+    probe = host.run(
+        ["launchctl", "print", f"gui/{host.uid}/{label}"],
+        capture_output=True,
+        timeout=_TOOL_TIMEOUT_S,
+    )
+    if probe.returncode == 0:
+        logger.error(
+            "launchctl still holds {label} after bootout; it keeps running the code it was "
+            "loaded with and its plist was removed under it",
+            label=label,
+            event="launchd_retirement",
+        )
+        return False
+    return True
+
+
+def remove_launchd_job(label: str, plist_path: Path, *, host: Host) -> bool:
+    retired = bootout_launchd_job(label, host=host)
     plist_path.unlink(missing_ok=True)
+    return retired
 
 
 def require_crontab(
@@ -436,17 +460,15 @@ def unregister_macos(*, host: Host) -> int:
     label = _HEALTH_PROBE_LABEL
 
     # Bootout the job.
-    host.run(
-        ["launchctl", "bootout", f"gui/{host.uid}/{label}"],
-        capture_output=True,
-        timeout=_TOOL_TIMEOUT_S,
-    )
+    retired = bootout_launchd_job(label, host=host)
 
     # Remove the plist.
     if plist_path.exists():
         plist_path.unlink()
         logger.info("Removed plist {}", plist_path)
 
+    if not retired:
+        return 1
     logger.info("launchd job '{}' unloaded", label)
     return 0
 

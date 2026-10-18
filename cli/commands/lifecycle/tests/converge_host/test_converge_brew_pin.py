@@ -20,6 +20,8 @@ from base.host.system.tests.fake_commands import (
     Reply,
     fake_host,
 )
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -158,13 +160,12 @@ def test_installed_but_unpinned_formula_still_warns(
     assert "brew pin grafana" in warning
 
 
-def test_brew_absent_is_silent(
+def test_brew_absent_says_the_check_did_not_run(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-
     commands = FakeCommands()
     commands.on("brew", FileNotFoundError("brew"), repeat=True)
     host = fake_host(commands, platform=DARWIN_ARM64)
@@ -173,7 +174,28 @@ def test_brew_absent_is_silent(
         _ctx(tmp_path, host, operator_database=operator_database, producer=operator_pipeline)
     )
 
-    assert capsys.readouterr().err == ""
+    assert "brew-pin: check skipped" in capsys.readouterr().err
+
+
+def test_a_failed_brew_query_does_not_read_as_all_pinned(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    loguru_records: LogRecords,
+) -> None:
+    commands = FakeCommands()
+    commands.on(["brew", "list", "--pinned"], Reply(returncode=1, stderr="boom"), repeat=True)
+    host = fake_host(commands, platform=DARWIN_ARM64)
+
+    cbp.ensure_brew_pin(
+        _ctx(tmp_path, host, operator_database=operator_database, producer=operator_pipeline)
+    )
+
+    assert "brew-pin: check skipped" in capsys.readouterr().err
+    [event] = loguru_records.events("brew_pin")
+    assert event["level"].name == "WARNING"
+    assert event["extra"]["rc"] == 1
 
 
 def test_non_macos_is_silent_without_calling_brew(
