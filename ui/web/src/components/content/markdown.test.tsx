@@ -8,6 +8,7 @@ vi.mock("./python-code", () => ({
 }));
 
 import { __resetMarkdownMathForTests, __setMarkdownMathImportForTests, type MarkdownMath } from "@/lib/markdown/math";
+import reportedMessage from "./fixtures/reported-message-20261019.json";
 import { ChatMarkdown, preloadChatMarkdown } from "./markdown";
 
 beforeAll(async () => {
@@ -351,6 +352,22 @@ describe("math through the lazy KaTeX surface", () => {
     await waitFor(() => expect(container.textContent).toContain("cost $`a` and `b`$ end"), { timeout: 5000 });
     expect(container.querySelector(".katex")).toBeNull();
     expect(container.querySelector(".katex-error")).toBeNull();
+  });
+
+  it("renders the reported 2026-10-19 reply without a katex-error", async () => {
+    const { container } = render(<ChatMarkdown content={reportedMessage.text} />);
+
+    await waitFor(() => expect(container.querySelectorAll(".katex").length).toBeGreaterThan(0), { timeout: 5000 });
+    expect(container.querySelector(".katex-error")).toBeNull();
+  });
+
+  it("keeps the reported reply's stray $ literal and its arrows as math", async () => {
+    const { container } = render(<ChatMarkdown content={reportedMessage.text} />);
+
+    await waitFor(() => expect(container.querySelectorAll(".katex").length).toBeGreaterThan(0), { timeout: 5000 });
+    const arrows = [...container.querySelectorAll("annotation")].filter((node) => node.textContent === "\\to");
+    expect(arrows.length).toBeGreaterThanOrEqual(10);
+    expect(container.textContent).toContain("\u6839\u6761\u4ef6 $ \u5e95\u4e0b\u7684");
   });
 
   it("renders inline and display math once the math chunk loads", async () => {
