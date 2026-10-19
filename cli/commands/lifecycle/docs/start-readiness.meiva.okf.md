@@ -11,15 +11,14 @@ tags:
 # Start readiness
 
 `meiva start` first validates the persisted home (initialized by `meiva init`) and service selection.
-Before converge, `cli/commands/lifecycle/host_dependencies.py` ensures the host
-packages the selected roster actually executes: PostgreSQL 17 tools, Redis,
-PgBouncer when pooling is enabled, and Node/npm/npx when the frontend or browser
-service is selected. It resolves the same binaries the launch resolves, installs
-a missing group through `scripts/provision/database.sh` / `node.sh` (Homebrew on
-macOS, apt on Debian/Ubuntu), and re-probes. A component still missing after the
-attempt refuses the start before any service launch and prints the exact repair
-command; a runner-only unit and a remote-managed plane skip the local data-plane
-group. The
+Before converge, `cli/commands/data_plane/host_dependencies.py` runs the host
+dependency preflight: it resolves every external executable and OS service the
+selected roster executes, installs a missing group through `scripts/provision/*`
+(Homebrew on macOS, apt on Debian/Ubuntu), re-probes, and refuses the start
+before any service launch when something is still missing. A runner-only unit
+and a remote-managed plane skip the local data-plane group; a headless gateway
+skips Node; `MEIVA_OS_JOBS_ENABLED=0` (or a non-default `$MEIVA_HOME`) skips the
+scheduler group. The
 pre-bind gate in `cli/commands/lifecycle/start.py:refuse_occupied_health_ports` refuses
 ports held by another unit before launching application processes. It reads the
 selected core roster; optional port conflicts cannot block the core.
@@ -50,6 +49,17 @@ Protocol availability is an observation, not a proof that an endpoint belongs to
 a particular native process generation. Process ownership for actual signals
 remains with the launch/stop owner. The rollout launch-failure record contains
 only core launch failures.
+
+## Host dependencies
+
+The preflight resolves every external executable and OS service the selected
+roster executes, installs a provisionable group through `scripts/provision/*`
+(Homebrew on macOS, apt on Debian/Ubuntu), re-probes, and refuses the start
+before any service launch when something is still missing — naming the tool and
+the command that fixes the host. `crontab` and `systemctl` are part of that
+table, so a host without `cron` no longer dies at the WAL-G job step in the
+middle of converge. [[cli/commands/lifecycle/docs/start-host-dependencies.meiva.okf.md|The dependency table]]
+lists every row, its owner and the behavior when it is absent.
 
 ## Related contracts
 
