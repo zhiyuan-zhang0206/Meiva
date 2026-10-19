@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatUpcoming, normalizeDayPeriodSpace } from "./time";
+import { formatRelative, formatUpcoming, normalizeDayPeriodSpace } from "./time";
 
 const SHANGHAI = "Asia/Shanghai";
 const NEW_YORK = "America/New_York";
@@ -107,5 +107,23 @@ describe("normalizeDayPeriodSpace", () => {
 
   it("leaves an already-plain clock unchanged", () => {
     expect(normalizeDayPeriodSpace("3:21 PM")).toBe("3:21 PM");
+  });
+});
+
+describe("formatRelative sub-minute bucket", () => {
+  it("says 'just now' at zero seconds instead of a bare 'now'", () => {
+    expect(formatRelative(NOW.toISOString(), NOW)).toBe("just now");
+  });
+
+  it("still says 'just now' at 59 seconds", () => {
+    expect(formatRelative(new Date(NOW.getTime() - 59_000).toISOString(), NOW)).toBe("just now");
+  });
+
+  it("leaves the 60-second boundary on the minute tier", () => {
+    expect(formatRelative(new Date(NOW.getTime() - 60_000).toISOString(), NOW)).toBe("1m ago");
+  });
+
+  it("says 'just now' for a future instant still under a minute", () => {
+    expect(formatRelative(new Date(NOW.getTime() + 30_000).toISOString(), NOW)).toBe("just now");
   });
 });
