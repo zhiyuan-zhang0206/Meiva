@@ -74,17 +74,18 @@ def test_frontend_cmd_port_uses_explicit_app_port(monkeypatch: pytest.MonkeyPatc
 
 
 def test_frontend_build_injects_gateway_port(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Frontend build cmd must inline NEXT_PUBLIC_GATEWAY_PORT from settings.gateway.gateway_port.
-
-    NEXT_PUBLIC_* are baked into the JS bundle at build time and the session
-    only forwards MEIVA_* env, so the build subprocess never sees a .env-only
-    NEXT_PUBLIC_GATEWAY_PORT — it must be injected on the command line from the
-    single source of truth (MEIVA_GATEWAY_PORT). The browser then dials the gateway
-    on that port (e.g. the prod VPS on 8800).
-    """
+    # meiva:note
+    # NEXT_PUBLIC_* are baked into the JS bundle at build time and the session only
+    # forwards MEIVA_* env, so the build subprocess never sees a .env-only
+    # NEXT_PUBLIC_GATEWAY_PORT; it must ride the command line from the single source
+    # of truth (MEIVA_GATEWAY_PORT), and the build guard must receive the same value
+    # so a changed port is a changed build key.
+    # meiva:link base/cluster/docs/frontend-build.meiva.okf.md
     monkeypatch.setattr(settings.gateway, "gateway_port", 8800)
     spec = _spec_by_session(build_services(), "frontend")
-    assert "NEXT_PUBLIC_GATEWAY_PORT=8800 npm run build" in spec.cmd
+    assert "NEXT_PUBLIC_GATEWAY_PORT=8800" in spec.cmd
+    assert ".venv/bin/python -m base.cluster.frontend_build ensure" in spec.cmd
+    assert "--gateway-port 8800" in spec.cmd
 
 
 def test_gateway_curl_url_follows_settings(monkeypatch: pytest.MonkeyPatch) -> None:
