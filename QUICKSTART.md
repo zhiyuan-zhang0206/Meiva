@@ -17,7 +17,7 @@ the entire cluster.
 | Git | For cloning the repo |
 | A terminal | All commands in this guide run in a terminal |
 | Homebrew (macOS) | The first `meiva start` installs PostgreSQL 17, Redis 8.2, PgBouncer and Node through Homebrew (packages you already have are reused) — install Homebrew first: `https://brew.sh` |
-| Debian/Ubuntu (Linux) | The first `meiva start` installs the same missing packages through `apt`; other distributions need PostgreSQL 17, Redis 8.2, PgBouncer and Node 22 installed first |
+| Debian/Ubuntu (Linux) | The first `meiva start` installs the same missing packages through `apt`, plus `cron` (the `crontab` its OS jobs register into) and `curl`; other distributions need those installed first |
 | Non-root user (Linux) | The first `meiva start` births a per-cluster Postgres via `initdb`, which **refuses to run as root**, and its `apt` package install needs root. Fresh VPS images land you as root — create a user with passwordless sudo first, then run the install as that user: `adduser meiva && echo 'meiva ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/meiva && su - meiva` |
 
 ---
@@ -38,10 +38,10 @@ uv sync
 
 `uv sync` installs the locked Python dependencies into `.venv` (fetching Python
 3.12 through uv when needed). It does **not** install host packages: the first
-`meiva start` installs missing PostgreSQL 17, Redis 8.2, PgBouncer and Node.js
-through Homebrew (macOS) or apt (Debian/Ubuntu). If a package cannot be
-installed, start stops before convergence with the exact repair command; it
-never reports a green start and then dies on the missing binary.
+`meiva start` installs missing PostgreSQL 17, Redis 8.2, PgBouncer, Node.js,
+`cron` and `curl` through Homebrew (macOS) or apt (Debian/Ubuntu). If a package
+cannot be installed, start stops before convergence with the exact repair
+command; it never reports a green start and then dies on the missing binary.
 `meiva init` records the cluster's identity: its ports, its generated credentials
 (including the cluster secret, `MEIVA_CLUSTER_SECRET`) and `~/.meiva/.env`. It starts no process and creates no database; an initialized home
 refuses a second `meiva init`.
@@ -183,13 +183,16 @@ missing component. The repository's provisioners are the same ones CI uses:
 # Debian/Ubuntu
 sudo bash scripts/provision/database.sh   # PostgreSQL 17 + pgvector, Redis 8.2, PgBouncer
 sudo bash scripts/provision/node.sh       # Node 22 + npm/npx
+sudo bash scripts/provision/host_utils.sh # cron (crontab) + curl
 
 # macOS
 brew install postgresql@17 redis@8.2 pgbouncer pgvector node
 ```
 
 A headless gateway that does not serve the web UI can skip Node entirely:
-`meiva start --disable-service frontend`.
+`meiva start --disable-service frontend`. A host that must run without OS jobs
+(no cron, no systemd — a container, typically) says so instead of faking them:
+`MEIVA_OS_JOBS_ENABLED=0 meiva start`.
 
 ### Postgres connection failed
 

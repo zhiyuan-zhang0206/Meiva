@@ -2,6 +2,7 @@ exports = ["converge_host", "startup", "stop"]
 
 [uses]
 "identity" = ["test_root_driver.py"]
+"test_start_host_dependencies.py" = ["_host_dependencies_path_child.py"]
 
 [debt.env-patch]
 "test_collector_admission.py#monkeypatch.delitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 3
