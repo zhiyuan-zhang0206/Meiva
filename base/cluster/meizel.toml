@@ -3,7 +3,7 @@ exports = ["authority", "dataplane", "derive.py", "frontend_build.py", "machine"
 [uses]
 "__init__.py" = ["derive.py", "ports.py", "provision.py", "record.py", "redis_acl.py"]
 "dataplane" = ["derive.py", "machine", "ownership.py", "port_preflight.py", "ports.py", "record.py"]
-"derive.py" = ["frontend_build.py", "machine", "record.py"]
+"derive.py" = ["machine", "record.py"]
 "machines.py" = ["machine"]
 "ownership.py" = ["port_preflight.py", "postgres.py"]
 "port_preflight.py" = ["machine"]
