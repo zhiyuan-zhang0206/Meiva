@@ -16,6 +16,7 @@ from services.desktop.permissions_helper.tests.test_permissions_helper import (
     fake_helper as fake_helper,
 )
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
+    fake_tools,
     retire_env,
     write_agent_plist,
 )
@@ -94,18 +95,17 @@ def test_unrelated_cluster_plists_are_left_alone(
     assert other.exists()
 
 
-def test_long_mac_ipc_path_refuses_before_signing_or_native_jobs(
+def test_long_mac_ipc_path_refuses_before_building_or_native_jobs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
     long_socket = tmp_path / ("s" * 104)
     monkeypatch.setattr(lifecycle, "helper_socket", lambda: long_socket)
-    monkeypatch.setattr(
-        lifecycle, "ensure_signing_cert", lambda: pytest.fail("must refuse before signing")
-    )
+    recorded = fake_tools(monkeypatch)
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="shorter cluster home"):
         lifecycle.converge(helper=refuse_helper, timers=ManualTimers())
+    assert recorded == []
 
 
 def test_overlong_socket_is_typed_unavailability() -> None:

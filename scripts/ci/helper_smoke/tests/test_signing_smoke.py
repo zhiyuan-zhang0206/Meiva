@@ -40,12 +40,6 @@ def test_readback_failure_truncates_long_output() -> None:
     assert problem is not None and len(problem) < 600
 
 
-def test_run_requires_the_keychain_password() -> None:
-    with pytest.raises(SystemExit) as refused:
-        smoke.main(["run"])
-    assert refused.value.code == 2
-
-
 def test_a_command_is_required() -> None:
     with pytest.raises(SystemExit) as refused:
         smoke.main([])
