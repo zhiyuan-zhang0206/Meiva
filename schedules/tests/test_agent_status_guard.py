@@ -60,6 +60,23 @@ def _status_references(tree: ast.AST) -> set[str]:
     }
 
 
+def _imports_daily_host_report_agent(tree: ast.AST) -> bool:
+    return any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "schedules.daily_host"
+        and any(alias.name == "report_agent" for alias in node.names)
+        for node in ast.walk(tree)
+    )
+
+
+def _status_members_read_by(tree: ast.AST) -> set[str]:
+    referenced = _status_references(tree)
+    if _imports_daily_host_report_agent(tree):
+        helper = ast.parse((SCHEDULES_DIR / "daily_host.py").read_text())
+        referenced |= _status_references(helper)
+    return referenced
+
+
 def _guard_calls(tree: ast.AST) -> list[ast.Call]:
     return [
         node
@@ -75,17 +92,9 @@ def test_builtin_schedule_guards_every_referenced_status_member(
     filename: str, expected: set[str]
 ) -> None:
     tree = ast.parse((SCHEDULES_DIR / filename).read_text())
-    referenced = _status_references(tree)
     if filename in _DAILY_HOST_SCRIPTS:
-        assert any(
-            isinstance(node, ast.ImportFrom)
-            and node.module == "schedules.daily_host"
-            and any(alias.name == "report_agent" for alias in node.names)
-            for node in ast.walk(tree)
-        )
-        helper = ast.parse((SCHEDULES_DIR / "daily_host.py").read_text())
-        referenced |= _status_references(helper)
-    assert referenced == expected
+        assert _imports_daily_host_report_agent(tree)
+    assert _status_members_read_by(tree) == expected
 
     calls = _guard_calls(tree)
     if not expected:
@@ -98,6 +107,14 @@ def test_builtin_schedule_guards_every_referenced_status_member(
     assert ast.literal_eval(call.args[1]) == expected
     keywords = {keyword.arg: keyword.value for keyword in call.keywords}
     assert ast.literal_eval(keywords["schedule_name"]) == SCHEDULE_NAMES[filename]
+
+
+def test_every_template_reading_a_status_member_declares_its_guard() -> None:
+    assert {
+        path.name
+        for path in sorted(SCHEDULES_DIR.glob("*-schedule.py"))
+        if _status_members_read_by(ast.parse(path.read_text()))
+    } == set(EXPECTED_STATUS_MEMBERS)
 
 
 def test_missing_member_exits_with_schedule_and_member_names() -> None:
