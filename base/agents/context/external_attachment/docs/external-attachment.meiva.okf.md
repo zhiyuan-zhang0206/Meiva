@@ -1,7 +1,7 @@
 ---
 type: doc
 title: External attachment kernel
-description: '`base/agents/external_attachment/` — the borrowed-identity kernel both a takeover lease and a provider harness attach through: boot, state replay, admission gate, flush and detach ordering.'
+description: '`base/agents/context/external_attachment/` — the borrowed-identity kernel both a takeover lease and a provider harness attach through: boot, state replay, admission gate, flush and detach ordering.'
 tags:
 - base
 - agents
