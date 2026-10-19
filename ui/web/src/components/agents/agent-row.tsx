@@ -43,7 +43,7 @@ import { useUserSettings } from "@/lib/state/use-user-settings";
 import type { TimeMode, DateFormat } from "@/lib/contracts/types";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
 import { formatRelativeTime } from "@/lib/agents/sidebar";
-import { formatShort } from "@/lib/format/time";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import type { AgentRow, PublicAgentStatus } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
@@ -176,6 +176,7 @@ export function AgentRow({
   }, []);
 
   const { settings: userSettings } = useUserSettings();
+  const { formatShort } = useTimeFormat();
   const rawTimeMode = userSettings["display.time_mode"];
   const timeMode: TimeMode =
     rawTimeMode === "last_active" || rawTimeMode === "spawned" || rawTimeMode === "hidden"

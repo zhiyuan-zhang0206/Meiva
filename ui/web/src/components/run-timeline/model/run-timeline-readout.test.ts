@@ -33,6 +33,7 @@ function readout(u: RunTimelineUnit): string | null {
       t,
       unitLabel: () => "Output",
       sourceLabel: (s) => s,
+      clockFormat: "24h",
     },
   );
 }

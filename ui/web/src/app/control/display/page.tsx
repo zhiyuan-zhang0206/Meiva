@@ -20,6 +20,7 @@ import {
   Eye,
   EyeOff,
   Gauge,
+  Globe,
   History,
   Languages,
   MessageSquareText,
@@ -135,10 +136,6 @@ export default function DisplaySettingsPage() {
               { value: "", label: "Default (Meiva)" },
               ...themePacks.map((p) => ({
                 value: themePackId(p),
-                // Marked per pack rather than only in the description: a pack
-                // without a dark half disables the mode toggle for every color
-                // it sets, and that is a property of the pack being chosen, not
-                // of skins in general.
                 label: `${p.name} (${p.plugin})${p.dark_tokens ? "" : " — no dark variant"}`,
               })),
             ]}
@@ -173,9 +170,27 @@ export default function DisplaySettingsPage() {
         <ToggleRow
           icon={CalendarClock}
           label="Show weekday in timestamps"
-          description="Show the weekday in timeline card timestamps (e.g. [2026-05-06 Tue 16:56:29 GMT+8])"
+          description="Show the weekday in timeline card timestamps (e.g. [2026-05-06 Tue 16:56:29])"
           value={settings["display.show_timestamp_weekday"] as boolean}
           onChange={(v) => setSetting("display.show_timestamp_weekday", v)}
+        />
+        <RadioRow
+          icon={Clock}
+          label="Clock format"
+          description="How clock times are written across the console: 24-hour (15:45) or 12-hour (3:45 PM). Default 24-hour"
+          options={[
+            { value: "24h", label: "24-hour" },
+            { value: "12h", label: "12-hour" },
+          ]}
+          value={settings["display.clock_format"] === "12h" ? "12h" : "24h"}
+          onChange={(v) => setSetting("display.clock_format", v)}
+        />
+        <ToggleRow
+          icon={Globe}
+          label="Show timezone"
+          description="Append the timezone name to full timestamps (e.g. 2026-05-06 16:56:29 UTC). Off by default: the times you see are already in your own clock"
+          value={settings["display.show_timezone"] === true}
+          onChange={(v) => setSetting("display.show_timezone", v)}
         />
         <RadioRow
           icon={Clock}

@@ -32,7 +32,7 @@ import type { UnitHeights } from "@/components/run-timeline/canvas/run-timeline-
 import type { RowOptions } from "@/components/run-timeline/model/timeline-nav";
 import { api } from "@/lib/transport/api";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
-import { formatAbsolute } from "@/lib/format/time";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import { cn } from "@/lib/format/utils";
 
 function parseAgents(segment: string): number[] | null {
@@ -54,6 +54,7 @@ const pathFor = (ids: readonly number[]) => `/insights/run/${ids.join(",")}`;
 // meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
 export default function AgentViewPage({ params }: { params: Promise<{ agents: string }> }) {
   const t = useTranslations("runTimeline");
+  const { formatAbsolute } = useTimeFormat();
 
   const [agentIds, setAgentIds] = useState<number[] | null>(null);
   const [paramsResolved, setParamsResolved] = useState(false);

@@ -60,6 +60,7 @@ vi.mock("@/lib/transport/api", () => ({
     recheckHostPermissions: () => recheckHostPermissions(),
     requestHostPermissions: () => requestHostPermissions(),
     deferHostPermissions: () => deferHostPermissions(),
+    getSettings: () => Promise.resolve({ settings: [] }),
   },
 }));
 vi.mock("@/lib/state/store", () => ({

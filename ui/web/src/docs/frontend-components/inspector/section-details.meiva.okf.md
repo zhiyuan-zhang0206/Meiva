@@ -73,10 +73,11 @@ spelling (the same rule as the `# Capabilities` index); `*` stays `*`.
 not `started_at`, which refreshes on every restart; next heartbeat — both
 projected instants (the end of an active pause and the check-in time) render
 through `formatUpcoming`, so the day boundary is part of the value: clock time
-later today, `Tomorrow 3:21 PM` across local midnight, a weekday name two to six
+later today, `Tomorrow 15:21` across local midnight, a weekday name two to six
 days out, a date countdown from seven days, and a plain date from a month on. A
-bare clock time is never shown for a future day — `3:21 PM` read at 4:26 PM
-looks like a time that already passed (user report 2026-10-17). A queued
+bare clock time is never shown for a future day — `15:21` read at 16:26 looks
+like a time that already passed (user report 2026-10-17, in the 12-hour
+wording then in use). A queued
 check-in renders "pending" (the daemon will not send another while an inbound is
 pending), a running or terminated agent an em dash, and a projected time already
 in the past renders "due" (a past "*next*" time must never read "Xm ago"); last

@@ -7,7 +7,7 @@ import { Info } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Section } from "@/components/inspector/inspector-section";
-import { formatAbsolute } from "@/lib/format/time";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import { cn } from "@/lib/format/utils";
 import { FLEX } from "@/lib/layout/layout";
 
@@ -16,6 +16,7 @@ import type { ResolvedLink } from "./model/timeline-links";
 
 export function LinkGroupDetail({ links, onSelect }: { links: readonly ResolvedLink[]; onSelect: (key: string) => void }) {
   const t = useTranslations("runTimeline");
+  const { formatAbsolute } = useTimeFormat();
   const labels = useLinkKindLabels();
   const endLabel = useLinkEndLabel();
   const sorted = [...links].sort((a, b) => Date.parse(a.link.ts) - Date.parse(b.link.ts));

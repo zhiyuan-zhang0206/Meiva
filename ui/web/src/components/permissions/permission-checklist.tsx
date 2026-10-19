@@ -17,6 +17,7 @@ import { useStore } from "@/lib/state/store";
 import { errMsg } from "@/lib/contracts/errors";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import type { HostPermissionsPayload, PermissionItemRow } from "@/lib/contracts/types";
 
 import { HOST_PERMISSIONS_QUERY_KEY, useHostPermissions } from "./use-host-permissions";
@@ -31,6 +32,7 @@ const STATE_TONE: Record<string, string> = {
 
 export function PermissionChecklist() {
   const t = useTranslations("control.permissions");
+  const { formatShort } = useTimeFormat();
   const queryClient = useQueryClient();
   const showToast = useStore((s) => s.showToast);
   const { data, isLoading, isError, error } = useHostPermissions();
@@ -82,7 +84,7 @@ export function PermissionChecklist() {
         <span className="text-sm font-medium">{data.headline}</span>
         <div className={cn("items-center gap-2", FLEX)} />
         <span className="text-xs text-muted-foreground">
-          {t("checkedAt", { at: new Date(data.checked_at).toLocaleTimeString() })}
+          {t("checkedAt", { at: formatShort(data.checked_at, { includeDate: false }) })}
         </span>
         <Button variant="outline" size="sm" onClick={() => recheck.mutate()} disabled={busy}>
           <RefreshCw className={cn("size-3.5", recheck.isPending && "animate-spin")} aria-hidden />

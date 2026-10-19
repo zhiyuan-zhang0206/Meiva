@@ -181,6 +181,8 @@ vi.mock("@/lib/layout/content-toggle-store", async () => {
 const userSettingsState: Record<string, unknown> = {
   "display.render_reasoning_markdown": true,
   "display.show_timestamp_weekday": true,
+  "display.clock_format": "24h",
+  "display.show_timezone": false,
 };
 function setUserSettings(settings: Record<string, unknown>) {
   Object.assign(userSettingsState, settings);
@@ -188,6 +190,8 @@ function setUserSettings(settings: Record<string, unknown>) {
 function resetUserSettings() {
   userSettingsState["display.render_reasoning_markdown"] = true;
   userSettingsState["display.show_timestamp_weekday"] = true;
+  userSettingsState["display.clock_format"] = "24h";
+  userSettingsState["display.show_timezone"] = false;
 }
 
 vi.mock("@/lib/state/use-user-settings", () => ({
@@ -3054,7 +3058,7 @@ describe("ItemTimestamp", () => {
     expect(screen.queryByText(/\[\d{4}-\d{2}-\d{2}/)).toBeNull();
   });
 
-  it("valid iso → renders [YYYY-MM-DD DayOfWeek HH:MM:SS TZ] format, no hover tooltip", () => {
+  it("valid iso → renders [YYYY-MM-DD DayOfWeek HH:MM:SS] format, no hover tooltip", () => {
     render(
       <TimelineView
         items={[
@@ -3066,11 +3070,8 @@ describe("ItemTimestamp", () => {
         ]}
       />,
     );
-    // bracket + 4-digit year + dash + 2-digit month + 2-digit day + optional weekday + space + HH:MM:SS + space + TZ.
-    // Don't pin timezone (differs CI vs local) — verify structure only.
-    const stamp = screen.getByText(/\[\d{4}-\d{2}-\d{2}( [A-Z][a-z]{2})? \d{2}:\d{2}:\d{2} [A-Z]+\]/);
+    const stamp = screen.getByText(/\[\d{4}-\d{2}-\d{2}( [A-Z][a-z]{2})? \d{2}:\d{2}:\d{2}\]/);
     expect(stamp).toBeTruthy();
-    // No title attribute — no native hover tooltip on the timestamp.
     expect(stamp.getAttribute("title")).toBeNull();
   });
 
@@ -3364,48 +3365,36 @@ describe("UnknownMarkerChip source render", () => {
   });
 });
 
-// formatItemTime: hour12: false is 24-hour format — verified by
-// spying on Intl.DateTimeFormat. Stubbing the entire Intl.DateTimeFormat
-// behavior is impractical, so a spy on the call args is used instead.
-describe("formatItemTime: hour12=false (24-hour format)", () => {
-  it("Intl.DateTimeFormat called with hour12=false (pins 24-hour format)", () => {
-    const origDTF = Intl.DateTimeFormat;
-    const calls: { locale: unknown; options: Intl.DateTimeFormatOptions | undefined }[] = [];
-    // class wrapper preserves constructor semantics + formatToParts via the original impl
-    class SpyDTF extends origDTF {
-      constructor(locale?: string | string[], options?: Intl.DateTimeFormatOptions) {
-        super(locale, options);
-        calls.push({ locale, options });
-      }
-    }
-    Object.defineProperty(Intl, "DateTimeFormat", {
-      value: SpyDTF,
-      writable: true,
-      configurable: true,
-    });
-    try {
-      render(
-        <TimelineView
-          items={[
-            makeItem({
-              kind: "agent_chat",
-              payload: "x",
-              created_at: "2026-05-15T12:00:00Z",
-            }),
-          ]}
-        />,
-      );
-      // formatItemTime called at least once, and options.hour12 === false
-      const tsCall = calls.find((c) => c.options?.timeZoneName === "short");
-      if (!tsCall) throw new Error("no timeZoneName=short call found");
-      expect(tsCall.options?.hour12).toBe(false);
-    } finally {
-      Object.defineProperty(Intl, "DateTimeFormat", {
-        value: origDTF,
-        writable: true,
-        configurable: true,
-      });
-    }
+describe("formatItemTime: clock format and zone name", () => {
+  it("renders 24-hour text with no zone name by default", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "agent_chat",
+            payload: "x",
+            created_at: "2026-05-15T12:00:00Z",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("[2026-05-15 Fri 12:00:00]")).toBeTruthy();
+  });
+
+  it("renders a 12-hour clock and the zone name when the viewer turns them on", () => {
+    setUserSettings({ "display.clock_format": "12h", "display.show_timezone": true });
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "agent_chat",
+            payload: "x",
+            created_at: "2026-05-15T12:00:00Z",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("[2026-05-15 Fri 12:00:00 PM UTC]")).toBeTruthy();
   });
 });
 

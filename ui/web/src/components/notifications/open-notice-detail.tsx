@@ -11,7 +11,8 @@ import { api } from "@/lib/transport/api";
 import { newOperationKey } from "@/lib/transport/operation-key";
 import { errMsg } from "@/lib/contracts/errors";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
-import { formatAbsolute, formatRelative } from "@/lib/format/time";
+import { formatRelative } from "@/lib/format/time";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import type { NoticeAnswer, OpenNotice, ResolveNoticeIn } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1 } from "@/lib/layout/layout";
@@ -54,6 +55,7 @@ export function OpenNoticeDetail({
   className?: string;
 }) {
   const t = useTranslations("noticeDetail");
+  const { formatAbsolute } = useTimeFormat();
   const requiresResponse = notice.require_response;
   const [reply, setReply] = useState("");
   const [structuredAnswer, setStructuredAnswer] = useState<NoticeAnswer | null>(null);

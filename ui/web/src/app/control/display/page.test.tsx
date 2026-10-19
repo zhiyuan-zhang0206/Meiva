@@ -89,6 +89,58 @@ describe("DisplaySettingsPage", () => {
     });
   });
 
+  it("persists the clock format under display.clock_format", async () => {
+    vi.mocked(api.getSettings)
+      .mockResolvedValueOnce({ settings: [] })
+      .mockResolvedValue({
+        settings: [
+          { key: "display.clock_format", value: "12h", updated_at: "2026-10-19T00:00:00Z" },
+        ],
+      });
+    const { queryClient } = renderPage();
+    const twelveHour = await screen.findByLabelText<HTMLInputElement>("12-hour");
+    expect(twelveHour.checked).toBe(false);
+    expect(screen.getByLabelText<HTMLInputElement>("24-hour").checked).toBe(true);
+
+    fireEvent.click(twelveHour);
+    await waitFor(() => expect(api.putSetting).toHaveBeenCalledWith("display.clock_format", "12h"));
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY)?.[
+          "display.clock_format"
+        ],
+      ).toBe("12h"),
+    );
+  });
+
+  it("persists the timezone-name switch under display.show_timezone", async () => {
+    vi.mocked(api.getSettings)
+      .mockResolvedValueOnce({ settings: [] })
+      .mockResolvedValue({
+        settings: [
+          { key: "display.show_timezone", value: true, updated_at: "2026-10-19T00:00:00Z" },
+        ],
+      });
+    const { queryClient } = renderPage();
+    await screen.findByText("Show timezone");
+    const label = screen.getByText("Show timezone");
+    const toggle = label.parentElement?.parentElement?.parentElement?.querySelector<HTMLButtonElement>(
+      '[role="switch"]',
+    );
+    if (!toggle) throw new Error("show timezone toggle not found");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(api.putSetting).toHaveBeenCalledWith("display.show_timezone", true));
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY)?.[
+          "display.show_timezone"
+        ],
+      ).toBe(true),
+    );
+  });
+
   it("renders all setting labels", async () => {
     renderPage();
 
@@ -101,6 +153,8 @@ describe("DisplaySettingsPage", () => {
     expect(screen.queryByText("Show machine name")).toBeNull();
     expect(screen.getByText("Show activity line")).toBeTruthy();
     expect(screen.getByText("Show terminated agents")).toBeTruthy();
+    expect(screen.getByText("Clock format")).toBeTruthy();
+    expect(screen.getByText("Show timezone")).toBeTruthy();
     expect(screen.getByText("Time display mode")).toBeTruthy();
     expect(screen.getByText("Date format")).toBeTruthy();
     expect(screen.getByText("Awaiting-reply notification")).toBeTruthy();
