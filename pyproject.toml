@@ -855,6 +855,9 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/lm/harness/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/antigravity/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
