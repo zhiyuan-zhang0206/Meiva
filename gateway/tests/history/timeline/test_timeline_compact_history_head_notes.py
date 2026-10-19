@@ -209,7 +209,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         for tag in ("exec_timeout", "timezone", "memory", "agent_id", "agent_memory"):
             messages.append(
                 HumanMessage(
-                    content=f"[system] {tag} note",
+                    content=f"<system_note>\n{tag} note\n</system_note>",
                     additional_kwargs={
                         "meiva_msg_type": "system_note",
                         "meiva_note_tag": tag,
@@ -263,7 +263,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         for tag in ("exec_timeout", "timezone", "memory", "agent_id", "agent_memory"):
             messages.append(
                 HumanMessage(
-                    content=f"[system] {tag} note",
+                    content=f"<system_note>\n{tag} note\n</system_note>",
                     additional_kwargs={
                         "meiva_msg_type": "system_note",
                         "meiva_note_tag": tag,
@@ -315,7 +315,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         )
         notes = [
             HumanMessage(
-                content=f"[system] {tag} note",
+                content=f"<system_note>\n{tag} note\n</system_note>",
                 additional_kwargs={
                     "meiva_msg_type": "system_note",
                     "meiva_note_tag": tag,
@@ -366,7 +366,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         )
         notes = [
             HumanMessage(
-                content=f"[system] {tag} note",
+                content=f"<system_note>\n{tag} note\n</system_note>",
                 additional_kwargs={
                     "meiva_msg_type": "system_note",
                     "meiva_note_tag": tag,

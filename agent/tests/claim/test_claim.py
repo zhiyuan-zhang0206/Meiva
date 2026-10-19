@@ -348,7 +348,7 @@ async def test_claim_fork_preserves_the_inherited_prefix(
 
     def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:
         return HumanMessage(
-            content=f"[system] {content}",
+            content=f"<system_note>\n{content}\n</system_note>",
             id=id,
             additional_kwargs={"meiva_msg_type": "system_note", "meiva_note_tag": tag.value},
         )

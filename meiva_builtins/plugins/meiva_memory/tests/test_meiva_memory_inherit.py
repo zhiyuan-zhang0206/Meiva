@@ -187,7 +187,7 @@ def test_direct_parent_blocks_are_injected(
     assert note is not None
     assert _note_tag(note) == "inherited_memory"
     content = _note_text(note)
-    assert content.startswith("[system] Memory your ancestors chose to share")
+    assert content.startswith("<system_note>\nMemory your ancestors chose to share")
     assert "verify facts that conflict with current evidence" in content
     assert "## ancestor #600311 (Parent) — memory/family-rules.md" in content
     assert "Report in Chinese." in content

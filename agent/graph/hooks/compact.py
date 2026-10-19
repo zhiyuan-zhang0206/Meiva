@@ -37,19 +37,19 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
 from base.lm.errors import is_retryable_provider_error
+from base.lm.system_note import wrap_system_note
 from base.log import logger
 from base.packages.plugins import activation
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
 
-COMPACTION_INSTRUCTION = """[system] Context compaction checkpoint: the conversation above is about to be
+COMPACTION_INSTRUCTION = """Context compaction checkpoint: the conversation above is about to be
 replaced by the summary you write now. Produce it now as plain text — do not
 write code or call any tool; anything other than text is discarded. Write it
 exactly as the `meiva.self.compact` contract below specifies: first person, every
 section filled, "(none)" only when one genuinely has nothing. Refer to others as
 "the user" or "agent N". If a summary already appears above, rewrite it in place
-— one flat, updated summary, never a summary nested inside a summary.
-"""
+— one flat, updated summary, never a summary nested inside a summary."""
 
 
 COMPACT_MIN_SUMMARY_CHARS = 1000
@@ -153,8 +153,14 @@ async def generate_summary(
     if not content_msgs:
         raise ValueError("conversation is empty, nothing to compress")
 
+    # meiva:note
+    # The checkpoint instruction and the contract it points at are one system note, so the
+    # model reads where the order ends.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
     instruction = HumanMessage(
-        content=f"{COMPACTION_INSTRUCTION}\nmeiva.self.compact contract:\n{compact_contract()}"
+        content=wrap_system_note(
+            f"{COMPACTION_INSTRUCTION}\nmeiva.self.compact contract:\n{compact_contract()}"
+        )
     )
     compaction_input = [*system_head, *content_msgs, instruction]
     response = await ainvoke_tool_call(

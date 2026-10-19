@@ -585,9 +585,11 @@ async def test_nameerror_for_name_used_in_earlier_cell_hints(
     assert result is not None
     [note] = result["messages"]
     assert note.content == (
-        "[system] NameError: 'cache' appeared in an earlier execute_code call, "
+        "<system_note>\n"
+        "NameError: 'cache' appeared in an earlier execute_code call, "
         "but each call runs in a fresh interpreter — variables do not persist "
-        "between calls. Re-define it here, or carry state via files or shell sessions."
+        "between calls. Re-define it here, or carry state via files or shell sessions.\n"
+        "</system_note>"
     )
     assert result["meiva_sdk_reminder__reminded"] == {"nameerror:cache"}
 
