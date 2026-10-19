@@ -221,14 +221,41 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
     usage = turn.usage
     if usage.input_tokens == 0 and usage.output_tokens == 0:
         return
-    log_usage_fields(
+    pricing = (
         model or ctx.require_agent().brain.llm_model,
-        tok_in=usage.input_tokens,
-        tok_out=usage.output_tokens,
-        tok_cached=usage.cache_read_input_tokens or None,
-        cache_write_5m=usage.cache_creation_input_tokens,
-        usage_kind="agent",
-        source=ctx.harness.value,
-        for_agent_id=agent_id,
-        catalog=ctx.require_catalog(),
+        ctx.require_catalog(),
     )
+    try:
+        log_usage_fields(
+            pricing[0],
+            tok_in=usage.input_tokens,
+            tok_out=usage.output_tokens,
+            tok_cached=usage.cache_read_input_tokens or None,
+            cache_write_5m=usage.cache_creation_input_tokens,
+            usage_kind="agent",
+            source=ctx.harness.value,
+            for_agent_id=agent_id,
+            catalog=pricing[1],
+        )
+    except Exception as error:
+        # meiva:note
+        # A bill that cannot be priced is a hole in an accounting row; the reply it
+        # describes is real either way. The turn has already finished by the time it
+        # is logged, so a raise here deletes a reply the user paid for — a provider
+        # that reports token counts in a shape the price book rejects must not cost
+        # the answer, and the recorded warning keeps the gap visible.
+        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+        logger.warning(
+            "[{label}] {body}",
+            label="harness",
+            event="harness_usage_log_failed",
+            body=(
+                f"agent {agent_id}'s {ctx.harness.value} turn finished but its usage could not be "
+                f"priced: {error!r}"
+            ),
+            agent_id=agent_id,
+            tok_in=usage.input_tokens,
+            tok_out=usage.output_tokens,
+            tok_cached=usage.cache_read_input_tokens,
+            cache_write=usage.cache_creation_input_tokens,
+        )
