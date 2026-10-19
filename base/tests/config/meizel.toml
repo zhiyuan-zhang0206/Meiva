@@ -27,8 +27,8 @@
 "test_config_surface.py#monkeypatch.setitem os.environ" = 1
 "test_dotenv_file.py#monkeypatch.setenv os.environ.TZ" = 1
 "test_home_resolution.py#monkeypatch.delenv os.environ.MEIVA_HOME" = 1
-"test_home_resolution.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 6
 "test_home_resolution.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_home_resolution.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 6
 "test_paths.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
 
 [debt.first-party-patch]

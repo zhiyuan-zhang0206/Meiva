@@ -5,6 +5,8 @@
 "test_daemon_entry.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
+"test_daemon_entry.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
+"test_daemon_entry.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_daemon_entry.py#monkeypatch.setattr meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon.ConfigBoot" = 1
 "test_daemon_entry.py#monkeypatch.setattr meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon.Database" = 1
 "test_daemon_entry.py#monkeypatch.setattr meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon.EventBus.from_settings" = 1
@@ -23,6 +25,4 @@
 "test_daemon_entry.py#monkeypatch.setattr meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon.task_maintenance_endpoint" = 1
 "test_daemon_entry.py#monkeypatch.setattr meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon.telemetry.build_pipeline" = 1
 "test_daemon_entry.py#monkeypatch.setattr meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon.write_pidfile" = 1
-"test_daemon_entry.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
-"test_daemon_entry.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_task_maintenance_escalation.py#monkeypatch.setattr meiva_builtins.plugins.meiva_fleet.task_maintenance.escalation.insert_inbound_message_in_transaction" = 2

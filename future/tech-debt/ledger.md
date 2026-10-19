@@ -52,6 +52,13 @@ fixture/incident scope.
 - **first-seen**: 2026-10-19 (PR #6358)
 - **last-verified**: 2026-10-19
 
+### boundary:harness-registration-two-owners
+- **class**: boundary
+- **status**: open
+- **evidence**: `base/lm/harness/registration.py:HarnessRegistration` is the writer the bridge uses; `meiva/impersonation/harness/registration.py:FileRegistrationStore` is the reader the attached child uses. Both decode the same `$MEIVA_HOME/harness/registrations/<agent_id>.json` document and both name the field set and the `attached` status, because the SDK surface sits above `base` and cannot be imported downward. The coupling already bit once: the bridge wrote `status="active"` against a reader that requires `attached`, which would have refused every child. Repair: one dataclass for the document (owned by `base`, re-exported by the SDK module) plus a parity test, once #6387 lands.
+- **first-seen**: 2026-10-19 (PR #6393)
+- **last-verified**: 2026-10-19
+
 ### boundary:supervisor-intent-fixture-stop-window
 - **class**: boundary
 - **status**: open

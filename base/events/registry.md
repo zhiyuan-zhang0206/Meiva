@@ -221,6 +221,14 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `wake_degraded` | RedisInboundListener wake path degraded (instant pub/sub wake off) | anomaly | — | — | events | — |
 | `wake_restored` | RedisInboundListener wake path recovered (clean consume restored instant wake) | noise | — | — | events | — |
 | `launch_failures` | this start could not read the launch-failure report, so the unlaunched sessions it recorded stay unreported to the rollout aftermath block | anomaly | — | — | events | — |
+| `harness_interrupt` | an external harness turn was interrupted; the adapter's settle answer is carried as it came back | noise | agent_id, settled, turn_id | — | events | — |
+| `harness_interrupt_failed` | interrupting an external harness turn raised; the durable cancel row stays pending and claim dispatches it again on the next pass | anomaly | — | — | events | — |
+| `harness_close_settled` | an external harness session closed and none of its observed processes survived | noise | harness, agent_id, waited_ms | — | events | — |
+| `harness_close_unobserved` | an external harness session closed without ever observing its process tree; the close answers unknown, not settled | noise | harness, agent_id | — | events | — |
+| `harness_close_residue` | closing an external harness session left processes running after the settle window | anomaly | harness, agent_id, remaining, waited_ms | — | events | — |
+| `harness_close_failed` | closing an external harness session raised | anomaly | — | — | events | — |
+| `harness_close_failures` | external harness session closes raised while the agent host was running | anomaly | — | — | events | — |
+| `harness_registration_unreadable` | a harness registration row could not be read during the sweep and is left in place | anomaly | — | — | events | — |
 | `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, unpriced, usage_kind, attribution, source | — | events | ✓ |
 | `turn_end` | one turn finished | observation | ok, duration_seconds | — | events | ✓ |
 | `llm_usage_metering_failed` | direct model call accounting failed (the call ran; its llm_usage row is dropped) | anomaly | model, error_type, failures | — | events | ✓ |

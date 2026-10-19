@@ -32,6 +32,12 @@ EXEC: Literal["exec"] = "exec"
 AFTER_EXEC: Literal["after_exec"] = "after_exec"
 AFTER_INIT: Literal["after_init"] = "after_init"
 INIT_CONTEXT: Literal["init_context"] = "init_context"
+# meiva:note
+# The whole turn of a non-native harness: claim routes here instead of before_llm when
+# the agent runs on an external CLI, because that CLI owns the model call, the tool
+# calls and the transcript in one loop. The native nodes never run under it.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+HARNESS_TURN: Literal["harness_turn"] = "harness_turn"
 
 # LangGraph's terminal target. Spelled out rather than imported: langgraph's
 # `END = sys.intern("__end__")` is inferred as `LiteralString`, which a narrow
@@ -50,5 +56,6 @@ NodeName = Literal[
     "after_exec",
     "after_init",
     "init_context",
+    "harness_turn",
     "__end__",
 ]

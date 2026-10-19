@@ -46,8 +46,10 @@ from base.lm.harness.process import (
     ProcessObservation,
     PsutilChildProbe,
     describe,
+    settle_close,
     snapshot,
     wait_gone,
+    watch_tree,
 )
 from base.lm.harness.registry import SessionRecord, SessionRegistry
 
@@ -232,6 +234,7 @@ class CodexSession:
         if self._closed:
             return
         self._closed = True
+        watched = watch_tree(self._probe, self._transport.pid)
         self._fail_pending(SessionClosedError("session closed"))
         for task in list(self._deadlines.values()):
             task.cancel()
@@ -244,6 +247,13 @@ class CodexSession:
             except ExceptionGroup as group:
                 self._emit(SessionFaulted(turn_id=None, error=f"session tasks failed: {group!r}"))
         await self._transport.close()
+        await settle_close(
+            self._probe,
+            watched,
+            "codex",
+            self.config.cancel_settle_seconds,
+            agent_id=self.agent_id,
+        )
         self._emit(SessionClosed(turn_id=None, reason=reason))
         self._events.put_nowait(_EVENT_STREAM_END)
 

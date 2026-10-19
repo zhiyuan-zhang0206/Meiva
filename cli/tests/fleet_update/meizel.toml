@@ -6,8 +6,8 @@
 
 [debt.env-patch]
 "conftest.py#monkeypatch.delenv os.environ.MEIVA_AGENT_ID" = 1
-"test_fleet_update.py#monkeypatch.setenv os.environ.MEIVA_AGENT_ID" = 1
 "test_fleet_update.py#monkeypatch.setenv os.environ.HOME" = 2
+"test_fleet_update.py#monkeypatch.setenv os.environ.MEIVA_AGENT_ID" = 1
 
 [debt.first-party-patch]
 "conftest.py#monkeypatch.setattr cli.fleet_update.REPO" = 1

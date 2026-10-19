@@ -24,6 +24,7 @@ def configured_policy(**changes: Any) -> HostPolicy:
             clock_factory=Clock.from_settings,
             timestamps_enabled=lambda: settings.general.message_timestamps,
         ),
+        harness_registration_ttl_seconds=lambda: settings.daemon.harness_registration_ttl_seconds,
     )
 
 
