@@ -19,6 +19,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
+from base.agents.impersonation._store import machine_mismatch_message
 from base.agents.impersonation.status import ImpersonationStatus, parse_lease
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -129,7 +130,13 @@ def resolve(
         raise ValueError(f"Agent {agent_id} has no impersonation session {session_id}")
     parse_lease(lease)
     if lease["machine"] != local_machine:
-        raise ValueError("Impersonation operations must run on the agent's machine")
+        raise ValueError(
+            machine_mismatch_message(
+                agent_id=agent_id,
+                agent_machine=lease["machine"],
+                local_machine=local_machine,
+            )
+        )
     return lease
 
 
