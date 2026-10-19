@@ -257,6 +257,39 @@ The next walls once memory is handled: the heartbeat's
 wake-rate ceiling (~1.67/s, ≈750 agents on today's numbers) and LLM turn cost,
 which is linear in fleet size regardless of any of the above.
 
+### Heavy ad-hoc jobs on a data-plane host
+
+One ad-hoc job can take the whole host down. On 2026-10-18 11:27 CST an SSH
+login from a runner started a Python job on the gateway host; by 11:48 it held
+27.9 GB `anon-rss` inside its own login-session scope, the kernel entered global
+OOM and killed it — after the host had already spent ~18 minutes with Postgres
+writes stalled and every agent host on the fleet crashing. The kernel was out of
+memory, not the job's cgroup: nothing confined it.
+
+Run anything that may exceed a couple of GB in its own transient scope with a
+cap, so a runaway failure lands on that job instead of the host:
+
+```bash
+systemd-run --user --scope -p MemoryMax=12G -- python heavy_job.py
+```
+
+- **Never cap a scope that already holds the data plane or the root
+  supervisor.** Both currently live in login-session scopes (`session-19017.scope`
+  owns the postmaster, `session-19501.scope` owns `meiva_root`); a `MemoryMax`
+  there caps the cluster itself. That structural hazard is tracked in task
+  #5351 — separating the data plane from the desktop (and re-parenting these
+  services out of session scopes) is the fix, not a tighter cap.
+- A backend-side timeout cannot rescue this shape: `statement_timeout` and
+  `transaction_timeout` are checked by a backend that is not being scheduled.
+  The restore budget of task #5303 covers backend-visible waits only.
+- `scripts/host_ops/host_memory_sample.py` samples the kernel pressure file, the
+  slice's `memory.events` counters and the largest descendant units with their
+  limits. On a host where it is installed as the operator unit
+  `com.meiva.host-memory-sample.timer` it appends one JSON line per minute to
+  `$MEIVA_HOME/logs/host-memory.jsonl`; read that before choosing a cap. It
+  reads the cgroup tree only and raises no alert: an alarm needs a baseline
+  first.
+
 ### Optional rendered-page inspection
 
 `scripts/post_deploy_visual/check.py` is an optional inspection tool. It grants
