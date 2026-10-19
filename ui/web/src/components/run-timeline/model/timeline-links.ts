@@ -3,6 +3,8 @@
 
 import type { RunTimelineLink, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
+import { identityKey } from "./object-identity";
+
 import type { Selection } from "./timeline-model";
 
 /** What an arrow is: an event of the record, or (`user_message`) a chat message of the user, which has no event and is told apart from the messages between agents. */
@@ -67,7 +69,50 @@ export const isHumanSource = (source: string | null) => source !== null && (sour
  * a person, each ending on its own block and starting at the block's time (the time the agent read
  * it; the time the user sent it is not on the block).
  */
+const inboundIndex = new WeakMap<RunTimelineResponse, Map<number, RunTimelineUnit>>();
+
+// meiva:note
+// A link names its receiving block by `inbound_id`, and finding that block by scanning the agent's units made resolution O(links x units): 3000 links over 52 000 loaded units took ~250 ms, once per viewport sample, which is what froze panning on a deep zoom-out (user report 2026-10-19). The index is built once per response and reused; responses are immutable per window.
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.meiva.okf.md
+function inboundOf(data: RunTimelineResponse): Map<number, RunTimelineUnit> {
+  const cached = inboundIndex.get(data);
+  if (cached !== undefined) return cached;
+  const index = new Map<number, RunTimelineUnit>();
+  for (const unit of data.units) if (unit.inbound_id !== null && !index.has(unit.inbound_id)) index.set(unit.inbound_id, unit);
+  inboundIndex.set(data, index);
+  return index;
+}
+
+const RESOLVED_CACHE_MAX = 16;
+const resolvedCache = new WeakMap<readonly RunTimelineLink[], Map<string, ResolvedLink[]>>();
+
+// meiva:note
+// Resolution is a pure function of the fetched links and the loaded responses, but the page recomputes it on every viewport sample because the arrays around it are rebuilt. The result is cached per links array and response identity, so a pan inside loaded coverage reuses it; fetches and responses are immutable, which is what makes identity exact.
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.meiva.okf.md
+function resolutionKey(inView: ReadonlySet<number>, loaded: ReadonlyMap<number, RunTimelineResponse>): string {
+  return `${[...inView].sort((a, b) => a - b).join(",")}|${[...loaded.keys()].sort((a, b) => a - b).join(",")}|${identityKey([...loaded.values()])}`;
+}
+
 export function resolveLinks(
+  links: readonly RunTimelineLink[],
+  inView: ReadonlySet<number>,
+  loaded: ReadonlyMap<number, RunTimelineResponse>,
+): ResolvedLink[] {
+  const key = resolutionKey(inView, loaded);
+  let byKey = resolvedCache.get(links);
+  if (byKey === undefined) {
+    byKey = new Map();
+    resolvedCache.set(links, byKey);
+  }
+  const hit = byKey.get(key);
+  if (hit !== undefined) return hit;
+  const resolved = resolveLinksUncached(links, inView, loaded);
+  if (byKey.size >= RESOLVED_CACHE_MAX) byKey.clear();
+  byKey.set(key, resolved);
+  return resolved;
+}
+
+function resolveLinksUncached(
   links: readonly RunTimelineLink[],
   inView: ReadonlySet<number>,
   loaded: ReadonlyMap<number, RunTimelineResponse>,
@@ -87,8 +132,11 @@ export function resolveLinks(
     let unmatched = false;
     let block: RunTimelineUnit | null = null;
     if (receiverIn) {
+      const receiverData = loaded.get(receiver);
       block =
-        link.inbound_id === null ? null : (loaded.get(receiver)?.units.find((unit) => unit.inbound_id === link.inbound_id) ?? null);
+        link.inbound_id === null || receiverData === undefined
+          ? null
+          : (inboundOf(receiverData).get(link.inbound_id) ?? null);
       unmatched = link.inbound_id !== null && block === null;
       to = { row: "units", agent: receiver, ms: block === null ? ms : middle(block) };
     }
