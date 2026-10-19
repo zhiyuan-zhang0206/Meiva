@@ -15,7 +15,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from base.host.runtime_interpreter import source_digest
-from base.log import logger
 
 _KEY_FILE = "meiva-build-key"
 
@@ -86,6 +85,11 @@ def _npm_build(frontend_dir: Path) -> int:
     return subprocess.run(["npm", "run", "build"], cwd=str(frontend_dir), check=False).returncode
 
 
+# meiva:note
+# The decision is printed because a unit's stdout is the only record an operator
+# can read after a start: this one-shot module has no CLI process to carry a log
+# sink, and "the UI did not change" must not look like "the build was skipped by
+# accident".
 def ensure_build(
     frontend_dir: Path,
     *,
@@ -100,9 +104,9 @@ def ensure_build(
     # construction, and the next start rebuilds.
     current = key(frontend_dir, gateway_port=gateway_port, browser_origin=browser_origin)
     if current is not None and is_current(frontend_dir, current):
-        logger.info("frontend build is current for {}; reusing .next", frontend_dir)
+        print(f"frontend build is current for {frontend_dir}; reusing .next")  # noqa: T201
         return 0
-    logger.info("frontend build inputs changed for {}; running npm run build", frontend_dir)
+    print(f"frontend build inputs changed for {frontend_dir}; running npm run build")  # noqa: T201
     code = build(frontend_dir)
     if code != 0:
         return code
