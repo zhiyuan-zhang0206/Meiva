@@ -9,6 +9,7 @@ from base.lm.harness import Handoff
 from base.lm.harness.deepseek import BridgeConfig, DeepSeekSession
 from base.lm.harness.deepseek.tests.fake_acp import FakeConnection, ScriptedProbe
 from base.lm.harness.registry import FileSessionRegistry
+from base.lm.pricing import PriceBook
 
 AGENT_PID = 4242
 
@@ -80,6 +81,7 @@ async def start(
     registry: FileSessionRegistry | None = None,
     session_id: str = "session-1",
     observe_pid: bool = True,
+    prices: PriceBook | None = None,
     **config_overrides: Any,
 ) -> Harness:
     connection = FakeConnection(
@@ -94,6 +96,7 @@ async def start(
         probe=scripted_probe,
         connect=lambda: connection,
         kill=lambda pid, _signal_number: scripted_probe.kill(pid),
+        prices=prices,
     )
     await session.start(resume=resume, handoff=handoff)
     return Harness(session, connection, scripted_probe)

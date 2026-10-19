@@ -57,6 +57,11 @@ file, the decoder or the field is missing the snapshot says
 `per_turn_usage=False` with a reason, and the turn's numbers are absent rather
 than zero. A caller that silently received zeros would price a turn at nothing.
 
+Cost is computed only when the caller injects a `PriceBook` (`base/lm/pricing`):
+the adapter never builds one, because a library does not own the process's model
+catalog. Without one `cost_usd` stays `None` and `SessionTotals.cost_known` turns
+False, so an unpriced session is never reported as free.
+
 ## Cancel
 
 `session/cancel` settles the turn with `stopReason: cancelled`, but the runtime

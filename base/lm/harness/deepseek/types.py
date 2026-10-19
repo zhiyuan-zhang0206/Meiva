@@ -24,8 +24,10 @@ class SessionTotals:
     cache_creation_input_tokens: int = 0
     turns: int = 0
     per_turn_usage: bool = True
+    cost_usd: float = 0.0
+    cost_known: bool = True
 
-    def with_turn(self, usage: Usage, *, measured: bool) -> SessionTotals:
+    def with_turn(self, usage: Usage, *, measured: bool, cost: float | None) -> SessionTotals:
         return SessionTotals(
             input_tokens=self.input_tokens + usage.input_tokens,
             output_tokens=self.output_tokens + usage.output_tokens,
@@ -35,6 +37,8 @@ class SessionTotals:
             ),
             turns=self.turns + 1,
             per_turn_usage=self.per_turn_usage and measured,
+            cost_usd=self.cost_usd + (cost or 0.0),
+            cost_known=self.cost_known and cost is not None,
         )
 
 
