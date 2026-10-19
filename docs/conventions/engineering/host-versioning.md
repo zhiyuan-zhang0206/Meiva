@@ -14,11 +14,12 @@ tasks #2915 / #3267).
 - **Display form:** `YYYY.M.D+g<short-sha>` (`host_version_display`) — for
   humans only: `meiva packages status`, log lines. Gates never see the suffix.
 - **Fallback:** a checkout-less runtime (wheel install) falls back to
-  `[project].version` in `pyproject.toml`. The hand-maintained number is
-  vestigial (`0.1.5` since the initial public release) and read by nothing in
-  the deploy path; it survives purely so the gate still has a value off a git
-  checkout. When neither exists the caller surfaces "unknown" — never a
-  guessed number a gate would trust.
+  `[project].version` in `pyproject.toml`, the repository's single product
+  version, bumped only at a release milestone (see
+  [CHANGELOG](../../../CHANGELOG.md)). It never selects the gate version in a
+  checkout; it survives so the gate still has a value off a git checkout. When
+  neither exists the caller surfaces "unknown" — never a guessed number a gate
+  would trust.
 
 ## What packages declare
 
