@@ -21,6 +21,7 @@ from base.agents.impersonation._store import (
     insert_handoff,
     local,
     lock_agent,
+    machine_mismatch_message,
     public,
     require_active_locked,
     token_hash,
@@ -216,7 +217,13 @@ def request(
     with db.write_transaction() as conn:
         meta = lock_agent(conn, agent_id)
         if meta["machine"] != local_machine:
-            raise ImpersonationError("Impersonation is limited to the agent's own machine")
+            raise ImpersonationError(
+                machine_mismatch_message(
+                    agent_id=agent_id,
+                    agent_machine=meta["machine"],
+                    local_machine=local_machine,
+                )
+            )
         if AgentStatus(meta["status"]) not in (AgentStatus.RUNNING, AgentStatus.IDLING):
             raise ImpersonationError("Agent must be running or idling to receive a request")
         _reject_open_previous(conn, agent_id)
