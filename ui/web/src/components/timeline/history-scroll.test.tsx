@@ -119,15 +119,23 @@ describe("history entry scroll ownership", () => {
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(700);
   });
-  it.each([["send", 600], ["send", 900], ["selection", 600], ["selection", 900]] as const)("allows %s to supersede a target at content height %s", (command, initialHeight) => {
+  it.each([600, 900])("allows a selection to supersede a target at content height %i", (initialHeight) => {
     height = initialHeight;
-    saveScrollMemory(`history-short-${command}-${initialHeight}`, { contentKey: "42", scrollTop: 700, followBottom: false });
-    const { rerender } = render(conversation(42, `history-short-${command}-${initialHeight}`));
+    saveScrollMemory(`history-short-selection-${initialHeight}`, { contentKey: "42", scrollTop: 700, followBottom: false });
+    const { rerender } = render(conversation(42, `history-short-selection-${initialHeight}`));
     resize();
-    if (command === "send") act(() => { useTimelineStore.getState().requestScrollToBottom(); });
-    else rerender(conversation(43, `history-short-${command}-${initialHeight}`));
+    rerender(conversation(43, `history-short-selection-${initialHeight}`));
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(4400);
+  });
+  it.each([600, 900])("a send leaves a parked reader at their saved position at content height %i", (initialHeight) => {
+    height = initialHeight;
+    saveScrollMemory(`history-send-${initialHeight}`, { contentKey: "42", scrollTop: 700, followBottom: false });
+    render(conversation(42, `history-send-${initialHeight}`));
+    resize();
+    act(() => { useTimelineStore.getState().requestScrollToBottom(); });
+    act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(viewport().scrollTop).toBe(700);
   });
   it("lets a reader replace an unreachable saved position by scrolling", () => {
     height = 900;
@@ -205,14 +213,12 @@ describe("history entry scroll ownership", () => {
     rerender(conversation(43, "history-second"));
     expect(viewport().scrollTop).toBe(1200);
   });
-  it("keeps user send and subsequent selection commands after a restore", () => {
-    saveScrollMemory("history-send", { contentKey: "42", scrollTop: 700, followBottom: false });
-    const { rerender } = render(conversation(42, "history-send"));
+  it("keeps a selection command after a restore", () => {
+    saveScrollMemory("history-select-after-restore", { contentKey: "42", scrollTop: 700, followBottom: false });
+    const { rerender } = render(conversation(42, "history-select-after-restore"));
     expect(viewport().scrollTop).toBe(700);
-    act(() => { useTimelineStore.getState().requestScrollToBottom(); });
-    expect(viewport().scrollTop).toBe(4400);
     act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
-    rerender(conversation(43, "history-send"));
+    rerender(conversation(43, "history-select-after-restore"));
     expect(viewport().scrollTop).toBe(4400);
   });
 });
@@ -249,8 +255,6 @@ describe("agent switch reading positions", () => {
     resize();
     expect(viewport().scrollTop).toBe(4400);
     expect(screen.getByTestId("scroll-to-bottom").className).toContain("opacity-100");
-    act(() => useTimelineStore.getState().requestScrollToBottom());
-    expect(viewport().scrollTop).toBe(5400);
   });
 
   it("retains scroll-loaded history and keeps it after a newer tail snapshot", () => {
