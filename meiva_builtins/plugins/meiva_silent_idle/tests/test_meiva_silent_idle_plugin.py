@@ -15,7 +15,7 @@ Covered:
 """
 
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock
@@ -25,7 +25,6 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph.hooks import compact
 from agent.messages import NoteTag
 from agent.state import build_agent_state
 from base.agents.context import MeivaContext
@@ -33,7 +32,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
 
@@ -58,12 +57,18 @@ def _state(messages: list[AnyMessage]):
     return build_agent_state(EMPTY)(messages=messages)
 
 
-def _runtime(catalog: ModelCatalog, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
+def _runtime(
+    catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    *,
+    pins: Mapping[str, Any] | None = None,
+) -> Runtime[MeivaContext]:
     ctx = MeivaContext(
         ops_pool=MagicMock(),
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(
+            pins,
             default_reader=defaults(),
         ),
         catalog=catalog,
@@ -151,7 +156,6 @@ async def test_noop_when_empty(
 
 async def test_defers_when_auto_compact_would_fire(
     _loaded: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
@@ -160,25 +164,19 @@ async def test_defers_when_auto_compact_would_fire(
     (returns None) so it does not collide with compaction's `messages` write —
     and the defer log names the registered `silent_idle` event (the raw
     'silent-idle' label is not an event and would raise in the emitter)."""
-    # Pin the force-compact ceiling to 1 token (regardless of model) so any
+    # meiva:note
+    # Pin the agent's force-compact ceiling to 1 token (regardless of model) so any
     # non-empty history triggers it; occupancy here is the chars/4 fallback.
-    from base.lm.context_budget import ContextBudget
-
-    budget = ContextBudget(
-        max_context_tokens=1_000_000, soft_compact_tokens=600_000, hard_compact_tokens=1
-    )
-
-    def pinned_budget(
-        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
-    ) -> ContextBudget:
-        assert catalog is model_catalog
-        return budget
-
-    monkeypatch.setattr(compact, "resolve_context_budget", pinned_budget)
     state = _state([HumanMessage(content="a long history " * 20), _reasoning_only_ai()])
     assert (
         await _loaded.silent_idle_continue_before_llm(
-            state, _runtime(model_catalog, database_gate=database_gate), _config()
+            state,
+            _runtime(
+                model_catalog,
+                database_gate=database_gate,
+                pins={"auto_compact_ceiling_tokens": 1},
+            ),
+            _config(),
         )
         is None
     )  # pyright: ignore[reportUnknownMemberType]

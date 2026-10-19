@@ -91,7 +91,9 @@ def validate_core_metric(spec: MetricSpec) -> MetricSpec:
     return spec.model_copy(update={"plugin": "core"})
 
 
-def collect_core_metrics() -> list[MetricSpec]:
+def collect_core_metrics(
+    modules: tuple[ModuleType, ...] = CORE_DEFINITION_MODULES,
+) -> list[MetricSpec]:
     """The core metrics of every definition module, validated, in registration order.
 
     Raises:
@@ -99,7 +101,7 @@ def collect_core_metrics() -> list[MetricSpec]:
         InvalidMetricQuery: any template failed validation.
     """
     collected: dict[str, MetricSpec] = {}
-    for module in CORE_DEFINITION_MODULES:
+    for module in modules:
         for spec in cast("Any", module).core_metrics():
             if spec.name in collected:
                 raise DuplicateMetric(

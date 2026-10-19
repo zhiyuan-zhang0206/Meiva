@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import uuid
+from typing import cast
 
 import psycopg
-import pytest
 
 from base.api_contracts.caller_identity import CallerIdentity
 from base.db import Database
-from base.telemetry import audit_events
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.mcp_server.endpoint import record_tool_call
@@ -34,20 +33,22 @@ async def test_a_tool_call_is_recorded_with_its_outcome(
     assert (attributes["tool"], attributes["outcome"]) == ("spawn_agent", "ok")
 
 
+class _UnreachableDatabase:
+    # meiva:note
+    # A database handle whose write transaction fails: the audit store is down.
+    def write_transaction(self) -> object:
+        raise RuntimeError("database down")
+
+
 async def test_a_failed_audit_write_does_not_fail_the_tool_call(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
     emitted_events: EmittedEvents,
 ) -> None:
     caller = _caller()
 
-    def refuse(_db: object, _event: object) -> None:
-        raise RuntimeError("database down")
-
-    monkeypatch.setattr(audit_events, "record_audit_standalone", refuse)
-
-    await record_tool_call(database, caller, {"tool": "spawn_agent", "outcome": "ok"})
+    await record_tool_call(
+        cast(Database, _UnreachableDatabase()), caller, {"tool": "spawn_agent", "outcome": "ok"}
+    )
 
     reported = [a["event_name"] for a in emitted_events.attributes("audit_write_failed")]
     assert reported == ["mcp_tool_call"]

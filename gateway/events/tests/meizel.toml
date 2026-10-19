@@ -1,2 +1,0 @@
-[debt.first-party-patch]
-"test_runtime_metrics_events.py#monkeypatch.setattr gateway.events.sse.retry_auth_failures_async" = 1

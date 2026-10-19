@@ -550,7 +550,7 @@ async def run(
         resources.remove_pidfile(process_config, runtime=runtime)
 
 
-def main() -> None:
+def main(*, exit_process: Callable[[int], None] = _hard_exit) -> None:
     """Initialize the daemon after verifying the database schema version."""
     from base.deploy.schema.migrations import assert_schema_current
 
@@ -610,7 +610,7 @@ def main() -> None:
     except Exception:
         _log.exception("[page-server] daemon crashed — uncaught exception escaped run()")
         code = 1
-    _hard_exit(code)
+    exit_process(code)
 
 
 if __name__ == "__main__":

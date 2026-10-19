@@ -105,7 +105,7 @@ async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database
         _log.info("[insights] daemon stopped")
 
 
-def main() -> None:
+def main(*, exit_process: Callable[[int], None] = _hard_exit) -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     image = LoadedCommit.capture()
@@ -148,7 +148,7 @@ def main() -> None:
     except Exception:
         _log.exception("[insights] fatal error, shutting down")
         code = 1
-    _hard_exit(code)
+    exit_process(code)
 
 
 if __name__ == "__main__":

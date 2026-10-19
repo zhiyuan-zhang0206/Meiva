@@ -21,20 +21,20 @@ from meizel.language import no_script_sibling_imports as _lint
 
 
 @pytest.fixture()
-def scan_tmp(tmp_path: Path, monkeypatch) -> None:
-    """Point the lint at a scratch tree so fixtures never touch the real repo."""
-    monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
+def scan_tmp(tmp_path: Path) -> Path:
+    """A scratch tree the lint scans; fixtures never touch the real repo."""
+    return tmp_path
 
 
-def _write(scan_tmp, rel: str, body: str) -> Path:
-    p = _lint._REPO_ROOT / rel
+def _write(scan_tmp: Path, rel: str, body: str) -> Path:
+    p = scan_tmp / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(textwrap.dedent(body), encoding="utf-8")
     return p
 
 
-def _errors(scan_tmp, rel: str, body: str) -> list[str]:
-    return _lint.scan_file(_write(scan_tmp, rel, body))
+def _errors(scan_tmp: Path, rel: str, body: str) -> list[str]:
+    return _lint.scan_file(_write(scan_tmp, rel, body), root=scan_tmp)
 
 
 # All bodies are assembled at one uniform indentation so dedent produces a

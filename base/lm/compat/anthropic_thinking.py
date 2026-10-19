@@ -58,32 +58,42 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
             coerce_content_to_string=coerce_content_to_string,
             block_start_event=block_start_event,
         )
-        # Emit once: LangChain concatenates repeated string metadata while
-        # combining chunks. The start event carries the actual service speed.
-        if msg is not None and getattr(event, "type", None) == "message_start":
-            speed = getattr(event.message.usage, "speed", None)
-            if speed is not None:
-                msg.response_metadata["speed"] = speed
-        # The `message_delta` event carries the final usage including
-        # output_tokens_details.thinking_tokens — which the upstream
-        # _create_usage_metadata drops. Capture it here and supplement
-        # the chunk's usage_metadata before it leaves our layer.
-        if (
-            msg is not None
-            and msg.usage_metadata is not None
-            and getattr(event, "type", None) == "message_delta"
-        ):
-            usage = event.usage
-            output_details = getattr(usage, "output_tokens_details", None)
-            if output_details is not None:
-                thinking_tokens: int = getattr(output_details, "thinking_tokens", 0) or 0
-                if thinking_tokens > 0:
-                    existing = msg.usage_metadata.get("output_token_details") or {}
-                    if "reasoning" not in existing and "reasoning_tokens" not in existing:
-                        # Construct a fresh OutputTokenDetails dict (TypedDict,
-                        # total=False) so the type checker is satisfied.
-                        msg.usage_metadata["output_token_details"] = {
-                            **existing,
-                            "reasoning": thinking_tokens,
-                        }
-        return msg, block_start_event
+        return retain_usage_details(msg, event), block_start_event
+
+
+def retain_usage_details(msg: AIMessageChunk | None, event: Any) -> AIMessageChunk | None:
+    # meiva:note
+    # The chunk the SDK's conversion built is the input here, so a caller (and a
+    # test) supplies it directly; this puts back the two details that conversion
+    # drops: the service `speed` on a `message_start` event, and
+    # `output_tokens_details.thinking_tokens` on a `message_delta` event, which
+    # lands as `output_token_details.reasoning`.
+    if msg is None:
+        return msg
+    kind = getattr(event, "type", None)
+    # meiva:note
+    # Emit once: LangChain concatenates repeated string metadata while
+    # combining chunks. The start event carries the actual service speed.
+    if kind == "message_start":
+        speed = getattr(event.message.usage, "speed", None)
+        if speed is not None:
+            msg.response_metadata["speed"] = speed
+    # meiva:note
+    # The `message_delta` event carries the final usage including
+    # output_tokens_details.thinking_tokens — which the upstream
+    # _create_usage_metadata drops. Supplement the chunk's usage_metadata.
+    elif kind == "message_delta" and msg.usage_metadata is not None:
+        output_details = getattr(event.usage, "output_tokens_details", None)
+        if output_details is not None:
+            thinking_tokens: int = getattr(output_details, "thinking_tokens", 0) or 0
+            if thinking_tokens > 0:
+                existing = msg.usage_metadata.get("output_token_details") or {}
+                if "reasoning" not in existing and "reasoning_tokens" not in existing:
+                    # meiva:note
+                    # Construct a fresh OutputTokenDetails dict (TypedDict,
+                    # total=False) so the type checker is satisfied.
+                    msg.usage_metadata["output_token_details"] = {
+                        **existing,
+                        "reasoning": thinking_tokens,
+                    }
+    return msg

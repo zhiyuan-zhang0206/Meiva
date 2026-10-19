@@ -12,8 +12,6 @@ import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from base.log import FILE_SINK_SIZE_LIMIT, rotate_by_size_or_day
 
 
@@ -52,9 +50,7 @@ def test_creation_date_is_re_read_after_rotation(tmp_path: Path) -> None:
         assert rotate_by_size_or_day(_message(datetime.datetime.now(datetime.UTC)), fh) is False
 
 
-def test_day_boundary_is_utc_not_message_local_tz(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_day_boundary_is_utc_not_message_local_tz(tmp_path: Path) -> None:
     """loguru stamps a message's tzinfo from the machine's local zone, so the
     day boundary drifted per host when it followed the message's own tz (tz
     audit, 2026-08, PR-6) — it must follow UTC everywhere instead. Pins the
@@ -63,19 +59,11 @@ def test_day_boundary_is_utc_not_message_local_tz(
     happens to run."""
     f = tmp_path / "agent-1.log"
     f.write_text("x")
-    # ctime: 2026-06-15 23:50 UTC — "today" is June 15 in UTC. Only this
-    # test's own file is faked — Path.stat is used throughout pytest's own
-    # machinery, so the fake must fall through to the real implementation for
-    # every other path.
+    # meiva:note
+    # ctime: 2026-06-15 23:50 UTC — "today" is June 15 in UTC. The sink takes
+    # the file-creation clock as an explicit parameter, so the test hands in a
+    # fixed instant instead of rewriting Path.stat for the whole process.
     fixed_ctime = datetime.datetime(2026, 6, 15, 23, 50, tzinfo=datetime.UTC).timestamp()
-    real_stat = Path.stat
-
-    def fake_stat(self):
-        if self == f:
-            return SimpleNamespace(st_ctime=fixed_ctime)
-        return real_stat(self)  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(Path, "stat", fake_stat)  # pyright: ignore[reportUnknownArgumentType]
 
     # The message instant is 20 minutes later — 2026-06-16 00:10 UTC, genuinely
     # the NEXT UTC calendar day. loguru stamps the message in the writing
@@ -91,4 +79,7 @@ def test_day_boundary_is_utc_not_message_local_tz(
     with f.open("a") as fh:
         # The real (UTC) day already changed — must rotate regardless of what
         # calendar date the message's own local tz happens to read.
-        assert rotate_by_size_or_day(_message(local_view), fh) is True
+        assert (
+            rotate_by_size_or_day(_message(local_view), fh, ctime_of=lambda _path: fixed_ctime)
+            is True
+        )

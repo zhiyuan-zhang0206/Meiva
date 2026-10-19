@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager, nullcontext
+from dataclasses import replace
 from typing import Any, Literal, Self
 
 import httpx
@@ -64,6 +65,7 @@ def gateway_test_app(
     boot: ConfigBoot | None = None,
     machine: MachineIdentity | None = None,
     process_ownership: Literal["borrowed", "owned"] | None = None,
+    cluster_secret: str | None = None,
 ) -> FastAPI:
     if process is None:
         resolved_boot = snapshot_process_config() if boot is None else boot
@@ -81,6 +83,11 @@ def gateway_test_app(
     else:
         ownership = "borrowed" if process_ownership is None else process_ownership
     resolved_config = gateway_config_from_boot(process.config) if config is None else config
+    if cluster_secret is not None:
+        # meiva:note
+        # A test that pins the app's secret, e.g. to prove a client built from the
+        # app carries it, instead of rewriting process-wide settings.
+        resolved_config = replace(resolved_config, cluster_secret=cluster_secret)
     return create_app(
         resolved_config,
         process=process,
@@ -104,10 +111,11 @@ def gateway_test_client(
     config: GatewayConfig | None = None,
     boot: ConfigBoot | None = None,
     process: GatewayProcess | None = None,
+    cluster_secret: str | None = None,
     **kwargs: Any,
 ) -> Generator[GatewayTestClient]:
     if application is not None:
-        if any(arg is not None for arg in (machine, config, boot, process)):
+        if any(arg is not None for arg in (machine, config, boot, process, cluster_secret)):
             raise ValueError(
                 "gateway_test_client(application, ...) borrows an already assembled FastAPI app; "
                 "pass machine/config/boot/process to gateway_test_process or gateway_test_app instead."
@@ -116,7 +124,9 @@ def gateway_test_client(
             yield client
         return
     with gateway_test_process(machine=machine, config=boot, process=process) as active_process:
-        assembled = gateway_test_app(process=active_process, config=config)
+        assembled = gateway_test_app(
+            process=active_process, config=config, cluster_secret=cluster_secret
+        )
         with GatewayTestClient(assembled, **kwargs) as client:
             yield client
 

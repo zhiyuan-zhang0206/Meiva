@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 from base.host.private_storage import converge_private_tree, ensure_private_file
-from base.paths import repo_root
 from cli.commands.converge.spec import ConvergeCtx
 
 # --- host-wiring steps (no preconditions) ---------------------------------
@@ -78,6 +77,14 @@ def ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:
     ensure_pg_runtime()
 
 
+# meiva:note
+# The hook checker in THIS checkout. A checkout that carries no `scripts/` tree (an
+# installed wheel) has no file here, and the step stays silent.
+GIT_HOOKS_SCAN = (
+    Path(__file__).resolve().parents[3] / "scripts" / "provision" / "check_git_hooks.py"
+)
+
+
 def ensure_local_git_hooks(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Warn when a conventional local checkout's Git hook installation is
     missing or drifted; never repair or block start.
@@ -88,12 +95,11 @@ def ensure_local_git_hooks(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     or any subprocess failure degrades to silence — a warn-only assertion must
     never make converge noisy or fatal on its own account.
     """
-    script = repo_root() / "scripts" / "provision" / "check_git_hooks.py"
-    if not script.exists():
+    if not GIT_HOOKS_SCAN.exists():
         return
     try:
         result = subprocess.run(
-            [sys.executable, str(script), "--scan-machine"],
+            [sys.executable, str(GIT_HOOKS_SCAN), "--scan-machine"],
             capture_output=True,
             text=True,
             check=False,

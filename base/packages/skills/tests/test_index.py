@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -158,22 +159,22 @@ class TestBuild:
 
 
 class TestCached:
-    def test_cached_returns_same_index_without_rescan(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_cached_returns_same_index_without_rescan(self, tmp_path: Path) -> None:
         _write(tmp_path, "a/SKILL.md", _GOOD)
         calls = 0
-        real = SkillIndex.build.__func__  # type: ignore[attr-defined]
 
-        def counting_build(cls, roots):
-            nonlocal calls
-            calls += 1
-            return real(cls, roots)
+        class _CountingIndex(SkillIndex):
+            # meiva:note
+            # The index under test, with its scan counted rather than patched.
+            @classmethod
+            def build(cls, roots: list[Path] | tuple[Path, ...], **kwargs: Any) -> SkillIndex:
+                nonlocal calls
+                calls += 1
+                return super().build(roots, **kwargs)
 
-        monkeypatch.setattr(SkillIndex, "build", classmethod(counting_build))  # pyright: ignore[reportUnknownArgumentType]
-        SkillIndex.clear_cache()
-        first = SkillIndex.cached([tmp_path])
-        second = SkillIndex.cached([tmp_path])
+        _CountingIndex.clear_cache()
+        first = _CountingIndex.cached([tmp_path])
+        second = _CountingIndex.cached([tmp_path])
         assert first is second
         assert calls == 1
 

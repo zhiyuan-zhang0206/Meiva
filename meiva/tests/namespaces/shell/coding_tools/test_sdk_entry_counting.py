@@ -16,7 +16,7 @@ from base.packages.plugins.extensions import ExtensionRegistry, PluginContributi
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.sdk_surface import install, metering, process_context
-from meiva.shell.coding_tools._common import owner_terminated
+from meiva.shell.coding_tools import owner_terminated
 
 
 def test_real_shell_owner_probe_counts_its_public_fanout(

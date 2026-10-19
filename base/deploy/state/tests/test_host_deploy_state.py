@@ -8,11 +8,11 @@ transition writes the posture and nothing else.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import cast
 
 import psycopg
 import pytest
 
-from base import db
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -41,9 +41,15 @@ def test_no_row_reads_as_none(database: Database, *, machine_identity: MachineId
     assert hds.read(database, machine=machine_identity.name()) is None
 
 
+class _NoConnectDatabase:
+    # meiva:note
+    # A database handle that fails the test on any attempt to open a connection.
+    def connect(self, **_kwargs: object) -> object:
+        raise AssertionError("read opened a fresh connection")
+
+
 def test_read_uses_the_callers_connection(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     *,
     machine_identity: MachineIdentity,
@@ -51,12 +57,9 @@ def test_read_uses_the_callers_connection(
     """A bundled snapshot can read the row without opening or owning another connection."""
     hds.set_posture(database, "paused", machine=machine_identity.name())
 
-    def _fresh_connect(**_kwargs: object) -> object:
-        raise AssertionError("read opened a fresh connection")
-
-    monkeypatch.setattr(db, "connect", _fresh_connect)
-
-    state = hds.read(database, conn=db_conn, machine=machine_identity.name())
+    state = hds.read(
+        cast(Database, _NoConnectDatabase()), conn=db_conn, machine=machine_identity.name()
+    )
 
     assert state is not None
     assert state.posture == "paused"

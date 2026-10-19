@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass
 from functools import cache
 from io import StringIO
+from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values
@@ -49,17 +50,19 @@ class EnvPatchValidation:
     expected_digest: str
 
 
-def validate_env_patch(updates: dict[str, object], removals: set[str]) -> list[str]:
+def validate_env_patch(
+    updates: dict[str, object], removals: set[str], *, path: Path | None = None
+) -> list[str]:
     """Return validation errors for the full `.env` candidate after this patch.
 
     This read-only wrapper has no persistence guarantee; writers use
     ``validate_env_patch_for_write`` and pass its digest to ``write_fields``.
     """
-    return validate_env_patch_for_write(updates, removals).errors
+    return validate_env_patch_for_write(updates, removals, path=path).errors
 
 
 def validate_env_patch_for_write(
-    updates: dict[str, object], removals: set[str]
+    updates: dict[str, object], removals: set[str], *, path: Path | None = None
 ) -> EnvPatchValidation:
     """Validate an affected-domain candidate and bind it to its file digest.
 
@@ -69,13 +72,12 @@ def validate_env_patch_for_write(
     neither crash nor reject this candidate. Fields absent from the fresh file
     retain their boot-time environment value or Pydantic default.
     """
+    env_path = dotenv_file.env_file_path() if path is None else path
     if not updates and not removals:
-        return EnvPatchValidation(
-            [], {}, _env_digest(capture_env_bytes(dotenv_file.env_file_path()))
-        )
+        return EnvPatchValidation([], {}, _env_digest(capture_env_bytes(env_path)))
 
     patched_domains = {field_domain(name) for name in set(updates) | removals}
-    payload = capture_env_bytes(dotenv_file.env_file_path())
+    payload = capture_env_bytes(env_path)
     aliases = _env_aliases(payload)
 
     models = domain_model_classes()
@@ -141,9 +143,11 @@ def _env_digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def validate_env_patch_or_raise(updates: dict[str, object], removals: set[str]) -> None:
+def validate_env_patch_or_raise(
+    updates: dict[str, object], removals: set[str], *, path: Path | None = None
+) -> None:
     """Raise ``ValueError`` when the full `.env` candidate is invalid."""
-    errors = validate_env_patch(updates, removals)
+    errors = validate_env_patch(updates, removals, path=path)
     if errors:
         raise ValueError("; ".join(errors))
 

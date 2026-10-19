@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ast
+import os
 import pathlib
+import subprocess
+import sys
 
 import pytest
 
@@ -11,11 +14,22 @@ from scripts.structure.tests.patch_repo import make_repo, write
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 
+def _pytest_child_env() -> dict[str, str]:
+    # meiva:note
+    # The environment for a pytest child: this process's, with plugin autoload off.
+    # The variable is handed to the child explicitly instead of being written into
+    # this process's environment for the duration of the test.
+    env = dict(os.environ)
+    env.pop("PYTEST_ADDOPTS", None)
+    env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    return env
+
+
 @pytest.mark.parametrize("package_tests", [False, True])
 def test_pytest_importlib_relative_imports_match_ast_with_or_without_test_initializer(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, package_tests: bool
+    tmp_path: pathlib.Path, package_tests: bool
 ) -> None:
-    root = make_repo(pytester.path)
+    root = make_repo(tmp_path)
     initializer = "from .retry import backoff as local_backoff\n"
     write(root, "base/net/__init__.py", initializer)
     if package_tests:
@@ -34,18 +48,31 @@ def test_pytest_importlib_relative_imports_match_ast_with_or_without_test_initia
         "    assert first() == second() == lazy() == 1\n"
     )
     write(root, rel, text)
-    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
-    result = pytester.runpytest_subprocess(
-        "-q",
-        "--import-mode=importlib",
-        "--confcutdir",
-        str(root),
-        "-o",
-        "addopts=",
-        rel,
-        timeout=30,
+    # meiva:note
+    # Inner pytest run: this checkout's interpreter against a synthetic test tree,
+    # with plugin autoload off in the child's own environment.
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "--import-mode=importlib",
+            "--confcutdir",
+            str(root),
+            "-o",
+            "addopts=",
+            rel,
+        ],
+        cwd=root,
+        env=_pytest_child_env(),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
-    result.assert_outcomes(passed=1)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
     index = placement.ModuleIndex(root)
     refs = placement.collect_references(ast.parse(text), index, rel)
     assert [ref.module for ref in refs] == [

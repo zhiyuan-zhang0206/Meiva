@@ -1,2 +1,0 @@
-[debt.first-party-patch]
-"test_config_candidate.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1

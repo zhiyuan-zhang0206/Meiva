@@ -51,12 +51,18 @@ def worker_request(argv: list[str]) -> tuple[dict[str, object], Path]:
     group: its controller owns bounded stop signaling.
     """
     signal.signal(signal.SIGTERM, _interrupt)
-    if len(argv) != 3:
+    if len(argv) < 3:
         raise SystemExit("usage: python -m <operation worker> REQUEST RESULT")
-    value = json.loads(Path(argv[1]).read_text())
+    request_path, result_path = Path(argv[-2]), Path(argv[-1])
+    if not request_path.is_file():
+        # meiva:note
+        # A launch with no request never reaches the worker body: the controller
+        # writes it before the child starts.
+        raise SystemExit("usage: python -m <operation worker> REQUEST RESULT")
+    value = json.loads(request_path.read_text())
     if not isinstance(value, dict):
         raise TypeError("operation request must be an object")
-    return cast(dict[str, object], value), Path(argv[2])
+    return cast(dict[str, object], value), result_path
 
 
 def _result_object(path: Path) -> dict[str, object]:

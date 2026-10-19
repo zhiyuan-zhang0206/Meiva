@@ -12,4 +12,3 @@ exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task
 
 [debt.private-name]
 "tests/roster/test_task_maintenance_pidfile_guard.py -> task_maintenance/daemon.py#_is_running" = 1
-"tests/roster/test_task_maintenance_pidfile_guard.py -> task_maintenance/daemon.py#_pidfile" = 1

@@ -100,6 +100,7 @@ def upsert(
     detail: str | None = None,
     status: str = "ok",
     updated_by: str | None = None,
+    detail_cap: int | None = None,
 ) -> None:
     """Write (or refresh) one card's value — last write wins.
 
@@ -116,7 +117,8 @@ def upsert(
     card = _text(id, "id", limit=MAX_ID_CHARS)
     shown = _text(value, "value", limit=MAX_VALUE_CHARS)
     if detail is not None:
-        detail = _text(detail, "detail", limit=settings.display.plugin_stats_max_detail_chars)
+        cap = settings.display.plugin_stats_max_detail_chars if detail_cap is None else detail_cap
+        detail = _text(detail, "detail", limit=cap)
     if status not in STATUSES:
         raise ValueError(f"plugin_stats status: {status!r} is not one of {', '.join(STATUSES)}")
     if updated_by is not None:
