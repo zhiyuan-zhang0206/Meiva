@@ -61,29 +61,6 @@ class ImpersonationTerminalNoticeFailed(TypedDict):
     error: str
 
 
-# meiva:note
-# One event per SDK entry a lease's declared capabilities do not cover. In `warn`
-# the call still runs (the compatibility window records what it would refuse); in
-# `enforce` it is refused. `capability` is empty for an entry no capability
-# classifies, the case that keeps a growing SDK surface from passing silently.
-class ImpersonationCapabilityRefused(TypedDict):
-    lease_id: str
-    entry: str
-    capability: str
-    capabilities: list[str]
-    mode: str
-
-
-# meiva:note
-# One event per automatic takeover that declared no capabilities. The compatibility
-# window keeps the historical surface, so this event is the only durable trace that
-# nobody chose it; a launcher that declares its set stops emitting it.
-class ImpersonationCapabilityDefaulted(TypedDict):
-    lease_id: str
-    declared_by: str
-    capabilities: list[str]
-
-
 class ImpersonationEventLogIncomplete(TypedDict):
     """`impersonation_event_log_incomplete` payload — base/agents/impersonation/event_signals.py.
 
@@ -334,27 +311,6 @@ EVENTS: dict[str, EventSpec] = {
         "— the host does not treat it as fatal and the next cold admission "
         "retries the disposal of the claimed rows",
         tier="anomaly",
-    ),
-    "impersonation_capability_refused": telemetry_event(
-        "impersonation_capability_refused",
-        "an SDK call fell outside its impersonation lease's declared capabilities; "
-        "`warn` records it and lets the call through, `enforce` records it and refuses it. "
-        "Carries the lease, the dotted SDK entry, the capability it needed (empty when "
-        "nobody classified the entry; the primary one when the entry needs several), the "
-        "full requirement set, and the enforcement mode in force",
-        payload=ImpersonationCapabilityRefused,
-        tier="anomaly",
-        site="meiva/impersonation/attachment.py:_record_capability_refusal (positional emit)",
-    ),
-    "impersonation_capability_defaulted": telemetry_event(
-        "impersonation_capability_defaulted",
-        "an automatic takeover declared no capabilities, so the compatibility window "
-        "granted the historical machine set; carries the lease and the resulting set. "
-        "One event per lease at request time — the only durable trace that nobody chose "
-        "the takeover's authority",
-        payload=ImpersonationCapabilityDefaulted,
-        tier="noise",
-        site="base/agents/impersonation/__init__.py:_record_launcher_default (positional emit)",
     ),
     "impersonation_terminal_notice_failed": telemetry_event(
         "impersonation_terminal_notice_failed",

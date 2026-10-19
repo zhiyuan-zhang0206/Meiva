@@ -204,18 +204,6 @@ def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int
     return 0
 
 
-# meiva:note
-# `--profile` sets the base and each `--capability` adds to it, so a caller can say
-# "machine, plus the task registry" without spelling out the machine set. None
-# keeps the request path's own default, which differs for a caller and a launcher.
-def _requested_capabilities(args: argparse.Namespace) -> tuple[str, ...] | None:
-    from base.agents.impersonation.capabilities import parse_capabilities, profile_capabilities
-
-    requested = list(profile_capabilities(args.profile)) if args.profile else []
-    requested += list(args.capabilities or [])
-    return parse_capabilities(requested) if requested else None
-
-
 def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     """`impersonate request` — create the lease, then hand its relay the credential."""
     from base.agents.impersonation import sessions
@@ -244,7 +232,6 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
             )
         thread_id = str(UUID(thread_id))
         discover_antigravity_server()
-    capabilities = _requested_capabilities(args)
     response = sessions.request(
         database_factory(),
         EventBus.from_settings(),
@@ -263,7 +250,6 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
         thread_id=thread_id,
         codex_remote=endpoint,
         batch_window_seconds=args.relay_batch_window_seconds,
-        capabilities=capabilities,
         local_machine=args.runtime.machine.name(),
     )
     if dsh_stub is not None:

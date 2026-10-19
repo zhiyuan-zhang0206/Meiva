@@ -1,7 +1,6 @@
-exports = ["attachment.py", "capabilities.py"]
+exports = ["attachment.py"]
 
 [uses]
-"attachment.py" = ["capabilities.py"]
 "__init__.py" = ["attachment.py"]
 
 [loads]

@@ -1,6 +1,5 @@
 """Public agent-scoped session handles over the durable impersonation store."""
 
-from collections.abc import Iterable
 from typing import Any
 
 from base.agents import impersonation as control
@@ -11,10 +10,6 @@ from base.db import Database
 from base.events.live.bus import EventBus
 
 
-# meiva:note
-# ``capabilities`` declares the controller's surface. Omitting it on this automatic
-# path keeps the compatibility default and records ``launcher-default``; see
-# ``control.request`` and base/agents/impersonation/docs/capabilities.meiva.okf.md.
 def request(
     db: Database,
     bus: EventBus,
@@ -30,7 +25,6 @@ def request(
     thread_id: str | None = None,
     codex_remote: str | None = None,
     batch_window_seconds: int = 0,
-    capabilities: Iterable[str] | None = None,
     local_machine: str,
 ) -> dict[str, Any]:
     """Request an automatic safe-boundary takeover; return credentials once.
@@ -56,7 +50,6 @@ def request(
         relay_thread_id=thread_id,
         relay_codex_remote=codex_remote,
         relay_batch_window_seconds=batch_window_seconds,
-        capabilities=capabilities,
         local_machine=local_machine,
     )
     if "relay_token" in result:
