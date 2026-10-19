@@ -28,6 +28,16 @@ _STATUS = f"{HOME}; {MEIVA} status --json"
 _FREE = ("inactive", "resumed")
 POLL_S = 5
 KEEP_TIMEOUT_S = 300.0
+# meiva:note
+# Default 0 -- report only. The operator chose the window and the leases are named before the first
+# stop, so an ordinary update never waits; a wave that must not end a takeover passes
+# --lease-confirm-seconds and the stops are held open that long.
+LEASE_CONFIRM_S = 0
+
+# meiva:note
+# Five lines a minute: enough for an operator to watch the window move, few enough not to bury the
+# leases named above it.
+LEASE_TICK_S = 5.0
 _STOP_HINT = (
     '\nOn that host retry "meiva stop -y --timeout 600", confirm the maintenance hold is '
     "paused/stopped (`meiva status`), then rerun `down`."
@@ -266,6 +276,10 @@ def silence_program() -> str:
     return Path(__file__).with_name("fleet_alert_silence.py").read_text()
 
 
+def leases_program() -> str:
+    return (Path(__file__).parent / "commands" / "management" / "fleet_leases.py").read_text()
+
+
 # meiva:link cli/docs/fleet-update-window.meiva.okf.md
 def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "") -> None:
     hours = getattr(args, "silence_hours", 0)
@@ -276,6 +290,66 @@ def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "")
             s.say(f"WARNING: alert silence not {verb}: {line.removeprefix('SILENCE ')}")
 
 
+# meiva:note
+# Name the takeovers the stops would end, before anything stops -- under --dry-run too.
+# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+def _announce_leases(s: Session, args: argparse.Namespace) -> None:
+    try:
+        out = s.run(args.gateway, f"{_PYTHON} -", effect=False, stdin=leases_program())
+    except FailedError as exc:
+        _lease_read_warning(s, str(exc))
+        return
+    try:
+        parsed = json.loads([line for line in out.splitlines() if line.startswith("{")][-1])
+        leases = list(parsed["leases"])
+    except (IndexError, KeyError, TypeError, ValueError):
+        failed = next(
+            (line for line in out.splitlines() if line.startswith("LEASES failed")), "no output"
+        )
+        _lease_read_warning(s, failed)
+        return
+    if not leases:
+        s.say("leases: no active impersonation lease")
+        return
+    s.say(f"leases: {len(leases)} active impersonation lease(s):")
+    for lease in leases:
+        s.say(
+            f"leases:   agent {lease['agent_id']} session {lease['session_id']} "
+            f"executor {lease['executor']!r} expires {lease['expires_at']}"
+        )
+    s.say(
+        "leases: the stop ends every one of them -- a restart never adopts a relay, so the "
+        "takeover is aborted mid-task and the native agent resumes: release or renew them first"
+    )
+    _lease_window(s, args)
+
+
+# meiva:note
+# A lease list that could not be read -- an unreadable table, or a shipped program that exited
+# non-zero -- is one warning, never a refusal: refusing here would be the very thing the
+# announcement exists to prevent, a window that cannot run.
+def _lease_read_warning(s: Session, detail: str) -> None:
+    s.say(
+        f"WARNING: active impersonation leases were not read ({detail}); a takeover this window "
+        "ends goes unannounced"
+    )
+
+
+# meiva:note
+# Hold the stops open for an operator who asked for time; the default window returns at once.
+# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+def _lease_window(s: Session, args: argparse.Namespace) -> None:
+    if not args.lease_confirm_seconds:
+        return
+    if s.dry_run:
+        s.say(f"leases: dry run: not waiting {args.lease_confirm_seconds}s")
+        return
+    deadline = time.monotonic() + args.lease_confirm_seconds
+    while (left := deadline - time.monotonic()) > 0:
+        s.say(f"leases: {left:.0f}s left: release or renew them, or let the stop end them")
+        time.sleep(min(LEASE_TICK_S, left))
+
+
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 def down(s: Session, args: argparse.Namespace) -> None:
     new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}").stdout.strip()
@@ -284,6 +358,7 @@ def down(s: Session, args: argparse.Namespace) -> None:
     reasons, old = _preflight(s, args, new)
     if reasons:
         raise FailedError("refused: " + "; ".join(reasons))
+    _announce_leases(s, args)
     everyone = [args.gateway, *args.runner]
     for alias in everyone:
         s.run(alias, f'{HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
@@ -482,6 +557,18 @@ def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
     return []
 
 
+# meiva:note
+# A whole, non-negative number of seconds: a negative window is a typo, not a policy.
+def _seconds(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number of seconds") from exc
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number of seconds >= 0")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m cli.fleet_update",
@@ -503,6 +590,13 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--allow-python-change", action="store_true")
             p.add_argument("--stop-timeout", type=int, default=600)
             p.add_argument("--keep-timeout", type=float, default=KEEP_TIMEOUT_S)
+            p.add_argument(
+                "--lease-confirm-seconds",
+                type=_seconds,
+                default=LEASE_CONFIRM_S,
+                help="seconds to hold the stops open after naming the active impersonation "
+                "leases (default 0: report only, never wait)",
+            )
             p.add_argument(
                 "--silence-hours",
                 type=float,

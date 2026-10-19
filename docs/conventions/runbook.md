@@ -486,6 +486,15 @@ half, use the separate commands:
 .venv/bin/python -m cli.fleet_update up --gateway GATEWAY --runner RUNNER [--runner ...] --log-dir DIR
 ```
 
+- `down` names the takeovers its stops will end: past the refusal gate and
+  before anything stops, on the gateway host it reads every
+  `agent_impersonations` row still marked `active` (agent, session,
+  executor, expiry) — under `--dry-run` too, in the same
+  words — because a host or native restart never adopts a relay and an active
+  lease therefore ends with the window. `--lease-confirm-seconds N` (default 0,
+  report only) then holds the stops open N seconds with a countdown so the
+  leases can be released or renewed first; a lease table that cannot be read
+  only warns and the window goes on.
 - `down` refuses (exit 2, nothing changed) when a checkout has a
   `post-checkout` hook, uncommitted changes or `$HOME/.meiva/updates/active`,
   when a host holds maintenance other than a completed stop, when the hosts
