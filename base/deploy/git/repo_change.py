@@ -15,6 +15,10 @@ _DOC_ROOTS = (
 )
 
 
+# meiva:note
+# A test under a doc root is code: schedules/tests/ is collected by pytest, so a
+# change there must select the backend lane, while the templates beside it stay
+# documentation.
 def is_doc_path(path: str) -> bool:
     """Documentation axes, top-level Markdown and component OKF doc layers.
 
@@ -23,7 +27,7 @@ def is_doc_path(path: str) -> bool:
     """
     directories = path.split("/")[:-1]
     return (
-        path.startswith(_DOC_ROOTS)
+        (path.startswith(_DOC_ROOTS) and "tests" not in directories)
         or (path.endswith(".md") and "/" not in path)
         or (path.endswith(".meiva.okf.md") and "docs" in directories and "tests" not in directories)
     )

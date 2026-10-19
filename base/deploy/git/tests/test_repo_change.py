@@ -55,6 +55,33 @@ def test_classify_change(paths: list[str], expected: tuple[bool, bool]) -> None:
     assert classify_change(paths) == expected
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "schedules/tests/test_x.py",
+        "schedules/tests/conftest.py",
+        "schedules/tests/meizel.toml",
+        "schedules/tests/path_scopes.toml",
+    ],
+)
+def test_a_test_under_a_doc_root_is_code(path: str) -> None:
+    assert not is_doc_path(path)
+    assert classify_change([path]) == (False, True)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "schedules/db-write-stall-watch-schedule.py",
+        "schedules/catchup.py",
+        "schedules/docs/entry-composition.meiva.okf.md",
+    ],
+)
+def test_schedule_templates_stay_documentation(path: str) -> None:
+    assert is_doc_path(path)
+    assert classify_change([path]) == (False, False)
+
+
 def test_component_okf_docs_do_not_select_a_code_suite() -> None:
     paths = [
         "scripts/lint/docs/changed-files-mode.meiva.okf.md",
