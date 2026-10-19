@@ -11,18 +11,16 @@ from scripts.verify import tart_golden
 from scripts.verify.boundary import RunFailedError
 from scripts.verify.tart_vm import Tart
 
-SHA1 = "CF503E0148DD7F8349FC23EE3D414CF40B925E37"
+CDHASH = "c2cd6485ef1fa91d10ff82fec89864ac666fe394"
 GRANTED: dict[str, Any] = {
     "ping": {"preflight_screen": True, "ax_trusted": True},
-    "identity": f'  1) {SHA1} "Meiva Permissions Helper Code Signing" (CSSMERR_TP_NOT_TRUSTED)',
     "signature": [
-        'designated => identifier "com.meiva.permissions-helper" and certificate leaf = '
-        f'H"{SHA1.lower()}"',
-        "CDHash=c2cd6485ef1fa91d10ff82fec89864ac666fe394",
+        f'designated => cdhash H"{CDHASH}"',
+        f"CDHash={CDHASH}",
     ],
     "tcc": {
-        "kTCCServiceScreenCapture": [2, f"FADE0C00{SHA1}"],
-        "kTCCServiceAccessibility": [2, f"FADE0C00{SHA1}"],
+        "kTCCServiceScreenCapture": [2, f"FADE0C00{CDHASH.upper()}"],
+        "kTCCServiceAccessibility": [2, f"FADE0C00{CDHASH.upper()}"],
     },
     "capture": {"distinct": 270171, "top_share": 0.36},
 }
@@ -48,8 +46,6 @@ def test_a_dry_run_prints_every_step_in_order_and_touches_nothing(
         "prepare-source",
         "toolchain",
         "python",
-        "identity",
-        "key-access",
         "helper",
         "restart-helper",
         "verify",
@@ -118,10 +114,10 @@ def _edit(record: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
     [
         (("ping", "preflight_screen"), False, "preflight_screen"),
         (("ping", "ax_trusted"), False, "ax_trusted"),
-        (("tcc", "kTCCServiceScreenCapture"), [0, f"FADE{SHA1}"], "ScreenCapture"),
+        (("tcc", "kTCCServiceScreenCapture"), [0, f"FADE{CDHASH.upper()}"], "ScreenCapture"),
         (("tcc", "kTCCServiceAccessibility"), _DROP, "Accessibility"),
         (("tcc", "kTCCServiceAccessibility"), [2, "FADE0C00"], "requirement"),
-        (("identity",), "no identities", "not in the keychain"),
+        (("signature",), [], "no CDHash"),
         (("signature",), ["CDHash=abc"], "designated requirement"),
         (("capture",), {"distinct": 3, "top_share": 0.99}, "uniform"),
         (("capture",), {"error": "RuntimeError('no display')"}, "no capture"),

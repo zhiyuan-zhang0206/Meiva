@@ -5,8 +5,8 @@
 // "responsible process" — a binary forked from a terminal session inherits
 // the terminal's TCC identity and can only borrow its grants, which is fragile
 // (breaks under SSH, breaks on restart). Launched by launchd it has a stable,
-// own identity; signed with a stable certificate that identity survives every
-// rebuild, so the operator grants permission exactly once.
+// own identity; signed ad-hoc that identity is its code hash, so an unchanged
+// binary keeps its grants and a rebuilt one needs them granted again.
 //
 // Synthetic HID events and accessibility-tree reads require this process's
 // Accessibility grant. macOS silently drops synthetic events without it, so

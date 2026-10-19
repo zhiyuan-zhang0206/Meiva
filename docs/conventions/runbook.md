@@ -534,7 +534,7 @@ half, use the separate commands:
   retried automatically.
 - `up` runs `meiva start` on the gateway (its cold start applies migrations),
   then on each runner; on macOS as a one-time LaunchAgent in `gui/<uid>`,
-  because signing the helper needs the login keychain (the user must be
+  because the helper's launchd job lives in `gui/<uid>` (the user must be
   logged in to the GUI). Each start must release its hold; every machine
   listed by `--gateway`/`--runner` must be online on the roster with checkout and
   running code on one commit (`online` follows the heartbeat, so the roster is

@@ -23,7 +23,7 @@ User rulings on this slice (2026-10-01):
    download beyond package installs, and it restores the one claim no CI job carries
    (a fresh `meiva start` from source).
 2. **The Tart experiment runs in parallel** with it. Its result is in (Experiment B): a
-   clone of a granted image keeps the helper's signing identity and both grants, so the
+   clone of a granted image keeps the helper's code identity and both grants, so the
    Tart recipe is clone-per-run. The recipe is scripted (`scripts/verify/tart_run.py`) and
    one run of it carried a full `meiva start` in a guest (Recipe C, "Run results").
 3. **Tart uses the `base` image** (SIP disabled), not `vanilla`.
@@ -78,7 +78,7 @@ impersonation hosts need.
 | Real provider behavior | no (scripted model only) | no | no | no |
 | Headless browser against the frontend | not built (Chromium is not in the image) | possible | possible | yes (e2e) |
 | systemd boot custody | no | yes | no | yes (`native-root-lifetime-proof.yml`) |
-| launchd -> helper -> root chain, stable identity | no | no | yes | ad-hoc signed only |
+| launchd -> helper -> root chain, ad-hoc signed helper | no | no | yes | yes (`helper-signing-smoke`) |
 | Desktop grants, computer capability, headed Chrome | no | no | yes, once granted | no |
 
 ## Recipe A: Linux container
@@ -301,10 +301,10 @@ so the golden image and earlier experiment VMs are out of its reach. The model i
 and nothing secret is passed in, as in the container.
 
 `tart_golden.py` is the golden-image build, done once with a person present: clone the base
-image by digest, set 4 CPUs and 8 GB, fetch a commit and provision the toolchain, create the
-identity, set the key's partition list, build and load the helper, then boot with graphics,
+image by digest, set 4 CPUs and 8 GB, fetch a commit and provision the toolchain, build, ad-hoc
+sign and load the helper, then boot with graphics,
 print what to toggle and wait. After the person confirms it restarts the helper and judges the
-grant from `ping`, the system TCC rows, the identity's designated requirement and a capture
+grant from `ping`, the system TCC rows, the helper's designated requirement (its code hash) and a capture
 that is not a uniform image (the record is written to the evidence directory); it then removes
 `~/.meiva/source` and shuts the guest down. It never overwrites a VM, never boots a third, and
 `--dry-run` prints every step and touches nothing. The steps are those of "Golden image" and
@@ -320,7 +320,7 @@ grants, clones per run
 [agentuplink PR 177](https://github.com/andymac4182/agentuplink/pull/177),
 [capsule](https://github.com/akira-toriyama/capsule),
 [pilot-images](https://github.com/WeZZard/pilot-images); secondary evidence, their
-clone-inheritance claims differ and none uses a self-signed helper). Writing a
+clone-inheritance claims differ). Writing a
 virtualization layer directly would repeat Tart.
 
 ### Numbers (known, measured against registry manifests and releases on 2026-10-01, and by the run in Experiment B)
@@ -384,7 +384,7 @@ virtualization layer directly would repeat Tart.
 ### Golden image (one-time, user present)
 
 From `macos-tahoe-base` pinned by digest, 4 CPUs and 8 GB (`tart set <name> --cpu 4 --memory 8192`).
-Steps 1 to 4 prepare a signed, loaded helper; the experiment ran them by hand (known), and
+Steps 1 and 2 prepare a signed, loaded helper; the experiment ran them by hand (known), and
 `tart_golden.py` scripts them, with the toolchain for a full start added (step 1).
 
 1. **Toolchain.** `swiftc` is already in the image. Add `uv` at the release CI pins,
@@ -392,28 +392,11 @@ Steps 1 to 4 prepare a signed, loaded helper; the experiment ran them by hand (k
    at `~/.meiva/source` (a checkout at that path anchors the home to `~/.meiva`), then
    `uv sync --frozen`. A full start also needs `redis@8.2`, `pgbouncer`, `pgvector` and Node
    22 (design).
-2. **Identity.** With the same code the start path uses,
-   `services.desktop.permissions_helper.lifecycle.ensure_signing_cert()` imports the self-signed
-   identity with `-T /usr/bin/codesign -A`.
-3. **Key access: the one step the start path does not do.** On a headless guest the first
-   `lifecycle.converge()` fails in the signing probe: signing with the new identity blocks on
-   an interactive dialog nobody can answer, the probe times out after 20 seconds and
-   converge raises `PermissionsHelperSigningUnavailableError`. The keychain is not locked;
-   what blocks is the private key's partition list, which the import leaves short of
-   `codesign`. Set it once, with the remedy `services/desktop/permissions_helper/lifecycle.py` names:
-
-   ```
-   security set-key-partition-list -S apple-tool:,apple: -s \
-     -l 'Meiva Permissions Helper Code Signing' -k <account password> <login keychain>
-   ```
-
-   The key's access control lives in the keychain file, so a clone signs without a dialog:
-   each of the five clone boots of the experiment (three with graphics, two headless) passed
-   a signing probe before any unlock.
-4. **Build, sign, load.** `lifecycle.converge()` builds the helper with `swiftc`, signs it
-   with the hardened runtime, pins the designated requirement to the identity's SHA-1,
-   writes the LaunchAgent, bootstraps it and pings. At this point the helper answers with
-   both booleans false.
+2. **Build, sign, load.** `lifecycle.converge()` builds the helper with `swiftc`, signs it
+   ad-hoc with the hardened runtime and the AppleEvents entitlement, writes the LaunchAgent,
+   bootstraps it and pings. There is no certificate, key or keychain step, so the same call
+   works on a headless guest. TCC knows the signed helper by its code hash. At this point the
+   helper answers with both booleans false.
 
 No cluster is started in the golden image, so it carries no cluster state; the helper
 artifact under `~/.meiva/helper` and its LaunchAgent stay in it (route R1 below).
@@ -436,8 +419,8 @@ artifact under `~/.meiva/helper` and its LaunchAgent stay in it (route R1 below)
    minute after its first false reading. After the restart both were true.
 4. Verify, in the golden image, before anything is cloned: `ping` reports both booleans
    true; the two rows for `com.meiva.permissions-helper` in the system `TCC.db` have
-   `auth_value` 2 and a code requirement that embeds the identity's SHA-1; a real capture
-   through the helper is not a uniform image. Record the identity's SHA-1, the designated
+   `auth_value` 2 and a code requirement that embeds the helper's CDHash; a real capture
+   through the helper is not a uniform image. Record the CDHash, the designated
    requirement (`codesign -d -r-`) and the rows.
 5. Shut the guest down with `sudo /sbin/shutdown -h now` (plain `shutdown` is not on sudo's
    `PATH`) and wait for `tart run` to exit. `tart exec` reports "Transport became inactive"
@@ -468,8 +451,10 @@ port-number problem as in Recipe A. The container's observer is the guest's: one
 toolchain and one macOS-only check, `helper_chain`. `tart_run.py` is this section as a
 script.
 
-**A helper rebuild inside a used home needs the job retired first.** When the commit under
-test changes the helper's inputs, the start rebuilds it, and replacing an installed, loaded
+**A helper rebuild inside a used home needs the job retired first, and loses the grants.**
+When the commit under test changes the helper's inputs, the start rebuilds it, and the
+rebuilt helper is a new code identity that the golden image's grants do not cover (only an
+unchanged helper keeps them), so such a commit needs a golden image built from it. Replacing an installed, loaded
 helper is refused by design (read in the code, not triggered in the run: `install_and_load`
 raises "loaded helper differs from the requested artifact"; `require_retired_helper`
 demands no loaded job, no plist and no live process). The order R2 followed, and that
@@ -494,7 +479,7 @@ nothing:
   values; the helper's designated requirement and CDHash are recorded beside them. The
   Screen Recording and Accessibility rows for `com.meiva.permissions-helper` live there, not
   in the user database. `auth_value` 2 is allowed, 0 is denied; the helper writes the denied
-  rows itself at its first start, and its csreq embeds the identity's SHA-1. Never write
+  rows itself at its first start, and its csreq embeds the helper's CDHash. Never write
   these rows to make a check pass.
 
 Beyond the observer, for a person or a boot with graphics:
@@ -515,13 +500,13 @@ Beyond the observer, for a person or a boot with graphics:
 ### Limits
 
 Two macOS VMs at a time, golden image included while it runs (known: two guests ran at
-once). The helper's grants are keyed to the bundle id and the certificate's designated
-requirement. The onboarding note records that a same-identity rebuild kept the Screen
-Recording and folder grants, an identity change drops them, and other notes say a rebuild
-resets Accessibility and some extended rows. In R2 a same-identity, same-source rebuild
-reproduced the same CDHash and kept both grants; it did not change the code, so whether a
-rebuild that changes the CDHash resets Accessibility is untested (unknown 2). A rebuild is
-skipped when the source and the requirement hash are unchanged.
+once). The helper is signed ad-hoc, so its grants are keyed to its code hash: an unchanged
+helper keeps both grants, and a rebuild that changes the helper's inputs is a new code
+identity with none, which only a person can give again. In R2, which ran under the earlier
+certificate signature, a same-source rebuild reproduced the same CDHash and kept both
+grants; whether an ad-hoc rebuild of the same source reproduces its CDHash on another host is
+untested (unknown 2). A rebuild is skipped when the content hash of the helper's inputs is
+unchanged.
 
 ### Run results
 
@@ -584,6 +569,10 @@ that drifted over days.
 
 #### The golden build, as exercised
 
+These runs predate the removal of the self-signed certificate. The `IDENTITY` and
+`KEY_ACCESS` steps, the key partition list and the SHA-1 checks they name no longer exist;
+`judge_grant` now pins the helper's CDHash.
+
 Two parts of `tart_golden.py` ran for real; the part between them did not.
 
 - **From the base image, as the script runs it.** `tart clone` of the pinned digest (APFS
@@ -615,17 +604,17 @@ Two parts of `tart_golden.py` ran for real; the part between them did not.
 
 | Surface | Why macOS | Hosted macOS CI today | Tart VM |
 |---|---|---|---|
-| Helper signed with the stable identity | needs imported-identity codesign; hosted runners cannot (see `scripts/ci/helper_smoke/signing_smoke.py`) | ad-hoc signature only | yes |
+| Helper build and ad-hoc signature (the production path) | `swiftc`, `codesign` | yes (`helper-signing-smoke`, `scripts/ci/helper_smoke/signing_smoke.py`) | yes |
 | launchd -> helper -> root -> services ancestry; keeper conflict and restart | launchd | yes (`python -m scripts.ci.helper_smoke --skip-attribution`) | yes, plus tccd attribution |
 | Desktop grants and their attribution | tccd and the consent UI | no | yes |
 | Computer capability (capture, click, type) | grants, GUI session | no | yes |
 | Headed Chrome and browser profile | macOS Chrome, GUI session | no | yes |
 | macOS data plane (vendored PG, brew Redis and PgBouncer, SysV shm limits) | mac binaries | Linux-only pgvector smoke | yes |
-| `meiva start` end to end on macOS | helper refuses ad-hoc, no direct-spawn fallback | not possible without a test hook | the only place besides a real Mac |
+| `meiva start` end to end on macOS | the helper chain and its launchd custody, no direct-spawn fallback | no job today | the only place besides a real Mac |
 | LaunchAgent jobs (health probe, logs, packages, boot) | launchd | no | yes |
 
-Nothing above moves to the hosted runner without weakening the no-ad-hoc, no-fallback rule
-in the helper, so they stay on the VM.
+The rows hosted CI does not run stay on the VM until a hosted job is added for them. The
+helper signs ad-hoc on every host, so signing is not what blocks them.
 
 ## Not yet known
 
@@ -633,21 +622,20 @@ Tart. Items 1 to 3 are answered by Experiment B and stay here so the numbers use
 keep their meaning; the Recipe C run answers the question Experiment B left (`meiva start` in a
 guest) and adds items 6 to 9:
 
-1. **Answered: a clone of a granted image keeps the signing identity and both grants.** The
-   SHA-1, the designated requirement, the CDHash and the TCC rows were identical in the
+1. **Answered: a clone of a granted image keeps the helper's code identity and both grants.** The
+   SHA-1 of the then self-signed certificate, the designated requirement, the CDHash and the TCC rows were identical in the
    golden image and in every clone, both helper booleans were true on the first boot, and
    the ungranted control reported false. One clone per verification is enough; no click per
    clone.
-2. **Answered in part: a helper rebuilt in a clone (fresh home, same identity, same source)
-   keeps both grants** and reproduces the CDHash. Still untested: a rebuild that changes the
-   CDHash (a source change), which is the case the client's own diagnostic says resets
-   Accessibility once.
+2. **Answered in part: a helper rebuilt in a clone (fresh home, same source, certificate
+   signature) kept both grants** and reproduced the CDHash. Under ad-hoc signing a rebuild that
+   changes the CDHash is a new code identity, and the grants are given again by hand; whether
+   an ad-hoc rebuild of the same source reproduces the CDHash is untested.
 3. **Answered: the helper chain and signing work under `tart exec` and the auto-login
-   session with no approval at clone time**, once the key's partition list is set in the
-   golden image; the keychain needed no unlock at any of the five clone boots. Two things the
-   design missed:
-   the partition list (not a locked keychain) is what stops signing, and a Screen
-   Recording grant reaches a helper only after it restarts (see "First grant").
+   session with no approval at clone time.** The experiment signed with a self-signed
+   certificate, whose key needed its partition list set once (not an unlocked keychain);
+   ad-hoc signing has no key and needs no such step. A Screen Recording grant reaches a
+   helper only after it restarts (see "First grant").
 4. Whether Screen Recording re-prompts on a schedule in a long-lived golden image (macOS 15
    prompts monthly per app; state lives in
    `~/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist`; macOS
@@ -662,7 +650,8 @@ guest) and adds items 6 to 9:
    image would show whether the per-run `toolchain` step (743 seconds here) becomes a no-op.
 8. A commit that changes the helper's inputs: the run only met an unchanged helper, and
    `tart_run.py` does not automate the retired-helper order above, so by the code read there
-   the start would refuse such a commit (not triggered). Whether a CDHash-changing rebuild resets Accessibility is item 2.
+   the start would refuse such a commit (not triggered). Its helper would also be a new code
+   identity without grants in the clone (item 2).
 9. How the golden image ages: Homebrew formulae, the uv cache and the base image's own
    updates move under a long-lived image (compare item 4).
 
@@ -679,11 +668,15 @@ Container:
 
 ## Experiment B: clone inheritance, outside the repository (run 2026-10-01)
 
+Run while the helper was signed with a self-signed certificate; the identity, partition list
+and SHA-1 below record that run. The helper is now signed ad-hoc and `lifecycle.converge()`
+has no such steps; TCC knows it by its CDHash.
+
 Answered unknowns 1 to 3 and decided that the Tart recipe is clone-per-run, not
 click-per-run. It ran in parallel with Recipe A. The protocol, as run:
 
 1. Clone `macos-tahoe-base` (by digest) to `meiva-golden`; 4 CPUs, 8 GB.
-2. In the golden image: check out the commit at `~/.meiva/source`, create the identity, set the
+2. In the golden image: check out the commit at `~/.meiva/source`, create the self-signed identity, set the
    key's partition list, build and load the helper, and (user present) grant Screen Recording
    and Accessibility by hand, then restart the helper ("Golden image" and "First grant").
    Record: identity SHA-1; `codesign -d -r-` output; TCC rows for

@@ -17,19 +17,19 @@ observe its protocol and native job state; they never reload their ancestor.
 roles. Desktop capability probes remain distinct from service ownership. The
 helper is outside the application manifest because it owns root's lifetime.
 
-## Why launchd + Stable Signing is Required
-The launchd-ownership and stable-signing constraint set moved to its own node: [[launchd-and-stable-signing.meiva.okf.md]].
+## Why launchd + Ad-hoc Signing
+The launchd-ownership and ad-hoc-signing constraint set moved to its own node: [[launchd-and-stable-signing.meiva.okf.md]].
 
 ## Authorization Model
 
 The two grants, the planes they are read on, the helper-owned request
-path and the signing rule moved to their own node: [[authorization.meiva.okf.md]].
+path and what a rebuild does to them moved to their own node: [[authorization.meiva.okf.md]].
 
 ## Three Components
 - `helper/main.swift` — the Swift daemon body (+ `helper/Info.plist`). A socket-less launch (no `MEIVA_PERMISSIONS_HELPER_SOCKET`, no argv[1]) becomes the user-facing panel instance rather than exiting: [[panel.meiva.okf.md|panel mode]]. Wire method names: `ping` (with `preflight_screen`, `ax_trusted`, and the `*_v1` capability flags), `request_grants`, `screencapture_region`, `file_list`, `file_read`, `click`, `drag`, `type` (the Python client function is named `type_text`, but the wire method sent is `type`), `key`, `scroll`, `ax_window_info`, `ax_tree` (bounded read-only accessibility walk of one window, advertised as `ping.ax_tree_v1`), `ax_act` (press / show_menu / focus / set_value on an element of the latest walk, advertised as `ping.ax_act_v1`; `ping.ax_act_v2` adds reported platform actions and literal text selection), `window_info`, `session_info`. Accessibility-gated methods are explicitly refused when the helper lacks that grant. File access is limited to `~/Downloads`, `~/Desktop`, and `~/.meiva/incoming`; both the requested path and roots are symlink-resolved, then checked as the exact root or the root plus a `/` boundary. `file_list` returns sorted entry metadata; `file_read` returns base64 content for regular files up to 32 MiB.
 - `wire.py` — typed helper results, explicitly re-exported by `client.py` for existing consumers.
 - `client.py` — Python client. Connects to the local cluster helper via Unix socket, each call one line JSON request/response; `PermissionsHelperError` represents unreachable/timeout/remote error. Its `list_dir()` and `read_file()` wrappers expose the whitelisted file operations. `check_screen_capture()` turns `ping().preflight_screen` into a `base.host.converge.screen_capture.ScreenCaptureStatus`; `check_accessibility()` turns `ping().ax_trusted` into a `base.host.converge.accessibility.AccessibilityStatus`; `request_grants()` is the wire call above. Each result keeps grant denial distinct from helper unreachability.
-- `lifecycle.py` — bounded certificate checks, compilation, stable signing, and
+- `lifecycle.py` — bounded tool runs, compilation, ad-hoc signing, and
   initial LaunchAgent registration. A current signed artifact is reused
   (`build_state.py` records its content hash and designated requirement). A
   stale installed artifact is rebuilt in place only once `meiva stop` retired this

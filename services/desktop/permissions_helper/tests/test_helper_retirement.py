@@ -33,15 +33,6 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
     candidate = tmp_path / "candidate"
     monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: installed)
     monkeypatch.setattr(lifecycle, "source_content_hash", lambda: "source")
-    monkeypatch.setattr(lifecycle, "pinned_designated_requirement", lambda: "stable-dr")
-
-    def verify(_app: Path) -> str:
-        return "stable-dr"
-
-    monkeypatch.setattr(lifecycle, "verify_dr", verify)
-    monkeypatch.setattr(lifecycle, "keychain_lock_reason", lambda: None)
-    monkeypatch.setattr(lifecycle, "interactive_signing_reason", lambda: None)
-    monkeypatch.setattr(lifecycle, "preflight_signing_smoke", lambda: None)
 
     commands: list[list[str]] = []
 
@@ -49,6 +40,8 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
         commands.append(command)
         if command[0] == "swiftc":
             Path(command[-1]).write_bytes(b"test executable")
+        if command[:3] == ["codesign", "-d", "-r-"]:
+            return subprocess.CompletedProcess(command, 0, b"designated => adhoc-dr\n", b"")
         return subprocess.CompletedProcess(command, 0, b"", b"")
 
     monkeypatch.setattr(lifecycle, "run_tool", run)
@@ -57,11 +50,11 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
     assert sentinel.read_text() == "unchanged installed state"
     assert sorted(path.name for path in installed.iterdir()) == ["build-state.json"]
     assert (candidate / "build-state.json").is_file()
-    assert [command[0] for command in commands] == ["swiftc", "codesign"]
+    assert [command[0] for command in commands] == ["swiftc", "codesign", "codesign"]
     assert all(str(installed) not in argument for command in commands for argument in command)
 
 
-def test_isolated_helper_rejects_installed_destination_before_signing(
+def test_isolated_helper_rejects_installed_destination_before_building(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: tmp_path)
@@ -78,7 +71,7 @@ def _recorder(events: list[str], event: str, result: object = None) -> Callable[
 
 
 def _stale_installed_helper(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[str], *, dr: str = "stable-dr"
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[str], *, dr: str = "adhoc-dr-new"
 ) -> Path:
     from services.desktop.permissions_helper import launchd_job as jobs
 
@@ -93,16 +86,13 @@ def _stale_installed_helper(
     monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path / "agents")
     monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: installed)
     monkeypatch.setattr(lifecycle, "source_content_hash", lambda: "new")
-    monkeypatch.setattr(lifecycle, "pinned_designated_requirement", lambda: "stable-dr")
-    monkeypatch.setattr(lifecycle, "is_valid_stable_app", Path.exists)
     monkeypatch.setattr(jobs, "retirement_query", _recorder(events, "launchd"))
     monkeypatch.setattr(jobs, "executable_pids", _recorder(events, "scan", []))
-    monkeypatch.setattr(lifecycle, "keychain_lock_reason", _recorder(events, "keychain"))
-    monkeypatch.setattr(lifecycle, "interactive_signing_reason", _recorder(events, "acl"))
-    monkeypatch.setattr(lifecycle, "preflight_signing_smoke", _recorder(events, "smoke"))
-    monkeypatch.setattr(lifecycle, "verify_dr", _recorder(events, "verify", "stable-dr"))
 
     def run(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+        if command[:3] == ["codesign", "-d", "-r-"]:
+            events.append("read-dr")
+            return subprocess.CompletedProcess(command, 0, b"designated => adhoc-dr-new\n", b"")
         events.append(command[0])
         if command[0] == "swiftc":
             assert exe.read_bytes() == b"old helper", "the compile must precede removal"
@@ -134,11 +124,11 @@ def test_stale_installed_helper_is_never_replaced_while_in_use(
     assert "run `meiva stop` first" in str(refused.value)
     assert exe.read_bytes() == b"old helper"
     assert (exe.parents[3] / "build-state.json").read_text() == state
-    assert not {"keychain", "acl", "smoke", "swiftc", "codesign"} & set(events)
+    assert not {"swiftc", "codesign"} & set(events)
 
 
-@pytest.mark.parametrize("previous_dr", ["stable-dr", "regenerated-identity-dr"])
-def test_retired_stale_installed_helper_is_replaced_after_signing_checks_and_compile(
+@pytest.mark.parametrize("previous_dr", ["adhoc-dr-new", "adhoc-dr-old"])
+def test_retired_stale_installed_helper_is_replaced_after_the_compile(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -149,35 +139,25 @@ def test_retired_stale_installed_helper_is_replaced_after_signing_checks_and_com
 
     assert lifecycle.build_and_sign() == (exe.parents[2], True)
     assert exe.read_bytes() == b"new helper"
-    expected = "launchd scan keychain acl smoke swiftc launchd scan codesign verify"
-    assert " ".join(events) == expected
+    assert " ".join(events) == "launchd scan swiftc launchd scan codesign read-dr"
     state = json.loads((exe.parents[3] / "build-state.json").read_text())
-    assert (state["source_hash"], state["dr"]) == ("new", "stable-dr")
-    err = capsys.readouterr().err
-    assert ("grants carry over" in err) == (previous_dr == "stable-dr")
-    assert ("identity changed" in err) == (previous_dr != "stable-dr")
+    assert (state["source_hash"], state["dr"]) == ("new", "adhoc-dr-new")
+    warned = "need granting again" in capsys.readouterr().err
+    assert warned == (previous_dr != "adhoc-dr-new")
 
 
-@pytest.mark.parametrize("failing", ["keychain", "acl", "smoke", "swiftc"])
-def test_stale_installed_helper_survives_a_host_that_cannot_sign_or_compile(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing: str
+def test_stale_installed_helper_survives_a_host_that_cannot_compile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     events: list[str] = []
     exe = _stale_installed_helper(tmp_path, monkeypatch, events)
     state = (exe.parents[3] / "build-state.json").read_text()
 
     def fail(*_args: object) -> None:
-        raise lifecycle.PermissionsHelperBuildError(f"{failing} failed")
+        raise lifecycle.PermissionsHelperBuildError("swiftc failed")
 
-    if failing == "keychain":
-        monkeypatch.setattr(lifecycle, "keychain_lock_reason", lambda: "keychain failed")
-    elif failing == "acl":
-        monkeypatch.setattr(lifecycle, "interactive_signing_reason", lambda: "acl failed")
-    elif failing == "smoke":
-        monkeypatch.setattr(lifecycle, "preflight_signing_smoke", fail)
-    else:
-        monkeypatch.setattr(lifecycle, "run_tool", fail)
-    with pytest.raises(lifecycle.PermissionsHelperBuildError, match=f"{failing} failed"):
+    monkeypatch.setattr(lifecycle, "run_tool", fail)
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="swiftc failed"):
         lifecycle.build_and_sign()
     assert exe.read_bytes() == b"old helper"
     assert (exe.parents[3] / "build-state.json").read_text() == state
