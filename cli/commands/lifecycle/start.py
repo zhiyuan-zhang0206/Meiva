@@ -107,15 +107,16 @@ def _prepare_start_schema(
 
 
 # meiva:note
-# The host-package step is deliberately first: a missing redis/pgbouncer/node
-# must refuse before any green converge step or service launch, not after them.
+# The host-dependency step is deliberately first: a missing redis/pgbouncer/node
+# or crontab/systemctl/curl must refuse before any green converge step or service
+# launch, not after them (a host without crontab used to die at the WAL-G job).
 def cold_start_steps() -> tuple[ConvergeStep, ...]:
     from cli.commands.data_plane import host_dependencies
     from cli.commands.lifecycle import converge_host
 
     return (
         ConvergeStep(
-            "host dependency packages",
+            "host dependencies",
             host_dependencies.ensure_host_dependencies_step,
             roles=frozenset({"gateway", "agent-runner"}),
         ),
