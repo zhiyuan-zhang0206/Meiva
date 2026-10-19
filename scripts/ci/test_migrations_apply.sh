@@ -454,6 +454,36 @@ BEGIN
 END $$;
 SQL
 
+echo "-> harness immutability smoke: fixed at birth, every other write stays free"
+psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
+-- `harness` is the runtime loop an agent is born on (task #5407). The trigger
+-- rejects a change, and the WHEN guard leaves ordinary lifecycle writes alone —
+-- a body that fired on every UPDATE would break status transitions instead.
+INSERT INTO agents (id, label) VALUES (993001, 'harness-smoke');
+INSERT INTO agents_meta (id, status, harness) VALUES (993001, 'idling', 'codex');
+DO $$
+DECLARE stored TEXT;
+BEGIN
+    IF (SELECT harness FROM agents_meta WHERE id = 993001) <> 'codex' THEN
+        RAISE EXCEPTION 'the explicit harness was not stored';
+    END IF;
+    BEGIN
+        UPDATE agents_meta SET harness = 'meiva' WHERE id = 993001;
+        RAISE EXCEPTION 'changing harness was NOT rejected';
+    EXCEPTION
+        WHEN raise_exception THEN
+            IF SQLERRM NOT LIKE '%immutable%' THEN
+                RAISE;
+            END IF;
+    END;
+    UPDATE agents_meta SET status = 'running' WHERE id = 993001;
+    SELECT harness INTO stored FROM agents_meta WHERE id = 993001;
+    IF stored <> 'codex' THEN
+        RAISE EXCEPTION 'a status transition rewrote harness — stored=%', stored;
+    END IF;
+END $$;
+SQL
+
 echo "-> lifecycle pointer->done guard smoke: exercise the commit-time fence"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO agents (id, label) VALUES (992001, 'pointer-guard-smoke');

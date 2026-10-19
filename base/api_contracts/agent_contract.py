@@ -42,6 +42,19 @@ class LivenessState(StrEnum):
     UNKNOWN = "unknown"
 
 
+# meiva:note
+# The runtime loop an agent runs on, fixed for the agent's whole life: `meiva` is
+# the built-in runtime, the others run the loop on an external CLI. The model is a
+# separate choice, `spawn(harness=...)` picks it, a fork keeps its source's, and
+# `harness_availability()` reports what this machine can run.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+class Harness(StrEnum):
+    MEIVA = "meiva"
+    CLAUDE_CODE = "claude_code"
+    CODEX = "codex"
+    ANTIGRAVITY = "antigravity"
+
+
 class TerminationSource(StrEnum):
     """WHO/WHAT wrote `agents_meta.status='terminated'` — stamped by EVERY code path
     that writes it, so a corpse always records how it died.
@@ -134,6 +147,7 @@ class ErrorReason(StrEnum):
     CHANNEL_NOT_CONFIGURED = "channel_not_configured"
     INVALID_MODEL_CONFIG = "invalid_model_config"
     FORK_CONFIG_CHANGE_NOT_ALLOWED = "fork_config_change_not_allowed"
+    FORK_HARNESS_MISMATCH = "fork_harness_mismatch"
 
 
 class MeivaAgentError(Exception):
@@ -257,6 +271,16 @@ class ForkConfigChangeNotAllowed(ForkError, MeivaAgentError):  # noqa: N818 — 
     """
 
     reason = ErrorReason.FORK_CONFIG_CHANGE_NOT_ALLOWED
+    http_status = 400
+
+
+# meiva:note
+# A fork may not change the harness it runs on: it continues the source agent's
+# identity, so it runs the same harness. Asking for a different one is refused
+# here rather than silently accepted or merely warned about.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+class ForkHarnessMismatch(ForkError, MeivaAgentError):  # noqa: N818
+    reason = ErrorReason.FORK_HARNESS_MISMATCH
     http_status = 400
 
 
@@ -410,6 +434,7 @@ EXCEPTION_BY_REASON: dict[ErrorReason, type[MeivaAgentError]] = {
     ErrorReason.CHANNEL_NOT_CONFIGURED: ChannelNotConfigured,
     ErrorReason.INVALID_MODEL_CONFIG: InvalidModelConfig,
     ErrorReason.FORK_CONFIG_CHANGE_NOT_ALLOWED: ForkConfigChangeNotAllowed,
+    ErrorReason.FORK_HARNESS_MISMATCH: ForkHarnessMismatch,
 }
 
 

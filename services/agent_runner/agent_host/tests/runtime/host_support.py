@@ -70,10 +70,11 @@ class Row:
         self,
         machine: str = "this-box",
         status: str = "running",
+        harness: str = "meiva",
         overlay: dict[str, Any] | None = None,
         birth: dict[str, Any] | None = None,
     ) -> None:
-        self.tuple = (machine, status, overlay, birth)
+        self.tuple = (machine, status, harness, overlay, birth)
 
 
 class _FakeCursor:
@@ -133,7 +134,8 @@ class _FakeConn:
             # These orchestration agents have no guarded compact command.
             return _FakeCursor(None)
         if sql == (
-            "SELECT machine, status, config_overlay, birth_config FROM agents_meta WHERE id = %s"
+            "SELECT machine, status, harness, config_overlay, birth_config "
+            "FROM agents_meta WHERE id = %s"
         ):
             self._pool.reads += 1
             row = self._pool.rows.get(params[0])

@@ -98,6 +98,7 @@ class StoredConfig:
 
     machine: str
     status: str
+    harness: str
     config_overlay: dict[str, object] | None
     birth_config: dict[str, object] | None
 

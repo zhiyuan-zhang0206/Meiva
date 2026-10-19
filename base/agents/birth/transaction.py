@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 
 from base import telemetry
 from base.agents.birth.creation_identity import record_creation_snapshot, recover_birth
+from base.agents.birth.harness import resolve_birth_harness
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 from base.agents.impersonation.manifest import record_central_event
 from base.agents.inbox.insert import insert_spawn_prompt_in_transaction
@@ -233,6 +234,7 @@ def insert_agent_birth(
     prompt: str | None = None,
     prompt_source: str | None = None,
     fork_tail_skills: list[str] | None = None,
+    harness: str | None = None,
     creation_key: str | None = None,
     creation_request_hash: str | None = None,
 ) -> AgentBirth:
@@ -258,6 +260,12 @@ def insert_agent_birth(
         return AgentBirth(
             existing.agent_id, existing.birth_config, None, existing.launch_attempt_id, None, None
         )
+    # meiva:note
+    # Settled before anything is written: a fork naming a different harness than its
+    # source is refused here, so a caller that skipped request validation cannot
+    # bypass the rule.
+    # meiva:link base/agents/docs/harness.meiva.okf.md
+    born_harness = resolve_birth_harness(cur, harness, fork_from)
     new_id = _insert_agent_identity(cur, label)
     config, birth_config = _resolve_birth_overlay(
         cur, config, fork_from, catalog=catalog, authority=authority
@@ -274,9 +282,9 @@ def insert_agent_birth(
     # resurrectable (`base.agents.incarnation.lifecycle_acceptance.record_unowned_termination`).
     cur.execute(
         "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
-        "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, "
+        "fork_source_checkpoint_id, status, machine, harness, config_overlay, birth_config, "
         "last_launch_attempt_id, last_resurrect_inbound_id, incarnation_resources) "
-        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, 0, %s)",
+        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s, %s::jsonb, %s::jsonb, %s, 0, %s)",
         (
             new_id,
             lineage_spawner,
@@ -284,6 +292,7 @@ def insert_agent_birth(
             fork_from,
             fork_checkpoint,
             target_machine,
+            born_harness,
             json.dumps(config) if config else None,
             json.dumps(birth_config, sort_keys=True),
             launch_attempt_id,

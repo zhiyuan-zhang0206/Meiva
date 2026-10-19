@@ -132,6 +132,7 @@ CREATE TABLE agents_meta (
     started_at                 TIMESTAMPTZ,              -- filled alongside pid and lease by agent._starting.claim_agent_row
     session_index              BIGINT NOT NULL DEFAULT 0,  -- unified shell+watcher session sequence number, auto-incrementing; meiva.shell.new()/meiva.watcher.launch() atomically take the next via UPDATE ... RETURNING
     machine                    TEXT NOT NULL DEFAULT 'unknown',  -- physical machine identifier, for multi-machine deployment (private network + central Postgres); source = MEIVA_MACHINE_NAME, written on INSERT in the create path (spawn_agent), claim_agent_row only verifies
+    harness                    TEXT NOT NULL DEFAULT 'meiva' CHECK (harness IN ('meiva', 'claude_code', 'codex', 'antigravity')),  -- the agent-loop runtime this agent was BORN on (user ruling, task #5407): 'meiva' = the built-in loop, the others = an external CLI harness (Claude Code / Codex / Antigravity). Written once by the birth INSERT (base/agents/birth/transaction.py via base/agents/birth/harness.py); a BEFORE UPDATE trigger rejects any change, and a fork inherits its source's value — asking for a different harness on a fork is an error, never a silent override. Model and provider are separate concerns and are not derived from it.
     status_changed_at          TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the row last entered its current status; maintained by the agents_meta_status_changed_at trigger. Lets the restarter reap unclaimed idling rows older than a grace (unlike spawned_at, this resets on resurrect's terminated -> idling)
     last_active_at             TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the agent last did REAL work: written = now() by the agent process on every completed LLM turn (agent/graph/llm/node.py). Deliberately NOT touched by ops lifecycle churn (rollout quiesce / restarter respawn / self.update / stop-start) — for an idle agent that whole cycle runs without an LLM turn, so this survives it. The heartbeat daemon's idle clock reads THIS (not status_changed_at, which every status flip incl. ops restarts bumps) so an ops event never resets an agent's idle timer. Backfilled from status_changed_at at add time.
     heartbeat_paused_until     TIMESTAMPTZ,              -- pause window for the gateway heartbeat daemon; set to now()+duration by meiva.self.pause_heartbeat(). While in the future, the daemon skips this agent's idle-nudge. NULL = never paused.
@@ -179,6 +180,11 @@ COMMENT ON COLUMN agents_meta.born_spawner IS
     'Birth-time original spawner. Immutable and never rewritten by folding; '
     'forks use agent:<fork_source>, plain spawns use the birth trigger, and '
     'backfilled rows are best-known.';
+
+COMMENT ON COLUMN agents_meta.harness IS
+    'The agent loop runtime this agent was born on (meiva / claude_code / codex / '
+    'antigravity). Immutable: a trigger rejects any UPDATE that changes it, and a '
+    'fork inherits its source''s value.';
 
 COMMENT ON COLUMN agents_meta.last_force_terminate_inbound_id IS
     'Monotonic inbound id fence written by every explicit force termination. '
@@ -979,6 +985,22 @@ CREATE TRIGGER agents_meta_born_spawner_append_only
     BEFORE UPDATE OF born_spawner ON agents_meta
     FOR EACH ROW
     EXECUTE FUNCTION reject_agents_meta_born_spawner_update();
+
+-- Harness is fixed at birth: no restart / resurrect / rollout / repair path may
+-- move an agent onto another runtime. The WHEN guard leaves every other column
+-- (and a no-op self-assignment) alone.
+CREATE OR REPLACE FUNCTION reject_agents_meta_harness_update() RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'agents_meta.harness is immutable once the agent is born (% -> %)',
+        OLD.harness, NEW.harness;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER agents_meta_harness_immutable
+    BEFORE UPDATE OF harness ON agents_meta
+    FOR EACH ROW
+    WHEN (OLD.harness IS DISTINCT FROM NEW.harness)
+    EXECUTE FUNCTION reject_agents_meta_harness_update();
 
 -- ─────────────── events archive (DROPPED — Loki archive stream) ───────────────
 -- The frozen PG `events` archive was dropped with the task #1281/#1823 cleanup

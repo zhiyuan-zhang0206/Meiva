@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 import meiva.sdk_surface.agent_identity
@@ -15,6 +15,7 @@ from base.api_contracts.agent_contract import AgentLaunchFailed as AgentLaunchFa
 from base.api_contracts.agent_contract import AgentNotFound as AgentNotFound
 from base.api_contracts.agent_contract import (
     AgentStatus,
+    Harness,
     RestartResult,
     ResurrectResult,
     ShellSessionKillTiming,
@@ -28,6 +29,10 @@ from base.api_contracts.agent_contract import (
     ForkConfigChangeNotAllowed as ForkConfigChangeNotAllowed,
 )
 from base.api_contracts.agent_contract import ForkError as ForkError
+from base.api_contracts.agent_contract import ForkHarnessMismatch as ForkHarnessMismatch
+
+if TYPE_CHECKING:
+    from base.agents.birth.harness import HarnessProbe, HarnessStatus
 from base.api_contracts.agent_contract import ForkSourceEmpty as ForkSourceEmpty
 from base.api_contracts.agent_contract import GatewayUnavailable as GatewayUnavailable
 from base.api_contracts.agent_contract import InvalidModelConfig as InvalidModelConfig
@@ -47,6 +52,8 @@ __all_for_meiva__ = [
     "AgentRow",
     "AgentStatus",
     "CommandInfo",
+    "Harness",
+    "HarnessAvailability",
     "Machine",
     "Neighbor",
     "OpenTaskRow",
@@ -64,6 +71,7 @@ __all_for_meiva__ = [
     "get_launch_attempt",
     "get_neighbors",
     "get_status",
+    "harness_availability",
     "list_agents",
     "list_machines",
     "restart",
@@ -86,6 +94,33 @@ class CommandInfo:
         hint = f" {self.instruction_hint}" if self.instruction_hint else ""
         desc = f"  — {self.description}" if self.description else ""
         return f"/{self.name}{hint}{desc}"
+
+
+@dataclass
+class HarnessAvailability:
+    """One harness's availability on the machine you are running on.
+
+    harness: which harness the row describes.
+    status: "available" (installed and signed in), "unavailable" (not installed,
+        or installed but not signed in), or "unknown" (installed, but the sign-in
+        state cannot be read here).
+    reason: one readable sentence explaining the status.
+    binary: the executable this machine would run, or None when the harness has no
+        CLI of its own or none was found.
+    on_path: whether the executable was found through PATH; False means only a
+        conventional install directory held it, so a process started with a
+        trimmed PATH may not see it.
+    """
+
+    harness: Harness
+    status: HarnessStatus
+    reason: str
+    binary: str | None
+    on_path: bool
+
+    def __str__(self) -> str:
+        location = self.binary if self.binary is not None else "built in"
+        return f"{self.harness.value}  [{self.status}]  {location}  {self.reason}"
 
 
 @dataclass
@@ -353,6 +388,29 @@ def machines_from_rows(rows: list[dict[str, Any]]) -> list[Machine]:
     return [Machine(name=r["name"], description=r.get("description"), live=r["live"]) for r in rows]
 
 
+def harness_availability() -> list[HarnessAvailability]:
+    """Report which harnesses this machine can run, one row per harness.
+
+    Each row says whether the harness's command is installed and whether it is signed
+    in, with a readable reason. A sign-in state that cannot be read here reports
+    `unknown` instead of being guessed. The check reads this machine only: it starts no
+    session, runs no command and spends no quota.
+    """
+    from base.agents.birth.harness import probe_local_harnesses
+
+    return [_availability_from_probe(row) for row in probe_local_harnesses()]
+
+
+def _availability_from_probe(row: HarnessProbe) -> HarnessAvailability:
+    return HarnessAvailability(
+        harness=row.harness,
+        status=row.status,
+        reason=row.reason,
+        binary=row.binary,
+        on_path=row.on_path,
+    )
+
+
 def _row_from_dict(data: dict) -> AgentRow:
     """Gateway JSON dict → AgentRow dataclass."""
     return AgentRow(
@@ -400,6 +458,7 @@ def spawn(
     machine: str | None = None,
     config_overlay: dict[str, object] | None = None,
     label: str | None = None,
+    harness: str | Harness | None = None,
     *,
     idempotency_key: str,
 ) -> int:
@@ -409,6 +468,13 @@ def spawn(
     same key, inputs and caller identity to recover its original agent after a
     lost response; use a new key for another agent. Acceptance does not prove
     execution, and uncertain transport outcomes are not automatically retried.
+
+    `harness` is the runtime loop the agent runs on: "meiva" (the default) or an external
+    harness such as "claude_code", "codex" or "antigravity"; unknown names are refused, never
+    replaced by the default. It is fixed for the agent's whole life: no restart or resurrect
+    changes it. Omit it to run the built-in runtime, or, on a fork, to keep the source's
+    harness; asking a fork for a different one fails instead of being applied.
+    `harness_availability()` reports which ones this machine can run.
 
     `prompt` is the first message — make it self-contained; omit it to leave the agent idling.
     `label` names the new agent's role, which peers and the fleet view show; omit it to let the
@@ -433,6 +499,7 @@ def spawn(
         machine=machine,
         config=config_overlay,
         label=label,
+        harness=harness,
         idempotency_key=idempotency_key,
     )
 
@@ -474,6 +541,7 @@ def spawn_impl(
     machine: str | None,
     config: dict[str, object] | None,
     label: str | None,
+    harness: str | Harness | None,
     idempotency_key: str,
 ) -> int:
     prompt = coerce_str(prompt, "prompt", allow_none=True)
@@ -481,6 +549,9 @@ def spawn_impl(
     machine = coerce_str(machine, "machine", allow_none=True)
     config = coerce_typed(config, "config", dict, allow_none=True)
     label = coerce_str(label, "label", allow_none=True)
+    from base.agents.birth.harness import coerce_harness
+
+    harness = None if harness is None else coerce_harness(harness).value
     from base.api_contracts.idempotency import validate_idempotency_key
 
     idempotency_key = validate_idempotency_key(idempotency_key)
@@ -508,6 +579,7 @@ def spawn_impl(
         else process_context.current_context().require_machine().name(),
         config=config,
         label=label,
+        harness=harness,
         idempotency_key=idempotency_key,
     )
 

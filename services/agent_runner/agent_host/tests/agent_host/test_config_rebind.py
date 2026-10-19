@@ -659,6 +659,17 @@ class TestRunnability:
         assert graph.observations == []
         assert host.stats.wakes_skipped == 1
 
+    async def test_a_harness_without_a_launcher_never_gets_a_turn(self, wired: Build) -> None:
+        # meiva:note
+        # A row born on a harness this release cannot start keeps the value as an
+        # intent; it must not quietly run the built-in loop instead.
+        # meiva:link base/agents/docs/harness.meiva.okf.md
+        host, graph, _ = wired({1: Row(harness="codex")})
+        await asyncio.wait_for(host.run_turn(1), 2)
+        assert graph.observations == []
+        assert host.stats.wakes_skipped == 1
+        assert host.stats.turns_started == 0
+
     async def test_a_missing_row_is_skipped(self, wired: Build) -> None:
         host, graph, _ = wired({})
         await asyncio.wait_for(host.run_turn(99), 2)
