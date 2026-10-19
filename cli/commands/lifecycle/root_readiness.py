@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from base.clock import Timers
+from base.deploy import start_trace
 from base.log import logger
 from cli.commands.lifecycle import root_driver
 from cli.commands.probe import ReadinessWait
@@ -90,11 +91,18 @@ def wait_for_root_services_ready(
     deadline = started_at + timeout_s
     critical = tuple(s for s in specs if s.session in CRITICAL_SERVICE_SESSIONS)
     non_critical = tuple(s for s in specs if s.session not in CRITICAL_SERVICE_SESSIONS)
+    recorded: set[str] = set()
     while True:
         units, verdicts = _fresh_readiness_round(client, specs)
         unready = _unready_services(critical, units, verdicts)
         non_critical_unready = _unready_services(non_critical, units, verdicts)
         now = timers.monotonic()
+        for spec in specs:
+            if spec.session not in recorded and unit_ready(
+                units.get(spec.session), verdicts.get(spec.session)
+            ):
+                recorded.add(spec.session)
+                start_trace.record_service_ready(spec.session, now - started_at)
         gone_all = bool(unready) and all(_unit_gone(units.get(s.session)) for s in unready)
         if not unready or gone_all or now >= deadline:
             return ReadinessWait(

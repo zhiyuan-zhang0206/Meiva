@@ -144,6 +144,9 @@ def main(
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
     """Run one command with the operator event pipeline as its telemetry producer."""
+    from base.deploy import start_trace
+
+    start_trace.begin(enabled=start_trace.requested(os.environ))
     from cli.database import open_operator_database
 
     return run_command(
