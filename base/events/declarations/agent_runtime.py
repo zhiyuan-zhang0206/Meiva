@@ -81,6 +81,7 @@ class DbPoolRestoreTimeout(TypedDict):
     name: str
     budget_ms: int
     elapsed_ms: int
+    ended_by: str
 
 
 class HeartbeatNudged(TypedDict):

@@ -120,7 +120,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `delta_message_suffix` | message history write-body transfer and retained suffix counts; excludes snapshot seed | noise | thread_id, checkpoint_ns, checkpoint_id, candidate_writes, fetched_rows, fetched_bytes, body_batches, retained_writes, reset_found | — | events | — |
 | `db_pool_acquire_timeout` | db pool acquire timeout | anomaly | — | — | events | — |
 | `db_pool_acquire_slow` | db pool acquire slow | anomaly | name, elapsed, slot_wait_ms, check_ms, check_attempts, pool_size, pool_available, requests_waiting, connections_errors | — | events | — |
-| `db_pool_restore_timeout` | db pool restore timeout | anomaly | name, budget_ms, elapsed_ms | — | events | — |
+| `db_pool_restore_timeout` | db pool restore timeout | anomaly | name, budget_ms, elapsed_ms, ended_by | — | events | — |
 | `checkpoint_write_failed` | checkpoint write failed | anomaly | — | — | events | — |
 | `trace` | otel span export | noise | — | — | events | — |
 | `history_dump` | pre-compact history dumped to workspace | noise | — | — | events | — |
