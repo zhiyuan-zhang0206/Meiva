@@ -421,7 +421,7 @@ def sync_store(
     if not described.get("exists"):
         return f"skip {store.path} (absent on {source})"
     if args.dry_run:
-        return f"[dry-run] credentials {store.path} -> {target} ({store.rotation})"
+        return f"[dry-run] credentials {store.path} -> {store.destination} ({store.rotation})"
     payload = source.python(hostfs_source(), {"op": "read", "path": store.path}).json_payload()
     if "error" in payload:
         return f"FAILED read {store.path}: {payload['error']}"
@@ -432,19 +432,19 @@ def sync_store(
             f"WITHHELD {store.path}: rotation is '{rotation}' — {store.why} "
             "Sign in on the target once, or pass --accept-credential-risk."
         )
-    target.python(hostfs_source(), {"op": "backup", "path": store.path, "dir": backup_dir})
+    target.python(hostfs_source(), {"op": "backup", "path": store.destination, "dir": backup_dir})
     written = target.python(
         hostfs_source(),
         {
             "op": "write",
-            "path": store.path,
+            "path": store.destination,
             "b64": payload["b64"],
             "mode": payload.get("mode", "600"),
         },
     ).json_payload()
     if "error" in written:
-        return f"FAILED write {store.path}: {written['error']}"
-    return f"credentials {store.path} -> {target} ({rotation}, backed up in {backup_dir})"
+        return f"FAILED write {store.destination}: {written['error']}"
+    return f"credentials {store.path} -> {store.destination} ({rotation}, backup in {backup_dir})"
 
 
 # meiva:note

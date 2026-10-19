@@ -13,6 +13,11 @@ class Store:
     path: str
     rotation: Rotation
     why: str
+    target_path: str = ""
+
+    @property
+    def destination(self) -> str:
+        return self.target_path or self.path
 
 
 @dataclass(frozen=True)
@@ -117,9 +122,11 @@ CATALOG: dict[str, HarnessSpec] = {
                 path="~/.gemini/jetski-standalone-oauth-token",
                 rotation="unknown",
                 why=(
-                    "The older location of the same blob, still present on machines whose agy "
-                    "was installed before the CLI split its state directory."
+                    "Written by the Antigravity IDE, not by the CLI: a machine that carries only "
+                    "this file still answers 'authentication required'. It is a usable source "
+                    "for the CLI's own path, which is why the copy retargets it."
                 ),
+                target_path="~/.gemini/antigravity-cli/antigravity-oauth-token",
             ),
         ),
     ),
