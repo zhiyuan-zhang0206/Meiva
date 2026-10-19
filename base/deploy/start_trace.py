@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
@@ -48,7 +48,7 @@ class StartTrace:
         return self._phase(name)
 
     @contextmanager
-    def _phase(self, name: str) -> Iterator[None]:
+    def _phase(self, name: str) -> Generator[None]:
         origin = self.started_at()
         started = time.monotonic()
         self._open.append(started)
