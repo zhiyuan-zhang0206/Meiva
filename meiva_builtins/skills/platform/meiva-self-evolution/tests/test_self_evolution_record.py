@@ -192,7 +192,10 @@ def test_targeted_correction_remains_a_per_agent_correction(
             "agent:1",
             [],
             [
-                {"type": "human", "content": f"{record_module.SYSTEM_MARKER} Your Agent ID is 7."},
+                {
+                    "type": "human",
+                    "content": f"{record_module.SYSTEM_NOTE_OPEN}\nYour Agent ID is 7.\n</system_note>",
+                },
                 {"type": "human", "content": "inherited brief"},
             ],
             "inherited brief",
@@ -202,7 +205,12 @@ def test_targeted_correction_remains_a_per_agent_correction(
         pytest.param(
             "agent:1",
             [],
-            [{"type": "human", "content": f"{record_module.SYSTEM_MARKER} Your Agent ID is 7."}],
+            [
+                {
+                    "type": "human",
+                    "content": f"{record_module.SYSTEM_NOTE_OPEN}\nYour Agent ID is 7.\n</system_note>",
+                }
+            ],
             "",
             "none",
             id="preamble-only",
@@ -244,7 +252,10 @@ def test_task_prompt_of_falls_back_to_the_transcript(record: Any) -> None:
     legacy = {
         "task_prompt": "",
         "transcript": [
-            {"type": "human", "content": f"{record_module.SYSTEM_MARKER} Your Agent ID is 7."},
+            {
+                "type": "human",
+                "content": f"{record_module.SYSTEM_NOTE_OPEN}\nYour Agent ID is 7.\n</system_note>",
+            },
             {"type": "human", "content": "Fix the flaky test."},
         ],
     }

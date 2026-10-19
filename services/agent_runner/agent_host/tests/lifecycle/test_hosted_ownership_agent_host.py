@@ -1,12 +1,9 @@
 import asyncio
-from types import SimpleNamespace
-from typing import cast
 from unittest.mock import Mock
 from uuid import uuid4
 
 import psycopg
 import pytest
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 import services.agent_runner.agent_host.host as agent_host_host
@@ -145,46 +142,3 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
 
     monkeypatch.setattr(host, "_runtime_for", forbidden_runtime)
     await host.run_turn(agent_id)
-
-
-async def test_a_completed_turn_records_one_notification(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
-) -> None:
-    from services.agent_runner.agent_host.host import AgentHost
-    from services.agent_runner.agent_host.runtime import TurnOutcome
-
-    agent_id = _agent(db_conn)
-    db_conn.execute(
-        "INSERT INTO user_settings (key, value) VALUES ('notifications.categories', %s) "
-        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-        (Jsonb({"core.turn_finished": True}),),
-    )
-    db_conn.commit()
-    host = cast(AgentHost, SimpleNamespace(_pool=aops_pool, _bus=event_bus))
-    await AgentHost._notify_turn_finished(host, agent_id, TurnOutcome(exited=False, crashed=False))
-    rows = db_conn.execute(
-        "SELECT category, subject FROM notification_events WHERE agent_id = %s", (agent_id,)
-    ).fetchall()
-    assert len(rows) == 1
-    assert rows[0][0] == "core.turn_finished"
-    assert rows[0][1].endswith("finished its turn")
-
-
-async def test_an_interrupted_turn_records_no_notification(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
-) -> None:
-    from services.agent_runner.agent_host.host import AgentHost
-    from services.agent_runner.agent_host.runtime import TurnOutcome
-
-    agent_id = _agent(db_conn)
-    db_conn.execute(
-        "INSERT INTO user_settings (key, value) VALUES ('notifications.categories', %s) "
-        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-        (Jsonb({"core.turn_finished": True}),),
-    )
-    db_conn.commit()
-    host = cast(AgentHost, SimpleNamespace(_pool=aops_pool, _bus=event_bus))
-    await AgentHost._notify_turn_finished(host, agent_id, TurnOutcome(exited=False, crashed=True))
-    assert db_conn.execute(
-        "SELECT count(*) FROM notification_events WHERE agent_id = %s", (agent_id,)
-    ).fetchone() == (0,)

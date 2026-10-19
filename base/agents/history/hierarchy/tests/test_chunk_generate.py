@@ -178,10 +178,17 @@ def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_header_at_the
     None
 ):
     def inbound(source: str | None, text: str) -> HumanMessage:
+        # meiva:note
+        # A system source's header is the note's open tag; every other header is the sender
+        # line ending in a blank line.
+        # meiva:link agent/messages/docs/message-format.meiva.okf.md
+        system = source is not None and source.startswith("system")
         kwargs: dict[str, object] = {
             "meiva_msg_type": "inbound",
             "meiva_created_at": "2026-10-05T03:04:05+00:00",
-            "meiva_inbound_body_start": text.index("\n\n") + 2 if "\n\n" in text else 0,
+            "meiva_inbound_body_start": len("<system_note>\n")
+            if system
+            else (text.index("\n\n") + 2 if "\n\n" in text else 0),
         }
         if source:
             kwargs["meiva_source"] = source
@@ -192,7 +199,7 @@ def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_header_at_the
         inbound("user", "[2026-10-05 Mon 11:04:06]\n\n  fix it\n  now"),
         inbound("watcher:1955", "Watcher (id 1955) [2026-10-05 Mon 11:04:07]:\n\nwatch fired"),
         inbound("shell:1940", "Shell session (id 1940) [2026-10-05 Mon 11:04:08]:\n\nexited 0"),
-        inbound("system:notice-reply", "[system] Re: x"),
+        inbound("system:notice-reply", "<system_note>\nRe: x\n</system_note>"),
         inbound(None, "no source"),
     ]
     lines = build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS)).splitlines()
@@ -201,7 +208,7 @@ def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_header_at_the
         "[2] human message: fix it now",
         "[3] watcher 1955: watch fired",
         "[4] shell 1940: exited 0",
-        "[5] system notice-reply: [system] Re: x",
+        "[5] system notice-reply: Re: x",
         "[6] human message: no source",
     ]
 

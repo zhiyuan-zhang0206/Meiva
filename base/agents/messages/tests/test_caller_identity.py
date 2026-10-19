@@ -44,7 +44,7 @@ def test_retired_caller_kind_is_rejected_before_persistence(source: str) -> None
         "external_agent:codex:../../secret",
         "external_agent:" + "a" * 21,
         "external_agent:codex:" + "b" * 21,
-        "external_agent:codex\r[system]",
+        "external_agent:codex\r<system_note>",
     ],
 )
 def test_malformed_identity_rejected_by_boundary_and_reader(source: str) -> None:

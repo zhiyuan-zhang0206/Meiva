@@ -95,6 +95,11 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.SERVICE_READY_TIMEOUT_S,
         "how long `meiva start` waits for freshly launched services to pass liveness",
     ),
+    "HOST_PACKAGE_INSTALL_TIMEOUT_S": Clock(
+        "deploy",
+        lambda: deploy.HOST_PACKAGE_INSTALL_TIMEOUT_S,
+        "how long one host-package provisioner may run during a cold start",
+    ),
     "NON_CRITICAL_SERVICE_READY_TIMEOUT_S": Clock(
         "deploy",
         lambda: deploy.NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
@@ -191,6 +196,13 @@ CONSTRAINTS: list[Constraint] = [
         "NON_CRITICAL_SERVICE_READY_TIMEOUT_S",
         "SERVICE_READY_TIMEOUT_S",
         "optional root-health startup grace is shorter than the core-service grace",
+    ),
+    Constraint(
+        ">=",
+        "HOST_PACKAGE_INSTALL_TIMEOUT_S",
+        "SERVICE_READY_TIMEOUT_S",
+        "a cold package install is a separate, earlier budget and must not fit "
+        "inside the service-readiness window",
     ),
     # --- unit-bundle family ---
     Constraint(

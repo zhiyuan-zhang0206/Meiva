@@ -90,10 +90,11 @@ worker = meiva.agents.spawn(
 meiva.agents.send_message(worker, "Skip the legacy SAML path — out of scope.")
 ```
 
-The human side is first-class as well: every agent's notifications — progress,
-FYIs, decisions that need your call — converge into **one aggregated
-notification queue**, and agents organize across conversations through a
-**shared persistent task graph** (parent/child trees, owners, reminders).
+The human side is first-class as well: every agent's notices — progress, FYIs,
+decisions that need your call — converge into **one aggregated inbox**, and an
+answerable notice also reaches you as a notification; agents organize across
+conversations through a **shared persistent task graph** (parent/child trees,
+owners, reminders).
 
 → [How the fleet works](../meiva_builtins/plugins/meiva_fleet/docs/meiva_fleet.meiva.okf.md)
 
@@ -246,7 +247,7 @@ for the full surface.
 | `meiva skill install <src>` | install Agent Skills from a git URL or local path |
 | `meiva plugins` / `meiva mcp` | manage plugins and MCP servers |
 | `meiva memory` | shared memory pool operations |
-| `meiva config` / `meiva notices` / `meiva trace` | config get/set, the notification queue, the trace mirror |
+| `meiva config` / `meiva notices` / `meiva trace` | config get/set, the notice queue, the trace mirror |
 
 ---
 

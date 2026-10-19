@@ -2,7 +2,7 @@ import importlib
 import inspect
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 import psycopg
@@ -387,17 +387,16 @@ def test_fleet_declares_compact_preparation_in_its_manifest() -> None:
 
 
 # meiva:note
-# A closed task is routine agent activity, so its category ships switched off like
-# `core.turn_finished`: 227 closes over 2026-10-12..18 (37.8 a day, 27 in the
-# busiest hour), 64% of them agents closing their own bookkeeping and 42% between
-# 23:00 and 06:00. Flipping this back on is a product decision, not a test fix.
+# The fleet plugin declares no notification category: a closed task is not a
+# request that needs the user's reply, and no other task event is one either.
+# Adding one is a product decision, not a test fix.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-def test_fleet_ships_the_task_closed_category_switched_off() -> None:
+def test_fleet_declares_no_notification_category() -> None:
+    from pathlib import Path
+
     from base.packages.plugins.manifest import load_manifest
     from meiva_builtins.plugins.meiva_fleet import agent_runtime
 
     manifest = load_manifest(Path(agent_runtime.__file__).parent)
-    declared = cast(list[dict[str, Any]], manifest.contributions["notifications"])
-    task_closed = [entry for entry in declared if entry["id"] == "meiva_fleet.task_closed"]
 
-    assert [entry["defaultEnabled"] for entry in task_closed] == [False]
+    assert not manifest.contributions.get("notifications")

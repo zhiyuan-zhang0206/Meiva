@@ -7,10 +7,14 @@ tags: [contracts]
 
 # Notification spine
 
-`base/events/notifications` owns one question: does this event deserve to interrupt the
-user, and on which channel? Producers name a category; the spine applies the
-user's per-category switches, deduplicates by key, records the delivery, and
-publishes one live event every transport consumes.
+A notification is one request that needs the user's reply. Nothing else is one:
+a finished turn, a closed task or any other event the user does not have to
+answer belongs in the log, the task board or the inbox that already carries it.
+
+`base/events/notifications` owns that delivery decision: producers name a
+category, the spine applies the user's per-category switches, deduplicates by
+key, records the delivery, and publishes one live event every transport
+consumes.
 
 ## Store
 
@@ -24,7 +28,7 @@ The table is also the outbox. `announced_at` is when the live event was
 published; a NULL means the delivery is still owed. A producer stages the row
 when it decides (a notice's row commits with the notice, so a crash between the
 commit and the publish leaves a deliverable debt rather than a silent loss), and
-`announce` marks the row only after the transport accepted the publication — a
+`announce_sync` marks the row only after the transport accepted the publication — a
 known Redis failure returns None and marks nothing. A publish with no subscriber
 is accepted too: Redis took the message and nobody was listening, so the row is
 marked delivered and a client that was offline gets it from the recovery read,
@@ -40,14 +44,14 @@ and a duplicate ping is cheaper than a missing decision.
 ## Categories
 
 A category carries a label, a description, an importance, a default switch and a
-dedupe window.
-Core categories live in `catalog.CORE_CATEGORIES`. `core.turn_finished` ships
-switched off: a fleet-wide "turn finished" ping is dozens of interruptions an
-hour, so it is one the user opts into. `core.needs_input` ships on. A plugin declares its own in
-`contributions.notifications` in `meiva-plugin.json`, under its own
-`<plugin>.` id prefix; `gateway/extensions/notification_categories.py` merges the
-manifests with the core set, and `GET /api/notifications/categories` returns that
-merged view with the user's switches already applied.
+dedupe window. `catalog.CORE_CATEGORIES` holds exactly one: `core.needs_input`,
+a notice that needs an answer, and it ships on. A plugin declares its own in
+`contributions.notifications` in `meiva-plugin.json`, under its `<plugin>.` id
+prefix; a plugin category ships switched off — `defaultEnabled: true` is a
+manifest error — and the user turns it on.
+`gateway/extensions/notification_categories.py` merges the manifests with the
+core set, and `GET /api/notifications/categories` returns that merged view with
+the user's switches already applied.
 
 ## Policy
 
@@ -58,15 +62,21 @@ silent and returns no row.
 
 ## Producers
 
-A hosted turn that ran to completion records `core.turn_finished` from
-`services/agent_runner/agent_host/host.py`; a crashed, cancelled or truncated turn
-says nothing, because the notification lives on the turn path rather than on the
-settlement path that also fires for no-work parks. A posted notice
-records `core.needs_input` from `ops/lifecycle/events.py`, keyed by the notice
-id plus a fingerprint of its question, so a retried post stays silent while
-editing a container to add a question delivers again — a new question is what the
-user has to act on. The spine reads the notice row itself rather than trusting
-either post path to pass the right shape.
+A notice that needs an answer stages `core.needs_input` inside the transaction
+that writes it — `gateway/agents/notices.py` and
+`gateway/agents/notice_operations/current.py` on the gateway path — keyed by the
+notice id plus a fingerprint of its question, so a retried post stays silent
+while editing a container to add a question delivers again: a new question is
+what the user has to act on. `ops/lifecycle/events.py` publishes only the inbox's
+live hint. The spine reads the notice row itself rather than trusting either
+post path to pass the right shape.
+
+A completed turn and a closed task are not notifications. The agent host logs
+the finished turn (`services/agent_runner/agent_host/host.py`) and the task
+registry logs the closed task
+(`meiva_builtins/plugins/meiva_fleet/task_registry.py`); both remain queryable
+through the settled agent row, the task board and the task's `task_updated`
+event, and neither asks the user for an answer.
 
 The task-maintenance daemon's stall escalation is the same producer on a sync
 path: its user leg commits a `require_response` notice and stages the
@@ -81,13 +91,9 @@ agent note and deliberately produces no user notification.
 A plugin delivers through `POST /api/agents/{id}/notifications` with
 `category`, `subject` and an optional `dedupe_key`; the endpoint resolves the
 category against the merged catalog (422 when undeclared), writes the delivery
-and announces it. `meiva_fleet` registers `meiva_fleet.task_closed` and emits it
-from the task update path after the row commits, keyed by task id. It ships
-switched off like `core.turn_finished`: the category fires once per closed task,
-which measured 227 closes (37.8 a day, 27 in the busiest hour) over 2026-10-12..18,
-64% of them agents closing their own bookkeeping and 42% between 23:00 and 06:00.
-The console task board already shows every close, so the ping is an interruption
-the user opts into rather than one they must switch off.
+and announces it. A declared category names a request that needs the user's
+reply and ships switched off: enabling it is the user's switch, never the
+plugin's default.
 
 ## Auditing a window
 
@@ -101,16 +107,8 @@ a switch cannot be simulated from the rows its own policy dropped.
   row is one candidate, or two when the agent added a question after posting: the
   spine keys a re-ask by the question the notice carries now, so the post is keyed
   question-less and the edit by its question.
-- `core.turn_finished` comes from the agent host's clean turn ends in
-  `telemetry_events` (`halt` with `no tool_call (idle)` or `system_halt`), which is
-  where the hosted runner emits the notification. A terminated agent's halt is a
-  death, not a finished turn, and the runner reports nothing for it.
-- `meiva_fleet.task_closed` comes from `agent_tasks` rows that reached `done`:
-  the plugin delivers once per close, keyed by task id, and `updated_at` is that
-  close stamp for a task nothing has touched since.
 
-Two simulations are modelled, one flipped input at a time: turning
-`core.turn_finished` on or off, and keying a notice by `notice:<id>` instead of
+One simulation is modelled: keying a notice by `notice:<id>` instead of
 `notice:<id>:<question fingerprint>` (the re-ask switch).
 
 ## Transports

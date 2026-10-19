@@ -290,31 +290,28 @@ async def post_notice_resolve(
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> AgentMessageEnqueued:
-    """Resolve one open notice and (when a reply is given) wake the agent with it.
-
-    `action` is the explicit close verb: answer applies to both kinds — the
-    user can reply to an FYI too (Task #1061, the reply reaches the notice's
-    agent like a require_response answer); dismiss applies to a require_response
-    notice, read to an FYI notice. The endpoint marks the notice resolved
-    (resolved_at + resolution + cached reply) iff it is still open, then — when a
-    reply is supplied, or a require_response notice is dismissed — INSERTs a
-    self-describing chat inbound so the agent knows which notice this answers and
-    (for a dismissed blocking notice) stops waiting. The inbound is system-sourced
-    (`system:notice-reply` / `system:notice-dismiss`), rendered `[system] ...`
-    with no User envelope: a notice resolution is a notice-system event, not user
-    speech, so no user-role message is consumed and nothing is shaped like a
-    reply request.
-
-    409 when the notice does not exist, or `action` does not match the notice's
-    kind (dismiss on an FYI notice, or read on one needing a response). A bare
-    `read` on an already-resolved notice is an idempotent success (user ruling
-    2026-08-28: "Mark read" means "I have read it", so the already-read state
-    ends silently, like the normal path — the same skip-not-error semantics as
-    the batch endpoint); a note attached to that read still reaches the agent,
-    and `answer` / `dismiss` on an already-resolved notice keep the 409 so a
-    reply or a dismissal is never silently dropped. 422 when `action` is
-    `answer` without a reply.
-    """
+    # meiva:note
+    # Resolve one open notice and (when a reply is given) wake the agent with it. `action` is
+    # the explicit close verb: answer applies to both kinds — the user can reply to an FYI
+    # too (Task #1061, the reply reaches the notice's agent like a require_response answer);
+    # dismiss applies to a require_response
+    # notice, read to an FYI notice. The endpoint marks the notice resolved (resolved_at +
+    # resolution + cached reply) iff it is still open, then INSERTs a self-describing chat
+    # inbound so the agent knows which notice this answers and (for a dismissed blocking
+    # notice) stops waiting. The inbound is system-sourced, rendered inside the system-note
+    # envelope with no User envelope: a notice resolution is a notice-system event, not user
+    # speech, so no user-role message is consumed and nothing is shaped like a reply request.
+    #
+    # 409 when the notice does not exist, or `action` does not match the notice's
+    # kind (dismiss on an FYI notice, or read on one needing a response). A bare
+    # `read` on an already-resolved notice is an idempotent success (user ruling
+    # 2026-08-28: "Mark read" means "I have read it", so the already-read state
+    # ends silently, like the normal path — the same skip-not-error semantics as
+    # the batch endpoint); a note attached to that read still reaches the agent,
+    # and `answer` / `dismiss` on an already-resolved notice keep the 409 so a
+    # reply or a dismissal is never silently dropped. 422 when `action` is
+    # `answer` without a reply.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
     idempotency_key = notice_key(request, idempotency_key)
     action = body.action
     reply = body.reply
@@ -388,11 +385,11 @@ async def post_notice_resolve(
             )
         return resolution_inbound(title, action, resolved_answer.reply)
 
-    # Delivery channel: every notice resolution rides the notice-system source —
-    # a user reply as `system:notice-reply`, a bare dismiss as
-    # `system:notice-dismiss`. The claim node envelope-wraps both as "[system] ..."
-    # (base/agents/messages/envelope.py), so no User-role message is consumed and nothing is
-    # shaped like a reply request; read-without-reply still delivers nothing.
+    # meiva:note
+    # Every notice resolution rides the notice-system source (reply / dismiss); the claim node
+    # wraps both as a system note, so no User-role message is consumed and read-without-reply
+    # delivers nothing.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
     deliver_source = (
         "system:notice-reply"
         if reply is not None or body.answer is not None

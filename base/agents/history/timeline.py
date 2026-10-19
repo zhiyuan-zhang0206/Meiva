@@ -23,6 +23,7 @@ from base.agents.messages.kwargs import (
 )
 from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
 from base.lm.content import message_addl_kwargs, message_content
+from base.lm.system_note import unwrap_system_note
 
 __all__ = [
     "build_timeline_items",
@@ -60,13 +61,18 @@ _NO_TIMESTAMP_NOTE_TAGS = frozenset(
 
 
 def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
+    # meiva:note
+    # A message's text blocks joined, each rendered as its own text: a block that is one
+    # complete system note loses its envelope, because the framing is not content the card
+    # shows. The attach notice and a system-sourced inbound's body are the two such blocks.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
     from base.lm.reasoning import content_blocks
 
     if isinstance(content, str):
-        return content
+        return unwrap_system_note(content)
     if isinstance(content, list):
         return "\n".join(
-            text
+            unwrap_system_note(text)
             for b in content_blocks(content)
             if isinstance(b, dict)
             and b.get("type") == "text"
@@ -203,6 +209,10 @@ def _inbound_item(
         item_id=f"{msg_idx}.0",
         kind="inbound_chat",
         source=kwargs.get("meiva_source"),
+        # meiva:note
+        # A system source's body sits inside the envelope's note tags; the card shows the
+        # text, not the framing (the source metadata classifies it).
+        # meiva:link agent/messages/docs/message-format.meiva.okf.md
         payload=_inbound_text(raw_content),
         created_at=kwargs_read_time(kwargs),
         inbound_id=embedded_id,
@@ -291,7 +301,7 @@ def _system_note_item(
         item_id=f"{msg_idx}.0",
         kind="system_marker",
         source=note_tag,
-        payload=content,
+        payload=unwrap_system_note(content),
         created_at=created_at,
         inbound_id=None,
         show_timestamp=note_tag not in _NO_TIMESTAMP_NOTE_TAGS,
@@ -313,7 +323,7 @@ def _compact_item(
         item_id=f"{msg_idx}.0",
         kind=kind,
         source=None,
-        payload=f"{label}{ts}:\n\n{content}",
+        payload=f"{label}{ts}:\n\n{unwrap_system_note(content)}",
         created_at=created_at,
         inbound_id=None,
         compact_id=compact_id,
@@ -326,7 +336,7 @@ def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> 
         item_id=f"{msg_idx}.0",
         kind="system_marker",
         source=None,
-        payload=content,
+        payload=unwrap_system_note(content),
         created_at=created_at,
         inbound_id=None,
     )

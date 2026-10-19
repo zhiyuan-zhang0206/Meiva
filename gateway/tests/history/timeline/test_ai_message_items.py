@@ -180,7 +180,10 @@ class TestAiMessageItems:
         assert len(items) == 1
         assert items[0].kind == "system_marker"
         assert items[0].source == "agent_reply"
-        assert items[0].payload == "[system] use meiva.agents.send_message"
+        # meiva:note
+        # The timeline shows the note's text, not the envelope that carries it.
+        # meiva:link agent/messages/docs/message-format.meiva.okf.md
+        assert items[0].payload == "use meiva.agents.send_message"
 
     def test_system_note_show_timestamp_by_tag(self):
         from agent.messages import NoteTag, system_note_message

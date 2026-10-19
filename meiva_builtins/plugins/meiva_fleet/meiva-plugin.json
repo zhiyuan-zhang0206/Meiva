@@ -25,16 +25,6 @@
     ],
     "config": {
       "schema": "default_config.py"
-    },
-    "notifications": [
-      {
-        "id": "meiva_fleet.task_closed",
-        "label": "Task closed",
-        "description": "A fleet task reached a closed state.",
-        "importance": "normal",
-        "defaultEnabled": false,
-        "dedupeWindowSeconds": 0
-      }
-    ]
+    }
   }
 }

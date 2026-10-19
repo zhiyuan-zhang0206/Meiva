@@ -33,38 +33,39 @@ def default_cwd() -> str:
 
 
 class MeivaCodeState(BaseModel):
-    """plugins.meiva_code persistent state — survives across turns/restarts via LangGraph checkpoint.
-
-    - cwd: agent-maintained working directory, default `default_cwd()` (the
-      agent's workspace); the agent switches it via `meiva.cwd.set`; the
-      `meiva.files.read` wrap uses it to resolve relative paths.
-    - messages: declared base channel (exact BaseAgentState annotation) —
-      the context-file notes this plugin appends during the exec turn; the
-      exec node merges them into its own messages delta (after the exec
-      result). See the field comment below.
-    - injected_paths: set of context-file (AGENTS.md / CLAUDE.md) paths already
-      surfaced to the agent, deduped to prevent the wrap from re-injecting
-      (both auto-inject and direct agent reads mark into here; see module
-      docstring + `_wrapped_read` comment).
-    - last_seen_compact: bookmark compared against the built-in
-      `compact.version`. After compact strips messages, injected_paths is
-      lazily cleared (detected at wrap entry, not actively reset) — the same
-      monotonic version-counter reset `meiva_sdk_reminder` uses.
-    - project_skills_note: the project-local skills summary string to inject
-      as a system note when cwd changes. None when cwd has not been set or
-      the cwd is not under a git repo with project skills. Set by
-      `meiva.cwd.set()` and injected by the after-exec hook.
-    - project_skills_seen_compact: compact version bookmark for re-injection
-      after compaction. When compact.version advances past this bookmark the
-      note is re-injected (same lazy-reset pattern as injected_paths).
-      Defaults to -1 so the first injection always fires (compact.version
-      starts at 0).
-    - cwd_note: set by meiva.cwd.set() to trigger a system note injection in
-      the after-exec hook. The hook reads and clears it, injecting
-      "[system] Working directory set to ..." with optional project-skills
-      listing. Per-turn dedup: subsequent cwd.set() calls overwrite the
-      field; only the final value is injected.
-    """
+    # meiva:note
+    # plugins.meiva_code persistent state — survives across turns/restarts via LangGraph checkpoint.
+    #
+    # - cwd: agent-maintained working directory, default `default_cwd()` (the
+    # agent's workspace); the agent switches it via `meiva.cwd.set`; the
+    # `meiva.files.read` wrap uses it to resolve relative paths.
+    # - messages: declared base channel (exact BaseAgentState annotation) —
+    # the context-file notes this plugin appends during the exec turn; the
+    # exec node merges them into its own messages delta (after the exec
+    # result). See the field comment below.
+    # - injected_paths: set of context-file (AGENTS.md / CLAUDE.md) paths already
+    # surfaced to the agent, deduped to prevent the wrap from re-injecting
+    # (both auto-inject and direct agent reads mark into here; see module
+    # docstring + `_wrapped_read` comment).
+    # - last_seen_compact: bookmark compared against the built-in
+    # `compact.version`. After compact strips messages, injected_paths is
+    # lazily cleared (detected at wrap entry, not actively reset) — the same
+    # monotonic version-counter reset `meiva_sdk_reminder` uses.
+    # - project_skills_note: the project-local skills summary string to inject
+    # as a system note when cwd changes. None when cwd has not been set or
+    # the cwd is not under a git repo with project skills. Set by
+    # `meiva.cwd.set()` and injected by the after-exec hook.
+    # - project_skills_seen_compact: compact version bookmark for re-injection
+    # after compaction. When compact.version advances past this bookmark the
+    # note is re-injected (same lazy-reset pattern as injected_paths).
+    # Defaults to -1 so the first injection always fires (compact.version
+    # starts at 0).
+    # - cwd_note: set by meiva.cwd.set() to trigger a system note injection in
+    # the after-exec hook. The hook reads and clears it, injecting
+    # "Working directory set to ..." inside a system-note envelope with an
+    # optional project-skills listing. Per-turn dedup: subsequent cwd.set() calls overwrite the
+    # field; only the final value is injected.
+    # meiva:link meiva_builtins/plugins/meiva_code/docs/meiva_code.meiva.okf.md
 
     cwd: str = Field(default_factory=default_cwd)
     # Base-channel declaration: this plugin legitimately appends system notes

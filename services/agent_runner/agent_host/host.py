@@ -126,14 +126,6 @@ _HostGraph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, Ba
 RELEASE_OWNER_TIMEOUT_S = 3.0
 
 
-async def _agent_label(pool: AsyncConnectionPool, agent_id: int) -> str | None:
-    async with pool.connection() as conn:
-        row = await (
-            await conn.execute("SELECT label FROM agents WHERE id = %s", (agent_id,))
-        ).fetchone()
-    return None if row is None else row[0]
-
-
 class AgentHost:
     """Runs one agent's turns on demand, over shared machinery.
     `run_turn` is what `TurnScheduler` calls; the scheduler guarantees at most
@@ -397,7 +389,15 @@ class AgentHost:
                     else:
                         self.drop_agent(agent_id)
                         outcome = TurnOutcome(exited=False, crashed=False, native_held=True)
-                    await self._notify_turn_finished(agent_id, outcome)
+                    # meiva:note
+                    # A finished turn is a log line, not a notification: it asks the
+                    # user nothing, and at the measured 16k-34k turns a day
+                    # fleet-wide the ping was noise. The durable record is telemetry
+                    # plus the settled agent row; this DEBUG line (the file sink
+                    # records DEBUG) keeps it greppable without flooding INFO.
+                    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+                    if not outcome.crashed and not outcome.native_held and not outcome.truncated:
+                        logger.debug("hosted turn finished for agent {agent_id}", agent_id=agent_id)
             except asyncio.CancelledError:
                 # A cancelled turn (stale-turn scan, force terminate, shutdown)
                 # must not keep its runtime either: the next wake re-runs the
@@ -422,30 +422,6 @@ class AgentHost:
                     outcome,
                     resources=resources,
                 )
-
-    # meiva:note
-    # A turn that ran to completion is a delivered `core.turn_finished`
-    # notification. Interrupted turns (crash, accepted native cancel, force
-    # truncation) say nothing, and a delivery failure is logged and swallowed:
-    # the turn already committed, and a ping is never a reason to fail it.
-    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-    async def _notify_turn_finished(self, agent_id: int, outcome: TurnOutcome) -> None:
-        if outcome.crashed or outcome.native_held or outcome.truncated:
-            return
-        from base.events.notifications.publish import publish_notification
-
-        try:
-            label = await _agent_label(self._pool, agent_id)
-            name = label or f"Agent #{agent_id}"
-            await publish_notification(
-                self._pool,
-                self._bus,
-                category_id="core.turn_finished",
-                subject=f"{name} finished its turn",
-                agent_id=agent_id,
-            )
-        except Exception:
-            logger.exception("turn-finished notification failed for agent {agent}", agent=agent_id)
 
     async def _run_held_controls(
         self, agent_id: int, status: str, *, resources: HostedTurnResources | None

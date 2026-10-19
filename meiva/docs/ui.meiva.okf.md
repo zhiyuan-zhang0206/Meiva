@@ -1,7 +1,7 @@
 ---
 type: doc
 title: meiva.ui — User Interface
-description: '`meiva.ui` lets agents display rich web pages and notifications to users; serve() pages run in persistent shells owned by their agents.'
+description: '`meiva.ui` lets agents display rich web pages and post notices to users; serve() pages run in persistent shells owned by their agents.'
 tags:
 - agent-view
 - sdk
@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`meiva.ui` allows agents to display rich web pages and notifications to users. `serve()` runs in a persistent shell session owned by the serving agent and managed by the page-server daemon; `show()` registers an HTTP server the agent already owns. The page server binds the machine's reachable host (loopback on a single box) and is served to the user through the **gateway reverse proxy** — the link is the gateway's own authenticated URL (`/pages/<id>-<name>/`), so the browser never dials the page server directly.
+`meiva.ui` allows agents to display rich web pages and post notices to users. `serve()` runs in a persistent shell session owned by the serving agent and managed by the page-server daemon; `show()` registers an HTTP server the agent already owns. The page server binds the machine's reachable host (loopback on a single box) and is served to the user through the **gateway reverse proxy** — the link is the gateway's own authenticated URL (`/pages/<id>-<name>/`), so the browser never dials the page server directly.
 
 ## Core API (core SDK: page serving)
 
@@ -40,9 +40,9 @@ The daemon creates one persistent shell for each fresh `serve()` registration an
 
 The following are mounted onto the `meiva.ui` namespace by the `meiva_fleet` plugin (non-core). See plugin-side OKF for details.
 
-- `notify(title, content=None, *, require_response=False, blocking=False, priority='P2') → Notice` — Push a notification to the user, replacing your previous active notification (max one per agent). `require_response=True` requests a reply; `blocking=True` indicates you are blocked waiting. The returned `Notice` is an int subclass with `.pending_count` / `.pending_notices` / `.superseded`.
-- `edit_notice(*, title=..., content=..., priority=..., blocking=...)` — Edit the active notification (only pass fields to change; cannot change `require_response`; at most one is open, so no id).
-- `dismiss_notice()` — Dismiss the active notification (at most one is open, so no id).
+- `notify(title, content=None, *, require_response=False, blocking=False, priority='P2') → Notice` — Post a notice to the user's inbox, replacing your previous open notice (max one per agent). `require_response=True` requests a reply and is also delivered as a notification; `blocking=True` indicates you are blocked waiting. The returned `Notice` is an int subclass with `.pending_count` / `.pending_notices` / `.superseded`.
+- `edit_notice(*, title=..., content=..., priority=..., blocking=...)` — Edit the open notice (only pass fields to change; cannot change `require_response`; at most one is open, so no id).
+- `dismiss_notice()` — Dismiss the open notice (at most one is open, so no id).
 
 ### Priority
 P0 (highest) → P1 → P2 (default) → P3 (lowest). This is advisory—does not affect processing order.
