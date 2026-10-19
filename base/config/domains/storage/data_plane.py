@@ -437,18 +437,22 @@ class DataPlaneSettings(EnvSettings):
         default=5.0,
         alias="MEIVA_DB_POOL_RESTORE_TIMEOUT_SECONDS",
         description=(
-            "Statement budget, in seconds, for one per-borrow session restore "
-            "(RESET ALL plus the baseline SET), separate from the wait for a free "
-            "connection (db_pool_acquire_timeout_seconds does that). It bounds "
-            "what the backend itself can observe: a lock wait or a slow statement "
-            "inside the restore now fails at this budget (5 s), the pool counts "
-            "the check as failed and retries against its own deadline, and the "
-            "borrower no longer inherits the wait. It does not bound a backend "
-            "wedged in uninterruptible I/O, the WAL flush inside COMMIT, or a "
-            "client/network wait — statement_timeout cannot reach those, and the "
-            "2026-10-18 write stall (check_ms 389 s at host level) was that "
-            "class. Every process that pools connections runs this restore, so "
-            "the field lives in the data_plane domain, not in the agent-only one."
+            "Budget, in seconds, for one per-borrow session restore (RESET ALL "
+            "plus the baseline SET), separate from the wait for a free connection "
+            "(db_pool_acquire_timeout_seconds does that). It becomes two session "
+            "settings on this connection only: statement_timeout = the budget, "
+            "which ends a lock wait or a slow statement and leaves the connection "
+            "usable, and a LOCAL transaction_timeout one second later, which ends "
+            "a stalled COMMIT (the WAL flush statement_timeout cannot interrupt) "
+            "by terminating the session; LOCAL means the borrower's own "
+            "transactions never inherit either ceiling. A restore that blows the "
+            "budget logs db_pool_restore_timeout with the timer that ended it, and "
+            "the pool counts the check as failed and retries against its own "
+            "deadline. Neither timer reaches a backend wedged in uninterruptible "
+            "I/O or a client/network wait — the 2026-10-18 write stall (check_ms "
+            "389 s at host level) was that class. Every process that pools "
+            "connections runs this restore, so the field lives in the data_plane "
+            "domain, not in the agent-only one."
         ),
         gt=0,
         json_schema_extra={

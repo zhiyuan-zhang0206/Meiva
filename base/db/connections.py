@@ -138,18 +138,27 @@ PG_POOLED_BASELINE_RESTORE_SQL: tuple[LiteralString, LiteralString] = (
 
 
 # meiva:note
-# The scrub plus the statement budget for one restore, in a single
-# simple-protocol round trip: the budget has to be in force before the restore
-# touches the server, so it rides with the `RESET ALL` (the caller's
-# `prepare=False` is what lets both statements travel in one message). What it
-# bounds is what the backend can observe — a lock wait or a slow statement
-# inside the restore. It does not bound a backend wedged in uninterruptible
-# I/O, the WAL flush inside COMMIT, or a client/network wait; the 2026-10-18
-# 389 s check was that class, so #5303's client-side deadline stays a separate
-# item. The next statement restores the session's standing ceiling
-# (`db_pool_restore_timeout_seconds` owns the value). Read lazily because this
-# module is on the exec child's boot path (task #3621); `budget_seconds`
-# overrides the configured value for one restore.
+# The scrub plus the two budgets for one restore, in a single simple-protocol
+# round trip: they have to be in force before the restore touches the server,
+# so they ride with the `RESET ALL`. psycopg sends a parameterless text query
+# over the simple protocol, which is what allows more than one statement in one
+# message; `prepare=False` pins that path whatever the connection's
+# `prepare_threshold` says. Both budgets carry the same value. The transaction
+# timer (Postgres 17) starts at BEGIN — a hair before the first statement — so
+# in practice it is the one that ends a blown restore, and terminating the
+# session is the outcome we want for a backend that stalled: the pool replaces
+# it instead of reusing it. `statement_timeout` still bounds the statement on a
+# connection whose transaction the timer cannot span. `SET LOCAL` reverts both
+# at the restore's own COMMIT, so a borrower's later transactions on this
+# backend never inherit a 5 s ceiling (checked by
+# `test_a_normal_transaction_after_a_restore_is_not_terminated`). Neither
+# budget reaches a backend wedged in uninterruptible I/O or a client/network
+# wait; the 2026-10-18 389 s check was that class, so #5303's client-side
+# deadline stays a separate item. The next statement restores the session's
+# standing statement ceiling (`db_pool_restore_timeout_seconds` owns the
+# value). Read lazily because this module is on the exec child's boot path
+# (task #3621); `budget_seconds` overrides the configured value for one
+# restore.
 def restore_budget_statement(budget_seconds: float | None = None) -> tuple[LiteralString, int]:
     from base.config import settings
 
@@ -157,7 +166,10 @@ def restore_budget_statement(budget_seconds: float | None = None) -> tuple[Liter
         budget_seconds = settings.data_plane.db_pool_restore_timeout_seconds
     budget_ms = max(1, int(budget_seconds * 1000))
     reset = PG_POOLED_BASELINE_RESTORE_SQL[0]
-    return cast(LiteralString, f"{reset}; SET statement_timeout = {budget_ms}"), budget_ms
+    statement = (
+        f"{reset}; SET statement_timeout = {budget_ms}; SET LOCAL transaction_timeout = {budget_ms}"
+    )
+    return cast(LiteralString, statement), budget_ms
 
 
 # The second statement on the borrow that also reads the cluster's minimum code
@@ -218,25 +230,35 @@ def restore_pooled_session(
             conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
         conn.commit()
     except psycopg.errors.QueryCanceled:
-        _log_restore_timeout(started, budget_ms=budget_ms, gate=gate)
+        _log_restore_timeout(started, budget_ms=budget_ms, gate=gate, ended_by="statement_timeout")
+        raise
+    except psycopg.errors.TransactionTimeout:
+        _log_restore_timeout(
+            started, budget_ms=budget_ms, gate=gate, ended_by="transaction_timeout"
+        )
         raise
 
 
 # meiva:note
-# One db_pool_restore_timeout event per restore that blew its budget:
-# psycopg_pool treats the raised cancellation as a failed check and retries
-# against its own deadline, so the borrower stops waiting out the stall.
-def _log_restore_timeout(started: float, *, budget_ms: int, gate: ProcessDbGate) -> None:
+# One db_pool_restore_timeout event per restore that blew its budget, naming the
+# budget that ended it: `statement_timeout` cancels the statement and leaves the
+# connection usable, `transaction_timeout` terminates the session (the pool
+# replaces it). psycopg_pool treats either as a failed check and retries against
+# its own deadline, so the borrower stops waiting out the stall.
+def _log_restore_timeout(
+    started: float, *, budget_ms: int, gate: ProcessDbGate, ended_by: str
+) -> None:
     from base.log import logger
 
     logger.warning(
         "[db pool] {name} session restore exceeded its {budget_ms}ms budget after "
-        "{elapsed_ms}ms — the pool counts the check as failed and retries, so this "
-        "borrower does not wait out the stall",
+        "{elapsed_ms}ms ({ended_by}) — the pool counts the check as failed and "
+        "retries, so this borrower does not wait out the stall",
         event="db_pool_restore_timeout",
         name=gate.application_name(),
         budget_ms=budget_ms,
         elapsed_ms=int((time.monotonic() - started) * 1000),
+        ended_by=ended_by,
     )
 
 
@@ -266,7 +288,12 @@ async def restore_pooled_session_async(
             await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
         await conn.commit()
     except psycopg.errors.QueryCanceled:
-        _log_restore_timeout(started, budget_ms=budget_ms, gate=gate)
+        _log_restore_timeout(started, budget_ms=budget_ms, gate=gate, ended_by="statement_timeout")
+        raise
+    except psycopg.errors.TransactionTimeout:
+        _log_restore_timeout(
+            started, budget_ms=budget_ms, gate=gate, ended_by="transaction_timeout"
+        )
         raise
 
 
