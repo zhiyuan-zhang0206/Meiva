@@ -6,6 +6,7 @@ import psycopg
 import pytest
 from fastapi import HTTPException
 
+from base.agents.birth.harness import LAUNCHABLE_HARNESSES
 from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import MachineIdentitySetter
@@ -88,24 +89,25 @@ async def test_a_remote_machine_answers_from_its_own_runner(
 
 
 # meiva:note
-# Installed-but-unstartable must not read as a working choice, and an uninstalled
-# harness must not read as launchable either. LAUNCHABLE_HARNESSES holds only the
-# built-in runtime until #6393 adds the external launchers, so every external
-# harness reads not-launchable today; when that lands these expectations flip on
-# purpose, and the test follows the set rather than pinning the current answer.
+# Installed-but-unstartable must not read as a working choice, and a harness without
+# a launcher must not read as launchable either. Which harnesses have a launcher is
+# read from LAUNCHABLE_HARNESSES rather than pinned to one that cannot launch today,
+# so adding an adapter does not turn this red and removing one does. The built-in
+# runtime is the exception the rule names: it needs neither an install nor a login,
+# so its probe row says nothing about whether it can run.
 # meiva:link base/agents/docs/harness.meiva.okf.md
-def test_launchable_needs_a_launcher_and_a_machine_that_can_run_it() -> None:
-    available = HarnessProbeRow(harness=Harness.CLAUDE_CODE, status="available", reason="signed in")
-    unknown = HarnessProbeRow(harness=Harness.CLAUDE_CODE, status="unknown", reason="login unknown")
-    missing = HarnessProbeRow(
-        harness=Harness.CLAUDE_CODE, status="unavailable", reason="not installed"
-    )
-    builtin = HarnessProbeRow(harness=Harness.MEIVA, status="available", reason="built in")
+@pytest.mark.parametrize("harness", list(Harness))
+def test_launchable_needs_a_launcher_and_a_machine_that_can_run_it(harness: Harness) -> None:
+    available = HarnessProbeRow(harness=harness, status="available", reason="signed in")
+    assert launchable(available) is (harness in LAUNCHABLE_HARNESSES)
 
-    assert launchable(available) is False
+    if harness is Harness.MEIVA:
+        return
+
+    unknown = HarnessProbeRow(harness=harness, status="unknown", reason="login unknown")
+    missing = HarnessProbeRow(harness=harness, status="unavailable", reason="not installed")
     assert launchable(unknown) is False
     assert launchable(missing) is False
-    assert launchable(builtin) is True
 
 
 def test_rows_carry_status_and_reason_through() -> None:
