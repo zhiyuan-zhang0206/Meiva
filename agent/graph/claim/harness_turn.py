@@ -12,11 +12,13 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
+from agent.graph.llm_errors import FatalLLMStreamError
 from agent.nodes import CLAIM
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.events.live.projection import Cancelled
 from base.lm.content import message_content
+from base.lm.harness import HarnessClosedError, HarnessTurnFaultedError
 from base.lm.harness.engine import HarnessTurn, TurnEngine
 from base.lm.usage import log_usage_fields
 from base.log import logger
@@ -79,6 +81,14 @@ def turn_key(messages: Sequence[BaseMessage]) -> str:
     return f"window-{len(messages)}"
 
 
+# meiva:note
+# One graph step, one wait: the pending messages go to the harness, and every turn
+# completion that comes back — the handoff turn first, on a session that has just
+# woken — becomes its own assistant message, so a waking acknowledgement never reads
+# as the reply to the first chat. A session that faults or closes under the turn is
+# raised as a fatal stream abort: the turn cannot finish, so it settles as a failure
+# rather than leaving half a reply, and the next inbound may start a fresh session.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 async def harness_turn_node(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
@@ -113,21 +123,38 @@ async def harness_turn_node(
         _announce_cancel(ctx, agent_id)
         await interrupt_engine(agent_id, bridge)
         return Command[HarnessGoto](update={"halted": True}, goto=CLAIM)
+    except (HarnessTurnFaultedError, HarnessClosedError) as exc:
+        raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
 
-    log_turn_usage(ctx, agent_id, bridge.model, turn)
+    turns = (*turn.prelude, turn)
+    for completed in turns:
+        log_turn_usage(ctx, agent_id, bridge.model, completed)
     return Command[HarnessGoto](
         update={
-            "messages": [AIMessage(content=turn.text)],
-            "harness_cursor": len(state.messages) + 1,
+            "messages": [AIMessage(content=completed.text) for completed in turns],
+            "harness_cursor": len(state.messages) + len(turns),
             "halted": True,
         },
         goto=CLAIM,
     )
 
 
+# meiva:note
+# The waited turn is captured and raised after the group closes, the way
+# `interruptible_model` does it: a TaskGroup wraps a lone body error in an
+# ExceptionGroup, and the node matches a faulted session on the error's own type, so
+# the identity has to survive this scope. A cancelled turn keeps its CancelledError
+# for the same reason.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 async def _ticking(
     mark: Callable[[int], None], agent_id: int, turn: Awaitable[HarnessTurn]
 ) -> HarnessTurn:
+    async def settle() -> HarnessTurn | BaseException:
+        try:
+            return await turn
+        except BaseException as error:
+            return error
+
     async def tick() -> None:
         while True:
             await asyncio.sleep(PROGRESS_TICK_SECONDS)
@@ -135,12 +162,13 @@ async def _ticking(
 
     async with asyncio.TaskGroup() as tasks:
         ticker = tasks.create_task(tick(), name=f"harness-progress-{agent_id}")
-        try:
-            return await turn
-        finally:
-            ticker.cancel()
-            with suppress(asyncio.CancelledError):
-                await ticker
+        outcome = await settle()
+        ticker.cancel()
+        with suppress(asyncio.CancelledError):
+            await ticker
+    if isinstance(outcome, BaseException):
+        raise outcome
+    return outcome
 
 
 # meiva:note

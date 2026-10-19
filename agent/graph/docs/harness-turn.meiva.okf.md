@@ -69,8 +69,14 @@ is why an agent id must be stable across resurrect.
   which harness it is; `SessionRecord.harness` is what makes that check possible.
 - `run_turn` submits with the newest inbound row id as its idempotency key and
   waits for **that** turn's completion. A session opened with a handoff reports
-  that turn first; its usage is counted with the turn being waited for, and its
-  text is not shown.
+  that turn first; it comes back as a `prelude` entry with its own text and usage,
+  and the node commits it as its own message, so the waking acknowledgement never
+  reads as the answer to the first chat.
+- A session that faults or closes mid-turn retires itself: the bridge drops it, and
+  the next inbound opens a fresh one from the registry, where the provider still
+  holds the transcript. The node raises that as a fatal stream abort, so the graph
+  settles the turn the way it settles any aborted model call rather than stopping
+  with half a reply in the window.
 - `interrupt` is called from the node's cancel race: the durable cancel path is
   the existing `subscribe_interrupt`, and the adapter's `settled` report is logged
   as it came back — `None` (unobservable CLI tree) is not rounded up to "reaped".
@@ -86,9 +92,8 @@ nothing.
 
 ## What this slice does not do
 
-Streaming deltas to the timeline, tool-call timeline items, explicit `/compact`
-requests, and attributing the cold-start handoff turn as its own message are not
-wired yet; they are the next slices of the same node.
+Streaming deltas to the timeline, tool-call timeline items and explicit `/compact`
+requests are not wired yet; they are the next slices of the same node.
 
 A cancelled turn keeps its message in the window and does not advance the cursor,
 so the next turn re-submits it — the same shape as the built-in loop, which keeps
