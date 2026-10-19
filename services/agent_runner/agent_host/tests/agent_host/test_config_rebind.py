@@ -664,7 +664,7 @@ class TestRunnability:
         # A row born on a harness this release cannot start keeps the value as an
         # intent; it must not quietly run the built-in loop instead.
         # meiva:link base/agents/docs/harness.meiva.okf.md
-        host, graph, _ = wired({1: Row(harness="codex")})
+        host, graph, _ = wired({1: Row(harness="antigravity")})
         await asyncio.wait_for(host.run_turn(1), 2)
         assert graph.observations == []
         assert host.stats.wakes_skipped == 1
