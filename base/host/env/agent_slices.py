@@ -107,6 +107,16 @@ class AgentKernel:
     heartbeat_pause_max_seconds: float
 
 
+# meiva:note
+# The knobs a hosted turn hands its external CLI. Separate from `kernel` because they
+# decide how another program is launched, not how this agent's own loop runs, and they
+# are the daemon-domain settings a turn resolves.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+@dataclass(frozen=True)
+class HarnessCli:
+    harness_skip_permissions: bool
+
+
 def _value(pins: Mapping[str, Any], name: str, default_reader: Callable[[str, str], Any]) -> Any:
 
     value = pins[name] if name in pins else default_reader(FIELD_DOMAINS[name], name)
@@ -173,6 +183,7 @@ class AgentSlices:
     overrides: ModelOverrides
     sandbox: Sandbox
     kernel: AgentKernel
+    harness_cli: HarnessCli
 
     pins: Mapping[str, Any]
     plugin_pins: Mapping[str, Mapping[str, Any]]
@@ -205,6 +216,7 @@ class AgentSlices:
             overrides=ModelOverrides(**_kwargs(ModelOverrides, pins, default_reader)),
             sandbox=Sandbox(**_kwargs(Sandbox, pins, default_reader)),
             kernel=AgentKernel(**_kwargs(AgentKernel, pins, default_reader)),
+            harness_cli=HarnessCli(**_kwargs(HarnessCli, pins, default_reader)),
             pins=MappingProxyType(dict(pins)),
             plugin_pins=MappingProxyType({p: dict(f) for p, f in plugin_pins.items()}),
             _plugin_view=PluginConfigView(plugin_configs or {}, plugin_pins),

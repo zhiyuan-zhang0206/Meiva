@@ -413,7 +413,7 @@ async def build_runtime(
             registrations=registrations,
             registration_ttl_seconds=registration_ttl_seconds,
             machine=machine,
-            skip_permissions=bool(slices.read("daemon", "harness_skip_permissions")),
+            skip_permissions=slices.harness_cli.harness_skip_permissions,
         ),
     )
 

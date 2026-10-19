@@ -41,18 +41,23 @@ def _newest_agent(conn: psycopg.Connection) -> int:
     return int(row[0])
 
 
-def _refused_launch(client: TestClient, body: dict[str, object]) -> tuple[int, dict[str, object]]:
+def _spawn(client: TestClient, body: dict[str, object]) -> int:
+    # meiva:note
+    # These cases used to reach the row through a launch the runner refused, with
+    # antigravity as the standing example of a harness without a launcher. The release
+    # that gave antigravity its launcher removed that example, so the row is reached
+    # the ordinary way; the refused-launch receipt keeps its own coverage in
+    # `tests/lifecycle/test_spawn_forward.py` and `tests/test_agents_endpoints.py`.
+    # meiva:link base/agents/docs/harness.meiva.okf.md
     response = spawn_via_http(client, {"spawner": "user", **body})
-    assert response.status_code == 502, response.text
-    receipt = response.json()
-    assert receipt["reason"] == "agent_launch_failed"
-    return int(receipt["agent_id"]), receipt
+    assert response.status_code == 201, response.text
+    return int(response.json()["id"])
 
 
 class TestSpawnHarness:
     def test_spawn_records_the_requested_harness(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            agent, _ = _refused_launch(client, {"harness": "antigravity"})
+            agent = _spawn(client, {"harness": "antigravity"})
         assert _harness(db_conn, agent) == "antigravity"
 
     def test_spawn_without_a_harness_runs_the_builtin_runtime(
@@ -75,9 +80,9 @@ class TestSpawnHarness:
         self, db_conn: psycopg.Connection
     ) -> None:
         with gateway_test_client() as client:
-            source, _ = _refused_launch(client, {"harness": "antigravity"})
+            source = _spawn(client, {"harness": "antigravity"})
             _checkpoint(db_conn, source)
-            fork, _ = _refused_launch(client, {"fork_from": source})
+            fork = _spawn(client, {"fork_from": source})
         assert _harness(db_conn, source) == "antigravity"
         assert _harness(db_conn, fork) == "antigravity"
 
@@ -96,7 +101,7 @@ class TestSpawnHarness:
 
     def test_fork_naming_its_own_harness_is_not_refused(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            source, _ = _refused_launch(client, {"harness": "antigravity"})
+            source = _spawn(client, {"harness": "antigravity"})
             _checkpoint(db_conn, source)
-            fork, _ = _refused_launch(client, {"fork_from": source, "harness": "antigravity"})
+            fork = _spawn(client, {"fork_from": source, "harness": "antigravity"})
         assert _harness(db_conn, fork) == "antigravity"

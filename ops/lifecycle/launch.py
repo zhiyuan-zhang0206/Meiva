@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Collection
 
 from psycopg_pool import ConnectionPool
 
@@ -51,7 +52,11 @@ async def launch_agent_op(
 
 
 def validate_launch_row(
-    db_pool: ConnectionPool, body: LaunchAgentRequest, *, local_machine: str
+    db_pool: ConnectionPool,
+    body: LaunchAgentRequest,
+    *,
+    local_machine: str,
+    launchable: Collection[Harness] = LAUNCHABLE_HARNESSES,
 ) -> None:
     """A stale attempt cannot wake an identity now placed somewhere else."""
     with db_pool.connection() as conn, conn.cursor() as cur:
@@ -68,10 +73,10 @@ def validate_launch_row(
     # running the built-in loop under an external harness label.
     # meiva:link base/agents/docs/harness.meiva.okf.md
     harness = Harness(row[3])
-    if harness not in LAUNCHABLE_HARNESSES:
+    if harness not in launchable:
         raise ValueError(
             f"agent {body.agent_id} was born on harness {harness.value!r}, which has no "
-            f"launcher yet; only {sorted(item.value for item in LAUNCHABLE_HARNESSES)} can "
+            f"launcher yet; only {sorted(item.value for item in launchable)} can "
             f"start a session today"
         )
 
