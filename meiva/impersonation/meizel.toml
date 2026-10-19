@@ -2,6 +2,3 @@ exports = ["attachment.py"]
 
 [uses]
 "__init__.py" = ["attachment.py"]
-
-[loads]
-"attachment.py" = ["agent/extensions"]
