@@ -23,13 +23,17 @@ directory. The manifest is the single expression of the built-in policy
 | `self-evolution-daily` | `self-evolution-daily-schedule.py` | product | **enabled** |
 | `self-evolution-weekly` | `self-evolution-weekly-schedule.py` | product | **enabled** |
 | `model-update-tracker` | `model-update-tracker-schedule.py` | product | **enabled** |
+| `db-write-stall-watch` | `db-write-stall-watch-schedule.py` | operator | disabled |
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
   tracking, debt clearing, CI observability) are Meiva's own
   improvement loops — they ship and start by default.
 - **operator** schedules (cluster-operator tooling) ship with the product but
   start **disabled**: they exist so they are discoverable, and start only when
-  the operator enables them. None ships today.
+  the operator enables them. `db-write-stall-watch` is the first: three
+  consecutive minutes under 20 xacts/s with an average query time above 300 ms
+  means the write path has stopped completing transactions, which is the
+  root-cause signal an agent-host crash wave follows.
 
 The adversarial weekly batch owns its counted loopback HTTP server in a lexical
 scope. One batch-local executor serves requests while the batch updates the
