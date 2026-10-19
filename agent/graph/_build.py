@@ -182,11 +182,7 @@ def build_graph(
         ),
         input_schema=state_cls,
     )
-    g.add_node(  # pyright: ignore[reportUnknownMemberType]
-        HARNESS_TURN,
-        cast("Any", harness_turn_node),
-        input_schema=state_cls,
-    )
+    g.add_node(HARNESS_TURN, cast("Any", harness_turn_node), input_schema=state_cls)  # pyright: ignore[reportUnknownMemberType]
     g.add_edge(START, AFTER_INIT)
     if checkpointer is None:
         checkpointer = MemorySaver()
