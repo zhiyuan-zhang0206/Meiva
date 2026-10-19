@@ -4,9 +4,18 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.claude_sdk import DEFAULT_MODEL, SessionClosedError
+from base.lm.claude_sdk import (
+    DEFAULT_MODEL,
+    ClusterFact,
+    EntryPoint,
+    FileSessionRegistry,
+    Handoff,
+    SessionClosedError,
+)
 from base.lm.claude_sdk.events import (
+    HandoffInjected,
     RateLimitObserved,
+    SessionBound,
     SessionClosed,
     SessionFaulted,
     SessionStarted,
@@ -27,8 +36,8 @@ async def test_options_carry_the_boundary_invariants(tmp_path: Path) -> None:
         assert options.strict_mcp_config is True
         assert options.include_partial_messages is True
         assert "Bash" in list(options.tools or [])
-        assert "Read" in options.allowed_tools
         assert options.env.get("ANTHROPIC_API_KEY") == ""
+        assert options.permission_mode == "bypassPermissions"
     finally:
         await harness.stop()
 
@@ -128,3 +137,98 @@ async def test_dropped_deltas_are_counted_when_nothing_drains(tmp_path: Path) ->
         assert harness.session.dropped_deltas == 1
     finally:
         await harness.stop()
+
+
+async def test_start_binds_the_agent_id_to_the_session(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    harness = await start(tmp_path, agent_id=6984, registry=registry, session_id="sess-a")
+    try:
+        bound = await harness.wait_for(lambda event: isinstance(event, SessionBound))
+        assert bound.agent_id == 6984
+        assert bound.session_id == "sess-a"
+        assert bound.resumed is False
+        record = registry.load(6984)
+        assert record is not None
+        assert record.session_id == "sess-a"
+        assert record.model == DEFAULT_MODEL
+        assert record.cwd == str(tmp_path)
+        assert record.resumes == 0
+        assert harness.session.record == record
+    finally:
+        await harness.stop()
+
+
+async def test_second_session_resumes_from_the_registry(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    first = await start(tmp_path, agent_id=7001, registry=registry, session_id="sess-first")
+    try:
+        await first.wait_for(lambda event: isinstance(event, SessionBound))
+    finally:
+        await first.stop()
+
+    second = await start(tmp_path, agent_id=7001, registry=registry)
+    try:
+        assert second.client.options.resume == "sess-first"
+        assert second.session.resumed is True
+        bound = await second.wait_for(
+            lambda event: isinstance(event, SessionBound) and event.resumed
+        )
+        assert bound.session_id == "sess-first"
+        record = registry.load(7001)
+        assert record is not None
+        assert record.resumes == 1
+    finally:
+        await second.stop()
+
+
+async def test_handoff_is_injected_as_the_first_turn(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    handoff = Handoff(
+        agent_id=6984,
+        instruction="Read hello.txt and reply with the third word.",
+        machine="macmini",
+        workspace=tmp_path,
+        label="claude-sdk-bridge",
+        cluster=(ClusterFact("macmini", "primary host"),),
+        entries=(EntryPoint("meiva.files", "read and write files"),),
+    )
+    harness = await start(
+        tmp_path,
+        agent_id=6984,
+        registry=registry,
+        handoff=handoff,
+        scripts=[[Say("ack")], [Say("brown")]],
+    )
+    try:
+        injected = await harness.wait_for(lambda event: isinstance(event, HandoffInjected))
+        assert injected.agent_id == 6984
+        assert injected.size_bytes == handoff.size_bytes()
+        outcome = await harness.session.submit("Read hello.txt.").outcome()
+        assert outcome.text == "brown"
+        assert harness.client.queries == [handoff.render().strip(), "Read hello.txt."]
+    finally:
+        await harness.stop()
+
+
+async def test_resume_does_not_reinject_the_handoff(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    handoff = Handoff(agent_id=7002, instruction="Say OK.", machine="macmini", workspace=tmp_path)
+    first = await start(
+        tmp_path, agent_id=7002, registry=registry, handoff=handoff, scripts=[[Say("OK")]]
+    )
+    try:
+        await first.wait_for(lambda event: isinstance(event, SessionBound))
+        await first.session.submit("go").outcome()
+    finally:
+        await first.stop()
+
+    second = await start(
+        tmp_path, agent_id=7002, registry=registry, handoff=handoff, scripts=[[Say("still here")]]
+    )
+    try:
+        assert second.session.resumed is True
+        assert second.client.queries == []
+        assert (await second.session.submit("go").outcome()).text == "still here"
+        assert second.of(HandoffInjected) == []
+    finally:
+        await second.stop()

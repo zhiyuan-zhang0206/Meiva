@@ -19,12 +19,9 @@ class BridgeConfig:
     cwd: Path
     model: str = DEFAULT_MODEL
     tools: tuple[str, ...] = ("Read", "Grep", "Glob", "Edit", "Write", "Bash")
-    allowed_tools: tuple[str, ...] = ("Read", "Grep", "Glob")
-    permission_mode: str = "default"
-    system_prompt: str | None = None
+    permission_mode: str = "bypassPermissions"
     max_turns: int | None = 24
     auth: AuthConfig = field(default_factory=AuthConfig)
-    approval_timeout_seconds: float = 120.0
     turn_timeout_seconds: float = 900.0
     cancel_settle_seconds: float = 5.0
     max_pending_turns: int = 32
