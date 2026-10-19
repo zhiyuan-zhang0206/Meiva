@@ -8,9 +8,16 @@ Settings, a log sink or a database.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
-__all__ = ["default_home", "home_checkout_error", "is_default_home", "resolve_meiva_home"]
+__all__ = [
+    "default_home",
+    "home_checkout_error",
+    "is_default_home",
+    "is_prod_install",
+    "resolve_meiva_home",
+]
 
 
 def resolve_meiva_home() -> Path:
@@ -71,3 +78,18 @@ def default_home() -> Path:
 def is_default_home(home: Path) -> bool:
     """Whether `home` is the default prod home (`~/.meiva`)."""
     return Path(home).expanduser().resolve() == default_home().resolve()
+
+
+# meiva:note
+# Host-global wiring (the `~/.local/bin/meiva` symlink, the shell rc edit, the boot
+# unit) belongs to the host's one prod install, never to a dev cluster spun up from
+# a worktree: a worktree's wiring would dangle once the checkout is removed. The
+# home must be the default one too, because a dev worktree resolves its home to
+# `~/.meiva` whenever MEIVA_HOME is unset.
+def is_prod_install(
+    *, repo: Path, home: Path, is_default: Callable[[Path], bool] = is_default_home
+) -> bool:
+    resolved = str(repo.resolve())
+    if ".claude/worktrees" in resolved or "/.worktrees/" in resolved:
+        return False
+    return is_default(home)
