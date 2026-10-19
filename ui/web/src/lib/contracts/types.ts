@@ -780,7 +780,16 @@ export interface TaskRow extends TaskSummaryRow {
   readonly results: string | null;
 }
 
-export type TaskFields = "full" | "summary";
+// meiva:note
+// What the Fleet task graph reads: the summary columns plus the description the
+// board renders. `results` is left out - it is 85% of the full list's bytes and
+// only the hover card shows it, which reads the one row it displays.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+export interface TaskGraphRow extends TaskSummaryRow {
+  readonly description: string;
+}
+
+export type TaskFields = "full" | "summary" | "graph";
 
 export interface TaskListResponse<T extends TaskSummaryRow = TaskSummaryRow> {
   readonly tasks: readonly T[];

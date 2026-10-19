@@ -78,6 +78,7 @@
     },
     "reminders": "{count, plural, one {# reminder} other {# reminders}}",
     "lastReminder": "last {time}",
+    "fullFailed": "Could not load the full task.",
     "openOwnerConversation": "Double-click the node to open the owner's conversation",
     "stale": "Stale",
     "window": "Time window",
