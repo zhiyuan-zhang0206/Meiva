@@ -26,6 +26,11 @@ dependencies = [
     # 3.1.3 ships langgraph#8556 (the delta walk cursor starts at the target),
     # so Meiva reads pagination from upstream instead of overriding it.
     "langgraph-checkpoint-postgres>=3.1.3",
+    # Imported directly: base/agents/history/checkpoint_postgres_walks.py reads
+    # `writes_sort_key` (added in 4.3.0) from `langgraph.checkpoint.base`. The
+    # postgres pin above supplies it transitively today; the direct import is
+    # declared so a future postgres pin cannot silently resolve an older one.
+    "langgraph-checkpoint>=4.3",
     "fastapi>=0.120",
     "uvicorn[standard]>=0.40",
     "loguru>=0.7.3",
