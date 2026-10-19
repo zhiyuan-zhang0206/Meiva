@@ -29,7 +29,7 @@ from base.agents.incarnation.resources import (
 )
 from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.paths import exec_run_dir
+from base.paths import exec_domains_dir
 
 
 def process_ended(identity: ResourceProcess) -> bool:
@@ -135,9 +135,7 @@ def _completed_allocations(
     for allocation in state.requests.values():
         if allocation.owner_process is None or not process_ended(allocation.owner_process):
             continue
-        directory = (
-            exec_run_dir(home) / str(agent_id) / "domains" / str(allocation.request)
-        ).resolve()
+        directory = (exec_domains_dir(home, agent_id) / str(allocation.request)).resolve()
         if _verify_closed_receipt(target, allocation, directory):
             completed.append(allocation)
     return completed

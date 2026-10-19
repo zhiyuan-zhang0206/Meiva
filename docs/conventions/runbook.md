@@ -801,6 +801,21 @@ the command observed (`status='done'`, `observed_at` set, only while it is still
 commit-time guard rejects (task #3678) — and never clear the pointer without
 settling the command, which only makes the failure invisible.
 
+### Exec run-directory hygiene
+
+`run/exec/<agent>/domains/<request>/` holds one managed exec run until its owner
+settles it. Inspect and remove the settled leftovers with
+`python -m base.agents.incarnation.exec_domain_cleanup --agent <id>`: it reports
+by default, `--all-agents` covers the whole home, and `--delete` is the only
+destructive switch. A directory is removable only when the agent's stored
+allocation set no longer holds its request, no live process names its envelope,
+and it is past the retention margin; everything else is retained with its reason.
+
+Never glob the run tree yourself. An unrelated pass that deletes a live request
+envelope wedges the run it belonged to (issue #5362), and a cross-agent glob
+reaches every run on the machine. See
+[exec domain directory cleanup](../../base/agents/incarnation/docs/exec-domain-cleanup.meiva.okf.md).
+
 
 
 ## Observability / Tracing
