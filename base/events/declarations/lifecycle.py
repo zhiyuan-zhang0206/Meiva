@@ -63,6 +63,38 @@ class NativeCancelUncertain(TypedDict):
     work_id: str
 
 
+# meiva:note
+# These payloads carry what the bridge learned, never what it hoped. `settled=None`
+# means the adapter never observed the process tree (its provider SDK exposes the pid
+# through a private structure), so it is reported as unknown rather than as reaped; a
+# close that leaves processes behind names how many. Emit sites: the interrupt pair in
+# `agent/graph/claim/harness_turn.py:interrupt_engine`, the rest in
+# `base/lm/harness/process.py:settle_close` and the session closers that call it.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+class HarnessInterrupt(TypedDict):
+    agent_id: int
+    settled: bool | None
+    turn_id: str | None
+
+
+class HarnessCloseUnobserved(TypedDict):
+    harness: str
+    agent_id: int | None
+
+
+class HarnessCloseSettled(TypedDict):
+    harness: str
+    agent_id: int | None
+    waited_ms: float
+
+
+class HarnessCloseResidue(TypedDict):
+    harness: str
+    agent_id: int | None
+    remaining: int
+    waited_ms: float
+
+
 EVENTS: dict[str, EventSpec] = {
     "native_cancel_uncertain": telemetry_event(
         "native_cancel_uncertain",
@@ -136,6 +168,53 @@ EVENTS: dict[str, EventSpec] = {
         "launch_failures",
         "this start could not read the launch-failure report, so the unlaunched sessions it "
         "recorded stay unreported to the rollout aftermath block",
+        tier="anomaly",
+    ),
+    "harness_interrupt": telemetry_event(
+        "harness_interrupt",
+        "an external harness turn was interrupted; the adapter's settle answer is carried as "
+        "it came back",
+        payload=HarnessInterrupt,
+        tier="noise",
+    ),
+    "harness_interrupt_failed": telemetry_event(
+        "harness_interrupt_failed",
+        "interrupting an external harness turn raised; the durable cancel row stays pending "
+        "and claim dispatches it again on the next pass",
+        tier="anomaly",
+    ),
+    "harness_close_settled": telemetry_event(
+        "harness_close_settled",
+        "an external harness session closed and none of its observed processes survived",
+        payload=HarnessCloseSettled,
+        tier="noise",
+    ),
+    "harness_close_unobserved": telemetry_event(
+        "harness_close_unobserved",
+        "an external harness session closed without ever observing its process tree; the "
+        "close answers unknown, not settled",
+        payload=HarnessCloseUnobserved,
+        tier="noise",
+    ),
+    "harness_close_residue": telemetry_event(
+        "harness_close_residue",
+        "closing an external harness session left processes running after the settle window",
+        payload=HarnessCloseResidue,
+        tier="anomaly",
+    ),
+    "harness_close_failed": telemetry_event(
+        "harness_close_failed",
+        "closing an external harness session raised",
+        tier="anomaly",
+    ),
+    "harness_close_failures": telemetry_event(
+        "harness_close_failures",
+        "external harness session closes raised while the agent host was running",
+        tier="anomaly",
+    ),
+    "harness_registration_unreadable": telemetry_event(
+        "harness_registration_unreadable",
+        "a harness registration row could not be read during the sweep and is left in place",
         tier="anomaly",
     ),
 }
