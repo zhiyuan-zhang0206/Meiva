@@ -245,6 +245,28 @@ def live_domain_pids(path: Path, *, born_from: float, born_before: float) -> tup
     return tuple(sorted(found))
 
 
+# meiva:note
+# One scan for a whole directory survey: `live_domain_pids` re-reads every
+# process environment per envelope, which thousands of settled runs cannot
+# afford. A process whose environment this kernel will not show is not resolved
+# here; the caller's settlement proof already refuses a live domain, so this
+# stays the cheap second leg rather than a second classifier.
+# meiva:link base/agents/incarnation/docs/exec-domain-cleanup.meiva.okf.md
+def live_request_references() -> frozenset[str]:
+    references: set[str] = set()
+    for process in psutil.process_iter():
+        try:
+            environment = process.environ()
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            continue
+        except (psutil.AccessDenied, OSError):
+            continue
+        raw = environment.get(_REQUEST_REFERENCE_ENV)
+        if raw is not None:
+            references.add(os.path.realpath(raw))
+    return frozenset(references)
+
+
 def classify_request(
     path: Path,
     *,
