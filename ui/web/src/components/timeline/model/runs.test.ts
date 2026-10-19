@@ -43,7 +43,7 @@ describe("inboundKind", () => {
     expect(inboundKind("user")).toBe("human");
     expect(inboundKind("ui:page:board")).toBe("human");
     expect(inboundKind("system")).toBe("system");
-    expect(inboundKind("system:update")).toBe("system");
+    expect(inboundKind("system:restart")).toBe("system");
     expect(inboundKind("watcher:7")).toBe("system");
     expect(inboundKind("shell:3")).toBe("system");
     expect(inboundKind("schedule:9")).toBe("system");

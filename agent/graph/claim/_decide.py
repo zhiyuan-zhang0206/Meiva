@@ -126,7 +126,6 @@ async def _compact_outcome(
                 "messages": transition["messages"],
                 "context_reset": transition["context_reset"],
                 "halted": halted,
-                "update_initiated": st.update_initiated,
                 "compact": state.compact.next_segment(),
             },
             goto=INIT_CONTEXT,
@@ -144,7 +143,6 @@ def _fallthrough_outcome(st: BatchState) -> _Outcome:
             update={
                 "messages": st.new_msgs,
                 "halted": halted,
-                "update_initiated": st.update_initiated,
             },
             goto=goto,
         ),
@@ -160,14 +158,8 @@ def _veto_reentry(routing: Routing, st: BatchState) -> bool:
     )
 
 
-def _idle_restart_gate(
-    state: _state.AgentState, batch: list[ClaimedInbound], st: BatchState
-) -> bool:
-    return (
-        state.halted
-        and not st.update_initiated
-        and all(it.kind == InboundKind.RESTART_COMPLETED for it in batch)
-    )
+def _idle_restart_gate(state: _state.AgentState, batch: list[ClaimedInbound]) -> bool:
+    return state.halted and all(it.kind == InboundKind.RESTART_COMPLETED for it in batch)
 
 
 async def decide(
@@ -189,7 +181,7 @@ async def decide(
             )
         )
 
-    if _idle_restart_gate(state, batch, st):
+    if _idle_restart_gate(state, batch):
         return _Outcome(
             command=Command[ClaimGoto](
                 update={"messages": st.new_msgs, "halted": True},

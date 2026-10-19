@@ -45,14 +45,6 @@ def test_by_who_self_prefix_does_not_match_self():
     assert by_who("self:other") == "self:other"
 
 
-def test_render_restart_completed_marker_system_update_no_by_clause():
-    from agent.graph.claim.node import render_restart_completed_marker
-
-    text = render_restart_completed_marker("system:update", timestamp_prefix=lambda: "")
-    assert "updated and restarted" in text
-    assert "by " not in text
-
-
 def test_render_restart_completed_marker_plain_self_unchanged():
     from agent.graph.claim.node import render_restart_completed_marker
 

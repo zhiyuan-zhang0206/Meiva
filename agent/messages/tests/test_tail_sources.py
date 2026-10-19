@@ -19,7 +19,7 @@ def test_a_person_or_a_schedule_wakes_skill_recall(source: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "source", ["agent:402", "system", "system:update", "watcher:3", "shell:9", "external_agent:x"]
+    "source", ["agent:402", "system", "system:restart", "watcher:3", "shell:9", "external_agent:x"]
 )
 def test_every_other_source_does_not(source: str) -> None:
     assert not tail_has_skill_recall_inbound([AIMessage(content="prev", id="a0"), _inbound(source)])

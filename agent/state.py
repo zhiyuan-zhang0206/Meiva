@@ -1,64 +1,64 @@
-"""LangGraph state — supports whole-class plugin state registration.
+# meiva:note
+# LangGraph state — supports whole-class plugin state registration.
+#
+# BaseAgentState (framework layer, static):
+#     messages         — cross-turn LLM history (guarded add_messages reducer: append-only invariant, task #1256)
+#     halted           — whether the current turn has ended
+#     turn_active      — the current graph invocation is mid-turn (claim's turn boundary)
+#     exit_requested   — claim's END means process exit, not just turn over
+#     turn_idle        — hosted mode: claim found nothing and did not park, so the host ends the turn task
+#     compact          — nested compaction bookkeeping (CompactState, agent/state_channels.py)
+#     circuit          — nested heartbeat circuit-breaker state (CircuitState, agent/state_channels.py)
+#     attach           — nested next-turn attachment queue (AttachState, agent/state_channels.py)
+#     memory           — nested passive-recall bookkeeping (MemoryState, agent/state_channels.py)
+#     capabilities     — nested capability-index snapshot (CapabilitiesState, agent/state_channels.py)
+#     context_reset    — nested pending-context-reset bookkeeping (ContextReset, agent/state_channels.py)
+#
+# A plugin declares an entire BaseModel in its `contribute()` (`PluginContributions.state`) and
+# keeps a `PluginStateHandle[Cls]` (built from the class and its plugin name) for typed read/write;
+# framework dispatches by field name:
+#
+# - Field name ∈ BaseAgentState (messages / halted): treated as "plugin
+#   declares it will modify this base field"; no prefix added; type must
+#   match base exactly (including Annotated reducer), otherwise raise.
+#   Multiple plugins declaring the same base field all modify the same
+#   channel; reducer naturally merges.
+# - Field name ∉ base: auto-prefixed `<plugin>__<field>` into the merged
+#   AgentState; plugin-private channel.
+#
+# `build_agent_state(extensions)` dynamically creates AgentState (BaseAgentState
+# subclass + plugin-declared fields) at graph build time. A plugin reaches its state two
+# ways, one per side of the exec process boundary, both through its `PluginStateHandle`:
+#
+# - host side (graph hooks, in the agent process): `handle.view(state)` builds the typed
+#   snapshot from the graph `state` argument, and `handle.delta({...})` turns a plugin-local
+#   update into the prefixed update dict the hook returns for LangGraph's reducer. Pure
+#   functions of the class and the state — no SDK slot, no `meiva`.
+# - exec side (SDK functions running in the exec child): `handle.read()` / `handle.update()`
+#   work on the exec turn's slot (`meiva.state` / `meiva.state_update`, framework-internal).
+#
+# Usage (in a plugin's agent_runtime.py):
+#
+#     from agent.state import PluginStateHandle
+#     from base.packages.plugins.extensions import PluginContributions
+#     from pydantic import BaseModel, Field
+#     from typing import Annotated
+#
+#     def _set_union(old: set[str], new: set[str]) -> set[str]:
+#         return old | new
+#
+#     class MyPluginState(BaseModel):
+#         counter: int = Field(default=0)
+#         seen: Annotated[set[str], _set_union] = Field(default_factory=set)
+#
+#     state_handle = PluginStateHandle(MyPluginState, "my_plugin")
+#     # exec side: state_handle.read() -> MyPluginState; state_handle.update({"counter": 1})
+#     # host side, in a hook(state, runtime, config): state_handle.view(state) -> MyPluginState,
+#     #   return state_handle.delta({"counter": 1})  # -> {"my_plugin__counter": 1}
+#
+#     def contribute() -> PluginContributions:
+#         return PluginContributions(state=(MyPluginState,))
 
-BaseAgentState (framework layer, static):
-    messages         — cross-turn LLM history (guarded add_messages reducer: append-only invariant, task #1256)
-    halted           — whether the current turn has ended
-    turn_active      — the current graph invocation is mid-turn (claim's turn boundary)
-    exit_requested   — claim's END means process exit, not just turn over
-    turn_idle        — hosted mode: claim found nothing and did not park, so the host ends the turn task
-    update_initiated — this agent kicked off a cluster self-update
-    compact          — nested compaction bookkeeping (CompactState, agent/state_channels.py)
-    circuit          — nested heartbeat circuit-breaker state (CircuitState, agent/state_channels.py)
-    attach           — nested next-turn attachment queue (AttachState, agent/state_channels.py)
-    memory           — nested passive-recall bookkeeping (MemoryState, agent/state_channels.py)
-    capabilities     — nested capability-index snapshot (CapabilitiesState, agent/state_channels.py)
-    context_reset    — nested pending-context-reset bookkeeping (ContextReset, agent/state_channels.py)
-
-A plugin declares an entire BaseModel in its `contribute()` (`PluginContributions.state`) and
-keeps a `PluginStateHandle[Cls]` (built from the class and its plugin name) for typed read/write;
-framework dispatches by field name:
-
-- Field name ∈ BaseAgentState (messages / halted): treated as "plugin
-  declares it will modify this base field"; no prefix added; type must
-  match base exactly (including Annotated reducer), otherwise raise.
-  Multiple plugins declaring the same base field all modify the same
-  channel; reducer naturally merges.
-- Field name ∉ base: auto-prefixed `<plugin>__<field>` into the merged
-  AgentState; plugin-private channel.
-
-`build_agent_state(extensions)` dynamically creates AgentState (BaseAgentState
-subclass + plugin-declared fields) at graph build time. A plugin reaches its state two
-ways, one per side of the exec process boundary, both through its `PluginStateHandle`:
-
-- host side (graph hooks, in the agent process): `handle.view(state)` builds the typed
-  snapshot from the graph `state` argument, and `handle.delta({...})` turns a plugin-local
-  update into the prefixed update dict the hook returns for LangGraph's reducer. Pure
-  functions of the class and the state — no SDK slot, no `meiva`.
-- exec side (SDK functions running in the exec child): `handle.read()` / `handle.update()`
-  work on the exec turn's slot (`meiva.state` / `meiva.state_update`, framework-internal).
-
-Usage (in a plugin's agent_runtime.py):
-
-    from agent.state import PluginStateHandle
-    from base.packages.plugins.extensions import PluginContributions
-    from pydantic import BaseModel, Field
-    from typing import Annotated
-
-    def _set_union(old: set[str], new: set[str]) -> set[str]:
-        return old | new
-
-    class MyPluginState(BaseModel):
-        counter: int = Field(default=0)
-        seen: Annotated[set[str], _set_union] = Field(default_factory=set)
-
-    state_handle = PluginStateHandle(MyPluginState, "my_plugin")
-    # exec side: state_handle.read() -> MyPluginState; state_handle.update({"counter": 1})
-    # host side, in a hook(state, runtime, config): state_handle.view(state) -> MyPluginState,
-    #   return state_handle.delta({"counter": 1})  # -> {"my_plugin__counter": 1}
-
-    def contribute() -> PluginContributions:
-        return PluginContributions(state=(MyPluginState,))
-"""
 
 import operator
 from collections.abc import Callable, Iterable, Mapping
@@ -111,15 +111,14 @@ MESSAGES_DELTA_CHANNEL = DeltaChannel(
 )
 
 
+# meiva:note
+# Framework static state — base fields all agents have.
+#
+# Flat fields (messages / halted) sit at the top level;
+# compaction, attachments, passive-recall, and pending-context-reset
+# bookkeeping are grouped into nested sub-states, each its own LangGraph
+# channel holding a BaseModel.
 class BaseAgentState(BaseModel):
-    """Framework static state — base fields all agents have.
-
-    Flat fields (messages / halted / update_initiated) sit at the top level;
-    compaction, attachments, passive-recall, and pending-context-reset
-    bookkeeping are grouped into nested sub-states, each its own LangGraph
-    channel holding a BaseModel.
-    """
-
     # The messages channel is a LangGraph DeltaChannel since the 2026-09-14
     # write switch (task #3180): each super-step appends its messages delta
     # to `checkpoint_writes` (periodic `_DeltaSnapshot` blobs at
@@ -169,13 +168,6 @@ class BaseAgentState(BaseModel):
     """Claim accepted restart; the host flushes, applies it, and releases the runtime."""
     turn_idle: bool = False
     """Claim found no work; the host ends the turn task. Reset per invocation."""
-    update_initiated: bool = False
-    """Set by self-initiated restarts (`meiva.self.restart()`); the historical
-    `meiva.self.update()` initiator path that introduced it is removed, but
-    self-sourced restarts still set it (claim's restart handler), and it feeds
-    the idle-restart gate — a stale True is cleared by the system:update
-    restart_completed marker (2026-08-08 audit, P3-6: comment said the field
-    was dead, it is not)."""
     impersonation_introduced: bool = False
     """Native conversation has encountered impersonation; survives compaction."""
     impersonation_handoff_id: str | None = None
@@ -565,30 +557,30 @@ def compact_version() -> int:
     return meiva.state.compact.version
 
 
+# meiva:note
+# The state declarations of every plugin in `extensions`, validated.
+#
+# A plugin's `PluginContributions.state` classes dispatch by field name:
+#
+# - Field name ∈ BaseAgentState → no prefix, shares the same channel
+#   with base. Only `messages` is plugin-writable (`PLUGIN_WRITABLE_BASE_FIELDS`);
+#   declaring any other core key (halted / compact /
+#   memory / context_reset / capabilities) raises — those are
+#   framework-managed every turn. For `messages`, type must match base
+#   exactly (including Annotated reducer — the messages reducer may be
+#   spelled either `add_messages` or the guarded wrapper, same contract),
+#   otherwise raise — "plugin declares it will modify this base field"
+#   contract; not allowed to silently change types. The declaration is recorded in
+#   `base_declared` so the framework's state_update key validation lets it through, and
+#   the exec node merges the plugin's messages delta with its own ToolMessage delta.
+# - Field name ∉ base → auto-prefixed `<plugin>__<field>` into the
+#   dynamic AgentState; plugin-private channel.
+#
+# Raises:
+#     TypeError: a declared class is not a BaseModel subclass — plugin author misused dataclass / plain class.
+#     ValueError: field name ∈ base but annotation doesn't match base (type swap), or a
+#         plugin declares one prefixed field twice with conflicting types.
 def plugin_state_schema(extensions: ExtensionRegistry) -> PluginStateSchema:
-    """The state declarations of every plugin in `extensions`, validated.
-
-    A plugin's `PluginContributions.state` classes dispatch by field name:
-
-    - Field name ∈ BaseAgentState → no prefix, shares the same channel
-      with base. Only `messages` is plugin-writable (`PLUGIN_WRITABLE_BASE_FIELDS`);
-      declaring any other core key (halted / update_initiated / compact /
-      memory / context_reset / capabilities) raises — those are
-      framework-managed every turn. For `messages`, type must match base
-      exactly (including Annotated reducer — the messages reducer may be
-      spelled either `add_messages` or the guarded wrapper, same contract),
-      otherwise raise — "plugin declares it will modify this base field"
-      contract; not allowed to silently change types. The declaration is recorded in
-      `base_declared` so the framework's state_update key validation lets it through, and
-      the exec node merges the plugin's messages delta with its own ToolMessage delta.
-    - Field name ∉ base → auto-prefixed `<plugin>__<field>` into the
-      dynamic AgentState; plugin-private channel.
-
-    Raises:
-        TypeError: a declared class is not a BaseModel subclass — plugin author misused dataclass / plain class.
-        ValueError: field name ∈ base but annotation doesn't match base (type swap), or a
-            plugin declares one prefixed field twice with conflicting types.
-    """
     extra_fields: dict[str, _StateFieldSpec] = {}
     namespace_fields: dict[str, set[str]] = {}
     base_declared: set[str] = set()
