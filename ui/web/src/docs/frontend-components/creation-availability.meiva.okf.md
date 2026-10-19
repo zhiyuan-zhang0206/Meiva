@@ -59,3 +59,31 @@ A structured create 502 selects its committed `agent_id` and refreshes
 roster/detail instead of inviting another create.
 
 Creation HTTP calls send one operation key with the `principal-v1` scope. Spawn/fork mutations hold it in their variables; fork placement and prompt are resolved before mutation admission. Explicit API callers can reuse a key with an unchanged body. A new action mints another key. This does not enable automatic ambiguous retries or a browser outbox.
+
+## Harness choice
+
+A spawn names its harness (`meiva` by default; `claude_code`, `codex`,
+`antigravity` for the external CLIs). It is a birth attribute: the row records
+it once and a fork inherits its source's value, so the fork dialog says so
+instead of offering a choice the backend would refuse with
+`fork_harness_mismatch`.
+
+The picker reads `GET /api/cluster/machines/{name}/harnesses` for the machine
+the agent would be placed on — the probe runs where the runtime would run, not on
+the gateway. The wire row carries `status` (`available` / `unavailable` /
+`unknown`), the probe's `reason`, and `launchable`; the row on screen carries one
+word. `available` when `launchable`, `unavailable` otherwise, and the row is
+disabled in the second case. `unknown` and `unavailable` are one thing to the
+user — "you cannot pick this" — so the picker never shows the word `unknown`, a
+harness the machine has installed but this build cannot start reads `unavailable`
+like a missing one, and the probe's diagnostic sentence never reaches the
+interface. Those stay on the wire: an agent asked "why can't I use codex here"
+reads them from `meiva.agents.harness_availability()` instead of the UI.
+
+The same rule covers the spawn target list: a machine that cannot start the
+chosen harness has its row disabled with `unavailable`, no reason text.
+
+The chosen harness is a `behavior.spawn_harness` preference. The built-in
+`meiva` value is omitted from the request, because it is the server's own
+default; any other value is sent as `harness` and the backend's refusal (422
+validation, or a `fork_harness_mismatch` reason) is shown verbatim.

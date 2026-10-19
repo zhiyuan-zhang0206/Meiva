@@ -10,6 +10,8 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ApiError, api } from "../transport/api";
+import type { Harness } from "@/lib/harness/harness";
+
 import { errMsg } from "../contracts/errors";
 import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "../fold/agents";
 import { track } from "../telemetry/telemetry";
@@ -22,7 +24,7 @@ export interface AgentActions {
   pendingActions: Record<number, PendingAction>;
   pendingSpawnCount: number;
   forkPending: boolean;
-  spawn: (machine?: string, model?: string, reasoning_effort?: string) => Promise<number | null>;
+  spawn: (machine?: string, model?: string, reasoning_effort?: string, harness?: Harness) => Promise<number | null>;
   fork: (sourceId: number, prompt?: string) => Promise<number | null>;
   terminate: (id: number, force?: boolean) => Promise<void>;
   forceExpire: (id: number, sessionId: number) => Promise<void>;
@@ -51,15 +53,18 @@ export function useAgentActions(
       machine,
       model,
       reasoning_effort,
+      harness,
       operationKey,
     }: {
       machine?: string;
       model?: string;
       reasoning_effort?: string;
+      harness?: Harness;
       operationKey: string;
     }) =>
       api.spawnAgent({
         ...(machine !== undefined ? { machine } : {}),
+        ...(harness !== undefined ? { harness } : {}),
         ...(model !== undefined || reasoning_effort !== undefined
           ? {
               config: {
@@ -287,7 +292,7 @@ export function useAgentActions(
   );
 
   const spawn = useCallback(
-    async (machine?: string, model?: string, reasoning_effort?: string): Promise<number | null> => {
+    async (machine?: string, model?: string, reasoning_effort?: string, harness?: Harness): Promise<number | null> => {
       // Snapshot current ids so the in-flight placeholder can detect when
       // this spawn's row arrives through repair (which beats the HTTP
       // response) and yield to it instead of double-rendering.
@@ -299,7 +304,7 @@ export function useAgentActions(
         ),
       );
       try {
-        const { id } = await spawnMutation.mutateAsync({ machine, model, reasoning_effort, operationKey: newOperationKey() });
+        const { id } = await spawnMutation.mutateAsync({ machine, model, reasoning_effort, harness, operationKey: newOperationKey() });
         setActiveId(id);
         await markSpawnPending(id);
         return id;

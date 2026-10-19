@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Agent harness identity
-description: Immutable runtime-loop selection at birth, the fork rule that keeps it, and the local availability probe.
+description: Immutable runtime-loop selection at birth, the fork rule that keeps it, the local availability probe and the per-machine read behind the spawn form.
 tags: [base, agents]
 ---
 
@@ -97,3 +97,23 @@ invented answer.
 Recording and validating the harness is one slice: the launchers that actually
 start a session on an external harness are separate, and they read this column
 rather than re-deriving the choice.
+
+## Choosing a harness for a new agent
+
+The spawn form asks the machine that would run the agent, not the gateway:
+`GET /api/cluster/machines/{name}/harnesses` dispatches the `harness_probe` op to
+that machine's runner, which answers from `probe_local_harnesses()` — a fresh read
+every call, no runner-side cache. The gateway caches one answer per machine for 30
+seconds, so a form reopened inside that window does not reach the op at all; that
+cache belongs to the gateway because it is the only caller. A name no machine
+carries answers 404, and a machine without an agent-runner (it could not birth an
+agent there at all) answers 503 — the form renders either as `unknown`, never as
+"not installed".
+
+Each row carries the probe's `status` and `reason` unchanged, plus `launchable`,
+which the gateway composes from two facts: a launcher for that harness exists in
+this build (`LAUNCHABLE_HARNESSES`) and the machine can actually run it
+(`available`, or the built-in runtime, which needs no CLI). A harness can
+therefore be installed and signed in and still not launchable. The form keeps
+such a row pickable, states the reason, and refuses the spawn — creating an agent
+the machine cannot start would only look like success.

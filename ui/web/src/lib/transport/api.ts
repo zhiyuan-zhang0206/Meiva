@@ -1,6 +1,8 @@
 // meiva:note
 // The timeout and caller cancellation remain connected through both response headers and response-body consumption. The Inspector client budget leaves serialization and network headroom above the backend work budget. HTTP rejection retains its status separately from network failure. Cross-origin gateway requests include session cookies. Slow-request telemetry removes query strings and normalizes numeric IDs, and telemetry requests do not report themselves.
 // meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+import type { HarnessAvailability } from "@/lib/harness/harness";
+
 import { API_BASE } from "./api-base";
 import { track } from "../telemetry/telemetry";
 import type { ToUserDocument, NoticesFeed,
@@ -116,6 +118,34 @@ export class ApiError extends Error {
   }
 }
 
+// meiva:note
+// A 422 body carries one `{msg}` object per rejected field; only that text is
+// shown, so the operator reads the server's complaint rather than a JSON dump.
+// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+function validationMessage(entry: unknown): string | null {
+  if (typeof entry !== "object" || entry === null) return null;
+  const msg = (entry as { msg?: unknown }).msg;
+  return typeof msg === "string" ? msg : null;
+}
+
+// meiva:note
+// The error message is the server's own words, never a generic "failed": a string `detail` is shown as-is, a FastAPI validation list (422) is joined into its messages, and `reason` (the wire enum, e.g. `fork_harness_mismatch`) is appended when the server sent one - a spawn/fork refusal the operator can read instead of a swallowed failure.
+// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+function serverMessage(status: number, body: Record<string, unknown> | undefined, text: string): string {
+  const detail = body?.detail;
+  const parts: string[] = [];
+  if (typeof detail === "string") parts.push(detail);
+  else if (Array.isArray(detail)) {
+    for (const entry of detail as unknown[]) {
+      const msg = validationMessage(entry);
+      if (msg !== null) parts.push(msg);
+    }
+  }
+  const reason = body?.reason;
+  const joined = parts.length > 0 ? parts.join("; ") : `HTTP ${status}: ${text || "request failed"}`;
+  return typeof reason === "string" && reason !== "" ? `${joined} (${reason})` : joined;
+}
+
 async function ok<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -126,11 +156,7 @@ async function ok<T>(res: Response): Promise<T> {
         body = parsed as Record<string, unknown>;
       }
     } catch { body = undefined; }
-    throw new ApiError(
-      res.status,
-      typeof body?.detail === "string" ? body.detail : `HTTP ${res.status}: ${text || res.statusText}`,
-      body,
-    );
+    throw new ApiError(res.status, serverMessage(res.status, body, text), body);
   }
   return res.json() as Promise<T>;
 }
@@ -478,6 +504,13 @@ export const api = {
 
   spawnAgent: (req: SpawnAgentRequest = {}, operationKey: string = newOperationKey()): Promise<SpawnedAgent> =>
     f("/api/keyed/v1/agents", keyedJson(req, operationKey)).then(ok<SpawnedAgent>),
+
+  // meiva:note
+  // What a machine can actually run. An absent route (404) is not an error page: it means this gateway cannot answer yet, and every harness reads as unknown - the picker then shows the choice without claiming it works.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  getHarnessAvailability: (machine: string, signal?: AbortSignal): Promise<HarnessAvailability[]> =>
+    f(`/api/cluster/machines/${encodeURIComponent(machine)}/harnesses`, { signal })
+      .then((res) => (res.status === 404 ? [] : ok<HarnessAvailability[]>(res))),
   retryAgentLaunch: (agentId: number, priorAttempt: string, operationKey: string): Promise<RetryLaunchAccepted> =>
     f(`/api/keyed/v1/agents/${agentId}/retry-launch`, keyedJson({ expected_prior_attempt_id: priorAttempt }, operationKey))
       .then(ok<RetryLaunchAccepted>),
