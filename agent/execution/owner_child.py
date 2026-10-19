@@ -16,6 +16,7 @@ from types import TracebackType
 
 from base.agents.incarnation.exec_owner_protocol import (
     MAX_OWNER_MESSAGE,
+    MAX_PAYLOAD_BYTES,
     OwnerContext,
     OwnerControl,
     read_owner_bytes,
@@ -130,9 +131,9 @@ def _run_permitted(context: OwnerContext) -> None:
             # Defensive ceiling for hashing the launcher-written request
             # envelope: far above any legitimate request, still a bounded read
             # (task #3696 exception inventory).
-            read_owner_bytes(context.request_path, limit=64 * 1024 * 1024)
+            read_owner_bytes(context.request_path, limit=MAX_PAYLOAD_BYTES)
         ).hexdigest()
-        != context.allocation.request_digest
+        != context.allocation.recorded_payload_sha256
     ):
         raise RuntimeError("exec payload paths or bytes changed after allocation")
     with Path(os.devnull).open("rb") as empty:
