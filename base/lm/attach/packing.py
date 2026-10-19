@@ -21,7 +21,7 @@ from base.lm.attach.constants import (
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import attach_modalities_for_model
 from base.lm.provider_api import AttachPolicy
-from base.lm.system_note import SYSTEM_NOTE_CLOSE, SYSTEM_NOTE_LEAD, wrap_system_note
+from base.lm.system_note import wrap_system_note
 
 # Keep the notice bare: attachments persist in the message history, so any
 # extra instruction is redundant copy (user ruling 2026-08-30).
@@ -95,7 +95,7 @@ class _PackingState:
     """
 
     media_blocks: list[dict[str, object]] = field(default_factory=_new_media_blocks)
-    caption_lines: list[str] = field(default_factory=lambda: [_ATTACH_NOTICE])
+    caption_lines: list[str] = field(default_factory=lambda: [wrap_system_note(_ATTACH_NOTICE)])
     line_blocks: list[dict[str, object]] = field(default_factory=_new_media_blocks)
     delivered_flags: list[bool] = field(default_factory=_new_delivered_flags)
     delivered: list[str] = field(default_factory=_new_delivered_paths)
@@ -191,25 +191,23 @@ def pack_attachments(
             continue
         state.deliver(model, index, entry.label, attachment, data, catalog=catalog)
 
-    text = wrap_system_note("\n".join(state.caption_lines))
+    text = "\n".join(state.caption_lines)
     # meiva:note
-    # Interleave each entry's caption line with its media block inside the system note that
-    # opens the message: [text(open + notice), text(line1), media1, ..., text(close)]. Every
-    # delivered media block is immediately preceded by its own caption text block, so
-    # consumers pair a file's label with its image without re-parsing the joined caption
-    # (base/agents/history/timeline._attach_image_captions); the closing tag is the last
-    # block, so the text blocks join back to exactly `text`.
+    # Interleave each entry's caption line with its media block, behind the leading notice:
+    # [text(notice), text(line1), media1, text(line2), media2, ...]. Every delivered media
+    # block is immediately preceded by its own caption text block, so consumers pair a file's
+    # label with its image without re-parsing the joined caption
+    # (base/agents/history/timeline._attach_image_captions). The notice is one complete
+    # system note inside its own block — the captions interleave with media, so a note
+    # spanning them would move blocks; block count and order stay as they are.
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
-    blocks: list[dict[str, object]] = [
-        {"type": "text", "text": f"{SYSTEM_NOTE_LEAD}{state.caption_lines[0]}"}
-    ]
+    blocks: list[dict[str, object]] = [{"type": "text", "text": state.caption_lines[0]}]
     media_index = 0
     for line_block, delivered_flag in zip(state.line_blocks, state.delivered_flags, strict=True):
         blocks.append(line_block)
         if delivered_flag:
             blocks.append(state.media_blocks[media_index])
             media_index += 1
-    blocks.append({"type": "text", "text": SYSTEM_NOTE_CLOSE})
     return AttachmentPack(
         blocks=blocks,
         text=text,

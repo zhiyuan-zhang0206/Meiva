@@ -70,21 +70,15 @@ def test_blocks_interleave_each_caption_line_with_its_media(
 
     assert pack is not None
     # meiva:note
-    # The note opens the message and closes it: open+notice, then each entry's caption before
-    # its media block, then the close tag.
+    # The leading notice is one complete system note in its own block; the caption lines
+    # follow it outside the note, each directly before its media block. The tag pair never
+    # adds or moves a block.
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
-    assert [b.get("type") for b in pack.blocks] == [
-        "text",
-        "text",
-        "image_url",
-        "text",
-        "text",
-    ]
+    assert [b.get("type") for b in pack.blocks] == ["text", "text", "image_url", "text"]
     assert pack.blocks[0] == {
         "type": "text",
-        "text": "<system_note>\nFiles attached during this turn:",
+        "text": "<system_note>\nFiles attached during this turn:\n</system_note>",
     }
-    assert pack.blocks[-1] == {"type": "text", "text": "</system_note>"}
     line1 = pack.blocks[1]["text"]
     assert isinstance(line1, str) and line1.startswith("- [1] example.png (image/png,")
     assert isinstance(line1, str) and '— "shot"' in line1
@@ -145,7 +139,7 @@ def test_bad_files_are_skipped_without_aborting_the_pack(
     )
 
     assert pack is not None
-    assert [b.get("type") for b in pack.blocks] == ["text", "text", "text", "text", "text"]
+    assert [b.get("type") for b in pack.blocks] == ["text", "text", "text", "text"]
     assert [reason for _, reason in pack.skipped] == [
         "file does not exist",
         "not a regular file",
@@ -378,11 +372,11 @@ def test_empty_and_all_skipped_entries_preserve_the_text_notice(
 
     assert pack is not None
     # meiva:note
-    # open+notice, the skipped entry's caption, and the note's close tag.
+    # The notice block keeps its complete system note; the skipped entry's caption follows.
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
-    assert [b.get("type") for b in pack.blocks] == ["text", "text", "text"]
-    assert pack.text.startswith("<system_note>\nFiles attached during this turn:\n- [1]")
-    assert pack.text.endswith("cannot receive image\n</system_note>")
+    assert [b.get("type") for b in pack.blocks] == ["text", "text"]
+    assert pack.text.startswith("<system_note>\nFiles attached during this turn:")
+    assert pack.text.endswith("cannot receive image")
     assert pack.delivered == []
     assert pack.skipped == [(str(image_path.resolve()), "your model cannot receive image")]
     assert "not delivered: your model cannot receive image" in pack.text
