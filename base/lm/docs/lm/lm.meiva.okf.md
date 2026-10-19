@@ -50,7 +50,7 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - `usage.py` records one `meiva.billing.call` span for each completed provider call. Its v1 attributes use the `meiva.billing.*` ledger schema and deliberately carry no task dimension. Agent and birth-lineage usage is queried independently of task records. Core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites provide the response, usage kind and their explicit catalog.
 - Plugin `PriceRates` are the live chat source and carry full history, tiers, windows, and future periods. The archive is their reconciliation ledger, live only for catalog-only services. `quote()` returns rates and cost atomically; both sources share the child node's parser and selector.
 
-### durable usage — [[usage.meiva.okf.md]]
+### durable usage — [[../../usage/docs/usage.meiva.okf.md]]
 
 ### provider errors — [[provider-errors.meiva.okf.md]]
 
@@ -58,6 +58,10 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 
 ### provider plugins
 - [[base/lm/docs/provider-plugins.meiva.okf.md]] — plugin binding and `key_env`
+
+### Claude Agent SDK bridge
+[[../../harness/docs/harness.meiva.okf.md]] — shared half; unwired.
+[[../../harness/claude/docs/claude.meiva.okf.md]] — Claude adapter; opt-in extra.
   delivery contract.
 
 ### decision models — [[base/lm/docs/decision-models.meiva.okf.md]]
