@@ -48,9 +48,7 @@ async def test_an_unkillable_child_is_still_reported_as_residue(tmp_path: Path) 
     # A reaper that cannot kill stands in for a process we are not allowed to
     # signal: the report must stay honest instead of claiming a clean cancel.
     turn = {"hang": True, "spawn_child": True, "kill_child_on_interrupt": False}
-    harness = await start(
-        tmp_path, turns=[turn], cancel_settle_seconds=0.2, reap=_reap_nothing
-    )
+    harness = await start(tmp_path, turns=[turn], cancel_settle_seconds=0.2, reap=_reap_nothing)
     child = None
     try:
         harness.session.submit("run the long command")

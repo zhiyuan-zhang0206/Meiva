@@ -45,9 +45,7 @@ async def test_the_handoff_is_the_first_message_exactly_once(tmp_path: Path) -> 
 
 
 async def test_an_explicit_resume_is_not_treated_as_a_fresh_session(tmp_path: Path) -> None:
-    harness = await start(
-        tmp_path, turns=[say("one")], resume="conv-fake", handoff=a_handoff()
-    )
+    harness = await start(tmp_path, turns=[say("one")], resume="conv-fake", handoff=a_handoff())
     try:
         assert harness.session.resumed is True
         assert harness.session.handoff_ticket is None
