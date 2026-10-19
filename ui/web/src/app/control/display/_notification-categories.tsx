@@ -21,9 +21,7 @@ const SWITCHES_KEY = "notifications.categories";
 // Localized labels for the categories the core owns; a plugin category falls back
 // to the label its declaration carries (the catalog is data, not a build step).
 const KNOWN_LABELS = {
-  "core.turn_finished": "coreTurnFinished",
   "core.needs_input": "coreNeedsInput",
-  "meiva_fleet.task_closed": "fleetTaskClosed",
 } as const;
 
 export function NotificationCategoryRows() {

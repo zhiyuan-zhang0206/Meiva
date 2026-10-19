@@ -49,8 +49,6 @@
   "composerContextMeter": "在输入区显示上下文窗口",
   "composerContextMeterDesc": "在输入框旁显示上下文窗口进度条。默认关闭——具体数字在右侧检查器的「上下文」区；开启后也只显示进度条，不显示文字。",
   "categories": {
-    "coreTurnFinished": "一轮跑完",
-    "coreNeedsInput": "等你回答",
-    "fleetTaskClosed": "任务关闭"
+    "coreNeedsInput": "等你回答"
   }
 }

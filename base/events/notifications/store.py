@@ -4,9 +4,9 @@ from datetime import datetime
 from typing import Any, cast
 
 import psycopg
-from psycopg_pool import AsyncConnectionPool, ConnectionPool
+from psycopg_pool import ConnectionPool
 
-from base.db.transaction import async_write_transaction, write_transaction
+from base.db.transaction import write_transaction
 
 SETTINGS_KEY = "notifications.categories"
 
@@ -83,32 +83,8 @@ def read_inputs(
     return overrides, last
 
 
-async def read_inputs_async(
-    pool: AsyncConnectionPool[Any], *, category: str, dedupe_key: str | None
-) -> tuple[dict[str, bool], datetime | None]:
-    async with async_write_transaction(pool) as conn:
-        row = await (await conn.execute(_SELECT_OVERRIDES, (SETTINGS_KEY,))).fetchone()
-        overrides = parse_overrides(None if row is None else row[0])
-        last = (
-            None
-            if dedupe_key is None
-            else _last(
-                await (await conn.execute(_SELECT_LAST_KEYED, (category, dedupe_key))).fetchone()
-            )
-        )
-    return overrides, last
-
-
 def insert(conn: psycopg.Connection, params: tuple[Any, ...]) -> int:
     row = conn.execute(_INSERT, params).fetchone()
-    if row is None:
-        raise RuntimeError("notification insert returned no id")
-    return int(row[0])
-
-
-async def insert_async(pool: AsyncConnectionPool[Any], params: tuple[Any, ...]) -> int:
-    async with async_write_transaction(pool) as conn:
-        row = await (await conn.execute(_INSERT, params)).fetchone()
     if row is None:
         raise RuntimeError("notification insert returned no id")
     return int(row[0])
@@ -125,22 +101,9 @@ def unannounced_sync(pool: ConnectionPool, notification_id: int) -> tuple[Any, .
         return conn.execute(_SELECT_UNANNOUNCED, (notification_id,)).fetchone()
 
 
-async def unannounced_async(
-    pool: AsyncConnectionPool[Any], notification_id: int
-) -> tuple[Any, ...] | None:
-    async with async_write_transaction(pool) as conn:
-        return await (await conn.execute(_SELECT_UNANNOUNCED, (notification_id,))).fetchone()
-
-
 def mark_announced_sync(pool: ConnectionPool, notification_id: int) -> bool:
     with write_transaction(pool) as conn:
         return conn.execute(_MARK_ANNOUNCED, (notification_id,)).rowcount > 0
-
-
-async def mark_announced_async(pool: AsyncConnectionPool[Any], notification_id: int) -> bool:
-    async with async_write_transaction(pool) as conn:
-        cursor = await conn.execute(_MARK_ANNOUNCED, (notification_id,))
-    return cursor.rowcount > 0
 
 
 def pending_sync(pool: ConnectionPool, *, min_age_seconds: float, limit: int) -> list[int]:

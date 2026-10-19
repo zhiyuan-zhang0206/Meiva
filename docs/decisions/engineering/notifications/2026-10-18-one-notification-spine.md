@@ -2,6 +2,12 @@
 
 Date: 2026-10-18
 
+> **Amended 2026-10-19** (user ruling): a notification is a request that needs
+> the user's reply. `core.turn_finished` and `meiva_fleet.task_closed` no longer
+> exist as categories or producers; a completed turn and a closed task are one
+> log line each, and the task board already shows the close. `core.needs_input`
+> is the only category, and a plugin category always ships switched off.
+
 ## Context
 
 Four surfaces tell the user something happened: the console inbox, the Android
@@ -35,17 +41,18 @@ A separate, small delivery spine owns the decision:
   just written; every transport renders it, and a reconnecting client deduplicates
   on `notification_id`.
 
-Defaults follow the same conservative rule: a category that fires on every turn of
-every agent ships switched off (`core.turn_finished`), and a notice delivers again
+A category ships switched off unless it is the core request that needs the user's
+reply: `core.needs_input` is the only one that ships on. A notice delivers again
 when its question changes, because a new question is work for the user right now.
+A plugin category always ships off; the user, not the manifest, turns it on.
 
-Producers: a hosted turn that ran to completion (`core.turn_finished`, emitted on
-the turn path, not the settlement path that also fires for no-work parks), a
-posted notice that needs an answer (`core.needs_input`, read from the committed
-row and keyed by the notice id plus a fingerprint of its question, so adding a
-question delivers again), and `meiva_fleet.task_closed` through the plugin
-endpoint. A notice that needs no answer notifies nobody: the console inbox already
-carries it, and a ping the user cannot act on is noise.
+Producers: a posted notice that needs an answer (`core.needs_input`, read from the
+committed row and keyed by the notice id plus a fingerprint of its question, so
+adding a question delivers again), and the task-maintenance escalation that stages
+the same delivery inside its transaction. A notice that needs no answer notifies
+nobody: the console inbox already carries it, and a ping the user cannot act on is
+noise. A completed turn and a closed task are log lines, not producers; their
+durable records are the settled agent row and the task board.
 
 ## Consequences
 
@@ -54,9 +61,9 @@ category and calls one endpoint. The user gets one switch per category that ever
 transport honors, and the delivery log answers "did we tell them, and when".
 
 Harder: two stores now describe user-facing events, and the boundary has to stay
-honest — an answerable question is a notice, a ping is a notification. The
-console's `SystemEvent` union is closed, so a new role needs a frontend fixture in
-the same change.
+honest — an answerable question is a notice, and only an answerable request is a
+notification. The console's `SystemEvent` union is closed, so a new role needs a
+frontend fixture in the same change.
 
 ## Alternatives considered
 

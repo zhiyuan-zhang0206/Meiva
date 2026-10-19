@@ -77,18 +77,10 @@ fixture/incident scope.
 - **last-verified**: 2026-10-19
 
 
-### boundary:notification-manifest-default-conversion
-- **class**: boundary
-- **status**: open
-- **evidence**: `base/events/notifications/catalog.py:76:category_from_manifest` is the single owner of the manifest-to-category mapping (`defaultEnabled` into `default_enabled`, `dedupeWindowSeconds`, and the `<plugin>.` namespace check); `gateway/extensions/notification_categories.py:31` and `cli/commands/agents/notices_audit.py:190` are its only callers, and no test file references it — `base/events/notifications/tests/test_catalog.py` covers catalog merge and validation, not this conversion. PR #6228 flipped `meiva_fleet.task_closed` to `defaultEnabled: false` through that path and recorded the gap in its own body: "the conversion ... has no direct test coverage ... The right place for a regression test is that module, applied to every plugin category rather than this one; it is out of scope here and follows as its own task." Not registered in this ledger at merge time. (The PR named `gateway/extensions/notification_categories.py` as the owner; the conversion moved to `catalog.py` in the same day's notification-spine work.)
-- **first-seen**: 2026-10-18 (PR #6228)
-- **last-verified**: 2026-10-19
-
-
 ### boundary:notices-audit-sql
 - **class**: boundary
 - **status**: open
-- **evidence**: `cli/commands/agents/notices_audit.py:35,44,52` hold the three SELECTs behind `meiva notices audit` — `telemetry_events` halts for `core.turn_finished`, `agent_notices` for `core.needs_input`, `agent_tasks` for `meiva_fleet.task_closed` — executed at `:112`, `:120` and `:145` against a psycopg cursor. `cli/commands/agents/tests/test_notices_audit.py` exercises only the in-memory candidate and replay path; nothing reaches the query text, because unit CI carries no database. Both PRs that introduced it say so in their bodies: #6229 ("the SQL has no automated test (no database in unit CI); it was exercised against the live runtime database") and #6238 ("Not covered: the SQL still has no automated test"), and #6238 added `--explain` on top of it. Column renames and policy changes break this query silently.
+- **evidence**: `cli/commands/agents/notices_audit.py:33` holds the one SELECT left behind `meiva notices audit` — `agent_notices` rows that need a response — executed at `:93` against a psycopg cursor. The other two statements (halts for the removed `core.turn_finished`, `agent_tasks` for the removed `meiva_fleet.task_closed`) were deleted with those categories on 2026-10-19, which reduces but does not close the gap: `cli/commands/agents/tests/test_notices_audit.py` exercises only the in-memory candidate and replay path; nothing reaches the query text, because unit CI carries no database. Both PRs that introduced it say so in their bodies: #6229 ("the SQL has no automated test (no database in unit CI); it was exercised against the live runtime database") and #6238 ("Not covered: the SQL still has no automated test"), and #6238 added `--explain` on top of it. Column renames and policy changes break this query silently.
 - **first-seen**: 2026-10-18 (PRs #6229, #6238)
 - **last-verified**: 2026-10-19
 

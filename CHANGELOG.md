@@ -8,6 +8,15 @@ and the matching GitHub Releases.
 ## [Unreleased]
 
 ### Changed
+- A notification is only a request that needs the user's reply (user ruling 2026-10-19).
+  `core.turn_finished` and `meiva_fleet.task_closed` are gone as categories and producers:
+  the agent host logs a finished turn and the task registry logs a closed task, both
+  already queryable through the settled agent row, the task board and the `task_updated`
+  event. `core.needs_input` is the only category; a plugin category always ships switched
+  off (`defaultEnabled: true` is a manifest error), the async delivery path that existed
+  only for the turn host is removed, and `meiva notices audit` replays the notice producer
+  alone. Guard tests fail if any category other than `core.needs_input` ever ships enabled
+  ([notification spine](base/events/notifications/docs/notifications.meiva.okf.md)).
 - `run_background` and the watcher entries (`launch`, `at`, `cron`) return one
   `SessionHandle(session_id, output_path)`: a watcher's log path is known at launch, so the
   handle carries it instead of a bare session id. `sessions.send`, `send_keys`, `capture`,
