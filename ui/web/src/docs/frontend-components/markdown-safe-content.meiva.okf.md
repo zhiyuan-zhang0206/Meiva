@@ -38,7 +38,7 @@ content without a `$` never imports the math chunk, and KaTeX output renders
 after the sanitizer — its inputs cannot produce injection and its trust and
 strict defaults stand.
 
-Math renders through KaTeX only after a lazily loaded chunk: content without $ never imports remark-math / rehype-katex (the loader is the unit under test), content with $ upgrades to inline and display math once the deduplicated module promise resolves, and KaTeX runs after the sanitizer with throwOnError false — its inputs cannot produce injection and its trust/strict defaults stand.
+Math renders through KaTeX only after a lazily loaded chunk: content without $ never imports remark-math / rehype-katex (the loader is the unit under test), content with $ upgrades to inline and display math once the deduplicated module promise resolves, and KaTeX runs after the sanitizer with throwOnError false — its inputs cannot produce injection and its trust/strict defaults stand A `$…$` pair that carries prose — CJK outside `\text{…}`, fullwidth punctuation, or an inline-code backtick — is not math: the span demotes to its literal `$…$` text, because remark-math pairs any two `$` on a line and a `$` written as a plain symbol would otherwise swallow the sentence up to the next one and paint it as a KaTeX error.
 
 ## Document anchors
 

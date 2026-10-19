@@ -334,6 +334,25 @@ describe("math through the lazy KaTeX surface", () => {
     expect(load).not.toHaveBeenCalled();
   });
 
+  it("keeps a lone $ written as a symbol out of math", async () => {
+    const { container } = render(
+      <ChatMarkdown content={"root condition $\uff08\u6839\u6761\u4ef6\uff09$ and then prose"} />,
+    );
+
+    await waitFor(() => expect(container.textContent).toContain("\uff08\u6839\u6761\u4ef6\uff09"), { timeout: 5000 });
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.textContent).toContain("$\uff08\u6839\u6761\u4ef6\uff09$");
+  });
+
+  it("does not read a pair around inline code as math", async () => {
+    const { container } = render(<ChatMarkdown content={"cost $ `a` and `b` $ end"} />);
+
+    await waitFor(() => expect(container.textContent).toContain("cost $`a` and `b`$ end"), { timeout: 5000 });
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.querySelector(".katex-error")).toBeNull();
+  });
+
   it("renders inline and display math once the math chunk loads", async () => {
     const { container } = render(<ChatMarkdown content={`inline $x^2$ math
 
