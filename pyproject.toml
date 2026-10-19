@@ -78,13 +78,16 @@ dependencies = [
     "lark-oapi>=1.7.1",
     "websockets>=15.0.1",
     "oss2>=2.19.1",
-    # Drives a Claude Code CLI session as an agent brain (base/lm/claude_sdk).
-    # The wheel bundles a ~240MB CLI, which is the piece the bridge actually
-    # runs. The minor bound is deliberate: the bridge dispatches on the SDK's
-    # message class names, so a 0.x minor bump is a mapping change to review,
-    # not to pick up silently.
-    "claude-agent-sdk>=0.2.168,<0.3",
 ]
+
+[project.optional-dependencies]
+# Provider adapters sit behind their own extra (base/lm/harness/claude). The
+# Claude wheel bundles a ~240MB Claude Code CLI, which is the piece the adapter
+# actually runs, so a machine that only runs Codex or Antigravity must not pay
+# for it. The minor bound is deliberate: the adapter dispatches on the SDK's
+# message class names, so a 0.x minor bump is a mapping change to review, not
+# something to pick up silently.
+harness-claude = ["claude-agent-sdk>=0.2.168,<0.3"]
 
 [project.scripts]
 # `uv sync` installs `.venv/bin/meiva` — cluster ops CLI (start/stop/status/update/...).
@@ -156,6 +159,11 @@ dev = [
     "httpx2>=2.3.0",
     "mutmut>=3.5.0",
     "pytest-split",
+    # Same pin as the `harness-claude` extra, stated twice on purpose: the
+    # adapter imports the SDK inside a function so a runtime install without the
+    # extra still works, but pyright resolves that import while checking, so the
+    # development environment has to carry it.
+    "claude-agent-sdk>=0.2.168,<0.3",
 ]
 
 [tool.ruff]
@@ -246,7 +254,7 @@ check-typed-exception = true
 "demos/claude-sdk-bridge/bridge_demo.py" = ["T201"]
 # The fake SDK must expose the SDK's own constructor name, which is a class name
 # used as a method.
-"base/lm/claude_sdk/tests/fake_sdk.py" = ["N802"]
+"base/lm/harness/claude/tests/fake_sdk.py" = ["N802"]
 # schedules/* are version-controlled deployment templates (runnable scripts
 # referenced by the ops docs), not runtime source: exempt them from source-level
 # rules (typing, ambiguous unicode, security heuristics) so they stay readable.
@@ -826,17 +834,22 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "base/lm/claude_sdk/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "base/lm/compat/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/lm/decision/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/claude/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

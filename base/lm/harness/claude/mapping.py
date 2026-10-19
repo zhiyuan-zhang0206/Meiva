@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, cast
 
-from base.lm.claude_sdk.events import (
+from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
     RateLimitObserved,
@@ -20,7 +20,7 @@ from base.lm.claude_sdk.events import (
 # nothing, which is how a newer SDK stays compatible. Tool results are the one
 # payload that can be megabytes, so the event carries a preview — the model
 # already has the full content through the SDK's own transcript.
-# meiva:link base/lm/claude_sdk/docs/claude_sdk.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
 TOOL_RESULT_PREVIEW_CHARS = 2000
 
 

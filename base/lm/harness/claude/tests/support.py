@@ -5,9 +5,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from base.lm.claude_sdk import BridgeConfig, ClaudeSession, Handoff
-from base.lm.claude_sdk.registry import FileSessionRegistry
-from base.lm.claude_sdk.tests.fake_sdk import FakeSDK, ScriptedProbe
+from base.lm.harness import Handoff
+from base.lm.harness.claude import BridgeConfig, ClaudeSession
+from base.lm.harness.claude.tests.fake_sdk import FakeSDK, ScriptedProbe
+from base.lm.harness.registry import FileSessionRegistry
 
 CLI_PID = 4242
 

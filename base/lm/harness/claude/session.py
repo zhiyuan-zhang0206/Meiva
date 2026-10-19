@@ -9,11 +9,10 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-import claude_agent_sdk
-
-from base.lm.claude_sdk.auth import build_env
-from base.lm.claude_sdk.config import BridgeConfig
-from base.lm.claude_sdk.events import (
+from base.lm.harness.claude.auth import build_env
+from base.lm.harness.claude.config import BridgeConfig
+from base.lm.harness.claude.mapping import map_message, parse_result
+from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
     HandoffInjected,
@@ -25,9 +24,8 @@ from base.lm.claude_sdk.events import (
     Usage,
     is_droppable,
 )
-from base.lm.claude_sdk.handoff import Handoff
-from base.lm.claude_sdk.mapping import map_message, parse_result
-from base.lm.claude_sdk.process import (
+from base.lm.harness.handoff import Handoff
+from base.lm.harness.process import (
     ChildProbe,
     ProcessObservation,
     PsutilChildProbe,
@@ -36,7 +34,7 @@ from base.lm.claude_sdk.process import (
     snapshot,
     wait_gone,
 )
-from base.lm.claude_sdk.registry import SessionRecord, SessionRegistry
+from base.lm.harness.registry import SessionRecord, SessionRegistry
 
 # meiva:note
 # One session is one turn engine with three boundaries. Inbound is synchronous and
@@ -47,13 +45,35 @@ from base.lm.claude_sdk.registry import SessionRecord, SessionRegistry
 # not. Cancellation is a control message plus an assertion: `interrupt()` reports
 # whether the tool's child processes were actually reaped, and `settled=None` when
 # the CLI pid is unobservable — never a silent pass.
-# meiva:link base/lm/claude_sdk/docs/claude_sdk.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
 CANCEL_POLL_SECONDS = 0.02
 _EVENT_STREAM_END = object()
 
 
 class InboundQueueFullError(RuntimeError):
     pass
+
+
+class MissingClaudeSdkError(RuntimeError):
+    pass
+
+
+def _load_sdk() -> Any:
+    # meiva:note
+    # The adapter extra is optional because the wheel bundles a ~240MB Claude Code
+    # CLI that most machines never run. The import stays inside this function so
+    # `import base.lm.harness` (the shared half) never touches it; a machine
+    # without the extra still imports the package and fails only when it builds a
+    # session, with the install command in the message.
+    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    try:
+        import claude_agent_sdk
+    except ImportError as exc:
+        raise MissingClaudeSdkError(
+            "claude-agent-sdk is not installed; install the adapter extra with "
+            "pip install 'meiva[harness-claude]'"
+        ) from exc
+    return claude_agent_sdk
 
 
 class SessionClosedError(RuntimeError):
@@ -158,7 +178,7 @@ class ClaudeSession:
     ) -> None:
         self.config = config
         self.agent_id = agent_id
-        self._sdk: Any = sdk if sdk is not None else claude_agent_sdk
+        self._sdk: Any = sdk if sdk is not None else _load_sdk()
         self._probe: ChildProbe = probe or PsutilChildProbe()
         self._registry = registry
         self._environ = dict(environ)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from base.lm.claude_sdk.events import (
+from base.lm.harness.claude.mapping import TOOL_RESULT_PREVIEW_CHARS, map_message, parse_result
+from base.lm.harness.claude.tests import fake_sdk as fake
+from base.lm.harness.events import (
     AssistantText,
     RateLimitObserved,
     SessionStarted,
@@ -9,8 +11,6 @@ from base.lm.claude_sdk.events import (
     ToolUse,
     Usage,
 )
-from base.lm.claude_sdk.mapping import TOOL_RESULT_PREVIEW_CHARS, map_message, parse_result
-from base.lm.claude_sdk.tests import fake_sdk as fake
 
 
 def test_text_delta_maps_to_delta_event() -> None:
