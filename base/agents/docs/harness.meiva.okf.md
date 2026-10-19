@@ -98,32 +98,28 @@ missing (`agent/graph/docs/harness-turn.meiva.okf.md`).
 
 ## The availability probe
 
-`meiva.agents.harness_availability()` reports one row per harness for the machine
-the caller runs on. Each row carries a status — `available` (installed, and the
-credential store holds a token), `unavailable` (not installed, or installed with a
-store holding no token, or one whose credentials cannot renew and have expired)
-or `unknown` (installed, but the store is missing or unreadable, so nothing here
-settles the question) — plus a readable reason, the resolved executable path
-(symlinks followed, so not always the name on PATH) and whether PATH led to it.
+`meiva.agents.harness_availability()` reports one row per harness for this machine.
+A row carries a status — `available` (installed, and the store holds a token),
+`unavailable` (not installed, a store holding no token, or credentials that cannot
+renew and have expired) or `unknown` (installed, but the store is missing or
+unreadable) — plus a readable reason, the resolved executable path (symlinks
+followed, so not always the name on PATH) and whether PATH led to it.
 
-The probe reads a credential store; it does not authenticate. That buys two
-distinctions worth stating. A store is evidence, an account record is not:
-`~/.claude.json` keeps `oauthAccount` after the login behind it dies, so a probe
-reading it alone called an ubuntu machine signed in while its CLI reported
-`loggedIn: false`; the record now reads `unknown`. And a recorded expiry proves a
-logout only where the credential cannot renew itself — Claude Code's refresh
-token does, its access token is renewed from it, and Antigravity records a
-one-hour access token plus the refresh token that replaces it. Reading a past
-access-token expiry as a logout would mark a machine that has not run the CLI for
-an hour unavailable, so it is reported as age instead. Where the store records no
-expiry at all (Codex keeps opaque tokens), the stored token is the evidence and
-the reason carries its age.
+The probe reads a credential store; it does not authenticate. Two distinctions
+follow. A store is evidence, an account record is not: `~/.claude.json` keeps
+`oauthAccount` after the login behind it dies, so a probe reading it alone called
+an ubuntu machine signed in while its CLI reported `loggedIn: false`; the record
+now reads `unknown`. And a recorded expiry proves a logout only where the
+credential cannot renew itself — Claude Code's refresh token does, its access
+token is renewed from it, and Antigravity records a one-hour access token plus
+the refresh token that replaces it. A past access-token expiry only schedules the
+next renewal, so it is reported as age. Where the store records no expiry at all
+(Codex keeps opaque tokens), the token is the evidence and the reason its age.
 
-The store has to belong to the CLI. Antigravity's IDE writes
-`~/.gemini/jetski-standalone-oauth-token`, the CLI reads only
-`~/.gemini/antigravity-cli/antigravity-oauth-token`, and a machine holding just
-the IDE's fresh token answers `authentication required` when the CLI runs — so
-only the CLI's file is read, and an IDE-only machine reports `unknown`.
+The store has to belong to the CLI: Antigravity's IDE writes
+`~/.gemini/jetski-standalone-oauth-token`, the CLI reads only its own
+`antigravity-cli/antigravity-oauth-token`, and an IDE-only machine answers
+`authentication required` — so only the CLI's file is read.
 
 The probe reads the filesystem only. It runs no CLI, so it cannot hang on a login
 prompt, spend quota or start a session. When PATH misses a user-level install the
