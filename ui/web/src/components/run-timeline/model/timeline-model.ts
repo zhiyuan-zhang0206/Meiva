@@ -123,6 +123,9 @@ export interface SpanItem {
  * than that overlap, which the row's column merge (`aggregateColumns`) resolves. An item running past an
  * edge is cut there.
  */
+// meiva:note
+// Only the run of items that can intersect the view is projected (`visibleRun`): the rows arrive sorted by `u0`, so a binary search finds the first candidate and the walk back covers an item that began before the view but still covers it. A pan therefore costs what is on screen, not what is loaded behind it: laying out a 52 000-unit deep zoom-out took ~190 ms per viewport sample (user report 2026-10-19). The placements also need no sort, because the axis is linear and the rows are already in `u0` order.
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
 export function layoutSpans(
   items: readonly SpanItem[],
   view: Viewport,
@@ -130,14 +133,41 @@ export function layoutSpans(
   minPx: number = MIN_ITEM_PX,
 ): RowPlacement[] {
   const placements: RowPlacement[] = [];
-  for (const item of items) {
-    const box = projectBox(item.u0, item.u1, view);
-    if (box === null) continue;
-    const left = (box.left / 100) * trackPx;
-    const width = Math.min(Math.max((box.width / 100) * trackPx, minPx), trackPx - left);
+  const { start, end } = visibleRun(items, view);
+  const span = view.to - view.from;
+  if (!(span > 0)) return placements;
+  let ordered = true;
+  let lastLeft = -Infinity;
+  for (let i = start; i < end; i += 1) {
+    const item = items[i];
+    if (Number.isNaN(item.u0) || Number.isNaN(item.u1) || item.u1 < view.from || item.u0 > view.to) continue;
+    const left = ((Math.max(item.u0, view.from) - view.from) / span) * trackPx;
+    const right = ((Math.min(item.u1, view.to) - view.from) / span) * trackPx;
+    const width = Math.min(Math.max(right - left, minPx), trackPx - left);
+    if (left < lastLeft) ordered = false;
+    lastLeft = left;
     placements.push({ key: item.key, left, width });
   }
-  return placements.sort((a, b) => a.left - b.left || a.width - b.width);
+  return ordered ? placements : placements.sort((a, b) => a.left - b.left || a.width - b.width);
+}
+
+export function visibleRun(items: readonly { u0: number; u1: number }[], view: Viewport): { start: number; end: number } {
+  let start = firstStartingAtOrAfter(items, view.from);
+  while (start > 0 && items[start - 1].u1 >= view.from) start -= 1;
+  let end = start;
+  while (end < items.length && items[end].u0 <= view.to) end += 1;
+  return { start, end };
+}
+
+function firstStartingAtOrAfter(items: readonly { u0: number }[], u: number): number {
+  let lo = 0;
+  let hi = items.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (items[mid].u0 < u) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 export function firstLine(text: string, max: number): string {
