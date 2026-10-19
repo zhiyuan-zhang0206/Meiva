@@ -243,10 +243,21 @@ class ChromeMcpDaemon:
         # terminate this unusable daemon.
         self.dead = asyncio.Event()
 
+    # meiva:note
+    # Forwards to the upstream, turning a dead session into a clean signal: flag the
+    # daemon dead so run() exits, and raise a readable error so the client retries.
+    # A `close_page` first gives the page's tab back to no group when it is the last
+    # member of its agent's group (see `AgentTabGroups.release_page`): Chrome saves a
+    # group whose last tab closes, a saved group is invisible to the title lookup and
+    # undeletable through the extension API, and every close -- the agent's own
+    # `close_page`, the termination release and the TTL reaper -- comes through here.
+    # Best-effort: the close always proceeds.
+    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
     async def _call(self, name: str, args: dict[str, Any]) -> types.CallToolResult:
-        """Forward to the upstream, turning a dead session into a clean signal:
-        flag the daemon dead so run() exits, and raise a readable error
-        so the client knows to retry."""
+        if name == "close_page":
+            closing = _page_id(args.get("pageId"))
+            if closing is not None:
+                await self.tab_groups.release_page(closing)
         try:
             return await self._upstream.call_tool(name, args)
         except _UPSTREAM_DOWN as e:
@@ -353,9 +364,10 @@ class ChromeMcpDaemon:
         before = await self.tab_groups.snapshot() if group else None
         result = await self._call("new_page", args)
         if not result.is_error:
-            self.pages.register_created_page(selected_id(result), agent_id=agent_id)
+            created = selected_id(result)
+            self.pages.register_created_page(created, agent_id=agent_id)
             if group and agent_id is not None:
-                await self.tab_groups.group_new_page(agent_id, before)
+                await self.tab_groups.group_new_page(agent_id, before, created)
         return result
 
     async def _bootstrap_page(
