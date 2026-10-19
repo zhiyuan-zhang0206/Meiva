@@ -1,8 +1,11 @@
 # External harness adapters
 
-Status: the shared package and the Claude adapter exist (`base/lm/harness/`);
-nothing is wired into the agent loop yet. Codex and Antigravity adapters are in
-progress under the same contract.
+Status: `base/lm/harness/` and its Claude adapter landed on main with #6358
+(2026-10-19) — the four shared modules, the versioned handoff, the session
+registry and the `harness-claude` extra. Nothing is wired into the agent loop yet;
+§13 is that design. The Codex adapter (#5405) and the Antigravity adapter (#5406)
+are being built against this contract, and each row below moves from plan to
+landed as its adapter merges.
 
 This record replaces
 [wiring the Claude Agent SDK session into the turn model](2026-10-19-claude-sdk-session-bridge.md),
@@ -183,6 +186,10 @@ Package layout, `base/lm/harness/`:
 | `claude/` | adapter | claude-agent-sdk: auth / config / mapping / session |
 | `codex/` | adapter | `codex app-server` JSON-RPC |
 | `antigravity/` | adapter | agy headless CLI (NDJSON over stdio, see §12) |
+
+Landed with #6358: the four shared modules and `claude/`. Still a plan: `codex/`
+and `antigravity/` — their transports are already measured (§9, §10, §12), so an
+adapter is the only thing missing.
 
 The inbound queue, turn ticket, timeout and accounting state machine in
 `session.py` are **not** extracted into a base class yet: wait for the second
