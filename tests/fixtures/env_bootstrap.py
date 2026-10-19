@@ -244,6 +244,16 @@ os.environ["MEIVA_TELEMETRY_TEMPO_ENDPOINT"] = "http://127.0.0.1:14318"
 # operator's .env would move every rendered endpoint off the pinned 4318 the
 # render tests assert. Pinned for the same leak class as the Tempo URLs.
 os.environ["MEIVA_TELEMETRY_OTLP_PORT"] = "4318"
+# meiva:note
+# The station ingress projection is a second, independent port: with MEIVA_OBSERVABILITY_URL
+# set and no pure station advertisement, the gateway collector's LGTM fan-out and the
+# station probe resolve the remote ingress as <base>:observability_otlp_port. A host .env
+# carries its own value there (4319 on a dev box, beside the 4318 local port above), which
+# rendered a station endpoint on 4319 where the render test asserts the CI default. Pinned
+# like the local port, not popped like the endpoint below: it is a plain value with no
+# explicit-set signal behind it.
+# meiva:link tests/docs/test-fixtures/test-fixtures.meiva.okf.md
+os.environ["MEIVA_OBSERVABILITY_OTLP_PORT"] = "4318"
 # The collector endpoint is a value AND a signal: any env value marks the
 # field explicitly set (killing the port-derived default) and opens the OTLP
 # export gates for every identity (endpoint_override_is_explicit). So unlike
