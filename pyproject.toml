@@ -864,6 +864,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/deepseek/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/lm/harness/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
