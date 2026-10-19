@@ -8,8 +8,11 @@ YAML-indentation contract between template and generator is covered.
 
 from __future__ import annotations
 
+import os
 import platform
 import re
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -138,6 +141,36 @@ def test_generate_config_two_state_observability_url(
     )
     assert "loki: http://127.0.0.1:3100/otlp" in out
     assert "prom: http://127.0.0.1:9090/api/v1/otlp" in out
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_TWO_STATE_NODE = (
+    "cli/commands/observability/tests/test_converge_otel_collector.py"
+    "::test_generate_config_two_state_observability_url"
+)
+
+
+# meiva:note
+# A host MEIVA_OBSERVABILITY_OTLP_PORT must not reach the render: the login shell exports
+# ~/.meiva/.env into every child, so a dev box's 4319 moved the remote station ingress this
+# file asserts at the CI default 4318 while CI (no such variable) stayed green. env_bootstrap
+# pins the projection port; the child run below inherits the hostile value, so deleting that
+# pin turns this test red on every box.
+def test_station_otlp_port_survives_an_inherited_host_value() -> None:
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", _TWO_STATE_NODE, "-q", "-p", "no:cacheprovider"],
+        cwd=_REPO_ROOT,
+        env={**os.environ, "MEIVA_OBSERVABILITY_OTLP_PORT": "4319"},
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    combined = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 0, (
+        "an inherited MEIVA_OBSERVABILITY_OTLP_PORT reached the collector render; "
+        "tests/fixtures/env_bootstrap.py must pin it to 4318.\n" + combined[-2000:]
+    )
 
 
 def test_write_config_preserves_user_edited_config(
