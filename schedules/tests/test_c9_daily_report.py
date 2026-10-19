@@ -1,5 +1,3 @@
-"""Contract tests for the C9 daily CI-minute reconciliation schedule."""
-
 from __future__ import annotations
 
 import importlib.util
@@ -65,8 +63,6 @@ def _entry(agent_id: int | None, *, linux: int, macos: int) -> dict[str, int | N
 
 
 class _FakeAccounting(SimpleNamespace):
-    """Records collect() windows and returns fixed entries per call."""
-
     def __init__(self, module: ModuleType) -> None:
         super().__init__()
         self.module = module
@@ -89,10 +85,12 @@ class _FakeAccounting(SimpleNamespace):
         return 1
 
 
+# meiva:note
+# A materialized template runs from outside the checkout, so the loader must resolve the
+# accounting module through the installed package rather than the current directory.
 def test_repo_root_survives_runtime_materialization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A materialized template resolves its installed package from outside the checkout."""
     mat_dir = tmp_path / "schedules" / "11"
     mat_dir.mkdir(parents=True)
     mat_path = mat_dir / SCHEDULE_PATH.name
@@ -132,11 +130,11 @@ def test_window_bounds_covers_the_slot_day_in_cluster_timezone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _load_schedule_module()
-    # Pin the cluster timezone: the day label must follow the cluster wall
-    # clock, not the test environment's zone (CI runs UTC).
+    # meiva:note
+    # The day label must follow the cluster wall clock, not the test environment's zone (CI
+    # runs UTC): 05:00 Asia/Shanghai on 2026-09-07 is 21:00 UTC on 2026-09-06, so the UTC
+    # date and the cluster day differ.
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    # 05:00 Asia/Shanghai on 2026-09-07 == 21:00 UTC on 2026-09-06: the UTC
-    # date differs from the cluster day, which is the label that must win.
     slot_end = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
 
     since, until, day = module.window_bounds(slot_end)
@@ -185,8 +183,9 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     machine_identity: MachineIdentity,
     emitted_events: EmittedEvents,
 ) -> None:
-    """_fire derives its window from the CLAIMED slot (the fire_slot_once
-    callback argument), not from the wall clock — the layer QA's simulation flagged."""
+    # meiva:note
+    # `_fire` derives its window from the claimed slot — the `fire_slot_once` callback
+    # argument — and not from the wall clock, which is the layer QA's simulation flagged.
     module = _load_schedule_module()
 
     def fake_init_gateway(
@@ -201,7 +200,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     command_host = fake_host()
     accounting = _FakeAccounting(module)
     monkeypatch.setattr(accounting.module, "_load_accounting", lambda: accounting)
-    slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)  # 05:00 cluster
+    slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
     monkeypatch.setenv("MEIVA_SCHEDULE_ID", str(schedule_id))
 
@@ -324,7 +323,6 @@ def test_report_failure_uses_exact_label_and_existing_message(
 
 
 def test_load_accounting_resolves_under_scripts_ci() -> None:
-    """The loader must resolve accounting.py from its post-move home (scripts/ci/pull_requests/)."""
     module = _load_schedule_module()
     saved_path = list(sys.path)
     loaded = module._load_accounting()

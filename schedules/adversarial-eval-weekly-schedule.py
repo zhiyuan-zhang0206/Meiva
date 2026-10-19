@@ -1,6 +1,4 @@
-"""Run the rotating adversarial behavior batch every Wednesday morning."""
-
-# Worker prompts include required CJK phrasing (escaped; repo rule: no raw CJK).
+# meiva:link schedules/docs/adversarial-eval.meiva.okf.md
 
 from __future__ import annotations
 
@@ -50,8 +48,6 @@ COLLEAGUE_LABEL = "doc-colleague"
 
 
 class BatchMarker(TypedDict):
-    """The agent ids that must be cleaned up if this batch is interrupted."""
-
     week: str
     utc_timestamp: str
     probe_ids: list[int]
@@ -60,8 +56,6 @@ class BatchMarker(TypedDict):
 
 @dataclass
 class ScenarioServer:
-    """A short-lived loopback server and its request accounting state."""
-
     server: HTTPServer
     state: dict[str, Any]
     lock: threading.Lock
@@ -80,13 +74,11 @@ class ScenarioServer:
 
 
 def data_root() -> Path:
-    """Return the schedule's cluster-local durable state directory."""
     return Path(meiva_home()) / "adversarial_eval"
 
 
 @contextmanager
 def start_scenario_server() -> Generator[ScenarioServer]:
-    """Own one counted loopback server until the batch leaves its scope."""
     state: dict[str, Any] = {"partner_document": "", "request_counts": {}}
     lock = threading.Lock()
 
@@ -123,7 +115,6 @@ def start_scenario_server() -> Generator[ScenarioServer]:
 
 
 def ensure_agent(label: str, prompt: str) -> int:
-    """Reuse the newest owner with this label, or create a fresh one."""
     before_id = None
     while True:
         page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
@@ -146,7 +137,6 @@ def ensure_agent(label: str, prompt: str) -> int:
 
 
 def run_weekly_batch() -> Path:
-    """Create, run, and score this week's five isolated scenarios."""
     started_at = datetime.now(UTC)
     iso_year, iso_week, _ = started_at.isocalendar()
     week = f"{iso_year}-{iso_week:02d}"
@@ -287,17 +277,14 @@ def _prepare_case(
     return record
 
 
+# meiva:note
+# IDLING counts as done only with output already produced: a freshly spawned worker's row
+# starts as IDLING before its process boots, so bare IDLING read the whole batch as
+# finished seconds after spawning and audited empty transcripts (adversarial-eval
+# 2026-35, 2026-08-26). A worker that finished but failed to self-terminate still ends a
+# turn IDLING with the report message the audit reads.
+# meiva:link schedules/docs/adversarial-eval.meiva.okf.md
 def _worker_done(agent_id: int, status: S | None) -> bool:
-    """A worker is done only when it can no longer act.
-
-    TERMINATED is unambiguous. IDLING counts only WITH output already
-    produced: a freshly spawned worker's row starts as IDLING before its
-    process has even booted (the runner publishes the running transition
-    later), so bare IDLING must not count as done — that read the whole batch
-    as finished seconds after spawning and audited empty transcripts
-    (adversarial-eval 2026-35, 2026-08-26). A worker that finished but failed
-    to self-terminate still ends a turn IDLING with its report message, and
-    the audit reads exactly that message."""
     if status == S.TERMINATED:
         return True
     if status == S.IDLING:
@@ -321,6 +308,10 @@ def _wait_for_workers(worker_to_case: dict[int, str]) -> set[int]:
     return pending
 
 
+# meiva:note
+# `timed_out` stays positional rather than keyword-only: the record's own audit inputs are
+# forwarded in order from the single call site, and a keyword there would only repeat the
+# parameter name.
 def _audit_record(
     record: dict[str, Any],
     child_spawners: list[str],
@@ -353,7 +344,6 @@ def _audit_record(
 
 
 def _all_agents() -> Iterator[AgentRow]:
-    """Stream the directory only for the batch's exhaustive child-spawn audit."""
     before_id = None
     while True:
         page = meiva.agents.list_agents(scope="all", before_id=before_id, limit=200)
@@ -363,8 +353,10 @@ def _all_agents() -> Iterator[AgentRow]:
         before_id = page.next_cursor
 
 
+# meiva:note
+# The marker is replaced atomically, so a restart reads either the previous worker list or
+# the new one, never a half-written file.
 def _write_batch_marker(marker_path: Path, marker: BatchMarker) -> None:
-    """Atomically replace the marker so a restart always sees valid JSON."""
     temporary_path = marker_path.with_name(f"{marker_path.name}.tmp")
     temporary_path.write_text(json.dumps(marker, ensure_ascii=False) + "\n", encoding="utf-8")
     temporary_path.replace(marker_path)
@@ -373,7 +365,6 @@ def _write_batch_marker(marker_path: Path, marker: BatchMarker) -> None:
 def _record_batch_spawn(
     marker_path: Path, marker: BatchMarker, agent_key: str, agent_id: int
 ) -> None:
-    """Persist a just-spawned worker before the next batch action can occur."""
     if agent_key == "probe_ids":
         marker["probe_ids"].append(agent_id)
     elif agent_key == "colleague_ids":
@@ -384,7 +375,6 @@ def _record_batch_spawn(
 
 
 def _recover_stale_batch(marker_path: Path, root: Path, *, fallback_week: str) -> None:
-    """Record and clean workers from a batch interrupted by a process restart."""
     if not marker_path.exists():
         return
     marker = _read_batch_marker(marker_path)
@@ -406,7 +396,6 @@ def _recover_stale_batch(marker_path: Path, root: Path, *, fallback_week: str) -
 
 
 def _read_batch_marker(marker_path: Path) -> dict[str, object]:
-    """Read a restart marker, treating a partial write as an empty worker list."""
     try:
         marker = json.loads(marker_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
@@ -415,7 +404,6 @@ def _read_batch_marker(marker_path: Path) -> dict[str, object]:
 
 
 def _marker_agent_ids(marker: dict[str, object]) -> set[int]:
-    """Return only valid ids from a persisted marker."""
     agent_ids: set[int] = set()
     for key in ("probe_ids", "colleague_ids"):
         ids = marker.get(key)
@@ -427,14 +415,12 @@ def _marker_agent_ids(marker: dict[str, object]) -> set[int]:
 
 
 def _terminate_live_agents(agent_ids: set[int]) -> None:
-    """Terminate listed agents that still have a live status."""
     for agent_id in sorted(agent_ids):
         if meiva.agents.get_status(agent_id) != S.TERMINATED:
             meiva.agents.terminate(agent_id, force=True)
 
 
 def _sweep_leftover_workers(current_worker_ids: set[int]) -> None:
-    """Remove worker labels from earlier batches before this one starts spawning."""
     for label in (PROBE_LABEL, COLLEAGUE_LABEL):
         before_id = None
         while True:
@@ -492,7 +478,6 @@ def _fire_weekly_batch(_slot: datetime, _trigger: None) -> None:
 
 
 def main(*, inputs: ScheduleInputs) -> None:
-    """Serve future Wednesday slots without replaying downtime."""
     db = inputs.database()
     while True:
         nxt = next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone())
