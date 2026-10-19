@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from base.cluster import frontend_build
 
 
-def _recording_build(calls: list[Path]) -> object:
+def _recording_build(calls: list[Path]) -> Callable[[Path], int]:
     def build(frontend_dir: Path) -> int:
         calls.append(frontend_dir)
         return 0
@@ -15,7 +16,7 @@ def _recording_build(calls: list[Path]) -> object:
     return build
 
 
-def _fixed_key(value: str | None) -> object:
+def _fixed_key(value: str | None) -> Callable[..., str | None]:
     def key(_dir: Path, *, gateway_port: int, browser_origin: str) -> str | None:
         return value
 
