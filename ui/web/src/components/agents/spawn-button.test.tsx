@@ -29,6 +29,7 @@ vi.mock("@/lib/transport/api", () => ({
   api: {
     getSystemStatus: vi.fn(),
     getModels: vi.fn(),
+    getHarnessAvailability: vi.fn().mockResolvedValue([]),
   },
 }));
 

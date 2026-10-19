@@ -1,3 +1,4 @@
+import type { Harness } from "@/lib/harness/harness";
 import type { AgentRow, AgentLineage } from "@/lib/contracts/types";
 
 export interface Props {
@@ -11,7 +12,7 @@ export interface Props {
   /** True while the initial agent list fetch is in flight (cold load — no cached data yet). */
   isLoading: boolean;
   /** imperative lifecycle actions — provided by the caller's useAgents hook */
-  onSpawn: (opts: { machine?: string; model?: string; reasoning_effort?: string }) => void;
+  onSpawn: (opts: { machine?: string; model?: string; reasoning_effort?: string; harness?: Harness }) => void;
   onTerminate: (id: number, force?: boolean) => void;
   onForceExpire: (id: number, sessionId: number) => void;
   onRestart: (id: number) => void;
@@ -28,7 +29,7 @@ export interface InnerProps {
   ancestors?: AgentLineage[];
   activeId: number | null;
   onSelect: (id: number) => void;
-  onSpawn: (opts: { machine?: string; model?: string; reasoning_effort?: string }) => void;
+  onSpawn: (opts: { machine?: string; model?: string; reasoning_effort?: string; harness?: Harness }) => void;
   onTerminate: (id: number, force?: boolean) => void;
   onForceExpire: (id: number, sessionId: number) => void;
   onRestart: (id: number) => void;

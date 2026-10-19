@@ -17,5 +17,12 @@
   "noReadyRunner": "没有 host 可用的 agent runner",
   "priceBreakdown": "输入 / 缓存读取 / 输出，美元 / 百万 token",
   "pricingConditions": "当前基础档价格；长上下文和定时价格窗口可能采用不同费率。",
-  "cacheWritePrice": "缓存写入（{duration}）：{price} / 百万 token"
+  "cacheWritePrice": "缓存写入（{duration}）：{price} / 百万 token",
+  "harness": "运行时（harness）",
+  "harnessStatus": {
+    "available": "可用",
+    "unavailable": "不可用",
+    "unknown": "未知"
+  },
+  "harnessNotLaunchable": "{harness} 还不能启动 —— 平台认得这个选项，但还没有启动器能真的把它跑起来"
 }
