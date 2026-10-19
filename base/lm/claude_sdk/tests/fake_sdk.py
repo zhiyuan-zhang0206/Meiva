@@ -12,11 +12,6 @@ class TextBlock:
 
 
 @dataclass
-class ThinkingBlock:
-    thinking: str
-
-
-@dataclass
 class ToolUseBlock:
     id: str
     name: str
@@ -95,40 +90,16 @@ class ResultMessage:
 
 
 @dataclass
-class ToolPermissionContext:
-    tool_use_id: str | None = None
-    title: str | None = None
-    description: str | None = None
-    suggestions: list[Any] = field(default_factory=list[Any])
-
-
-@dataclass
-class PermissionResultAllow:
-    behavior: str = "allow"
-    updated_input: dict[str, Any] | None = None
-
-
-@dataclass
-class PermissionResultDeny:
-    message: str = ""
-    interrupt: bool = False
-    behavior: str = "deny"
-
-
-@dataclass
 class ClaudeAgentOptions:
     model: str | None = None
     cwd: str | None = None
     tools: list[str] | None = None
-    allowed_tools: list[str] = field(default_factory=list[str])
     permission_mode: str | None = None
-    system_prompt: str | None = None
     max_turns: int | None = None
     setting_sources: list[str] | None = None
     strict_mcp_config: bool = False
     include_partial_messages: bool = False
     env: dict[str, str] = field(default_factory=dict[str, str])
-    can_use_tool: Any = None
     resume: str | None = None
 
 
@@ -149,7 +120,6 @@ class CallTool:
     tool_use_id: str = "toolu-1"
     content: str = "ok"
     is_error: bool = False
-    ask_permission: bool = True
 
 
 @dataclass(frozen=True)
@@ -188,7 +158,7 @@ class FakeClaudeSDKClient:
             SystemMessage(
                 subtype="init",
                 data={
-                    "session_id": self.options.resume or self._sdk.session_id,
+                    "session_id": self.options.resume or self._sdk.new_session_id,
                     "model": self.options.model,
                     "cwd": self.options.cwd,
                     "apiKeySource": "none",
@@ -219,7 +189,26 @@ class FakeClaudeSDKClient:
                 elif isinstance(step, Delay):
                     await asyncio.sleep(step.seconds)
                 elif isinstance(step, CallTool):
-                    await self._call_tool(step)
+                    self._emit(
+                        AssistantMessage(
+                            content=[
+                                ToolUseBlock(
+                                    id=step.tool_use_id, name=step.name, input=step.tool_input
+                                )
+                            ]
+                        )
+                    )
+                    self._emit(
+                        UserMessage(
+                            content=[
+                                ToolResultBlock(
+                                    tool_use_id=step.tool_use_id,
+                                    content=step.content,
+                                    is_error=step.is_error,
+                                )
+                            ]
+                        )
+                    )
                 elif isinstance(step, Block):
                     await self._blocker.wait()
                 else:
@@ -227,39 +216,6 @@ class FakeClaudeSDKClient:
         except asyncio.CancelledError:
             return
         self._finish(result=ResultMessage())
-
-    async def _call_tool(self, step: CallTool) -> None:
-        self._emit(
-            AssistantMessage(
-                content=[ToolUseBlock(id=step.tool_use_id, name=step.name, input=step.tool_input)]
-            )
-        )
-        if step.ask_permission:
-            decision = await self.options.can_use_tool(
-                step.name, step.tool_input, ToolPermissionContext(tool_use_id=step.tool_use_id)
-            )
-            if getattr(decision, "behavior", "deny") != "allow":
-                self._emit(
-                    UserMessage(
-                        content=[
-                            ToolResultBlock(
-                                tool_use_id=step.tool_use_id,
-                                content=getattr(decision, "message", None) or "denied",
-                                is_error=True,
-                            )
-                        ]
-                    )
-                )
-                return
-        self._emit(
-            UserMessage(
-                content=[
-                    ToolResultBlock(
-                        tool_use_id=step.tool_use_id, content=step.content, is_error=step.is_error
-                    )
-                ]
-            )
-        )
 
     def _finish(self, *, result: ResultMessage) -> None:
         self.timeline.append(("result", result.subtype))
@@ -273,7 +229,7 @@ class FakeClaudeSDKClient:
         self._finish(result=ResultMessage(subtype="error_during_execution", is_error=True))
 
     async def _cancel_turn(self) -> None:
-        turn, self._turn = (self._turn, None)
+        turn, self._turn = self._turn, None
         if turn is None or turn.done():
             return
         turn.cancel()
@@ -302,12 +258,9 @@ class FakeSDK:
     def __init__(self, scripts: list[list[Any]] | None = None, *, cli_pid: int = 4242) -> None:
         self.scripts: list[list[Any]] = list(scripts or [])
         self.cli_pid = cli_pid
-        self.session_id = "session-1"
+        self.new_session_id = "session-1"
         self.clients: list[FakeClaudeSDKClient] = []
         self.ClaudeAgentOptions = ClaudeAgentOptions
-        self.PermissionResultAllow = PermissionResultAllow
-        self.PermissionResultDeny = PermissionResultDeny
-        self.ToolPermissionContext = ToolPermissionContext
 
     def ClaudeSDKClient(self, options: ClaudeAgentOptions) -> FakeClaudeSDKClient:
         client = FakeClaudeSDKClient(options, sdk=self)

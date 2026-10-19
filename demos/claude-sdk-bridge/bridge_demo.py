@@ -1,32 +1,50 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import asyncio
 import os
+import platform
 import sys
 import tempfile
 import time
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from base.lm.claude_sdk import (
-    ApprovalPolicyResult,
     BridgeConfig,
     ClaudeSession,
+    ClusterFact,
+    EntryPoint,
+    FileSessionRegistry,
+    Handoff,
     SessionTotals,
     TurnOutcome,
 )
 from base.lm.claude_sdk.process import PsutilChildProbe
 
-WORKSPACE_POLICY = "This demo workspace is read-only for the model: the host policy denies writes."
+# meiva:note
+# One command, one real session, the four things the bridge is for: the handoff
+# document is injected as the first message, agent id ↔ session id lands in the
+# registry, a running tool is cancelled with the child reaping asserted, and a new
+# process resumes the same session from the registry (no handoff re-injection).
+# meiva:link demos/claude-sdk-bridge/README.md
+DEMO_AGENT_ID = 6984
 
 
-def policy(tool_name: str, _tool_input: Mapping[str, Any]) -> ApprovalPolicyResult | None:
-    if tool_name == "Write":
-        return ApprovalPolicyResult(allow=False, message=WORKSPACE_POLICY)
-    if tool_name == "Bash":
-        return ApprovalPolicyResult(allow=True)
-    return None
+def build_handoff(workspace: Path) -> Handoff:
+    return Handoff(
+        agent_id=DEMO_AGENT_ID,
+        instruction="Reply with the single word READY. The host sends your task next.",
+        machine=platform.node() or "unknown",
+        workspace=workspace,
+        label="claude-sdk-bridge-demo",
+        cluster=(ClusterFact("macmini", "hosts the Claude subscription login"),),
+        entries=(
+            EntryPoint("meiva.files", "read and write files under the workspace"),
+            EntryPoint("meiva.shell", "run commands and open sessions"),
+            EntryPoint("meiva.tasks", "the shared task registry"),
+        ),
+    )
 
 
 def make_workspace() -> Path:
@@ -40,14 +58,14 @@ async def run_stage(name: str, session: ClaudeSession, prompt: str) -> tuple[Tur
     outcome = await session.submit(prompt).outcome()
     elapsed = time.perf_counter() - started
     print(f"\n[{name}] {elapsed:.2f}s  subtype={outcome.subtype}  error={outcome.is_error}")
-    print(f"[{name}] model> {outcome.text[:400]}")
-    return (outcome, elapsed)
+    print(f"[{name}] model> {outcome.text[:300]}")
+    return outcome, elapsed
 
 
 async def stage_cancel(session: ClaudeSession, probe: PsutilChildProbe) -> dict[str, Any]:
-    print(f"[cancel] cli_pid: {session.cli_pid}")
     ticket = session.submit(
-        "Run this exact bash command with the Bash tool and wait for it to finish: ping -c 30 127.0.0.1"
+        "Run this exact bash command with the Bash tool and wait for it to finish: "
+        "ping -c 30 127.0.0.1"
     )
     started = time.perf_counter()
     child_pids = await wait_for_child(session, probe, ticket, timeout=60.0)
@@ -59,7 +77,9 @@ async def stage_cancel(session: ClaudeSession, probe: PsutilChildProbe) -> dict[
         outcome = None
     print(f"\n[cancel] tool child seen after {observed_at - started:.2f}s: {sorted(child_pids)}")
     print(
-        f"[cancel] interrupt returned in {report.interrupt_ms:.1f}ms; settled={report.settled}; waited={report.waited_ms:.0f}ms; cli_alive={report.cli_alive}; remaining={[o.pid for o in report.remaining]}"
+        f"[cancel] interrupt returned in {report.interrupt_ms:.1f}ms; settled={report.settled}; "
+        f"waited={report.waited_ms:.0f}ms; cli_alive={report.cli_alive}; "
+        f"remaining={[observation.pid for observation in report.remaining]}"
     )
     if outcome is not None:
         print(f"[cancel] turn ended subtype={outcome.subtype} interrupted={outcome.interrupted}")
@@ -86,7 +106,8 @@ async def wait_for_child(
         if ticket.settled:
             outcome = await ticket.outcome()
             raise RuntimeError(
-                f"the turn ended without a tool child (subtype={outcome.subtype}): {outcome.text[:300]}"
+                f"the turn ended without a tool child (subtype={outcome.subtype}): "
+                f"{outcome.text[:300]}"
             )
         await asyncio.sleep(0.02)
     raise TimeoutError("no tool child process appeared")
@@ -99,33 +120,45 @@ async def drain(session: ClaudeSession) -> None:
 
 def summarise(label: str, totals: SessionTotals) -> None:
     print(
-        f"[{label}] turns={totals.turns} in={totals.input_tokens} out={totals.output_tokens} cache_read={totals.cache_read_input_tokens} cost=${totals.cost_usd:.4f}"
+        f"[{label}] turns={totals.turns} in={totals.input_tokens} out={totals.output_tokens} "
+        f"cache_read={totals.cache_read_input_tokens} cost=${totals.cost_usd:.4f}"
     )
 
 
 async def main() -> int:
     workspace = make_workspace()
+    registry = FileSessionRegistry(workspace / "sessions")
+    handoff = build_handoff(workspace)
     print(f"workspace: {workspace}")
-    config = BridgeConfig(cwd=workspace)
-    print(f"model: {config.model}   auth: oauth (no API key forwarded)")
+    print(f"model: {BridgeConfig(cwd=workspace).model}   auth: oauth (no API key forwarded)")
+    print(f"\n[handoff] {handoff.size_bytes()} bytes injected as the first message:")
+    print("\n".join(handoff.render().splitlines()[:8]) + "\n  …")
+
     started = time.perf_counter()
-    session = ClaudeSession(config, environ=os.environ, approval_policy=policy)
-    await session.start()
+    session = ClaudeSession(
+        BridgeConfig(cwd=workspace), environ=os.environ, agent_id=DEMO_AGENT_ID, registry=registry
+    )
+    await session.start(handoff=handoff)
     pump = asyncio.create_task(drain(session))
     cancel: dict[str, Any] = {}
     session_id: str | None = None
     try:
+        ticket = session.handoff_ticket
+        if ticket is not None:
+            ack = await ticket.outcome()
+            print(f"\n[1 handoff] {ack.text[:200]}")
         await run_stage(
             "1 talk+read",
             session,
-            "Remember the number 4711. Then use the Read tool to read hello.txt in the current directory and reply with exactly the third word.",
+            "Remember the number 4711. Then use the Read tool to read hello.txt in the "
+            "current directory and reply with exactly the third word.",
         )
-        await run_stage(
-            "2 approval",
-            session,
-            "Use the Write tool to create a file named approval.txt with the exact content APPROVED-42, then reply with the single word DONE.",
+        record = registry.load(DEMO_AGENT_ID)
+        print(f"\n[2 mapping] {registry.path(DEMO_AGENT_ID)}")
+        print(
+            f"[2 mapping] agent {DEMO_AGENT_ID} -> session {record.session_id if record else None} "
+            f"(model={record.model if record else None}, resumes={record.resumes if record else None})"
         )
-        print(f"[2 approval] approval.txt exists: {(workspace / 'approval.txt').exists()}")
         cancel = await stage_cancel(session, PsutilChildProbe())
         session_id = session.session_id
         cli_pid = session.cli_pid
@@ -136,29 +169,38 @@ async def main() -> int:
         await asyncio.gather(pump, return_exceptions=True)
     cli_reaped = cli_pid is not None and (not PsutilChildProbe().is_alive(cli_pid))
     print(f"[close] cli pid {cli_pid} reaped: {cli_reaped}")
-    print(f"\nsession_id: {session_id}")
-    resumed = ClaudeSession(config, environ=os.environ, approval_policy=policy)
-    await resumed.start(resume=session_id)
+
+    resumed = ClaudeSession(
+        BridgeConfig(cwd=workspace), environ=os.environ, agent_id=DEMO_AGENT_ID, registry=registry
+    )
+    await resumed.start(handoff=handoff)
     pump = asyncio.create_task(drain(resumed))
     try:
         outcome, _ = await run_stage(
-            "4 resume",
+            "3 resume",
             resumed,
             "What number did I ask you to remember earlier? Reply with just the number.",
+        )
+        print(
+            f"[3 resume] resumed={resumed.resumed} session_id={resumed.session_id} "
+            f"handoff_reinjected={resumed.handoff_ticket is not None}"
         )
         summarise("resumed", resumed.totals)
     finally:
         await resumed.close(reason="demo done")
         pump.cancel()
         await asyncio.gather(pump, return_exceptions=True)
+
     print(f"\ntotal wall clock: {time.perf_counter() - started:.2f}s")
-    print(f"resume recalled 4711: {'4711' in outcome.text}")
+    recalled = "4711" in outcome.text
+    print(f"resume recalled 4711: {recalled}")
     ok = (
         cancel["settled"] is True
         and cancel["remaining"] == []
         and cli_reaped
-        and ("4711" in outcome.text)
-        and (not (workspace / "approval.txt").exists())
+        and recalled
+        and resumed.resumed
+        and resumed.session_id == session_id
     )
     print("RESULT:", "PASS" if ok else "CHECK ABOVE")
     return 0 if ok else 1
