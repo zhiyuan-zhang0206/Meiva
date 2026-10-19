@@ -61,10 +61,12 @@ class ExecRequestEnvelopeMutated(TypedDict):
     domain: str
     digest_version: int
     phase: str
+    condition: str
+    detail: str
     refused: bool
     recorded_payload_sha256: str
-    observed_payload_sha256: str
-    size_bytes: int
+    observed_payload_sha256: str | None
+    size_bytes: int | None
     evidence_path: str
 
 
@@ -127,8 +129,8 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "exec_request_envelope_mutated": telemetry_event(
         "exec_request_envelope_mutated",
-        "exec request envelope no longer matches its allocation; refused says whether "
-        "that mismatch is authoritative (payload-digest rows) or only reported",
+        "exec request payload condition (matched/changed/missing/unreadable/symlink/"
+        "oversize); refused says whether it is authoritative or only reported",
         payload=ExecRequestEnvelopeMutated,
         tier="anomaly",
         persist=True,

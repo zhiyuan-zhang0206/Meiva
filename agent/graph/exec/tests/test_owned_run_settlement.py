@@ -251,3 +251,15 @@ def test_an_identity_that_no_longer_derives_refuses(tmp_path: Path) -> None:
 
     with pytest.raises(ResourceEvidenceError, match="identity differs"):
         validate_closed(context, attached, closed)
+
+
+def test_a_version_2_allocation_settles_when_the_envelope_is_gone(tmp_path: Path) -> None:
+    payload = b'{"v": 1, "code": "print(1)"}'
+    generation, owner = uuid4(), uuid4()
+    allocation = _version_2(payload, generation=generation, owner=owner)
+    context, attached, closed = _domain(
+        tmp_path, allocation, payload=payload, generation=generation, owner=owner
+    )
+    context.request_path.unlink()
+
+    assert validate_closed(context, attached, closed).reason == "completed"

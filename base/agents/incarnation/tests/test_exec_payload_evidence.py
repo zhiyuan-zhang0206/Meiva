@@ -10,10 +10,15 @@ from uuid import UUID, uuid4
 
 import psutil
 import pytest
+from loguru import logger
 from psycopg.pq import TransactionStatus
 from pydantic import ValidationError
 
-from base.agents.incarnation.exec_owner_protocol import OwnerClosed, OwnerContext
+from base.agents.incarnation.exec_owner_protocol import (
+    MAX_PAYLOAD_BYTES,
+    OwnerClosed,
+    OwnerContext,
+)
 from base.agents.incarnation.exec_owner_recovery import recover_local_resources
 from base.agents.incarnation.exec_payload_evidence import observe_exec_payload
 from base.agents.incarnation.resources import (
@@ -186,6 +191,7 @@ def test_a_version_1_row_still_refuses_a_rewritten_payload(tmp_path: Path) -> No
     )
     assert record["refused"] is True
     assert record["digest_version"] == 1
+    assert record["condition"] == "changed"
 
 
 def test_a_version_2_row_reports_a_rewritten_payload_without_refusing(
@@ -211,6 +217,7 @@ def test_a_version_2_row_reports_a_rewritten_payload_without_refusing(
         (request.parent.parent.parent / "evidence" / f"{allocation.request}.json").read_text()
     )
     assert record["refused"] is False
+    assert record["condition"] == "changed"
     assert record["recorded_payload_sha256"] == allocation.request_sha256
     assert record["observed_payload_sha256"] != allocation.request_sha256
     assert record["payload_path"] == str(request)
@@ -362,3 +369,123 @@ def test_recovery_still_refuses_a_rewritten_version_1_allocation(tmp_path: Path)
             home=tmp_path,
         )
     assert not connection.stores
+
+
+def _condition(request: Path, condition: str) -> None:
+    if condition == "missing":
+        request.unlink()
+    elif condition == "unreadable":
+        request.chmod(0o000)
+    elif condition == "symlink":
+        target = request.with_name("elsewhere.json")
+        target.write_bytes(b"{}")
+        request.unlink()
+        request.symlink_to(target)
+    elif condition == "oversize":
+        with request.open("r+b") as stream:
+            stream.truncate(MAX_PAYLOAD_BYTES + 1)
+    else:
+        raise AssertionError(condition)
+
+
+_CONDITIONS = ["missing", "unreadable", "symlink", "oversize"]
+
+
+@pytest.mark.parametrize("condition", _CONDITIONS)
+def test_a_version_2_row_observes_every_payload_condition(tmp_path: Path, condition: str) -> None:
+    payload = b'{"v": 1, "code": "print(1)"}'
+    allocation, agent_id, generation, owner = _version_2(payload=payload)
+    request = _domain_request(tmp_path, allocation, payload)
+    _condition(request, condition)
+    records: list[Any] = []
+    sink = logger.add(
+        lambda message: records.append(message.record), level="ERROR", format="{message}"
+    )
+    try:
+        observation = observe_exec_payload(
+            allocation,
+            request_path=request,
+            agent_id=agent_id,
+            generation=generation,
+            runtime_owner=owner,
+            phase="settle",
+        )
+    finally:
+        logger.remove(sink)
+
+    assert observation.condition == condition
+    assert observation.observed_sha256 is None
+    assert observation.refused is False
+    record = json.loads(
+        (request.parent.parent.parent / "evidence" / f"{allocation.request}.json").read_text()
+    )
+    assert record["condition"] == condition
+    assert record["refused"] is False
+    assert record["observed_payload_sha256"] is None
+    assert [entry["extra"]["condition"] for entry in records] == [condition]
+    assert records[0]["extra"]["refused"] is False
+
+
+@pytest.mark.parametrize("condition", _CONDITIONS)
+def test_a_version_1_row_still_refuses_every_payload_condition(
+    tmp_path: Path, condition: str
+) -> None:
+    payload = b"first"
+    allocation = _version_1(payload=payload)
+    request = _domain_request(tmp_path, allocation, payload)
+    _condition(request, condition)
+
+    observation = observe_exec_payload(
+        allocation,
+        request_path=request,
+        agent_id=9,
+        generation=uuid4(),
+        runtime_owner=uuid4(),
+        phase="settle",
+    )
+
+    assert observation.condition == condition
+    assert observation.refused is True
+
+
+def test_recovery_discharges_a_version_2_allocation_whose_envelope_is_gone(
+    tmp_path: Path,
+) -> None:
+    generation, owner = uuid4(), uuid4()
+    payload = b'{"v": 1}'
+    allocation, agent_id, _generation, _owner = _version_2(
+        payload=payload, generation=generation, owner=owner
+    )
+    attached = _closed_domain(
+        tmp_path,
+        allocation,
+        payload=payload,
+        agent_id=agent_id,
+        generation=generation,
+        owner=owner,
+    )
+    (
+        exec_run_dir(tmp_path)
+        / str(agent_id)
+        / "domains"
+        / str(allocation.request)
+        / f"req-{allocation.request.hex}.json"
+    ).unlink()
+    state = IncarnationResources(
+        generation=generation,
+        owner=owner,
+        host_process=_process(1),
+        requests={str(attached.request): attached},
+    )
+    connection = _RecordingConnection(
+        resources=state.model_dump(mode="json"), generation=generation, owner=owner
+    )
+
+    recover_local_resources(
+        cast(Database, _RecordingDatabase(connection)),
+        agent_id,
+        "test-machine",
+        home=tmp_path,
+    )
+
+    assert connection.stores and connection.stores[-1]["requests"] == {}
