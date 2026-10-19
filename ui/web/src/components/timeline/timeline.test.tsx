@@ -1632,8 +1632,8 @@ describe("deep history DOM window", () => {
     }));
     // Measure a parked reader before crossing the virtualization threshold, as history loading does.
     const loadOlder = vi.fn();
-    const view = (rows: BackendTimelineItem[]) => (
-      <TimelineView items={rows} threadKey="tracked-bottom" hasMoreOlder onLoadOlder={loadOlder} />
+    const view = (rows: BackendTimelineItem[], threadKey = "tracked-bottom") => (
+      <TimelineView items={rows} threadKey={threadKey} hasMoreOlder onLoadOlder={loadOlder} />
     );
     const { rerender } = render(view(items.slice(0, 90)));
     const viewport = screen.getByTestId("scroll-viewport");
@@ -1675,6 +1675,7 @@ describe("deep history DOM window", () => {
     writes.length = 0;
     return {
       viewport, height, writes, scrollTo,
+      switchThread: (threadKey: string) => rerender(view(items, threadKey)),
       smoothTarget: () => smoothTarget,
       finishSmoothScroll: () => {
         // Motion can precede the browser's next scroll event and React commit.
@@ -1706,9 +1707,9 @@ describe("deep history DOM window", () => {
     expect(history.viewport.querySelector(`.timeline-item[data-item-id="${count}.0"]`)).not.toBeNull();
   });
 
-  it.each([90, 300])("keeps a send force pin at the bottom with %i tracked rows", (count) => {
+  it.each([90, 300])("pins a thread switch to the bottom with %i tracked rows", (count) => {
     const history = trackedHistory(count);
-    act(() => { useTimelineStore.getState().requestScrollToBottom(); });
+    act(() => { history.switchThread("next-thread"); });
     expect(history.viewport.scrollTop).toBe(history.height - 600);
     expect(history.viewport.querySelector(`.timeline-item[data-item-id="${count}.0"]`)).not.toBeNull();
   });
@@ -1849,7 +1850,6 @@ describe("deep history DOM window", () => {
     });
     expect(viewport.querySelectorAll(".timeline-item").length).toBeGreaterThan(0);
     act(() => {
-      useTimelineStore.getState().requestScrollToBottom();
       rerender(<TimelineView items={items} threadKey="new-thread" />);
     });
     expect(viewport.scrollTop).toBe(120_000);
@@ -3527,15 +3527,13 @@ describe("splitEnvelope idx === 0 boundary", () => {
   });
 });
 
-// Force-scroll is now driven by the store's single scrollToBottomRequest
-// signal (bumped on agent switch inside switchThread and on
-// send via requestScrollToBottom), consumed by one useLayoutEffect. The
-// signal's bump-vs-no-bump contract is covered in store.test.ts; jsdom does
-// not render scroll, so the pin itself stays covered only by sticky.test.ts.
-// Here we just confirm the timeline mounts and renders content without a
-// force-scroll prop.
+// meiva:note
+// The pin is driven by the thread key alone, consumed by one useLayoutEffect;
+// a send reaches the timeline only as ordinary content growth. jsdom does not
+// render scroll, so the pin itself stays covered by sticky.test.ts.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
 describe("force-scroll: renders without a scroll-token prop", () => {
-  it("mounts and renders content (scrollToBottomRequest drives the pin, no prop)", () => {
+  it("mounts and renders content (the pin needs no prop)", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);
     expect(screen.getByText("x")).toBeTruthy();
   });

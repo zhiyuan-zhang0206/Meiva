@@ -1,7 +1,8 @@
-// HomePage tests — mock all use-* hooks and child components as stubs to
-// test top-level wiring and state flow (send calls the store's
-// requestScrollToBottom, handleSend errors bubble to toast, composerMode
-// tri-state).
+// meiva:note
+// HomePage tests — mock all use-* hooks and child components as stubs to test
+// top-level wiring and state flow (send asks the timeline to stay with a
+// follower, handleSend errors bubble to toast, composerMode tri-state).
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 //
 // Hooks have too many heavy dependencies (useAgents+useTimeline+useTokenUsage+
 // useEventStream+useStore); running them for real triggers SSE / fetch /
@@ -155,12 +156,8 @@ vi.mock("@/lib/layout/breakpoint", () => ({
 }));
 
 vi.mock("@/lib/timeline/timeline-store", () => ({
-  useTimelineStore: <T,>(selector: (s: unknown) => T): T => {
-    const fakeState = {
-      requestScrollToBottom: hooksState.requestScrollToBottom,
-    };
-    return selector(fakeState);
-  },
+  useTimelineStore: <T,>(selector: (s: unknown) => T): T =>
+    selector({ requestScrollToBottom: hooksState.requestScrollToBottom }),
 }));
 
 vi.mock("@/lib/transport/api", () => ({
@@ -827,11 +824,12 @@ describe("Spawn flow", () => {
   });
 });
 
-// Force-scroll on send: page.tsx calls the store's requestScrollToBottom
-// action (the switch-side bump lives in the store's switchThread, not
-// here). The store is mocked, so we assert the action fires.
-describe("force-scroll on send", () => {
-  it("send succeeds → requestScrollToBottom called (sending scrolls to bottom)", async () => {
+// meiva:note
+// A send asks the timeline to stay with a FOLLOWER; the view decides, so a
+// reader parked mid-history is never moved.
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+describe("send asks the timeline to stay with the tail", () => {
+  it("send succeeds → requestScrollToBottom called", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
     wrap(<HomePage />);
@@ -843,7 +841,7 @@ describe("force-scroll on send", () => {
     expect(hooksState.requestScrollToBottom).toHaveBeenCalledTimes(1);
   });
 
-  it("send fails → requestScrollToBottom NOT called (no scroll on error)", async () => {
+  it("send fails → requestScrollToBottom NOT called", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
     vi.mocked(api.sendMessage).mockRejectedValueOnce(new Error("boom"));
@@ -1027,7 +1025,7 @@ describe("multi-command dispatch", () => {
     );
   });
 
-  it("does not scroll when the send fails", async () => {
+  it("does not ask for the tail when the send fails", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
     vi.mocked(api.sendMessage).mockRejectedValueOnce(new Error("boom"));
