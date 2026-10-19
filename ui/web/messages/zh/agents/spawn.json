@@ -20,7 +20,6 @@
   "cacheWritePrice": "缓存写入（{duration}）：{price} / 百万 token",
   "harness": "运行时（harness）",
   "harnessStatus": {
-    "available": "可用",
     "unavailable": "不可用"
   }
 }
