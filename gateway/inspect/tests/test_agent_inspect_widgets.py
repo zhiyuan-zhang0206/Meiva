@@ -53,7 +53,7 @@ def _widget(**over: Any) -> InspectWidgetSpec:
     data: dict[str, Any] = {
         "id": "today-tasks",
         "kind": "taskList",
-        "order": 150,
+        "order": 250,
     }
     data.update(over)
     face = DeclaredFace(
@@ -200,7 +200,7 @@ def test_lists_only_the_agents_active_tasks(
         "meiva_fleet",
         "today-tasks",
         "taskList",
-        150,
+        250,
     )
     # One rung (the default P2): id ascending — recency is no order key.
     assert [t["id"] for t in widget["tasks"]] == [older, newer, mid]
@@ -356,7 +356,7 @@ def test_loader_imports_shipped_fleet_widget(monkeypatch: pytest.MonkeyPatch) ->
 
     specs = _plugin_widgets.load_inspect_widgets()
     assert [(s.plugin, s.id, s.kind, s.order) for s in specs] == [
-        ("meiva_fleet", "today-tasks", "taskList", 150)
+        ("meiva_fleet", "today-tasks", "taskList", 250)
     ]
     assert specs[0].title is None
 
