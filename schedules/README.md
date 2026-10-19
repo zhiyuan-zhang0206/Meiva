@@ -77,6 +77,26 @@ Edit the script template and the manifest entry (name, class, default_enabled,
 description), PR it, and deploy: the next `schedule-manager` start syncs it into
 existing clusters.
 
+Four places change together; each one left out fails a directory-wide gate
+rather than a review:
+
+1. **The template.** `tests/components/base/test_schedule_timezone.py` sweeps
+   every `*-schedule.py`: at least one timezone argument must be present and
+   every one of them must be `cluster_timezone()` (a `timezone=` keyword, a
+   `ZoneInfo(...)` argument, or `run_daily_loop`'s third argument). A resident
+   sentinel with no cron slot is no exception — stamp its own output with
+   `ZoneInfo(cluster_timezone())`. A hard-coded IANA name, or a template reading
+   `settings.general.timezone` itself, fails the same test.
+2. **`meizel.toml`'s `[uses]`.** An import of a sibling module (typically
+   `schedules.catchup` for `cluster_timezone`) needs its declared edge, or
+   `meizel check` fails the locality gate.
+3. **The manifest entry and this table** — name, class, `default_enabled`,
+   description.
+4. **`base/daemon/schedules/tests/test_builtin_schedules.py`**, whose
+   repo-manifest test names every entry's class and the set of schedules that
+   start by default. A new entry cannot pass by carrying the right class and the
+   wrong default.
+
 The C9 template imports its accounting dependency through
 `scripts.ci.pull_requests.accounting`. Materialization changes the script
 directory, not the installed module roots. Template tests live in
