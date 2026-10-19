@@ -1,0 +1,6 @@
+exports = ["core.py", "identity.py"]
+
+[uses]
+"__init__.py" = ["core.py", "identity.py"]
+"core.py" = ["identity.py"]
+"identity.py" = []
