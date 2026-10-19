@@ -186,6 +186,12 @@ def _claude_credentials(record: object) -> _LoginEvidence:
     return _session_deadline(_epoch_ms(oauth.get("expiresAt")), where=where)
 
 
+# meiva:note
+# This row reports one thing: a token set that `~/.claude/.credentials.json`
+# stores and whose refresh token has not expired. An account named in
+# `~/.claude.json` is not that evidence — the record outlives the login — so on its
+# own it reads `unknown`, as does a missing or unreadable store.
+# meiva:link base/agents/docs/harness.meiva.okf.md
 def _claude_code_login(home: Path) -> _LoginEvidence:
     credentials = home / ".claude" / ".credentials.json"
     if credentials.is_file():
@@ -202,6 +208,14 @@ def _claude_code_login(home: Path) -> _LoginEvidence:
     return _LoginEvidence(signed_in=None, detail="no Claude Code configuration found")
 
 
+# meiva:note
+# This row reports a token set stored in `~/.codex/auth.json`. The file records no
+# expiry for it — the access token is renewed from the refresh token, and
+# `last_refresh` says when that last happened — and no threshold on that age would
+# be more than a guess, so the token set is the evidence and the reason carries the
+# age. A missing or unreadable file reads `unknown`; a file holding no token reads
+# `unavailable`.
+# meiva:link base/agents/docs/harness.meiva.okf.md
 def _codex_login(home: Path) -> _LoginEvidence:
     where = "~/.codex/auth.json"
     auth = home / ".codex" / "auth.json"
@@ -217,12 +231,6 @@ def _codex_login(home: Path) -> _LoginEvidence:
     holds_token = _has_value(tokens, "access_token") or _has_value(tokens, "refresh_token")
     if tokens is None or not holds_token:
         return _LoginEvidence(signed_in=False, detail=f"{where} holds no credentials")
-    # meiva:note
-    # The file stores opaque tokens and records no expiry for them: the access
-    # token is renewed from the refresh token, and `last_refresh` says when that
-    # last happened. No threshold on that age would be more than a guess, so the
-    # stored token set stands as the evidence and the reason carries the age.
-    # meiva:link base/agents/docs/harness.meiva.okf.md
     refreshed = data.get("last_refresh")
     age = f", last refreshed {refreshed}" if isinstance(refreshed, str) else ""
     return _LoginEvidence(signed_in=True, detail=f"a ChatGPT token set is stored in {where}{age}")
@@ -251,6 +259,12 @@ def _antigravity_session(record: object, where: str) -> _LoginEvidence:
     return _session_deadline(expiry, where=where)
 
 
+# meiva:note
+# This row reports the session file its CLI wrote. A readable file holding an access
+# token is `available`; its expiry is reported as age because the refresh token
+# renews it, and it decides only when no refresh token is stored. No file, or one
+# that cannot be read, is `unknown`.
+# meiva:link base/agents/docs/harness.meiva.okf.md
 def _antigravity_login(home: Path) -> _LoginEvidence:
     for relative in _ANTIGRAVITY_TOKEN_FILES:
         token_file = home / relative
