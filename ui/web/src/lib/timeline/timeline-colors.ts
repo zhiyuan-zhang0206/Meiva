@@ -250,20 +250,25 @@ const CLASSES: Record<ColorFamily, FamilyClasses> = {
     bg50_950_30: "bg-amber-50 dark:bg-amber-950/30",
     text700_300: "text-amber-700 dark:text-amber-300",
   },
+  // meiva:note
+  // The gray family paints neutral blocks, so its dark side follows the surface
+  // tokens instead of Tailwind's cool gray ramp: a cool patch on a warm canvas
+  // reads as a rendering bug, not as a quiet neutral.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
   gray: {
-    border500_50: "border-gray-500/50",
-    border500_70: "border-gray-500/70",
-    border500_40: "border-gray-500/40",
-    border400_40: "border-gray-400/40",
-    border400_50: "border-gray-400/50",
-    border400_60: "border-gray-400/60",
-    bg50_40_950_15: "bg-gray-50/40 dark:bg-gray-950/15",
-    bg50_60_900_20: "bg-gray-50/60 dark:bg-gray-900/20",
-    bg50_40_950_10: "bg-gray-50/40 dark:bg-gray-950/10",
-    bg50_950_20: "bg-gray-50 dark:bg-gray-950/20",
-    bg50_900_30: "bg-gray-50 dark:bg-gray-900/30",
-    bg50_950_30: "bg-gray-50 dark:bg-gray-950/30",
-    text700_300: "text-gray-700 dark:text-gray-300",
+    border500_50: "border-gray-500/50 dark:border-muted-foreground/30",
+    border500_70: "border-gray-500/70 dark:border-muted-foreground/40",
+    border500_40: "border-gray-500/40 dark:border-muted-foreground/25",
+    border400_40: "border-gray-400/40 dark:border-muted-foreground/25",
+    border400_50: "border-gray-400/50 dark:border-muted-foreground/30",
+    border400_60: "border-gray-400/60 dark:border-muted-foreground/35",
+    bg50_40_950_15: "bg-gray-50/40 dark:bg-muted/40",
+    bg50_60_900_20: "bg-gray-50/60 dark:bg-muted/50",
+    bg50_40_950_10: "bg-gray-50/40 dark:bg-muted/30",
+    bg50_950_20: "bg-gray-50 dark:bg-muted/60",
+    bg50_900_30: "bg-gray-50 dark:bg-muted/70",
+    bg50_950_30: "bg-gray-50 dark:bg-muted/80",
+    text700_300: "text-gray-700 dark:text-foreground/80",
   },
 };
 
