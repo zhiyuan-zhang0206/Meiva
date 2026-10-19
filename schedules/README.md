@@ -33,7 +33,9 @@ directory. The manifest is the single expression of the built-in policy
   the operator enables them. `db-write-stall-watch` is the first: three
   consecutive minutes under 20 xacts/s with an average query time above 300 ms
   means the write path has stopped completing transactions, which is the
-  root-cause signal an agent-host crash wave follows.
+  root-cause signal an agent-host crash wave follows. It wakes the operator and
+  the P0 lead only — never a user notification path — and stops with
+  `meiva schedules stop db-write-stall-watch`.
 
 The adversarial weekly batch owns its counted loopback HTTP server in a lexical
 scope. One batch-local executor serves requests while the batch updates the
