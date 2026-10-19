@@ -42,6 +42,20 @@ If Antigravity ever ships ACP into the CLI, only `transport.py` changes.
 | Difference | Where it is absorbed |
 |---|---|
 | Headless cannot prompt: a tool that needs a permission the configured policy does not grant is **auto-denied**, yet the turn still reports `status: SUCCESS` and exits 0 | `mapping.ResultFields.is_error` is true when `denied_actions` is non-empty; `TurnCompleted.permission_denials` carries the entries. A caller that only reads `status` records a silent no-op as success |
+
+The shape that makes this a silent failure, captured from `agy` 1.4.2 with a
+`request-review` profile asked to run `echo hi > file`:
+
+```json
+{"event":"result","result":{"conversation_id":"…","status":"SUCCESS","response":"",
+ "num_turns":1,"usage":{"input_tokens":11907,"output_tokens":71,"thinking_tokens":0,
+ "cache_read_tokens":0,"total_tokens":11978},
+ "denied_actions":[{"action":"command","display_name":"RunCommand"}]}}
+```
+
+Nothing ran, the exit code is 0, and `denied_actions` is the only structured
+signal. The adapter turns that into `subtype="denied"`, `is_error=True`,
+`permission_denials=("command:RunCommand",)`.
 | Every `run_command` is a fresh shell: `cd` and `export` do not survive into the next call | `handoff_rules.SHELL_SEMANTICS`, appended to the handoff by `build_handoff()` |
 | A background process started with `&` is killed when the turn ends | same: the handoff tells the agent to use `setsid nohup …` or tmux |
 
@@ -70,6 +84,18 @@ absent from a plain `Handoff`).
 | `max_buffered_events` | 256 | text deltas are droppable under lag; control events never are |
 | `dedupe_window` | 256 | how many completed keys stay replayable |
 | `skip_permissions` | `False` | headless cannot prompt; a command outside the configured policy is denied, which the adapter reports as failure. Opting in trades that denial for auto-approval |
+
+## Interrupt, measured on the real CLI
+
+`SIGINT` stops `agy` but not its tool tree. In a live run the turn was asked to
+`run_command: sleep 90`; after the interrupt the CLI had exited, while both
+`bash -c sleep 90` and `sleep 90` were still running. `interrupt()` therefore
+reports `settled=False` with those pids in `remaining` instead of claiming a
+clean cancel — the assertion is the contract, not a formality. Killing the
+residue is the caller's decision; the adapter never widens its own authority.
+
+The session itself recovers: the next turn respawns `agy` with
+`--conversation <id>` and completed normally in the same measurement.
 
 ## Usage and cost
 

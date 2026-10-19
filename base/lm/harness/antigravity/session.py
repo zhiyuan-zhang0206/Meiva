@@ -173,6 +173,10 @@ class AgySession:
         if self._closed:
             raise SessionClosedError("session is closed")
         resume = resume or self._resume_from_registry()
+        if resume is not None:
+            # A caller-supplied resume is still a resume: the transcript already
+            # carries the handoff, so it must not be injected again.
+            self._resumed_existing = True
         transport = self._factory()
         await transport.start(resume=resume)
         self._transport = transport
