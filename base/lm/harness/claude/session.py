@@ -239,7 +239,13 @@ class ClaudeSession:
                 self._emit(SessionFaulted(turn_id=None, error=f"session tasks failed: {group!r}"))
         if self._client is not None:
             await self._client.disconnect()
-        await settle_close(self._probe, watched, "claude_code", self.config.cancel_settle_seconds)
+        await settle_close(
+            self._probe,
+            watched,
+            "claude_code",
+            self.config.cancel_settle_seconds,
+            agent_id=self.agent_id,
+        )
         self._emit(SessionClosed(turn_id=None, reason=reason))
         self._events.put_nowait(_EVENT_STREAM_END)
 

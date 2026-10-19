@@ -207,7 +207,13 @@ class AgySession:
         watched = watch_tree(self._probe, transport.pid if transport is not None else None)
         if transport is not None:
             await transport.close()
-        await settle_close(self._probe, watched, "antigravity", self.config.cancel_settle_seconds)
+        await settle_close(
+            self._probe,
+            watched,
+            "antigravity",
+            self.config.cancel_settle_seconds,
+            agent_id=self.agent_id,
+        )
         self._emit(SessionClosed(turn_id=None, reason=reason))
         self._events.put_nowait(EVENT_STREAM_END)
 

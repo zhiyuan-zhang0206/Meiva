@@ -88,7 +88,12 @@ is why an agent id must be stable across resurrect.
   start a second CLI on the same resumed session id while the first one is still
   inside its terminate/kill window. `HarnessSessions.retire` therefore keeps the
   close per agent and `join` is what the next turn waits on; the close itself waits
-  out the adapter's settle window and reports residue instead of assuming it.
+  out the adapter's settle window and reports residue instead of assuming it. The
+  first wake after an eviction can therefore take about 25s before it builds a
+  runtime — the SDK's own bounded close plus the settle window — which is rare and
+  bounded, not a stall. A close that observed no process tree at all reports
+  `harness_close_unobserved` rather than success: the pid comes from a provider SDK's
+  private structure, and "nothing seen" is not "nothing running".
 - A turn that never got a session (a missing provider SDK, a refused submission) is
   a setup failure, not a crash: the bridge raises `HarnessSetupError` and the node
   settles it on the same fatal-stream path.
