@@ -51,7 +51,7 @@ _PROVISION_LABELS = {
     DATA_PLANE: "PostgreSQL/Redis/PgBouncer",
     NODE: "Node.js",
     HOST_UTILS: "cron + curl",
-    CLI_TOOLS: "git and the GitHub CLI",
+    CLI_TOOLS: "git, the GitHub CLI and the other CLI tools",
 }
 
 # meiva:note
