@@ -25,14 +25,15 @@ import { ConnectionNotice } from "@/components/notifications/connection-notice";
 import { CompactingBlock } from "./model/compacting-block";
 import { LiveClockGate } from "./model/reasoning-clock";
 import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
+import { applyBookmarkRestore, settleRestoredPosition as settleRestoredPositionImpl, type BookmarkState } from "./model/bookmark-restore";
 import { rememberTimelinePosition, readTimelineExpansion, rememberTimelineExpansion, watchReadingNavigation } from "./model/reading-position";
 import { materializeBeforeAnchor } from "./model/materialize-prefix";
-import { settleSavedTimelineScroll } from "./model/restore-settle";
 import { classifyItem } from "./model/runs";
 import { groupTimelineSegments } from "./model/segments";
 import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
 import { useOlderHistoryPull } from "./model/use-older-history-pull";
-import { applySavedTimelineScroll, useTimelineWindow, useTimelineWindowLimits } from "./model/use-timeline-window";
+import { usePinRequests } from "./model/use-pin-requests";
+import { useTimelineWindow, useTimelineWindowLimits } from "./model/use-timeline-window";
 import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
@@ -103,6 +104,10 @@ export const TimelineView = memo(function TimelineView({
 
   const holdRestoredPositionRef = useRef(!!pendingRestoreRef.current && !pendingRestoreRef.current.followBottom);
   const settledRestoreRef = useRef<SavedScroll | null>(null);
+  // meiva:note
+  // Consecutive layout passes at the same content height. A bookmark beyond the reachable end is only unreachable once the content has stopped growing - before that, the height is still arriving and waiting is correct.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  const restoreProbeRef = useRef<{ height: number; passes: number }>({ height: -1, passes: 0 });
   const restoreInFlight = useCallback(() => pendingRestoreRef.current !== null || (settledRestoreRef.current !== null && holdRestoredPositionRef.current), []);
   const initialRestorePassRef = useRef(true);
 
@@ -342,33 +347,36 @@ export const TimelineView = memo(function TimelineView({
     prevLoadingOlderRef.current = loadingOlder;
   }, [loadingOlder, captureAnchor]);
 
+  const bookmarkState = useRef<BookmarkState>({
+    pending: pendingRestoreRef,
+    settled: settledRestoreRef,
+    hold: holdRestoredPositionRef,
+    probe: restoreProbeRef,
+  }).current;
   const applyPendingRestore = useCallback(
-    (viewport: HTMLElement | null) => {
-      const saved = pendingRestoreRef.current;
-      if (initialRestorePassRef.current || !saved || !viewport) return;
-      if (threadKey === undefined) return;
-      if (saved.contentKey !== threadKey) {
-        pendingRestoreRef.current = null;
-        holdRestoredPositionRef.current = false;
-        return;
-      }
-      if (!applySavedTimelineScroll(viewport, saved, compactBuffer, canonicalItemsRef.current)) {
-        controller.notifyRestored({ scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight });
-        return;
-      }
-      controller.notifyRestored({ scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight });
-      pendingRestoreRef.current = null;
-      settledRestoreRef.current = saved.anchor ? saved : null;
-    },
-    [compactBuffer, controller, threadKey],
+    (viewport: HTMLElement | null) => applyBookmarkRestore({
+      state: bookmarkState,
+      viewport,
+      initialPass: initialRestorePassRef.current,
+      threadKey,
+      compactBuffer,
+      canonicalItems: canonicalItemsRef.current,
+      controller,
+    }),
+    [bookmarkState, compactBuffer, controller, threadKey],
   );
 
-  const settleRestoredPosition = useCallback((viewport: HTMLElement | null, layoutChanged: boolean) => {
-    const saved = settledRestoreRef.current;
-    if (!saved || !viewport) return;
-    if (pendingRestoreRef.current !== null || !holdRestoredPositionRef.current || threadKey === undefined || saved.contentKey !== threadKey) { settledRestoreRef.current = null; return; }
-    if (layoutChanged && settleSavedTimelineScroll(viewport, saved, compactBuffer, canonicalItemsRef.current)) settledRestoreRef.current = null;
-  }, [compactBuffer, threadKey]);
+  const settleRestoredPosition = useCallback(
+    (viewport: HTMLElement | null, layoutChanged: boolean) => settleRestoredPositionImpl({
+      state: bookmarkState,
+      viewport,
+      layoutChanged,
+      threadKey,
+      compactBuffer,
+      canonicalItems: canonicalItemsRef.current,
+    }),
+    [bookmarkState, compactBuffer, threadKey],
+  );
 
   useEffect(() => {
     const viewport = wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
@@ -389,9 +397,12 @@ export const TimelineView = memo(function TimelineView({
       const isPrependEcho = prependEchoRef.current || boundaryCorrection;
       prependEchoRef.current = false;
 
+      // meiva:note
+      // The reader moved: that movement is the position from here on, so the bookmark and the hold that protected it are both spent. Keeping the hold alive here silenced the controller (holding reads every scroll as "none"), which is how a restored reader who then scrolled to the bottom stopped following for good.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
       if (direction !== "none" && !isPrependEcho) {
-        if (pendingRestoreRef.current) holdRestoredPositionRef.current = true;
         pendingRestoreRef.current = null;
+        holdRestoredPositionRef.current = false;
       }
       measureAtBottom();
       trimFollowing();
@@ -439,6 +450,9 @@ export const TimelineView = memo(function TimelineView({
     viewport.addEventListener("touchcancel", onTouchCancel, { passive: true });
 
     const ro = new ResizeObserver(() => {
+      const probe = restoreProbeRef.current;
+      if (probe.height === viewport.scrollHeight) probe.passes += 1;
+      else { probe.height = viewport.scrollHeight; probe.passes = 1; }
 
       prepareHistoryPull(viewport);
       applyPendingRestore(viewport);
@@ -464,30 +478,20 @@ export const TimelineView = memo(function TimelineView({
     };
   }, [applyPendingRestore, settleRestoredPosition, restoreInFlight, controller, stickyThresholds, measureAtBottom, maybeColdFill, pinToBottom, trimFollowing, updateStuckHeader, prepareHistoryPull, historyPullActive, pullScroll, pullScrollEnd, pullWheel, pullTouchStart, pullTouchMove, pullTouchEnd, cancelPullTouch]);
 
-  // meiva:note
-  // A send re-pins only a following reader; a thread change always pins.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
-  const scrollToBottomRequest = useTimelineStore((s) => s.scrollToBottomRequest);
-  const lastForceRequest = useRef<{ request: number; thread: string | undefined } | null>(null);
-  useLayoutEffect(() => {
-    const previous = lastForceRequest.current;
-    if (previous && previous.thread === threadKey && (previous.request === scrollToBottomRequest
-      || !controller.isSticky() || restoreInFlight())) return;
-    lastForceRequest.current = { request: scrollToBottomRequest, thread: threadKey };
-    pendingAnchorRef.current = null;
-    if (pendingRestoreRef.current?.contentKey !== threadKey) pendingRestoreRef.current = null;
-    if (pendingRestoreRef.current) return;
-    holdRestoredPositionRef.current = false;
-
-    setAtBottom(true);
-    const viewport =
-      viewportRef.current ??
-      wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
-      null;
-    if (!viewport) return;
-
-    pinToBottom(viewport, true);
-  }, [scrollToBottomRequest, controller, restoreInFlight, pinToBottom, threadKey]);
+  usePinRequests({
+    threadKey,
+    controller,
+    thresholds: stickyThresholds,
+    viewportRef,
+    wrapperRef,
+    anchorRef: pendingAnchorRef,
+    pendingRef: pendingRestoreRef,
+    settledRef: settledRestoreRef,
+    holdRef: holdRestoredPositionRef,
+    restoreInFlight,
+    pinToBottom,
+    setAtBottom,
+  });
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current ??

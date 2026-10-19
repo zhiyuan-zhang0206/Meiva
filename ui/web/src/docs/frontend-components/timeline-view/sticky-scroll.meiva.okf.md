@@ -36,9 +36,16 @@ controller is already following. An agent switch hides the button in the same
 commit, supersedes an unreachable restore target, and pins with a fresh run so a
 post-command twitch cannot release following while the awaited reply streams in
 (user report 2026-09-19). A send re-pins only a follower: the thread is
-unchanged, so it pins just when the controller is already following and no
-restore is steering the viewport — a reader parked mid-history keeps their place
-(user report 2026-10-19). The composer's pending strip lives outside the scroll
+unchanged, so it pins when the controller is already following — or, while a
+bookmark is still settling, when the reader is at a real tail by measurement —
+and a reader parked mid-history keeps their place (user report 2026-10-19). The
+bookmark owns the viewport only until it settles or the reader moves: a settled
+restore and any movement the controller classifies both release the hold, so a
+reader who scrolls after returning is no longer read as "none" (that silence
+used to switch following off for good and skipped the position save on the next
+agent switch — user report 2026-10-19). A bookmark that lies past the end of a
+page that has stopped growing is unreachable: it lands on the end and hands the
+viewport back instead of holding the reader at the top forever. The composer's pending strip lives outside the scroll
 area, so the echo arrives as ordinary growth and a following reader stays on the
 tail either way. Only a following reader releases the oldest rows (the 250-row
 retention rule in the paging doc).
