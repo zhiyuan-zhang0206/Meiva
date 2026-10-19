@@ -21,6 +21,7 @@ _NEEDS_SWIFT = pytest.mark.skipif(
 )
 
 _STUBBED = [
+    "requestGrants",
     "fileList",
     "fileRead",
     "listWindows",

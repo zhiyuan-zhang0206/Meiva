@@ -127,8 +127,8 @@ included: its prompt writes no `PROMPTING` line, so verify it by screenshot
 
 | Authorization | TCC service / row | Holder | First request today | Programmatic request | Manual only | Helper restart |
 |---|---|---|---|---|---|---|
-| Screen Recording (incl. ScreenCaptureKit) | `kTCCServiceScreenCapture` | helper | the gate's `request_grants` on every start, or first capture | yes -- helper-owned `CGRequestScreenCaptureAccess` (`ping.request_grants_v1`) | **yes** once denied -- System Settings > Screen Recording | **yes** |
-| Accessibility | `kTCCServiceAccessibility` | helper | the gate's `request_grants` on every start, or the first AX-gated operation | yes -- helper-owned `AXIsProcessTrustedWithOptions` (`axTrustedOrPrompt`) | **yes** once denied | no (read live per call) |
+| Screen Recording (incl. ScreenCaptureKit) | `kTCCServiceScreenCapture` | helper | the helper's first start without the grant, or the first capture | yes -- helper-owned `CGRequestScreenCaptureAccess` (`ping.request_grants_v1`), at most once per helper process | **yes** once denied -- System Settings > Screen Recording | **yes** |
+| Accessibility | `kTCCServiceAccessibility` | helper | the helper's first start without the grant, or the first AX-gated operation | yes -- helper-owned `AXIsProcessTrustedWithOptions` (`axTrustedOrPrompt`), at most once per helper process | **yes** once denied | no (read live per call) |
 | Desktop / Documents / Downloads folders | `kTCCServiceSystemPolicy{Desktop,Documents,Downloads}Folder` | helper | first folder operation by whichever workflow needed it | yes -- helper-spawned child lists the folder | after a denial | no |
 | Automation (Finder, Terminal, System Events, Safari, Chrome) | `kTCCServiceAppleEvents` per target | helper | first AppleEvent to that app | yes -- one benign `get version` event per app | after a denial | no |
 | App data | `kTCCServiceSystemPolicyAppData` | helper | -- (no shipped feature uses it) | experimental (`--fill-pending`) | -- | no |
@@ -138,6 +138,18 @@ included: its prompt writes no `PROMPTING` line, so verify it by screenshot
 | Developer Tools | `kTCCServiceDeveloperTool` | helper | never requested | no (read-only by decision) | always | no |
 | Notifications | -- (Tauri app bundle) | app | Android only (`request_notification_permission_async`) | n/a on macOS today | -- | no |
 | Camera / Microphone | -- | -- | not used by any shipped feature | -- | -- | -- |
+
+### How often a dialog appears
+
+The helper raises each desktop dialog at most once per process. An operator therefore
+sees at most one Accessibility dialog and one Screen Recording dialog before the grant
+is answered, no matter how many AX-gated or capture operations run, and every later
+attempt -- `meiva permissions status`, a converge, a failed click -- reads the system
+state and reports the missing grant instead of asking again. Two conditions still show
+a dialog: the grant has never been answered and a *new* helper has been started since
+(`meiva stop`, then `meiva start` re-arms the one ask), or the operator asked for it
+explicitly from the console's Ask button / `meiva permissions onboard`, which spends the
+same single ask. A dismissed dialog is not re-raised by the process that raised it.
 
 Reading the last three rows: Meiva raises no macOS notification authorization
 today (in-product notices are web UI), and nothing captures camera or

@@ -401,7 +401,25 @@ def _installed_build_is_current(app: Path, state: BuildState | None, source_hash
     return is_valid_stable_app(app) and state is not None and state["source_hash"] == source_hash
 
 
-def ensure_signing_cert() -> None:
+# meiva:note
+# `security find-identity` with no keychain argument searches the user's search list only,
+# so a keychain that dropped out of that list -- another tool ran
+# `security list-keychains -d user -s`, a restore replaced the list, a migration carried
+# the file but not the preference -- makes a good identity look missing. Minting a second
+# self-signed certificate in that state changes the helper's designated requirement and
+# silently drops its Screen Recording and Accessibility grants, so the build refuses and
+# names the keychain to put back instead.
+# meiva:link services/docs/agent_runner_side/permissions-helper/authorization.meiva.okf.md
+def identity_outside_search_list(keychain: Path) -> Path | None:
+    if not keychain.exists():
+        return None
+    proc = run_readonly_query(["security", "find-identity", "-p", "codesigning", str(keychain)])
+    if proc.returncode != 0:
+        return None
+    return keychain if CERT_CN in proc.stdout.decode(errors="replace") else None
+
+
+def ensure_signing_cert(*, keychain: Path | None = None) -> None:
     """Provision the stable self-signed code-signing identity if it is missing.
 
     This is the certificate `build_and_sign` signs with, and the reason a rebuilt
@@ -409,6 +427,7 @@ def ensure_signing_cert() -> None:
     self-signed cert -- trust only governs Gatekeeper verification, not signing --
     so no trust-settings change (and its GUI auth prompt) is needed. Idempotent:
     a present identity is left as-is."""
+    target = keychain_path() if keychain is None else keychain
     listing = run_readonly_query(["security", "find-identity", "-p", "codesigning"])
     if listing.returncode != 0:
         raise PermissionsHelperBuildError(
@@ -416,7 +435,17 @@ def ensure_signing_cert() -> None:
         )
     if CERT_CN in listing.stdout.decode(errors="replace"):
         return
-    keychain = str(keychain_path())
+    hidden = identity_outside_search_list(target)
+    if hidden is not None:
+        raise PermissionsHelperBuildError(
+            f"code-signing identity {CERT_CN!r} is in {hidden}, which is not in this user's "
+            "keychain search list, so codesign cannot resolve it. A second self-signed "
+            "identity would change the helper's designated requirement and drop its Screen "
+            "Recording and Accessibility grants, so the build stops instead. Put the "
+            f"keychain back on the search list: `security list-keychains -d user -s {hidden}` "
+            "followed by every keychain `security list-keychains -d user` already lists, "
+            "then re-run converge."
+        )
     with tempfile.TemporaryDirectory() as td:
         d = Path(td)
         key, cert, p12 = d / "key.pem", d / "cert.pem", d / "ident.p12"
@@ -467,7 +496,7 @@ def ensure_signing_cert() -> None:
                 "import",
                 str(p12),
                 "-k",
-                keychain,
+                str(target),
                 "-P",
                 "meiva",
                 "-T",

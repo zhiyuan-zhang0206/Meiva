@@ -509,6 +509,7 @@ class _FakeToolOutputs:
     designated_requirement: str | None
     dr_streams: tuple[bytes, bytes] | None
     identity_output: str | None
+    keychain_identity_output: str
     list_keychains_output: bytes | None
     list_keychains_rc: int
 
@@ -540,6 +541,9 @@ class _FakeToolOutputs:
     def _find_identity(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
         from services.desktop.permissions_helper import lifecycle
 
+        scoped_to_keychain = len(cmd) > 4
+        if scoped_to_keychain:
+            return subprocess.CompletedProcess(cmd, 0, self.keychain_identity_output.encode(), b"")
         output = self.identity_output or f'  1) {TEST_CERT_SHA1} "{lifecycle.CERT_CN}"\n'
         return subprocess.CompletedProcess(cmd, 0, output.encode(), b"")
 
@@ -584,6 +588,7 @@ def fake_tools(
     designated_requirement: str | None = None,
     dr_streams: tuple[bytes, bytes] | None = None,
     identity_output: str | None = None,
+    keychain_identity_output: str = "",
     list_keychains_output: bytes | None = None,
     list_keychains_rc: int = 0,
     hang: tuple[str, ...] = (),
@@ -614,6 +619,7 @@ def fake_tools(
         designated_requirement=designated_requirement,
         dr_streams=dr_streams,
         identity_output=identity_output,
+        keychain_identity_output=keychain_identity_output,
         list_keychains_output=list_keychains_output,
         list_keychains_rc=list_keychains_rc,
     )
