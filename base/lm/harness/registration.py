@@ -18,6 +18,14 @@ from base.log import logger
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
 
+# meiva:note
+# The one status a usable row carries. `meiva.impersonation.harness.attach` refuses a row
+# that says anything else, and the reader owns that vocabulary: this module cannot import
+# it, because the SDK surface sits above `base`, so the word is repeated here and a test
+# pins the pair the moment both land.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+ATTACHED = "attached"
+
 _REQUIRED = frozenset(
     {
         "agent_id",
@@ -27,6 +35,7 @@ _REQUIRED = frozenset(
         "controller_pid",
         "handle_sha256",
         "created_at",
+        "expires_at",
     }
 )
 
@@ -36,6 +45,9 @@ _REQUIRED = frozenset(
 # external session, on which machine, written by the process that owns the session.
 # The child reads nothing from it — it gets only the handle — so this is the record a
 # crash sweep and an operator both read to answer "is anything still attached?".
+# `expires_at` is required here even though a reader may accept its absence: the row is
+# a bearer capability, and `descends_from(controller_pid)` cannot tell a reused pid from
+# the original, so only an expiry keeps a dead controller's claim from living forever.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 @dataclass(frozen=True, slots=True)
 class HarnessRegistration:
@@ -46,7 +58,7 @@ class HarnessRegistration:
     controller_pid: int
     handle_sha256: str
     created_at: str
-    expires_at: str | None = None
+    expires_at: str
     status: str | None = None
 
     def document(self) -> dict[str, Any]:
@@ -58,9 +70,8 @@ class HarnessRegistration:
             "controller_pid": self.controller_pid,
             "handle_sha256": self.handle_sha256,
             "created_at": self.created_at,
+            "expires_at": self.expires_at,
         }
-        if self.expires_at is not None:
-            document["expires_at"] = self.expires_at
         if self.status is not None:
             document["status"] = self.status
         return document
@@ -133,7 +144,7 @@ class RegistrationStore:
                 controller_pid=int(payload["controller_pid"]),
                 handle_sha256=str(payload["handle_sha256"]),
                 created_at=str(payload["created_at"]),
-                expires_at=_optional_text(payload.get("expires_at")),
+                expires_at=str(payload["expires_at"]),
                 status=_optional_text(payload.get("status")),
             )
         except (TypeError, ValueError) as exc:
@@ -172,9 +183,7 @@ class RegistrationStore:
         return removed
 
     def _stale(self, registration: HarnessRegistration, now: datetime) -> bool:
-        if registration.expires_at is not None and _parse(registration.expires_at) <= now:
-            return True
-        return not _alive(registration.controller_pid)
+        return _parse(registration.expires_at) <= now or not _alive(registration.controller_pid)
 
 
 def _optional_text(value: object) -> str | None:

@@ -4,7 +4,7 @@ import os
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from base.api_contracts.agent_contract import Harness
@@ -18,6 +18,7 @@ from base.lm.harness.events import (
 )
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.registration import (
+    ATTACHED,
     HarnessRegistration,
     RegistrationStore,
     handle_digest,
@@ -78,6 +79,7 @@ class HarnessBridge:
         machine: str = "",
         handoff: Handoff | None = None,
         registrations: RegistrationStore | None = None,
+        registration_ttl_seconds: float,
     ) -> None:
         self.harness = harness
         self._agent_id = agent_id
@@ -85,6 +87,10 @@ class HarnessBridge:
         self._machine = machine
         self._handoff = handoff
         self._registrations = registrations
+        if registration_ttl_seconds <= 0:
+            raise ValueError(f"a harness registration must expire, got {registration_ttl_seconds}s")
+        self._registration_ttl = timedelta(seconds=registration_ttl_seconds)
+        self._created_at: str | None = None
         self._session: HarnessSession | None = None
         self._model: str | None = None
         self._digest: str | None = None
@@ -119,6 +125,7 @@ class HarnessBridge:
 
     async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
         session = await self.ensure()
+        self._register(session.session_id or "")
         ticket: Any = session.submit(text, key=key)
         try:
             return await self._await_turn(session, str(ticket.turn_id))
@@ -149,12 +156,23 @@ class HarnessBridge:
     async def _retire(self, session: HarnessSession, reason: str) -> None:
         if self._session is session:
             self._session = None
+            self._created_at = None
             self._retire_registration()
         await _close_quietly(session, reason)
 
+    # meiva:note
+    # Every row carries an expiry, and the bridge rewrites it at the start of each turn:
+    # `descends_from(controller_pid)` is only as good as the kernel's pid allocation, so
+    # a row that never expired would be a bearer capability that a reused pid could
+    # eventually inherit. Renewal is what keeps a live agent's row valid — the TTL is
+    # sized above the adapter's own turn timeout — and it is also what makes a crashed
+    # host's row lapse without anyone sweeping it.
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
     def _register(self, external_session_id: str) -> None:
         if self._registrations is None or self._digest is None:
             return
+        now = datetime.now(UTC)
+        self._created_at = self._created_at or now.isoformat(timespec="seconds")
         self._registrations.write(
             HarnessRegistration(
                 agent_id=self._agent_id,
@@ -163,8 +181,9 @@ class HarnessBridge:
                 machine=self._machine,
                 controller_pid=os.getpid(),
                 handle_sha256=self._digest,
-                created_at=datetime.now(UTC).isoformat(timespec="seconds"),
-                status="active",
+                created_at=self._created_at,
+                expires_at=(now + self._registration_ttl).isoformat(timespec="seconds"),
+                status=ATTACHED,
             )
         )
 
