@@ -40,7 +40,7 @@ tags:
 
 ## Two-layer Relationship
 
-1. **Agent ↔ User**: via Self (activity trail, role labels) and Notify (notification queue) — agents present themselves and request decisions. Communication is **bifurcated**: authorization/decisions go directly to the user from any depth; progress/conclusions roll up along the delegation tree to the delegator for aggregation before entering the user queue
+1. **Agent ↔ User**: via Self (activity trail, role labels) and Notify (the user's notice inbox) — agents present themselves and request decisions. Communication is **bifurcated**: authorization/decisions go directly to the user from any depth; progress/conclusions roll up along the delegation tree to the delegator for aggregation before entering the user queue
 2. **Agent ↔ Agent**: via Neighbors (discovery, messages) and Spawn (creation, termination) — agents coordinate division of labor, no fixed hierarchy
 
 ## Dependencies
@@ -53,7 +53,7 @@ tags:
 ## Configuration
 
 - Enable/disable uses per-machine `~/.meiva/plugins_config.json` (`base/packages/plugins/enable_config.py:set_local_enabled` is the only writer), CLI `meiva plugins enable/disable <name>` — no `MEIVA_FLEET_ENABLED` or similar env switch
-- After disabling: `meiva.ui` falls back to pure page mode (no notifications), `meiva.self`'s log/label methods disappear, `meiva.tasks` namespace disappears; `meiva.agents.spawn` keeps working unchanged, `label` included
+- After disabling: `meiva.ui` falls back to pure page mode (no notices), `meiva.self`'s log/label methods disappear, `meiva.tasks` namespace disappears; `meiva.agents.spawn` keeps working unchanged, `label` included
 
 ## Workflow boundary
 

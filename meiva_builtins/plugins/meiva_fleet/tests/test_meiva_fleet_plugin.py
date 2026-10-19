@@ -384,3 +384,19 @@ def test_fleet_declares_compact_preparation_in_its_manifest() -> None:
     check_manifest(
         "meiva_fleet", Path(agent_runtime.__file__).parent, contribution, FACE_KEYS["agent_runtime"]
     )
+
+
+# meiva:note
+# The fleet plugin declares no notification category: a closed task is not a
+# request that needs the user's reply, and no other task event is one either.
+# Adding one is a product decision, not a test fix.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def test_fleet_declares_no_notification_category() -> None:
+    from pathlib import Path
+
+    from base.packages.plugins.manifest import load_manifest
+    from meiva_builtins.plugins.meiva_fleet import agent_runtime
+
+    manifest = load_manifest(Path(agent_runtime.__file__).parent)
+
+    assert not manifest.contributions.get("notifications")

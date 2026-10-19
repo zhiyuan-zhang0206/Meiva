@@ -62,12 +62,14 @@ silent and returns no row.
 
 ## Producers
 
-A posted notice that needs an answer records `core.needs_input` from
-`ops/lifecycle/events.py` through `base/events/notifications/notices.py`, keyed
-by the notice id plus a fingerprint of its question, so a retried post stays
-silent while editing a container to add a question delivers again — a new
-question is what the user has to act on. The spine reads the notice row itself
-rather than trusting either post path to pass the right shape.
+A notice that needs an answer stages `core.needs_input` inside the transaction
+that writes it — `gateway/agents/notices.py` and
+`gateway/agents/notice_operations/current.py` on the gateway path — keyed by the
+notice id plus a fingerprint of its question, so a retried post stays silent
+while editing a container to add a question delivers again: a new question is
+what the user has to act on. `ops/lifecycle/events.py` publishes only the inbox's
+live hint. The spine reads the notice row itself rather than trusting either
+post path to pass the right shape.
 
 A completed turn and a closed task are not notifications. The agent host logs
 the finished turn (`services/agent_runner/agent_host/host.py`) and the task
