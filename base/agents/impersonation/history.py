@@ -97,8 +97,6 @@ def public_session(lease: Mapping[str, Any]) -> dict[str, Any]:
         "relay_heartbeat_at",
         "relay_last_failure_at",
         "events_completed_at",
-        "capabilities",
-        "capability_declared_by",
     )
     result = {key: lease[key] for key in fields} | {"id": lease["session_id"]}
     result["status"] = status
