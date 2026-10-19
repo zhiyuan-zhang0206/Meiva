@@ -1,4 +1,4 @@
-exports = ["agents", "cluster", "converge", "data_plane", "extensions", "lifecycle", "management", "observability", "permissions.py", "probe.py", "tests"]
+exports = ["agents", "cluster", "converge", "data_plane", "extensions", "harness.py", "lifecycle", "management", "observability", "permissions.py", "probe.py", "tests"]
 
 [uses]
 "_repo.py" = ["_setup.py"]
@@ -9,3 +9,6 @@ exports = ["agents", "cluster", "converge", "data_plane", "extensions", "lifecyc
 "lifecycle" = ["_repo.py", "_setup.py", "cluster", "converge", "data_plane", "extensions", "observability", "probe.py"]
 "observability" = ["converge"]
 "tests" = ["_repo.py", "_setup.py", "data_plane", "extensions", "lifecycle", "observability", "permissions.py", "probe.py"]
+
+[external]
+"harness.py" = "runs the Python file or stdin the operator names, inside a harness attachment: the operator-authored program is run content, not a dependency of this repository"

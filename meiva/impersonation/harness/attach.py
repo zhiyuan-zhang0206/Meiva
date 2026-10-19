@@ -47,16 +47,30 @@ __all_for_meiva__ = []
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
 
 
-def _refuse_unless_attachable() -> MeivaContext | None:
-    if process_context.is_host_process():
+@dataclasses.dataclass(frozen=True, slots=True)
+class ProcessProbe:
+    is_host: Callable[[], bool]
+    ambient: Callable[[], MeivaContext | None]
+    in_exec_turn: Callable[[], bool]
+
+
+PROCESS_PROBE = ProcessProbe(
+    is_host=process_context.is_host_process,
+    ambient=process_context.ambient_context,
+    in_exec_turn=process_context.in_exec_turn,
+)
+
+
+def refuse_unless_attachable(probe: ProcessProbe = PROCESS_PROBE) -> MeivaContext | None:
+    if probe.is_host():
         raise RuntimeError("a native agent runtime cannot attach a harness identity")
-    bound = process_context.ambient_context()
+    bound = probe.ambient()
     identity = None if bound is None else bound.identity
     if identity is not None and identity.lease is not None:
         raise RuntimeError("this process already has an external attachment")
     if identity is not None and identity.agent_id is not None and identity.owns_loop:
         raise RuntimeError("a native agent runtime cannot attach a harness identity")
-    if process_context.in_exec_turn():
+    if probe.in_exec_turn():
         raise RuntimeError("an exec turn cannot attach a harness identity")
     return bound
 
@@ -95,7 +109,7 @@ class HarnessAttachment(ExternalAttachment):
         self._machine: MachineIdentity
         self._database: Any = None
         self._clock_factory: Any = None
-        bound = _refuse_unless_attachable()
+        bound = refuse_unless_attachable()
         super().__init__(identity=_RegistrationIdentity(self), codec=_RegistrationCodec(self))
         self.open(bound)
 

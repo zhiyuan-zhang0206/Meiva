@@ -26,6 +26,10 @@ gives one to a takeover; both go through
 | bind | a borrowed `ExternalLease` on the ambient context, pipeline and SDK state initialized |
 | close | flush the plugin delta, seal events, deliver telemetry, detach, retire the row |
 
+`meiva harness exec --file script.py` is the CLI around the same seam: it reads the
+script (or stdin as `-`) and runs it inside the attachment, so a bridge needs no
+bootstrap file in the child's workspace.
+
 ## The registration row
 
 The bridge writes one row per started session
