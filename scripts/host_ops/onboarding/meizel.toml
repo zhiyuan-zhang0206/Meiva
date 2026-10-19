@@ -1,0 +1,5 @@
+exports = ["catalog.py", "harness_onboarding.py", "hostfs.py", "transport.py"]
+
+[uses]
+"harness_onboarding.py" = ["catalog.py", "hostfs.py", "transport.py"]
+"tests" = ["catalog.py", "harness_onboarding.py", "transport.py"]
