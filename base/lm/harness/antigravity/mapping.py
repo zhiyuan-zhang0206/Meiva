@@ -15,15 +15,13 @@ from base.lm.harness.events import (
 )
 
 
+# meiva:note
+# One `result` event, decoded. `denied_actions` is the only structured signal
+# that a tool call was refused: the CLI still reports `status: SUCCESS` and
+# exits 0, so a caller that reads `status` alone records a silent no-op as a
+# successful turn.
 @dataclass(frozen=True, slots=True)
 class ResultFields:
-    """One `result` event, decoded.
-
-    `denied_actions` is the only structured signal that a tool call was refused:
-    the CLI still reports `status: SUCCESS` and exits 0, so a caller that reads
-    `status` alone records a silent no-op as a successful turn.
-    """
-
     session_id: str | None
     status: str
     text: str
@@ -64,9 +62,9 @@ def map_init(payload: dict[str, Any]) -> SessionStarted:
     )
 
 
+# meiva:note
+# Translate one `step_update`; text accumulation stays with the session.
 def map_step_update(update: dict[str, Any], *, turn_id: str) -> tuple[BridgeEvent, ...]:
-    """Translate one `step_update`; text accumulation stays with the session."""
-
     step_type = _text(update.get("step_type"))
     state = _text(update.get("state"))
     delta = _text(update.get("text_delta"))
@@ -107,8 +105,10 @@ def assistant_text(update: dict[str, Any], *, turn_id: str, text: str) -> Assist
 def parse_usage(payload: Any) -> Usage:
     usage = _mapping(payload)
     output = _int(usage.get("output_tokens"))
-    # `agy` bills thinking tokens as output and reports them separately; fold them so
-    # a turn's output figure stays comparable with the other harnesses.
+    # meiva:note
+    # `agy` bills thinking tokens as output and reports them separately; fold
+    # them in so a turn's output figure stays comparable with the other
+    # harnesses.
     output += _int(usage.get("thinking_tokens"))
     return Usage(
         input_tokens=_int(usage.get("input_tokens")),
@@ -144,8 +144,9 @@ def _denial_label(entry: Any) -> str:
 
 
 def _tool_failed(info: dict[str, Any]) -> bool:
-    # `agy` does not mark a failing shell command: a non-zero exit arrives as plain
-    # output text. Only a tool-level error field is trustworthy here.
+    # meiva:note
+    # `agy` does not mark a failing shell command: a non-zero exit arrives as
+    # plain output text. Only a tool-level error field is trustworthy here.
     return bool(info.get("error") or info.get("Error"))
 
 

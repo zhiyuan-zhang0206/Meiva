@@ -1,11 +1,3 @@
-"""A stand-in for the `agy` CLI, speaking its NDJSON stream on stdin/stdout.
-
-The adapter is tested against the real framing, not a Python object: this script
-is spawned exactly like `agy`, reads `{"event":"user",...}` lines and writes
-`init` / `step_update` / `result`. `FAKE_AGY_PLAN` names a JSON plan; every turn
-in it is one entry consumed per inbound message.
-"""
-
 from __future__ import annotations
 
 import json
@@ -18,6 +10,12 @@ from pathlib import Path
 from typing import Any, cast
 
 
+# meiva:note
+# A stand-in for the `agy` CLI, speaking its NDJSON stream on stdin/stdout. The
+# adapter is tested against the real framing, not against a Python object: this
+# script is spawned exactly like `agy`, reads `{"event":"user",...}` lines and
+# writes `init` / `step_update` / `result`. `FAKE_AGY_PLAN` names a JSON plan;
+# every turn in it is one entry consumed per inbound message.
 class _InterruptedError(Exception):
     pass
 
