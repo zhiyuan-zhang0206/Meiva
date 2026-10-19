@@ -179,7 +179,7 @@ async def generate_label_async(
     # parsing complexity (PR #69 hit a thinking block signature
     # leaking into the label). Disable at the source so the consumer
     # typically only needs to handle str content.
-    from base.lm.metering import unmeter
+    from base.lm.usage.metering import unmeter
 
     llm = unmeter(
         build_chat_model(

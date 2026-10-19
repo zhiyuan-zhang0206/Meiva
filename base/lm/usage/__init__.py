@@ -1,4 +1,5 @@
-"""Canonical durable usage accounting and billing spans for completed LLM calls."""
+# meiva:note
+# Canonical durable usage accounting and billing spans for completed LLM calls.
 
 from __future__ import annotations
 
@@ -20,12 +21,12 @@ from base.telemetry import ambient_agent_id, report_sink_failure
 
 
 def usage_model(msg: AIMessage, requested_model: str, *, catalog: ModelCatalog) -> str:
-    """Resolve the billable Meiva ID from a Fast call's actual service receipt.
-
-    Preserve the requested ID for ordinary services. An explicit standard
-    downgrade uses the standard ID; a missing or unknown Fast receipt raises
-    rather than fabricating premium consumption.
-    """
+    # meiva:note
+    # Resolve the billable Meiva ID from a Fast call's actual service receipt.
+    #
+    # Preserve the requested ID for ordinary services. An explicit standard downgrade uses the
+    # standard ID; a missing or unknown Fast receipt raises rather than fabricating premium
+    # consumption.
     spec = catalog.models.get(requested_model)
     if spec is None or spec.fast_of is None:
         return requested_model
@@ -39,7 +40,8 @@ def usage_model(msg: AIMessage, requested_model: str, *, catalog: ModelCatalog) 
 
 
 def _metered_cache_read(usage: Mapping[str, Any], cached: int) -> int | None:
-    """Distinguish absent provider metering from an explicitly reported zero."""
+    # meiva:note
+    # Distinguish absent provider metering from an explicitly reported zero.
     details: Mapping[str, Any] = usage.get("input_token_details") or {}
     return (
         cached
@@ -62,16 +64,16 @@ def log_usage_from_message(
     stamp_message: bool = False,
     catalog: ModelCatalog,
 ) -> tuple[int, float] | None:
-    """Log one completed LangChain message's token usage and price snapshot.
-
-    `stamp_message` also writes the logged figures onto `msg.additional_kwargs["meiva_usage"]`
-    (`MeivaUsage`): the one `quote` result feeds the event and the message alike.
-    """
+    # meiva:note
+    # Log one completed LangChain message's token usage and price snapshot.
+    #
+    # `stamp_message` also writes the logged figures onto `msg.additional_kwargs["meiva_usage"]`
+    # (`MeivaUsage`): the one `quote` result feeds the event and the message alike.
 
     # meiva:note
     # A message carries at most one usage record: the direct-call meter stamps `meiva_usage`
     # before a caller that also accounts for the call gets to log it.
-    # meiva:link base/lm/docs/usage.meiva.okf.md
+    # meiva:link base/lm/usage/docs/usage.meiva.okf.md
     if not _accountable(msg):
         return None
     usage_metadata = msg.usage_metadata
@@ -80,6 +82,7 @@ def log_usage_from_message(
     try:
         in_total, out_total, cache_read = tally_tokens([msg])
     except KeyError:
+        # meiva:note
         # Preserve main-conversation observability for a malformed provider
         # usage payload, while withholding its incomplete billing span.
         in_total = usage_metadata.get("input_tokens", 0) or 0
@@ -133,7 +136,8 @@ def log_usage_fields(
     for_agent_id: int | None = None,
     catalog: ModelCatalog,
 ) -> tuple[int, float]:
-    """Log raw provider usage; absent cache metering stays absent, including on decisions."""
+    # meiva:note
+    # Log raw provider usage; absent cache metering stays absent, including on decisions.
     return _log_usage(
         model,
         in_total=tok_in,
@@ -180,7 +184,8 @@ def _price_snapshot(priced: CostQuote) -> dict[str, float]:
 def _cache_usage(
     cache_read: int | None, in_total: int, write_5m: int, write_1h: int
 ) -> tuple[dict[str, int], str]:
-    """Only measured cache counts enter events or their human-readable usage line."""
+    # meiva:note
+    # Only measured cache counts enter events or their human-readable usage line.
     fields: dict[str, int] = {}
     text = ""
     if cache_read is not None:
@@ -214,7 +219,8 @@ def _log_usage(
     record_out: dict[str, Any] | None = None,
     catalog: ModelCatalog,
 ) -> tuple[int, float]:
-    """Emit one priced or explicitly unpriced usage event and billing span."""
+    # meiva:note
+    # Emit one priced or explicitly unpriced usage event and billing span.
     cache_fields, cache_text = _cache_usage(cache_read, in_total, cache_write_5m, cache_write_1h)
     reason_pct = f" ({reasoning / out_total * 100:.0f}%)" if out_total else ""
     priced = quote(
@@ -236,6 +242,7 @@ def _log_usage(
             model=model,
         )
         snapshot = {"unpriced": 1}
+    # meiva:note
     # The one figure set both the event and (via `record_out`) the message carry.
     record: dict[str, Any] = {
         "model": model,
@@ -284,8 +291,6 @@ def _log_usage(
     return in_total + out_total, priced.cost_usd if priced is not None else 0.0
 
 
-# ── billing spans ──
-
 MEIVA_BILLING_ATTR_LINE = "meiva.billing.line"
 MEIVA_BILLING_ATTR_VENDOR = "meiva.billing.vendor"
 MEIVA_BILLING_ATTR_MODEL = "meiva.billing.model"
@@ -303,16 +308,17 @@ _CORE_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = ()
 
 
 def _is_qwen_family(model: str) -> bool:
-    """Alibaba family ids nest directly after the stem (``qwen3.8-max``), so a
-    bare ``qwen-`` prefix would miss them. Require a digit after the stem (or an
-    exact ``qwen`` id) so a non-Alibaba ``qwenfoo-*`` id cannot be mis-attributed;
-    plugin registration already rejects such prefixes, this is a second guard.
-    """
+    # meiva:note
+    # Alibaba family ids nest directly after the stem (``qwen3.8-max``), so a bare ``qwen-`` prefix
+    # would miss them. Require a digit after the stem (or an exact ``qwen`` id) so a non-Alibaba
+    # ``qwenfoo-*`` id cannot be mis-attributed; plugin registration already rejects such prefixes,
+    # this is a second guard.
     return model == "qwen" or (model.startswith("qwen") and len(model) > 4 and model[4].isdigit())
 
 
 def vendor_of_model(model: str, *, catalog: ModelCatalog) -> str | None:
-    """Return the registered manufacturer for ``model``, if one is known."""
+    # meiva:note
+    # Return the registered manufacturer for ``model``, if one is known.
     for prefix, vendor in _CORE_VENDOR_PREFIXES:
         if model.startswith(prefix):
             return vendor
@@ -347,11 +353,11 @@ def emit_billing_event(
     unpriced: bool = False,
     start_time_ns: int | None = None,
 ) -> None:
-    """End one trace-safe billing span for a completed provider call.
-
-    Billing must never affect the call it observes, including while tracing is
-    initializing or an exporter is unavailable.
-    """
+    # meiva:note
+    # End one trace-safe billing span for a completed provider call.
+    #
+    # Billing must never affect the call it observes, including while tracing is initializing or an
+    # exporter is unavailable.
     try:
         if not settings.observability.trace_enabled:
             return
@@ -399,7 +405,8 @@ def emit_billing_from_message(
     vendor: str | None = None,
     catalog: ModelCatalog,
 ) -> None:
-    """Price a LangChain message and emit its billing span when usage is known."""
+    # meiva:note
+    # Price a LangChain message and emit its billing span when usage is known.
     try:
         tok_in, tok_out, tok_cached = tally_tokens([msg])
         if tok_in is None or tok_out is None or tok_cached is None:
