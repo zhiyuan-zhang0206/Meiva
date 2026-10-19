@@ -7,6 +7,7 @@ from scripts.content_lint.code_comments.model import NoteKind
 _LINK = re.compile(r"(?:#|//)\s*meiva:link\s+(\S+)")
 _NOTE = re.compile(r"(?:#|//)\s*meiva:note\s*")
 _QUIESCE = re.compile(r"# quiesce-exempt: \S.*")
+_TIME_BOMB = re.compile(r"# time-bomb-ok: \S.*")
 _RUFF_CODE = r"[A-Z]+[0-9]{3,4}"
 _PYRIGHT_CODE = r"report[A-Z][A-Za-z0-9]+"
 _LINT = re.compile(
@@ -52,7 +53,7 @@ def ambient_call_lines(path: str, tree: ast.Module) -> frozenset[int]:
 
 
 def comment_kind(text: str, line: int, ambient_lines: frozenset[int]) -> NoteKind:
-    if _QUIESCE.fullmatch(text):
+    if _QUIESCE.fullmatch(text) or _TIME_BOMB.fullmatch(text):
         return NoteKind.MACHINE
     if _LINT.fullmatch(text):
         return NoteKind.LINT_DIRECTIVE

@@ -58,6 +58,9 @@ Machine syntax is not prose and stays:
   `/usr/bin/python3`, `/usr/bin/python3.12`) at the start of the first line
 - `# noqa: CODE[, CODE...]` and `# pyright: ignore[reportRule[, ...]]`
 - `# quiesce-exempt: <reason>` (the stop-window lint owns the reason and the placement)
+- `# time-bomb-ok: <reason>` (the time-bomb lint matches that exact form, and the
+  marker has to sit inside the assertion's or binding's span where a note block
+  cannot go, so its reason is carried inline)
 - `# ambient: BATCH` on the call line the ambient audit examines
 - an exact `/** @deprecated */` attached to a TypeScript declaration
 
@@ -65,7 +68,8 @@ A lint directive needs a `meiva:note` owned by the same definition. Its text, or
 the document its link names, states the constraint; naming a lint rule is not an
 explanation. A quiesce
 marker carries its own reason because the stop-window lint matches that exact
-form. Ruff, Pyright and the existing stop-window lint keep ownership of
+form, and a time-bomb marker does the same because the time-bomb lint must find
+it on the binding's own lines. Ruff, Pyright and the existing stop-window lint keep ownership of
 rule validity, necessity and placement.
 
 Pytest fixture docstrings are user-facing `--fixtures` help and stay on the
