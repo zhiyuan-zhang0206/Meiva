@@ -44,7 +44,7 @@ ENTITLEMENTS = _SERVICE_DIR / "helper" / "helper.entitlements"
 LOCALES = _SERVICE_DIR / "helper" / "locales"
 _HELPER_PING_ATTEMPTS = 10
 _HELPER_PING_SETTLE_S = 0.5
-_DESIGNATED_REQUIREMENT_RE = re.compile(r"^designated => (.+)$", re.MULTILINE)
+_DESIGNATED_REQUIREMENT_RE = re.compile(r"^(?:# )?designated => (.+)$", re.MULTILINE)
 
 # meiva:note
 # Every tool below is local and has no network leg, so a bound only catches a wedged tool. It turns that wait into a failed converge step, which the update path already knows how to abort and recover from. None of these is a performance budget -- each sits well above what the work costs.
