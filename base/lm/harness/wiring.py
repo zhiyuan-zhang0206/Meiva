@@ -15,9 +15,10 @@ from base.lm.harness.registry import SessionRegistry
 # meiva:note
 # The document a fresh session wakes on. It states who the agent is and where it
 # works, and asks for one short acknowledgement: the agent's actual work arrives as
-# the session's later messages, so the handoff turn must not start any. The cluster
-# sections stay empty here because section 3 (`import meiva`) is true for every
-# agent but the entry points a role may reach belong to the role, not to the wake.
+# the session's later messages, so the handoff turn must not start any. Section 3
+# lists what every attached process may reach, led by `meiva.attach()`, which
+# `import meiva` has already done here; what a particular role may reach is the
+# role's business, not the wake's.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 HANDOFF_INSTRUCTION = (
     "You are the agent described above. Read this document once and reply with one short "
