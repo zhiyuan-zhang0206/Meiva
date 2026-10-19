@@ -71,6 +71,18 @@ def test_deepseek_api_key_is_the_only_store_declared_static() -> None:
     assert static == [(catalog.spec("dsh"), "${DSH_HOME:-~/.dsh}/.credentials.yaml")]
 
 
+def test_claude_login_is_declared_single_use() -> None:
+    harness = catalog.spec("claude")
+    assert [store.rotation for store in harness.stores] == ["rotating"]
+
+
+def test_the_ide_token_is_retargeted_to_the_cli_path() -> None:
+    harness = catalog.spec("agy")
+    legacy = [store for store in harness.stores if "jetski" in store.path]
+    assert len(legacy) == 1
+    assert legacy[0].destination == "~/.gemini/antigravity-cli/antigravity-oauth-token"
+
+
 def test_parse_version_reads_the_first_dotted_version() -> None:
     assert parse_version("2.1.290 (Claude Code)") == "2.1.290"
     assert parse_version("codex-cli 0.163.0") == "0.163.0"

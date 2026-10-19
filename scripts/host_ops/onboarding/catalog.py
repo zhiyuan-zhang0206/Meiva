@@ -65,11 +65,12 @@ CATALOG: dict[str, HarnessSpec] = {
         stores=(
             Store(
                 path="~/.claude/.credentials.json",
-                rotation="unknown",
+                rotation="rotating",
                 why=(
-                    "OAuth access+refresh pair. macOS keeps the authoritative copy in the "
-                    "login Keychain (service 'Claude Code-credentials') and falls back to "
-                    "this file when the item is absent; Linux uses the file only."
+                    "OAuth access+refresh pair with a single-use refresh token: measured on "
+                    "2026-10-19, a copy refreshed first and the machine it was copied from "
+                    "could no longer authenticate. A file at this path also wins over a stale "
+                    "macOS Keychain item (service 'Claude Code-credentials')."
                 ),
             ),
         ),
