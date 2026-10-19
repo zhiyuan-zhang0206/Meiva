@@ -123,6 +123,33 @@ describe("browser API timing", () => {
   });
 });
 
+describe("server error surfacing", () => {
+  it("joins a FastAPI validation list instead of printing raw JSON", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      detail: [{ loc: ["body", "harness"], msg: "unknown harness", type: "value_error" }],
+    }), { status: 422, headers: { "content-type": "application/json" } }))));
+
+    await expect(api.getAgent(1)).rejects.toThrow("unknown harness");
+  });
+
+  it("keeps the server's reason next to its detail", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      detail: "agent 12 runs claude_code; a fork keeps its source's harness",
+      reason: "fork_harness_mismatch",
+    }), { status: 400, headers: { "content-type": "application/json" } }))));
+
+    await expect(api.getAgent(1)).rejects.toThrow(
+      "agent 12 runs claude_code; a fork keeps its source's harness (fork_harness_mismatch)",
+    );
+  });
+
+  it("treats a missing harness route as 'cannot report', not as an error", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("not found", { status: 404 }))));
+
+    await expect(api.getHarnessAvailability("local")).resolves.toEqual([]);
+  });
+});
+
 describe("lifecycle endpoints", () => {
   it("getRunTimeline GETs the agent session endpoint with the selected window", async () => {
     await api.getRunTimeline(405, {

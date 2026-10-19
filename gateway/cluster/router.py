@@ -29,8 +29,13 @@ from base.db.transaction import write_transaction
 from base.deploy.git.cluster_drift import prod_source_head_sha
 from base.native_process.loaded_commit import LoadedCommit
 from gateway.cluster import snapshots
+from gateway.cluster.harness_probe import (
+    HarnessProbeCache,
+    availability_rows,
+    probe_harnesses,
+)
 from gateway.cluster.roster_probe import IdentityMismatchLog
-from gateway.cluster.schemas import AgentMachineRow, MachineDeleteResponse
+from gateway.cluster.schemas import AgentMachineRow, HarnessAvailability, MachineDeleteResponse
 from gateway.cluster.status import gather_cluster_status
 from gateway.events import telemetry_rows
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
@@ -392,6 +397,35 @@ async def get_cluster_machines(
         for m in statuses
         if m.serve_agent_runner
     ]
+
+
+# meiva:note
+# The spawn form reads this before offering a harness: `status` says whether that
+# machine has the CLI installed and signed in, `launchable` whether this build can
+# start a session on it at all. Both are reported, so an installed-but-unstartable
+# harness still appears — with the reason — instead of vanishing. A machine whose
+# runner predates this op, or a name no machine carries, is an error here, and the
+# form then shows the choice as unknown rather than as available.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+@router.get(
+    "/api/cluster/machines/{name}/harnesses",
+    response_model=list[HarnessAvailability],
+    description="What one machine can run, one row per harness, cached 30 seconds.",
+)
+async def get_machine_harnesses(name: str, request: Request) -> list[HarnessAvailability]:
+    cache: HarnessProbeCache = request.app.state.harness_cache
+    cached = cache.get(name)
+    if cached is not None:
+        return cached
+    probed = await probe_harnesses(
+        name,
+        db=request.app.state.db,
+        local_machine=request.app.state.machine,
+        dispatch=_dispatch_op,
+    )
+    rows = availability_rows(probed)
+    cache.store(name, rows)
+    return rows
 
 
 class MachineStagingRequest(BaseModel):

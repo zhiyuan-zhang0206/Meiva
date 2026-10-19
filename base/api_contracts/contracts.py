@@ -120,6 +120,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/cluster/machines"): RouteContract(
         pause=PauseSemantics.CONTROL_PLANE, note="control-plane read — observability during rollout"
     ),
+    ("GET", "/api/cluster/machines/{name}/harnesses"): RouteContract(
+        note="per-machine harness probe, cached 30s — a repeat reads the same install state"
+    ),
     ("DELETE", "/api/cluster/machines/{name}"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         PauseSemantics.CONTROL_PLANE,

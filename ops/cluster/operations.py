@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+from base.agents.birth.harness import probe_local_harnesses
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.api_contracts.agent_contract import ShellKillMode
 from base.cluster.machine import MachineIdentity
@@ -31,6 +32,8 @@ from ops.cluster_status import (
 )
 from ops.rpc_schemas import (
     AgentSkillViewResult,
+    HarnessProbeResult,
+    HarnessProbeRow,
     OpsCommandItem,
     ShellCaptureResult,
     ShellKillResult,
@@ -57,6 +60,33 @@ def cluster_status_op(
 ) -> ClusterStatus:
     """Local snapshot — assembled by `status_snapshot()`."""
     return status_snapshot(db, pool=pool, image=image, local_machine=local_machine)
+
+
+# meiva:note
+# The runner-side half of `GET /api/cluster/machines/{name}/harnesses`: the gateway
+# dispatches this op to the machine an agent would be born on, because an install
+# directory and a login live on that box, not on the gateway's. `reason` passes
+# through unchanged — the probe already separates not installed, installed outside
+# PATH, not signed in and sign-in state unknown, and that sentence is what the form
+# shows. The probe reads files only, so it cannot hang on a login prompt; it runs
+# on the daemon's worker thread because a stalled network mount would still block
+# the event loop that serves spawn and lifecycle. The gateway caches one answer per
+# machine for 30 seconds, so a repeat read of the form does not reach this op.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+def harness_probe_op(machine: str) -> HarnessProbeResult:
+    return HarnessProbeResult(
+        machine=machine,
+        harnesses=[
+            HarnessProbeRow(
+                harness=row.harness,
+                status=row.status,
+                reason=row.reason,
+                binary=row.binary,
+                on_path=row.on_path,
+            )
+            for row in probe_local_harnesses()
+        ],
+    )
 
 
 def shell_probe_op(agent_id: int) -> ShellProbeResult:

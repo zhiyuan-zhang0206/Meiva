@@ -13,7 +13,7 @@
   "forceExpireNotOpen": "该接管会话已不再开放。",
   "forceExpireFailed": "无法结束接管会话",
   "forkAgent": "分叉 agent",
-  "forkAgentDesc": "从此 agent 创建一个子 agent",
+  "forkAgentDesc": "从这个 agent 派生一个子 agent。fork 会继承它的 harness（运行时）与配置——harness 属于被继承的身份，不能在这里改。",
   "forkPromptPlaceholder": "新 agent 的初始提示词…",
   "resurrectAgent": "复活 agent",
   "resurrectDesc": "将已终止的 agent 唤醒，并在其醒来时送达一条消息。",
