@@ -20,7 +20,7 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
-from base.db import Database, DbConfig
+from base.db import Database, DbConfig, connections
 from base.db.code_version_gate import ProcessDbGate
 from cli.commands.data_plane import pgbouncer
 
@@ -256,10 +256,12 @@ def _assert_pool_hooks(make_pool: MagicMock, conn: MagicMock, *, direct: bool) -
             _assert_session_reset(conn)
 
 
+# meiva:note
+# A dial and both pool hooks scrub, budget and reapply the statement ceiling.
 def _assert_session_reset(conn: MagicMock) -> None:
-    """A dial and both pool hooks scrub and reapply the statement ceiling."""
+    statement, _budget_ms = connections.restore_budget_statement()
     assert conn.execute.call_args_list == [
-        call("RESET ALL"),
+        call(statement, prepare=False),
         call(
             "SELECT set_config('statement_timeout', '60000', false), "
             "set_config('application_name', %s, false)",
