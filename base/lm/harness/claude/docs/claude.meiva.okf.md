@@ -78,7 +78,10 @@ package through the dependency group, so pyright still resolves the import.
 - **Cancellation is asserted.** `interrupt()` reports whether the tool's child
   processes were reaped, and `settled=None` when the CLI pid is unobservable.
 - **No credential handling.** The adapter blanks credential variables in the
-  child environment and never reads, stores or forwards a secret.
+  child environment and never reads, stores or forwards a secret. Everything else
+  the bridge passes rides along — the registration handle and the runner's home —
+  because the SDK merges this dict over the host environment and a tool the CLI
+  spawns needs the handle to attach as the agent it belongs to.
 - **No system-prompt override.** `system_prompt` is not set; the CLI's own preset
   stands. The handoff is a message, not a prompt edit.
 - **A killed host leaves the CLI behind.** If the host is SIGKILLed, the bundled

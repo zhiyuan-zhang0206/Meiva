@@ -31,9 +31,17 @@ class AuthConfig:
 # silently moving a subscription session onto metered billing. API-key mode
 # restores exactly the one variable the caller named; nothing here reads, stores
 # or forwards a secret, which is also why `describe_auth` reports presence only.
+#
+# What the caller hands in rides along, because the merge makes this a patch rather
+# than a whole environment: `wiring.bridge_for` adds the session's registration
+# handle (`MEIVA_HARNESS_HANDLE`) and the runner's home allowlist on top of it, and
+# dropping them left every shell the CLI spawned without an identity — a live turn
+# read `meiva.self.AGENT_ID` as `None` inside its own Bash tool, so the agent could
+# not call the SDK as itself from a tool.
 # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
 def build_env(environ: Mapping[str, str], auth: AuthConfig) -> dict[str, str]:
-    env = dict.fromkeys(SECRET_ENV_NAMES, "")
+    env = dict(environ)
+    env.update(dict.fromkeys(SECRET_ENV_NAMES, ""))
     if auth.mode is AuthMode.API_KEY:
         value = environ.get(auth.api_key_env, "")
         if not value:
