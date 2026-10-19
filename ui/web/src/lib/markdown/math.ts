@@ -1,6 +1,8 @@
 // meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
 import type { PluggableList } from "unified";
 
+import remarkMathProseGuard from "@/lib/markdown/remark-math-prose-guard";
+
 export interface MarkdownMath {
   remark: PluggableList;
   rehype: PluggableList;
@@ -13,7 +15,7 @@ const defaultImport = async (): Promise<MarkdownMath> => {
     import("katex/dist/katex.min.css"),
   ]);
   return {
-    remark: [remarkMath.default],
+    remark: [remarkMath.default, remarkMathProseGuard],
     rehype: [[rehypeKatex.default, { throwOnError: false }]],
   };
 };
