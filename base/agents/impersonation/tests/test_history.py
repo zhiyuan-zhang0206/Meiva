@@ -439,3 +439,24 @@ def test_public_session_exposes_handoff_applied_at(
         history.resolve(database, owner.agent_id, lease["session_id"], local_machine=local_machine)
     )
     assert applied["handoff_applied_at"] is not None
+
+
+def test_resolve_names_both_machines_when_the_session_lives_elsewhere(
+    owner: RuntimeIncarnation,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    local_machine = machine_identity.name()
+    lease = start(
+        owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
+    )
+    with pytest.raises(ValueError) as refusal:
+        history.resolve(
+            database, owner.agent_id, lease["session_id"], local_machine="some-other-host"
+        )
+    assert f"agent {owner.agent_id} is on '{local_machine}'" in str(refusal.value)
+    assert "this process is on 'some-other-host'" in str(refusal.value)

@@ -669,10 +669,12 @@ def test_attestation_and_same_machine_checks(
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="placement"):
         leases.require_active(database, lease["id"], local_machine=local_machine)
-    with pytest.raises(leases.ImpersonationError, match="own machine"):
+    with pytest.raises(leases.ImpersonationError) as refusal:
         request_controller(
             owner,
             authority=config_authority,
             database_gate=database_gate,
             local_machine=local_machine,
         )
+    assert f"agent {owner.agent_id} is on 'another-host'" in str(refusal.value)
+    assert f"this process is on '{local_machine}'" in str(refusal.value)
