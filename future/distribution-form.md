@@ -30,8 +30,8 @@ The decisive fact: **publishing the source is not shipping an installer.** A
 self-hoster clones and runs the documented bring-up; on macOS the permissions helper's
 `lifecycle.py` compiles + self-signs locally on *their* machine, so there is no
 download quarantine and no Apple account in the loop. Code signing for TCC is
-free (a stable self-signed cert — the property that survives rebuilds is the
-designated requirement, not a paid identity). See the permissions helper
+free (an ad-hoc signature — the identity is the code hash, so grants hold until the
+helper is rebuilt, and no paid identity is involved). See the permissions helper
 (`services/native/`) and [`decentralized-install-and-config.md`](infra/extensions/decentralized-install-and-config.md)
 (install is a local operation).
 

@@ -13,5 +13,5 @@ exports = ["converge_host.py", "hold_report.py", "lgtm_toggle.py", "migrations.p
 "tests" = ["_pause_resume.py", "_start_readiness_preflight.py", "_stop_extras.py", "_temporary_stop.py", "converge_host.py", "lgtm_toggle.py", "login_link.py", "migrations.py", "root_driver.py", "root_readiness.py", "service_stop.py", "start.py", "start_generation.py", "status.py", "stop.py"]
 
 [debt.private-name]
-"tests/converge_host/test_converge.py -> converge_host.py#_ensure_permissions_helper" = 2
+"tests/converge_host/test_converge.py -> converge_host.py#_ensure_permissions_helper" = 1
 "tests/stop/test_stop_terminals.py -> service_stop.py#_TERMINAL_STOP_GRACE_S" = 2

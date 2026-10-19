@@ -9,9 +9,8 @@ tags: [cli, lifecycle, converge]
 
 `meiva converge` is fail-fast: the first failing step ends the run. `meiva start`
 then continues into service bring-up, so a host can serve with one step never
-applied — the state the 2026-10-18 update wave left on macmini and company-air,
-where the permissions-helper signing step aborted on a locked login keychain
-while every service reported healthy (task #5323).
+applied — a converge step aborted while every service reported healthy
+(task #5323).
 
 The aborted converge writes `$MEIVA_HOME/state/converge-incomplete.json` —
 `{at, step, error}` — and `meiva status` prints it above the service table:
