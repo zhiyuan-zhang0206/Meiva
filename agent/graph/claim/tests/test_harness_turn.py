@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -13,13 +14,14 @@ from agent.graph.claim.harness_turn import (
     render_messages,
     turn_key,
 )
+from agent.graph.llm_errors import FatalLLMStreamError
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
-from base.lm.harness import HarnessTurn, Usage
+from base.lm.harness import HarnessTurn, HarnessTurnFaultedError, Usage
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.plugin_providers import build_model_catalog
@@ -31,7 +33,12 @@ class FakeEngine:
     # Recording the submission is what lets a test say which messages the harness
     # received and under which key, without a provider or a process.
     # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-    def __init__(self, reply: str = "the answer", usage: Usage | None = None) -> None:
+    def __init__(
+        self,
+        reply: str = "the answer",
+        usage: Usage | None = None,
+        prelude: tuple[HarnessTurn, ...] = (),
+    ) -> None:
         self.harness = Harness.CLAUDE_CODE
         self.model = "claude-sonnet-5-5"
         self.submitted: list[tuple[str, str]] = []
@@ -39,6 +46,7 @@ class FakeEngine:
         self.closed = False
         self._reply = reply
         self._usage = usage
+        self._prelude = prelude
 
     async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
         self.submitted.append((text, key))
@@ -50,6 +58,7 @@ class FakeEngine:
             subtype="success",
             is_error=False,
             interrupted=False,
+            prelude=self._prelude,
         )
 
     async def interrupt(self) -> object:
@@ -169,6 +178,43 @@ async def test_a_turn_logs_usage_under_the_harness(loguru_records: LogRecords) -
     assert extras["in_total"] == 1200
     assert extras["model"] == "claude-sonnet-5-5"
     assert extras["usage_kind"] == "agent"
+
+
+async def test_the_handoff_turn_lands_as_its_own_message(loguru_records: LogRecords) -> None:
+    opening = HarnessTurn(
+        turn_id="t0",
+        text="acknowledged",
+        usage=Usage(input_tokens=900, output_tokens=6),
+        cost_usd=0.02,
+        subtype="success",
+        is_error=False,
+        interrupted=False,
+    )
+    engine = FakeEngine(reply="done", prelude=(opening,))
+    state = AgentState(messages=[inbound("do it", 7)], harness_cursor=0)
+
+    command = await harness_turn_node(state, runtime(engine), config())
+
+    assert command.update is not None
+    assert [message.content for message in command.update["messages"]] == ["acknowledged", "done"]
+    assert command.update["harness_cursor"] == 3, "both messages are covered by the cursor"
+    rows = loguru_records.events("llm_usage")
+    assert [row["extra"]["in_total"] for row in rows] == [900, 7], "each turn keeps its own row"
+
+
+async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
+    loguru_records: LogRecords,
+) -> None:
+    class FaultingEngine(FakeEngine):
+        async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
+            raise HarnessTurnFaultedError("cli died")
+
+    state = AgentState(messages=[inbound("do it", 7)], harness_cursor=0)
+
+    with pytest.raises(FatalLLMStreamError, match="claude_code harness turn aborted: cli died"):
+        await harness_turn_node(state, runtime(FaultingEngine()), config())
+
+    assert loguru_records.events("llm_usage") == [], "an aborted turn logs no usage"
 
 
 class SettledReport:

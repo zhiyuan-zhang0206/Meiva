@@ -15,7 +15,6 @@ from base.lm.harness.events import (
     SessionFaulted,
     SessionStarted,
     TurnCompleted,
-    Usage,
 )
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.registration import (
@@ -121,7 +120,11 @@ class HarnessBridge:
     async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
         session = await self.ensure()
         ticket: Any = session.submit(text, key=key)
-        return await self._await_turn(session, str(ticket.turn_id))
+        try:
+            return await self._await_turn(session, str(ticket.turn_id))
+        except (HarnessTurnFaultedError, HarnessClosedError):
+            await self._retire(session, reason="turn faulted")
+            raise
 
     async def interrupt(self) -> Any:
         if self._session is None:
@@ -132,10 +135,22 @@ class HarnessBridge:
         if self._closed:
             return
         self._closed = True
-        session, self._session = self._session, None
-        self._retire_registration()
-        if session is not None:
-            await session.close(reason=reason)
+        if self._session is not None:
+            await self._retire(self._session, reason)
+        else:
+            self._retire_registration()
+
+    # meiva:note
+    # A session that faults or closes mid-turn is dropped rather than reused, and the next
+    # inbound rebuilds one from the registry — the provider still holds the transcript, so a
+    # crashed CLI costs one turn instead of every later one. Retirement is not `close`: the
+    # bridge stays open for that next turn, which is why the two are separate calls.
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    async def _retire(self, session: HarnessSession, reason: str) -> None:
+        if self._session is session:
+            self._session = None
+            self._retire_registration()
+        await _close_quietly(session, reason)
 
     def _register(self, external_session_id: str) -> None:
         if self._registrations is None or self._digest is None:
@@ -158,29 +173,19 @@ class HarnessBridge:
             self._registrations.delete(self._agent_id)
 
     async def _await_turn(self, session: HarnessSession, turn_id: str) -> HarnessTurn:
-        parts: list[str] = []
-        usage = Usage()
-        cost: float | None = None
+        streamed: dict[str, list[str]] = {}
+        prelude: list[HarnessTurn] = []
         async for event in session.events():
             if isinstance(event, SessionStarted):
                 self._model = event.model
                 self._register(event.session_id)
             elif isinstance(event, TurnCompleted):
-                usage = _add_usage(usage, event.usage)
-                cost = _add_cost(cost, event.cost_usd)
+                turn = _completed(event, "".join(streamed.get(event.turn_id, [])))
                 if event.turn_id == turn_id:
-                    return HarnessTurn(
-                        turn_id=turn_id,
-                        text=event.text or "".join(parts),
-                        usage=usage,
-                        cost_usd=cost,
-                        subtype=event.subtype,
-                        is_error=event.is_error,
-                        interrupted=event.interrupted,
-                    )
+                    return replace(turn, prelude=tuple(prelude))
+                prelude.append(turn)
             elif isinstance(event, AssistantText):
-                if event.turn_id == turn_id:
-                    parts.append(event.text)
+                streamed.setdefault(event.turn_id, []).append(event.text)
             elif isinstance(event, SessionFaulted):
                 if event.turn_id is None or event.turn_id == turn_id:
                     raise HarnessTurnFaultedError(event.error)
@@ -191,21 +196,16 @@ class HarnessBridge:
         raise HarnessClosedError(f"harness event stream ended before turn {turn_id} completed")
 
 
-def _add_usage(total: Usage, turn: Usage) -> Usage:
-    return Usage(
-        input_tokens=total.input_tokens + turn.input_tokens,
-        output_tokens=total.output_tokens + turn.output_tokens,
-        cache_creation_input_tokens=(
-            total.cache_creation_input_tokens + turn.cache_creation_input_tokens
-        ),
-        cache_read_input_tokens=total.cache_read_input_tokens + turn.cache_read_input_tokens,
+def _completed(event: TurnCompleted, streamed: str) -> HarnessTurn:
+    return HarnessTurn(
+        turn_id=event.turn_id,
+        text=event.text or streamed,
+        usage=event.usage,
+        cost_usd=event.cost_usd,
+        subtype=event.subtype,
+        is_error=event.is_error,
+        interrupted=event.interrupted,
     )
-
-
-def _add_cost(total: float | None, turn: float | None) -> float | None:
-    if turn is None:
-        return total
-    return turn if total is None else total + turn
 
 
 async def _close_quietly(session: HarnessSession, reason: str) -> None:

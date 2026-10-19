@@ -30,7 +30,9 @@ invariants the host relies on:
 5. a turn timeout interrupts; it never silently drops the turn;
 6. usage and cost accumulate per turn;
 7. the handoff is injected once, when the session is created, and never again on
-   resume.
+   resume;
+8. a faulted or closed session stops being usable: the bridge retires it instead of
+   submitting to it again.
 
 Adapters: [[../claude/docs/claude.meiva.okf.md]],
 [[../deepseek/docs/deepseek.meiva.okf.md]]. Contract, provider differences
@@ -42,7 +44,7 @@ and open questions are recorded in
 | Module | Owns |
 |---|---|
 | `events.py` | `BridgeEvent` and its members, plus the droppable (text delta) versus control split |
-| `engine.py` | `HarnessSession` (the adapter contract), `TurnEngine` (what a graph run needs), and `HarnessTurn` (one turn's reply, usage and boundary) |
+| `engine.py` | `HarnessSession` (the adapter contract), `TurnEngine` (what a graph run needs), and `HarnessTurn` (one turn's reply, usage and boundary, plus the `prelude` turns that completed before it) |
 | `handoff.py` | the six-section handoff document, `HANDOFF_VERSION`, and its rendered byte size |
 | `registry.py` | `SessionRecord` and `FileSessionRegistry`: one JSON document per agent id, atomic replace |
 | `process.py` | `ChildProbe`, the psutil implementation, tree snapshots and the bounded wait for a pid to disappear |
