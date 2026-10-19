@@ -14,6 +14,7 @@ from base.cluster import session_name
 from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
+from base.deploy import start_trace
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.sessions.helperproc import HELPER_PROTOCOLS, helper_wire_ok
@@ -557,10 +558,11 @@ def ensure_root_service_tree(
     if runtime is not None:
         runtime.validate()
     env = root_child_env()
-    manifest = tree_manifest(roster, repo, roles=roles)
     from cli.commands.lifecycle.start_generation import launch_digest
 
-    manifest["launch_digest"] = launch_digest(repo, env, home=meiva_home())
+    with start_trace.phase("launch manifest"):
+        manifest = tree_manifest(roster, repo, roles=roles)
+        manifest["launch_digest"] = launch_digest(repo, env, home=meiva_home())
     manifests = root_manifests_path(meiva_home())
     client = root_client()
     try:
@@ -580,19 +582,23 @@ def ensure_root_service_tree(
         if status is None:
             require_root_absent()
             write_manifest(manifests, manifest)
-            status = bring_up_root(
-                run_dir,
-                repo,
-                manifests,
-                client,
-                env,
-                runtime,
-                retained_children=retained_children,
-                helper=helper,
-            )
+            with start_trace.phase("root spawn"):
+                status = bring_up_root(
+                    run_dir,
+                    repo,
+                    manifests,
+                    client,
+                    env,
+                    runtime,
+                    retained_children=retained_children,
+                    helper=helper,
+                )
             require_root_owner(status, helper=helper)
             require_same_generation(manifest, status, roster, reconcile=reconcile)
-        status = reconcile_units(roster, client, status, honor_restart_budget=honor_restart_budget)
+        with start_trace.phase("units up"):
+            status = reconcile_units(
+                roster, client, status, honor_restart_budget=honor_restart_budget
+            )
     except RootDriverError as exc:
         print(f"  ✗ meiva-root tree bring-up failed: {exc}", file=sys.stderr)
         return LaunchOutcome(roster, tuple(session_name(spec.session) for spec in roster))

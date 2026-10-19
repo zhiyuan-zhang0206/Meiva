@@ -14,4 +14,5 @@ Its component nodes describe the current contracts and implementation.
 
 - [[base/cluster/authority/docs/authority.meiva.okf.md]] — Database write-generation authority.
 - [[base/cluster/machine/docs/machine.meiva.okf.md]] — Machine Identity & Capabilities.
+- [[base/cluster/docs/frontend-build.meiva.okf.md]] — Frontend build reuse (when `meiva start` rebuilds the UI).
 - [[base/cluster/docs/postgres.meiva.okf.md]] — Owned PostgreSQL birth.

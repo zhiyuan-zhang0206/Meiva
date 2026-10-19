@@ -176,35 +176,24 @@ def frontend_service_cmd(
     browser_origin: str,
     frontend_dir: str | Path = "ui/web",
 ) -> str:
-    """The complete frontend service launch command — single source for BOTH
-    launch paths: the canonical ServiceSpec (``services/supervision/roster/spec.py``) and the watchdog
-    respawn (``services/supervision/healthchecks/frontend.py``). The two drifted once
-    (2026-08-27 prod outage: the respawn command lost its ``exec``, so the
-    session validator rejected it and a dead frontend could never self-heal);
-    this is the one place the command shape is authored.
-
-    ``exec`` on the serve stage: the build is a transient prelude, so
-    the shell must hand its pid to ``npm run start`` — otherwise it outlives it
-    and swallows the graceful-stop SIGTERM (``base.sessions.env_forwarding.exec_into``
-    rejects a compound command whose final stage does not exec, which is what
-    made the drifted respawn unlaunchable).
-
-    Args:
-        port: the cluster-allocated frontend port. Passed explicitly — Next.js
-            defaults to 3000 otherwise, and a watchdog restart would silently
-            revert the app off-cluster.
-        gateway_port, browser_origin: the gateway's port and the browser entry the build bakes in
-            (see ``fe_build_env``).
-        frontend_dir: the directory to ``cd`` into before the build, as the
-            session sees it — the spec's session starts at the checkout root
-            (``ui/web``), the respawn's at the absolute ``ui/web`` path. The
-            build env prefix rides the command (NEXT_PUBLIC_* is build-time
-            inlined and never reaches the build from a unit .env); see
-            ``fe_build_env``.
-    """
+    # meiva:note
+    # Two properties make this the one place the frontend command is authored.
+    # `exec` on the serve stage hands the pid to `npm run start`, so a graceful
+    # stop's SIGTERM reaches it (`base.sessions.env_forwarding.exec_into` rejects a
+    # compound command whose final stage does not exec — the shape that once made a
+    # respawn unlaunchable). The build is a prelude owned by
+    # `base.cluster.frontend_build`: it rebuilds only when the source digest or the
+    # baked NEXT_PUBLIC_* values changed, which keeps a start that changed nothing
+    # from re-running a production Next.js build.
+    # meiva:link base/cluster/docs/frontend-build.meiva.okf.md
     frontend_dir = Path(frontend_dir).as_posix()
     build_env = fe_build_env(gateway_port=gateway_port, browser_origin=browser_origin)
-    return f"cd {frontend_dir} && {build_env} npm run build && exec npm run start -- -p {port}"
+    origin = f" --browser-origin {shlex.quote(browser_origin)}" if browser_origin else ""
+    build = (
+        f"{build_env} .venv/bin/python -m base.cluster.frontend_build ensure"
+        f" --dir {shlex.quote(frontend_dir)} --gateway-port {gateway_port}{origin}"
+    )
+    return f"{build} && cd {frontend_dir} && exec npm run start -- -p {port}"
 
 
 def redis_admin_url(redis_url: str, admin_password: str) -> str:

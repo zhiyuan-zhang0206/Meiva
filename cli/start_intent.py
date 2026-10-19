@@ -193,3 +193,19 @@ def start_once(
             return print_settings_load_failure(exc)
         print(f"meiva start: {exc}", file=sys.stderr)
         return 1
+    finally:
+        from base.deploy import start_trace
+
+        try:
+            from base.paths import resolve_meiva_home
+
+            # meiva:note
+            # The resolver, never `meiva_home()`: a refused start must not create
+            # the home it just declined to operate.
+            timing_home: Path | None = resolve_meiva_home()
+        except (RuntimeError, OSError, ValueError):
+            timing_home = None
+        report = start_trace.report(timing_home)
+        if report is not None:
+            print()
+            print(report)

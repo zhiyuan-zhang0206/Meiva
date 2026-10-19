@@ -7,6 +7,7 @@ import { useState } from "react";
 import { AppConnectionBanner } from "@/components/connection/app-connection-banner";
 import { OpenTasksNoticeHost } from "@/components/notifications/open-tasks-notice";
 import { ThemePackTokens } from "@/components/plugins/theme-pack-tokens";
+import { ThemeColorSync } from "@/components/shell/theme-color-sync";
 import { ToastHost } from "@/components/notifications/toast";
 import { LanguageProvider } from "@/i18n/language-provider";
 import { AuthProvider, notifySessionInvalid } from "@/lib/auth/auth-context";
@@ -108,6 +109,7 @@ export function Providers({ children, nonce }: { children: React.ReactNode; nonc
                   {/* Applies the selected plugin skin's tokens over the active
                       light/dark palette; renders nothing. */}
                   <ThemePackTokens />
+                  <ThemeColorSync />
                   <AppConnectionBanner />
                   {children}
                   {/* The toast renderer is root-level so error toasts reach the
