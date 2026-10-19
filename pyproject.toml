@@ -1204,6 +1204,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/host_ops/onboarding/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/host_ops/tcc/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

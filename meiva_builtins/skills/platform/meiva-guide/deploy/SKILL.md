@@ -12,6 +12,9 @@ Use the same two entries for a single box, a gateway, and a runner joining a gat
 The `docs/conventions/runbook.md` in the Meiva source checkout describes the runtime contract.
 Use [secrets](references/secrets.md) for credential handling and
 [split deployment](references/split-deployment.md) for private-network setup.
+Use [harness distribution](references/harness-distribution.md) to put the external
+coding CLIs on another machine — the vendor install, the state that can be copied,
+and the logins that must be signed in per machine.
 
 ## Acquire dependencies
 
