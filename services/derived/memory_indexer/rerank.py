@@ -176,8 +176,33 @@ def _pool_relative(path: str, root: Path) -> tuple[Path, str]:
         return file, path
 
 
+# meiva:note
+# One report per unreadable path per process. Passive recall runs a search every agent
+# turn, so without this a note that keeps ranking in the top hits warns on every turn for
+# as long as it stays unreadable, and the line never carries new information after the
+# first. The set is injected rather than held here: the gateway owns one instance for the
+# process, and `load_candidates` never invents one, so a caller that wants no suppression
+# passes a fresh instance. Keys are resolved paths, so two pools holding a same-named note
+# each report theirs; two searches racing on one file can each report it once. This set only
+# decides whether a search logs, never what it counts: a search still reports how many
+# candidates it skipped, so the line never understates what it ranked out.
+class UnreadableReports:
+    def __init__(self) -> None:
+        self._paths: set[str] = set()
+
+    def first(self, path: str) -> bool:
+        if path in self._paths:
+            return False
+        self._paths.add(path)
+        return True
+
+
 def load_candidates(
-    hits: Sequence[ChunkHit], memory_root: Path, exclude: Collection[str], limit: int
+    hits: Sequence[ChunkHit],
+    memory_root: Path,
+    exclude: Collection[str],
+    limit: int,
+    reports: UnreadableReports,
 ) -> list[Candidate]:
     """Restore the chunk text of the first `limit` hits that are not excluded.
 
@@ -188,7 +213,8 @@ def load_candidates(
     """
     root = memory_root.resolve()
     candidates: list[Candidate] = []
-    unreadable: list[tuple[str, BaseException]] = []
+    skipped = 0
+    fresh: dict[str, tuple[str, BaseException]] = {}
     for hit in hits:
         if len(candidates) == limit:
             break
@@ -200,7 +226,10 @@ def load_candidates(
         except FileNotFoundError:
             continue
         except (OSError, UnicodeDecodeError) as exc:
-            unreadable.append((rel, exc))
+            skipped += 1
+            key = str(file)
+            if reports.first(key):
+                fresh.setdefault(key, (rel, exc))
             continue
         chunk = chunk_text(content, hit.kind, hit.chunk_idx)
         if chunk is None:
@@ -209,12 +238,13 @@ def load_candidates(
         description = note.description.strip() if note and note.description else ""
         tags = list(note.tags) if note else []
         candidates.append(Candidate(rel, chunk, description, tags))
-    if unreadable:
+    if fresh:
+        first_rel, first_exc = next(iter(fresh.values()))
         logger.warning(
             "memory_search rerank skipped {n} candidate note(s) it could not read; "
             "they are ranked out of this search: {first}",
-            n=len(unreadable),
-            first=f"{unreadable[0][0]}: {unreadable[0][1]!r}",
+            n=skipped,
+            first=f"{first_rel}: {first_exc!r}",
             event="memory_search_rerank",
         )
     return candidates
@@ -270,6 +300,7 @@ async def rerank(
     limit: int,
     exclude: Collection[str],
     memory_root: Path,
+    reports: UnreadableReports,
 ) -> list[RankedChunk]:
     """Up to `k` of the `limit` candidates most worth reading for `query`, best first.
 
@@ -279,7 +310,9 @@ async def rerank(
     decision model cannot answer; an empty `hits`, or hits whose files are all gone or excluded,
     give [].
     """
-    candidates = await asyncio.to_thread(load_candidates, hits, memory_root, exclude, limit)
+    candidates = await asyncio.to_thread(
+        load_candidates, hits, memory_root, exclude, limit, reports
+    )
     if not candidates:
         return []
     states = [pair_state(query, candidate, purpose) for candidate in candidates]

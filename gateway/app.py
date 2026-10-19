@@ -487,6 +487,7 @@ def create_app(
         openapi_url=None,
     )
     app.state.gateway_config = config
+    app.state.memory_unreadable_reports = memory_router.unreadable_reports()
     app.state.gateway_process = process
     machine_token_acceptance: AcceptanceCache = {}
     app.state.machine_token_acceptance = machine_token_acceptance
