@@ -410,6 +410,16 @@ def _establish_codex_relay(
             return False
     except ImpersonationError:
         return False  # the lease is no longer native-held accepted state
+    antigravity_endpoint_file = None
+    if session["relay_provider"] == "antigravity":
+        from base.agents.impersonation.host_transport import antigravity_endpoint_path
+
+        # meiva:note
+        # The relay inherits the session env projection, which carries no
+        # host-injected ANTIGRAVITY_* variables; it gets the record the request
+        # wrote, by path, so the endpoint never rides argv or the environment.
+        # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+        antigravity_endpoint_file = str(antigravity_endpoint_path(session["relay_thread_id"]))
     child = RelayChild(
         session["id"],
         _relay_process.spawn_codex_relay(
@@ -420,6 +430,7 @@ def _establish_codex_relay(
             session["relay_codex_remote"],
             session["process_metadata"].get("codex_home"),
             provider=session["relay_provider"],
+            antigravity_endpoint_file=antigravity_endpoint_file,
         ),
         relay_token,
         time.monotonic(),
@@ -629,15 +640,6 @@ async def _record_stale_relay(
 
 async def _send_ended_notice(db: Database, agent_id: int, lease_id: str) -> None:
     """Submit the ended lease's notice once; a failure is logged and never retried."""
-    from base.agents.impersonation.terminal_notices import send_ended_notice
-    from base.log import logger
+    from base.agents.impersonation.terminal_notices import deliver_ended_notice
 
-    error = await asyncio.to_thread(send_ended_notice, db, lease_id)
-    if error is not None:
-        logger.error(
-            "ended impersonation lease notice was not delivered and will not be retried",
-            event="impersonation_terminal_notice_failed",
-            agent_id=agent_id,
-            lease_id=str(lease_id),
-            error=error,
-        )
+    await asyncio.to_thread(deliver_ended_notice, db, agent_id, lease_id)

@@ -11,7 +11,11 @@ as failure. The relay-level Steer-only wiring lives in
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import stat
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -341,3 +345,131 @@ def test_antigravity_live_submit_posts_send_agent_message_with_csrf_token() -> N
     assert path == "/exa.language_server_pb.LanguageServerService/SendAgentMessage"
     assert header_value == expected_csrf
     assert body == {"recipient": str(THREAD_ID), "content": "hello antigravity"}
+
+
+# meiva:note
+# A loopback Connect endpoint that records the CSRF header it was called with, so a
+# test can assert which credential reached the server rather than which one a
+# function was handed.
+def _antigravity_http_stub() -> tuple[Any, list[str | None], threading.Thread]:
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    seen: list[str | None] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            self.rfile.read(length)
+            seen.append(self.headers.get("x-codeium-csrf-token"))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    httpd = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    return httpd, seen, thread
+
+
+def _no_scan(**_kwargs: object) -> codex_app_server.AntigravityServer:
+    raise AssertionError("a resolved environment or a record needs no process scan")
+
+
+def test_antigravity_endpoint_record_is_owner_only_and_round_trips(tmp_path: Path) -> None:
+    csrf = "local-csrf"
+    server = codex_app_server.AntigravityServer(address="127.0.0.1:59901", csrf_token=csrf)
+    path = codex_app_server.write_antigravity_endpoint(
+        server, thread_id=str(THREAD_ID), home=tmp_path
+    )
+    assert path == codex_app_server.antigravity_endpoint_path(str(THREAD_ID), home=tmp_path)
+    assert path.name == f"{THREAD_ID}.json"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert codex_app_server.read_antigravity_endpoint(str(THREAD_ID), home=tmp_path) == server
+
+
+def test_antigravity_endpoint_prefers_the_host_environment(tmp_path: Path) -> None:
+    received = "recorded"
+    recorded = codex_app_server.AntigravityServer(address="127.0.0.1:1", csrf_token=received)
+    codex_app_server.write_antigravity_endpoint(recorded, thread_id=str(THREAD_ID), home=tmp_path)
+    injected = codex_app_server.resolve_antigravity_endpoint(
+        str(THREAD_ID),
+        home=tmp_path,
+        environment={
+            "ANTIGRAVITY_LS_ADDRESS": "127.0.0.1:2",
+            "ANTIGRAVITY_CSRF_TOKEN": "injected",
+        },
+        scan=_no_scan,
+    )
+    injected_csrf = "injected"
+    assert injected == codex_app_server.AntigravityServer(
+        address="127.0.0.1:2", csrf_token=injected_csrf
+    )
+
+
+def test_antigravity_endpoint_record_serves_a_process_without_the_host_environment(
+    tmp_path: Path,
+) -> None:
+    recorded_csrf = "recorded"
+    recorded = codex_app_server.AntigravityServer(address="127.0.0.1:3", csrf_token=recorded_csrf)
+    codex_app_server.write_antigravity_endpoint(recorded, thread_id=str(THREAD_ID), home=tmp_path)
+    resolved = codex_app_server.resolve_antigravity_endpoint(
+        str(THREAD_ID), home=tmp_path, environment={}, scan=_no_scan
+    )
+    assert resolved == recorded
+
+
+def test_antigravity_endpoint_failure_names_the_record_it_looked_for(tmp_path: Path) -> None:
+    def no_server(**_kwargs: object) -> codex_app_server.AntigravityServer:
+        raise RuntimeError("No running Antigravity language_server was found on this machine")
+
+    path = codex_app_server.antigravity_endpoint_path(str(THREAD_ID), home=tmp_path)
+    with pytest.raises(RuntimeError) as failure:
+        codex_app_server.resolve_antigravity_endpoint(
+            str(THREAD_ID), home=tmp_path, environment={}, scan=no_server
+        )
+    assert str(path) in str(failure.value)
+    assert "request records it" in str(failure.value)
+
+
+def test_another_process_reaches_the_conversation_from_the_record_alone(
+    tmp_path: Path,
+) -> None:
+    # meiva:note
+    # The accepting runtime has no ANTIGRAVITY_* variables, so the record is its only
+    # route: this real child process resolves the endpoint the request recorded and
+    # calls it, which is the hop both the relay and the ended-lease notice make.
+    # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+    httpd, seen, thread = _antigravity_http_stub()
+    port = httpd.server_address[1]
+    csrf = "recorded-csrf"
+    recorded = codex_app_server.AntigravityServer(address=f"127.0.0.1:{port}", csrf_token=csrf)
+    codex_app_server.write_antigravity_endpoint(recorded, thread_id=str(THREAD_ID), home=tmp_path)
+    probe = Path(__file__).parent / "antigravity_endpoint_probe.py"
+    root = Path(__file__).resolve().parents[4]
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": str(tmp_path),
+        "MEIVA_HOME": str(tmp_path),
+        "PYTHONPATH": str(root),
+    }
+    try:
+        completed = subprocess.run(  # noqa: S603
+            [sys.executable, str(probe), str(THREAD_ID)],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=root,
+            timeout=120,
+            check=False,
+        )
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=5)
+        httpd.server_close()
+    assert completed.returncode == 0, completed.stderr
+    assert seen == [csrf]

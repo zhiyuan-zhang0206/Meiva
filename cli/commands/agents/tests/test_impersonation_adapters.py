@@ -135,3 +135,24 @@ def test_antigravity_readiness_passes_for_a_resolvable_language_server() -> None
 def test_controller_session_adapters_need_no_destination_probe() -> None:
     assert adapters.resolve_adapter("claude", None).ready() is None
     assert adapters.resolve_adapter("dsh", None).ready() is None
+
+
+def test_antigravity_destination_resolves_once_and_every_push_reuses_it(
+    unused_tcp_port: int,
+) -> None:
+    from base.agents.impersonation.host_transport import AntigravityServer
+
+    recorded = "recorded"
+    resolved = AntigravityServer(address=f"127.0.0.1:{unused_tcp_port}", csrf_token=recorded)
+    lookups: list[str] = []
+
+    def discover() -> object:
+        lookups.append("resolve")
+        return resolved
+
+    adapter = adapters.resolve_adapter("antigravity", str(THREAD_ID), discover=discover)
+    assert adapter.ready() is None
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="Antigravity SendAgentMessage delivery failed"):
+            adapter.send("push")
+    assert lookups == ["resolve"]

@@ -30,14 +30,18 @@ import os
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID
 
 import psutil
 from websockets.sync.client import ClientConnection, unix_connect
 from websockets.sync.client import connect as ws_connect
+
+from base.host.private_storage import write_private_bytes
+from base.paths import meiva_home
 
 LIVE_SUBMIT_TIMEOUT_SECONDS = 5.0
 """Deadline for one whole live attempt: connect, handshake, and the turn/start.
@@ -195,15 +199,26 @@ def _probe_antigravity_server(candidate: AntigravityServer, timeout: float) -> b
         return False
 
 
+# meiva:note
+# The Antigravity CLI injects the endpoint and its CSRF token only into the
+# commands it runs, so they describe that command's conversation and are never
+# cluster configuration. An absent environment is not an error here: the caller
+# falls back to the record the request wrote.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+def _env_antigravity_server(environment: Mapping[str, str] | None) -> AntigravityServer | None:
+    source = os.environ if environment is None else environment
+    address = (source.get("ANTIGRAVITY_LS_ADDRESS") or "").strip()
+    token = (source.get("ANTIGRAVITY_CSRF_TOKEN") or "").strip()
+    return AntigravityServer(address=address, csrf_token=token) if address and token else None
+
+
 def discover_antigravity_server(
-    *, timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS
+    *, timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS, environment: Mapping[str, str] | None = None
 ) -> AntigravityServer:
     """Resolve the local Antigravity language_server Connect endpoint and CSRF token."""
-    env_address = (os.environ.get("ANTIGRAVITY_LS_ADDRESS") or "").strip()
-    env_token = (os.environ.get("ANTIGRAVITY_CSRF_TOKEN") or "").strip()
-    if env_address and env_token:
-        return AntigravityServer(address=env_address, csrf_token=env_token)
-
+    server = _env_antigravity_server(environment)
+    if server is not None:
+        return server
     probe_timeout = min(timeout, _ANTIGRAVITY_PROBE_TIMEOUT_SECONDS)
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         for candidate in _process_candidate_servers(proc):
@@ -212,6 +227,99 @@ def discover_antigravity_server(
     raise RuntimeError(
         "No running Antigravity language_server with an HTTP Connect endpoint was found on this machine"
     )
+
+
+# meiva:note
+# The record is keyed by the Antigravity conversation, not by a lease: the request
+# writes it before the lease exists, so the accepting runtime cannot race it.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+def antigravity_endpoint_path(thread_id: str, *, home: Path | None = None) -> Path:
+    directory = (home if home is not None else meiva_home()) / "impersonation" / "antigravity"
+    return directory / f"{UUID(str(thread_id))}.json"
+
+
+# meiva:note
+# A missing record is None, but an unreadable one raises with its path: the request
+# is the only writer, so a broken file is a fact rather than a reason to guess at a
+# language_server.
+def read_antigravity_endpoint_file(path: Path) -> AntigravityServer | None:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RuntimeError(f"Antigravity endpoint record {path} cannot be read ({exc})") from exc
+    try:
+        parsed: object = json.loads(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"Antigravity endpoint record {path} is not JSON") from exc
+    record = cast("dict[str, object]", parsed if isinstance(parsed, dict) else {})
+    address = str(record.get("address") or "").strip()
+    token = str(record.get("csrf_token") or "").strip()
+    if not address or not token:
+        raise RuntimeError(f"Antigravity endpoint record {path} names no address and CSRF token")
+    return AntigravityServer(address=address, csrf_token=token)
+
+
+def read_antigravity_endpoint(
+    thread_id: str, *, home: Path | None = None
+) -> AntigravityServer | None:
+    return read_antigravity_endpoint_file(antigravity_endpoint_path(thread_id, home=home))
+
+
+# meiva:note
+# Owner-only (0700 directory, 0600 file, atomic replace): the CSRF token is a local
+# credential, so it never enters argv, the environment, the database or a log line.
+# Every request rewrites the record, which replaces a token that no longer answers.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+def write_antigravity_endpoint(
+    server: AntigravityServer, *, thread_id: str, home: Path | None = None
+) -> Path:
+    path = antigravity_endpoint_path(thread_id, home=home)
+    payload = json.dumps(
+        {
+            "conversation_id": str(UUID(str(thread_id))),
+            "address": server.address,
+            "csrf_token": server.csrf_token,
+        },
+        ensure_ascii=False,
+    )
+    write_private_bytes(path, payload.encode("utf-8"))
+    return path
+
+
+# meiva:note
+# Resolution order: this process's host-injected environment, the endpoint the
+# request recorded for this conversation, then a listening language_server. The
+# record is why a host daemon can reach an Antigravity CLI at all, and the failure
+# names the record it looked for: "no language_server is running" was the wrong
+# answer for the CLI case. ``home``/``environment``/``scan`` are the caller's
+# explicit context; a host daemon passes nothing and reads its own.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+def resolve_antigravity_endpoint(
+    thread_id: str,
+    *,
+    home: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+    timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS,
+    scan: Callable[..., AntigravityServer] = discover_antigravity_server,
+) -> AntigravityServer:
+    server = _env_antigravity_server(environment)
+    if server is not None:
+        return server
+    path = antigravity_endpoint_path(thread_id, home=home)
+    recorded = read_antigravity_endpoint_file(path)
+    if recorded is not None:
+        return recorded
+    try:
+        return scan(timeout=timeout)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"No Antigravity endpoint record exists at {path}, this process has no "
+            "ANTIGRAVITY_LS_ADDRESS/ANTIGRAVITY_CSRF_TOKEN, and no language_server "
+            f"answers for conversation {thread_id}. Request the takeover from that "
+            "conversation's own run_command so the request records its endpoint."
+        ) from exc
 
 
 def antigravity_rpc(

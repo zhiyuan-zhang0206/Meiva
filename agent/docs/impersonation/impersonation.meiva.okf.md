@@ -52,9 +52,13 @@ marker. Resurrection and its prompt use the database clock after locking the
 agent; claim orders by creation time and id, including equal-time notes.
 When the host first sees its Codex or Antigravity relay's lease ended, it submits one ended-lease
 notice to the recorded thread without reopening expired inbox authority or
-delaying native handoff. A failed submission is reported once through
-`impersonation_terminal_notice_failed` and never retried; a lease that ended while no
-host held its relay child gets no notice.
+delaying native handoff. The replacement admission that ends a takeover is the one
+other submission site: it is the host that ended the lease, and the in-memory relay
+child does not survive the restart. A failed submission is reported once through
+`impersonation_terminal_notice_failed` and never retried; a lease that ended with no
+host-held relay child and no replacement admission gets no notice. An Antigravity
+destination comes from the endpoint record the request wrote on this host, and a
+missing record is named in the failure reason instead of a guessed process.
 
 Cancel requests remain pending in the external inbox while held. The controller
 acknowledges the request on receipt, then stops its current work; the cancel

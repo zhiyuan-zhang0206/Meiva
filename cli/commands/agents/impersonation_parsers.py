@@ -262,6 +262,11 @@ def add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentPa
         "--codex-remote",
         help="Codex app-server endpoint used by the session, e.g. unix:///private/tmp/codex.sock",
     )
+    relay.add_argument(
+        "--antigravity-endpoint-file",
+        help="Antigravity endpoint record the request wrote on this host (internal host "
+        "handoff: a path, never a credential)",
+    )
     # Internal host machinery, not an operator parameter (approved exception,
     # task #4102); 0.5s is the coalescing default the relay has always used.
     relay.add_argument(

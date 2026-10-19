@@ -35,9 +35,12 @@ Codex's own thread UUID (`CODEX_THREAD_ID`) and Antigravity's cascade UUID
 (`ANTIGRAVITY_CONVERSATION_ID`, used automatically when `--thread-id` is omitted)
 are provider addresses, not the Meiva session handle.
 For Codex, preserve `CODEX_HOME` and optionally supply `--codex-remote` so the
-native relay reaches the owning server. For Antigravity, the request verifies
-that the local `language_server_macos_*` ConnectRPC endpoint is reachable and the
-accepting runtime starts the relay at activation. For Claude, start the `Monitor`
+native relay reaches the owning server. For Antigravity, the request resolves the
+conversation's ConnectRPC endpoint and records it owner-only on this machine
+(`$MEIVA_HOME/impersonation/antigravity/<conversation>.json`) before the lease
+exists; the accepting runtime starts the relay at activation and both the relay and
+the ended-lease notice read that record, because the host runs outside the CLI's own
+environment. For Claude, start the `Monitor`
 watch immediately after the request, armed with `timeout_ms: 1800000` and
 re-armed at each expiry notice.
 A dsh takeover runs from a DeepSeek Harness session that loaded the Meiva relay

@@ -18,6 +18,8 @@ import sys
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
+from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -568,6 +570,35 @@ async def _heartbeat_completion(
 
 
 # meiva:note
+# The Antigravity destination this relay may use. A relay spawned by the accepting
+# runtime is handed the record the request wrote, by path; a hand-started relay
+# falls back to the same lookup (its own host-provided environment, then that
+# record). Neither path guesses at a language_server process, which a standalone
+# `agy` CLI never produces.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+def antigravity_destination(args: argparse.Namespace) -> Callable[[], object]:
+    from base.agents.impersonation.host_transport import (
+        read_antigravity_endpoint_file,
+        resolve_antigravity_endpoint,
+    )
+
+    record = getattr(args, "antigravity_endpoint_file", None)
+    if record:
+        path = Path(record)
+
+        def recorded() -> object:
+            server = read_antigravity_endpoint_file(path)
+            if server is None:
+                raise RuntimeError(
+                    f"the request's Antigravity endpoint record is missing at {path}"
+                )
+            return server
+
+        return recorded
+    return partial(resolve_antigravity_endpoint, args.thread_id)
+
+
+# meiva:note
 # Run a native relay until lease release/expiry, failure, or interruption. The
 # transport destination resolves before any lease authority is used, and the first
 # heartbeat follows it: the accepting runtime reads that beat as proof the host can
@@ -590,7 +621,10 @@ def cmd_relay(
         from base.agents.impersonation.history import resolve
 
         adapter = (adapter_factory or resolve_adapter)(
-            args.provider, args.thread_id, codex_remote=args.codex_remote
+            args.provider,
+            args.thread_id,
+            codex_remote=args.codex_remote,
+            discover=antigravity_destination(args),
         )
         adapter.ready()
 

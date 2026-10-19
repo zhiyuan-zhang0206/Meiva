@@ -398,7 +398,7 @@ def test_establish_relay_codex_provisions_spawns_and_waits_for_heartbeat(
     provision_token = provision.call_args.args[3]
     assert spawn.call_count == 1
     assert spawn.call_args.args == (42, "lease-1", provision_token, "thread-1", None, None)
-    assert spawn.call_args.kwargs == {"provider": "codex"}
+    assert spawn.call_args.kwargs == {"provider": "codex", "antigravity_endpoint_file": None}
     assert relays.children[42].token == provision_token
 
 
