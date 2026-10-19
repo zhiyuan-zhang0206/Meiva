@@ -21,8 +21,6 @@
   "harness": "运行时（harness）",
   "harnessStatus": {
     "available": "可用",
-    "unavailable": "不可用",
-    "unknown": "未知"
-  },
-  "harnessNotLaunchable": "{harness} 还不能启动 —— 平台认得这个选项，但还没有启动器能真的把它跑起来"
+    "unavailable": "不可用"
+  }
 }

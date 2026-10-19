@@ -21,8 +21,6 @@
   "harness": "Harness",
   "harnessStatus": {
     "available": "available",
-    "unavailable": "unavailable",
-    "unknown": "unknown"
-  },
-  "harnessNotLaunchable": "{harness} cannot start a session yet — the platform has the choice, but no launcher runs it, so nothing would come up"
+    "unavailable": "unavailable"
+  }
 }

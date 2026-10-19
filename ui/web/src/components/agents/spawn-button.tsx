@@ -28,7 +28,7 @@ import { ChevronDown, Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Fragment, useState } from "react";
 
-import { DEFAULT_HARNESS, harnessRows, harnessLabel, type Harness } from "@/lib/harness/harness";
+import { DEFAULT_HARNESS, harnessRows, type Harness } from "@/lib/harness/harness";
 import { useHarnessAvailabilityByMachine } from "@/lib/harness/use-harness-availability";
 import { api } from "@/lib/transport/api";
 import { HarnessPicker } from "./harness-picker";
@@ -94,10 +94,10 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   const spawnable = eligible.filter((m) => m.agent_host_online === true);
   // meiva:note
   // A harness a machine cannot start is not offered as a working spawn there: the
-  // button is disabled with the reason, because an agent born on a harness the
-  // machine cannot launch sits inert while looking created. Every candidate
-  // machine answers for itself - the spawn list names its target only at click
-  // time, so one machine's probe says nothing about another's.
+  // row is disabled and says only that it is unavailable, because an agent born on
+  // a harness the machine cannot launch would sit inert while looking created.
+  // Every candidate machine answers for itself - the spawn list names its target
+  // only at click time, so one machine's probe says nothing about another's.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
   const harnessByMachine = useHarnessAvailabilityByMachine(spawnable.map((m) => m.name));
   const harnessBlocked = (machine: string): boolean => {
@@ -286,17 +286,14 @@ export function SpawnButton({ onSpawn, variant }: Props) {
 
   if (spawnable.length === 1 && eligible.length === 1) {
     const only = spawnable[0];
-    const refusal = harnessBlocked(only.name)
-      ? t("harnessNotLaunchable", { harness: harnessLabel(selectedHarness) })
-      : undefined;
+    const refusal = harnessBlocked(only.name);
     if (variant === "icon") {
       // Icon variant has no room to render the model select; the selection
       // (effectiveModel via buildOpts) is still preserved and passed on spawn.
       return (
         <TriggerButton
           variant={variant}
-          disabled={refusal !== undefined}
-          title={refusal}
+          disabled={refusal}
           onClick={() => onSpawn(buildOpts(only.name))}
         />
       );
@@ -311,8 +308,7 @@ export function SpawnButton({ onSpawn, variant }: Props) {
         <span className={cn(FLEX_1, MIN_W_0)} aria-hidden="true" />
         <TriggerButton
           variant={variant}
-          disabled={refusal !== undefined}
-          title={refusal}
+          disabled={refusal}
           onClick={() => onSpawn(buildOpts(only.name))}
         />
       </div>
@@ -324,16 +320,14 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   const sorted = [...eligible].sort((a, b) => a.name.localeCompare(b.name));
   // meiva:note
   // One row offers one machine: a host that is down and a harness that machine
-  // cannot start are both refusals, and the row shows the first reason that
-  // applies so the button never explains one while blocking for the other.
+  // cannot start are both refusals, and the row shows the first that applies so
+  // the button never explains one while blocking for the other.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
   const machineRow = (m: (typeof sorted)[number]) => {
     const hostReason = m.agent_host_online === true
       ? undefined
       : m.agent_host_online === false ? t("hostUnavailable") : t("hostUnknown");
-    const harnessReason = harnessBlocked(m.name)
-      ? t("harnessNotLaunchable", { harness: harnessLabel(selectedHarness) })
-      : undefined;
+    const harnessReason = harnessBlocked(m.name) ? t("harnessStatus.unavailable") : undefined;
     const reason = hostReason ?? harnessReason;
     return (
       <li key={m.name}>
