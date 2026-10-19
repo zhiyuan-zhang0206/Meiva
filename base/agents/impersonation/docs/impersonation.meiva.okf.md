@@ -24,8 +24,7 @@ The former UUID remains a private compatibility reference for existing leases,
 checkpoint receipts and plugin journals. Public commands and file paths
 use the scoped integer. The controller holds no credential: its authority is
 the `(agent_id, session_id)` lease handle on the hosting machine.
-Relay credentials are returned once and stored as hashes. See
-[[base/agents/impersonation/docs/capabilities.meiva.okf.md]].
+Relay credentials are returned once and stored as hashes.
 
 ## Ownership and return
 

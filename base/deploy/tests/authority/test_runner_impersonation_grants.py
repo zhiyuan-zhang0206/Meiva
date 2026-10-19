@@ -238,11 +238,11 @@ def test_baseline_schema_grants_cover_the_lease_statements() -> None:
 
 # meiva:note
 # request -> accept -> activate -> renew -> release, executed by the runner login
-# itself. This is the production shape #5375 broke: the capability columns are
-# written by the request INSERT (capabilities, capability_declared_by) and
-# restamped by the renewal UPDATE (capability_declared_by). The gateway never saw
-# it because it holds a table-level grant. The caller vocabulary comes from the
-# impersonation package because `base.deploy` must not reach `base.api_contracts`.
+# itself. This is the production shape #5375 broke: a column written by the request
+# INSERT or the renewal UPDATE and missing from the runner's column-level grant
+# dies here, while the gateway's table-level grant keeps its own leases working.
+# The caller vocabulary comes from the impersonation package because `base.deploy`
+# must not reach `base.api_contracts`.
 def test_runner_drives_the_lease_lifecycle(
     authority_postgres: AuthorityCluster, config_authority: ConfigAuthority
 ) -> None:
@@ -265,8 +265,6 @@ def test_runner_drives_the_lease_lifecycle(
             authority=config_authority,
             local_machine=_LOCAL_MACHINE,
         )
-        assert lease["capabilities"] is not None
-        assert lease["capability_declared_by"] == "caller-default"
         leases.accept(
             database,
             bus,
