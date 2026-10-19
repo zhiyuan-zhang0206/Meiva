@@ -524,8 +524,7 @@ async def test_delayed_snapshot_cannot_retire_replacement_sender(
     assert gate_ctx.relays.children[42].process is process
 
 
-@pytest.mark.parametrize("owned", [False, True])
-@pytest.mark.parametrize("running", [False, True])
+@pytest.mark.parametrize("owned,running", [(False, False), (False, True), (True, True)])
 async def test_claim_gate_records_a_stale_relay_as_degraded_and_never_replaces_it(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
@@ -585,37 +584,6 @@ async def test_startup_grace_does_not_degrade_a_fresh_child(
     await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     degradation.assert_not_called()
     assert native_gate_ctx.relays.children[42].process is child
-
-
-async def test_confirmed_child_exit_is_degraded_at_once_without_replacement(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    native_gate_ctx: MeivaContext,
-) -> None:
-    from agent.nodes import END
-
-    session = _relay_session(
-        "active", relay_heartbeat_at=datetime.now(UTC), relay_minted_at=datetime.now(UTC)
-    )
-    old = MagicMock()
-    old.poll.return_value = 1
-    native_gate_ctx.relays.children[42] = RelayChild(
-        "lease-1", old, "old-token", impersonation.time.monotonic(), 1
-    )
-    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    provision = Mock(return_value={"relay_generation": 2})
-    monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
-    spawn = Mock()
-    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
-    degradation = Mock()
-    monkeypatch.setattr(relay, "record_degradation", degradation)
-    monkeypatch.setattr(impersonation, "stamp_relay_failure", Mock())
-    decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
-    assert decision is not None and decision.goto == END
-    degradation.assert_called_once()
-    provision.assert_not_called()
-    spawn.assert_not_called()
-    assert session["relay_generation"] == 1
 
 
 async def test_stale_session_relay_retains_authority_with_visible_unsupported_recovery(

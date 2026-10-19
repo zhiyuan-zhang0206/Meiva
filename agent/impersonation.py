@@ -479,6 +479,14 @@ def _roll_back_relay_failure(
     return False
 
 
+# meiva:note
+# Observe relay delivery, end takeovers whose relay died, retire the children. An
+# exited relay this host spawned ends its takeover: nothing can push inbound
+# messages any more, so control returns to the native agent instead of parking them
+# until the TTL. A relay that is only stale keeps the lease open until its TTL or
+# explicit release, because another host may still deliver. When the host first sees
+# its relay's lease ended, it submits the ended-lease notice once.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 async def supervise_relay(
     db: Database,
     bus: EventBus,
@@ -488,13 +496,6 @@ async def supervise_relay(
     *,
     incarnation: RuntimeIncarnation | None,
 ) -> None:
-    """Observe relay delivery and retire exited relay children.
-
-    A stale or exited relay is recorded as degraded and never replaced: the
-    lease runs to its TTL or explicit release. When the host first sees its
-    relay's lease ended, it submits the ended-lease notice once.
-    """
-    del bus
     child = relays.children.get(agent_id)
     if (
         child is not None
@@ -503,57 +504,108 @@ async def supervise_relay(
     ):
         return  # A delayed predecessor snapshot cannot retire a replacement's sender.
     if session is None or session["status"] not in OPEN:
-        if child is not None:
-            with db.connect() as conn:
-                terminal = conn.execute(
-                    "SELECT status FROM agent_impersonations WHERE id=%s", (child.lease_id,)
-                ).fetchone()
-            if terminal is not None and ImpersonationStatus(terminal[0]) not in OPEN:
-                if relays.children.get(agent_id) is child:
-                    relays.children.pop(agent_id, None)
-                await asyncio.to_thread(terminate_relay, child)
-                await _send_ended_notice(db, agent_id, child.lease_id)
+        if child is not None and _lease_is_terminal(db, child.lease_id):
+            await _retire_relay_child(db, agent_id, relays, child)
         return
     if session["status"] != ImpersonationStatus.ACTIVE:
         return
     exited = relay_exited(child)
     if not exited and _heartbeat_fresh(session["relay_heartbeat_at"]):
         return
-    await _record_stale_relay(
-        db, session, agent_id, child, confirmed_exit=exited, incarnation=incarnation
+    if exited and child is not None:
+        ended = await asyncio.to_thread(
+            _end_dead_relay_lease, db, bus, session, agent_id, incarnation, child.process.returncode
+        )
+        if ended:
+            await _retire_relay_child(db, agent_id, relays, child)
+        return
+    await _record_stale_relay(db, session, agent_id, child, incarnation=incarnation)
+
+
+def _lease_is_terminal(db: Database, lease_id: str) -> bool:
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status FROM agent_impersonations WHERE id=%s", (lease_id,)
+        ).fetchone()
+    return row is not None and ImpersonationStatus(row[0]) not in OPEN
+
+
+async def _retire_relay_child(
+    db: Database, agent_id: int, relays: RelaySupervision, child: RelayChild
+) -> None:
+    if relays.children.get(agent_id) is not child:
+        return
+    relays.children.pop(agent_id, None)
+    await asyncio.to_thread(terminate_relay, child)
+    await _send_ended_notice(db, agent_id, child.lease_id)
+
+
+# meiva:note
+# End a takeover whose own relay child is confirmed gone. A poll result on the
+# child this host spawned is a deterministic death, not a liveness gap another
+# host could still cover, so nothing can push inbound messages any more. Ending
+# the lease returns control to the native agent, which answers the messages that
+# would otherwise wait for the TTL. A normal exit, a signal and a failed start
+# are the same fact here; the exit code only names how it died.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+def _end_dead_relay_lease(
+    db: Database,
+    bus: EventBus,
+    session: dict[str, Any],
+    agent_id: int,
+    incarnation: RuntimeIncarnation | None,
+    exit_code: int | None,
+) -> bool:
+    from base.agents.impersonation import ImpersonationError, abort_lease
+    from base.log import logger
+
+    if incarnation is None:
+        return False
+    detail = f"the bound relay process exited (exit code {exit_code})"
+    try:
+        ended = abort_lease(db, bus, session["id"], incarnation, detail)
+    except (ImpersonationError, RuntimeError):
+        return False
+    if ended is None:
+        return False
+    logger.error(
+        "impersonation relay exited; the takeover ended and native control returned",
+        agent_id=agent_id,
+        lease_id=str(session["id"]),
+        relay_provider=session["relay_provider"],
+        exit_code=exit_code,
     )
+    return True
 
 
+# meiva:note
+# Record a stale relay as degraded; nothing replaces it. Only a missing
+# heartbeat reaches here: an exited child this host spawned ends its lease
+# instead. A relay still inside its startup window is left alone. The lease keeps
+# its original TTL, so messages stay in the inbox and the liveness alert names the
+# gap until the controller re-requests or releases.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 async def _record_stale_relay(
     db: Database,
     session: dict[str, Any],
     agent_id: int,
     child: RelayChild | None,
     *,
-    confirmed_exit: bool = False,
     incarnation: RuntimeIncarnation | None,
 ) -> None:
-    """Record a stale or exited relay as degraded; nothing replaces it.
-
-    A relay still inside its startup window is left alone. The lease keeps its
-    original TTL: messages stay in the inbox and the liveness alert names the
-    gap until the controller re-requests or releases.
-    """
     from base.agents.impersonation.relay import record_degradation
 
     if incarnation is None:
         return
     if (
-        not confirmed_exit
-        and child is not None
+        child is not None
         and child.process.poll() is None
         and time.monotonic() - child.spawned_at < RELAY_READY_TIMEOUT_S
     ):
         return
     minted_at = session.get("relay_minted_at")
     if (
-        not confirmed_exit
-        and minted_at is not None
+        minted_at is not None
         and (datetime.now(UTC) - minted_at).total_seconds() < RELAY_READY_TIMEOUT_S
     ):
         return
