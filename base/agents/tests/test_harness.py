@@ -51,12 +51,10 @@ def _claude_credentials(home: Path, *, access: timedelta, refresh: timedelta) ->
     )
 
 
-def _antigravity_token(home: Path, *, relative: str, expiry: timedelta, refresh: bool) -> None:
+def _antigravity_token(home: Path, *, relative: str, expiry: timedelta) -> None:
     path = home / relative
     path.parent.mkdir(parents=True, exist_ok=True)
-    token = {"access_token": "access", "expiry": _iso(expiry)}
-    if refresh:
-        token.update({"refresh_token": "renewable"})
+    token = {"access_token": "access", "refresh_token": "renewable", "expiry": _iso(expiry)}
     path.write_text(json.dumps({"token": token}), encoding="utf-8")
 
 
@@ -142,37 +140,20 @@ def test_an_antigravity_session_reports_its_access_expiry_as_age(tmp_path: Path)
         tmp_path,
         relative=".gemini/antigravity-cli/antigravity-oauth-token",
         expiry=timedelta(hours=-1),
-        refresh=True,
     )
     row = _probe(tmp_path)[Harness.ANTIGRAVITY]
     assert row.status == "available"
     assert "renewed on use" in row.reason
 
 
-def test_an_antigravity_session_without_a_refresh_token_expires(tmp_path: Path) -> None:
+def test_an_ide_session_is_not_a_cli_login(tmp_path: Path) -> None:
     _external_cli(tmp_path, ".local/bin", "agy")
     _antigravity_token(
-        tmp_path,
-        relative=".gemini/antigravity-cli/antigravity-oauth-token",
-        expiry=timedelta(hours=-1),
-        refresh=False,
+        tmp_path, relative=".gemini/jetski-standalone-oauth-token", expiry=timedelta(hours=1)
     )
     row = _probe(tmp_path)[Harness.ANTIGRAVITY]
-    assert row.status == "unavailable"
-    assert "expired at" in row.reason
-
-
-def test_the_legacy_antigravity_token_file_still_answers(tmp_path: Path) -> None:
-    _external_cli(tmp_path, ".local/bin", "agy")
-    _antigravity_token(
-        tmp_path,
-        relative=".gemini/jetski-standalone-oauth-token",
-        expiry=timedelta(hours=1),
-        refresh=True,
-    )
-    row = _probe(tmp_path)[Harness.ANTIGRAVITY]
-    assert row.status == "available"
-    assert "jetski-standalone-oauth-token" in row.reason
+    assert row.status == "unknown"
+    assert "antigravity-cli/antigravity-oauth-token" in row.reason
 
 
 def test_a_path_install_is_reported_as_on_path(tmp_path: Path) -> None:
