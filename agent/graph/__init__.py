@@ -1,44 +1,48 @@
-"""LangGraph definition and node implementations (async).
+# meiva:note
+# LangGraph definition and node implementations (async).
+#
+# Submodules split by node (one file per node); leading underscore marks
+# package-private, no underscore marks a module promoted to a real public door
+# (other packages import it directly — plugin registration points, the exec
+# child's protocol, etc.). Four node families are subpackages, one package per
+# node (`claim/`, `llm/`, `exec/`, `harness/`) — each re-exports its node from
+# `node.py`, so callers do not name the file. Two more packages group what the
+# nodes read: `prompt/` (system prompt and standing context notes) and `recall/`
+# (passive memory recall):
+#
+#   - `claim/node.py`      — claim node: pipeline orchestrator (long await + dispatch by inbound kind)
+#   - `claim/_batch.py`    — claim batch acquisition: idle wait loop, trim, chat deferral
+#   - `claim/_routing.py`  — claim lifecycle routing: ClaimGoto + batch winner resolution
+#   - `claim/_dispatch.py` — claim per-kind dispatch: batch state, markers, handlers
+#   - `claim/_decide.py`   — claim post-dispatch decision → single Command
+#   - `claim/_present.py`  — claim display: SSE publishing for the frontend timeline
+#   - `claim/_chat_inbound.py` — claim chat inbound: row → HumanMessage assembly
+#   - `llm/node.py`        — llm node (stream + cancel = discard partial turn)
+#   - `llm/_stream.py`     — llm streaming consumption (stall timeouts, non-stream fallback, cache retry)
+#   - `llm/_cancel.py`     — llm streaming-vs-cancel race (partial turn discard)
+#   - `llm/goto.py`        — the node names the llm node may route to
+#   - `llm/_chunk.py`      — llm chunk assembly + final-message validation
+#   - `llm_errors.py`      — llm stream error taxonomy + failure ledger
+#   - `prompt/_base_prompt.py` — immutable base system prompt + lazily captured `meiva` SDK overview
+#   - `exec/node.py`      — exec node (one disposable subprocess per execute_code call)
+#   - `exec/output.py`    — code execution output envelope: format / truncate / overflow-to-file
+#   - `exec/protocol.py`  — exec child request/result envelopes (shared with `agent/execution/child.py`)
+#   - `exec/_*.py`        — exec subprocess machinery: spawn, process domain, stream, result, alerts
+#   - `_build.py`        — build_graph: assemble the self-cycling topology
+#   - `node_log.py`      — node enter/exit lifecycle log + publish timeline snapshot
+#   - `prompt/system_prompt.py` — system prompt dynamic assembly (base + plugin contributions)
+#   - `prompt/capabilities.py`, `prompt/context_notes.py` — the `# Capabilities` index, standing context notes
+#   - `harness/node.py`    — harness_turn: the whole turn of an external-CLI agent
+#   - `harness/bridge.py`  — the session behind it: open, resume, submit, close
+#   - `recall/memory_recall.py` — passive memory recall
+#
+# Public API is lazily re-exported via this __init__.py (PEP 562) — external
+# `from agent.graph import X` callers don't need to know the submodule layout,
+# and importing a light submodule (`exec.protocol`, `agent_traceback`) no
+# longer drags the node set into the importer — the exec child imports those
+# before user code runs (startup-path laziness, task #3585).
+# meiva:link agent/graph/docs/graph.meiva.okf.md
 
-Submodules split by node (one file per node); leading underscore marks
-package-private, no underscore marks a module promoted to a real public door
-(other packages import it directly — plugin registration points, the exec
-child's protocol, etc.). Three node families are subpackages, one package per
-node (`claim/`, `llm/`, `exec/`) — each package door (`__init__.py`) is
-docstring-only, so `claim_node` / `llm_node` / `exec_node` are re-exported from
-their `node.py`. Two more packages group what the nodes read: `prompt/` (system prompt
-and standing context notes) and `recall/` (passive memory recall):
-
-  - `claim/node.py`      — claim node: pipeline orchestrator (long await + dispatch by inbound kind)
-  - `claim/_batch.py`    — claim batch acquisition: idle wait loop, trim, chat deferral
-  - `claim/_routing.py`  — claim lifecycle routing: ClaimGoto + batch winner resolution
-  - `claim/_dispatch.py` — claim per-kind dispatch: batch state, markers, handlers
-  - `claim/_decide.py`   — claim post-dispatch decision → single Command
-  - `claim/_present.py`  — claim display: SSE publishing for the frontend timeline
-  - `claim/_chat_inbound.py` — claim chat inbound: row → HumanMessage assembly
-  - `llm/node.py`        — llm node (stream + cancel = discard partial turn)
-  - `llm/_stream.py`     — llm streaming consumption (stall timeouts, non-stream fallback, cache retry)
-  - `llm/_cancel.py`     — llm streaming-vs-cancel race (partial turn discard)
-  - `llm/goto.py`        — the node names the llm node may route to
-  - `llm/_chunk.py`      — llm chunk assembly + final-message validation
-  - `llm_errors.py`      — llm stream error taxonomy + failure ledger
-  - `prompt/_base_prompt.py` — immutable base system prompt + lazily captured `meiva` SDK overview
-  - `exec/node.py`      — exec node (one disposable subprocess per execute_code call)
-  - `exec/output.py`    — code execution output envelope: format / truncate / overflow-to-file
-  - `exec/protocol.py`  — exec child request/result envelopes (shared with `agent/execution/child.py`)
-  - `exec/_*.py`        — exec subprocess machinery: spawn, process domain, stream, result, alerts
-  - `_build.py`        — build_graph: assemble 8-Node self-cycling topology
-  - `node_log.py`      — node enter/exit lifecycle log + publish timeline snapshot
-  - `prompt/system_prompt.py` — system prompt dynamic assembly (base + plugin contributions)
-  - `prompt/capabilities.py`, `prompt/context_notes.py` — the `# Capabilities` index, standing context notes
-  - `recall/memory_recall.py` — passive memory recall
-
-Public API is lazily re-exported via this __init__.py (PEP 562) — external
-`from agent.graph import X` callers don't need to know the submodule layout,
-and importing a light submodule (`exec.protocol`, `agent_traceback`) no
-longer drags the node set into the importer — the exec child imports those
-before user code runs (startup-path laziness, task #3585).
-"""
 
 from typing import TYPE_CHECKING, Any
 

@@ -47,6 +47,6 @@
 "test_codex_canonical_owner.py#monkeypatch.setattr watch_work._owner_terminated" = 1
 "test_codex_canonical_owner.py#monkeypatch.setattr watch_work._session_crashed" = 1
 "test_codex_canonical_owner.py#monkeypatch.setattr watch_work._terminalize" = 1
+"test_codex_canonical_owner.py#monkeypatch.setattr watch_work.coding_session_owner.read" = 1
 "test_codex_canonical_owner.py#monkeypatch.setattr watch_work.meiva.agents.send_message" = 1
 "test_codex_canonical_owner.py#monkeypatch.setattr watch_work.meiva.agents.send_system_note" = 1
-"test_codex_canonical_owner.py#monkeypatch.setattr watch_work.coding_session_owner.read" = 1

@@ -279,8 +279,25 @@ injected content and refuses it.
 
 ### The decision
 
-The bridge replaces the *model call*, not the graph. `agent/graph/llm` keeps
-owning the turn's shape; only the body of one LLM round changes.
+**2026-10-19 19:59 update (ruled):** the wiring is a graph node, not a
+replacement for the llm node's body. Claim keeps its durable queue and lifecycle
+handling and routes a "has work" verdict on a non-native harness to
+`harness_turn` (`agent/graph/claim/harness_turn.py`, `base/lm/harness/bridge.py`, implementation task #5413). The ruled
+alternative — swapping the body of one LLM round — cannot work: `llm` is one
+model call whose contract is "return tool calls for `exec`", while a harness turn
+performs any number of tool calls internally and returns one text; and routing
+from claim keeps the single implementation of terminate / cancel / restart /
+resurrect / fork instead of a second copy that would drift. The session cache
+lives with `AgentRuntime`, so the existing idle TTL/LRU is what closes it.
+`before_llm`, `llm`, `before_exec`, `exec` and `after_exec` never run on such an
+agent, and the graph test asserts that over a real compiled graph.
+
+What follows is the section as written before that ruling; the event and
+persistence contracts in it are what the node implements.
+
+The bridge replaces the *model call*, not the graph — in the first draft that
+meant `agent/graph/llm` keeping the turn's shape and only the body of one LLM
+round changing.
 
 **How a message gets in.** The claim node already owns the durable inbound queue
 and keeps that role. It gains one step: instead of handing user text to a chat

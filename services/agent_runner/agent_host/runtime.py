@@ -3,6 +3,7 @@ wake-time admission of an agent's stored model configuration."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import time
@@ -18,12 +19,19 @@ from pydantic import BaseModel
 
 from agent.process_boot import boot_agent_scope
 from base.agents.impersonation.notes import HandoffNotes
+from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.host.env.agent_slices import AgentBrain, AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import validate_model_config
+from base.lm.harness.bridge import HarnessBridge
+from base.lm.harness.engine import TurnEngine
+from base.lm.harness.registration import RegistrationStore
+from base.lm.harness.registry import SessionRegistry
+from base.lm.harness.wiring import bridge_for
 from base.lm.registry import resolve_available_model
 from base.log import logger
+from base.paths import workspace_dir
 
 __all__ = [
     "AgentRuntime",
@@ -118,6 +126,16 @@ class AgentRuntime:
 
     fingerprint: str
     llm: BaseChatModel
+    # meiva:note
+    # The turn engine this runtime was built for, and the external session it drives.
+    # Both belong to the cached runtime because an external session is expensive to
+    # start and resumes by id: the cache's idle TTL and LRU bound is what closes it,
+    # together with the explicit drops (terminate, restart, crash) and host shutdown.
+    # A built-in runtime carries no bridge and never asks for one; harness is immutable
+    # per agent, so a rebuilt runtime cannot switch engines under the same id.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    harness: Harness = Harness.MEIVA
+    harness_bridge: TurnEngine | None = None
     last_used: float = field(default_factory=time.monotonic)
 
 
@@ -311,30 +329,33 @@ async def cached_runtime(
     return runtime
 
 
+# meiva:note
+# Evict idle runtimes by age and least-recent use; misses rebuild on wake. Active
+# runtimes survive both bounds, including turns longer than the idle TTL; completion
+# refreshes idle time and LRU position before eviction, and an over-budget warm cache
+# returns to its configured size as active runtimes settle. What it evicted is
+# returned so the caller can close the sessions those runtimes hold: dropping the
+# entry is what retires an external harness runtime.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 def evict_runtimes(
     runtimes: OrderedDict[int, AgentRuntime],
     in_flight: set[int],
     *,
     policy: HostCachePolicy,
     now: float,
-) -> None:
-    """Evict idle runtimes by age and least-recent use; misses rebuild on wake.
-
-    Active runtimes survive both bounds, including turns longer than the
-    idle TTL. Completion refreshes idle time and LRU position before eviction.
-    Active-agent admission can exceed the cache budget; completion returns
-    the warm cache to its configured size as active runtimes settle.
-    """
+) -> list[AgentRuntime]:
+    evicted: list[AgentRuntime] = []
     cutoff = now - policy.idle_ttl_seconds
     aged = [a for a, r in runtimes.items() if r.last_used < cutoff and a not in in_flight]
     for agent_id in aged:
-        del runtimes[agent_id]
+        evicted.append(runtimes.pop(agent_id))
     cap = policy.size
     for agent_id in list(runtimes):
         if len(runtimes) <= cap:
             break
         if agent_id not in in_flight:
-            del runtimes[agent_id]
+            evicted.append(runtimes.pop(agent_id))
+    return evicted
 
 
 async def read_last_active_at(pool: AsyncConnectionPool, agent_id: int) -> datetime | None:
@@ -365,6 +386,10 @@ async def build_runtime(
     *,
     catalog: ModelCatalog,
     llm_override: str,
+    harness: Harness = Harness.MEIVA,
+    registry: SessionRegistry | None = None,
+    registrations: RegistrationStore | None = None,
+    machine: str,
 ) -> AgentRuntime:
     """Build the retained model after the host repaired its original admission."""
     llm, _binding = await boot_agent_scope(
@@ -374,7 +399,38 @@ async def build_runtime(
         catalog=catalog,
         llm_override=llm_override,
     )
-    return AgentRuntime(fingerprint=fingerprint, llm=llm)
+    return AgentRuntime(
+        fingerprint=fingerprint,
+        llm=llm,
+        harness=harness,
+        harness_bridge=harness_bridge_for(
+            agent_id, harness, registry=registry, registrations=registrations, machine=machine
+        ),
+    )
+
+
+def harness_bridge_for(
+    agent_id: int,
+    harness: Harness,
+    *,
+    registry: SessionRegistry | None,
+    registrations: RegistrationStore | None,
+    machine: str,
+) -> HarnessBridge | None:
+    if harness is Harness.MEIVA:
+        return None
+    if registry is None:
+        raise ValueError(
+            f"an agent on harness {harness.value!r} needs the session registry its resume reads"
+        )
+    return bridge_for(
+        harness,
+        agent_id=agent_id,
+        machine=machine,
+        workspace=workspace_dir(agent_id),
+        registry=registry,
+        registrations=registrations,
+    )
 
 
 def refresh_cached_runtime(
@@ -390,3 +446,71 @@ def refresh_cached_runtime(
         runtimes.move_to_end(agent_id)
     in_flight.discard(agent_id)
     evict()
+
+
+# meiva:note
+# The host's one owner of session shutdown. A runtime can be dropped from any sync
+# path — idle eviction, terminate, restart, crash — while closing an external session
+# is async and must not leak the CLI child process that holds the transcript, so the
+# close runs as a task inside this component's own TaskGroup and is retained until the
+# group joins at host shutdown. `start` runs at the top of every hosted turn, which is
+# always before a runtime can be dropped; a retirement without it is a wiring defect
+# and raises rather than silently leaving the session open.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+class HarnessSessions:
+    def __init__(self, registrations: RegistrationStore) -> None:
+        self._registrations = registrations
+        self._tasks = asyncio.TaskGroup()
+        self._started = False
+        self._pending: set[asyncio.Task[None]] = set()
+        self.failures: list[BaseException] = []
+
+    async def start(self) -> None:
+        if self._started:
+            return
+        await self._tasks.__aenter__()
+        self._started = True
+        self._registrations.sweep()
+
+    def retire(self, runtime: AgentRuntime, *, reason: str = "runtime retired") -> None:
+        bridge = runtime.harness_bridge
+        if bridge is None:
+            return
+        if not self._started:
+            raise RuntimeError(
+                "a harness session cannot be retired before the host's session owner started"
+            )
+        task = self._tasks.create_task(
+            self._close(bridge, reason), name=f"harness-close-{runtime.harness.value}"
+        )
+        self._pending.add(task)
+        task.add_done_callback(self._collect)
+
+    def _collect(self, task: asyncio.Task[None]) -> None:
+        self._pending.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            self.failures.append(error)
+            logger.warning(
+                "[{label}] {body}",
+                label="harness",
+                event="harness_close_failed",
+                body=f"retiring a harness session raised: {error!r}",
+            )
+
+    async def _close(self, bridge: TurnEngine, reason: str) -> None:
+        try:
+            await bridge.close(reason=reason)
+        except Exception:
+            logger.exception(
+                "closing an external harness session failed",
+                event="harness_close_failed",
+            )
+
+    async def aclose(self) -> None:
+        if not self._started:
+            return
+        self._started = False
+        await self._tasks.__aexit__(None, None, None)
