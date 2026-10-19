@@ -46,11 +46,11 @@ a new agent instead of forking.
 for the machine the caller runs on:
 
 - `harness`: which harness the row describes.
-- `status`: `available` (installed and a credential marker is present),
-  `unavailable` (not installed, or installed with a marker that holds no
-  credentials), or `unknown` (installed, but the sign-in state cannot be read
-  here). The probe does not validate credential freshness; an expired credential
-  still reads as `available`.
+- `status`: `available` (installed, and its credential store holds a token),
+  `unavailable` (not installed, or installed with a store holding no token, or
+  one whose credentials cannot renew and have expired), or `unknown` (installed,
+  but the sign-in state cannot be read here — an account recorded in a config
+  file is not a login).
 - `reason`: one readable sentence explaining that status.
 - `binary` and `on_path`: the resolved executable path this machine would run
   (following symlinks to the real target, which is not always the name on PATH),
