@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Harness attach
-description: '`meiva/impersonation/harness/` — the seam that lets a provider harness process (Claude Code, Codex, Antigravity, dsh) act as a Meiva agent: a registration row, a hashed handle delivered through the environment, and the attach step that binds the borrowed identity.'
+description: '`meiva/self/harness/` — the seam that lets a provider harness process (Claude Code, Codex, Antigravity, dsh) act as a Meiva agent: a registration row, a hashed handle delivered through the environment, and the attach step that binds the borrowed identity.'
 tags:
 - meiva
 - harness
@@ -12,9 +12,8 @@ tags:
 
 A provider harness runs the agent loop in its own process and cannot use the
 handoff document alone: `import meiva` in a bare interpreter fails, because every
-`meiva.*` call needs an initialized process pipeline. `meiva.impersonation.harness.attach()`
-gives that process a borrowed identity, the same way `meiva.impersonation.attach()`
-gives one to a takeover; both go through
+`meiva.*` call needs an initialized process pipeline. `meiva.attach()` gives that process a borrowed identity, the same way
+`meiva.impersonation.attach()` gives one to a takeover; both go through
 [[base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md]].
 
 | Step | What it does |
@@ -25,6 +24,10 @@ gives one to a takeover; both go through
 | prove | the row is attached and unexpired, the machine matches, the caller descends from the controller pid |
 | bind | a borrowed `ExternalLease` on the ambient context, pipeline and SDK state initialized |
 | close | flush the plugin delta, seal events, deliver telemetry, detach |
+
+`meiva.attach()` is the public entry: with no argument it reads
+`MEIVA_HARNESS_HANDLE`, attaches once and returns the attachment. Every session's
+first identity read does the same thing, so the call is optional.
 
 `meiva harness exec --file script.py` is the CLI around the same seam: it reads the
 script (or stdin as `-`) and runs it inside the attachment, so a bridge needs no
@@ -63,6 +66,51 @@ leaked registration file does not yield a usable handle. The bridge hands the
 plain value to the child through `MEIVA_HARNESS_HANDLE`, deliberately **not** as a
 workspace file: a provider sandbox reads everything and writes only its workspace,
 so a file would hand the token to the very agent it authorises.
+
+## Reaching the SDK from inside the child
+
+The bridge cannot run `attach()` inside the provider's process, and the handoff
+document cannot do it either, so the SDK makes the attachment itself — on the
+**first read that needs an identity**, never at `import meiva`:
+
+| Read | Path it passes through |
+|---|---|
+| `meiva.context`, `meiva.DB`, `meiva.REDIS` | the context slot |
+| `meiva.self.AGENT_ID`, every `meiva.agents` call | `agent_identity._bound()` |
+| a plugin namespace (`meiva.tasks`, …) | `boot.maybe_load_plugins_for_missing` |
+
+Attaching replays the agent's plugin-state snapshot through the codec, and that
+opens the database. Doing it at import would make every provider tool call that
+merely imports the SDK open a connection — a probe, a syntax check, a turn with
+nothing to record. Importing `meiva` therefore stays what it is in every other
+process, and the handle decides nothing until an identity is asked for, which
+also keeps the SDK's import budget (#3816) intact.
+
+File and shell calls reach the same read when they resolve a path against the
+agent's workspace, and that is correct: a relative path belongs to that
+workspace, not to the operator's `$HOME`. What they do *not* do is fail when the
+borrow fails — see below.
+
+A failed attachment is recorded, not raised:
+
+- calls that answer without an identity keep working — an absolute-path file
+  read, `meiva.ui` — and `meiva.files` / `meiva.shell` fall back to `$HOME`, the
+  documented pre-bootstrap base, instead of failing. `HarnessAttachError` is a
+  `ContextOutsideProcessError`, which is what makes those readers keep their own
+  fallback while the reads that need an identity report the reason;
+- whatever the failed attach had already installed is rolled back, so no
+  half-built surface answers for an identity that is not there;
+- the next read that needs an identity raises `boot.HarnessAttachError` carrying
+  the row's own reason (no matching handle, expired, another machine) and the
+  instruction to stop retrying and report it instead of working around it.
+
+The reason is kept in the install slot (`mark_load_failed`), the SDK's existing
+"attempted and failed, do not retry" memory, so a dead session is not re-probed
+on every attribute read. Two concurrent first reads cannot build two attachments
+either: `ExternalAttachment.open` holds a process-wide non-blocking lock and
+refuses the second. `ExternalAttachment.close()` runs from `atexit`: it flushes
+the turn's events, seals the participant, delivers telemetry, and only then
+detaches.
 
 ## What admission checks
 

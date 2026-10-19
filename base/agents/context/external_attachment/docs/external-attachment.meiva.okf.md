@@ -34,8 +34,8 @@ This package owns that shared half:
 
 - `meiva/impersonation/attachment.py` — the lease row, derived from
   (agent, session, machine) and rechecked on every call.
-- `meiva/impersonation/harness/attach.py` — a harness registration handle (see
-  [[meiva/impersonation/harness/docs/harness-attach.meiva.okf.md]] for the handle and what it
+- `meiva/self/harness/attachment.py` — a harness registration handle (see
+  [[meiva/self/harness/docs/harness-attach.meiva.okf.md]] for the handle and what it
   proves).
 
 ## Failure behaviour

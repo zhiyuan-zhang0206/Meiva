@@ -1,0 +1,7 @@
+exports = ["attachment.py", "registration.py"]
+
+[uses]
+"__init__.py" = ["attachment.py", "registration.py"]
+"attachment.py" = ["registration.py"]
+"registration.py" = []
+"tests" = ["__init__.py", "attachment.py", "registration.py"]

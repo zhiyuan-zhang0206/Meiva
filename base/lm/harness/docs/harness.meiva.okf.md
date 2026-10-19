@@ -64,6 +64,12 @@ task — because an agent that skims it still meets the task last. `HANDOFF_VERS
 is part of the document (`- handoff version: 1` in section 1) so a provider that
 caches or replays a handoff can tell which field set it holds.
 
+Section 3 names where to start, not an inventory: `DEFAULT_ENTRIES` holds the
+`meiva` entry — which attaches this session's identity on first use — plus the
+three namespaces a turn reaches for first (files, tasks, agents). Listing every
+namespace there would become a second copy of `meiva.help()` that drifts from the
+SDK; the entry point and its pointer are enough to start.
+
 Changing the field set or the section order means bumping the version.
 `tests/test_handoff.py` pins both: the field tuple is compared against
 `PINNED_HANDOFF_FIELDS` and the version against a literal, so the edit that
