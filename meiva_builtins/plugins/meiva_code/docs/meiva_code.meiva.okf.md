@@ -48,7 +48,7 @@ def state_handle() -> PluginStateHandle[MeivaCodeState]:
 
 - `MeivaCodeState` besides `cwd: str` (default = agent workspace or `$HOME`) declares the base `messages` channel (exact `BaseAgentState` annotation — the in-memory delivery channel for context notes) and holds context injection dedup state (`injected_paths` / `injected_hashes` / `last_seen_compact`) and note injection state (`cwd_note` / `project_skills_note` / `project_skills_seen_compact`)
 - `cwd` is read/written via `meiva.cwd.get() / set()` and is purely logical LangGraph state: `set()` never mutates the parent or disposable child's OS cwd
-- SDK wraps (`meiva.files.read/edit/write/append/delete/glob`, `meiva.shell.run`, `meiva.understand`) resolve relative paths using cwd (for `meiva.understand` the wrap walks the batch and resolves each target's `path`)
+- SDK wraps (`meiva.files.read/edit/write/append/delete/restore/glob`, `meiva.shell.run`, `meiva.understand`) resolve relative paths using cwd (for `meiva.understand` the wrap walks the batch and resolves each target's `path`)
 
 ### SDK namespace declaration
 

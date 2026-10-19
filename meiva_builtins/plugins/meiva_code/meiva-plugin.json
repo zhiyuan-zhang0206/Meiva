@@ -20,6 +20,7 @@
       "files.write",
       "files.append",
       "files.delete",
+      "files.restore",
       "files.glob",
       "understand",
       "ui.serve"
