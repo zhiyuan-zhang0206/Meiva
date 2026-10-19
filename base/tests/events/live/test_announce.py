@@ -1,22 +1,37 @@
 from __future__ import annotations
 
+import ast
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import cast
 
 import pytest
 
-from base.agents.observation import snapshot
 from base.events.live import announce
 from base.events.live.bus import EventBus
 
 
-@pytest.fixture(autouse=True)
-def _forbid_snapshot_reads(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("lifecycle announcements must not read an agent snapshot")
+def _imported_modules(source: str) -> set[str]:
+    # meiva:note
+    # Every module name a source imports, including the names it takes from one.
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            found.add(node.module)
+            found.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return found
 
-    monkeypatch.setattr(snapshot, "select_one", forbidden)
+
+def test_lifecycle_hints_cannot_reach_the_agent_snapshot() -> None:
+    # meiva:note
+    # The guard is the module's import list, not a call spy: nothing in `announce`
+    # may reach the observation snapshot, so no runtime patch can be forgotten
+    # when a code path is added.
+    source = Path(announce.__file__).read_text(encoding="utf-8")
+    assert not [m for m in _imported_modules(source) if m.startswith("base.agents.observation")]
 
 
 class _RecordingBus:

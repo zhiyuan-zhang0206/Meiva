@@ -46,6 +46,17 @@ def add_lineage_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def owner_terminated(agent_id: int) -> bool:
+    # meiva:note
+    # The probe lives in the private launch plumbing (`_common`); this door is how
+    # the rest of the tree (and a test standing in for a plugin) reaches it. The
+    # import stays inside the call because `_common` imports `meiva.agents`, which
+    # must not load while this package is being imported.
+    from ._common import owner_terminated as probe
+
+    return probe(agent_id)
+
+
 # meiva:note
 # A missing --why is a usage error: the reason is the one field the launcher cannot derive, and a
 # worker without it cannot judge whether the work fits. Takeover launches get the three-line form

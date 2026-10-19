@@ -156,6 +156,7 @@ def write_fields(
     capture_bytes: bool = False,
     expected_digest: str | None = None,
     audit: EnvAudit | None = None,
+    path: Path | None = None,
 ) -> bytes | None:
     """Set each field's alias in this unit's `.env`, and unset each removed field's.
 
@@ -167,7 +168,7 @@ def write_fields(
     (never silent — a silent full-replace once dropped a cluster's secrets).
     `audit`, when given, records the write (`.env` history and `env_write` event).
     """
-    path = dotenv_file.env_file_path()
+    path = dotenv_file.env_file_path() if path is None else path
     path.parent.mkdir(parents=True, exist_ok=True)
     # Cross-process exclusive, for the whole snapshot-and-rewrite section. Each
     # `set_key` / `unset_key` READS the file and rewrites it, so two writers

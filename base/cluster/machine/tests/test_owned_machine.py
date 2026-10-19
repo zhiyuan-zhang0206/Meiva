@@ -5,14 +5,15 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 
 
-def test_construction_does_not_read_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
-    config = ConfigBoot()
+class _RefusingConfigBoot(ConfigBoot):
+    # meiva:note
+    # A boot config that fails the test if construction reads any field from it.
+    def get_field(self, name: str) -> object:
+        pytest.fail(f"construction must not read machine configuration (read {name!r})")
 
-    def refused(_self: ConfigBoot, _name: str) -> object:
-        pytest.fail("construction must not read machine configuration")
 
-    monkeypatch.setattr(ConfigBoot, "get_field", refused)
-    machine_from_boot(config)
+def test_construction_does_not_read_configuration() -> None:
+    machine_from_boot(_RefusingConfigBoot())
 
 
 def test_role_never_requires_name_and_delivery_owners_are_independent() -> None:

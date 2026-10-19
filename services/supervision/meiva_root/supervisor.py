@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from time import monotonic, time
 from typing import Protocol, cast
@@ -96,6 +96,9 @@ def _caller_facts(raw: object) -> CallerFacts | None:
     )
 
 
+type ChildSpawn = Callable[..., Awaitable[asyncio.subprocess.Process]]
+
+
 class Supervisor(StoppingMixin):
     """Owns the lifecycle of every unit in one registry.
 
@@ -110,8 +113,13 @@ class Supervisor(StoppingMixin):
         *,
         run_dir: Path,
         config: SupervisorConfig | None = None,
+        spawn: ChildSpawn | None = None,
     ) -> None:
         self._registry = registry
+        # meiva:note
+        # The child-process launcher. None means `asyncio.create_subprocess_exec`;
+        # a deployment assembly (`--wiring`) may install its own before start.
+        self.spawn: ChildSpawn | None = spawn
         self._run_dir = run_dir
         self._log_dir = run_dir / "logs"
         self._config = config if config is not None else SupervisorConfig()
@@ -620,7 +628,8 @@ class Supervisor(StoppingMixin):
         log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
         try:
             env = inherited_process_env() | dict(manifest.env)
-            proc = await asyncio.create_subprocess_exec(
+            launcher = self.spawn or asyncio.create_subprocess_exec
+            proc = await launcher(
                 *manifest.exec,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=log_fd,

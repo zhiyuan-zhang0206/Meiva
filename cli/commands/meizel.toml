@@ -9,6 +9,3 @@ exports = ["agents", "cluster", "converge", "data_plane", "extensions", "lifecyc
 "lifecycle" = ["_repo.py", "_setup.py", "cluster", "converge", "data_plane", "extensions", "observability", "probe.py"]
 "observability" = ["converge"]
 "tests" = ["_repo.py", "_setup.py", "data_plane", "extensions", "lifecycle", "observability", "permissions.py", "probe.py"]
-
-[debt.private-module]
-"tests/maintenance_cluster.py -> lifecycle/_pause_resume.py" = 1

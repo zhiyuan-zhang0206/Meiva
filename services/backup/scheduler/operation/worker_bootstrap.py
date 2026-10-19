@@ -12,7 +12,11 @@ def main() -> None:
         origin = None if spec is None else spec.origin
         if origin is None or not pathlib.Path(origin).resolve().is_relative_to(root):
             raise SystemExit(f"operation worker code root mismatch: {name} resolves to {origin}")
-    sys.argv = [module, *sys.argv[3:]]
+    # meiva:note
+    # `alter_sys=True` makes argv[0] the module's file, as `python -m` does; the
+    # worker reads its request and result from the tail of argv (see
+    # `worker_process.worker_request`), so this process's own arguments can stay
+    # in place and nothing has to rewrite `sys.argv`.
     runpy.run_module(module, run_name="__main__", alter_sys=True)
 
 

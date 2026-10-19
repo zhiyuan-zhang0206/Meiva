@@ -7,13 +7,13 @@ from typing import Any
 
 import pytest
 
-from base import config, telemetry
+from base import telemetry
 from base.telemetry import Event
 from base.telemetry.otlp import telemetry_otlp
 
 
 @pytest.fixture
-def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
+def otlp_backend() -> Any:
     """An in-memory OTLP log exporter for the cross-store byte contract."""
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
@@ -26,9 +26,9 @@ def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
     logs.add_log_record_processor(SimpleLogRecordProcessor(resource_exporter))
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,
+        enabled=lambda: True,
         providers=(logs, MeterProvider(metric_readers=[InMemoryMetricReader()])),
     )
-    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
     yield backend, exporter
     backend.shutdown()
 

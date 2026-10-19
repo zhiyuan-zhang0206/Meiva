@@ -1,2 +1,0 @@
-[debt.first-party-patch]
-"test_tool_call_audit.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_standalone" = 1

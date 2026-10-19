@@ -34,12 +34,11 @@ def test_validate_core_metric_sets_plugin_core() -> None:
     assert filled.plugin == "core"
 
 
-def test_collect_core_metrics_rejects_duplicates(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collect_core_metrics_rejects_duplicates() -> None:
     module = types.ModuleType("fake_core_metrics")
     module.core_metrics = lambda: [_spec(), _spec()]  # type: ignore[attr-defined]
-    monkeypatch.setattr(catalog, "CORE_DEFINITION_MODULES", (module,))
     with pytest.raises(DuplicateMetric):
-        catalog.collect_core_metrics()
+        catalog.collect_core_metrics((module,))
 
 
 def test_validate_core_metric_validates_sql_like_plugins() -> None:

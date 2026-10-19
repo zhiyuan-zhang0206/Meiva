@@ -40,17 +40,6 @@ def _ctx(
     )
 
 
-def _with_script(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    script = tmp_path / "scripts" / "provision" / "check_git_hooks.py"
-    script.parent.mkdir(parents=True)
-    script.write_text("# stub\n")
-
-    def fake_repo_root() -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(csteps, "repo_root", fake_repo_root)
-
-
 def _fake_scan(monkeypatch: pytest.MonkeyPatch, stdout: str, code: int) -> None:
     def fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert args[1].endswith("check_git_hooks.py")
@@ -79,7 +68,6 @@ def test_clean_machine_is_silent(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    _with_script(monkeypatch, tmp_path)
     _fake_scan(monkeypatch, "hook check: OK (3 clone(s))\n", 0)
 
     csteps.ensure_local_git_hooks(
@@ -96,7 +84,6 @@ def test_drifted_machine_warns(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    _with_script(monkeypatch, tmp_path)
     _fake_scan(
         monkeypatch,
         "WARNING: [/home/u/Meiva] pre-commit: INSTALL_PYTHON points into a disposable worktree: /x\n"
@@ -120,10 +107,9 @@ def test_missing_script_is_silent(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    def fake_repo_root() -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(csteps, "repo_root", fake_repo_root)
+    monkeypatch.setattr(
+        csteps, "GIT_HOOKS_SCAN", tmp_path / "scripts" / "provision" / "check_git_hooks.py"
+    )
 
     def fail(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         pytest.fail("the scan must not run without the script")
@@ -144,7 +130,6 @@ def test_usage_error_from_pre_flag_checkout_is_silent(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    _with_script(monkeypatch, tmp_path)
     _fake_scan(monkeypatch, "usage: check_git_hooks.py [-h] [--scan-machine]\n", 2)
 
     csteps.ensure_local_git_hooks(
@@ -161,7 +146,6 @@ def test_subprocess_failure_is_silent(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    _with_script(monkeypatch, tmp_path)
 
     def boom(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise OSError("git vanished")

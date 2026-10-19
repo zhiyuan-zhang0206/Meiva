@@ -1,2 +1,0 @@
-[debt.first-party-patch]
-"test_host_deploy_state.py#monkeypatch.setattr base.db.connect" = 1

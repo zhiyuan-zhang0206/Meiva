@@ -6,6 +6,7 @@ import contextlib
 import datetime
 import logging
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -229,7 +230,13 @@ def add_sink(sink: Any, /, **kwargs: Any) -> int:
 FILE_SINK_SIZE_LIMIT = 100 * 1024 * 1024
 
 
-def rotate_by_size_or_day(message: Any, file: Any) -> bool:
+def _file_ctime(path: Path) -> float:
+    return path.stat().st_ctime
+
+
+def rotate_by_size_or_day(
+    message: Any, file: Any, *, ctime_of: Callable[[Path], float] = _file_ctime
+) -> bool:
     """Rotation predicate for the JSONL file sink (Task #434): rotate when
     the file crosses the 100 MB ceiling OR when the message's date moves past
     the file's creation date.
@@ -260,9 +267,7 @@ def rotate_by_size_or_day(message: Any, file: Any) -> bool:
         if file.tell() > FILE_SINK_SIZE_LIMIT:
             return True
     try:
-        created = datetime.datetime.fromtimestamp(
-            Path(file.name).stat().st_ctime, tz=datetime.UTC
-        ).date()
+        created = datetime.datetime.fromtimestamp(ctime_of(Path(file.name)), tz=datetime.UTC).date()
     except (OSError, ValueError, TypeError):
         return False
     return message.record["time"].astimezone(datetime.UTC).date() > created

@@ -106,12 +106,18 @@ def test_writer_validation_refuses_what_the_panel_cannot_render(
         stats.upsert(database, plugin="", id="c", value="ok")
 
 
-def test_detail_cap_follows_config(
-    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection, database: Database
-) -> None:
+def test_detail_cap_follows_config(db_conn: psycopg.Connection, database: Database) -> None:
     """The detail cap is cluster config, resolved per call: a shortened cap
     rejects what the default would accept (task #3696)."""
-    monkeypatch.setattr(settings.display, "plugin_stats_max_detail_chars", 10)
-    stats.upsert(database, plugin="p", id="c", value="ok", detail="y" * 10)
+    stats.upsert(database, plugin="p", id="c", value="ok", detail="y" * 10, detail_cap=10)
     with pytest.raises(ValueError, match="exceeds"):
-        stats.upsert(database, plugin="p", id="c", value="ok", detail="y" * 11)
+        stats.upsert(database, plugin="p", id="c", value="ok", detail="y" * 11, detail_cap=10)
+
+
+def test_the_default_detail_cap_is_the_configured_one(
+    db_conn: psycopg.Connection, database: Database
+) -> None:
+    cap = settings.display.plugin_stats_max_detail_chars
+    stats.upsert(database, plugin="p", id="c", value="ok", detail="y" * cap)
+    with pytest.raises(ValueError, match="exceeds"):
+        stats.upsert(database, plugin="p", id="c", value="ok", detail="y" * (cap + 1))
