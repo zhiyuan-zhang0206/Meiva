@@ -514,7 +514,7 @@ def test_runner_marks_a_delivery_but_cannot_rewrite_it(runner_db: str) -> None:
     with psycopg.connect(runner_db, autocommit=True) as conn:
         row = conn.execute(
             "INSERT INTO notification_events (category, subject, importance) "
-            "VALUES ('core.turn_finished', 'turn finished', 'low') RETURNING id"
+            "VALUES ('core.needs_input', 'needs input', 'high') RETURNING id"
         ).fetchone()
         assert row is not None
         notification_id = int(row[0])

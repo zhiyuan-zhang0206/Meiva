@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from base.events.notifications.catalog import NotificationCategory, core_catalog
+from base.events.notifications.catalog import core_catalog
 from base.events.notifications.notices import notice_dedupe_key
 from cli.commands.agents.notices_audit import (
     MODELLED_CATEGORIES,
@@ -24,16 +24,7 @@ from cli.commands.agents.notices_audit import (
 )
 
 _CATALOG = core_catalog()
-_FLEET = NotificationCategory(
-    id="meiva_fleet.task_closed",
-    label="Task closed",
-    description="A fleet task reached a closed state.",
-    importance="normal",
-    default_enabled=True,
-)
-_MODEL = {**_CATALOG, _FLEET.id: _FLEET}
 _NEEDS_INPUT = "core.needs_input"
-_TURN_FINISHED = "core.turn_finished"
 
 
 def _at(minutes: int) -> datetime:
@@ -67,17 +58,6 @@ def test_replay_delivers_the_same_key_again_an_hour_later() -> None:
 
     assert len(result.delivered) == 2
     assert result.deduplicated[_NEEDS_INPUT] == 0
-
-
-def test_replay_reports_a_switched_off_turn_finished_without_delivering_it() -> None:
-    candidates = [Candidate(_TURN_FINISHED, _at(i), i, None) for i in range(5)]
-
-    off = replay(candidates, categories=_CATALOG, switches={})
-    on = replay(candidates, categories=_CATALOG, switches={_TURN_FINISHED: True})
-
-    assert len(off.delivered) == 0
-    assert off.switched_off[_TURN_FINISHED] == 5
-    assert len(on.delivered) == 5
 
 
 def test_replay_never_dedupes_a_null_key() -> None:
@@ -133,14 +113,14 @@ def test_per_hour_uses_the_requested_zone() -> None:
     assert shanghai[7] == 1
 
 
-@pytest.mark.parametrize("spec", ["turn_finished=maybe", "unknown=on", "turn_finished"])
+@pytest.mark.parametrize("spec", ["requestion=maybe", "unknown=on", "requestion"])
 def test_parse_simulation_rejects_a_switch_it_does_not_model(spec: str) -> None:
     with pytest.raises(ValueError):
         parse_simulation(spec)
 
 
 def test_parse_simulation_reads_on_and_off() -> None:
-    assert parse_simulation("turn_finished=on") == ("turn_finished", True)
+    assert parse_simulation("requestion=on") == ("requestion", True)
     assert parse_simulation("requestion=off") == ("requestion", False)
 
 
@@ -206,25 +186,24 @@ def test_an_edit_after_the_window_is_not_a_candidate() -> None:
     assert len(candidates) == 1
 
 
-def test_the_plugin_category_is_modelled_beside_the_core_ones() -> None:
-    assert set(_CATALOG) < set(MODELLED_CATEGORIES)
-    assert "meiva_fleet.task_closed" in MODELLED_CATEGORIES
+def test_the_audit_models_exactly_the_core_catalog() -> None:
+    assert set(MODELLED_CATEGORIES) == set(_CATALOG)
 
 
 def _report(categories: list[str] | None = None):
-    names = categories or ["core.needs_input", "meiva_fleet.task_closed"]
+    names = categories or ["core.needs_input"]
     window = window_for(
         days=2, tz_name="Asia/Shanghai", now=datetime(2026, 10, 2, 0, 0, tzinfo=UTC)
     )
     baseline = replay(
         [_notice(0, 1, {"ask": "a"}), _notice(30, 1, {"ask": "a"})],
-        categories=_MODEL,
+        categories=_CATALOG,
         switches={},
     )
     return build_report(
         window=window,
-        categories=[_MODEL[name] for name in names],
-        switches={"core.needs_input": True, "meiva_fleet.task_closed": True},
+        categories=[_CATALOG[name] for name in names],
+        switches={"core.needs_input": True},
         baseline=baseline,
         variants=[("baseline", baseline)],
     )
@@ -247,7 +226,7 @@ def test_the_report_carries_every_section_a_consumer_reads() -> None:
     assert report["simulations"] == [
         {"variant": "baseline", "delivered": 1, "delta": 0, "per_day": 0.5}
     ]
-    assert report["sources"]["meiva_fleet.task_closed"].startswith("agent_tasks")
+    assert report["sources"]["core.needs_input"].startswith("agent_notices")
 
 
 def test_json_and_text_report_the_same_totals() -> None:
@@ -257,7 +236,7 @@ def test_json_and_text_report_the_same_totals() -> None:
     assert parsed == report
     assert sum(parsed["delivered"]["per_category"].values()) == parsed["delivered"]["total"]
     text = "\n".join(render_text(parsed, tz=ZoneInfo("Asia/Shanghai")))
-    assert "meiva_fleet.task_closed" in text
+    assert "core.needs_input" in text
     assert "Simulations" in text
 
 
@@ -282,9 +261,9 @@ def test_explain_names_the_outcome_of_every_candidate() -> None:
 
 def test_explain_marks_a_switched_off_category() -> None:
     result = replay(
-        [Candidate(_TURN_FINISHED, _at(0), 3, None)],
+        [Candidate(_NEEDS_INPUT, _at(0), 3, None)],
         categories=_CATALOG,
-        switches={_TURN_FINISHED: False},
+        switches={_NEEDS_INPUT: False},
         explain=True,
     )
 

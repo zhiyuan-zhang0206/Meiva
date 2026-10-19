@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
-from psycopg_pool import AsyncConnectionPool, ConnectionPool
+from psycopg_pool import ConnectionPool
 
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
@@ -16,12 +16,8 @@ from base.events.notifications.catalog import NotificationCategory, core_catalog
 from base.events.notifications.policy import decide
 from base.events.notifications.store import (
     insert,
-    insert_async,
-    mark_announced_async,
     mark_announced_sync,
     read_inputs,
-    read_inputs_async,
-    unannounced_async,
     unannounced_sync,
 )
 
@@ -160,47 +156,6 @@ def deliver_sync(
         )
 
 
-async def deliver_async(
-    pool: AsyncConnectionPool[Any],
-    *,
-    category_id: str,
-    subject: str,
-    body: str | None = None,
-    href: str | None = None,
-    dedupe_key: str | None = None,
-    agent_id: int = 0,
-    overrides: dict[str, bool] | None = None,
-    now: datetime | None = None,
-    catalog: Mapping[str, NotificationCategory] | None = None,
-) -> NotificationRecord | None:
-    declared = category(category_id, catalog)
-    inputs = await read_inputs_async(pool, category=declared.id, dedupe_key=dedupe_key)
-    prepared = _record(
-        category_id,
-        subject=subject,
-        body=body,
-        href=href,
-        dedupe_key=dedupe_key,
-        agent_id=agent_id,
-        overrides=overrides,
-        now=now,
-        inputs=inputs,
-        catalog=catalog,
-    )
-    if prepared is None:
-        return None
-    declared, params = prepared
-    return NotificationRecord(
-        id=await insert_async(pool, params),
-        category=declared.id,
-        subject=subject,
-        body=body,
-        href=href,
-        importance=declared.importance,
-        agent_id=agent_id,
-    )
-
-
 def _emitted(
     notification_id: int,
     category: str,
@@ -229,22 +184,6 @@ def _emitted(
 # at-least-once push the client already deduplicates on `notification_id` — and is
 # never a lost one.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-async def announce(
-    pool: AsyncConnectionPool[Any], bus: EventBus | None, notification_id: int
-) -> bool:
-    if bus is None:
-        return False
-    row = await unannounced_async(pool, notification_id)
-    if row is None:
-        return False
-    published = await bus.publish_best_effort(
-        _emitted(*row).model_dump_json(), context="notification_emitted"
-    )
-    if published is None:
-        return False
-    return await mark_announced_async(pool, notification_id)
-
-
 def announce_sync(pool: ConnectionPool, bus: EventBus | None, notification_id: int) -> bool:
     if bus is None:
         return False
@@ -257,20 +196,3 @@ def announce_sync(pool: ConnectionPool, bus: EventBus | None, notification_id: i
     if published is None:
         return False
     return mark_announced_sync(pool, notification_id)
-
-
-# meiva:note
-# Delivery is the only side effect: one row in `notification_events` plus one
-# live `notification` event. Suppression returns None, so a producer cannot tell a
-# switched-off category from a deduplicated one and has nothing to retry.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-async def publish_notification(
-    pool: AsyncConnectionPool[Any],
-    bus: EventBus | None,
-    **fields: Any,
-) -> int | None:
-    record = await deliver_async(pool, **fields)
-    if record is None:
-        return None
-    await announce(pool, bus, record.id)
-    return record.id

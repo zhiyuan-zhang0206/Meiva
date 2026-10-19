@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import psycopg
 
 from base.api_contracts.idempotency import keyed_headers
 from base.events.live.bus import EventBus
+from gateway.extensions.notification_categories import categories_from_manifests
 from tests.fixtures.gateway_config import gateway_test_client
 
 
@@ -19,14 +23,21 @@ def _agent(conn: psycopg.Connection) -> int:
     return agent_id
 
 
-def test_categories_report_the_core_set_with_switches(db_conn: psycopg.Connection) -> None:
+# meiva:note
+# The default configuration enables the one request the user has to answer. A
+# category the core or an installed plugin adds that ships on fails here, because
+# every transport honors this merged view.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def test_only_the_request_that_needs_a_reply_is_enabled(db_conn: psycopg.Connection) -> None:
     with gateway_test_client() as client:
         resp = client.get("/api/notifications/categories")
     assert resp.status_code == 200
     categories = {item["id"]: item for item in resp.json()["categories"]}
     core = {item_id for item_id in categories if item_id.startswith("core.")}
-    assert core == {"core.turn_finished", "core.needs_input"}
-    assert categories["core.turn_finished"]["enabled"] is False
+    assert core == {"core.needs_input"}
+    assert {item_id for item_id, item in categories.items() if item["enabled"]} == {
+        "core.needs_input"
+    }
 
 
 def test_an_undeclared_category_is_rejected(db_conn: psycopg.Connection) -> None:
@@ -63,7 +74,7 @@ def test_an_empty_subject_is_rejected(db_conn: psycopg.Connection) -> None:
     with gateway_test_client() as client:
         resp = client.post(
             f"/api/agents/{agent_id}/notifications",
-            json={"category": "core.turn_finished", "subject": "   "},
+            json={"category": "core.needs_input", "subject": "   "},
         )
     assert resp.status_code == 422
 
@@ -171,3 +182,42 @@ def test_the_pull_path_keeps_the_newest_rows_of_a_long_gap(
     with gateway_test_client() as client:
         resp = client.get("/api/notifications?after_id=0&limit=2")
     assert [item["id"] for item in resp.json()["notifications"]] == ids[1:]
+
+
+# meiva:note
+# A plugin's declared category joins the merged switch list — switched off, with
+# its dedupe window intact — so the plugin path stays exercised after the core
+# catalog dropped to one category. The manifest is a real one on disk, parsed by
+# the same loader the gateway uses.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def test_a_plugin_category_joins_the_switch_list_switched_off(tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "sample"
+    plugin_dir.mkdir()
+    (plugin_dir / "meiva-plugin.json").write_text(
+        json.dumps(
+            {
+                "apiVersion": 2,
+                "name": "sample",
+                "version": "1.0.0",
+                "engines": {"meiva": ">=0.0.1"},
+                "contributions": {
+                    "notifications": [
+                        {
+                            "id": "sample.question",
+                            "label": "A question",
+                            "description": "The sample plugin needs an answer.",
+                            "importance": "high",
+                            "defaultEnabled": False,
+                            "dedupeWindowSeconds": 60,
+                        }
+                    ]
+                },
+            }
+        )
+    )
+
+    catalog = categories_from_manifests({"sample": plugin_dir}, {"sample"})
+
+    assert set(catalog) == {"core.needs_input", "sample.question"}
+    assert catalog["sample.question"].default_enabled is False
+    assert catalog["sample.question"].dedupe_window_seconds == 60

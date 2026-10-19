@@ -29,9 +29,15 @@ def _optional_fields(
     if importance not in IMPORTANCES:
         errors.append(f"{where}.importance must be one of {', '.join(IMPORTANCES)}")
         return None
-    default_enabled = entry.get("defaultEnabled", True)
+    default_enabled = entry.get("defaultEnabled", False)
     if not isinstance(default_enabled, bool):
         errors.append(f"{where}.defaultEnabled must be a boolean")
+        return None
+    if default_enabled:
+        errors.append(
+            f"{where}.defaultEnabled must be false: a plugin category ships switched off "
+            "and the user turns it on"
+        )
         return None
     window = entry.get("dedupeWindowSeconds", 0)
     if isinstance(window, bool) or not isinstance(window, int) or window < 0:

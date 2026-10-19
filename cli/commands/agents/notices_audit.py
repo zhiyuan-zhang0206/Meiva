@@ -30,17 +30,6 @@ from base.events.notifications.store import read_overrides_sync
 from base.packages.plugins import enable_config
 from base.packages.plugins.manifest import load_manifest
 
-_CLEAN_HALT_BODIES: tuple[str, ...] = ("no tool_call (idle)", "system_halt (compact)")
-
-_TURN_FINISHED_SQL = """
-SELECT ts, agent_id
-  FROM telemetry_events
- WHERE event_name = 'halt'
-   AND attributes->>'body' = ANY(%s)
-   AND ts >= %s AND ts < %s
- ORDER BY ts, id
-"""
-
 _NEEDS_INPUT_SQL = """
 SELECT id, agent_id, created_at, updated_at, question
   FROM agent_notices
@@ -49,15 +38,7 @@ SELECT id, agent_id, created_at, updated_at, question
  ORDER BY created_at, id
 """
 
-_TASK_CLOSED_SQL = """
-SELECT id, owner, updated_at
-  FROM agent_tasks
- WHERE status = 'done'
-   AND updated_at >= %s AND updated_at < %s
- ORDER BY updated_at, id
-"""
-
-_SIMULATED_SWITCHES: tuple[str, ...] = ("turn_finished", "requestion")
+_SIMULATED_SWITCHES: tuple[str, ...] = ("requestion",)
 
 
 @dataclass(frozen=True)
@@ -108,14 +89,6 @@ class _Query:
     requestion: bool
 
 
-def _load_turn_finished(cur: psycopg.Cursor[Any], query: _Query) -> list[Candidate]:
-    cur.execute(_TURN_FINISHED_SQL, (list(_CLEAN_HALT_BODIES), query.start, query.end))
-    return [
-        Candidate("core.turn_finished", at, int(agent_id or 0), None)
-        for at, agent_id in cur.fetchall()
-    ]
-
-
 def _load_needs_input(cur: psycopg.Cursor[Any], query: _Query) -> list[Candidate]:
     cur.execute(_NEEDS_INPUT_SQL, (query.start, query.end, query.start, query.end))
     found: list[Candidate] = []
@@ -135,20 +108,6 @@ def _load_needs_input(cur: psycopg.Cursor[Any], query: _Query) -> list[Candidate
     return found
 
 
-# meiva:note
-# `meiva_fleet` delivers `task_closed` from the task update path once a task reaches
-# `done`, keyed by task id. `agent_tasks.updated_at` is the close stamp for a task
-# that has not been touched since; a later edit moves that stamp, so this counts
-# closes that are still the row's last change.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-def _load_task_closed(cur: psycopg.Cursor[Any], query: _Query) -> list[Candidate]:
-    cur.execute(_TASK_CLOSED_SQL, (query.start, query.end))
-    return [
-        Candidate("meiva_fleet.task_closed", at, int(owner or 0), f"task:{task_id}:closed")
-        for task_id, owner, at in cur.fetchall()
-    ]
-
-
 @dataclass(frozen=True)
 class _Source:
     category: str
@@ -161,16 +120,6 @@ _SOURCES: tuple[_Source, ...] = (
         "core.needs_input",
         "agent_notices (require_response post and edit)",
         _load_needs_input,
-    ),
-    _Source(
-        "core.turn_finished",
-        "telemetry_events 'halt' (a turn that ended cleanly)",
-        _load_turn_finished,
-    ),
-    _Source(
-        "meiva_fleet.task_closed",
-        "agent_tasks (a task that reached done)",
-        _load_task_closed,
     ),
 )
 
@@ -388,7 +337,7 @@ def _selection(
             f"modelled categories: {', '.join(MODELLED_CATEGORIES)}"
         )
     simulations = [parse_simulation(spec) for spec in simulate]
-    needs = {"turn_finished": "core.turn_finished", "requestion": "core.needs_input"}
+    needs = {"requestion": "core.needs_input"}
     for name, _ in simulations:
         if needs[name] not in selected:
             raise ValueError(f"--simulate {name} needs --category {needs[name]}")
@@ -403,16 +352,10 @@ def _variants(
     database_factory: DatabaseFactory,
     catalog: Mapping[str, NotificationCategory],
     overrides: Mapping[str, bool],
-    candidates: Sequence[Candidate],
     baseline: Replay,
 ) -> list[tuple[str, Replay]]:
     variants: list[tuple[str, Replay]] = [("baseline", baseline)]
-    for name, enabled in simulations:
-        if name == "turn_finished":
-            switched = dict(overrides) | {"core.turn_finished": enabled}
-            result = replay(candidates, categories=catalog, switches=switched)
-            variants.append((f"core.turn_finished={_on_off(value=enabled)}", result))
-            continue
+    for _name, enabled in simulations:
         rekeyed = load_candidates(
             database_factory,
             start=window.start,
@@ -688,7 +631,6 @@ def cmd_notices_audit(
             database_factory=database_factory,
             catalog=catalog,
             overrides=overrides,
-            candidates=candidates,
             baseline=baseline,
         ),
     )

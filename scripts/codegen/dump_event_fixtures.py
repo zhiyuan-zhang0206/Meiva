@@ -198,11 +198,11 @@ def _samples() -> dict[str, dict]:
             "role": "notification",
             "agent_id": agent_id,
             "notification_id": 11,
-            "category": "core.turn_finished",
-            "subject": "Agent #7 finished its turn",
+            "category": "core.needs_input",
+            "subject": "Agent #7 is waiting on your answer",
             "body": None,
             "href": None,
-            "importance": "normal",
+            "importance": "high",
         },
     }
 
