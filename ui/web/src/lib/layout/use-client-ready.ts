@@ -38,12 +38,17 @@ export function useClientReady(): boolean {
 // all of it before the router commits the URL: Control added 13,878 DOM nodes in
 // one transition and its URL did not change for 1.36 s on a 4x-slower CPU (user
 // report 2026-10-20). DEFERRED_MOUNT_DEADLINE_MS is a hard ceiling, so a page
-// that never reaches idle still mounts its bodies instead of hanging.
+// that never reaches idle still mounts its bodies instead of hanging. A URL that
+// carries a hash starts already mounted: it lands on a section and lets
+// useSettledAnchorScroll settle the jump while the content above grows, so that
+// path keeps the growth schedule it always had.
 // meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
 export const DEFERRED_MOUNT_DEADLINE_MS = 200;
 
 export function useDeferredMount(deadlineMs: number = DEFERRED_MOUNT_DEADLINE_MS): boolean {
-  const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted] = useState(() =>
+    typeof window !== "undefined" && window.location.hash.length > 1,
+  );
   useEffect(() => {
     let cancelled = false;
     let idle: number | null = null;

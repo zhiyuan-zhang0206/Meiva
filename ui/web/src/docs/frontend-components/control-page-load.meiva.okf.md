@@ -36,3 +36,10 @@ What the split must not change:
 The deadline exists because `requestIdleCallback` alone is not a promise: a page
 that never reaches idle would hold every body back indefinitely. At the deadline
 the body mounts anyway.
+
+A URL that carries a hash opts out: `useDeferredMount` starts already mounted
+when the page was opened as a deep link, so the sections above the target grow on
+the same schedule they always did and `useSettledAnchorScroll` settles the jump
+exactly as before. Measured: `/control#config`, `/control#schedules` and
+`/insights#alerts` all land with the section at the top of the scroll container on
+the deferred build.
