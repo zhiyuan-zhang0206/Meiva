@@ -114,8 +114,25 @@ async def settle_close(
     harness: str,
     timeout_seconds: float,
     *,
+    agent_id: int | None,
     poll_seconds: float = 0.02,
-) -> bool:
+) -> bool | None:
+    if not observed:
+        # meiva:note
+        # Nothing observed is not nothing running. The pid comes from a provider SDK's
+        # private transport structure, so a shape change leaves it permanently None and
+        # an "all gone" report would be a zero-value fallback dressed up as a total.
+        # `interrupt()` already answers `settled=None` here; a close answers the same.
+        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        logger.info(
+            "[{label}] {body}",
+            label="harness",
+            event="harness_close_unobserved",
+            body=f"{harness} session closed but its process tree was never observed",
+            harness=harness,
+            agent_id=agent_id,
+        )
+        return None
     gone, waited_ms = await wait_gone(
         probe, observed, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds
     )
@@ -126,6 +143,7 @@ async def settle_close(
             event="harness_close_settled",
             body=f"{harness} session closed; {len(observed)} process(es) observed, none left",
             harness=harness,
+            agent_id=agent_id,
             waited_ms=round(waited_ms, 1),
         )
         return True
@@ -134,8 +152,9 @@ async def settle_close(
         "[{label}] {body}",
         label="harness",
         event="harness_close_residue",
-        body=f"{harness} session closed with {len(remaining)} process(es) still running",
+        body=f"{harness} session for agent {agent_id} left {len(remaining)} process(es) running",
         harness=harness,
+        agent_id=agent_id,
         remaining=len(remaining),
         waited_ms=round(waited_ms, 1),
     )
