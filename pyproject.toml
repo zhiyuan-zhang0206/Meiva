@@ -849,6 +849,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/codex/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/lm/harness/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
