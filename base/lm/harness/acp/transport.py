@@ -25,21 +25,16 @@ MAX_STDERR_LINES = 200
 _STREAM_END = object()
 
 
-class AcpError(RuntimeError):
-    """Base class for ACP transport failures."""
+class AcpError(RuntimeError): ...
 
 
-class AcpClosedError(AcpError):
-    """The connection is gone: the child exited, closed stdout, or was closed."""
+class AcpClosedError(AcpError): ...
 
 
-class AcpTimeoutError(AcpError):
-    """A request did not answer within its deadline."""
+class AcpTimeoutError(AcpError): ...
 
 
 class AcpRpcError(AcpError):
-    """The peer answered a request with a JSON-RPC error."""
-
     def __init__(self, method: str, code: int, message: str, data: Any = None) -> None:
         super().__init__(f"{method} failed with JSON-RPC error {code}: {message}")
         self.method = method
@@ -89,8 +84,6 @@ class _Pending:
 
 
 class AcpConnection:
-    """Spawn one ACP agent over stdio and speak JSON-RPC with it."""
-
     def __init__(
         self,
         argv: Sequence[str],
@@ -132,8 +125,6 @@ class AcpConnection:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            # Own process group: teardown reaches the whole tree the agent spawned,
-            # not only the process we hold a handle to.
             start_new_session=True,
         )
         stdin, stdout, stderr = process.stdin, process.stdout, process.stderr
@@ -221,7 +212,7 @@ class AcpConnection:
         process = self._process
         if process is not None and process.returncode is None:
             if self._stdin is not None:
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(OSError, RuntimeError):
                     self._stdin.close()
             try:
                 await asyncio.wait_for(process.wait(), timeout=self.shutdown_timeout_seconds)
@@ -274,12 +265,10 @@ class AcpConnection:
                 try:
                     frame = json.loads(text)
                 except json.JSONDecodeError:
-                    # A stray non-protocol line is a defect in the composition, not
-                    # a reason to drop the connection; keep it for the postmortem.
                     self.stderr_tail.append(f"non-JSON stdout: {text[:300]}")
                     continue
                 if isinstance(frame, dict):
-                    await self._dispatch(frame)
+                    await self._dispatch(cast("dict[str, Any]", frame))
         finally:
             self._closed = True
             self._fail_pending(AcpClosedError("the agent closed its output"))
@@ -306,12 +295,13 @@ class AcpConnection:
             return
         error = frame.get("error")
         if isinstance(error, dict):
+            payload = cast("dict[str, Any]", error)
             pending.future.set_exception(
                 AcpRpcError(
                     pending.method,
-                    int(error.get("code", -1)),
-                    str(error.get("message", "")),
-                    error.get("data"),
+                    int(payload.get("code", -1)),
+                    str(payload.get("message", "")),
+                    payload.get("data"),
                 )
             )
             return
@@ -325,7 +315,7 @@ class AcpConnection:
         request_id = frame["id"]
         params = frame.get("params")
         if method == "session/request_permission" and isinstance(params, dict):
-            await self._answer_permission(request_id, params)
+            await self._answer_permission(request_id, cast("dict[str, Any]", params))
             return
         await self._answer_error(request_id, -32601, f"client does not implement {method}")
 

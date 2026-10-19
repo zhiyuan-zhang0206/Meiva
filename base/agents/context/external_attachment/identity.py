@@ -12,37 +12,35 @@ from typing import Any, Protocol
 #
 # `require` is called on every SDK call, not once at entry: a lease that expired or
 # a session that closed mid-run must stop the process at its next action, not at
-# the next restart.
+# the next restart. `merge_delta` is the only write path for plugin state, and it
+# takes the expected version so two attachments cannot silently overwrite each
+# other.
+# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
 
 
 class IdentitySource(Protocol):
-    """What an external attachment needs to know about its borrowed identity."""
+    def require(self) -> Mapping[str, Any]: ...
 
-    def require(self) -> Mapping[str, Any]:
-        """Return the live identity record, or raise when it no longer permits use."""
+    def validate(self) -> int: ...
 
-    def validate(self) -> int:
-        """Re-check the identity and return the borrowed agent id."""
+    def machine(self) -> str: ...
 
-    def machine(self) -> str:
-        """The machine the identity is bound to; the process must run there."""
+    def agent_id(self) -> int: ...
 
-    def agent_id(self) -> int:
-        """The borrowed agent id."""
+    def delta_version(self) -> int: ...
 
-    def merge_delta(self, encoded: str, *, expected_version: int) -> int:
-        """Persist one plugin-state delta under optimistic version control."""
+    def merge_delta(self, encoded: dict[str, str], *, expected_version: int) -> int: ...
 
 
 class AttachmentCodec(Protocol):
-    """The agent-state codec: snapshot load, plugin-state schema, delta codec."""
-
     def load_snapshot(self, agent_id: int) -> tuple[Any, Any, Any]: ...
 
     def plugin_state_schema(self, state: Any) -> Any: ...
 
-    def encode_plugin_delta(self, update: Mapping[str, Any], state_cls: type[Any]) -> str: ...
+    def encode_plugin_delta(
+        self, update: Mapping[str, Any], state_cls: type[Any]
+    ) -> dict[str, str]: ...
 
-    def decode_plugin_delta(self, encoded: str, state_cls: type[Any]) -> Any: ...
+    def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> Any: ...
 
     def apply_plugin_delta(self, state: Any, delta: Any) -> None: ...

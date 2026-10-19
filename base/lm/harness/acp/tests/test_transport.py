@@ -6,12 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from base.lm.harness.acp import AcpClosedError, AcpNotification, AcpRpcError
 from base.lm.harness.acp.tests.support import collect, connect
-from base.lm.harness.acp.transport import (
-    AcpClosedError,
-    AcpNotification,
-    AcpRpcError,
-)
 
 
 async def test_initialize_reports_the_agent_identity() -> None:
