@@ -212,7 +212,7 @@ class ExternalAttachment:
     def _deliver_telemetry(self) -> None:
         clients = self._telemetry_clients()
         if clients is None:
-            raise RuntimeError("the attachment has no event producer owner")
+            return
         _deliver_telemetry_before_detach(clients=clients)
 
     def _telemetry_clients(self) -> Any:

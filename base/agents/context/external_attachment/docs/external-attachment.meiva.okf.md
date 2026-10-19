@@ -25,7 +25,7 @@ This package owns that shared half:
 | replay | load the agent snapshot, apply the identity's plugin deltas under `applied_version` | a takeover continues native plugin state instead of resetting it |
 | admit | every SDK call passes one gate that revalidates the identity | an expired lease or a closed registration stops the process at its next action |
 | flush | write the delta back under optimistic version control | two attachments cannot silently overwrite each other |
-| close | close admission, seal, deliver telemetry, detach, restore the prior context | a later cleanup error never replaces the first failure |
+| close | close admission, seal, deliver telemetry, detach, restore the prior context | a later cleanup error never replaces the first failure; an attachment that reused a bound context's clients owns no producer and delivers nothing |
 
 ## Identity sources
 

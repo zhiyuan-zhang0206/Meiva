@@ -24,7 +24,7 @@ gives one to a takeover; both go through
 | boot | config, machine, database, client set and clock come from `meiva/boot.py` |
 | prove | the row is attached and unexpired, the machine matches, the caller descends from the controller pid |
 | bind | a borrowed `ExternalLease` on the ambient context, pipeline and SDK state initialized |
-| close | flush the plugin delta, seal events, deliver telemetry, detach, retire the row |
+| close | flush the plugin delta, seal events, deliver telemetry, detach |
 
 `meiva harness exec --file script.py` is the CLI around the same seam: it reads the
 script (or stdin as `-`) and runs it inside the attachment, so a bridge needs no
@@ -37,7 +37,10 @@ The bridge writes one row per started session
 file format under `$MEIVA_HOME/harness/registrations/`). The fields are the
 agent id, the harness name, the provider-side session id, the machine, the
 controller pid, the handle digest, the creation time, and an optional expiry and
-status.
+status. The bridge owns the row: it writes it before the child starts and retires
+it when the session ends. The child never writes it back — a provider sandbox
+allows writes only inside the workspace, so a closing child could not delete the
+row anyway, and a failed cleanup must not turn a finished turn into an error.
 
 **The handle** is an opaque `hx_<random>` string. Only its SHA-256 is stored, so a
 leaked registration file does not yield a usable handle. The bridge hands the
