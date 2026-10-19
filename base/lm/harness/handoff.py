@@ -29,13 +29,23 @@ DEFAULT_DISCIPLINE: tuple[str, ...] = (
     "The host records your final text; do not message other agents or the user directly.",
 )
 
-DEFAULT_ENTRIES: tuple[EntryPoint, ...] = ()
-
 
 @dataclass(frozen=True, slots=True)
 class EntryPoint:
     name: str
     purpose: str
+
+
+DEFAULT_ENTRIES: tuple[EntryPoint, ...] = (
+    EntryPoint(
+        "meiva",
+        "the cluster SDK for this session; `meiva.attach()` binds your identity, done for "
+        "you on first use — start at meiva.help()",
+    ),
+    EntryPoint("meiva.files", "read and write files in your workspace"),
+    EntryPoint("meiva.tasks", "the task you were given, and its siblings"),
+    EntryPoint("meiva.agents", "message another agent, or read the one that briefed you"),
+)
 
 
 @dataclass(frozen=True, slots=True)

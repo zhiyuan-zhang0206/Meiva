@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -39,6 +40,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.loading import StateGate
 from meiva.mcps import McpClients
 from meiva.sdk_surface import meiva_module, process_context
+from meiva.sdk_surface.process_context import ContextOutsideProcessError
 
 
 def _redis(*, url_reader: Callable[[], str]) -> object:
@@ -358,7 +360,6 @@ def _prepare_launched_context() -> tuple[MeivaContext, ConfigBoot]:
     context = launched_context(config=config)
     if context is None:
         raise RuntimeError("launched process identity disappeared during SDK initialization")
-    import atexit
 
     atexit.register(context.clients.close)
     process_context.bind_context(context)
@@ -386,14 +387,16 @@ def maybe_load_plugins_for_missing(name: str) -> bool:
         return False
     from meiva.sdk_surface import agent_identity
 
-    if not agent_identity.is_launched_child():
+    launched_child = agent_identity.is_launched_child()
+    if installed() is not None:
+        return True
+    if not launched_child:
         return False
     ensure_plugins_loaded()
     return installed() is not None
 
 
 def bind_launched_context() -> MeivaContext | None:
-    import atexit
 
     launched = launched_context()
     if launched is None:
@@ -401,6 +404,61 @@ def bind_launched_context() -> MeivaContext | None:
     process_context.bind_context(launched)
     atexit.register(launched.clients.close)
     return launched
+
+
+# meiva:note
+# A provider harness runs the agent loop itself and exports a registration handle
+# instead of MEIVA_AGENT_ID, so every "is this an agent-launched child" test above
+# answers no. The attachment is made on the first read that needs an identity —
+# `meiva.context`, `meiva.self.AGENT_ID`, `meiva.attach`, a plugin namespace such as
+# `meiva.tasks` — and never at import: attaching replays the agent's plugin-state
+# snapshot through the codec, which opens the database, and a provider runs a fresh
+# Python per tool call.
+#
+# Nothing caches the attempt here. A session that ended must not be retried on every
+# attribute read, and the SDK already owns that answer: a failed attach is recorded
+# in the install slot (`mark_load_failed`), whose readers raise it instead of
+# loading again. Two concurrent first reads cannot build two attachments either —
+# `ExternalAttachment.open` takes a process-wide non-blocking lock.
+#
+# `HarnessAttachError` is a `ContextOutsideProcessError` so the readers that
+# tolerate a missing context (`meiva.files` resolving a relative path,
+# `meiva.shell` choosing a working directory) keep their own fallback, while the
+# reads that need an identity report this reason. A cell that failed half-way
+# leaves a plugin surface with no identity behind it, so the failure drops it.
+# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
+_HARNESS_HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
+
+
+class HarnessAttachError(ContextOutsideProcessError):
+    pass
+
+
+def harness_failure(exc: BaseException) -> HarnessAttachError:
+    return HarnessAttachError(
+        "this process was started by a harness bridge, but the SDK could not borrow the "
+        f"session's identity: {exc}. Calls that do not need the identity still work (an "
+        "absolute-path file read, meiva.ui); meiva.context, meiva.self.AGENT_ID, the "
+        "plugin namespaces (meiva.tasks) and meiva.agents all fail with this error. A "
+        "session that expired or ended cannot be attached again: stop retrying and report "
+        "this failure in your reply instead of working around it."
+    )
+
+
+def record_harness_failure(exc: BaseException) -> None:
+    from meiva.sdk_surface import install as _sdk_install
+
+    failure = harness_failure(exc)
+    try:
+        _sdk_install.uninstall()
+    except Exception:
+        from base.log import logger
+
+        logger.opt(exception=True).warning("rolling back the failed harness attachment failed")
+    _sdk_install.mark_load_failed(failure)
+    from base.log import logger
+
+    logger.warning(f"harness identity attachment failed: {exc}")
 
 
 @dataclass(frozen=True, slots=True)

@@ -424,10 +424,14 @@ and the SDK state, gates every SDK call, and flushes plugin state on exit.
 `meiva impersonate exec --file` is the CLI wrapper around it. A harness needs the
 same thing with its own identity.
 
-**Shape.** `meiva.impersonation.harness.attach(handle=None, *, agent_id=None, session_id=None)`
-returns the same object (`flush` / `close` / `native_snapshot`, usable as a
-context manager). It is a controller-facing entry: like `impersonation.attach` it
-is not part of the agent-facing SDK surface.
+**Shape.** `meiva.attach(handle=None)` — renamed from
+`meiva.impersonation.harness.attach` by a user ruling on 2026-10-19: the capability
+is "bind this external process to its Meiva execution identity", shared by every
+harness and not an impersonation concept. It returns the same object (`flush` /
+`close` / `native_snapshot`, usable as a context manager) and reads
+`MEIVA_HARNESS_HANDLE` when called with no argument. The low-level constructor
+`meiva.attach.open_attachment(handle, *, agent_id, session_id, store)` remains for
+the controller-facing CLI (`meiva harness exec`), which validates the row itself.
 
 **The handle.** An opaque `hx_<random>` string whose SHA-256 the registry stores;
 the bridge passes the plain value to the harness child through

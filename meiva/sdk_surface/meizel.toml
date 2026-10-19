@@ -1,7 +1,7 @@
 exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py", "discovery.py", "extensions.py", "help.py", "injection_check.py", "install.py", "installation.py", "metering.py", "plugins.py", "process_context.py", "sdk_disable.py", "settings.py", "skill_sources.py", "tests", "validation.py", "wraps.py"]
 
 [uses]
-"agent_identity.py" = ["process_context.py"]
+"agent_identity.py" = ["install.py", "process_context.py"]
 "attachment_transport.py" = ["process_context.py", "settings.py", "validation.py"]
 "discovery.py" = ["const.py"]
 "extensions.py" = ["install.py"]

@@ -181,7 +181,6 @@ def current_context() -> MeivaContext:
 
 
 def ambient_context() -> MeivaContext | None:
-    """`meiva.context` where this process has one, else None."""
     try:
         return current_context()
     except ContextOutsideProcessError:
