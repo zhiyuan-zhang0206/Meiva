@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import PIPE, STDOUT
-from typing import Any
+from typing import Any, cast
 
 REPO = Path(__file__).resolve().parents[1]
 HOME = 'H="$HOME/.meiva"; S="$H/source"; cd "$S" || exit 1'
@@ -53,6 +53,13 @@ printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
 test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
 test -e "$H/updates/active" && echo active=yes || echo active=no
 printf '%s\\n' "hold=$({MEIVA} status --json 2>/dev/null | grep '^{{' | tail -n 1)\""""
+# meiva:note
+# The two facts a failed window needs per host: whether the agent host is running, and the
+# journal of its last stop (`lifecycle-op.json`). Read-only, one round trip.
+_OP_EVIDENCE = """H="$HOME/.meiva"
+p=$(cat "$H/run/agent_host.pid" 2>/dev/null)
+if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo host=up; else echo host=down; fi
+cat "$H/run/lifecycle-op.json" 2>/dev/null || true"""
 _VENV_DIRS = (
     "find .venv/bin .venv/lib -maxdepth 3 -type d \\( -path .venv/bin "
     '-o -path ".venv/lib/python*/site-packages" '
@@ -177,21 +184,38 @@ def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
     return reasons
 
 
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
-def _preflight(s: Session, args: argparse.Namespace, new: str) -> tuple[list[str], str | None]:
-    reasons: list[str] = []
-    heads: dict[str, str] = {}
-    for alias in [args.gateway, *args.runner]:
-        probe = s.run(alias, PROBE, effect=False).splitlines()
-        facts = {key: value for key, _, value in (line.partition("=") for line in probe)}
-        heads[alias] = facts["head"]
-        reasons += _host_refusals(alias, facts)
-    old = {head for head in heads.values() if head != new}
-    if len(old) > 1:
-        return [*reasons, f"hosts disagree on HEAD: {heads}"], None
-    resolved = next(iter(old)) if old else None
+# meiva:note
+# The hold a probe line reports; an unreadable record reads as a hold of its own, never as a
+# crash inside the gate that is deciding whether to refuse.
+def _hold(hold: str) -> tuple[str, str | None]:
+    try:
+        return split_hold_text(hold)
+    except (IndexError, ValueError):
+        return ("unreadable", None)
+
+
+# meiva:note
+# One host's probe facts, and whether it was serving when the window began: a completed stop is
+# the only quiet hold a window admits, so every other readable hold means the machine was up.
+def _probe(s: Session, alias: str) -> tuple[dict[str, str], bool]:
+    lines = s.run(alias, PROBE, effect=False).splitlines()
+    facts = {key: value for key, _, value in (line.partition("=") for line in lines)}
+    return facts, _hold(facts["hold"] or "") != ("paused", "stopped")
+
+
+# meiva:note
+# OLD is the one commit every host agrees on that is not NEW; hosts that disagree, or an OLD the
+# operator's checkout does not carry, refuse the window.
+def _old_target(
+    s: Session, args: argparse.Namespace, heads: dict[str, str], new: str
+) -> tuple[list[str], str | None]:
+    older = {head for head in heads.values() if head != new}
+    if len(older) > 1:
+        return [f"hosts disagree on HEAD: {heads}"], None
+    resolved = next(iter(older)) if older else None
     if resolved and _git("cat-file", "-e", f"{resolved}^{{commit}}").returncode:
-        return [*reasons, f"OLD {resolved} is not in {REPO}: git fetch origin"], None
+        return [f"OLD {resolved} is not in {REPO}: git fetch origin"], None
+    reasons: list[str] = []
     if resolved:
         stat = _git("diff", "--stat", resolved, new, "--", *_WATCHED).stdout.rstrip()
         s.say(stat or "no change under " + " ".join(_WATCHED))
@@ -201,7 +225,24 @@ def _preflight(s: Session, args: argparse.Namespace, new: str) -> tuple[list[str
     return reasons, resolved
 
 
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+def _preflight(
+    s: Session, args: argparse.Namespace, new: str
+) -> tuple[list[str], str | None, list[str]]:
+    reasons: list[str] = []
+    heads: dict[str, str] = {}
+    serving: list[str] = []
+    for alias in [args.gateway, *args.runner]:
+        facts, was_serving = _probe(s, alias)
+        heads[alias] = facts["head"]
+        reasons += _host_refusals(alias, facts)
+        if was_serving:
+            serving.append(alias)
+    more, resolved = _old_target(s, args, heads, new)
+    return [*reasons, *more], resolved, serving
+
+
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def keep_decision(
     s: Session, old: str | None, new: str, *, timeout: float = KEEP_TIMEOUT_S
 ) -> list[str]:
@@ -240,7 +281,7 @@ def keep_decision(
     return keeps
 
 
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     out = s.run(
         args.gateway,
@@ -280,7 +321,7 @@ def leases_program() -> str:
     return (Path(__file__).parent / "commands" / "management" / "fleet_leases.py").read_text()
 
 
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "") -> None:
     hours = getattr(args, "silence_hours", 0)
     tail = f" --hours {hours:g} --comment {shlex.quote(comment)}" if verb == "open" else ""
@@ -292,7 +333,7 @@ def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "")
 
 # meiva:note
 # Name the takeovers the stops would end, before anything stops -- under --dry-run too.
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _announce_leases(s: Session, args: argparse.Namespace) -> None:
     try:
         out = s.run(args.gateway, f"{_PYTHON} -", effect=False, stdin=leases_program())
@@ -337,7 +378,7 @@ def _lease_read_warning(s: Session, detail: str) -> None:
 
 # meiva:note
 # Hold the stops open for an operator who asked for time; the default window returns at once.
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _lease_window(s: Session, args: argparse.Namespace) -> None:
     if not args.lease_confirm_seconds:
         return
@@ -350,12 +391,83 @@ def _lease_window(s: Session, args: argparse.Namespace) -> None:
         time.sleep(min(LEASE_TICK_S, left))
 
 
+# meiva:note
+# A failed stop must not leave the cluster half stopped: that hosts this run took down go back up,
+# on the OLD commit they still carry, so a failed window costs an aborted update instead of an
+# outage. Three facts decide one host, and none of them alone is enough: it was serving when the
+# window began (a host the operator had already stopped stays stopped), it is down now, and this
+# run is what took it down -- either its stop completed here, or the host's own stop journal
+# records a failed or unfinished stop. A host that is still running is never touched, and no code
+# is rolled back: the switch phase never started.
+# The start is plain `meiva start`, never `--boot`: a boot attempt spends the boot budget, and on
+# macOS the failing attempt that spends it exits 0 (launchd has no attempt limit), so a failed
+# recovery would read as success and never reach `needs manual:`.
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+def _recover_after_failed_stop(
+    s: Session,
+    args: argparse.Namespace,
+    serving: list[str],
+    stopped: list[str],
+    failed: str | None,
+) -> None:
+    recovered: list[str] = []
+    down: list[str] = []
+    for alias in [args.gateway, *args.runner]:
+        if alias not in serving:
+            continue
+        up, journal = _host_up_and_journal(s, alias)
+        if up:
+            continue
+        down.append(alias)
+        if alias not in stopped and not (alias == failed and _failed_stop(journal)):
+            continue
+        try:
+            start = (
+                gui_oneshot(alias, args.start_timeout)
+                if s.os[alias] == "Darwin"
+                else f"{HOME}; {MEIVA} start"
+            )
+            s.run(alias, start)
+            if split_hold_text(s.run(alias, _STATUS, effect=False))[0] not in _FREE:
+                raise FailedError(f"{alias}: recovery start left the hold on")
+            recovered.append(alias)
+        except FailedError as exc:
+            s.say(f"recovery: {exc}")
+    s.say(f"recovered: {', '.join(recovered) or 'none'}")
+    s.say(f"needs manual: {', '.join(a for a in down if a not in recovered) or 'none'}")
+
+
+# meiva:note
+# The host's daemon state and its last lifecycle journal, in one read: the journal answers "was
+# this host's stop a failure" (a stop that reported a non-zero rc or never completed), which is
+# the half a running daemon cannot tell us.
+def _host_up_and_journal(s: Session, alias: str) -> tuple[bool, dict[str, Any] | None]:
+    lines = s.run(alias, _OP_EVIDENCE, effect=False).splitlines()
+    up = any(line.strip() == "host=up" for line in lines)
+    raw = next((line for line in lines if line.startswith("{")), None)
+    try:
+        parsed: Any = json.loads(raw) if raw is not None else None
+    except ValueError:
+        parsed = None
+    return up, cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else None
+
+
+# meiva:note
+# The host's own journal is the evidence that its stop failed, as opposed to ending in a state the
+# window did not expect.
+def _failed_stop(journal: dict[str, Any] | None) -> bool:
+    if journal is None or journal.get("operation") != "stop":
+        return False
+    result = cast("dict[str, Any]", journal["result"]) if "result" in journal else {}
+    return journal.get("complete") is not True or result.get("rc") != 0
+
+
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 def down(s: Session, args: argparse.Namespace) -> None:
     new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}").stdout.strip()
     if not new:
         raise FailedError(f"refused: {args.new} is not a commit in {REPO}; git fetch origin")
-    reasons, old = _preflight(s, args, new)
+    reasons, old, serving = _preflight(s, args, new)
     if reasons:
         raise FailedError("refused: " + "; ".join(reasons))
     _announce_leases(s, args)
@@ -372,15 +484,21 @@ def down(s: Session, args: argparse.Namespace) -> None:
     _silence(
         s, args, "open", f"fleet update to {new[:12]}: planned outage; `up` expires this silence"
     )
-    for alias in [*args.runner, args.gateway]:
-        try:
+    stopped: list[str] = []
+    current = args.gateway
+    try:
+        for alias in [*args.runner, args.gateway]:
+            current = alias
             s.run(alias, f"{HOME}; {MEIVA} stop -y --timeout {args.stop_timeout}{keep_flags}")
             if not s.dry_run:
                 status, phase = split_hold_text(s.run(alias, _STATUS, effect=False))
                 if (status, phase) != ("paused", "stopped"):
                     raise FailedError(f"{alias}: stop left {status}/{phase}")
-        except FailedError as exc:
-            raise FailedError(f"{exc}{_STOP_HINT}") from exc
+            stopped.append(alias)
+    except FailedError as exc:
+        if not s.dry_run:
+            _recover_after_failed_stop(s, args, serving, stopped, current)
+        raise FailedError(f"{exc}{_STOP_HINT}") from exc
     for alias in everyone:
         s.run(
             alias,
@@ -488,7 +606,7 @@ def _drift_checks(s: Session, args: argparse.Namespace) -> None:
 # Exit code 2 already means "refused before doing anything"; a run where some
 # hosts came up and others did not is its own outcome, so automation can tell
 # a partial up from a rejected one.
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 PARTIAL_FAILURE_EXIT = 3
 
 _INCOMPLETE = 'cat "$HOME/.meiva/state/converge-incomplete.json" 2>/dev/null'
@@ -517,7 +635,7 @@ def _host_failure(s: Session, alias: str, exc: FailedError) -> HostFailure:
 # the failures are collected with their step and reason, and the caller reports
 # them and exits 3. A half-up cluster is reported, never hidden behind a single
 # abort that leaves the remaining hosts untouched.
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
     failures: list[HostFailure] = []
     for alias in [args.gateway, *args.runner]:
@@ -585,6 +703,12 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--runner", action="append", default=[], metavar="SSH_ALIAS")
         p.add_argument("--log-dir", type=Path, required=True)
         p.add_argument("--dry-run", action="store_true", help="read-only preflight, print effects")
+        p.add_argument(
+            "--start-timeout",
+            type=int,
+            default=1800,
+            help="deadline for one host start; a failed down uses it to bring hosts back",
+        )
         if half in ("run", "down"):
             p.add_argument("--new", required=True, help="commit to switch every host to")
             p.add_argument("--allow-python-change", action="store_true")
@@ -614,7 +738,6 @@ def main(argv: list[str] | None = None) -> int:
                 help="skip the keep decision and stop every service, untouched components included",
             )
         if half in ("run", "up"):
-            p.add_argument("--start-timeout", type=int, default=1800)
             p.add_argument("--smoke-timeout", type=int, default=300)
             p.add_argument("--roster-timeout", type=int, default=90)
     args = parser.parse_args(argv)
