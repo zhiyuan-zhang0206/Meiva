@@ -88,11 +88,25 @@ absent from a plain `Handoff`).
 ## Interrupt, measured on the real CLI
 
 `SIGINT` stops `agy` but not its tool tree. In a live run the turn was asked to
-`run_command: sleep 90`; after the interrupt the CLI had exited, while both
-`bash -c sleep 90` and `sleep 90` were still running. `interrupt()` therefore
-reports `settled=False` with those pids in `remaining` instead of claiming a
-clean cancel — the assertion is the contract, not a formality. Killing the
-residue is the caller's decision; the adapter never widens its own authority.
+`run_command: sleep 90`; after the interrupt the CLI had exited while both
+`bash -c sleep 90` and `sleep 90` were still running. Those pids are known only
+inside this call — the model can no longer track them and the caller never saw
+them — so the adapter reaps them itself, by default and without a switch.
+
+The report still has to be honest: `settled` is true only when every observed pid
+is gone after the reap. A process that survives (permission, pid reuse, a reaper
+that refuses) leaves `settled=False` and names the survivors in `remaining`;
+`killed` lists what the adapter actually signalled.
+
+Same live run after reaping:
+
+```
+InterruptReport(settled=True, remaining=(),
+                observed=(bash -c sleep 90; echo done, sleep 90),
+                killed=(2615594, 2615595), cli_alive=False, waited_ms=8039)
+turn: interrupted, is_error=True
+next: AFTER-CANCEL          # respawned with --conversation
+```
 
 The session itself recovers: the next turn respawns `agy` with
 `--conversation <id>` and completed normally in the same measurement.
