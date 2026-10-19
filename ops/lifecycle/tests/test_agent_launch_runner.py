@@ -6,7 +6,9 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.agents.birth.harness import LAUNCHABLE_HARNESSES
 from base.agents.birth.spawn import create_agent_row
+from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -38,8 +40,16 @@ def test_a_harness_without_a_launcher_is_refused(
     )
     pool: ConnectionPool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1)
     body = LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=attempt)
+    # meiva:note
+    # The shipped set grows as launchers land, so the refusal is driven through the
+    # parameter rather than by betting on which harnesses still lack one: antigravity
+    # was this test's example until the release that gave it a launcher.
+    # meiva:link base/agents/docs/harness.meiva.okf.md
+    without_it = frozenset(LAUNCHABLE_HARNESSES - {Harness.ANTIGRAVITY})
     with pool, pytest.raises(ValueError, match="no launcher yet"):
-        launch.validate_launch_row(pool, body, local_machine=machine_identity.name())
+        launch.validate_launch_row(
+            pool, body, local_machine=machine_identity.name(), launchable=without_it
+        )
     assert db_conn.execute(
         "SELECT status, harness FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchall() == [("idling", "antigravity")]
