@@ -28,8 +28,13 @@ class RecordingGroups(AgentTabGroups):
         self.events.append(("snapshot", self.snapshots))
         return frozenset({f"before-{self.snapshots}"})
 
-    async def group_new_page(self, agent_id: int, before: frozenset[str] | None) -> None:
+    async def group_new_page(
+        self, agent_id: int, before: frozenset[str] | None, page_id: int | None = None
+    ) -> None:
         self.events.append(("group", (agent_id, before)))
+
+    async def release_page(self, page_id: int) -> None:
+        self.events.append(("release", page_id))
 
     def grouped(self) -> list[int]:
         return [payload[0] for kind, payload in self.events if kind == "group"]
@@ -229,6 +234,70 @@ async def test_hard_ttl_reaper_closes_through_close_page() -> None:
     assert up.closed_pages() == [1]
 
 
-async def test_no_closing_or_ungrouping_helper_exists_to_keep_in_sync() -> None:
+async def test_the_public_surface_is_the_grouping_contract_and_one_ungroup() -> None:
+    # meiva:note
+    # `release_page` is the one call that can destroy a group, and it exists
+    # because Chrome saves a group whose last tab closes: without it every close
+    # leaves a saved group that the title lookup can no longer see. The decision
+    # about WHICH tab may be ungrouped stays in the extension (`meivaUngroupLast`
+    # checks the title and the single member), so this side never names a group.
+    # Keep the surface at four names; a new helper here would be a second write
+    # path to reconcile.
+    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
     public = {n for n in dir(AgentTabGroups) if not n.startswith("_")}
-    assert public == {"snapshot", "group_new_page", "cancel_pending"}
+    assert public == {"snapshot", "group_new_page", "release_page", "cancel_pending"}
+
+
+async def test_close_page_ungroups_the_last_tab_before_the_upstream_closes_it() -> None:
+    # meiva:note
+    # The ungroup must land BEFORE the close: Chrome saves a group whose last tab
+    # closes, and a saved group can no longer be reached.
+    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    order: list[str] = []
+
+    class OrderedUpstream(FakeUpstream):
+        async def call_tool(self, name: str, args: dict[str, Any]) -> Any:
+            if name == "close_page":
+                order.append("close_page")
+            return await super().call_tool(name, args)
+
+    class OrderedGroups(RecordingGroups):
+        async def release_page(self, page_id: int) -> None:
+            order.append(f"release:{page_id}")
+            await super().release_page(page_id)
+
+    groups = OrderedGroups()
+    d = new_daemon(OrderedUpstream(), tab_groups=groups)
+    await d.call_tool_for_agent("new_page", {"url": "https://a.example/"}, 7)
+
+    result = await d.call_tool_for_agent("close_page", {"pageId": 1}, 7)
+
+    assert not result.is_error
+    assert order == ["release:1", "close_page"], order
+
+
+async def test_release_of_an_agents_pages_also_ungroups_each_before_closing() -> None:
+    # meiva:note
+    # `release_agent_page` (the termination hook) closes through the same door.
+    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    order: list[str] = []
+
+    class OrderedUpstream(FakeUpstream):
+        async def call_tool(self, name: str, args: dict[str, Any]) -> Any:
+            if name == "close_page":
+                order.append("close_page")
+            return await super().call_tool(name, args)
+
+    class OrderedGroups(RecordingGroups):
+        async def release_page(self, page_id: int) -> None:
+            order.append(f"release:{page_id}")
+            await super().release_page(page_id)
+
+    groups = OrderedGroups()
+    d = new_daemon(OrderedUpstream(), tab_groups=groups)
+    await d.call_tool_for_agent("new_page", {"url": "https://a.example/"}, 7)
+    await d.call_tool_for_agent("new_page", {"url": "https://b.example/"}, 7)
+
+    await page_lifecycle.release_agent_page(d, 7)
+
+    assert order == ["release:1", "close_page", "release:2", "close_page"], order

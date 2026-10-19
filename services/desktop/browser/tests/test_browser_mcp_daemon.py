@@ -102,7 +102,12 @@ class NoTabGroups(AgentTabGroups):
     async def snapshot(self) -> frozenset[str] | None:
         return None
 
-    async def group_new_page(self, agent_id: int, before: frozenset[str] | None) -> None:
+    async def group_new_page(
+        self, agent_id: int, before: frozenset[str] | None, page_id: int | None = None
+    ) -> None:
+        return None
+
+    async def release_page(self, page_id: int) -> None:
         return None
 
 
