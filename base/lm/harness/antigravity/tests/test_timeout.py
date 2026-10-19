@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from base.lm.claude_sdk.events import SessionFaulted, TurnCompleted
 from base.lm.harness.antigravity.tests.support import say, start
+from base.lm.harness.events import SessionFaulted, TurnCompleted
 
 
 async def test_a_turn_past_its_deadline_is_interrupted_not_dropped(tmp_path: Path) -> None:

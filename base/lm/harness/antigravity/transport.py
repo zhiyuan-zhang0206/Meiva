@@ -12,7 +12,8 @@ from typing import Any, cast
 
 import psutil
 
-from base.lm.claude_sdk.process import (
+from base.lm.harness.antigravity.config import AntigravityConfig
+from base.lm.harness.process import (
     ChildProbe,
     ProcessObservation,
     PsutilChildProbe,
@@ -20,7 +21,6 @@ from base.lm.claude_sdk.process import (
     snapshot,
     wait_gone,
 )
-from base.lm.harness.antigravity.config import AntigravityConfig
 
 # A single NDJSON line can carry a whole tool result; the 64 KiB StreamReader
 # default would truncate the stream instead of the line.

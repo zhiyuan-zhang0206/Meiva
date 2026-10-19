@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from base.lm.claude_sdk.events import HandoffInjected
-from base.lm.claude_sdk.handoff import Handoff
-from base.lm.claude_sdk.registry import FileSessionRegistry, SessionRecord
 from base.lm.harness.antigravity.handoff_rules import SHELL_SEMANTICS, build_handoff
 from base.lm.harness.antigravity.tests.support import say, start
+from base.lm.harness.events import HandoffInjected
+from base.lm.harness.handoff import Handoff
+from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 
 
 def a_handoff(workspace: Path | None = None) -> Handoff:

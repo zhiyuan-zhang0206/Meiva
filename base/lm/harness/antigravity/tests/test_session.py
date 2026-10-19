@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from base.lm.claude_sdk.events import (
+from base.lm.harness.antigravity.tests.support import say, start
+from base.lm.harness.events import (
     AssistantText,
     SessionBound,
     SessionClosed,
@@ -10,8 +11,7 @@ from base.lm.claude_sdk.events import (
     TextDelta,
     TurnCompleted,
 )
-from base.lm.claude_sdk.registry import FileSessionRegistry
-from base.lm.harness.antigravity.tests.support import say, start
+from base.lm.harness.registry import FileSessionRegistry
 
 
 async def test_a_turn_streams_text_and_completes(tmp_path: Path) -> None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from base.lm.claude_sdk.events import TextDelta, ToolResult, ToolUse
 from base.lm.harness.antigravity.mapping import (
     assistant_text,
     map_init,
@@ -8,6 +7,7 @@ from base.lm.harness.antigravity.mapping import (
     parse_result,
     parse_usage,
 )
+from base.lm.harness.events import TextDelta, ToolResult, ToolUse
 
 
 def test_init_carries_the_conversation_and_permission_mode() -> None:

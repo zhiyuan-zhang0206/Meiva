@@ -7,10 +7,10 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from base.lm.claude_sdk.process import ChildProbe
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.session import AgySession
 from base.lm.harness.antigravity.transport import AgyTransport, Reaper
+from base.lm.harness.process import ChildProbe
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
 CLI_PID = 4242

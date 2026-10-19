@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
-from base.lm.claude_sdk.handoff import (
+from base.lm.harness.handoff import (
     DEFAULT_DISCIPLINE,
     DEFAULT_OVERLAPS,
     ClusterFact,

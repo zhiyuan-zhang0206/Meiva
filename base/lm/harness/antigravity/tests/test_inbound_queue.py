@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.claude_sdk.events import TurnCompleted
 from base.lm.harness.antigravity.session import InboundQueueFullError
 from base.lm.harness.antigravity.tests.support import say, start
+from base.lm.harness.events import TurnCompleted
 
 
 async def test_a_second_message_waits_for_the_first_turn_to_finish(tmp_path: Path) -> None:
