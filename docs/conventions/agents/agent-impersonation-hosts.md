@@ -261,12 +261,19 @@ The accepting runtime re-checks relay liveness on the held-controls pass, which
 the dispatcher's database-backed pending scan triggers for held rows every ~30
 seconds — the check is pull-based and never depends on wake delivery.
 
-- **Relay transport.** A stale or exited relay, host-supervised or
-  controller-session, is recorded as degraded (`relay_degraded_reason`, a
-  rate-limited failure stamp and an error log) and never replaced. The lease
-  keeps its first credential and its original TTL; messages stay in the inbox
-  until the controller re-requests or releases. A host or native restart ends
-  the lease, so a relay is never adopted across incarnations.
+- **Relay transport.** A relay is never replaced; the lease keeps its first
+  credential, and a host or native restart ends it rather than adopting a relay
+  across incarnations. What happens when it stops depends on the evidence:
+  - A **relay this runtime spawned that has exited** (`poll()` returns a code —
+    normal exit, signal or failed start alike) is a death no other host can
+    cover. The lease ends (`expired`, `rejection_reason` =
+    `aborted: the bound relay process exited (exit code N)`), the end-of-session
+    note names that cause, and the native agent resumes so the waiting messages
+    are answered instead of parking until the TTL.
+  - A **stale heartbeat with no child handle** may belong to another host, so it
+    only records degradation (`relay_degraded_reason`, a rate-limited failure
+    stamp and an error log). The lease keeps its original TTL; messages stay in
+    the inbox until the controller re-requests or releases.
 - **What stopping does.** When a lease ends early (such as native runtime
   replacement or operator force-expiry), it goes terminal (`expired`) with the
   cause recorded in `rejection_reason` (the request's own `reason` is preserved),

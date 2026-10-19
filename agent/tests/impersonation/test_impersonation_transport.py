@@ -129,7 +129,7 @@ def active_codex_lease(
             server.stop()
 
 
-async def test_dead_relay_child_is_degraded_and_never_replaced(
+async def test_dead_relay_child_ends_the_lease(
     db_conn: Any,
     database: Any,
     event_bus: Any,
@@ -168,14 +168,46 @@ async def test_dead_relay_child_is_degraded_and_never_replaced(
         session["id"],
         local_machine=machine_identity.name(),
     )
-    assert after["status"] == "active"
-    assert after["relay_generation"] == current["relay_generation"]
-    assert after["relay_degraded_reason"] == "relay unavailable; automatic recovery unsupported"
-    assert after["relay_degraded_at"] is not None
-    assert after["expires_at"] == current["expires_at"]
-    leases.relay_heartbeat(
-        database, session["id"], "old-private", local_machine=machine_identity.name()
+    assert after["status"] == "expired"
+    assert after["ended_at"] is not None
+    assert after["rejection_reason"] == "aborted: the bound relay process exited (exit code 0)"
+    assert after["relay_degraded_reason"] is None
+
+
+async def test_stale_relay_heartbeat_alone_keeps_the_lease(
+    db_conn: Any,
+    database: Any,
+    event_bus: Any,
+    active_codex_lease: Any,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    from base.agents import impersonation as leases
+    from base.agents.observation.relay_supervision import RelaySupervision
+
+    session, owner = active_codex_lease
+    assert leases.provision_relay(database, session["id"], owner, "old-private") is not None
+    db_conn.execute(
+        "UPDATE agent_impersonations SET relay_heartbeat_at="
+        "clock_timestamp() - interval '10 minutes', relay_minted_at="
+        "clock_timestamp() - interval '10 minutes' WHERE id=%s",
+        (session["id"],),
     )
+    db_conn.commit()
+    current = leases.native_status(database, event_bus, owner.agent_id, owner)
+    assert current is not None
+    await impersonation.supervise_relay(
+        database, event_bus, current, owner.agent_id, RelaySupervision(), incarnation=owner
+    )
+    after = leases.get(
+        database,
+        event_bus,
+        session["id"],
+        local_machine=machine_identity.name(),
+    )
+    assert after["status"] == "active"
+    assert after["relay_degraded_reason"] == "relay unavailable; automatic recovery unsupported"
+    assert after["expires_at"] == current["expires_at"]
 
 
 @pytest.mark.parametrize("error", [None, "TimeoutError: ambiguous acceptance"])
