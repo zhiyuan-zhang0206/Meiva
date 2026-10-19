@@ -191,7 +191,7 @@ describe("Composer reply suggestion", () => {
     fireEvent.keyDown(input(), { key: "ArrowRight" });
     fireEvent.keyDown(input(), { key: "Enter" });
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(input().readOnly).toBe(false));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     expect(input().value).toBe("Use B.");
     fireEvent.change(input(), { target: { value: "" } });
     expect(input().placeholder).toBe("[2/2] Use B.");
@@ -633,7 +633,6 @@ describe("Composer input lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     expect(clearMessageSent).not.toHaveBeenCalled();
-    expect(ta.readOnly).toBe(false);
     expect(
       screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled,
     ).toBe(false);
@@ -664,7 +663,6 @@ describe("Composer input lifecycle", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend.mock.calls[1][2]).toBe(clientMessageId);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
-    expect(ta.readOnly).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(3));
@@ -685,7 +683,6 @@ describe("Composer input lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
 
-    expect(ta.readOnly).toBe(false);
     fireEvent.change(ta, { target: { value: "new explicit message" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
@@ -790,7 +787,7 @@ describe("Composer input lifecycle", () => {
     expect(ta.value).toBe("draft for B");
   });
 
-  it("locks same-agent edits and attachments while a send is in flight", async () => {
+  it("keeps edits typed while a send is in flight and still refuses attachments", async () => {
     let resolveSend: (value: boolean) => void = () => undefined;
     const onSend = vi.fn(
       () => new Promise<boolean>((resolve) => { resolveSend = resolve; }),
@@ -809,9 +806,13 @@ describe("Composer input lifecycle", () => {
     fireEvent.change(ta, { target: { value: "original snapshot" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await screen.findByRole("button", { name: "Sending" });
-    expect(ta.readOnly).toBe(true);
 
+    // meiva:note
+    // The textarea stays editable mid-flight: `readOnly` here would tear down an
+    // Android IME connection and silently drop the next voice-input commit.
+    // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
     fireEvent.change(ta, { target: { value: "later edit" } });
+    expect(ta.value).toBe("later edit");
     const image = new File(["png"], "later.png", { type: "image/png" });
     fireEvent.drop(screen.getByTestId("composer"), {
       dataTransfer: { files: [image], types: ["Files"] },
@@ -819,7 +820,7 @@ describe("Composer input lifecycle", () => {
     expect(onAttachImage).not.toHaveBeenCalled();
 
     resolveSend(true);
-    await waitFor(() => expect(ta.value).toBe(""));
+    await waitFor(() => expect(ta.value).toBe("later edit"));
     expect(screen.queryByRole("button", { name: "Sending" })).toBeNull();
   });
 
@@ -1544,7 +1545,6 @@ describe("Composer image attachments", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
 
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Remove shot.png" }).disabled).toBe(false);
-    expect(ta.readOnly).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
