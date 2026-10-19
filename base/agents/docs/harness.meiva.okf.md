@@ -56,12 +56,28 @@ and rolls the birth back. The comparison happens inside the birth transaction, s
 a caller that bypassed the gateway's request validation still cannot fork across
 harnesses. Spawning a new agent is the supported way onto another harness.
 
-## Running on the harness
+A source with no launcher is refused by the same boundary: `HarnessNotLaunchable`
+names the source agent and its harness rather than copying a value no launcher can
+start.
+
+## No launcher, no birth
 
 Recording a value nobody can honour would make the column a claim about a runtime
-loop that is not running. `LAUNCHABLE_HARNESSES` names the harnesses a launcher
-exists for — `meiva`, `claude_code` and `codex` — and two gates refuse to run
-anything else:
+loop that is not running — and because the value never changes, the agent could
+be neither run nor moved onto another loop. `LAUNCHABLE_HARNESSES` names the
+harnesses a launcher exists for, and `resolve_birth_harness` refuses the birth
+itself for anything else:
+`HarnessNotLaunchable` (`harness_not_launchable`, HTTP 400) names the harness and
+the launchable ones, and the transaction rolls back before the row exists. A fork
+inherits its source's harness, so a source born before this rule — or one whose
+launcher was retired — is refused by the same check instead of copying a value
+nothing can start.
+
+## Rows born before the rule
+
+Membership is checked again at run time, which is what keeps pre-existing rows
+inert instead of quietly running the built-in loop under an external label. Two
+gates refuse to run anything outside the set:
 
 - `validate_launch_row` (`ops/lifecycle/launch.py`) refuses the spawn's launch op
   with a reason naming the harness, so the caller sees why;
@@ -70,13 +86,11 @@ anything else:
   delivery watchdog, the durable pending scan and pub/sub wakes all reach
   `_run_turn` without it, and every one of them passes this gate.
 
-The spawn still records the request and the row keeps the value. It stays inert —
-no turn starts on it, so no built-in loop runs under an external label — and
-`retry_launch` can wake it once its launcher lands. Ending it in the meantime
-needs a force terminate: a graceful terminate is applied inside a turn the row
-cannot get. Adding a launcher means adding its harness to that set; removing one
-is the rollback, and the rows it served go inert rather than falling back to the
-built-in loop.
+Such a row keeps its stored value and stays inert: no turn starts on it, so no
+built-in loop runs under an external label. Adding a launcher back means adding
+its harness to the set, and `retry_launch` can then wake the rows it serves.
+Ending one in the meantime needs a force terminate — a graceful terminate is
+applied inside a turn the row cannot get.
 
 A launchable harness is not a working one: the wake gate says the release has a
 launcher, and the session itself is what fails first if the CLI or its SDK is

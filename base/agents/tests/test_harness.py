@@ -2,16 +2,26 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
+import psycopg
 import pytest
 
 from base.agents.birth.harness import (
     DEFAULT_HARNESS,
+    LAUNCHABLE_HARNESSES,
     HarnessProbe,
     coerce_harness,
     probe_local_harnesses,
+    resolve_birth_harness,
 )
-from base.api_contracts.agent_contract import ForkHarnessMismatch, Harness
+from base.api_contracts.agent_contract import (
+    ErrorReason,
+    ForkHarnessMismatch,
+    Harness,
+    HarnessNotLaunchable,
+    MeivaAgentError,
+)
 
 _BIN_DIRS = (".local/bin", "bin")
 
@@ -100,3 +110,44 @@ def test_fork_harness_mismatch_is_a_fork_error() -> None:
 
     assert issubclass(ForkHarnessMismatch, ForkError)
     assert issubclass(ForkHarnessMismatch, MeivaAgentError)
+
+
+class _UnreadCursor:
+    def execute(self, *_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a plain birth reads no fork source")
+
+
+def _no_cursor() -> psycopg.Cursor[Any]:
+    return cast("psycopg.Cursor[Any]", _UnreadCursor())
+
+
+# meiva:note
+# Every declared harness has a launcher today, so the refusal is driven by handing
+# the rule a narrower set: membership is what decides, and this pins the moment a
+# launcher is retired or a harness is declared before one.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+def test_a_harness_outside_the_launchable_set_is_refused() -> None:
+    with pytest.raises(HarnessNotLaunchable) as refusal:
+        resolve_birth_harness(
+            _no_cursor(), Harness.CODEX, None, launchable=frozenset({Harness.MEIVA})
+        )
+    detail = str(refusal.value)
+    assert "codex" in detail
+    assert "meiva" in detail
+    assert "claude_code" not in detail
+
+
+def test_the_shipped_set_is_what_the_birth_gate_reads() -> None:
+    for launchable in LAUNCHABLE_HARNESSES:
+        assert resolve_birth_harness(_no_cursor(), launchable, None) == launchable.value
+
+
+def test_every_launchable_harness_is_accepted_at_birth() -> None:
+    for launchable in LAUNCHABLE_HARNESSES:
+        assert resolve_birth_harness(_no_cursor(), launchable, None) == launchable.value
+
+
+def test_harness_not_launchable_is_a_wire_error() -> None:
+    assert issubclass(HarnessNotLaunchable, MeivaAgentError)
+    assert HarnessNotLaunchable.reason is ErrorReason.HARNESS_NOT_LAUNCHABLE
+    assert HarnessNotLaunchable.http_status == 400

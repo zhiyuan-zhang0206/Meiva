@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from base.agents.birth.harness import HarnessProbe
 from base.api_contracts.agent_contract import ForkSourceEmpty as ForkSourceEmpty
 from base.api_contracts.agent_contract import GatewayUnavailable as GatewayUnavailable
+from base.api_contracts.agent_contract import HarnessNotLaunchable as HarnessNotLaunchable
 from base.api_contracts.agent_contract import InvalidModelConfig as InvalidModelConfig
 from base.api_contracts.agent_contract import MachineNotRegistered as MachineNotRegistered
 from base.api_contracts.agent_contract import ResurrectError as ResurrectError
@@ -475,7 +476,9 @@ def spawn(
     replaced by the default. It is fixed for the agent's whole life: no restart or resurrect
     changes it. Omit it to run the built-in runtime, or, on a fork, to keep the source's
     harness; asking a fork for a different one fails instead of being applied.
-    `harness_availability()` reports which ones this machine can run.
+    `harness_availability()` reports which ones this machine can run. A harness no launcher
+    can start yet is refused with `HarnessNotLaunchable` before any row is written, and so is
+    a fork of an agent born on one.
 
     `prompt` is the first message — make it self-contained; omit it to leave the agent idling.
     `label` names the new agent's role, which peers and the fleet view show; omit it to let the
