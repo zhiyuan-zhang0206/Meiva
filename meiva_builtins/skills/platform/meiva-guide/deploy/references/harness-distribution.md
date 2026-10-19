@@ -70,7 +70,7 @@ none of it is inferred from a vendor document.
 | `claude` | macOS login Keychain, generic password `service="Claude Code-credentials"` | same blob | not automated; the Keychain is per-machine state |
 | `codex` | `~/.codex/auth.json` | `auth_mode="chatgpt"` → `tokens.{id_token, access_token, refresh_token, account_id}` + `last_refresh`; `auth_mode="apikey"` → static `OPENAI_API_KEY` | the API-key form is safe; the ChatGPT form is usable on a second machine immediately |
 | `agy` | `~/.gemini/antigravity-cli/antigravity-oauth-token` | `token.{access_token, token_type, refresh_token, expiry}` + `auth_method` + `id_token` | **copies successfully** |
-| `agy` | `~/.gemini/jetski-standalone-oauth-token` | same blob, older location | the same login before the CLI split its state directory |
+| `agy` | `~/.gemini/jetski-standalone-oauth-token` | same blob, written by the Antigravity **IDE** | not read by the CLI, but a usable source: `sync` retargets it to the CLI's own path |
 | `dsh` | `${DSH_HOME:-~/.dsh}/.credentials.yaml` | a DeepSeek API key (`refs: DEEPSEEK_API_KEY`) | safe — a key is not rotated by being used |
 
 ### Where `agy` actually keeps its session
@@ -85,9 +85,14 @@ looks only inside the CLI's config directory. The session is one level away:
 
 Confirmed on a live process rather than by inspection: `lsof -p <agy pid>` on a
 running `agy` shows file descriptor 15 reading
-`~/.gemini/antigravity-cli/antigravity-oauth-token`. Machines whose `agy` was
-installed before the split carry only the `jetski-…` file, and their CLI still
-works, so the older path is read as a fallback.
+`~/.gemini/antigravity-cli/antigravity-oauth-token`.
+
+The older `jetski-…` file is **not** a fallback the CLI reads. A machine that
+carries only that file answers `Error: authentication required. Run 'agy' to log
+in, then retry.` — measured on `macbook-air`, whose `agy` CLI has therefore never
+been signed in, while its Antigravity IDE keeps the legacy file fresh. Treat the
+two as different owners: the CLI owns `antigravity-cli/`, the IDE owns
+`jetski-…`. `sync` copies from either and always writes the CLI's path.
 
 ## What was measured, and what was not
 
@@ -100,16 +105,29 @@ Measured on 2026-10-19 with two secondary machines, never the primary
 | `codex`: copy `~/.codex/auth.json` (ChatGPT mode) from macbook-air to company-mini | **works** — `codex login status` flipped from "API key" to "ChatGPT", and `codex exec` answered on the copy |
 | `agy`: copy the Google token from macbook-air to company-mini (which had never run `agy`) | **works** — `agy -p "Reply with exactly: OK"` answered `OK`, with no browser login |
 
-What these do **not** prove is what happens at the next refresh. Nothing in the
-three runs above forced one: the codex access token still had about nine days
-left, and the `agy` access token was still inside its hour, so neither CLI wrote
-a new token back and the refresh tokens on both machines stayed byte-identical.
+A fourth run waited for the copied `agy` access token to expire and then called
+the CLI again:
 
-The open question is therefore narrow and stated exactly: **when the copy
-refreshes, does the issuer rotate the refresh token, invalidating the source?**
-Until a refresh is observed, `catalog.Store.rotation` says `unknown` for those
-stores and `sync` refuses to copy them unless the operator passes
-`--accept-credential-risk`.
+| Experiment | Result |
+|---|---|
+| `agy`: wait until the copied access token expires (23:21), then `agy -p` on company-mini | **works** — the CLI refreshed on its own, answered, and moved its expiry an hour out; the `refresh_token` value on disk did **not** change |
+
+What remains unproven is narrower than before: **whether a refresh evicts the
+machine it was copied from.** The source of the `agy` copy turned out to have no
+CLI login at all (see above), so it could not serve as the other side of that
+test, and the codex access token still had about nine days left when it was
+copied. `catalog.Store.rotation` therefore stays `unknown` for those stores and
+`sync` withholds them unless the operator passes `--accept-credential-risk`.
+
+## Copy verdicts
+
+| Harness | Verdict | Basis |
+|---|---|---|
+| `dsh` | **safe to copy** | a static API key; the copy answered on the target |
+| `agy` | **copyable, and the copy keeps itself alive** | copied to a machine with no Google login, answered, then refreshed by itself an hour later |
+| `codex`, ChatGPT mode | **copyable and usable now; the refresh path is unobserved** | `codex exec` answered on the copy; no refresh happened, so eviction stays open |
+| `codex`, API-key mode | safe to copy | a static key, like `dsh` |
+| `claude` | **sign in once per machine** | the only live login is the primary's, its macOS copy lives in the Keychain, and no copy experiment ran against it |
 
 ## Choosing the golden machine
 
@@ -133,6 +151,7 @@ copy is live:
 | probe `unavailable` although the CLI answers | npm installed it under `/usr/bin`, which is not in `_FALLBACK_BIN_DIRS`, and the caller's PATH is trimmed | export PATH for that process, or install through a directory the probe searches |
 | probe `available`, `claude auth status` says `loggedIn: false` | `~/.claude.json` keeps an `oauthAccount` record after the token expires or is revoked; the probe reads that record as evidence | treat `claude auth status` as authoritative until the probe stops treating `oauthAccount` as proof |
 | `agy` reports `unknown` everywhere | the probe looks only inside the CLI's config directory | expected; use `doctor --verify` and a real `agy -p` invocation |
+| `agy -p` says `authentication required` although `~/.gemini/jetski-standalone-oauth-token` exists | that file belongs to the Antigravity IDE; the CLI reads only `~/.gemini/antigravity-cli/antigravity-oauth-token` | copy the legacy file to the CLI's path, or sign the CLI in once |
 | `sync` prints `WITHHELD …` | the store's rotation is `unknown` or `rotating` and no acknowledgement was given | sign in once on the target, or pass `--accept-credential-risk` knowing the source may be signed out later |
 
 ## What `doctor` is not
