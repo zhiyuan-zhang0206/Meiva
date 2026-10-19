@@ -753,14 +753,12 @@ describe("applyTokenUsage", () => {
   });
 });
 
-// -- scrollToBottomRequest: the single force-scroll signal ──────────────────
-//
-// The timeline honors exactly one force-scroll trigger; the store owns it.
-// It MUST bump on agent switch (switchThread) and on send
-// (requestScrollToBottom), and MUST NOT bump on a mid-stream snapshot refresh
-// (reloadSnapshot) or a scroll-up load-older (prependOlder) — either of those
-// bumping would yank the viewport to the bottom while the user is reading.
-describe("scrollToBottomRequest force-scroll signal", () => {
+// meiva:note
+// The timeline pins on a thread change; a send only asks it to stay with a
+// FOLLOWER. The store owns the request, and it must not bump on a mid-stream
+// snapshot refresh or a scroll-up load-older.
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+describe("scrollToBottomRequest send signal", () => {
   it("requestScrollToBottom increments the counter (send path)", () => {
     act(() => {
       useTimelineStore.setState({ scrollToBottomRequest: 5 });
@@ -777,15 +775,7 @@ describe("scrollToBottomRequest force-scroll signal", () => {
     expect(useTimelineStore.getState().scrollToBottomRequest).toBe(2);
   });
 
-  it("switchThread preserves it (cold-cache agent switch)", () => {
-    act(() => {
-      useTimelineStore.setState({ scrollToBottomRequest: 9 });
-      useTimelineStore.getState().switchThread(11, null, false);
-    });
-    expect(useTimelineStore.getState().scrollToBottomRequest).toBe(9);
-  });
-
-  it("reloadSnapshot does NOT bump it (mid-stream refresh must not force-scroll)", () => {
+  it("reloadSnapshot does NOT bump it (mid-stream refresh must not move the reader)", () => {
     act(() => {
       useTimelineStore.setState({ scrollToBottomRequest: 4 });
       useTimelineStore.getState().reloadSnapshot([item({ item_id: "0.0", payload: "s" })], 1, false);
@@ -793,7 +783,7 @@ describe("scrollToBottomRequest force-scroll signal", () => {
     expect(useTimelineStore.getState().scrollToBottomRequest).toBe(4);
   });
 
-  it("prependOlder does NOT bump it (scroll-up load-older must not force-scroll)", () => {
+  it("prependOlder does NOT bump it (scroll-up load-older must not move the reader)", () => {
     act(() => {
       useTimelineStore.setState({
         items: [item({ item_id: "5.0", payload: "curr" })],

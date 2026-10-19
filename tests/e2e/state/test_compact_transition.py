@@ -128,6 +128,18 @@ def _prepare_history_view(e2e_env: E2EEnv, retention: int) -> list[str]:
 def _place_nonsticky_reply(env: E2EEnv, retention: int, reply: str) -> dict[str, Any] | None:
     if retention == 0:
         return None
+    # meiva:note
+    # Rows below the viewport are virtualized spacers at their ESTIMATED height,
+    # so a target computed against them can exceed the real maximum and clamp to
+    # the bottom. Materialize the tail before centering the reply; where a send
+    # leaves the viewport is not this helper's subject.
+    # meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    env.page.evaluate("""() => {
+      const viewport = document.querySelector('[role="log"]').closest('[data-slot="scroll-area-viewport"]');
+      viewport.scrollTop = viewport.scrollHeight;
+      viewport.dispatchEvent(new Event('scroll'));
+    }""")
+    env.page.wait_for_timeout(300)
     position: dict[str, Any] = env.page.evaluate(
         "reply => window.__compactTransitionFrames.placeReply(reply)", reply
     )

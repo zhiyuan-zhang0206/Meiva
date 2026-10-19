@@ -114,10 +114,7 @@ export interface TimelineState {
    * Reset when the selected conversation changes. */
   olderFetchCount: number;
 
-  /** Force the viewport to bottom on send. Reads/history paging
-   * never bump this signal; ordinary content growth follows the sticky controller. */
   scrollToBottomRequest: number;
-  /** Bump `scrollToBottomRequest` on an explicit send. */
   requestScrollToBottom: () => void;
   setCompactHistoryPages: (pages: number) => void;
   invalidateCompactEpoch: () => void;
