@@ -127,9 +127,9 @@ class TurnTicket:
         self._future.exception()
 
 
+# meiva:note
+# One `agy` conversation as a turn engine.
 class AgySession:
-    """One `agy` conversation as a turn engine."""
-
     def __init__(
         self,
         config: AntigravityConfig,
@@ -174,8 +174,9 @@ class AgySession:
             raise SessionClosedError("session is closed")
         resume = resume or self._resume_from_registry()
         if resume is not None:
-            # A caller-supplied resume is still a resume: the transcript already
-            # carries the handoff, so it must not be injected again.
+            # meiva:note
+            # A caller-supplied resume is still a resume: the transcript
+            # already carries the handoff, so it must not be injected again.
             self._resumed_existing = True
         transport = self._factory()
         await transport.start(resume=resume)
@@ -297,7 +298,9 @@ class AgySession:
                 cli_alive=None,
             )
         if ticket is None:
-            # Nothing is running: keep the healthy process instead of killing it.
+            # meiva:note
+            # Nothing is running: keep the healthy process instead of killing
+            # it.
             return CancelReport(
                 turn_id=None,
                 interrupt_ms=0.0,
@@ -308,8 +311,10 @@ class AgySession:
                 cli_pid=transport.pid,
                 cli_alive=transport.alive,
             )
+        # meiva:note
         # Retire before signalling: the reader may see EOF while the report is
-        # still being assembled, and an expected exit must not look like a crash.
+        # still being assembled, and an expected exit must not look like a
+        # crash.
         self._retired = transport
         return await transport.interrupt(turn_id=ticket.turn_id, baseline=self._baseline)
 
@@ -453,6 +458,7 @@ class AgySession:
             return
         ticket = self._active
         if ticket is not None and ticket.interrupt_requested:
+            # meiva:note
             # The interrupt killed the process before its `result` arrived.
             self._complete(
                 ticket,

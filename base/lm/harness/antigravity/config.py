@@ -11,19 +11,21 @@ from pathlib import Path
 DEFAULT_MODEL = "gemini-4-argon-high"
 
 
+# meiva:note
+# Everything the adapter decides about one `agy` process. Bounds carry their
+# reason in the component doc; a limit without one is a defect.
 @dataclass(frozen=True, slots=True)
 class AntigravityConfig:
-    """Everything the adapter decides about one `agy` process.
-
-    Bounds carry their reason in the component doc; a limit without one is a defect.
-    """
-
     cwd: Path
     model: str = DEFAULT_MODEL
-    # argv prefix, so a test can point the adapter at a fake CLI without a shell.
+    # meiva:note
+    # An argv prefix rather than a program path, so a test can point the adapter
+    # at a fake CLI without a shell.
     executable: tuple[str, ...] = ("agy",)
-    # Headless `agy` cannot ask a human: a command outside the configured policy is
-    # denied instead of prompted. Opting in here trades that denial for auto-approval.
+    # meiva:note
+    # Headless `agy` cannot ask a human: a command outside the configured policy
+    # is denied instead of prompted. Opting in here trades that denial for
+    # auto-approval.
     skip_permissions: bool = False
     extra_args: tuple[str, ...] = ()
     turn_timeout_seconds: float = 900.0

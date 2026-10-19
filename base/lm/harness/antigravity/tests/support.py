@@ -16,9 +16,9 @@ FAKE_CLI = Path(__file__).with_name("fake_agy.py")
 CLI_PID = 4242
 
 
+# meiva:note
+# The adapter's view of a process tree, without spawning one.
 class ScriptedProbe(ChildProbe):
-    """The adapter's view of a process tree, without spawning one."""
-
     def __init__(self) -> None:
         self.children: dict[int, str] = {}
         self.alive: set[int] = set()
@@ -154,9 +154,9 @@ async def start(
     return Harness(session, received, argv, child)
 
 
+# meiva:note
+# One assistant text step, as `agy` frames it.
 def say(text: str, *, step_index: int = 1) -> dict[str, Any]:
-    """One assistant text step, as `agy` frames it."""
-
     return {
         "steps": [
             {

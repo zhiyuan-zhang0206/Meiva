@@ -16,6 +16,7 @@ def _reap_nothing(observed: Mapping[int, str], pids: Iterable[int]) -> tuple[int
 
 
 async def test_interrupt_reaps_the_tool_children_the_cli_leaves_behind(tmp_path: Path) -> None:
+    # meiva:note
     # The real CLI exits on SIGINT and orphans its `run_command` tree; the fake
     # reproduces that by not killing the child itself.
     turn = {"hang": True, "spawn_child": True, "kill_child_on_interrupt": False}
@@ -45,6 +46,7 @@ async def test_interrupt_reaps_the_tool_children_the_cli_leaves_behind(tmp_path:
 
 
 async def test_an_unkillable_child_is_still_reported_as_residue(tmp_path: Path) -> None:
+    # meiva:note
     # A reaper that cannot kill stands in for a process we are not allowed to
     # signal: the report must stay honest instead of claiming a clean cancel.
     turn = {"hang": True, "spawn_child": True, "kill_child_on_interrupt": False}

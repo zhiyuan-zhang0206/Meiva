@@ -28,6 +28,8 @@ SHELL_SEMANTICS: tuple[str, ...] = (
 )
 
 
+# meiva:note
+# A `Handoff` that also carries the `agy` shell semantics.
 def build_handoff(
     *,
     agent_id: int,
@@ -40,8 +42,6 @@ def build_handoff(
     overlaps: Sequence[str] = DEFAULT_OVERLAPS,
     discipline: Sequence[str] = DEFAULT_DISCIPLINE,
 ) -> Handoff:
-    """A `Handoff` that also carries the `agy` shell semantics."""
-
     return Handoff(
         agent_id=agent_id,
         instruction=instruction,

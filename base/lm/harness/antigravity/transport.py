@@ -22,6 +22,7 @@ from base.lm.harness.process import (
     wait_gone,
 )
 
+# meiva:note
 # A single NDJSON line can carry a whole tool result; the 64 KiB StreamReader
 # default would truncate the stream instead of the line.
 READER_LIMIT_BYTES = 8 * 1024 * 1024
@@ -53,13 +54,13 @@ Reaper = Callable[[Mapping[int, str], "Iterable[int]"], "tuple[int, ...]"]
 # meiva:note
 # The CLI exits on SIGINT but its tool tree does not: `run_command` children are
 # orphaned, and nobody outside this call knows their pids. The adapter therefore
-# reaps what it observed, and still reports honestly — `settled` is true only when
-# every observed pid is gone, so a process that survives SIGKILL shows up in
-# `remaining` instead of being rounded up to a clean cancel.
+# reaps what it observed — SIGKILLing the observed pids and skipping any whose
+# command line no longer matches, so a reused pid is not killed by mistake — and
+# still reports honestly: `settled` is true only when every observed pid is
+# gone, so a process that survives SIGKILL shows up in `remaining` instead of
+# being rounded up to a clean cancel.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.meiva.okf.md
 def kill_orphans(observed: Mapping[int, str], pids: Iterable[int]) -> tuple[int, ...]:
-    """SIGKILL the observed children, skipping pids that were reused."""
-
     killed: list[int] = []
     for pid in pids:
         if pid <= 1:
