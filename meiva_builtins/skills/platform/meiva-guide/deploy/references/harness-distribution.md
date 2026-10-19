@@ -147,11 +147,33 @@ Measured on 2026-10-19 between two secondary machines:
    stayed put on the source). The source's next call returned
    `Failed to authenticate: OAuth session expired and could not be refreshed`.
 
-So a Claude login is **single-holder**: copying it moves the login, it does not
-share it. The machine that refreshes first keeps it; the other machine needs a
-new interactive sign-in. `catalog` records this as `rotation = "rotating"`, and
-`sync` will not copy this store without `--accept-credential-risk`, which is the
-honest label for "you are moving the login, not duplicating it".
+Two different statements follow, and conflating them reads as "several machines
+cannot be signed in to Claude at once", which is false:
+
+- **A copy is a move, not a duplicate.** One refresh token held in two places
+  means the first machine to refresh keeps it and the other is signed out for
+  good. That is what the two measurements above show.
+- **Separate sign-ins coexist.** Each interactive login is its own OAuth grant
+  with its own tokens; several machines can hold a live login at the same time
+  without competing. `macmini` (signed in long before this experiment) and
+  `company-air` (signed in as the copy) were both usable at the end of it, and
+  neither evicted the other.
+
+So "sign in once per machine" is not "compete for one slot" — it is one grant
+each. `catalog` records this store as `rotation = "rotating"`, and `sync` will not
+copy it without `--accept-credential-risk`, which is the honest label for "you
+are moving the login, not duplicating it".
+
+Two notes for whoever operates this next:
+
+- After the experiment `company-air` holds a usable login it did not have
+  before, because a copy that refreshes first becomes the holder. Deleting it
+  would only waste a grant.
+- **An API key is the copyable alternative, at a different price.** Claude Code
+  also accepts API-key authentication (`claude auth status` then reports
+  `authMethod: api_key`). A key is static, so it copies and does not rotate — but
+  it bills per token instead of drawing on the subscription. Do not switch to it
+  unless the user has accepted that billing change.
 
 ## Choosing the golden machine
 
@@ -173,6 +195,7 @@ copy is live:
 |---|---|---|
 | `env: node: No such file or directory` from `codex --version` | the npm shim runs a Node script and `node` is not on the executing PATH | install Node (`brew install node` / `apt install nodejs npm`); the pinned PATH in `transport.py` already includes `/opt/homebrew/bin` |
 | probe `unavailable` although the CLI answers | npm installed it under `/usr/bin`, which is not in `_FALLBACK_BIN_DIRS`, and the caller's PATH is trimmed | export PATH for that process, or install through a directory the probe searches |
+| `command -v claude` finds nothing in a non-interactive ssh session, yet the machine is set up | the native installer put it in `~/.local/bin` and only the login shell adds that to PATH; the probe still finds it through `_FALLBACK_BIN_DIRS`, so it reports `on_path=false` rather than `unavailable` | read the `on_path` column, not `command -v`; `transport.py` pins the same directories into every command it runs |
 | probe `available`, `claude auth status` says `loggedIn: false` | `~/.claude.json` keeps an `oauthAccount` record after the token expires or is revoked; the probe reads that record as evidence | treat `claude auth status` as authoritative until the probe stops treating `oauthAccount` as proof |
 | `agy` reports `unknown` everywhere | the probe looks only inside the CLI's config directory | expected; use `doctor --verify` and a real `agy -p` invocation |
 | `agy -p` says `authentication required` although `~/.gemini/jetski-standalone-oauth-token` exists | that file belongs to the Antigravity IDE; the CLI reads only `~/.gemini/antigravity-cli/antigravity-oauth-token` | copy the legacy file to the CLI's path, or sign the CLI in once |
