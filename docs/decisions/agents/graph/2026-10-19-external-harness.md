@@ -279,8 +279,52 @@ injected content and refuses it.
 
 ### The decision
 
-The bridge replaces the *model call*, not the graph. `agent/graph/llm` keeps
-owning the turn's shape; only the body of one LLM round changes.
+**2026-10-19 19:59 update (ruled):** the wiring is a graph node, not a
+replacement for the llm node's body. Claim keeps its durable queue and lifecycle
+handling and routes a "has work" verdict on a non-native harness to
+`harness_turn` (`agent/graph/claim/harness_turn.py`, `base/lm/harness/bridge.py`, implementation task #5413). The ruled
+alternative — swapping the body of one LLM round — cannot work: `llm` is one
+model call whose contract is "return tool calls for `exec`", while a harness turn
+performs any number of tool calls internally and returns one text; and routing
+from claim keeps the single implementation of terminate / cancel / restart /
+resurrect / fork instead of a second copy that would drift. The session cache
+lives with `AgentRuntime`, so the existing idle TTL/LRU is what closes it.
+`before_llm`, `llm`, `before_exec`, `exec` and `after_exec` never run on such an
+agent, and the graph test asserts that over a real compiled graph.
+
+**2026-10-19 22:44 update (ruled):** the public entry is `meiva.attach()`, not
+`meiva.impersonation.harness.attach`: the binding is shared by every harness, so the
+impersonation namespace was the wrong home for it. The old path is removed rather
+than aliased (it has no external callers yet), and the handoff's entry points name
+the new one.
+
+**2026-10-19 21:25 update (ruled):** every registration row carries `expires_at`,
+and the bridge rewrites it at the start of each turn. `descends_from(controller_pid)`
+is only as good as the kernel's pid allocation, so a row without an expiry plus a
+reused pid is a bearer capability that never dies; the TTL
+(`MEIVA_HARNESS_REGISTRATION_TTL_SECONDS`, one hour, above the adapter's own 900 s
+turn timeout) is what makes a crashed host's claim lapse on its own. A reader may
+still accept a row without one; the writer may not produce it.
+
+**2026-10-19 21:18 update (ruled):** two semantics belong to the wiring slice
+rather than a later one. A `SessionFaulted` (or a session closing) under a turn
+settles as a fatal stream abort — the agent does not stop half-way — and the
+session is retired so the next inbound opens a fresh one from the registry. And
+the cold-start handoff turn is committed as its own message, because injecting
+the handoff is itself a turn: folding it into the first chat reply makes "the
+first message" mean two different things. Streaming deltas, tool-call timeline
+items and explicit `/compact` stay visibility work for later slices.
+
+The ruled remedy for a fault supersedes the "retry path" cell in the event table
+below: there is no in-turn retry against a session that died, and the abort is
+reported the way an exhausted stream abort already is.
+
+What follows is the section as written before that ruling; the event and
+persistence contracts in it are what the node implements.
+
+The bridge replaces the *model call*, not the graph — in the first draft that
+meant `agent/graph/llm` keeping the turn's shape and only the body of one LLM
+round changing.
 
 **How a message gets in.** The claim node already owns the durable inbound queue
 and keeps that role. It gains one step: instead of handing user text to a chat
@@ -326,7 +370,7 @@ session and maps each event onto what the graph already produces:
 | `RateLimitObserved` | the usage signal behind the quota warning |
 | `SessionStarted` / `SessionBound` | binds the incarnation to the session id and the agent id |
 | `HandoffInjected` | the per-wake cost record (size in bytes) |
-| `SessionFaulted` | the llm node's retry path |
+| `SessionFaulted` | a fatal stream abort: the turn settles, the session is retired |
 
 The harness's tool surface is a real tool call rather than a Python namespace, so
 one `ToolUse`/`ToolResult` pair maps onto the existing exec-node message pair, and

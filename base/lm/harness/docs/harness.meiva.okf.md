@@ -30,7 +30,11 @@ invariants the host relies on:
 5. a turn timeout interrupts; it never silently drops the turn;
 6. usage and cost accumulate per turn;
 7. the handoff is injected once, when the session is created, and never again on
-   resume.
+   resume;
+8. a faulted or closed session stops being usable: the bridge retires it instead of
+   submitting to it again;
+9. `close()` returns only after the session's process tree is gone, or after the
+   adapter's settle window proved it is not — residue is reported, never assumed.
 
 Adapters: [[../claude/docs/claude.meiva.okf.md]],
 [[../deepseek/docs/deepseek.meiva.okf.md]]. Contract, provider differences
@@ -42,8 +46,10 @@ and open questions are recorded in
 | Module | Owns |
 |---|---|
 | `events.py` | `BridgeEvent` and its members, plus the droppable (text delta) versus control split |
+| `engine.py` | `HarnessSession` (the adapter contract), `TurnEngine` (what a graph run needs), and `HarnessTurn` (one turn's reply, usage and boundary, plus the `prelude` turns that completed before it) |
 | `handoff.py` | the six-section handoff document, `HANDOFF_VERSION`, and its rendered byte size |
 | `registry.py` | `SessionRecord` and `FileSessionRegistry`: one JSON document per agent id, atomic replace |
+| `registration.py` | `HarnessRegistration` and `RegistrationStore`: the attachment row the bridge writes, always with an expiry, plus the crash sweep |
 | `process.py` | `ChildProbe`, the psutil implementation, tree snapshots and the bounded wait for a pid to disappear |
 
 `process.py` stays provider-neutral on purpose: the question it answers — "is
@@ -77,11 +83,28 @@ changes the shape fails until the version moves with it.
 
 ## Identity
 
-`FileSessionRegistry` writes `agent_id ↔ session_id` (plus cwd, model and resume
-count) as soon as the adapter reports the session started. Writes are a temp file
+`FileSessionRegistry` writes `agent_id ↔ session_id` (plus cwd, model, resume
+count and the harness that wrote it) as soon as the adapter reports the session
+started. Writes are a temp file
 plus `Path.replace`, so a reader never sees a half-written record, and a corrupt
 document raises instead of silently starting a fresh session under an id that
 already has history.
+
+A registration is not a second identity: it is the bridge's claim that a session on
+this machine belongs to one agent. Three facts gate it — the row says `attached`,
+`expires_at` has not passed, and the calling process descends from
+`controller_pid` — and the expiry is the one the bridge cannot forget, because the
+others degrade silently: a pid gets reused, and a row that never expires would be a
+bearer capability nobody can revoke. The bridge rewrites the row at the start of
+every turn, so the deadline only runs out when the writing host is gone.
+
+`SessionRecord.harness` makes the registry self-describing. A record written
+before the field existed reads as `meiva` — the only harness that predates it —
+and every write names its harness, so the fallback can only describe an older
+document. `load(agent_id, harness=...)` refuses a record that names another
+harness instead of resuming one provider's transcript under another provider's
+session, and the wiring passes its harness through a scoped registry rather than
+trusting every caller to remember.
 
 ## Testing
 

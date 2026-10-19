@@ -35,22 +35,27 @@ Routing semantics (preserved verbatim from the original claim module):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from agent.db import ClaimedInbound, has_pending_inbound_after
+from agent.nodes import BEFORE_LLM, HARNESS_TURN
 from base.agents.context import MeivaContext
 from base.agents.messages.inbound import InboundKind
+from base.api_contracts.agent_contract import Harness
 
-# The four targets claim itself routes to: BEFORE_LLM (has work), END
+# meiva:note
+# The five targets claim itself routes to: BEFORE_LLM (has work), END
 # (terminate with exit_requested=True, a hosted restart with
 # restart_requested=True, or the turn boundary with both False — the runloop
 # re-invokes and the fresh invocation's claim waits), back
 # to CLAIM (cancel/pause -> re-enter with halted=True; the re-entered pass
-# hits the turn boundary and ends the invocation), or INIT_CONTEXT (a
+# hits the turn boundary and ends the invocation), INIT_CONTEXT (a
 # compaction emptied the history; that node re-establishes the standing head,
-# then resumes where this batch was headed). Narrower than `NodeName` on
-# purpose, so pyright catches a goto claim has no business making.
-ClaimGoto = Literal["before_llm", "claim", "__end__", "init_context"]
+# then resumes where this batch was headed), or HARNESS_TURN (the same "has
+# work" verdict on an agent whose loop runs in an external CLI). Narrower than
+# `NodeName` on purpose, so pyright catches a goto claim has no business making.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+ClaimGoto = Literal["before_llm", "claim", "__end__", "init_context", "harness_turn"]
 
 # Kinds whose dispatch is gated on the routing winner.
 ROUTING_KINDS: frozenset[InboundKind] = frozenset(
@@ -61,6 +66,21 @@ ROUTING_KINDS: frozenset[InboundKind] = frozenset(
         InboundKind.RESURRECT,
     }
 )
+
+
+# meiva:note
+# Where a "has work" verdict actually goes. The built-in loop continues into
+# before_llm; an agent on an external harness continues into the one node that hands
+# the whole turn to its session, and the native nodes behind before_llm never run for
+# it. Every other verdict (wait, cancel re-entry, compaction, exit) is the same for
+# both, which is why only this one target is rewritten. A reset's parked `resume` is
+# the same verdict one node later, so it goes through here too — otherwise a
+# compaction hands an external-harness agent back to `before_llm`.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+def route_target[Goto](ctx: MeivaContext, goto: Goto) -> Goto:
+    if goto == BEFORE_LLM and ctx.harness is not Harness.MEIVA:
+        return cast("Goto", HARNESS_TURN)
+    return goto
 
 
 @dataclass(frozen=True)

@@ -117,7 +117,7 @@ async def test_hosted_applies_only_after_continuation_returns(
             catalog=model_catalog,
             commands=CommandCatalog(skills=list),
         )
-        host._runtimes[agent_id] = Mock()
+        host._runtimes[agent_id] = Mock(harness_bridge=None)
         assert [
             row.id
             for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=old, work=None)
@@ -200,7 +200,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
             catalog=model_catalog,
             commands=CommandCatalog(skills=list),
         )
-        host._runtimes[agent_id] = Mock()
+        host._runtimes[agent_id] = Mock(harness_bridge=None)
         original_execute = psycopg.AsyncConnection.execute
         original_drop = host.drop_agent
 
@@ -374,7 +374,7 @@ async def _run_terminating_turn(
             catalog=model_catalog,
             commands=CommandCatalog(skills=list),
         )
-        host._runtimes[agent_id] = Mock()
+        host._runtimes[agent_id] = Mock(harness_bridge=None)
         assert await host._invoke_until_done(
             agent_id,
             MeivaContext(

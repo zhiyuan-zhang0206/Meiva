@@ -32,7 +32,7 @@ from base.lm.harness.events import (
     is_droppable,
 )
 from base.lm.harness.handoff import Handoff
-from base.lm.harness.process import ChildProbe, PsutilChildProbe, snapshot
+from base.lm.harness.process import ChildProbe, PsutilChildProbe, settle_close, snapshot, watch_tree
 from base.lm.harness.registry import SessionRecord, SessionRegistry
 
 # meiva:note
@@ -204,8 +204,16 @@ class AgySession:
             except ExceptionGroup as group:
                 self._emit(SessionFaulted(turn_id=None, error=f"session tasks failed: {group!r}"))
         transport, self._transport = self._transport, None
+        watched = watch_tree(self._probe, transport.pid if transport is not None else None)
         if transport is not None:
             await transport.close()
+        await settle_close(
+            self._probe,
+            watched,
+            "antigravity",
+            self.config.cancel_settle_seconds,
+            agent_id=self.agent_id,
+        )
         self._emit(SessionClosed(turn_id=None, reason=reason))
         self._events.put_nowait(EVENT_STREAM_END)
 

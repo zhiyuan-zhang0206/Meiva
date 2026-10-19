@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from base.api_contracts.agent_contract import Harness
 from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import validate_model_config
@@ -427,9 +428,11 @@ class TestSchedulerIntegration:
             _fingerprint: str,
             _model: str,
             *,
+            harness: Harness,
             incarnation: RuntimeIncarnation,
             checkpoints: TurnCheckpoints,
         ) -> None:
+            assert harness is Harness.MEIVA, "the runtime build is told which loop it builds"
             raise ValueError("runtime build failed")
 
         monkeypatch.setattr(host, "_runtime_for", _explode)

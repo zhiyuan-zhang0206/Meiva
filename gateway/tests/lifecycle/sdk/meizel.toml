@@ -5,6 +5,6 @@
 "test_external_integration_agent.py#monkeypatch.setenv os.environ.MEIVA_CALLER_IDENTITY" = 1
 
 [debt.first-party-patch]
+"test_external_integration_agent.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1
 "test_external_integration_agent.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
 "test_external_integration_agent.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 1
-"test_external_integration_agent.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1
