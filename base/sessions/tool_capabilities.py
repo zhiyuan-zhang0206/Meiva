@@ -198,7 +198,7 @@ def _write_cache(target: Path, payload: dict[str, object]) -> None:
         logger.opt(exception=True).warning("tool probe cache is not writable: {}", target)
 
 
-def _from_cache(entry: object) -> Probe | None:
+def _from_cache(entry: object, *, now: dt.datetime) -> Probe | None:
     if not isinstance(entry, dict):
         return None
     record = cast("dict[str, object]", entry)
@@ -209,9 +209,7 @@ def _from_cache(entry: object) -> Probe | None:
         stamped = dt.datetime.fromisoformat(probed_at)
     except ValueError:
         return None
-    if dt.datetime.now(dt.UTC) - stamped.astimezone(dt.UTC) > dt.timedelta(
-        seconds=PROBE_TTL_SECONDS
-    ):
+    if now - stamped.astimezone(dt.UTC) > dt.timedelta(seconds=PROBE_TTL_SECONDS):
         return None
     version_text = record.get("version_text")
     version = parse_version(version_text) if isinstance(version_text, str) else None
@@ -268,9 +266,10 @@ def probe_tool(
             unknown_reason="not found on PATH or its candidate paths",
             probed_at=now or dt.datetime.now(dt.UTC),
         )
+    reference = now or dt.datetime.now(dt.UTC)
     key = _cache_key(resolved)
     cache = _read_cache(target)
-    cached = _from_cache(cache.get(key))
+    cached = _from_cache(cache.get(key), now=reference)
     if cached is not None and cached.tool == spec.tool:
         return cached
 
@@ -291,7 +290,7 @@ def probe_tool(
         version_text=version_text.strip() or None,
         flags=flags,
         unknown_reason=None if version is not None else "version output was not a version",
-        probed_at=now or dt.datetime.now(dt.UTC),
+        probed_at=reference,
     )
     cache[key] = _to_cache(result)
     _write_cache(target, cache)
