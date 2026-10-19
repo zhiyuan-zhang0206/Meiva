@@ -23,6 +23,8 @@ reaping result, the handoff size in bytes, and the token/cost totals.
 
 ## Requirements
 
+- The Claude adapter is an optional extra: `pip install -e '.[harness-claude]'`
+  (a development checkout gets it from the dev dependency group).
 - A Claude subscription login on the machine running it (`claude auth status`
   reports `authMethod: claude.ai`). The demo never sets or reads an API key; an
   `ANTHROPIC_API_KEY` exported in the shell is blanked for the child.
@@ -34,6 +36,6 @@ reaping result, the handoff size in bytes, and the token/cost totals.
 - Everything the demo writes lives in a fresh temporary workspace, including the
   session registry (`<workspace>/sessions/6984.json`).
 - Stage 3 interrupts as soon as the tool's child process is observable; that is
-  the same signal the bridge's cancel assertion uses (`base/lm/claude_sdk/process.py`).
+  the same signal the bridge's cancel assertion uses (`base/lm/harness/process.py`).
 - If the model declines to run the `ping`, stage 3 fails after 60s and the demo
   exits non-zero rather than reporting a false pass.

@@ -10,17 +10,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from base.lm.claude_sdk import (
+from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff
+from base.lm.harness.claude import (
     BridgeConfig,
     ClaudeSession,
-    ClusterFact,
-    EntryPoint,
-    FileSessionRegistry,
-    Handoff,
     SessionTotals,
     TurnOutcome,
 )
-from base.lm.claude_sdk.process import PsutilChildProbe
+from base.lm.harness.process import PsutilChildProbe
 
 # meiva:note
 # One command, one real session, the four things the bridge is for: the handoff

@@ -45,10 +45,10 @@ fixture/incident scope.
 
 ## Open
 
-### boundary:base-lm-claude-sdk-private-transport-pid
+### boundary:base-lm-harness-claude-private-transport-pid
 - **class**: boundary
 - **status**: open
-- **evidence**: `base/lm/claude_sdk/process.py:client_pid` reads the SDK client's private transport (`_transport._process.pid`) to obtain the CLI pid, because `claude-agent-sdk` 0.2.168 exposes no public accessor; the bridge is the caller that must observe the process tree to assert a cancel. The code degrades to `None` when the shape changes (a cancel then reports `settled=None`, never a false pass), but a 0.x SDK bump can silently disable the assertion until the attribute is re-checked. Repair: move to a public SDK accessor when one exists, or assert the attribute shape in the bridge's real end-to-end run (`demos/claude-sdk-bridge/bridge_demo.py` already fails on `settled is not True`).
+- **evidence**: `base/lm/harness/process.py:client_pid` reads the SDK client's private transport (`_transport._process.pid`) to obtain the CLI pid, because `claude-agent-sdk` 0.2.168 exposes no public accessor; the bridge is the caller that must observe the process tree to assert a cancel. The code degrades to `None` when the shape changes (a cancel then reports `settled=None`, never a false pass), but a 0.x SDK bump can silently disable the assertion until the attribute is re-checked. Repair: move to a public SDK accessor when one exists, or assert the attribute shape in the bridge's real end-to-end run (`demos/claude-sdk-bridge/bridge_demo.py` already fails on `settled is not True`).
 - **first-seen**: 2026-10-19 (PR #6358)
 - **last-verified**: 2026-10-19
 

@@ -37,7 +37,7 @@ class SessionRegistry(Protocol):
 # agents apart, and the write is a temp file plus `os.replace` so a reader never
 # sees a half-written record. A corrupt document raises instead of silently
 # resuming a fresh session under an id that already has history.
-# meiva:link base/lm/claude_sdk/docs/claude_sdk.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
 class FileSessionRegistry:
     def __init__(self, root: Path) -> None:
         self._root = Path(root)

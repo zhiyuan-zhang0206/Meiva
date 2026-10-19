@@ -60,7 +60,8 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - [[base/lm/docs/provider-plugins.meiva.okf.md]] — plugin binding and `key_env`
 
 ### Claude Agent SDK bridge
-[[../../claude_sdk/docs/claude_sdk.meiva.okf.md]] — CLI session turn engine; not wired yet.
+[[../../harness/docs/harness.meiva.okf.md]] — shared harness half; not wired yet.
+[[../../harness/claude/docs/claude.meiva.okf.md]] — Claude adapter; opt-in extra.
   delivery contract.
 
 ### decision models — [[base/lm/docs/decision-models.meiva.okf.md]]

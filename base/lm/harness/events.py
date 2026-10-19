@@ -121,6 +121,6 @@ BridgeEvent = (
 # `TextDelta` alone is droppable: a consumer that falls behind may skip text, but
 # never a turn boundary, a tool result or a session binding, because losing one of
 # those loses structure rather than detail.
-# meiva:link base/lm/claude_sdk/docs/claude_sdk.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
 def is_droppable(event: object) -> bool:
     return isinstance(event, TextDelta)

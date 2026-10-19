@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.claude_sdk import FileSessionRegistry, SessionRecord
+from base.lm.harness import FileSessionRegistry, SessionRecord
 
 
 def record(agent_id: int = 6984, *, session_id: str = "sess-1", resumes: int = 0) -> SessionRecord:

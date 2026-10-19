@@ -3,6 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# meiva:note
+# The handoff is a wire format between the host and every external provider: the
+# same six sections are rendered for Claude, Codex and Antigravity, and a waking
+# agent reads them before it does anything. The version is part of the document,
+# not just of this module: a provider that caches or replays a handoff can tell
+# which field set it is holding. Changing the dataclass fields or the section
+# order means bumping this number, and the field-set test fails until you do.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+HANDOFF_VERSION = 1
+
 DEFAULT_OVERLAPS: tuple[str, ...] = (
     "Do not run your own background-task or monitor machinery, and do not try to schedule or "
     "supervise turns yourself: the host owns the turn loop, the queue and cancellation.",
@@ -64,6 +74,7 @@ class Handoff:
             f"# Handoff — Meiva agent #{self.agent_id}{label}",
             "",
             "## 1. Identity",
+            f"- handoff version: {HANDOFF_VERSION}",
             f"- agent id: {self.agent_id}",
             f"- label: {self.label or 'unassigned'}",
             f"- machine: {self.machine}",
