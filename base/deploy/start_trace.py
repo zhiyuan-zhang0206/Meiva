@@ -89,6 +89,11 @@ class StartTrace:
         }
 
     def write(self, home: Path) -> Path | None:
+        # meiva:note
+        # A start that was refused must not leave a home behind, so a report is
+        # only persisted under a home that already exists.
+        if not home.is_dir():
+            return None
         try:
             target = home / "logs" / "start-timing"
             target.mkdir(parents=True, exist_ok=True)
