@@ -5,7 +5,7 @@
 // addressable by ID regardless of directory membership.
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Search, X } from "lucide-react";
+import { PanelLeft, Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 
@@ -149,7 +149,7 @@ export function AgentSidebar(props: Props) {
 
 function DesktopSidebar(props: DesktopProps) {
   const t = useTranslations("sidebar");
-  const { collapsed, onSearchOpen } = props;
+  const { collapsed, onSearchOpen, onToggleCollapsed } = props;
 
   if (collapsed) return null;
 
@@ -178,6 +178,14 @@ function DesktopSidebar(props: DesktopProps) {
               aria-label={t("searchAgents")}
             >
               <Search className="size-4" />
+            </button>
+            <button
+              onClick={onToggleCollapsed}
+              className="p-1 rounded hover:bg-sidebar-accent shrink-0"
+              aria-label={t("hideSidebar")}
+              data-testid="sidebar-collapse"
+            >
+              <PanelLeft className="size-4" />
             </button>
           </>
         }

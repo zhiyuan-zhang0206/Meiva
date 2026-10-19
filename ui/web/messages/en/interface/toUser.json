@@ -17,5 +17,6 @@
   "collapseNotice": "Collapse notification",
   "openContext": "To user",
   "back": "Back",
-  "legacyHtml": "Awaiting Markdown."
+  "legacyHtml": "Awaiting Markdown.",
+  "hideContextPanel": "Hide shared context"
 }

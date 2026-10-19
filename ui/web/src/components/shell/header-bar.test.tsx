@@ -73,14 +73,16 @@ describe("HeaderBar", () => {
     expect(screen.getByTestId("header-extra")).toBeTruthy();
   });
 
-  it("toggles the agent sidebar from the title bar", () => {
+  it("carries the sidebar toggle only while the sidebar is collapsed", () => {
     const onToggle = vi.fn();
     const { rerender } = render(
       <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={onToggle} />,
     );
-    fireEvent.click(screen.getByTestId("sidebar-toggle"));
-    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("sidebar-toggle")).toBeNull();
     rerender(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={onToggle} />);
-    expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).toBe("Show sidebar");
+    const button = screen.getByTestId("sidebar-toggle");
+    expect(button.getAttribute("aria-label")).toBe("Show sidebar");
+    fireEvent.click(button);
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 });

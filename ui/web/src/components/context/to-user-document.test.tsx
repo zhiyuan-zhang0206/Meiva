@@ -28,7 +28,7 @@ function idleQuery(data?: ToUserDocument) {
 }
 function show(
   value: ToUserDocument,
-  { mobile = false, linked, onInspect }: { mobile?: boolean; linked?: ToUserDocument; onInspect?: () => void } = {},
+  { mobile = false, linked, onInspect, onCollapse }: { mobile?: boolean; linked?: ToUserDocument; onInspect?: () => void; onCollapse?: () => void } = {},
 ) {
   linkedQuery.mockReturnValue(idleQuery(linked));
   return render(
@@ -40,6 +40,7 @@ function show(
       refresh={vi.fn()}
       mobile={mobile}
       onInspect={onInspect}
+      onCollapse={onCollapse}
     />,
   );
 }
@@ -189,4 +190,22 @@ it("offers the inspector trigger only when the panel wires it, and reports press
   show(document("hello"), { onInspect });
   fireEvent.click(screen.getByTestId("open-inspector"));
   expect(onInspect).toHaveBeenCalledOnce();
+});
+
+
+describe("shared-context column collapse", () => {
+  it("closes the column from its own bar when the host offers it", () => {
+    const onCollapse = vi.fn();
+    show(document("hello"), { onCollapse });
+    fireEvent.click(screen.getByTestId("context-panel-collapse"));
+    expect(onCollapse).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders no collapse control without the host callback or on mobile", () => {
+    show(document("hello"));
+    expect(screen.queryByTestId("context-panel-collapse")).toBeNull();
+    cleanup();
+    show(document("hello"), { onCollapse: vi.fn(), mobile: true });
+    expect(screen.queryByTestId("context-panel-collapse")).toBeNull();
+  });
 });

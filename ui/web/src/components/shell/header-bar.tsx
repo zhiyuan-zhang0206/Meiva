@@ -54,15 +54,17 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
           >
             <Menu className="size-5" />
           </button>
-          <button
-            onClick={onToggleSidebar}
-            className="hidden md:inline-flex p-1 -ml-1 rounded hover:bg-sidebar-accent shrink-0"
-            aria-label={sidebarT(sidebarCollapsed ? "showSidebar" : "hideSidebar")}
-            aria-pressed={!sidebarCollapsed}
-            data-testid="sidebar-toggle"
-          >
-            <PanelLeft className="size-5" />
-          </button>
+          {sidebarCollapsed ? (
+            <button
+              onClick={onToggleSidebar}
+              className="hidden md:inline-flex p-1 -ml-1 rounded hover:bg-sidebar-accent shrink-0"
+              aria-label={sidebarT("showSidebar")}
+              aria-pressed={false}
+              data-testid="sidebar-toggle"
+            >
+              <PanelLeft className="size-4" />
+            </button>
+          ) : null}
           <span className="truncate">{label}</span>
         </div>
         <div className={cn("items-center gap-2", FLEX)}>{children}</div>
