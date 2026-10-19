@@ -69,3 +69,14 @@ def test_write_keeps_one_json_record(tmp_path: Path) -> None:
     assert path is not None and path.parent == tmp_path / "logs" / "start-timing"
     payload = json.loads(path.read_text())
     assert payload["phases"][0]["name"] == "phase"
+
+
+def test_write_never_creates_a_missing_home(tmp_path: Path) -> None:
+    trace = start_trace.StartTrace()
+    trace.begin()
+    with trace.phase("phase"):
+        pass
+    missing = tmp_path / "never-initialized"
+
+    assert trace.write(missing) is None
+    assert not missing.exists()
