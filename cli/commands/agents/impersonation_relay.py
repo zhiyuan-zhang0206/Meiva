@@ -35,7 +35,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
 
-from .impersonation_adapters import resolve_adapter
+from .impersonation_adapters import RelayAdapter, resolve_adapter
 
 _CATCHUP_SECONDS = 30.0
 MIN_EMIT_INTERVAL_SECONDS = 2.0
@@ -567,20 +567,32 @@ async def _heartbeat_completion(
     return None
 
 
+# meiva:note
+# Run a native relay until lease release/expiry, failure, or interruption. The
+# transport destination resolves before any lease authority is used, and the first
+# heartbeat follows it: the accepting runtime reads that beat as proof the host can
+# be pushed into, so an unreachable host must fail startup and roll the acceptance
+# back. The relay never renews the lease; its credential reads, reserves delivery,
+# and beats. ``adapter_factory`` defaults to ``resolve_adapter`` so a test can hand
+# in a transport without patching.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 def cmd_relay(
-    args: argparse.Namespace, *, database_factory: DatabaseFactory, machine: MachineIdentity
+    args: argparse.Namespace,
+    *,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentity,
+    adapter_factory: Callable[..., RelayAdapter] | None = None,
 ) -> int:
-    """Run a native relay until lease release/expiry, failure, or interruption.
-
-    The first heartbeat is written before the inbox loop, so the accepting
-    runtime's readiness gate observes a live relay immediately. The relay
-    never renews the lease; its credential reads, reserves delivery, and beats.
-    """
     from . import impersonation
 
     try:
         from base.agents.impersonation import relay_get
         from base.agents.impersonation.history import resolve
+
+        adapter = (adapter_factory or resolve_adapter)(
+            args.provider, args.thread_id, codex_remote=args.codex_remote
+        )
+        adapter.ready()
 
         db = database_factory()
         bus = EventBus.from_settings()
@@ -604,7 +616,6 @@ def cmd_relay(
         session_id = relay_get(db, bus, str(lease_id), token, local_machine=machine.name())[
             "session_id"
         ]
-        adapter = resolve_adapter(args.provider, args.thread_id, codex_remote=args.codex_remote)
         max_chars = PUSH_MAX_CHARS
 
         async def run() -> None:
