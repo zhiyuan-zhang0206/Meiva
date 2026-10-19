@@ -3,14 +3,19 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
 import psycopg
 
-from base.api_contracts.agent_contract import ForkHarnessMismatch, Harness, HarnessStatus
+from base.api_contracts.agent_contract import (
+    ForkHarnessMismatch,
+    Harness,
+    HarnessNotLaunchable,
+    HarnessStatus,
+)
 from base.db import fetch_one
 
 DEFAULT_HARNESS = Harness.MEIVA
@@ -71,21 +76,51 @@ def coerce_harness(value: str | Harness | None) -> Harness:
 
 
 # meiva:note
+# Birth is the last moment this choice is cheap to refuse: a stored harness is
+# immutable, so a value no launcher can start would leave an agent that can
+# neither run nor move onto another loop, and only a force terminate could end
+# it. A fork inherits its source's harness, so a source that never got a
+# launcher is refused by the same rule instead of copying the dead value.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+def _require_launchable(
+    harness: Harness, fork_from: int | None, launchable: Collection[Harness]
+) -> Harness:
+    if harness in launchable:
+        return harness
+    allowed = ", ".join(sorted(item.value for item in launchable))
+    if fork_from is None:
+        raise HarnessNotLaunchable(
+            f"harness {harness.value!r} has no launcher yet: nothing in this release can run "
+            f"an agent on it, and a stored harness never changes, so the row could never run. "
+            f"Spawn on one of {allowed} instead"
+        )
+    raise HarnessNotLaunchable(
+        f"cannot fork agent {fork_from}: it was born on harness {harness.value!r}, which has "
+        f"no launcher yet, and a fork keeps its source's harness, so the child could never "
+        f"run either. Fork an agent on one of {allowed}, or spawn a new one"
+    )
+
+
+# meiva:note
 # A fork continues its source's identity, so it runs the source's harness. Naming
 # a different one is refused here, inside the birth transaction, so a caller that
 # skipped request validation still cannot fork across harnesses; omitting the
 # value inherits the source's.
 # meiva:link base/agents/docs/harness.meiva.okf.md
 def resolve_birth_harness(
-    cur: psycopg.Cursor[Any], requested: str | Harness | None, fork_from: int | None
+    cur: psycopg.Cursor[Any],
+    requested: str | Harness | None,
+    fork_from: int | None,
+    *,
+    launchable: Collection[Harness] = LAUNCHABLE_HARNESSES,
 ) -> str:
     if fork_from is None:
-        return coerce_harness(requested).value
+        return _require_launchable(coerce_harness(requested), fork_from, launchable).value
     cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (fork_from,))
     row = fetch_one(cur, "harness: read fork source")
     source = Harness(row[0])
     if requested is None:
-        return source.value
+        return _require_launchable(source, fork_from, launchable).value
     requested_harness = coerce_harness(requested)
     if requested_harness is not source:
         raise ForkHarnessMismatch(
@@ -94,7 +129,7 @@ def resolve_birth_harness(
             f"agent. Spawn a new agent with harness={requested_harness.value!r} instead of "
             f"forking onto it."
         )
-    return source.value
+    return _require_launchable(source, fork_from, launchable).value
 
 
 def _read_json(path: Path) -> object | None:

@@ -157,6 +157,7 @@ class ErrorReason(StrEnum):
     INVALID_MODEL_CONFIG = "invalid_model_config"
     FORK_CONFIG_CHANGE_NOT_ALLOWED = "fork_config_change_not_allowed"
     FORK_HARNESS_MISMATCH = "fork_harness_mismatch"
+    HARNESS_NOT_LAUNCHABLE = "harness_not_launchable"
 
 
 class MeivaAgentError(Exception):
@@ -290,6 +291,17 @@ class ForkConfigChangeNotAllowed(ForkError, MeivaAgentError):  # noqa: N818 — 
 # meiva:link base/agents/docs/harness.meiva.okf.md
 class ForkHarnessMismatch(ForkError, MeivaAgentError):  # noqa: N818
     reason = ErrorReason.FORK_HARNESS_MISMATCH
+    http_status = 400
+
+
+# meiva:note
+# A harness no launcher can start refuses the birth itself: the row would record
+# a runtime loop that can never run, and the stored harness is immutable, so the
+# agent could be neither run nor moved onto another loop. Raising before the row
+# exists is what keeps every stored value a claim about a loop that can start.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+class HarnessNotLaunchable(MeivaAgentError):  # noqa: N818
+    reason = ErrorReason.HARNESS_NOT_LAUNCHABLE
     http_status = 400
 
 
@@ -444,6 +456,7 @@ EXCEPTION_BY_REASON: dict[ErrorReason, type[MeivaAgentError]] = {
     ErrorReason.INVALID_MODEL_CONFIG: InvalidModelConfig,
     ErrorReason.FORK_CONFIG_CHANGE_NOT_ALLOWED: ForkConfigChangeNotAllowed,
     ErrorReason.FORK_HARNESS_MISMATCH: ForkHarnessMismatch,
+    ErrorReason.HARNESS_NOT_LAUNCHABLE: HarnessNotLaunchable,
 }
 
 
