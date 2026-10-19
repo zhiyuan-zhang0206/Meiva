@@ -37,6 +37,10 @@ directory. The manifest is the single expression of the built-in policy
   the P0 lead only — never a user notification path — and stops with
   `meiva schedules stop db-write-stall-watch`.
 
+Built-in slots sit in the off-peak trough: the cluster workday peaks at
+09:00-12:00 and 14:00-18:00 cluster time, so every daily and weekly fire lands
+outside it.
+
 The adversarial weekly batch owns its counted loopback HTTP server in a lexical
 scope. One batch-local executor serves requests while the batch updates the
 partner document and collects counts. Leaving the batch, including by an error,
@@ -127,6 +131,13 @@ template into a running cluster without a restart of the manager, run
   at process start, so a changed value needs `meiva schedules restart <id>`.
   A one-off schedule you write yourself should do the same rather than
   hard-coding an IANA name; `next_fire(expr, timezone=None)` computes in UTC.
+- **Report recipients are operator knobs.** A daily report resolves its
+  recipient from its own `MEIVA_*_REPORT_AGENT` variable when set — a numeric
+  agent id, and a malformed value fails the run instead of falling back — and
+  otherwise from the fixed report label the script declares (`_REPORT_LABEL`).
+  `MEIVA_SELF_EVOLUTION_DAILY_REPORT_AGENT` defaults to agent 228, and an
+  explicit empty value skips that report. The debt-clearing worker label comes
+  from `MEIVA_DEBT_SWEEP_AGENT_LABEL`.
 - **Built-in cron slots are durably claimed.** Templates use
   `schedules.catchup.fire_slot_once()` for online fires. Startup skips missed
   slots; there is no catch-up helper. The `(schedule_id, slot_fire_at)` claim

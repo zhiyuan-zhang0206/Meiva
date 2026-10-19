@@ -1,11 +1,3 @@
-"""Per-slot at-most-once execution for gateway-hosted schedule templates.
-
-The database claim commits before the callback starts. That ordering prevents
-concurrent or restarted runners from repeating a slot, at the accepted cost
-that a process crash after the claim and before the callback completes leaves
-the slot claimed and will not retry it.
-"""
-
 from __future__ import annotations
 
 import os
@@ -20,12 +12,13 @@ from base.db import Database
 _Payload = TypeVar("_Payload")
 
 
+# meiva:note
+# The cluster wall clock (`MEIVA_TIMEZONE`, cluster-pinned), never the host's OS timezone:
+# the fleet fires at one instant wherever each machine sits, and a weekly cron read
+# host-locally lands the run on the wrong calendar day, not merely at the wrong hour. A
+# schedule reads it when it runs, so a changed value waits for its next restart.
+# meiva:link schedules/README.md
 def cluster_timezone() -> str:
-    """The cluster wall-clock timezone (`MEIVA_TIMEZONE`, cluster-pinned), never the host's OS
-    timezone: the whole fleet fires at one instant regardless of where each machine sits. A
-    weekly cron is the case where a host-local reading lands the run on the wrong CALENDAR
-    DAY, not merely at the wrong hour. The schedule script reads it when it runs; a changed
-    value reaches a schedule at its next restart (`meiva schedules restart <id>`)."""
     return Clock.from_settings().timezone
 
 
@@ -42,6 +35,11 @@ def _as_utc(value: datetime, *, field: str) -> datetime:
     return value.astimezone(UTC)
 
 
+# meiva:note
+# The durable claim commits before the callback, so concurrent runners and later restarts
+# get one winner and the callback receives the claimed UTC slot; a crash after the claim
+# loses that slot instead of retrying it, and a callback failure still leaves it committed.
+# meiva:link schedules/README.md
 def fire_slot_once(
     db: Database,
     slot_fire_at: datetime,
@@ -50,14 +48,6 @@ def fire_slot_once(
     fire: Callable[[datetime, _Payload], None],
     schedule_id: int | None = None,
 ) -> bool:
-    """Claim one cron slot and invoke ``fire`` exactly when this caller wins.
-
-    The durable claim gives concurrent processes and later restarts one winner.
-    The callback receives the claimed UTC slot and its payload after commit.
-    ``True`` means this caller claimed and invoked the callback; ``False`` means
-    the slot was already claimed. Callback failures propagate while the claim
-    remains committed, preserving the feature's explicit at-most-once posture.
-    """
     resolved_id = _schedule_id(schedule_id)
     slot = _as_utc(slot_fire_at, field="slot_fire_at")
     with db.write_transaction() as conn, conn.cursor() as cur:
