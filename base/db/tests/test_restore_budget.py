@@ -156,10 +156,11 @@ def _restore_in_a_thread(
 # lock stands in for a 2026-10-17 acquire: the backend is waiting on the server
 # and only a budget can end the wait. Falsification: the same restore under a
 # budget longer than the wait is still blocked while the short-budget one has
-# already failed. Both timers carry the budget, so either one may end it — the
-# test accepts either and requires the event to name the one that did. The
-# connection is the pool's default (non-autocommit), so the restore's closing
-# commit() is a real round trip here.
+# already failed. Both budgets carry the same value and the transaction timer
+# starts at BEGIN, a hair before the first statement, so it is the one that ends
+# this wait — pinned here so a grace interval later added to the transaction
+# budget turns this red. The connection is the pool's default (non-autocommit),
+# so the restore's closing commit() is a real round trip here.
 def test_the_budget_ends_a_restore_stuck_on_a_locked_table(
     db_url: str, events: list[dict[str, Any]]
 ) -> None:
@@ -176,13 +177,11 @@ def test_the_budget_ends_a_restore_stuck_on_a_locked_table(
         assert not thread.is_alive(), "the restore ignored its 1s budget"
         assert time.monotonic() - started < 5.0
         assert failures, "the restore must fail at its budget"
-        assert isinstance(
-            failures[0], (psycopg.errors.QueryCanceled, psycopg.errors.TransactionTimeout)
-        ), failures
+        assert isinstance(failures[0], psycopg.errors.TransactionTimeout), failures
         (reported,) = [event for event in events if event.get("event") == "db_pool_restore_timeout"]
         assert (reported["name"], reported["budget_ms"]) == ("tests:restore", 1000)
         assert reported["elapsed_ms"] >= 900, "the event must carry the wait it measured"
-        assert reported["ended_by"] in {"statement_timeout", "transaction_timeout"}
+        assert reported["ended_by"] == "transaction_timeout"
 
         thread, _failures = _restore_in_a_thread(
             slow_conn, _Gate(read_due=True), budget_seconds=600.0
