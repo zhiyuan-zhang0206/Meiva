@@ -11,9 +11,9 @@ exports = ["lm", "model_catalog.py", "plugin_config"]
 "test_update_disk_images.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
-"test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.meiva_home" = 1
 "test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.command_dirs" = 6
 "test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.external_plugin_read_root" = 1
+"test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.meiva_home" = 1
 "test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.repo_plugins_dir" = 1
 "test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.repo_root" = 1
 "test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.settings.agent.commands_enabled" = 2

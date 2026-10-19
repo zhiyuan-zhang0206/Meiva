@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -77,3 +78,49 @@ def test_non_positive_agent_id_is_refused(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "sessions")
     with pytest.raises(ValueError):
         registry.path(0)
+
+
+# meiva:note
+# The registry outlives the field that names a harness: records written before it
+# existed must still load, and a record must never be resumed by a different
+# harness than the one that wrote it. These three tests are the contract.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def legacy_document() -> dict[str, object]:
+    return {
+        "agent_id": 6984,
+        "session_id": "sess-legacy",
+        "cwd": "/workspace/agent",
+        "model": "claude-sonnet-5-5",
+        "created_at": "2026-10-19T08:00:00+00:00",
+        "updated_at": "2026-10-19T08:00:00+00:00",
+        "resumes": 0,
+    }
+
+
+def test_a_record_without_a_harness_reads_as_the_legacy_default(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    path = registry.path(6984)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(legacy_document()), encoding="utf-8")
+    loaded = registry.load(6984)
+    assert loaded is not None
+    assert loaded.harness == "meiva"
+    assert loaded.session_id == "sess-legacy"
+
+
+def test_a_saved_record_names_its_harness(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    registry.save(replace(record(), harness="codex"))
+    stored = json.loads(registry.path(6984).read_text(encoding="utf-8"))
+    assert stored["harness"] == "codex"
+    loaded = registry.load(6984)
+    assert loaded is not None
+    assert loaded.harness == "codex"
+
+
+def test_a_record_from_another_harness_is_refused(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    registry.save(replace(record(), harness="codex"))
+    with pytest.raises(ValueError, match="refusing to resume across harnesses"):
+        registry.load(6984, harness="claude")
+    assert registry.load(6984, harness="codex") is not None

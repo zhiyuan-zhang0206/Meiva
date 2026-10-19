@@ -53,6 +53,7 @@ from base.agents.history.delta_read_compat import recovery_reconstruction_scope
 from base.agents.incarnation.native_work_models import NativeWorkTarget, NativeWorkUncertainError
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
+from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentity
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
@@ -62,12 +63,15 @@ from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.lm.harness.registration import RegistrationStore
+from base.lm.harness.registry import FileSessionRegistry
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
+from base.paths import harness_registrations_dir, harness_sessions_dir
 from base.telemetry.tracing import turn_span
 from services.agent_runner.agent_host.force_termination import (
     force_termination_outcome,
@@ -91,6 +95,7 @@ from services.agent_runner.agent_host.lifecycle import maintenance as maintenanc
 from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
 from services.agent_runner.agent_host.runtime import (
     AgentRuntime,
+    HarnessSessions,
     HostPolicy,
     HostStats,
     TurnOutcome,
@@ -169,6 +174,14 @@ class AgentHost:
         self._machine = machine.name()
         self._owner = uuid4()
         self._runtimes: OrderedDict[int, AgentRuntime] = OrderedDict()
+        # meiva:note
+        # One registry for every external session this host starts: the agent id ->
+        # session id documents a resume reads, shared by all harnesses and scoped per
+        # harness at each bridge. File-backed, so it outlives this process.
+        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+        self._harness_registry = FileSessionRegistry(harness_sessions_dir())
+        self._registrations = RegistrationStore(harness_registrations_dir())
+        self._sessions = HarnessSessions(self._registrations)
         self._rejected_configs: dict[int, str] = {}
         self._normalized_configs: dict[int, str] = {}
         # Eviction preserves in-flight runtimes so the next turn can reuse the same build.
@@ -285,6 +298,7 @@ class AgentHost:
         """Run to idle, re-reading ownership and configuration each turn boundary.
         Restart overlays reach the next turn even when its model remains cached.
         """
+        await self._sessions.start()
         # Reset before any admission await: recovery may take time, and the
         # dispatcher's stall scan must not cancel this turn using its predecessor's clock.
         self.turn_progress.reset(agent_id)
@@ -377,6 +391,7 @@ class AgentHost:
                             slices,
                             incarnation=incarnation,
                             checkpoints=checkpoints,
+                            harness=Harness(stored.harness),
                         )
                         outcome = await self._drive_turns(
                             agent_id,
@@ -498,6 +513,7 @@ class AgentHost:
         *,
         incarnation: RuntimeIncarnation,
         checkpoints: TurnCheckpoints | None = None,
+        harness: Harness = Harness.MEIVA,
     ) -> AgentRuntime:
         """Build a cold/stale model from this turn's slices, or retain its cache."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
@@ -507,10 +523,20 @@ class AgentHost:
             agent_id,
             fingerprint,
             slices,
-            partial(self._build_runtime, incarnation=incarnation, checkpoints=checkpoints),
+            partial(
+                self._build_runtime,
+                incarnation=incarnation,
+                checkpoints=checkpoints,
+                harness=harness,
+            ),
             self._evict,
         )
 
+    # meiva:note
+    # Every hosted turn builds its runtime here, so this is where the agent's retired
+    # session is joined: without that wait the next turn starts a second CLI on the
+    # session id the first one still holds.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
     async def _build_runtime(
         self,
         agent_id: int,
@@ -519,9 +545,11 @@ class AgentHost:
         *,
         incarnation: RuntimeIncarnation | None,
         checkpoints: TurnCheckpoints | None = None,
+        harness: Harness = Harness.MEIVA,
     ) -> AgentRuntime:
         """Reconcile claimed inbounds, then prepare the model."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
+        await self._sessions.join(agent_id)
         await consume_claimed_inbounds(
             self._pool, agent_id, incarnation=incarnation, unknown_execution=True
         )
@@ -531,13 +559,19 @@ class AgentHost:
             slices,
             catalog=self._catalog,
             llm_override=self._policy.llm_override(),
+            harness=harness,
+            registry=self._harness_registry,
+            registrations=self._registrations,
+            registration_ttl_seconds=self._policy.harness_registration_ttl_seconds(),
+            machine=self._machine,
         )
 
     def _evict(self) -> None:
         """Evict settled runtimes by idle age and least-recent use."""
-        evict_runtimes(
+        for agent_id, runtime in evict_runtimes(
             self._runtimes, self._in_flight, policy=self._policy.cache(), now=time.monotonic()
-        )
+        ):
+            self._sessions.retire(agent_id, runtime)
 
     async def last_active_at(self, agent_id: int) -> datetime | None:
         """Read the scheduler's actual LLM activity clock."""
@@ -551,8 +585,33 @@ class AgentHost:
         """Forget an agent's cached runtime — the hosted equivalent of the
         fresh-process half of `meiva.self.restart()`. The checkpointer thread, the
         real state, is untouched, exactly as a process restart leaves it."""
-        self._runtimes.pop(agent_id, None)
+        runtime = self._runtimes.pop(agent_id, None)
+        if runtime is not None:
+            self._sessions.retire(agent_id, runtime)
         self.relays.drop(agent_id)
+
+    # meiva:note
+    # Shutdown retires what the cache still holds: an external session is a child
+    # process, and leaving it to the exit path would orphan a CLI that still holds the
+    # transcript. The close runs even when a joined service reported a primary failure,
+    # because a leaked session survives the process that owns it. Sessions retired
+    # earlier (a dropped runtime) are joined here through their own owner.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    async def _close_runtimes(self) -> None:
+        runtimes = list(self._runtimes.values())
+        self._runtimes.clear()
+        for runtime in runtimes:
+            bridge = runtime.harness_bridge
+            if bridge is None:
+                continue
+            try:
+                await bridge.close(reason="host shutdown")
+            except Exception:
+                logger.exception(
+                    "closing an external harness session failed during shutdown",
+                    event="harness_close_failed",
+                )
+        await self._sessions.aclose()
 
     async def _drive_turns(
         self,
@@ -588,6 +647,8 @@ class AgentHost:
             hosted_resources=resources,
             clients=self._clients,
             # The dispatcher owns subscriptions; an empty claim ends this task.
+            harness=runtime.harness,
+            harness_bridge=runtime.harness_bridge,
         )
         return await drive_context(
             self._control_pool,
@@ -708,7 +769,7 @@ class AgentHost:
             lambda: release_hosted_owner(
                 self._control_pool, self._machine, self._owner, self._in_flight
             ),
-            clear_runtimes=self._runtimes.clear,
+            close_runtimes=self._close_runtimes,
             resource_deadline=resource_deadline,
             release_timeout=RELEASE_OWNER_TIMEOUT_S,
         )

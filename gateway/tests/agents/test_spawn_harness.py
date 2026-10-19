@@ -52,8 +52,8 @@ def _refused_launch(client: TestClient, body: dict[str, object]) -> tuple[int, d
 class TestSpawnHarness:
     def test_spawn_records_the_requested_harness(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            agent, _ = _refused_launch(client, {"harness": "codex"})
-        assert _harness(db_conn, agent) == "codex"
+            agent, _ = _refused_launch(client, {"harness": "antigravity"})
+        assert _harness(db_conn, agent) == "antigravity"
 
     def test_spawn_without_a_harness_runs_the_builtin_runtime(
         self, db_conn: psycopg.Connection
@@ -96,7 +96,7 @@ class TestSpawnHarness:
 
     def test_fork_naming_its_own_harness_is_not_refused(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            source, _ = _refused_launch(client, {"harness": "codex"})
+            source, _ = _refused_launch(client, {"harness": "antigravity"})
             _checkpoint(db_conn, source)
-            fork, _ = _refused_launch(client, {"fork_from": source, "harness": "codex"})
-        assert _harness(db_conn, fork) == "codex"
+            fork, _ = _refused_launch(client, {"fork_from": source, "harness": "antigravity"})
+        assert _harness(db_conn, fork) == "antigravity"

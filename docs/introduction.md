@@ -316,7 +316,7 @@ cluster; that has to come from outside Meiva today. Full policy and reporting:
 |---|---|
 | DB | Postgres 17 |
 | Cache | Redis 8.2 |
-| Framework | LangGraph (8-node self-looping graph) |
+| Framework | LangGraph (self-looping graph) |
 | SDK | `meiva` (this repo) |
 | Models | 8 providers side by side (DeepSeek, Claude, Gemini, GPT, MiMo, Kimi, GLM, Qwen) — picked once per agent at spawn, never routed at runtime ([why](conventions/non-goals.md)) |
 | Package manager | uv |

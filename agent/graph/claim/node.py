@@ -74,7 +74,7 @@ from ._dispatch import by_who as by_who
 from ._dispatch import handle_heartbeat as handle_heartbeat
 from ._dispatch import render_restart_completed_marker as render_restart_completed_marker
 from ._present import publish_end_timeline_snapshot, publish_inbound_committed
-from ._routing import ClaimGoto, resolve_routing
+from ._routing import ClaimGoto, resolve_routing, route_target
 
 
 def claim_will_idle(state: _state.AgentState) -> bool:
@@ -111,7 +111,7 @@ async def claim_node_impl(
     if ctx.ops_pool is None:
         if state.halted:
             return Command[ClaimGoto](goto=END)
-        return Command[ClaimGoto](update={"halted": False}, goto=BEFORE_LLM)
+        return Command[ClaimGoto](update={"halted": False}, goto=route_target(ctx, BEFORE_LLM))
 
     agent_id = agent_id_from_config(config)
     marker = await observe_bound_cancel(
@@ -159,7 +159,7 @@ async def claim_node_impl(
         )
         return Command[ClaimGoto](
             update={"halted": False, "turn_active": True},
-            goto=BEFORE_LLM,
+            goto=route_target(ctx, BEFORE_LLM),
         )
 
     # ── Routing: resolve winner once ──
@@ -203,7 +203,7 @@ async def claim_node_impl(
     # branch, which never flips the row).
     update["exit_requested"] = (st.next_goto == END) and not st.restart_requested
     update["restart_requested"] = st.restart_requested
-    return Command[ClaimGoto](update=update, goto=outcome.command.goto)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportArgumentType]
+    return Command[ClaimGoto](update=update, goto=route_target(ctx, outcome.command.goto))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportArgumentType]
 
 
 async def claim_node(

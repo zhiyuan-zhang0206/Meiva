@@ -83,6 +83,7 @@ async def start(
 
         sdk.ClaudeSDKClient = without_transport
     scripted_probe = probe if probe is not None else ScriptedProbe()
+    sdk.probe = scripted_probe
     if observe_pid:
         scripted_probe.alive.add(CLI_PID)
     session = ClaudeSession(
