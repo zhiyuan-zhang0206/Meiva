@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from base.host.runtime_interpreter import source_digest
+from base.log import logger
 
 _KEY_FILE = "meiva-build-key"
 
@@ -99,7 +100,9 @@ def ensure_build(
     # construction, and the next start rebuilds.
     current = key(frontend_dir, gateway_port=gateway_port, browser_origin=browser_origin)
     if current is not None and is_current(frontend_dir, current):
+        logger.info("frontend build is current for {}; reusing .next", frontend_dir)
         return 0
+    logger.info("frontend build inputs changed for {}; running npm run build", frontend_dir)
     code = build(frontend_dir)
     if code != 0:
         return code
