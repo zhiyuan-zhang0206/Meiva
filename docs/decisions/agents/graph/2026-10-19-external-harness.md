@@ -380,3 +380,75 @@ executed on the login machine.
   with SIGKILL leaves the CLI reparented to init and still holding the session.
   The supervisor must sweep leftover `claude` children on agent restart, keyed by
   the session id in the registry, before starting a new session.
+
+## 15. Measured: Antigravity's cancel semantics (2026-10-19, agy 1.4.2)
+
+**SIGINT stops the CLI, not its tools.** Measured: after an interrupt, `agy` exits
+while the `bash -c 'sleep 90'` and `sleep 90` it spawned are still alive eight
+seconds later. This is a different path from the normal turn end, where the CLI
+does clean up after itself; only cancellation leaves the tree behind.
+
+**The adapter reaps, not the caller.** Three reasons, and they hold for every
+harness: only the adapter knows the descendant tree at the moment of
+cancellation; the turn is already over, so the model cannot track those processes
+any more; and the four adapters must be interchangeable, so one that reaps and
+one that does not would make the same contract mean two different things. The
+sweep is unconditional rather than switchable — a switch is exactly where this
+bug would live again.
+
+**Report honestly.** `settled=True` only when nothing survived. Survivors set
+`settled=False` with `remaining` naming them; a clean cancellation is never
+claimed on a partial sweep.
+
+**Resume re-injection was a real bug.** A takeover resumed with
+`--conversation <id>` kept its history, but the explicit `start(resume=...)` path
+never set `resumed`, so the handoff was injected a second time — invariant 7
+broken. The registry path covered it; the explicit path did not. Regression test
+added. The lesson generalises: "resume does not replay history" is a property of
+the runtime, while "we do not re-inject" is a property of *every* resume entry
+point in our code, and only tests can hold the second one.
+
+## 16. External processes and the SDK: `attach` (2026-10-19)
+
+**The problem.** A harness runs the agent loop in its own process. The handoff
+document is not enough: that process needs the SDK, and a bare
+`python -c "import meiva; meiva.tasks.get(...)"` raises
+`RuntimeError: event emission requires an initialized process pipeline or
+producer`. Measured both inside the dsh sandbox and on the host, so it is not a
+sandbox property: `meiva.*` needs an initialized process context.
+
+**The seam already exists.** `meiva.impersonation.attach(session_id,
+agent_id=...)` is a context manager that boots config, machine, database and
+client set, binds a borrowed `MeivaContext`, initializes the telemetry pipeline
+and the SDK state, gates every SDK call, and flushes plugin state on exit.
+`meiva impersonate exec --file` is the CLI wrapper around it. A harness needs the
+same thing with its own identity.
+
+**Shape.** `meiva.harness.attach(handle=None, *, agent_id=None, session_id=None)`
+returns the same object (`flush` / `close` / `native_snapshot`, usable as a
+context manager). It is a controller-facing entry: like `impersonation.attach` it
+is not part of the agent-facing SDK surface.
+
+**The handle.** An opaque `hx_<random>` string whose SHA-256 the registry stores;
+the bridge passes the plain value to the harness child through
+`MEIVA_HARNESS_HANDLE`. Deliberately **not** a workspace file: the sandbox can
+read everything and write only the workspace, so a file would hand the token to
+the agent it authorises. Validation is threefold on every SDK call — the row is
+active and unexpired, the machine matches, and the calling process descends from
+the recorded controller pid (the harness analogue of the takeover's
+process-tree rule).
+
+**What an attached harness agent may do.** Default profile: `read`,
+`files.write`, `shell`, `tasks.write`, `agents.message`, `ui`. Not granted:
+`self.lifecycle` (the harness process is not the agent's own turn loop, so
+compaction, restart and termination stay with the bridge, exactly as for a
+takeover), `agents.control`, `agents.spawn` (recursion), `schedule` (outlives the
+session), and `external.model` (spends money and sends local content out of the
+cluster).
+
+**Why not MCP, and why not a sidecar.** MCP would add a process, a tool
+description and a second interaction model for the same capability, and the
+sidecar bridge adds a service, an auth scheme and its own version surface. The
+kernel gives the harness the same `meiva.*` calls the native agent makes, with
+the same gate and the same telemetry, which is the point of having one logic with
+two entry points.
