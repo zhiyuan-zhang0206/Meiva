@@ -164,13 +164,13 @@ def test_file_rows_desc_plus_body_chunks() -> None:
     content = "---\ntype: Memory\ndescription: hand off to 402\n---\n\n" + "\n\n".join(
         f"paragraph-{i} " + "word " * 80 for i in range(6)
     )
-    rows = chunking._file_rows(content)
+    rows = chunking.chunk_rows(content)
     assert rows[0] == ("desc", 0, "hand off to 402")
     assert [k for k, _, _ in rows] == ["desc", "body", "body"]
 
 
 def test_file_rows_no_frontmatter_no_desc() -> None:
-    assert chunking._file_rows("# heading\n\nshort body") == [
+    assert chunking.chunk_rows("# heading\n\nshort body") == [
         ("body", 0, "# heading\n\nshort body")
     ]
 
