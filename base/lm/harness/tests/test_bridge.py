@@ -137,16 +137,49 @@ def handoff(agent_id: int = 6984) -> Handoff:
     )
 
 
-async def test_a_turn_returns_its_own_reply_and_counts_the_opening_turn() -> None:
+async def test_a_turn_returns_its_own_reply_and_the_opening_turn_as_a_prelude() -> None:
     session = FakeSession(opening="acknowledged")
     bridge = make_bridge(session, handoff=handoff())
 
     turn = await bridge.run_turn("hello", key="inbound-7")
 
     assert turn.text == "reply-t2", "the handoff turn's text is not this turn's reply"
-    assert turn.usage.input_tokens == 110, "both completions are counted, none is dropped"
+    assert turn.usage.input_tokens == 10, "a turn reports its own usage"
+    assert [opening.text for opening in turn.prelude] == ["acknowledged"]
+    assert turn.prelude[0].usage.input_tokens == 100, "the opening turn keeps its own row"
     assert [submitted[1] for submitted in session.submitted] == ["handoff", "inbound-7"]
     assert bridge.model == "claude-sonnet-5-5"
+
+
+async def test_a_later_turn_has_no_prelude() -> None:
+    bridge = make_bridge(FakeSession(opening="acknowledged"), handoff=handoff())
+
+    await bridge.run_turn("one", key="inbound-1")
+    turn = await bridge.run_turn("two", key="inbound-2")
+
+    assert turn.prelude == (), "the opening turn is reported once, on the turn that waited for it"
+
+
+async def test_a_faulted_turn_retires_its_session_and_the_next_one_starts_fresh() -> None:
+    faulted, fresh = FakeSession(fault="cli died"), FakeSession()
+    sessions = [faulted, fresh]
+    bridge = HarnessBridge(
+        Harness.CLAUDE_CODE,
+        6984,
+        lambda _handle: sessions.pop(0),
+        machine="macmini",
+        handoff=handoff(),
+    )
+
+    with pytest.raises(HarnessTurnFaultedError, match="cli died"):
+        await bridge.run_turn("hello", key="inbound-1")
+
+    assert faulted.closed, "a faulted session is dropped, not reused for the next inbound"
+    turn = await bridge.run_turn("again", key="inbound-2")
+
+    assert turn.text == "reply-t1", "the rebuilt session runs its own first turn"
+    assert fresh.started == 1
+    assert fresh.handoff is None, "a resume carries the transcript, so no second handoff"
 
 
 async def test_the_handoff_is_injected_once_and_the_session_started_once() -> None:
@@ -269,7 +302,6 @@ def test_the_scope_refuses_an_explicit_other_harness() -> None:
 def test_a_session_registers_its_handle_digest_and_retires_the_line(tmp_path: Path) -> None:
     store = RegistrationStore(tmp_path / "registrations")
     session = FakeSession()
-    bridge = make_bridge(session, registrations=store)
     handles: list[str] = []
     bridge = HarnessBridge(
         Harness.CLAUDE_CODE,

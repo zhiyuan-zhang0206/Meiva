@@ -11,9 +11,11 @@ from base.lm.harness.handoff import Handoff
 # meiva:note
 # What one harness turn produced, in the terms the graph already accounts for: the
 # reply text, the provider usage the turn reported, and the turn boundary that
-# closed it. `usage` sums every turn completion this call observed, because a
-# session started with a handoff runs that document as its first turn and the
-# waiter sees both completions; normally they are one and the same.
+# closed it. `prelude` holds the turns that completed earlier in the same wait: a
+# session started with a handoff runs that document as its first turn, so the waiter
+# sees two completions. Each one keeps its own text and usage, which is what lets the
+# graph commit the handoff turn as its own message instead of folding it into the
+# reply — normally the prelude is empty.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 @dataclass(frozen=True, slots=True)
 class HarnessTurn:
@@ -24,6 +26,7 @@ class HarnessTurn:
     subtype: str
     is_error: bool
     interrupted: bool
+    prelude: tuple[HarnessTurn, ...] = ()
 
 
 # meiva:note
