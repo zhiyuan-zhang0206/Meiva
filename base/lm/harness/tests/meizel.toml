@@ -1,0 +1,3 @@
+[uses]
+"test_handoff.py" = []
+"test_registry.py" = []

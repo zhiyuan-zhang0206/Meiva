@@ -2,7 +2,7 @@
 # Direct `build_chat_model(...).invoke()` calls write one llm_usage row (task #5327). These
 # tests drive the real factory through its documented MEIVA_LLM_OVERRIDE seam and assert on
 # the emitted loguru event - the same record the event pipeline stores.
-# meiva:link base/lm/docs/usage.meiva.okf.md
+# meiva:link base/lm/usage/docs/usage.meiva.okf.md
 
 from __future__ import annotations
 
@@ -23,10 +23,9 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from loguru import logger
 
 from base.config.tests.configuration import model_overrides
-from base.lm import metering
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import build_chat_model
-from base.lm.usage import log_usage_from_message
+from base.lm.usage import log_usage_from_message, metering
 from base.log.tests.log_records import LogRecords
 from base.telemetry import process_state
 
