@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Fleet update window guarantees
-description: What refuses, gates and surrounds the cli.fleet_update stops — preflight, stored schedules, the keep decision, the silence and the log.
+description: What refuses, gates and surrounds the cli.fleet_update stops — preflight, the lease announcement, stored schedules, the keep decision, the silence and the log.
 tags: [cli, updates, operations]
 ---
 
@@ -20,6 +20,31 @@ closing the silence only after `up` passes all verification.
 Each listed host is probed in its own shell before anything is touched. The
 probe uses `printf` because zsh's and dash's `echo` reinterprets backslashes,
 which once mangled a hold record carrying a quoted `$HOME`.
+
+## The lease announcement
+
+The stops end every external takeover that is running: a host or native
+restart never adopts a relay across incarnations, so a lease that is active
+when the cluster stops is aborted mid-task and its executor loses control
+([agent impersonation hosts](../../docs/conventions/agents/agent-impersonation-hosts.md)). The rule
+therefore has a carrier, not only a sentence here: `down` reads
+`agent_impersonations` rows with `status='active'` on the gateway host before
+anything stops — under `--dry-run` too, in the same words — and names each
+lease's agent, session, executor and expiry, followed by one warning that the
+stop ends them. `cli/fleet_leases.py` is a real file whose text ships to the
+host, like the silence and roster programs, so its imports stay visible to the
+reader and the first update that carries it already has it. The filter is the
+status the table holds rather than the clock: a stopped cluster's reaper lags,
+and the row still marked active is exactly the one the stop would end. A table
+that cannot be read only warns; an unreadable lease list must not strand a
+window.
+
+`--lease-confirm-seconds` (default 0) then holds the stops open for that long
+with a printed countdown, so the operator can release or renew a lease first.
+The default waits for nobody: the operator chose the window and the leases are
+named before the first stop, so an ordinary update never pays a pause; a wave
+that must not end a takeover passes the window explicitly. `--dry-run` reports
+the window and does not sleep.
 
 ## The stored-schedule gate
 
@@ -63,6 +88,8 @@ down refuses before touching anything — exit 2, no effects — when a listed h
 Before anything stops — under --dry-run too — down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table refuses with the rows listed unless --allow-red-schedules.
 
 down runs the keep decision as a subprocess of scripts/host_ops/fleet_update_keep.py on this interpreter; every failure — missing script, timeout, non-zero exit, unusable output — returns no keeps with one WARNING and the stops restart everything; the verdicts ride every stop as --keep-service flags; --restart-all skips the decision; a rerun over hosts already on NEW passes NEW as both revisions.
+
+Before anything stops — under --dry-run too, in the same words — down reads the gateway's agent_impersonations rows with status='active' and names each lease by agent, session, executor and expiry, followed by one warning that the stops end them; a read that fails only warns and the window goes on; --lease-confirm-seconds (default 0, report only) holds the stops open that long with a countdown, and dry-run prints that window without sleeping.
 
 down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry --silence-hours (default 4); up expires it after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
 
