@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import dataclasses
-import importlib
 from collections.abc import Mapping
 from typing import Any, Self, cast
 
@@ -18,7 +17,6 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import DatabaseFactory
 from base.agents.context.external_attachment import ExternalAttachment
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
@@ -32,7 +30,12 @@ from base.host.env.agent_slices import PluginConfigView
 from base.native_process.code_version import CodeVersion
 from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
-from meiva.boot import initialize_context, process_clients
+from meiva.boot import (
+    boot_external_process,
+    initialize_context,
+    plugin_state_codec,
+    process_clients,
+)
 from meiva.sdk_surface import process_context
 
 __all__ = ["Attachment", "attach"]
@@ -67,7 +70,7 @@ def _attachment_database(
 
 
 def _agent_codec() -> Any:
-    return importlib.import_module("agent.extensions.plugin_state_codec")
+    return plugin_state_codec()
 
 
 class _Codec:
@@ -150,25 +153,19 @@ class Attachment(ExternalAttachment):
 
     def _prepare(self) -> None:
         bound = self._prior_context
-        config = None if bound is not None else ConfigBoot()
-        if config is not None:
-            config.read_process_environment()
+        boot = boot_external_process(
+            bound,
+            config_factory=ConfigBoot,
+            build_clients=process_clients,
+            machine_reader=machine_from_boot,
+            clock_builder=clock_config_from_boot,
+        )
+        config = boot.config
         self._boot_config = config
-        self._clock_factory = (
-            bound.require_clock
-            if bound is not None
-            else (
-                lambda: Clock(
-                    clock_config_from_boot(cast(ConfigBoot, config)), timers=SYSTEM_TIMERS
-                )
-            )
-        )
-        self._machine = (
-            bound.require_machine()
-            if bound is not None
-            else machine_from_boot(cast(ConfigBoot, config))
-        )
-        self._database = _attachment_database(bound, config=config, machine=self._machine)
+        self._clock_factory = boot.clock_factory
+        self._machine = boot.machine
+        self._database = boot.database
+        self._own_clients = boot.clients
         if self._lease_session_id is not None:
             from base.agents.impersonation.sessions import private_id
 
@@ -177,10 +174,6 @@ class Attachment(ExternalAttachment):
                 cast(int, self._lease_agent_id),
                 self._lease_session_id,
                 local_machine=self._machine.name(),
-            )
-        if bound is None:
-            self._own_clients = process_clients(
-                database=self._database, config=config, machine=self._machine
             )
         lease = self._lease()
         self.agent_id = int(lease["agent_id"])

@@ -969,6 +969,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva/impersonation/harness/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva/mcps/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

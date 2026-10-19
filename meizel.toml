@@ -27,7 +27,7 @@ tests = ["tests"]
 frontend = ["ui"]
 
 [debt.cycle-edge]
-"meiva/impersonation/attachment.py -> agent/extensions" = 1
+"meiva/boot.py -> agent/extensions" = 1
 "scripts/codegen/dump_openapi.py -> gateway/app.py" = 1
 "scripts/content_lint/check_doc_references.py -> cli/parsers/__init__.py" = 1
 "scripts/entrypoints/gateway.py -> gateway/app.py" = 1

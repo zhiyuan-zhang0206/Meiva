@@ -6,24 +6,40 @@
 # while bound calls retain the attachment's own producer. A reload must preserve the
 # first-loaded code image and process-context slots instead of relabeling or clearing
 # already-running code.
+#
+# Booting an external process is the same work whoever borrowed the identity: read
+# the launch environment, resolve the machine, build the database factory, and
+# (only when nothing is bound yet) own a client set. The clock factory comes from
+# here too because an independent attachment has no process clock to inherit. The
+# takeover and the harness differ in *what proves the identity*; they must not
+# differ in how the process around it is built, or a fix to one boot path silently
+# misses the other. The plugin-state codec lives here for the same reason: the
+# agent layer owns it, both attachments replay through it, and one load site keeps
+# the upward edge counted once.
 # meiva:link meiva/docs/boot-contracts.meiva.okf.md
+# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
 
 from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from dataclasses import replace
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import Any, cast
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
-from base.clock.configuration import clock_config_from_boot
+from base.clock.configuration import ClockConfig, clock_config_from_boot
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
+from base.native_process.code_version import CodeVersion
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.loading import StateGate
 from meiva.mcps import McpClients
@@ -390,3 +406,68 @@ def bind_launched_context() -> MeivaContext | None:
     process_context.bind_context(launched)
     atexit.register(launched.clients.close)
     return launched
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalBoot:
+    config: ConfigBoot | None
+    machine: MachineIdentity
+    database: DatabaseFactory
+    clients: ClientSet | None
+    clock_factory: Callable[[], Clock]
+
+
+def boot_external_process(
+    bound: MeivaContext | None,
+    *,
+    config_factory: Callable[[], ConfigBoot] = ConfigBoot,
+    build_clients: Callable[..., ClientSet] = process_clients,
+    machine_reader: Callable[[ConfigBoot], MachineIdentity] = machine_from_boot,
+    clock_builder: Callable[[ConfigBoot], ClockConfig] = clock_config_from_boot,
+) -> ExternalBoot:
+    config = None if bound is not None else config_factory()
+    if config is not None:
+        config.read_process_environment()
+    clock_factory: Callable[[], Clock] = (
+        bound.require_clock
+        if bound is not None
+        else (lambda: Clock(clock_builder(cast("ConfigBoot", config)), timers=SYSTEM_TIMERS))
+    )
+    machine = (
+        bound.require_machine() if bound is not None else machine_reader(cast("ConfigBoot", config))
+    )
+    database = _external_database_factory(bound, config=config, machine=machine)
+    clients = (
+        None
+        if bound is not None
+        else build_clients(database=database, config=config, machine=machine)
+    )
+    return ExternalBoot(
+        config=config,
+        machine=machine,
+        database=database,
+        clients=clients,
+        clock_factory=clock_factory,
+    )
+
+
+def plugin_state_codec() -> Any:
+    import importlib
+
+    return importlib.import_module("agent.extensions.plugin_state_codec")
+
+
+def _external_database_factory(
+    bound: MeivaContext | None, *, config: ConfigBoot | None, machine: MachineIdentity
+) -> DatabaseFactory:
+    if bound is not None:
+        return bound.clients.database
+    if config is None:
+        raise RuntimeError("an independent attachment needs its configuration owner")
+    version = CodeVersion(process_context.loaded_code_image())
+    gate = ProcessDbGate(version=version.get, process="unknown")
+    return lambda: Database(
+        db_config_from_boot(config),
+        gate=gate,
+        direct_url=ClusterDirectUrl(machine.host),
+    )

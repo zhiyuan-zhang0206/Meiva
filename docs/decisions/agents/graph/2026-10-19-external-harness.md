@@ -424,7 +424,7 @@ and the SDK state, gates every SDK call, and flushes plugin state on exit.
 `meiva impersonate exec --file` is the CLI wrapper around it. A harness needs the
 same thing with its own identity.
 
-**Shape.** `meiva.harness.attach(handle=None, *, agent_id=None, session_id=None)`
+**Shape.** `meiva.impersonation.harness.attach(handle=None, *, agent_id=None, session_id=None)`
 returns the same object (`flush` / `close` / `native_snapshot`, usable as a
 context manager). It is a controller-facing entry: like `impersonation.attach` it
 is not part of the agent-facing SDK surface.
@@ -438,13 +438,22 @@ active and unexpired, the machine matches, and the calling process descends from
 the recorded controller pid (the harness analogue of the takeover's
 process-tree rule).
 
-**What an attached harness agent may do.** Default profile: `read`,
-`files.write`, `shell`, `tasks.write`, `agents.message`, `ui`. Not granted:
-`self.lifecycle` (the harness process is not the agent's own turn loop, so
-compaction, restart and termination stay with the bridge, exactly as for a
-takeover), `agents.control`, `agents.spawn` (recursion), `schedule` (outlives the
-session), and `external.model` (spends money and sends local content out of the
-cluster).
+**What an attached harness agent may do.** The same as a native agent: there is
+no capability gate. The user ruled on 2026-10-19 that a stored declaration is a
+record, never a check, and the takeover path's gate was reverted; giving the
+harness path the same abstraction under a new name would restore what was
+removed. Admission therefore keeps only the two rejections main already applies
+to a borrowed identity — the registration is no longer attached or has expired,
+and the attachment is closed — and they live in one place (`admit_sdk_call`),
+not in a per-call capability table.
+
+Lifecycle self-calls are a **convention, not a rule**: `compact`, `restart` and
+`terminate` belong to the bridge that owns the session, and adapter authors
+should not issue them. What enforces that is not our code but the SDK's own
+`assert_self_action`, which requires the caller to own the agent's turn loop — a
+provider harness process never does, so the call is refused on that ground.
+Spawning agents, scheduling and spending on `understand` are likewise review
+conventions for adapter authors, not runtime boundaries.
 
 **Why not MCP, and why not a sidecar.** MCP would add a process, a tool
 description and a second interaction model for the same capability, and the
