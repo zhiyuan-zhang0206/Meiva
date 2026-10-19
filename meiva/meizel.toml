@@ -17,3 +17,6 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 "understand" = ["files.py", "sdk_surface", "security.py"]
 "watcher" = ["sdk_surface", "shell"]
 "web" = ["sdk_surface", "security.py"]
+
+[loads]
+"boot.py" = ["agent/extensions"]

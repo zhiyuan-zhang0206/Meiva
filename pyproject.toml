@@ -844,6 +844,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/acp/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/lm/harness/antigravity/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -855,6 +860,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/lm/harness/codex/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/deepseek/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -960,6 +970,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva/gateway_client/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/impersonation/harness/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

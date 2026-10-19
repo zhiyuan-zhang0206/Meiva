@@ -1,7 +1,4 @@
-exports = ["attachment.py"]
+exports = ["attachment.py", "harness"]
 
 [uses]
 "__init__.py" = ["attachment.py"]
-
-[loads]
-"attachment.py" = ["agent/extensions"]

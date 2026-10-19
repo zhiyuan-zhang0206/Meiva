@@ -25,6 +25,7 @@
 "base/packages/plugins/config_face.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "base/packages/plugins/loading/plugin_loader.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "cli/commands/agents/impersonation.py" = "runs the Python the operator pipes in or names as a file"
+"cli/commands/harness.py" = "runs the Python file or stdin the operator names, inside a harness attachment: the operator-authored program is run content, not a dependency of this repository"
 "cli/commands/extensions/_plugin_scaffold.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "cli/commands/management/schedule_verify_child.py" = "dry-runs the imports of a user-written schedule script and checks its syntax"
 "gateway/inspect/_plugin_metrics.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
@@ -44,7 +45,7 @@
 "tests/e2e/fakes/child_budget_writer.py" = "executes the generated scenario program passed on its command line"
 
 [loads]
-"meiva/impersonation/attachment.py" = ["agent/extensions"]
+"meiva/boot.py" = ["agent/extensions"]
 "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests/test_agent_usage.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/coordination/meiva-dynamic-workflow/tests/test_minimal_dispatch.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_coding_session_resume.py" = ["meiva_builtins/skills/platform/meiva-guide/external-agents"]
@@ -292,6 +293,7 @@ family-modules = [
 "agent/loop.py" = "run() pops the per-agent config-overlay / birth-config env vars ($MEIVA_AGENT_CONFIG_OVERLAY / $MEIVA_AGENT_BIRTH_CONFIG) before spawning children; argv is world-readable via ps (issue #974) and the payloads are per-agent launch secrets, not Settings fields"
 "agent/process_boot.py" = "boot sets os.environ[\"MEIVA_AGENT_ID\"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)"
 "meiva/boot.py" = "launched_context() / has_launched_identity() read os.environ[\"MEIVA_AGENT_ID\"]; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent"
+"meiva/impersonation/harness/attach.py" = "the bridge hands the one-shot harness handle (MEIVA_HARNESS_HANDLE) to the child it just started; a per-launch IPC handoff, not cluster configuration, and the child must read the live value the bridge wrote"
 "meiva/watcher/spawn.py" = "build_boot() bootstrap code uses os.environ.get in a string literal for the child process bootstrap"
 "meiva_builtins/skills/integrations/telegram-send-file/scripts/send_file.py" = "the telegram config domain is EXCLUDED from the agent process profile (Task #856 consumption matrix), so Settings cannot construct it in the skill's runtime context — the env aliases (the same values Settings itself reads from) are the only access path; same class as the child-env handoff entries"
 "base/agents/impersonation/host_transport.py" = "CODEX_HOME is provider routing context, not cluster configuration; the shared transport preserves the CLI socket resolution contract"

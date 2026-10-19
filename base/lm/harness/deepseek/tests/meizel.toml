@@ -1,0 +1,7 @@
+exports = ["fake_acp.py", "support.py"]
+
+[uses]
+"support.py" = ["fake_acp.py"]
+"test_mapping.py" = []
+"test_session.py" = ["support.py"]
+"test_usage.py" = []

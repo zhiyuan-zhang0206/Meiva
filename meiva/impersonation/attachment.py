@@ -1,32 +1,22 @@
 # meiva:note
-# An attachment borrows a validated controller identity and restores the prior process
-# context on detach. Its own client set and admission gate are distinct from the SDK
-# installation's longer-lived cold producer. Each admitted SDK call retains its original
-# durable capture gate even when another attachment becomes current. Closing admission
-# and marking the attachment closing share one lock: already-admitted calls may drain,
-# later calls are refused. Close attempts plugin-state flush, receipt closure, telemetry
-# delivery and detach; a later cleanup error cannot replace the primary failure. A
-# still-running admitted call retains its original receipt and seals it only when it
-# actually drains; a finite close wait cannot certify that source empty.
+# A takeover attachment. What is lease-specific lives here — the derived lease id,
+# the active-lease recheck on every call, the delta column's optimistic version and
+# the durable event participant the takeover manifest owns. The kernel
+# (`base.agents.context.external_attachment`) owns the sequence and the failure handling,
+# so a second borrowed identity cannot drift from this one's ordering.
 # meiva:link meiva/impersonation/docs/attachment-contracts.meiva.okf.md
 
 from __future__ import annotations
 
 import dataclasses
-import importlib
-import sys
 from collections.abc import Mapping
-from contextlib import ExitStack
-from threading import Lock, local
-from types import TracebackType
 from typing import Any, Self, cast
-from uuid import uuid4
 
 from base.agents import impersonation as control
 from base.agents.context import MeivaContext
-from base.agents.context.clients import ClientSet, DatabaseFactory
+from base.agents.context.clients import DatabaseFactory
+from base.agents.context.external_attachment import ExternalAttachment
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
@@ -37,45 +27,18 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.env.agent_slices import PluginConfigView
-from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
-from meiva.boot import initialize_context, process_clients
+from meiva.boot import (
+    boot_external_process,
+    initialize_context,
+    plugin_state_codec,
+    process_clients,
+)
 from meiva.sdk_surface import process_context
 
-_attachment_lock = Lock()
-_close_flush_permission = local()
-
-
-def _close_flush_permitted() -> bool:
-    return bool(getattr(_close_flush_permission, "allowed", False))
-
-
-def _deliver_telemetry_before_detach(*, clients: ClientSet) -> None:
-    if "base.telemetry" not in sys.modules:
-        return
-    from base import telemetry
-
-    owned = clients.sync_events()
-    if owned.status is telemetry.DrainStatus.UNFINISHED:
-        logger.warning(
-            "external attachment: owned telemetry delivery is unfinished; "
-            "queued records may be lost or land later"
-        )
-    try:
-        result = telemetry.sync()
-        if result.status is telemetry.DrainStatus.UNFINISHED:
-            logger.warning(
-                "external attachment: ordinary telemetry delivery is unfinished; "
-                "queued records may be lost or land later"
-            )
-        clients.finalize_events()
-    except Exception:
-        logger.opt(exception=True).warning(
-            "external attachment: telemetry delivery before detach failed; "
-            "ordinary queued records may be lost or land later"
-        )
+__all__ = ["Attachment", "attach"]
 
 
 def _refuse_unless_attachable() -> MeivaContext | None:
@@ -107,83 +70,115 @@ def _attachment_database(
 
 
 def _agent_codec() -> Any:
-    return importlib.import_module("agent.extensions.plugin_state_codec")
+    return plugin_state_codec()
 
 
-class Attachment:
+class _Codec:
+    def __init__(self, attachment: Attachment) -> None:
+        self._attachment = attachment
+
+    def load_snapshot(self, agent_id: int) -> Any:
+        return _agent_codec().load_snapshot(agent_id, database=self._attachment._database())
+
+    def plugin_state_schema(self, state: Any) -> Any:
+        del state
+        return _agent_codec().plugin_state_schema
+
+    def encode_plugin_delta(
+        self, update: Mapping[str, Any], state_cls: type[Any]
+    ) -> dict[str, str]:
+        return cast("dict[str, str]", _agent_codec().encode_plugin_delta(update, state_cls))
+
+    def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> Any:
+        return _agent_codec().decode_plugin_delta(encoded, state_cls)
+
+    def apply_plugin_delta(self, state: Any, delta: Any) -> None:
+        _agent_codec().apply_plugin_delta(state, delta)
+
+
+class _LeaseIdentity:
+    def __init__(self, attachment: Attachment) -> None:
+        self._attachment = attachment
+
+    def require(self) -> Mapping[str, Any]:
+        return self._attachment._lease()
+
+    def validate(self) -> int:
+        return self._attachment._validate()
+
+    def machine(self) -> str:
+        return self._attachment._machine.name()
+
+    def agent_id(self) -> int:
+        return self._attachment.agent_id
+
+    def delta_version(self) -> int:
+        return self._attachment._version
+
+    def merge_delta(self, encoded: dict[str, str], *, expected_version: int) -> int:
+        attachment = self._attachment
+        control.merge_plugin_delta(
+            attachment._database(),
+            attachment.lease_id,
+            encoded,
+            expected_version=expected_version,
+            local_machine=attachment._machine.name(),
+        )
+        attachment._version += 1
+        return attachment._version
+
+
+class Attachment(ExternalAttachment):
     def __init__(
         self, lease_id: str, *, agent_id: int | None = None, session_id: int | None = None
     ) -> None:
-
-        bound = _refuse_unless_attachable()
         if session_id is not None and agent_id is None:
             raise ValueError("an integer session requires an agent_id")
+        bound = _refuse_unless_attachable()
         self.lease_id = lease_id
-        self._closed = False
-        self._closing = False
-        self._stack = ExitStack()
-
+        self._lease_agent_id = agent_id
+        self._lease_session_id = session_id
         self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
-        self._event_gate: Any = None
-        self._call_lock = Lock()
-
-        self._prior_context = bound
-        self._bound = False
-        self._own_clients: ClientSet | None = None
-
-        self._state_cls: type[Any]
+        self._machine: MachineIdentity
+        self._database: DatabaseFactory
+        self._clock_factory: Any = None
+        self._event_seal_wait_reader: Any = None
+        self.agent_id: int = 0
+        self.session_id: int = 0
+        self._version: int = 0
         if process_context.in_exec_turn():
             raise RuntimeError("an exec turn cannot attach an external controller")
-        if not _attachment_lock.acquire(blocking=False):
-            raise RuntimeError("this process already has an external attachment")
-        try:
-            self._initialize(bound, agent_id=agent_id, session_id=session_id)
-        except BaseException as primary:
-            try:
-                self._detach()
-            except BaseException as secondary:
-                primary.add_note(f"Attachment constructor cleanup also failed: {secondary!r}")
-            raise
+        super().__init__(identity=_LeaseIdentity(self), codec=_Codec(self))
+        self.open(bound)
 
-    def _initialize(
-        self, bound: MeivaContext | None, *, agent_id: int | None, session_id: int | None
-    ) -> None:
-        config = None if bound is not None else ConfigBoot()
-        if config is not None:
-            config.read_process_environment()
-        self._clock_factory = (
-            bound.require_clock
-            if bound is not None
-            else (
-                lambda: Clock(
-                    clock_config_from_boot(cast(ConfigBoot, config)), timers=SYSTEM_TIMERS
-                )
-            )
+    def _prepare(self) -> None:
+        bound = self._prior_context
+        boot = boot_external_process(
+            bound,
+            config_factory=ConfigBoot,
+            build_clients=process_clients,
+            machine_reader=machine_from_boot,
+            clock_builder=clock_config_from_boot,
         )
-        self._machine = (
-            bound.require_machine()
-            if bound is not None
-            else machine_from_boot(cast(ConfigBoot, config))
-        )
-        self._database = _attachment_database(bound, config=config, machine=self._machine)
-        if session_id is not None:
+        config = boot.config
+        self._boot_config = config
+        self._clock_factory = boot.clock_factory
+        self._machine = boot.machine
+        self._database = boot.database
+        self._own_clients = boot.clients
+        if self._lease_session_id is not None:
             from base.agents.impersonation.sessions import private_id
 
             self.lease_id = private_id(
                 self._database(),
-                cast(int, agent_id),
-                session_id,
+                cast(int, self._lease_agent_id),
+                self._lease_session_id,
                 local_machine=self._machine.name(),
-            )
-        if bound is None:
-            self._own_clients = process_clients(
-                database=self._database, config=config, machine=self._machine
             )
         lease = self._lease()
         self.agent_id = int(lease["agent_id"])
         self.session_id = int(lease["session_id"])
         self._version = int(lease["delta_version"])
-
         self._bind_borrowed_context()
         initialize_context(
             process_context.current_context(),
@@ -203,29 +198,11 @@ class Attachment:
             self._event_seal_wait_reader = lambda: (
                 config.view.general.impersonation_event_seal_wait_seconds
             )
-        state, overlay, birth = _agent_codec().load_snapshot(
-            self.agent_id, database=self._database()
-        )
-        self._state_cls = type(state)
-        self._resolve_config(overlay, birth)
 
+    def _applied_version(self, state: Any, lease: Mapping[str, Any]) -> int:
         receipt = state.impersonation_applied
         checkpoint_version = receipt["version"] if receipt.get("lease_id") == self.lease_id else 0
-        applied = max(lease["applied_version"], checkpoint_version)
-        codec = _agent_codec()
-        for encoded in lease["plugin_delta"][applied:]:
-            codec.apply_plugin_delta(state, codec.decode_plugin_delta(encoded, self._state_cls))
-        self._validate()
-        self._open_event_participant()
-        process_context.set_state(state)
-        process_context.set_state_update({})
-
-    def native_snapshot(self) -> Any:
-        self._validate()
-        snapshot, _overlay, _birth = _agent_codec().load_snapshot(
-            self.agent_id, database=self._database()
-        )
-        return snapshot
+        return max(lease["applied_version"], checkpoint_version)
 
     def _resolve_config(
         self, overlay: Mapping[str, Any] | None, birth: Mapping[str, Any] | None
@@ -241,6 +218,16 @@ class Attachment:
                 installation.configs, resolve_agent_plugin_pins(overlay, installation.configs)
             ),
         )
+
+    def _set_state(self, state: Any) -> None:
+        process_context.set_state(state)
+        process_context.set_state_update({})
+
+    def _state_update(self) -> Any:
+        return process_context.get_state_update()
+
+    def _clear_state_update(self) -> None:
+        process_context.get_state_update().clear()
 
     def _bind_borrowed_context(self) -> None:
         borrowed = ExternalLease(
@@ -266,20 +253,6 @@ class Attachment:
             clients=self._own_clients, clock_factory=self._clock_factory, machine=self._machine
         )
 
-    def admit_sdk_call(self) -> Any:
-        with self._call_lock:
-            if self._closed or self._closing:
-                raise RuntimeError("external attachment is closing or closed")
-            gate = self._event_gate
-            if gate is None:
-                self._validate()
-                return None
-            with gate.condition:
-                if self._closed or self._closing or gate.admission_closed:
-                    raise RuntimeError("external attachment is closing or closed")
-                self._validate()
-                return gate.admit()
-
     def capture_local_event(self, event: Any) -> Any:
         from base.agents.impersonation.manifest import capture_local_event
 
@@ -303,71 +276,14 @@ class Attachment:
             )
         return self.agent_id
 
-    def flush(self) -> None:
-        self._flush(allow_closing=_close_flush_permitted())
-
-    def _flush(self, *, allow_closing: bool) -> None:
-
-        if self._closing and not allow_closing:
-            raise RuntimeError("external attachment is closing")
-        self._validate()
-        update = process_context.get_state_update()
-        if not isinstance(update, dict):
-            raise TypeError("external plugin state update must be a dict")
-        if update:
-            encoded = _agent_codec().encode_plugin_delta(update, self._state_cls)
-            control.merge_plugin_delta(
-                self._database(),
-                self.lease_id,
-                encoded,
-                expected_version=self._version,
-                local_machine=self._machine.name(),
-            )
-            self._version += 1
-            update.clear()
-
-    def close(self) -> None:
-        if self._closed:
-            self._close_owned_clients()
-            return
-        if self._closing:
-            return
-        primary: BaseException | None = None
-        try:
-            self._begin_event_participant_close()
-            was_permitted = _close_flush_permitted()
-            _close_flush_permission.allowed = True
-            try:
-                self.flush()
-            finally:
-                _close_flush_permission.allowed = was_permitted
-        except BaseException as exc:
-            primary = exc
-
-        for cleanup in (
-            self._seal_event_participant,
-            self._deliver_telemetry,
-            self._detach,
-        ):
-            try:
-                cleanup()
-            except BaseException as secondary:
-                if primary is None:
-                    primary = secondary
-                else:
-                    primary.add_note(f"Attachment close cleanup also failed: {secondary!r}")
-        if primary is not None:
-            raise primary
-
-    def _deliver_telemetry(self) -> None:
-        clients = self._own_clients
+    def _telemetry_clients(self) -> Any:
         if self._prior_context is not None:
-            clients = self._prior_context.clients
-        if clients is None:
-            raise RuntimeError("the attachment has no event producer owner")
-        _deliver_telemetry_before_detach(clients=clients)
+            return self._prior_context.clients
+        return self._own_clients
 
     def _open_event_participant(self) -> None:
+        from uuid import uuid4
+
         from base.agents.impersonation.manifest import (
             LocalCaptureGate,
             LocalParticipant,
@@ -401,7 +317,6 @@ class Attachment:
             self._event_gate,
             timeout=self._event_seal_wait_reader(),
         )
-
         if drained:
             seal_local_participant(self._event_gate)
 
@@ -417,64 +332,17 @@ class Attachment:
             lambda: setattr(self, "_closing", True),
         )
 
-    def _detach(self) -> None:
-
-        if self._closed:
-            return
-        self._closed = True
-        primary: BaseException | None = None
-        try:
-            for cleanup in (
-                self._restore_prior_context,
-                process_context.unbind_exec_turn,
-                self._stack.close,
-                self._close_owned_clients,
-            ):
-                try:
-                    cleanup()
-                except BaseException as secondary:
-                    if primary is None:
-                        primary = secondary
-                    else:
-                        primary.add_note(f"Attachment detach cleanup also failed: {secondary!r}")
-        finally:
-            _attachment_lock.release()
-        if primary is not None:
-            raise primary
-
     def _restore_prior_context(self) -> None:
         if self._bound and self._prior_context is not None:
             process_context.bind_context(self._prior_context)
         elif self._bound:
             process_context.unbind_context()
 
-    def _close_owned_clients(self) -> None:
-        if self._own_clients is not None:
-            self._own_clients.close()
+    def _unbind_exec_turn(self) -> None:
+        process_context.unbind_exec_turn()
 
     def __enter__(self) -> Self:
-        try:
-            self._validate()
-        except BaseException as primary:
-            try:
-                self._detach()
-            except BaseException as secondary:
-                primary.add_note(f"Attachment entry cleanup also failed: {secondary!r}")
-            raise
-        return self
-
-    def __exit__(
-        self,
-        _kind: type[BaseException] | None,
-        _error: BaseException | None,
-        _trace: TracebackType | None,
-    ) -> None:
-        try:
-            self.close()
-        except BaseException as secondary:
-            if _error is None:
-                raise
-            _error.add_note(f"Attachment context cleanup also failed: {secondary!r}")
+        return super().__enter__()
 
 
 def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:

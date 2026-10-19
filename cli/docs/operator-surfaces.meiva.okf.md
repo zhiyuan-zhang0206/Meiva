@@ -49,6 +49,16 @@ tags:
   tags and descriptions; JSON emits the gateway response's `results` list
   without converting paths or normalizing null and empty metadata.
 
+## Harness attachment
+
+- `meiva harness exec [--file PATH] [--handle H] [--agent-id N] [--session-id S]`: run one
+  Python file (or stdin as `-`) inside a provider-harness attachment, so the script's
+  `meiva.*` calls carry the agent identity the bridge registered. The handle defaults to
+  `$MEIVA_HARNESS_HANDLE`, which is how the bridge hands it to the child; nothing is
+  written to the workspace. The process refuses to attach a second identity, so a script
+  that calls `attach()` itself fails instead of nesting
+  ([[meiva/impersonation/harness/docs/harness-attach.meiva.okf.md|harness attach]]).
+
 ## Local and package operations
 
 - [[cli/docs/config.meiva.okf.md|`meiva config get/set/unset`]]
