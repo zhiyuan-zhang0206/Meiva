@@ -29,11 +29,20 @@ def _emit(payload: dict[str, object]) -> None:
     sys.stdout.flush()
 
 
+# meiva:note
+# The tests poll these paths every 5ms, so the path itself is a reader's only signal.
+# Opening for append created the file before its content landed, and a buffered write
+# becomes visible only at close, so a reader could see an empty or half-written line
+# and `splitlines()[0]` raised IndexError. Replacing the path keeps it either absent
+# or complete. One writer per path: each harness owns its own files.
 def _record(path: str | None, value: object) -> None:
     if not path:
         return
-    with Path(path).open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(value) + "\n")
+    target = Path(path)
+    pending = target.with_name(target.name + ".pending")
+    written = target.read_bytes() if target.exists() else b""
+    pending.write_bytes(written + (json.dumps(value) + "\n").encode())
+    pending.replace(target)
 
 
 def _result(conversation: str, **fields: object) -> dict[str, object]:
