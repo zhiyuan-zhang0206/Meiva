@@ -45,12 +45,15 @@ anywhere else is invisible to the probe until the process PATH happens to
 include it — which is why the catalog pins every harness to a vendor command
 whose output directory is on that list.
 
-| Harness | Official command | Pinned | Lands at | Needs |
+| Harness | Official installer | Pinned | Lands at | Needs |
 |---|---|---|---|---|
-| `claude` | `curl -fsSL https://claude.ai/install.sh \| bash -s -- <version>` | 2.1.290 | `~/.local/share/claude/versions/<v>` + `~/.local/bin/claude` | curl |
+| `claude` | vendor script `https://claude.ai/install.sh`, takes the version as its argument | 2.1.290 | `~/.local/share/claude/versions/<v>` + `~/.local/bin/claude` | curl |
 | `codex` | `npm install -g @openai/codex@<version>` | 0.163.0 | npm global prefix (`/opt/homebrew/bin/codex`, `/usr/bin/codex`) | node + npm |
-| `agy` | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | 1.4.2 | `~/.local/bin/agy` (self-updating single binary) | curl |
+| `agy` | vendor script `https://antigravity.google/cli/install.sh`, takes only a target directory | 1.4.2 | `~/.local/bin/agy` (self-updating single binary) | curl |
 | `dsh` | `npm install -g @deepseek-ai/dsh@<version>` | 0.1.5-rc.3 | npm global prefix | node + npm |
+
+For the two vendor scripts, `install` fetches the script and runs it under
+`bash`, passing the version (or nothing, for `agy`) as the only argument.
 
 The version used is recorded on the machine that received it, in
 `~/.meiva/onboarding/install-log.jsonl` — one line per install: what was asked
