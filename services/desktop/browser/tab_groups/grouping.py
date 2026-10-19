@@ -1,51 +1,65 @@
-"""One Chrome tab group per agent, for the pages that agent's browser calls create.
-
-Chrome's DevTools protocol has no tab-group API (measured on Chrome 153: none
-of its domains mentions groups), so grouping goes through a small extension
-shipped in ``extension/``. The browser-mcp daemon loads it with
-``Extensions.loadUnpacked`` -- available on the ordinary
-``--remote-debugging-port`` connection, no launch flag -- and calls the
-``meivaGroup(targetId, title)`` function its service worker exposes.
-
-Three facts shape the design:
-
-- **Loading is per Chrome session and the worker idles out.** An unpacked
-  extension loaded over CDP is gone after a Chrome restart, and its service
-  worker stops ~30s after its last event (its CDP target disappears). Each
-  grouping therefore checks, on the same websocket, whether the extension is
-  loaded with a live worker of the file name this checkout ships, and issues
-  the idempotent ``Extensions.loadUnpacked`` only when it is not (Chrome
-  restarted, worker idled out, or an older worker file is still running). It
-  must not reload a live worker: the reload tears the worker down, and a
-  call that attached to the dying target never gets its reply (measured).
-  After attaching it waits for the worker script to have defined ``meivaGroup``
-  (the target can be attachable first). Nothing is remembered between calls,
-  so daemon restarts need no repair.
-- **Page ids are not target ids.** The daemon's page ids are chrome-devtools-mcp
-  sequence numbers; the extension needs the CDP targetId. The caller holds the
-  daemon's machine-wide serial lock, so the one page target that appears
-  between ``snapshot()`` (before ``new_page``) and ``group_new_page()`` (after)
-  is the page that was just created. Anything other than exactly one new
-  target (a user opening a tab meanwhile, a popup) is reported and left
-  ungrouped -- the module never guesses which tab is the agent's.
-- **Only the two target listings run under that lock.** They are short
-  (``LISTING_TIMEOUT_S``). Everything else -- loading the extension, attaching
-  to its worker, calling it -- runs in a background task with its own timeout
-  (``GROUP_TIMEOUT_S``), so a slow or wedged Chrome costs the page creation
-  nothing. The tasks run one at a time (``_lock``, the grouping's own lock, not
-  the daemon's): two grouping tasks of one agent both search the group by title
-  and would otherwise each create it. ``cancel_pending()`` drops in-flight
-  tasks when the daemon stops (an upstream death ends the process).
-- **Nothing here deletes a group.** Chrome removes a tab group, and its saved
-  group record, when the group's last tab closes. Every way this stack closes
-  an agent's page goes through ``close_page`` (``page_lifecycle``), so an
-  agent's group disappears with its last page.
-
-Grouping is presentation only. Every failure -- extension refused, CDP error, no
-unique new target, a wedged Chrome -- is logged as a WARNING and swallowed: the
-browser operation it decorates must succeed or fail on its own merits (see
-docs/decisions/engineering/design/contracts/2026-10-12-presentation-only-failure-degrades-with-warning.md).
-"""
+# meiva:note
+# One Chrome tab group per agent, for the pages that agent's browser calls create.
+#
+# Chrome's DevTools protocol has no tab-group API (measured on Chrome 153: none
+# of its domains mentions groups), so grouping goes through a small extension
+# shipped in ``extension/``. The browser-mcp daemon loads it with
+# ``Extensions.loadUnpacked`` -- available on the ordinary
+# ``--remote-debugging-port`` connection, no launch flag -- and calls the
+# ``meivaGroup(targetId, title)`` function its service worker exposes.
+#
+# Three facts shape the design:
+#
+# - **Loading is per Chrome session and the worker idles out.** An unpacked
+#   extension loaded over CDP is gone after a Chrome restart, and its service
+#   worker stops ~30s after its last event (its CDP target disappears). Each
+#   grouping therefore checks, on the same websocket, whether the extension is
+#   loaded with a live worker of the file name this checkout ships, and issues
+#   the idempotent ``Extensions.loadUnpacked`` only when it is not (Chrome
+#   restarted, worker idled out, or an older worker file is still running). It
+#   must not reload a live worker: the reload tears the worker down, and a
+#   call that attached to the dying target never gets its reply (measured).
+#   After attaching it waits for the worker script to have defined ``meivaGroup``
+#   (the target can be attachable first). Nothing is remembered between calls,
+#   so daemon restarts need no repair.
+# - **Page ids are not target ids.** The daemon's page ids are chrome-devtools-mcp
+#   sequence numbers; the extension needs the CDP targetId. The caller holds the
+#   daemon's machine-wide serial lock, so the one page target that appears
+#   between ``snapshot()`` (before ``new_page``) and ``group_new_page()`` (after)
+#   is the page that was just created. Anything other than exactly one new
+#   target (a user opening a tab meanwhile, a popup) is reported and left
+#   ungrouped -- the module never guesses which tab is the agent's.
+# - **Only the two target listings run under that lock.** They are short
+#   (``LISTING_TIMEOUT_S``). Everything else -- loading the extension, attaching
+#   to its worker, calling it -- runs in a background task with its own timeout
+#   (``GROUP_TIMEOUT_S``), so a slow or wedged Chrome costs the page creation
+#   nothing. The tasks run one at a time (``_lock``, the grouping's own lock, not
+#   the daemon's): two grouping tasks of one agent both search the group by title
+#   and would otherwise each create it. ``cancel_pending()`` drops in-flight
+#   tasks when the daemon stops (an upstream death ends the process).
+# - **A closed group is saved, not deleted, and saving is what makes residue.**
+#   Chrome keeps a group whose last tab closes as a SAVED group on the bookmarks
+#   bar (measured on Chrome 155: the chip reads "Meiva #<id> group - Closed").
+#   `chrome.tabGroups.query` returns only open groups, and the extension API has
+#   neither a saved-group view nor a delete (`query({saved:true})` is rejected;
+#   the namespace exposes only get/move/query/update plus events). The title
+#   lookup therefore cannot see a saved group, and the next page for that agent
+#   would create a second one — one more closed group per open/close cycle, and
+#   saved groups sync into the signed-in user's own Chrome. The daemon ungroups
+#   an agent's last tab **before** closing it (`release_page` ->
+#   `meivaUngroupLast`): an ungrouped last tab deletes the group instead of
+#   saving it (measured). Every way this stack closes an agent's page goes
+#   through ``close_page`` (``page_lifecycle``), so that is the one hook needed.
+# - **A tab the user closes by hand cannot be cleaned up.** It never passes
+#   through ``close_page``, so Chrome saves the group and no API can remove it.
+#   Those chips are deleted from the Chrome UI; this stack only guarantees it
+#   never adds one itself.
+#
+# Grouping is presentation only. Every failure -- extension refused, CDP error, no
+# unique new target, a wedged Chrome -- is logged as a WARNING and swallowed: the
+# browser operation it decorates must succeed or fail on its own merits (see
+# docs/decisions/engineering/design/contracts/2026-10-12-presentation-only-failure-degrades-with-warning.md).
+# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
 
 from __future__ import annotations
 
@@ -78,6 +92,15 @@ GROUP_TIMEOUT_S = 10.0
 # How long to wait for the extension's service worker target to appear after
 # `loadUnpacked` (it normally is up within milliseconds).
 WORKER_WAIT_S = 5.0
+
+# meiva:note
+# Bound on the pre-close ungroup. It runs inline (the page is about to close, so
+# the group must be gone first) and must never delay a close for long: the call
+# is one CDP evaluate against an already-loaded worker, and a fresh attach is
+# milliseconds. A worker that idled out is not reloaded for this -- it cannot
+# have saved a group it never grouped.
+# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+UNGROUP_TIMEOUT_S = 2.0
 _WORKER_POLL_S = 0.1
 
 
@@ -115,13 +138,24 @@ async def _live_worker(ws: Any, ids: Any, extension_id: str) -> str | None:
     )
 
 
-async def _worker_session(ws: Any, ids: Any) -> str:
-    """Attach to the extension's service worker, loading the extension if needed.
+# meiva:note
+# No live worker of the shipped file name, and the caller forbade loading one.
+# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+class _WorkerAbsentError(RuntimeError):
+    pass
 
-    Returns the flattened session id. Reuses a live worker of the shipped file
-    name; otherwise (not loaded, worker idled out, or an older worker file)
-    issues ``Extensions.loadUnpacked`` and waits for the worker to come up.
-    """
+
+async def _worker_session(ws: Any, ids: Any, *, load: bool = True) -> str:
+    # meiva:note
+    # Attach to the extension's service worker, loading the extension if needed.
+    #
+    # Returns the flattened session id. Reuses a live worker of the shipped file
+    # name; otherwise (not loaded, worker idled out, or an older worker file)
+    # issues ``Extensions.loadUnpacked`` and waits for the worker to come up.
+    # ``load=False`` refuses that instead (``_WorkerAbsentError``): a pre-close ungroup
+    # must not start a worker, because a worker that was not running cannot have
+    # left a group to save.
+    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
     loaded = [
         e
         for e in (await cdp_call(ws, ids, "Extensions.getExtensions", {}))["extensions"]
@@ -129,6 +163,8 @@ async def _worker_session(ws: Any, ids: Any) -> str:
     ]
     target_id = await _live_worker(ws, ids, loaded[0]["id"]) if loaded else None
     if target_id is None:
+        if not load:
+            raise _WorkerAbsentError("no live tab-group worker to attach to")
         loaded_id = (
             await cdp_call(ws, ids, "Extensions.loadUnpacked", {"path": str(EXTENSION_DIR)})
         )["id"]
@@ -186,6 +222,12 @@ class AgentTabGroups:
         self._task_group = tasks  # the daemon's root group: it owns every task's lifetime
         self._lock = asyncio.Lock()  # serializes groupings only; the daemon's lock is not held
         self._tasks: set[asyncio.Task[None]] = set()
+        # meiva:note
+        # page id -> (agent id, CDP target id) for the pages this daemon grouped:
+        # the only way to find an agent's tab again at close time, when the
+        # upstream hands us a page id and the extension needs a target id.
+        # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+        self._pages: dict[int, tuple[int, str]] = {}
 
     async def snapshot(self) -> frozenset[str] | None:
         """The ids of Chrome's page targets right now, taken before a ``new_page``.
@@ -204,14 +246,20 @@ class AgentTabGroups:
             )
             return None
 
-    async def group_new_page(self, agent_id: int, before: frozenset[str] | None) -> None:
-        """Start filing the page created since ``before`` into the agent's tab group.
+        # meiva:note
+        # Start filing the page created since ``before`` into the agent's tab group.
+        #
+        # ``before`` is the matching ``snapshot()``; None (its failure was
+        # reported) skips. Finds the new page's target with one short listing,
+        # then hands the grouping to a background task and returns: the page is
+        # grouped moments later, not before this returns. ``page_id`` is the
+        # daemon's id for that page; recording it is what lets `release_page`
+        # find the tab again when the page closes.
+        # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
 
-        ``before`` is the matching ``snapshot()``; None (its failure was
-        reported) skips. Finds the new page's target with one short listing,
-        then hands the grouping to a background task and returns: the page is
-        grouped moments later, not before this returns.
-        """
+    async def group_new_page(
+        self, agent_id: int, before: frozenset[str] | None, page_id: int | None = None
+    ) -> None:
         if before is None:
             return
         try:
@@ -219,6 +267,8 @@ class AgentTabGroups:
         except Exception as e:
             self._warn(agent_id, e)
             return
+        if page_id is not None:
+            self._pages[page_id] = (agent_id, target_id)
         task = self._task_group.create_task(
             self._file(agent_id, target_id), name=f"tab-group-agent-{agent_id}"
         )
@@ -232,6 +282,58 @@ class AgentTabGroups:
                 f"expected exactly one new page target, saw {len(new)} new page targets"
             )
         return next(iter(new))
+
+    # meiva:note
+    # The pre-close half: Chrome saves a group when its last tab closes, and a
+    # saved group is invisible to the title lookup and undeletable through the
+    # extension API, so the group must be gone *before* the tab is. Runs inline
+    # under the daemon's lock, bounded by `UNGROUP_TIMEOUT_S`, and reports a
+    # failure as a WARNING: a page that must close still closes.
+    # Ungroups this page's tab if it is the last member of its agent's group.
+    #
+    # A no-op for a page this daemon never grouped, or for a group that still
+    # has another tab (the extension decides that part, so a user's own group
+    # is never touched). Never raises.
+    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    async def release_page(self, page_id: int) -> None:
+        recorded = self._pages.pop(page_id, None)
+        if recorded is None:
+            return
+        agent_id, target_id = recorded
+        try:
+            await asyncio.wait_for(
+                self._ungroup_last(group_title(agent_id), target_id), UNGROUP_TIMEOUT_S
+            )
+        except Exception as e:
+            logger.opt(exception=not isinstance(e, _WorkerAbsentError)).warning(
+                "[browser-mcp] could not ungroup agent {}'s last tab on page {} ({}: {}); "
+                "closing it will leave a saved tab group behind",
+                agent_id,
+                page_id,
+                type(e).__name__,
+                e,
+            )
+
+    async def _ungroup_last(self, title: str, target_id: str) -> None:
+        version = await http_json(f"http://127.0.0.1:{self._cdp_port}/json/version")
+        ids = itertools.count(1)
+        async with websockets.connect(version["webSocketDebuggerUrl"]) as ws:
+            session_id = await _worker_session(ws, ids, load=False)
+            outcome = await cdp_call(
+                ws,
+                ids,
+                "Runtime.evaluate",
+                {
+                    "expression": (
+                        f"meivaUngroupLast({json.dumps(target_id)}, {json.dumps(title)})"
+                    ),
+                    "awaitPromise": True,
+                    "returnByValue": True,
+                },
+                session_id=session_id,
+            )
+        if "exceptionDetails" in outcome:
+            raise RuntimeError(outcome["exceptionDetails"]["exception"]["description"])
 
     def cancel_pending(self) -> None:
         """Drop every in-flight grouping (daemon stop, which an upstream death also causes).
