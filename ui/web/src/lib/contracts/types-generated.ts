@@ -1215,6 +1215,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/cluster/machines/{name}/harnesses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_machine_harnesses_api_cluster_machines__name__harnesses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cluster/machines/{name}/staging": {
         parameters: {
             query?: never;
@@ -2973,6 +2989,12 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         Harness: "meiva" | "claude_code" | "codex" | "antigravity";
+        HarnessAvailability: {
+            harness: components["schemas"]["Harness"];
+            status: "available" | "unavailable" | "unknown";
+            reason: string;
+            launchable: boolean;
+        };
         HeartbeatInfo: {
             interval_s: number;
             next_at?: string | null;
@@ -6480,6 +6502,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentMachineRow"][];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_machine_harnesses_api_cluster_machines__name__harnesses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HarnessAvailability"][];
                 };
             };
             422: {

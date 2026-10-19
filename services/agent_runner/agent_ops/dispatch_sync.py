@@ -90,6 +90,10 @@ def dispatch_sync(
                 return OpStatus.COMPLETED, inventory.inventory_write_op(
                     iw.plugins, iw.mcp_servers, local_machine=local_machine, host=host
                 ).model_dump(mode="json")
+        case "harness_probe":
+            return OpStatus.COMPLETED, cluster.harness_probe_op(local_machine.name()).model_dump(
+                mode="json"
+            )
         case "shell_probe" | "shell_kill" | "shell_capture" | "agent_skill_view":
             return OpStatus.COMPLETED, _agent_arm(kind, payload, pool)
         case _:

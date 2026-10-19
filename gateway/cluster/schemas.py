@@ -29,8 +29,23 @@ from pydantic import (
     PositiveInt,
 )
 
+from base.api_contracts.agent_contract import Harness, HarnessStatus
 from base.api_contracts.status import MachineStatus
 from gateway.schemas.stats import StatsWindowHours
+
+
+# meiva:note
+# One harness as one machine can run it. `status` is what that machine's probe
+# could prove about install and sign-in; `launchable` is this build's answer to
+# "can a session actually be started on it there" — a harness can be installed and
+# signed in and still not launchable, and the spawn form says so instead of
+# letting the choice look usable.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+class HarnessAvailability(BaseModel):
+    harness: Harness
+    status: HarnessStatus
+    reason: str
+    launchable: bool
 
 
 class ServiceItem(BaseModel):
