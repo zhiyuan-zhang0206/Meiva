@@ -57,12 +57,22 @@ class TaskSummaryRow(BaseModel):
     ghost: bool = False  # out-of-window ancestor of a kept task (GET /api/tasks with a window) — delivered for tree connectivity and rendered dimmed by the graph
 
 
+# meiva:note
+# One task-graph row: the summary columns plus the description the board renders.
+# `results` is deliberately absent - it is 85% of the full list's bytes and only
+# the hover card shows it, which fetches `GET /api/tasks/{id}` for the one task
+# on screen (user report 2026-10-20: the 24-hour full list was 3.1 MB).
+# meiva:link gateway/routers/docs/routers.meiva.okf.md
+class TaskGraphRow(TaskSummaryRow):
+    description: str
+
+
 class TaskListResponse(BaseModel):
     """GET /api/tasks response — full rows or compact list summaries."""
 
     model_config = ConfigDict(frozen=True)
 
-    tasks: list[TaskRow | TaskSummaryRow]
+    tasks: list[TaskRow | TaskSummaryRow | TaskGraphRow]
 
 
 class TaskUpdateRequest(BaseModel):
