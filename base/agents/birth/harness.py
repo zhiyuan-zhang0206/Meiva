@@ -272,14 +272,13 @@ def _codex_login(home: Path) -> _LoginEvidence:
 
 
 # meiva:note
-# The CLI shipped its session file under a different name before it was renamed;
-# an install that has not run since keeps only the old one, so the probe reads the
-# current path first and falls back to the legacy one.
+# The CLI keeps its session in its own directory. `~/.gemini/jetski-standalone-oauth-token`
+# is written by the IDE, not by the CLI, and the CLI does not read it: on a machine
+# holding only that file and a fresh token, `agy -p` still answered "authentication
+# required". Reading it would report that machine available, so the probe asks for the
+# CLI's own file and nothing else.
 # meiva:link base/agents/docs/harness.meiva.okf.md
-_ANTIGRAVITY_TOKEN_FILES = (
-    ".gemini/antigravity-cli/antigravity-oauth-token",
-    ".gemini/jetski-standalone-oauth-token",
-)
+_ANTIGRAVITY_SESSION_FILE = ".gemini/antigravity-cli/antigravity-oauth-token"
 
 
 def _antigravity_session(record: object, where: str) -> _LoginEvidence:
@@ -288,25 +287,25 @@ def _antigravity_session(record: object, where: str) -> _LoginEvidence:
         return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
     if not _has_value(token, "access_token"):
         return _LoginEvidence(signed_in=False, detail=f"{where} holds no access token")
-    expiry = _iso_timestamp(token.get("expiry"))
-    if _has_value(token, "refresh_token"):
-        return _renewable_credential(expiry, where=where, credential="access token")
-    return _session_deadline(expiry, where=where)
+    return _renewable_credential(
+        _iso_timestamp(token.get("expiry")), where=where, credential="access token"
+    )
 
 
 # meiva:note
-# This row reports the session file its CLI wrote. A readable file holding an access
-# token is `available`; its expiry is reported as age because the refresh token
-# renews it, and it decides only when no refresh token is stored. No file, or one
-# that cannot be read, is `unknown`.
+# This row reports the session file its CLI wrote, and nothing else on the machine: an
+# IDE login is a different credential. A readable file holding an access token is
+# `available`, and its expiry is reported as age — the CLI renews from the refresh
+# token, so a past access expiry is not a logout. No file, or one that cannot be read,
+# is `unknown`.
 # meiva:link base/agents/docs/harness.meiva.okf.md
 def _antigravity_login(home: Path) -> _LoginEvidence:
-    for relative in _ANTIGRAVITY_TOKEN_FILES:
-        token_file = home / relative
-        if token_file.is_file():
-            return _antigravity_session(_read_json(token_file), f"~/{relative}")
-    listed = " or ".join(f"~/{relative}" for relative in _ANTIGRAVITY_TOKEN_FILES)
-    return _LoginEvidence(signed_in=None, detail=f"no Antigravity token file found at {listed}")
+    token_file = home / _ANTIGRAVITY_SESSION_FILE
+    if token_file.is_file():
+        return _antigravity_session(_read_json(token_file), f"~/{_ANTIGRAVITY_SESSION_FILE}")
+    return _LoginEvidence(
+        signed_in=None, detail=f"no Antigravity session file found at ~/{_ANTIGRAVITY_SESSION_FILE}"
+    )
 
 
 _LOGIN_CHECKS = {
