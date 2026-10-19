@@ -102,12 +102,13 @@ rather than re-deriving the choice.
 
 The spawn form asks the machine that would run the agent, not the gateway:
 `GET /api/cluster/machines/{name}/harnesses` dispatches the `harness_probe` op to
-that machine's runner, which answers from `probe_local_harnesses()` cached for 30
-seconds per `(HOME, PATH)` pair — a runner's PATH is trimmed by its launcher, so
-two start paths can legitimately differ. A gateway-only box with no runner of its
-own is probed in-process; a name no machine carries answers 404 and a remote box
-without a runner answers 503, both of which the form renders as `unknown`, never
-as "not installed".
+that machine's runner, which answers from `probe_local_harnesses()` — a fresh read
+every call, no runner-side cache. The gateway caches one answer per machine for 30
+seconds, so a form reopened inside that window does not reach the op at all; that
+cache belongs to the gateway because it is the only caller. A name no machine
+carries answers 404, and a machine without an agent-runner (it could not birth an
+agent there at all) answers 503 — the form renders either as `unknown`, never as
+"not installed".
 
 Each row carries the probe's `status` and `reason` unchanged, plus `launchable`,
 which the gateway composes from two facts: a launcher for that harness exists in
