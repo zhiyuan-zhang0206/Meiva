@@ -81,5 +81,5 @@ tracked, deliberate non-goal
 
 ## Supported versions
 
-Meiva is pre-1.0 and ships from `main`; fixes land on `main`. There is no backport
+Meiva 1.0.0 ships from `main`; fixes land on `main`. There is no backport
 branch yet.

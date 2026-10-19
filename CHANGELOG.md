@@ -1,7 +1,7 @@
 # Changelog
 
 Notable changes, newest first. Format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Meiva is pre-1.0; the
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Meiva is at 1.0.0; the
 per-release PR-level detail lives in the annotated release tags (`git tag -n99`)
 and the matching GitHub Releases.
 

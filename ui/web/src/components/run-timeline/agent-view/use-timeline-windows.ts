@@ -8,6 +8,7 @@ import { api, ApiError } from "@/lib/transport/api";
 
 import { viewportOf, type Viewport } from "../model/timeline-model";
 
+import { identityKey } from "../model/object-identity";
 import { completeRanges, mergeWindows, omittedIn, overlaps, padded, uncovered } from "./timeline-window-cache";
 
 const MAX_UNITS = 5000;
@@ -67,6 +68,29 @@ function useRequestView(viewport: Viewport | null) {
   return viewport === null ? null : view;
 }
 
+const MERGED_CACHE_MAX = 32;
+const mergedCache = new Map<string, RunTimelineResponse | undefined>();
+
+// meiva:note
+// A merged multi-window model is rebuilt only when the responses behind it change, not when the viewport does. Panning samples the viewport every 80 ms and every sample re-renders this hook; re-flattening and re-sorting tens of thousands of units per sample kept the drag at 60-100 ms main-thread tasks (user report 2026-10-19). Responses are immutable per query, so their object identity — not their fields — is what makes a cached merge exact: two payloads that agree on snapshot and window but differ in content still merge separately.
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
+function cachedMerge(id: number, responses: readonly (RunTimelineResponse | undefined)[]): RunTimelineResponse | undefined {
+  const key = `${id}|${identityKey(responses)}`;
+  if (mergedCache.has(key)) {
+    const hit = mergedCache.get(key);
+    mergedCache.delete(key);
+    mergedCache.set(key, hit);
+    return hit;
+  }
+  const merged = mergeWindows(responses.filter((item): item is RunTimelineResponse => item !== undefined), null);
+  mergedCache.set(key, merged);
+  if (mergedCache.size > MERGED_CACHE_MAX) {
+    const oldest = mergedCache.keys().next().value;
+    if (oldest !== undefined) mergedCache.delete(oldest);
+  }
+  return merged;
+}
+
 // meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
 export function useTimelineWindows(ids: readonly number[], viewport: Viewport | null) {
   const client = useQueryClient();
@@ -124,8 +148,9 @@ export function useTimelineWindows(ids: readonly number[], viewport: Viewport | 
 
   const collections = useMemo(() => initial.map((first, i) => {
     const mine = active.map((item, index) => ({ ...item, read: windows[index] })).filter((item) => item.id === ids[i]);
-    const data = [first.data, ...mine.map(({ read }) => read.data)].filter((item): item is RunTimelineResponse => item !== undefined);
-    const merged = mergeWindows(data, null);
+    const refs = [first.data, ...mine.map(({ read }) => read.data)];
+    const data = refs.filter((item): item is RunTimelineResponse => item !== undefined);
+    const merged = cachedMerge(ids[i], refs);
     const counts = new Set([0, ...data.map((item) => item.units_omitted)]);
     const displays = merged === undefined ? [] : [...counts].map((count) => count === merged.units_omitted ? merged : { ...merged, units_omitted: count });
     return { first, mine, data, merged, displays };
