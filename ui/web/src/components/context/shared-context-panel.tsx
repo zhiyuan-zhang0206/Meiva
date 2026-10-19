@@ -23,13 +23,14 @@ const Inspector = dynamic(() => import("@/components/inspector/inspector-panel")
 });
 
 // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
-export function SharedContextPanel({ agentId, document, notices, noticesFailed, mobile, onClose }: {
+export function SharedContextPanel({ agentId, document, notices, noticesFailed, mobile, onClose, onCollapse }: {
   agentId: number;
   document: ReturnType<typeof useToUser>;
   notices: NoticeItem[];
   noticesFailed: boolean;
   mobile: boolean;
   onClose: () => void;
+  onCollapse?: () => void;
 }) {
   const t = useTranslations("toUser");
   const tInspector = useTranslations("inspector");
@@ -57,7 +58,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
             <OpenNoticeDetail key={notice.id} agentId={agentId} notice={notice} onResolved={() => dropOpenNotices(queryClient, [notice.id])} />
           </div>}
         </section>}
-        <ToUserDocumentView key={agentId} agentId={agentId} document={document.data} failed={document.isError} pending={document.isFetching} refresh={() => void document.refetch()} mobile={mobile} inspecting={inspecting} onInspect={toggleInspector} />
+        <ToUserDocumentView key={agentId} agentId={agentId} document={document.data} failed={document.isError} pending={document.isFetching} refresh={() => void document.refetch()} mobile={mobile} inspecting={inspecting} onInspect={toggleInspector} onCollapse={onCollapse} />
       </div>
       {inspecting && (
         <div

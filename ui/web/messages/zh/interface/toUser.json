@@ -17,5 +17,6 @@
   "collapseNotice": "折叠通知",
   "openContext": "To user",
   "back": "返回",
-  "legacyHtml": "等待 Markdown 文档。"
+  "legacyHtml": "等待 Markdown 文档。",
+  "hideContextPanel": "收起共享上下文"
 }

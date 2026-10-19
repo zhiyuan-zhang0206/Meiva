@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, House, RefreshCw, ScanSearch } from "lucide-react";
+import { ArrowLeft, House, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
@@ -24,7 +24,7 @@ function pushedEntry(): boolean {
 // The inspector trigger is optional: `onInspect` decides whether the bar renders
 // it at all, and `inspecting` drives its pressed state.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, onInspect }: {
+export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, onInspect, onCollapse }: {
   agentId: number;
   document: ToUserDocument | undefined;
   failed: boolean;
@@ -33,6 +33,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   mobile: boolean;
   inspecting?: boolean;
   onInspect?: () => void;
+  onCollapse?: () => void;
 }) {
   const t = useTranslations("toUser");
   const tInspector = useTranslations("inspector");
@@ -101,6 +102,18 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
               className={cn("rounded p-1 hover:bg-accent", inspecting && "bg-accent text-foreground")}
             >
               <ScanSearch className="size-3.5" />
+            </button>
+          ) : null}
+          {onCollapse && !mobile ? (
+            <button
+              type="button"
+              data-testid="context-panel-collapse"
+              title={t("hideContextPanel")}
+              aria-label={t("hideContextPanel")}
+              onClick={onCollapse}
+              className="rounded p-1 hover:bg-accent"
+            >
+              <PanelRight className="size-3.5" />
             </button>
           ) : null}
         </div>

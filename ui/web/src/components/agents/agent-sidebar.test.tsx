@@ -368,10 +368,11 @@ describe("DesktopSidebar collapse/expand", () => {
     expect(container.querySelectorAll(".animate-pulse").length).toBe(0);
   });
 
-  it("collapsed=false → 'Meiva' title, no in-sidebar collapse button", () => {
+  it("collapsed=false → the collapse control sits on the sidebar's own edge", () => {
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.getByText("Meiva")).toBeTruthy();
-    expect(screen.queryByLabelText("Collapse sidebar")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Hide sidebar"));
+    expect(state.setSidebarCollapsed).toHaveBeenCalledWith(true);
     expect(screen.queryByLabelText("Drag to resize width")).toBeNull();
   });
 
@@ -1194,7 +1195,7 @@ describe("Header layout + search overlay (task #723)", () => {
     wrap(<AgentSidebar {...handlers} />);
     const header = screen.getByText("Meiva").closest("header")!;
     const labels = Array.from(header.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
-    expect(labels.filter(Boolean)).toEqual(["Search agents"]);
+    expect(labels.filter(Boolean)).toEqual(["Search agents", "Hide sidebar"]);
     expect(screen.getByText("Meiva")).toBeTruthy();
   });
 
