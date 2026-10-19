@@ -5,6 +5,8 @@ from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
 from base.host.env.registry import child_env
+from base.lm.harness.antigravity import AgySession, AntigravityConfig
+from base.lm.harness.antigravity import build_handoff as antigravity_handoff
 from base.lm.harness.bridge import HarnessBridge, HarnessSession, ScopedSessionRegistry
 from base.lm.harness.claude import BridgeConfig, ClaudeSession
 from base.lm.harness.codex import CodexConfig, CodexSession
@@ -39,6 +41,7 @@ def open_session(
     cwd: Path,
     registry: SessionRegistry,
     environ: Mapping[str, str] | None = None,
+    skip_permissions: bool = True,
 ) -> HarnessSession:
     if harness is Harness.CLAUDE_CODE:
         return ClaudeSession(
@@ -54,7 +57,36 @@ def open_session(
             agent_id=agent_id,
             registry=registry,
         )
+    if harness is Harness.ANTIGRAVITY:
+        return AgySession(
+            AntigravityConfig(cwd=cwd, skip_permissions=skip_permissions),
+            environ=environ,
+            agent_id=agent_id,
+            registry=registry,
+        )
     raise ValueError(f"no session adapter for harness {harness.value!r}")
+
+
+# meiva:note
+# The wake document is per adapter only where the adapter's world differs: Antigravity's
+# CLI starts a fresh shell per `run_command` and kills a `&` child when the turn ends, and
+# a harness agent that does not know that writes commands that look right and do not
+# survive. Every other adapter takes the shared document unchanged.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def _handoff_for(harness: Harness, *, agent_id: int, machine: str, workspace: Path) -> Handoff:
+    if harness is Harness.ANTIGRAVITY:
+        return antigravity_handoff(
+            agent_id=agent_id,
+            instruction=HANDOFF_INSTRUCTION,
+            machine=machine,
+            workspace=workspace,
+        )
+    return Handoff(
+        agent_id=agent_id,
+        instruction=HANDOFF_INSTRUCTION,
+        machine=machine,
+        workspace=workspace,
+    )
 
 
 # meiva:note
@@ -73,16 +105,12 @@ def bridge_for(
     registrations: RegistrationStore | None = None,
     registration_ttl_seconds: float,
     environ: Mapping[str, str] | None = None,
+    skip_permissions: bool = True,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
     scoped = ScopedSessionRegistry(inner=registry, harness=harness)
-    handoff = Handoff(
-        agent_id=agent_id,
-        instruction=HANDOFF_INSTRUCTION,
-        machine=machine,
-        workspace=workspace,
-    )
+    handoff = _handoff_for(harness, agent_id=agent_id, machine=machine, workspace=workspace)
 
     def factory(handle: str) -> HarnessSession:
         inherited = child_env("runner") if environ is None else environ
@@ -92,6 +120,7 @@ def bridge_for(
             cwd=workspace,
             registry=scoped,
             environ={**inherited, HANDLE_ENV: handle},
+            skip_permissions=skip_permissions,
         )
 
     return HarnessBridge(

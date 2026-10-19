@@ -19,13 +19,13 @@ DEFAULT_HARNESS = Harness.MEIVA
 # A harness enters this set when a launcher that can start a session on it
 # exists. Until then the runner refuses to wake a row born on it: recording an
 # intent the platform cannot honour would make the stored value a claim about a
-# runtime loop that is not actually running. `claude_code` and `codex` are here
-# because the graph routes their turns to `harness_turn`, whose bridge opens an
-# adapter session; `antigravity` joins when its adapter lands. Removing a value
-# retires the launcher and leaves rows born on it inert, which is the rollback.
+# runtime loop that is not actually running. Every external harness is here
+# because the graph routes its turns to `harness_turn`, whose bridge opens an
+# adapter session; removing a value retires its launcher and leaves rows born on
+# it inert, which is the rollback.
 # meiva:link base/agents/docs/harness.meiva.okf.md
 LAUNCHABLE_HARNESSES: frozenset[Harness] = frozenset(
-    {Harness.MEIVA, Harness.CLAUDE_CODE, Harness.CODEX}
+    {Harness.MEIVA, Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY}
 )
 
 
