@@ -38,9 +38,9 @@ drift apart. Three kinds of row exist:
 | `node` | frontend or browser service selected: builds and runs the Next.js app | `scripts/provision/node.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
 | `npm` | frontend or browser service selected: installs and builds the frontend | `scripts/provision/node.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
 | `npx` | frontend or browser service selected: runs the frontend tooling and the meiva-browser daemon | `scripts/provision/node.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
-| `crontab` | Linux, OS jobs enabled, default home: registers the daily backup, log rotation, packages refresh, health probe and boot autostart | `scripts/provision/host_utils.sh` (apt; macOS ships both) | install → re-probe; still missing → refuse |
-| `systemctl` | Linux, OS jobs enabled, default home: installs and enables the boot autostart unit | the host; this repository cannot install it | refuse before converge |
-| `sudo` | Linux, OS jobs enabled, default home, not root: writes the boot unit as root | the host; this repository cannot install it | refuse before converge |
+| `crontab` | Linux, OS jobs enabled, default home: registers the daily backup, log rotation, packages refresh and health probe | `scripts/provision/host_utils.sh` (apt; macOS ships both) | install → re-probe; still missing → refuse |
+| `systemctl` | Linux prod install with OS jobs enabled: installs and enables the boot autostart unit (skipped for a dev worktree) | the host; this repository cannot install it | refuse before converge |
+| `sudo` | Linux prod install with OS jobs enabled, not root: writes the boot unit as root | the host; this repository cannot install it | refuse before converge |
 | `launchctl` | macOS, OS jobs enabled, default home: loads the launchd jobs | the host; this repository cannot install it | refuse before converge |
 | `curl` | frontend service selected: the frontend readiness probe | `scripts/provision/host_utils.sh` (apt; macOS ships both) | install → re-probe; still missing → refuse |
 | `swiftc` | macOS with the permissions helper: compiles the helper app | the host; this repository cannot install it | refuse before converge |
@@ -48,8 +48,8 @@ drift apart. Three kinds of row exist:
 | `security` | macOS with the permissions helper: the code-signing identity in the keychain | the host; this repository cannot install it | refuse before converge |
 | `openssl` | macOS with the permissions helper: key generation | the host; this repository cannot install it | refuse before converge |
 | `sh` | always: every supervised service and OS job line launches through /bin/sh | the host; this repository cannot install it | refuse before converge |
-| `git` | never required: records the running commit and warns about a dirty checkout | the host; this repository cannot install it | nothing: warn or skip, the start continues |
-| `gh` | never required: the PR-flow sampler job, production home with a Trunk token | the host; this repository cannot install it | nothing: warn or skip, the start continues |
+| `git` | always: enumerates tracked migrations and digests the checkout on every start | `scripts/provision/install-cli-tools.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
+| `gh` | split agent-runner that consolidates the memory pool through GitHub PRs (not a gateway, MEIVA_MEMORY_KEEP_LOCAL unset, MEIVA_REQUIRE_GITHUB_PR on) | `scripts/provision/install-cli-tools.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
 | `brew` | never required: the macOS Homebrew pin drift check | the host; this repository cannot install it | nothing: warn or skip, the start continues |
 | `lsof` | never required: fallback listener discovery when psutil cannot name a port holder | the host; this repository cannot install it | nothing: warn or skip, the start continues |
 | `ps` | never required: parent-chain inspection of launchd jobs (macOS always ships it) | the host; this repository cannot install it | nothing: warn or skip, the start continues |
@@ -68,9 +68,12 @@ the caller that appears to need it uses a Python path instead:
 - `rsync`, `scp` — cross-machine transfer goes through the gateway upload path
   or a Drive folder; no shell copy runs at start.
 - `docker` — only the verification recipes use it.
-- `psql`, `pg_dump`, `pg_restore`, `pg_config` — schema work and backups go
-  through psycopg or the vendored client tools of the database provisioner;
-  `pg_dump`/`pg_restore` are executed by `meiva backup`, not by start.
+- `psql`, `pg_dump`, `pg_restore`, `pg_config` — schema work goes through
+  psycopg. The vendored PostgreSQL tree carries only `initdb`, `pg_ctl` and
+  `postgres`; the client tools come from the host package, and the daily
+  `pg-backup` service runs `pg_dump` long after start. They are installed by
+  `database.sh` (the `pg_isready` row already requires that group), not probed
+  as start dependencies.
 
 `uv` and the checkout's `.venv` interpreter are settled before start by
 `uv sync` and `meiva init`; a start that cannot import Meiva never reaches this

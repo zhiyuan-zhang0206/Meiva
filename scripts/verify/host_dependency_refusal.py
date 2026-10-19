@@ -212,6 +212,10 @@ def running_services(container: str, *, docker: list[str]) -> str:
 
 def phase_refusal(container: str, *, docker: list[str]) -> None:
     print("→ phase 1: no cron, no sudo, OS jobs on — start must refuse before converge")
+    # meiva:note
+    # Dropping sudo is what makes the provisioners fail fast instead of installing
+    # for minutes first; the refusal itself does not depend on it (a host-owned
+    # tool refuses before any installer runs).
     sh_ok(container, "sudo -n rm -f /etc/sudoers.d/verify", docker=docker)
     result = start(container, os_jobs=True, docker=docker)
     out = result.stdout + result.stderr
@@ -246,6 +250,8 @@ def phase_install(container: str, *, docker: list[str]) -> None:
     first = start(container, os_jobs=True, docker=docker)
     out_first = first.stdout + first.stderr
     print(out_first[-3000:])
+    if first.returncode == 0:
+        raise RefusalError("the start succeeded with no systemd to install the boot unit")
     installed = sh_ok(container, "command -v crontab || true", docker=docker).strip()
     if not installed:
         raise RefusalError(f"the preflight did not install cron:\n{out_first[-4000:]}")

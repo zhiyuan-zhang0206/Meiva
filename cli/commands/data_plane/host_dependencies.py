@@ -10,9 +10,9 @@
 # the WAL-G job step, long after the start had printed green steps above it.
 #
 # `render_table` prints the same rows, and
-# `cli/commands/lifecycle/docs/start-readiness.meiva.okf.md` carries its output, so
-# the document cannot drift from what start enforces.
-# meiva:link cli/commands/lifecycle/docs/start-readiness.meiva.okf.md
+# `cli/commands/lifecycle/docs/start-host-dependencies.meiva.okf.md` carries its
+# output, so the document cannot drift from what start enforces.
+# meiva:link cli/commands/lifecycle/docs/start-host-dependencies.meiva.okf.md
 from __future__ import annotations
 
 import os
@@ -27,6 +27,7 @@ from base.cluster.dataplane.pg_tools import pg_tool
 from base.deploy.progress_timeout import HOST_PACKAGE_INSTALL_TIMEOUT_S
 from base.host.system.boot_unit import systemd_running
 from base.host.system.hostport import Host
+from base.paths.home import is_prod_install
 from base.sessions.env_forwarding import frontend_toolchain_path
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane import cluster_instance as instance
@@ -35,6 +36,7 @@ from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_fr
 DATA_PLANE = "data-plane"
 NODE = "node"
 HOST_UTILS = "host-utils"
+CLI_TOOLS = "cli-tools"
 
 _NODE_SERVICES = frozenset({"frontend", "browser", "browser-mcp"})
 
@@ -42,12 +44,14 @@ _PROVISION_SCRIPTS = {
     DATA_PLANE: "database.sh",
     NODE: "node.sh",
     HOST_UTILS: "host_utils.sh",
+    CLI_TOOLS: "install-cli-tools.sh",
 }
 
 _PROVISION_LABELS = {
     DATA_PLANE: "PostgreSQL/Redis/PgBouncer",
     NODE: "Node.js",
     HOST_UTILS: "cron + curl",
+    CLI_TOOLS: "git and the GitHub CLI",
 }
 
 # meiva:note
@@ -56,6 +60,7 @@ _OWNERS = {
     DATA_PLANE: "`scripts/provision/database.sh` (apt/Homebrew)",
     NODE: "`scripts/provision/node.sh` (apt/Homebrew)",
     HOST_UTILS: "`scripts/provision/host_utils.sh` (apt; macOS ships both)",
+    CLI_TOOLS: "`scripts/provision/install-cli-tools.sh` (apt/Homebrew)",
 }
 _HOST_OWNED = "the host; this repository cannot install it"
 
@@ -76,6 +81,15 @@ class StartScope:
     host: Host
     os_jobs: bool
     permissions_helper: bool
+    # meiva:note
+    # The memory pool consolidates through GitHub PRs on a split runner unless it
+    # is kept local; these config fields decide whether `gh` is a start dependency.
+    require_github_pr: bool
+    memory_keep_local: bool
+    # meiva:note
+    # The boot unit is host-global: converge registers it only for the prod install
+    # (default home and a checkout that is not a dev worktree).
+    prod_install: bool
 
     @property
     def macos(self) -> bool:
@@ -158,7 +172,14 @@ def _pgbouncer_bin() -> str:
 
 def _pgbouncer_probe(_scope: StartScope, probes: HostDependencyProbes) -> DependencyProblem | None:
     resolved = probes.pgbouncer()
-    return None if _executable(resolved) else DependencyProblem(f"{resolved!r} is not executable")
+    if _executable(resolved):
+        return None
+    # meiva:note
+    # `pooler.pgbouncer_bin()` answers the bare name when nothing resolves, so a
+    # separator is what tells "installed but unusable" apart from "not found".
+    if os.sep in resolved:
+        return DependencyProblem(f"{resolved!r} is not executable")
+    return DependencyProblem("not on PATH (pgbouncer is not installed)")
 
 
 def _which_probe(
@@ -277,8 +298,15 @@ def _needs_os_jobs_linux(scope: StartScope) -> bool:
     return scope.os_jobs and not scope.macos
 
 
+# meiva:note
+# The boot unit is the one host-global registrar (`converge_host` skips it for a
+# dev worktree), so systemd and the root step are required exactly where it runs.
+def _needs_boot_unit(scope: StartScope) -> bool:
+    return _needs_os_jobs_linux(scope) and scope.prod_install
+
+
 def _needs_os_jobs_sudo(scope: StartScope) -> bool:
-    return _needs_os_jobs_linux(scope) and scope.host.uid != 0
+    return _needs_boot_unit(scope) and scope.host.uid != 0
 
 
 def _needs_os_jobs_macos(scope: StartScope) -> bool:
@@ -287,6 +315,20 @@ def _needs_os_jobs_macos(scope: StartScope) -> bool:
 
 def _needs_frontend(scope: StartScope) -> bool:
     return "frontend" in scope.services
+
+
+# meiva:note
+# A split runner that consolidates memory through PRs cannot start without `gh`:
+# `ensure_github_pr` refuses to converge there. A gateway consolidates locally, and
+# a local-only pool never round-trips through GitHub at all.
+def _needs_github_pr(scope: StartScope) -> bool:
+    roles = scope.roles or frozenset()
+    return (
+        "gateway" not in roles
+        and bool(roles)
+        and scope.require_github_pr
+        and not scope.memory_keep_local
+    )
 
 
 def _needs_macos_helper(scope: StartScope) -> bool:
@@ -365,23 +407,24 @@ HOST_TOOLS: tuple[HostTool, ...] = (
     HostTool(
         name="crontab",
         when="Linux, OS jobs enabled, default home: registers the daily backup, log rotation, "
-        "packages refresh, health probe and boot autostart",
+        "packages refresh and health probe",
         component=HOST_UTILS,
         needed=_needs_os_jobs_linux,
         probe=_which_probe("crontab"),
     ),
     HostTool(
         name="systemctl",
-        when="Linux, OS jobs enabled, default home: installs and enables the boot autostart unit",
+        when="Linux prod install with OS jobs enabled: installs and enables the boot "
+        "autostart unit (skipped for a dev worktree)",
         component=None,
-        needed=_needs_os_jobs_linux,
+        needed=_needs_boot_unit,
         probe=_systemd_probe,
         repair="install systemd and boot with it, or run `MEIVA_OS_JOBS_ENABLED=0 meiva start` "
         "to start without OS jobs",
     ),
     HostTool(
         name="sudo",
-        when="Linux, OS jobs enabled, default home, not root: writes the boot unit as root",
+        when="Linux prod install with OS jobs enabled, not root: writes the boot unit as root",
         component=None,
         needed=_needs_os_jobs_sudo,
         probe=_which_probe("sudo"),
@@ -448,19 +491,23 @@ HOST_TOOLS: tuple[HostTool, ...] = (
     # Optional rows: documentation, not gates — start warns or skips their step.
     HostTool(
         name="git",
-        when="never required: records the running commit and warns about a dirty checkout",
-        component=None,
-        needed=_never,
+        when="always: enumerates tracked migrations and digests the checkout on every start",
+        component=CLI_TOOLS,
+        needed=_always,
         probe=_which_probe("git"),
-        optional=True,
+        repair="install git with your package manager: `sudo apt-get install -y git` "
+        "(macOS: `xcode-select --install`)",
     ),
     HostTool(
         name="gh",
-        when="never required: the PR-flow sampler job, production home with a Trunk token",
-        component=None,
-        needed=_never,
+        when="split agent-runner that consolidates the memory pool through GitHub PRs "
+        "(not a gateway, MEIVA_MEMORY_KEEP_LOCAL unset, MEIVA_REQUIRE_GITHUB_PR on)",
+        component=CLI_TOOLS,
+        needed=_needs_github_pr,
         probe=_which_probe("gh"),
-        optional=True,
+        repair="install the GitHub CLI, then run `gh auth login` and grant the account write "
+        "access to the memory repo; or set MEIVA_REQUIRE_GITHUB_PR=false / "
+        "MEIVA_MEMORY_KEEP_LOCAL=1 to run without PR consolidation",
     ),
     HostTool(
         name="brew",
@@ -530,7 +577,7 @@ def ensure_host_dependencies(
     repo: Path,
     scope: StartScope,
     probes: HostDependencyProbes | None = None,
-    install: Callable[[Path, str], bool] | None = None,
+    install: Callable[[Path, str], None] | None = None,
 ) -> int:
     active = probes or HostDependencyProbes()
     installer = install or _install
@@ -538,6 +585,13 @@ def ensure_host_dependencies(
     if not missing:
         return 0
     _report_missing(missing)
+    # meiva:note
+    # A host-owned tool cannot be fixed by any provisioner, so its refusal is
+    # certain: report it before spending minutes installing the groups that could
+    # have been fixed.
+    if any(tool.component is None or not problem.installable for tool, problem in missing):
+        _report_refusal(missing, repo=repo, macos=scope.macos)
+        return 1
     for component in _components(missing):
         installer(repo, component)
     remaining = missing_tools(scope, probes=active)
@@ -561,6 +615,9 @@ def ensure_host_dependencies_step(
         host=ctx.host,
         os_jobs=_os_jobs_owned(enabled=view.general.os_jobs_enabled),
         permissions_helper=view.services.permissions_helper_enabled,
+        require_github_pr=view.general.require_github_pr,
+        memory_keep_local=view.general.memory_keep_local,
+        prod_install=is_prod_install(repo=ctx.repo, home=ctx.meiva_home),
     )
     if check(repo=ctx.repo, scope=scope):
         raise RuntimeError(
@@ -624,6 +681,8 @@ def _remediation(
             lines.append("brew install node")
         if HOST_UTILS in components:
             lines.append("brew install curl")
+        if CLI_TOOLS in components:
+            lines.append("brew install git gh")
     else:
         for component in components:
             script = repo / "scripts" / "provision" / _PROVISION_SCRIPTS[component]
@@ -639,11 +698,11 @@ def _remediation(
     return lines
 
 
-def _install(repo: Path, component: str) -> bool:
+def _install(repo: Path, component: str) -> None:
     script = repo / "scripts" / "provision" / _PROVISION_SCRIPTS[component]
     if not script.is_file():
         print(f"  ✗ provision script missing: {script}", file=sys.stderr)
-        return False
+        return
     print(
         f"  · installing {_PROVISION_LABELS[component]} with {_package_manager()} "
         "(this can take several minutes)"
@@ -657,13 +716,12 @@ def _install(repo: Path, component: str) -> bool:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"  ✗ {script.name} failed to run: {exc}", file=sys.stderr)
-        return False
+        return
     if result.returncode != 0:
         print(
             f"  ! {script.name} exited {result.returncode}; re-checking what landed",
             file=sys.stderr,
         )
-    return True
 
 
 def _package_manager() -> str:

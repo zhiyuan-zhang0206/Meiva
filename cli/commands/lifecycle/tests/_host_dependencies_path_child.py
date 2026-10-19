@@ -13,6 +13,10 @@ from base.host.system.hostport import Host
 from cli.commands.data_plane import host_dependencies as hd
 
 
+def _no_install(_repo: Path, _component: str) -> None:
+    return
+
+
 def main() -> int:
     scope = hd.StartScope(
         roles=frozenset({"agent-runner"}),
@@ -21,10 +25,11 @@ def main() -> int:
         host=Host.system(),
         os_jobs=True,
         permissions_helper=False,
+        require_github_pr=False,
+        memory_keep_local=False,
+        prod_install=True,
     )
-    return hd.ensure_host_dependencies(
-        repo=Path(sys.argv[1]), scope=scope, install=lambda _repo, _component: False
-    )
+    return hd.ensure_host_dependencies(repo=Path(sys.argv[1]), scope=scope, install=_no_install)
 
 
 if __name__ == "__main__":

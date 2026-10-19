@@ -46,6 +46,10 @@ def _config(
     )
 
 
+def _no_install(_repo: Path, _component: str) -> None:
+    return
+
+
 def _run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess([], 0, "22.14.0\n", "")
 
@@ -80,6 +84,9 @@ def _scope(
     host: Host | None = None,
     os_jobs: bool = True,
     permissions_helper: bool = False,
+    require_github_pr: bool = False,
+    memory_keep_local: bool = False,
+    prod_install: bool = True,
 ) -> hd.StartScope:
     plane = _config() if data_plane is _DEFAULT else data_plane
     return hd.StartScope(
@@ -91,6 +98,9 @@ def _scope(
         host=host or _host(),
         os_jobs=os_jobs,
         permissions_helper=permissions_helper,
+        require_github_pr=require_github_pr,
+        memory_keep_local=memory_keep_local,
+        prod_install=prod_install,
     )
 
 
@@ -164,6 +174,7 @@ def test_gateway_with_the_frontend_requires_the_full_table() -> None:
         "sudo",
         "curl",
         "sh",
+        "git",
     }
 
 
@@ -202,14 +213,43 @@ def test_root_does_not_require_sudo() -> None:
     assert "sudo" not in _names(_scope(host=_host(uid=0)))
 
 
+def test_git_is_required_on_every_start() -> None:
+    selections: tuple[tuple[frozenset[str] | None, frozenset[str]], ...] = (
+        (GATEWAY, HEADLESS),
+        (RUNNER, frozenset()),
+        (None, frozenset()),
+    )
+    for roles, services in selections:
+        scope = _scope(roles=roles, services=services, data_plane=None)
+        assert "git" in _names(scope)
+
+
+def test_a_split_runner_consolidating_by_pr_needs_the_github_cli() -> None:
+    scope = _scope(roles=RUNNER, data_plane=None, require_github_pr=True)
+    assert "gh" in _names(scope)
+
+
+def test_a_gateway_never_needs_the_github_cli() -> None:
+    assert "gh" not in _names(_scope(require_github_pr=True))
+
+
+def test_a_local_memory_pool_or_an_explicit_opt_out_drops_the_github_cli() -> None:
+    local = _scope(roles=RUNNER, data_plane=None, require_github_pr=True, memory_keep_local=True)
+    opted_out = _scope(roles=RUNNER, data_plane=None, require_github_pr=False)
+    assert "gh" not in _names(local)
+    assert "gh" not in _names(opted_out)
+
+
+def test_a_dev_worktree_start_does_not_require_the_boot_unit() -> None:
+    scope = _scope(prod_install=False)
+    names = _names(scope)
+    assert "systemctl" not in names
+    assert "sudo" not in names
+    assert {"crontab", "git"} <= names
+
+
 def test_optional_tools_are_never_required() -> None:
-    assert {tool.name for tool in hd.HOST_TOOLS if tool.optional} == {
-        "git",
-        "gh",
-        "brew",
-        "lsof",
-        "ps",
-    }
+    assert {tool.name for tool in hd.HOST_TOOLS if tool.optional} == {"brew", "lsof", "ps"}
     assert all(not tool.optional for tool in hd.required_tools(_scope()))
 
 
@@ -232,10 +272,9 @@ def test_missing_crontab_installs_host_utils_then_passes(
     present = {"crontab": False}
     installed: list[str] = []
 
-    def install(_repo: Path, component: str) -> bool:
+    def install(_repo: Path, component: str) -> None:
         installed.append(component)
         present["crontab"] = True
-        return True
 
     scope = _scope(host=_host(present))
     assert (
@@ -254,21 +293,53 @@ def test_a_second_start_does_not_reinstall(
     present = {"crontab": False}
     installed: list[str] = []
 
-    def install(_repo: Path, component: str) -> bool:
+    def install(_repo: Path, component: str) -> None:
         installed.append(component)
         present["crontab"] = True
-        return True
 
     scope = _scope(host=_host(present))
-    for _ in range(2):
-        assert (
-            hd.ensure_host_dependencies(
-                repo=tmp_path, scope=scope, probes=_DataPlane().probes(), install=install
-            )
-            == 0
+    assert (
+        hd.ensure_host_dependencies(
+            repo=tmp_path, scope=scope, probes=_DataPlane().probes(), install=install
         )
+        == 0
+    )
+    # meiva:note
+    # Discard the first run's report: the second run must be silent.
+    capsys.readouterr()
+    assert (
+        hd.ensure_host_dependencies(
+            repo=tmp_path, scope=scope, probes=_DataPlane().probes(), install=install
+        )
+        == 0
+    )
     assert installed == ["host-utils"]
-    assert "installing" not in capsys.readouterr().out
+    assert "host dependencies" not in capsys.readouterr().out
+
+
+# meiva:note
+# A host-owned tool cannot be fixed by any provisioner, so the gate must not spend
+# minutes installing the groups that could have been fixed before it refuses.
+def test_a_host_owned_refusal_skips_the_installers(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    installs: list[str] = []
+
+    def install(_repo: Path, component: str) -> None:
+        installs.append(component)
+
+    assert (
+        hd.ensure_host_dependencies(
+            repo=tmp_path,
+            scope=_scope(host=_host({"crontab": False, "systemctl": False})),
+            probes=_DataPlane().probes(),
+            install=install,
+        )
+        == 1
+    )
+    assert installs == []
+    err = capsys.readouterr().err
+    assert "✗ crontab" in err and "✗ systemctl" in err
 
 
 def test_missing_crontab_that_cannot_be_installed_names_the_tool_and_the_command(
@@ -279,7 +350,7 @@ def test_missing_crontab_that_cannot_be_installed_names_the_tool_and_the_command
             repo=tmp_path,
             scope=_scope(host=_host({"crontab": False})),
             probes=_DataPlane().probes(),
-            install=lambda _repo, _component: False,
+            install=_no_install,
         )
         == 1
     )
@@ -294,9 +365,8 @@ def test_a_host_owned_tool_refuses_with_the_escape_command(
 ) -> None:
     installs: list[str] = []
 
-    def install(_repo: Path, component: str) -> bool:
+    def install(_repo: Path, component: str) -> None:
         installs.append(component)
-        return True
 
     assert (
         hd.ensure_host_dependencies(
@@ -319,10 +389,9 @@ def test_missing_postgres_installs_the_database_group(
     probe = _DataPlane(missing_postgres=("initdb", "pg_ctl", "postgres", "pg_isready"))
     installed: list[str] = []
 
-    def install(_repo: Path, component: str) -> bool:
+    def install(_repo: Path, component: str) -> None:
         installed.append(component)
         probe.gone.clear()
-        return True
 
     assert (
         hd.ensure_host_dependencies(
@@ -344,7 +413,7 @@ def test_node_older_than_the_floor_refuses(
             repo=tmp_path,
             scope=scope,
             probes=_DataPlane(node=problem).probes(),
-            install=lambda _repo, _component: False,
+            install=_no_install,
         )
         == 1
     )
@@ -447,7 +516,9 @@ def test_the_pgbouncer_probe_reports_the_resolved_path() -> None:
 # meiva:note
 # The Settings shape the step reads, built without constructing Settings; the
 # credentials are fake values that never leave this module.
-def _view(*, permissions_helper: bool = False) -> SimpleNamespace:
+def _view(
+    *, permissions_helper: bool = False, os_jobs: bool = True, github_pr: bool = True
+) -> SimpleNamespace:
     plane = SimpleNamespace(
         db_url="postgresql://meiva:pw@127.0.0.1:5432/meiva",
         redis_url="redis://meiva:pw@127.0.0.1:6380/0",
@@ -466,14 +537,22 @@ def _view(*, permissions_helper: bool = False) -> SimpleNamespace:
             embedding_backend="openai",
             permissions_helper_enabled=permissions_helper,
         ),
-        general=SimpleNamespace(os_jobs_enabled=True),
+        general=SimpleNamespace(
+            os_jobs_enabled=os_jobs,
+            require_github_pr=github_pr,
+            memory_keep_local=False,
+        ),
     )
 
 
 class _Ctx:
     # meiva:note
-    # A duck-typed ConvergeCtx: the step reads only these fields.
+    # A duck-typed ConvergeCtx: the step reads only these fields. The home is the
+    # default one so `prod_install` is decided by the checkout path alone, while
+    # the process's own MEIVA_HOME (the test harness's temporary home) is what
+    # `owns_os_jobs` reads — the pair the real step sees.
     repo = Path("/repo")
+    meiva_home = Path.home() / ".meiva"
     roles = RUNNER
     services = frozenset({"frontend"})
     host = _host()
@@ -498,3 +577,29 @@ def test_step_refuses_when_the_check_fails() -> None:
     assert isinstance(scope, hd.StartScope)
     assert scope.roles == RUNNER
     assert "node" in _names(scope)
+    # meiva:note
+    # The two gates the step derives rather than hardcodes: OS jobs need the default
+    # home this process does not own, and the view's helper flag reaches the scope.
+    assert scope.os_jobs is False
+    assert scope.prod_install is True
+    assert scope.permissions_helper is False
+
+
+def test_step_passes_the_helper_flag_and_the_os_jobs_switch_through() -> None:
+    seen: list[hd.StartScope] = []
+
+    class _Incapable(_Ctx):
+        def read_config(self) -> Any:
+            return SimpleNamespace(view=_view(permissions_helper=True, os_jobs=False))
+
+    def check(**kwargs: object) -> int:
+        scope = kwargs["scope"]
+        assert isinstance(scope, hd.StartScope)
+        seen.append(scope)
+        return 0
+
+    # meiva:note
+    # `_Incapable` is a duck-typed ConvergeCtx; pyright cannot see the protocol match.
+    hd.ensure_host_dependencies_step(_Incapable(), check=check)  # pyright: ignore[reportArgumentType]
+    assert seen[0].permissions_helper is True
+    assert seen[0].os_jobs is False
