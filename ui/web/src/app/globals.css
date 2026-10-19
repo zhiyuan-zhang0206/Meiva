@@ -50,6 +50,10 @@
 
 :root {
   color-scheme: light;
+  /* Browser chrome (Android status/toolbar and navigation bar areas) reads this
+     through <meta name="theme-color">; the palette owns it so a surface change
+     cannot leave the system bars on the old colour. */
+  --theme-color: #ffffff;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -118,6 +122,7 @@
   color-scheme: dark;
   /* Dark mode is a neutral gray surface, not black (user ruling 2026-10-18):
      oklch(0.145) read as pure black against the muted/foreground tokens. */
+  --theme-color: #222222;
   --background: oklch(0.25 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -187,6 +192,9 @@
   html {
     @apply font-sans;
     font-size: 16px;
+    /* Paint the root canvas too: the area behind the system bars and any
+       overscroll reads this, not the body underneath it. */
+    background-color: var(--background);
   }
   /* No page-level vertical overscroll (rubber-band), but browser
      horizontal-swipe navigation (forward/back) stays enabled.

@@ -99,6 +99,10 @@ NAV_ICONS = (
 
 # The themable custom properties of `ui/web/src/app/globals.css` `:root`.
 THEME_TOKENS = (
+    # meiva:note
+    # --theme-color is the browser-chrome colour (Android system/toolbar bars) - a colour like the rest of the palette, so a skin that repaints the surfaces sets it too; the stylesheet's light/dark pair is the default for skins that do not.
+    # meiva:link future/frontend-plugin-contributions.md
+    "--theme-color",
     "--background",
     "--foreground",
     "--card",
