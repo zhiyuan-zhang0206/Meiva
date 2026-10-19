@@ -65,6 +65,14 @@
       "description": "Daily GitHub Actions run-observability collection at 06:20 cluster time — publishes absolute Dev/CI workflow, failure, per-PR, and white-run gauges; failures wake the Meiva P0 lead.",
       "script": "dev-ci-metrics-schedule.py",
       "command": "python dev-ci-metrics-schedule.py"
+    },
+    {
+      "name": "db-write-stall-watch",
+      "class": "operator",
+      "default_enabled": false,
+      "description": "Operator sentinel for a stalled database write path (#5310): reads pgBouncer's per-minute stats line from $MEIVA_HOME/pgbouncer/pgbouncer.log and wakes the cluster operator after three consecutive minutes under 20 xacts/s with an average query time above 300 ms. Thresholds come from 29 days of history (40,375 minutes), where the rule marked only the two real incidents; an agent-host crash wave is the consequence it precedes, not the signal.",
+      "script": "db-write-stall-watch-schedule.py",
+      "command": "python db-write-stall-watch-schedule.py"
     }
   ]
 }
