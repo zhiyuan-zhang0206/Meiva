@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from base import paths
-from base.paths.home import default_home, is_default_home
+from base.paths.home import default_home, is_default_home, is_prod_install
 
 
 @pytest.fixture(autouse=True)
@@ -60,3 +60,11 @@ def test_default_home_is_bare_meiva():
 def test_is_default_home_expands_and_compares():
     assert is_default_home(Path("~/.meiva"))
     assert not is_default_home(Path("~/.meiva-foo"))
+
+
+def test_is_prod_install_needs_the_default_home_and_a_non_worktree_checkout(tmp_path: Path):
+    home = default_home()
+    assert is_prod_install(repo=tmp_path / "Meiva", home=home)
+    assert not is_prod_install(repo=tmp_path / "Meiva" / ".worktrees" / "x", home=home)
+    assert not is_prod_install(repo=tmp_path / ".claude" / "worktrees" / "x", home=home)
+    assert not is_prod_install(repo=tmp_path / "Meiva", home=tmp_path / "scratch-home")

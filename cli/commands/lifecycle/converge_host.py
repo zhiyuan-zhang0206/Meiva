@@ -28,7 +28,7 @@ from base.host.converge.browser_deps import browser_deps_notice, browser_deps_wa
 from base.host.converge.screen_capture import clear_status, write_status
 from base.host.system.hostport import Host
 from base.host.system.probes import browser_incapability
-from base.paths.home import is_default_home, resolve_meiva_home
+from base.paths.home import is_default_home, is_prod_install, resolve_meiva_home
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.converge.brew_pin import ensure_brew_pin
@@ -517,6 +517,18 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
 )
 
 
+# meiva:note
+# Host-global steps belong to the host's prod install (the default home
+# `~/.meiva`), not to a dev cluster spun up from a worktree — a dev cluster must
+# not repoint `~/.local/bin/meiva`, rewrite the shell rc or own the boot unit.
+# Identity is the home path, so the criterion is direct: this unit's resolved home
+# must BE the default home. A dev worktree resolves its home to `~/.meiva` too
+# whenever MEIVA_HOME is unset, so additionally require a checkout that is not a
+# dev worktree (`.worktrees/...` or `.claude/worktrees/...`).
+def prod_install(ctx: ConvergeCtx) -> bool:
+    return is_prod_install(repo=ctx.repo, home=ctx.meiva_home, is_default=is_default_home)
+
+
 def converge_host(
     repo: Path,
     roles: MachineRoles | None,
@@ -556,18 +568,7 @@ def converge_host(
         host=command.host,
     )
 
-    # Host-global steps belong to the host's prod install (the default home
-    # `~/.meiva`), not to a dev cluster spun up from a worktree — a dev cluster must
-    # not repoint `~/.local/bin/meiva` or rewrite the shell rc.
-    #
-    # Identity is the home path, so the criterion is direct: this unit's resolved
-    # home must BE the default home. A dev worktree resolves its home to `~/.meiva`
-    # too whenever MEIVA_HOME is unset, so additionally require a repo
-    # that is not a dev worktree (`.worktrees/...` or `.claude/worktrees/...`) —
-    # host-global wiring runs only for a genuine prod-install checkout.
-    repo_resolved = str(ctx.repo.resolve())
-    repo_is_worktree = ".claude/worktrees" in repo_resolved or "/.worktrees/" in repo_resolved
-    is_prod_install = is_default_home(ctx.meiva_home) and not repo_is_worktree
+    is_prod_install = prod_install(ctx)
 
     print("\n→ converge host")
     failed_step = ""

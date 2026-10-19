@@ -40,9 +40,11 @@ def test_the_owner_doc_carries_the_dependency_table() -> None:
 
 # meiva:note
 # The criterion the task names: remove a required tool from PATH and start must
-# refuse before converge launches anything, naming the tool and its repair. The
-# child runs the real gate with an empty PATH, which is exactly what a host
-# without crontab looks like to it.
+# refuse, naming the tool and its repair. The child runs the real gate with an
+# empty PATH — exactly what a host without crontab looks like to it. That the
+# refusal happens before any service launches is structural (the gate is
+# `cold_start_steps()[0]`) and is proved end to end by
+# `scripts/verify/host_dependency_refusal.py`.
 def test_a_tool_removed_from_path_is_refused_with_its_repair(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, str(CHILD), str(tmp_path)],
@@ -75,6 +77,9 @@ def test_the_platform_is_read_from_the_host_not_the_process() -> None:
         host=host,
         os_jobs=True,
         permissions_helper=False,
+        require_github_pr=False,
+        memory_keep_local=False,
+        prod_install=True,
     )
     names = {tool.name for tool in host_dependencies.required_tools(scope)}
     assert "launchctl" in names
