@@ -1,35 +1,8 @@
-"""Built-in schedules — the version-controlled schedules that ship with Meiva.
-
-Policy (user ruling 2026-08-11, pre-open-source): product schedules
-(self-evolution, memory) are built in AND start by default; cluster-operator
-schedules are built in but start disabled (none ships today). The manifest
-lives at ``<repo>/schedules/manifest.json`` next to the schedule script
-templates — it is the single expression of that policy.
-
-``provision_builtin_schedules()`` does two things per manifest entry:
-
-- **create** the schedule when its row is missing, with ``enabled`` taken from the
-  manifest's ``default_enabled``;
-- **resync** an existing row whose ``script`` / ``command`` differ from the repo
-  template. The checkout is the source of truth for a built-in's code: the DB copy
-  is a snapshot made at creation, and a snapshot goes stale when the library API
-  it calls moves (2026-10-03: ``catch_up()`` gained a required ``db`` and thirteen
-  stale snapshots crash-looped). The resync writes the template into the row,
-  snapshots a ``schedule_versions`` row (note ``builtin-resync <hash>``) and queues
-  a ``schedule_sync_requests`` row so a live session is relaunched onto the new code.
-
-Everything else on an existing row — ``enabled``, ``description``, status — is
-never touched, so stopping a built-in keeps it stopped. Delete a built-in and the
-next provision brings it back with its default state. Agent-created schedules are
-not in the manifest and are never read or written here. Both operations are
-idempotent: a second provision with an unchanged checkout changes nothing.
-
-Called from the gateway lifespan at boot (a fresh install comes up with its
-built-ins) and from ``meiva schedules provision`` (manual restore). Both call
-sites run it against their own DB connection; the gateway's reconcile loop
-launches any newly created enabled schedule within a poll tick.
-"""
-
+# meiva:note
+# One manifest entry, one row: create a missing row with the manifest's
+# `default_enabled`, resync a drifted script and command, and never touch an
+# existing row's enabled state, description or status.
+# meiva:link base/daemon/schedules/docs/builtin-provisioning.meiva.okf.md
 from __future__ import annotations
 
 import hashlib

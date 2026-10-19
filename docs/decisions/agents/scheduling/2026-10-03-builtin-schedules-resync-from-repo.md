@@ -3,8 +3,9 @@
 ## Context
 
 The 2026-08-11 pre-open-source ruling (recorded in `schedules/manifest.json`, `schedules/README.md` and
-the `builtin_schedules` docstring, not in a decision file) made provisioning create missing built-in
-schedules and never touch an existing row, so an operator's edits survived every boot. The row's
+the `builtin_schedules` docstring, not in a decision file; since 2026-10-19 that third record lives in
+`base/daemon/schedules/docs/builtin-provisioning.meiva.okf.md`) made provisioning create missing
+built-in schedules and never touch an existing row, so an operator's edits survived every boot. The row's
 `script` is a snapshot of the template taken when the row was created.
 
 On 2026-10-03 `catch_up()` and `fire_slot_once()` gained a required `db` and the hierarchy-worker's
