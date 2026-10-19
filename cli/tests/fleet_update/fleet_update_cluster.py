@@ -55,6 +55,7 @@ class Cluster:
         self.silence_reply: str | None = None
         self.leases: list[dict[str, Any]] = []
         self.lease_reply: str | None = None
+        self.lease_rc = 0
         # meiva:note
         # Where each read happened: the effects already accepted, so a test can prove the leases
         # are named before anything stops.
@@ -187,7 +188,7 @@ class Cluster:
         assert alias == "gw", "the lease table is read on the gateway host"
         reply = self.lease_reply
         emit(reply if reply is not None else json.dumps({"leases": self.leases}))
-        return 0
+        return self.lease_rc
 
     def _silence(self, alias: str, command: str, emit: Callable[[str], None]) -> int:
         assert alias == "gw", "the silence is Grafana's: it runs on the gateway host"

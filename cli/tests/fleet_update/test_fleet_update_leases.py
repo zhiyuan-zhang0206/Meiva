@@ -140,6 +140,21 @@ def test_a_lease_read_that_fails_warns_and_the_update_goes_on(
     assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
 
 
+# meiva:note
+# A shipped program that exited non-zero raises FailedError out of `s.run`; that must land on the
+# same warning, never on the refusal that aborts the window.
+def test_a_lease_program_that_exits_nonzero_warns_and_the_update_goes_on(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.lease_rc = 71
+    assert run("down") == 0
+    out = capsys.readouterr().out
+    assert "WARNING: active impersonation leases were not read" in out
+    assert "gw: exit 71" in out
+    assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
+
+
 def test_a_negative_window_is_refused_before_any_host_is_contacted(
     env: tuple[Cluster, Callable[..., int]],
 ) -> None:

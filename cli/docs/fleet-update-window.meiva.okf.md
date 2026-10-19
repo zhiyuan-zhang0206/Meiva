@@ -36,8 +36,9 @@ host, like the silence and roster programs, so its imports stay visible to the
 reader and the first update that carries it already has it. The filter is the
 status the table holds rather than the clock: a stopped cluster's reaper lags,
 and the row still marked active is exactly the one the stop would end. A table
-that cannot be read only warns; an unreadable lease list must not strand a
-window.
+that cannot be read only warns — the shipped program exiting non-zero is the
+same warning, not a refusal — because an unreadable lease list must not strand
+a window.
 
 `--lease-confirm-seconds` (default 0) then holds the stops open for that long
 with a printed countdown, so the operator can release or renew a lease first.
@@ -89,7 +90,7 @@ Before anything stops — under --dry-run too — down runs NEW's offline verify
 
 down runs the keep decision as a subprocess of scripts/host_ops/fleet_update_keep.py on this interpreter; every failure — missing script, timeout, non-zero exit, unusable output — returns no keeps with one WARNING and the stops restart everything; the verdicts ride every stop as --keep-service flags; --restart-all skips the decision; a rerun over hosts already on NEW passes NEW as both revisions.
 
-Before anything stops — under --dry-run too, in the same words — down reads the gateway's agent_impersonations rows with status='active' and names each lease by agent, session, executor and expiry, followed by one warning that the stops end them; a read that fails only warns and the window goes on; --lease-confirm-seconds (default 0, report only) holds the stops open that long with a countdown, and dry-run prints that window without sleeping.
+Before anything stops — under --dry-run too, in the same words — down reads the gateway's agent_impersonations rows with status='active' and names each lease by agent, session, executor and expiry, followed by one warning that the stops end them; a read that fails — an unreadable table or a program that exits non-zero — only warns and the window goes on; --lease-confirm-seconds (default 0, report only) holds the stops open that long with a countdown, and dry-run prints that window without sleeping.
 
 down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry --silence-hours (default 4); up expires it after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
 

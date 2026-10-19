@@ -294,7 +294,11 @@ def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "")
 # Name the takeovers the stops would end, before anything stops -- under --dry-run too.
 # meiva:link cli/docs/fleet-update-window.meiva.okf.md
 def _announce_leases(s: Session, args: argparse.Namespace) -> None:
-    out = s.run(args.gateway, f"{_PYTHON} -", effect=False, stdin=leases_program())
+    try:
+        out = s.run(args.gateway, f"{_PYTHON} -", effect=False, stdin=leases_program())
+    except FailedError as exc:
+        _lease_read_warning(s, str(exc))
+        return
     try:
         parsed = json.loads([line for line in out.splitlines() if line.startswith("{")][-1])
         leases = list(parsed["leases"])
@@ -302,10 +306,7 @@ def _announce_leases(s: Session, args: argparse.Namespace) -> None:
         failed = next(
             (line for line in out.splitlines() if line.startswith("LEASES failed")), "no output"
         )
-        s.say(
-            f"WARNING: active impersonation leases were not read ({failed}); a takeover this "
-            "window ends goes unannounced"
-        )
+        _lease_read_warning(s, failed)
         return
     if not leases:
         s.say("leases: no active impersonation lease")
@@ -321,6 +322,17 @@ def _announce_leases(s: Session, args: argparse.Namespace) -> None:
         "takeover is aborted mid-task and the native agent resumes: release or renew them first"
     )
     _lease_window(s, args)
+
+
+# meiva:note
+# A lease list that could not be read -- an unreadable table, or a shipped program that exited
+# non-zero -- is one warning, never a refusal: refusing here would be the very thing the
+# announcement exists to prevent, a window that cannot run.
+def _lease_read_warning(s: Session, detail: str) -> None:
+    s.say(
+        f"WARNING: active impersonation leases were not read ({detail}); a takeover this window "
+        "ends goes unannounced"
+    )
 
 
 # meiva:note
