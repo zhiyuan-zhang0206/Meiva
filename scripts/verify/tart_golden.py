@@ -1,4 +1,15 @@
-"""Build the golden macOS image the Tart verification runs clone from.
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any
+
+DESCRIPTION = """Build the golden macOS image the Tart verification runs clone from.
 
     python3 scripts/verify/tart_golden.py --ref origin/main --dry-run   # print every step
     python3 scripts/verify/tart_golden.py --ref origin/main             # build, user present
@@ -12,22 +23,19 @@ grants, which macOS lets only a person give:
    into `~/.meiva/source` (the helper is built from it), run the repository's own macOS
    provisioning (Homebrew postgresql@17, redis@8.2, pgbouncer, pgvector; the pinned uv)
    and `uv sync`, which also warms the uv cache every clone inherits;
-3. create the helper's self-signed identity, then set the key's partition list, the one
-   step the start path does not do: on a headless guest signing otherwise blocks on a
-   dialog nobody can answer (the account password below is the base image's documented
-   default, in a VM that holds nothing);
-4. build, sign and load the permissions helper (`lifecycle.converge()`); it answers `ping`
-   with both grant booleans false;
-5. shut the guest down and boot it again with graphics: a window opens, this script prints
+3. build, ad-hoc sign and load the permissions helper (`lifecycle.converge()`); it answers
+   `ping` with both grant booleans false;
+4. shut the guest down and boot it again with graphics: a window opens, this script prints
    what to click, and waits;
-6. after you confirm, restart the helper (macOS applies a Screen Recording grant only to a
+5. after you confirm, restart the helper (macOS applies a Screen Recording grant only to a
    process that started after it), and verify: `ping` reports both booleans true, the
-   system TCC rows are allowed with the identity's code requirement, and a real capture
-   through the helper is not a uniform image;
-7. remove `~/.meiva/source` (the golden image carries no source and no cluster; each run
+   system TCC rows are allowed with the helper's code requirement (an ad-hoc helper is
+   known to TCC by its code hash, so the grant belongs to this exact build), and a real
+   capture through the helper is not a uniform image;
+6. remove `~/.meiva/source` (the golden image carries no source and no cluster; each run
    fetches its own commit) and shut the guest down.
 
-Nothing of the host's `~/.meiva`, launchd, keychain or TCC is touched, and at most two Tart
+Nothing of the host's `~/.meiva`, launchd or TCC is touched, and at most two Tart
 VMs run at once. A VM that already has the name is never overwritten. If a step fails the
 VM is left stopped as it is, for inspection. The design is
 future/infra/engineering/verification-boundaries.md.
@@ -35,17 +43,6 @@ future/infra/engineering/verification-boundaries.md.
 Host-side and stdlib-only. Run it from the repository checkout; the commit only decides
 which helper source is built.
 """
-
-from __future__ import annotations
-
-import argparse
-import json
-import shutil
-import sys
-import tempfile
-import time
-from pathlib import Path
-from typing import Any
 
 RECIPE = Path(__file__).resolve().parent
 REPO = RECIPE.parents[1]
@@ -69,21 +66,12 @@ CPUS = 4
 MEMORY_MB = 8192
 # The base image's documented default account; the VM holds no secret.
 ACCOUNT_PASSWORD = "admin"  # noqa: S105 — the base image's documented default account
-CERT_CN = "Meiva Permissions Helper Code Signing"
 BUNDLE_ID = "com.meiva.permissions-helper"
 TCC_DB = "/Library/Application Support/com.apple.TCC/TCC.db"
 # The helper's two desktop grants, as the system TCC database names them.
 GRANTED = {"kTCCServiceScreenCapture": 2, "kTCCServiceAccessibility": 2}
 
 _HELPER_LIFECYCLE = "from services.desktop.permissions_helper import lifecycle; lifecycle.{call}"
-IDENTITY = guest_script(
-    f'cd "{GUEST_SOURCE}" && MEIVA_CONFIG_FETCH=skip .venv/bin/python -c '
-    f'"{_HELPER_LIFECYCLE.format(call="ensure_signing_cert()")}"'
-)
-KEY_ACCESS = guest_script(
-    f"security set-key-partition-list -S apple-tool:,apple: -s -l '{CERT_CN}' "
-    f'-k {ACCOUNT_PASSWORD} "$HOME/Library/Keychains/login.keychain-db"'
-)
 HELPER = guest_script(
     f'cd "{GUEST_SOURCE}" && MEIVA_CONFIG_FETCH=skip .venv/bin/python -c '
     f'"{_HELPER_LIFECYCLE.format(call="converge()")}"'
@@ -96,9 +84,8 @@ RESTART_HELPER = guest_script(
     'launchctl kickstart -k "gui/$(id -u)/$label"\n'
     "sleep 5"
 )
-# One JSON line for the host to judge: the helper's ping, the identity, its designated
-# requirement and CDHash, the system TCC rows (with the code requirement blob) and a
-# capture through the helper reduced to colour statistics. Runs in the checkout's venv.
+# meiva:note
+# One JSON line for the host to judge: the helper's ping, its designated requirement and CDHash, the system TCC rows (with the code requirement blob) and a capture through the helper reduced to colour statistics. Runs in the checkout's venv.
 _VERIFY_PY = """
 import collections, json, struct, subprocess
 from base.paths import permissions_helper_app_dir
@@ -111,11 +98,10 @@ def out(*argv):
 
 app = str(permissions_helper_app_dir() / "MeivaPermissionsHelper.app")
 record = {"ping": dict(client.ping())}
-record["identity"] = out("security", "find-identity", "-p", "codesigning")
 signing = subprocess.run(["codesign", "-dv", "-r-", "--verbose=4", app], capture_output=True, text=True)
 record["signature"] = [
-    line for line in (signing.stdout + signing.stderr).splitlines()
-    if line.startswith(("designated =>", "CDHash="))
+    line.removeprefix("# ") for line in (signing.stdout + signing.stderr).splitlines()
+    if line.removeprefix("# ").startswith(("designated =>", "CDHash="))
 ]
 rows = out(
     "sqlite3", "-readonly", "@TCC_DB@",
@@ -167,8 +153,6 @@ TIMEOUTS = {
     "prepare-source": 300,
     "toolchain": 1800,
     "python": 1200,
-    "identity": 120,
-    "key-access": 120,
     "helper": 600,
     "restart-helper": 120,
     "verify": 180,
@@ -176,30 +160,34 @@ TIMEOUTS = {
 }
 
 
-def _signing_sha1(record: dict[str, Any]) -> str | None:
-    """The 40-hex SHA-1 of the signing identity in `security find-identity` output."""
+# meiva:note
+# The helper's CDHash in `codesign -dv` output: what TCC knows an ad-hoc helper by.
+def _code_hash(record: dict[str, Any]) -> str | None:
+    prefix = "CDHash="
     return next(
-        (word for word in record["identity"].split() if len(word) == 40 and word.isalnum()), None
+        (line[len(prefix) :] for line in record["signature"] if line.startswith(prefix)), None
     )
 
 
-def _identity_problems(record: dict[str, Any], sha1: str | None) -> list[str]:
-    if sha1 is None:
-        return ["the signing identity is not in the keychain"]
+def _identity_problems(record: dict[str, Any], code_hash: str | None) -> list[str]:
+    if code_hash is None:
+        return ["codesign reported no CDHash for the helper"]
     designated = [line for line in record["signature"] if line.startswith("designated =>")]
-    if not any(f'H"{sha1.lower()}"' in line for line in designated):
-        return [f"the designated requirement does not pin the identity: {designated}"]
+    if not any(f'cdhash H"{code_hash.lower()}"' in line for line in designated):
+        return [f"the designated requirement does not pin the helper's code hash: {designated}"]
     return []
 
 
-def _tcc_problems(record: dict[str, Any], sha1: str | None) -> list[str]:
+def _tcc_problems(record: dict[str, Any], code_hash: str | None) -> list[str]:
     problems: list[str] = []
     for service, allowed in GRANTED.items():
         row = record["tcc"].get(service)
         if row is None or row[0] != allowed:
             problems.append(f"the system TCC row for {service} is {row}, expected auth {allowed}")
-        elif sha1 is not None and sha1.upper() not in row[1]:
-            problems.append(f"the TCC row for {service} does not carry the identity's requirement")
+        elif code_hash is not None and code_hash.upper() not in row[1]:
+            problems.append(
+                f"the TCC row for {service} does not carry the helper's code requirement"
+            )
     return problems
 
 
@@ -214,15 +202,15 @@ def _capture_problems(capture: dict[str, Any]) -> list[str]:
 def judge_grant(record: dict[str, Any]) -> list[str]:
     """Why a golden image's helper is not ready to be cloned; empty when it is."""
     ping = record["ping"]
-    sha1 = _signing_sha1(record)
+    code_hash = _code_hash(record)
     return [
         *(
             f"the helper reports {key} = {ping[key]}"
             for key in ("preflight_screen", "ax_trusted")
             if ping[key] is not True
         ),
-        *_identity_problems(record, sha1),
-        *_tcc_problems(record, sha1),
+        *_identity_problems(record, code_hash),
+        *_tcc_problems(record, code_hash),
         *_capture_problems(record["capture"]),
     ]
 
@@ -319,8 +307,6 @@ def build_golden(ref: str, evidence_root: Path, *, name: str, repo: Path, tart: 
         build.guest("prepare-source", name, PREPARE_SOURCE, commit)
         build.guest("toolchain", name, TOOLCHAIN)
         build.guest("python", name, PYTHON)
-        build.guest("identity", name, IDENTITY)
-        build.guest("key-access", name, KEY_ACCESS)
         build.guest("helper", name, HELPER)
         tart.shutdown_guest(name, proc)
         log = (evidence.root if evidence else export) / "tart-run-graphics.log"
@@ -347,7 +333,7 @@ def build_golden(ref: str, evidence_root: Path, *, name: str, repo: Path, tart: 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument("--ref", required=True, help="commit whose helper source is built")
     parser.add_argument("--name", default=NAME, help="name of the golden image to create")
     parser.add_argument(

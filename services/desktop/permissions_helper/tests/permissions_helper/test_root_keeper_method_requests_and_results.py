@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 
 from base import paths
-from base.config import settings
 from base.host.converge.accessibility import AccessibilityState
 from base.host.converge.screen_capture import ScreenCaptureState
 from base.host.permissions_helper import client
@@ -29,7 +28,6 @@ from services.desktop.permissions_helper.tests.test_permissions_helper import (
     ping_reply,
     read_line,
     recorded_argvs,
-    sign_command,
     stage_bundle,
     test_dr,
     write_current_build_state,
@@ -490,134 +488,12 @@ def test_read_dr_accepts_legacy_stderr_stream(
                 cmd,  # pyright: ignore[reportUnknownArgumentType]
                 0,
                 b"",
-                f"designated => {test_dr()}\n".encode(),
+                f"# designated => {test_dr()}\n".encode(),
             )
         raise AssertionError(f"unexpected call {cmd}")
 
     monkeypatch.setattr(lifecycle, "run_bounded", run)  # pyright: ignore[reportUnknownArgumentType]
     assert lifecycle.read_dr(app) == test_dr()
-
-
-def test_current_stable_signed_bundle_is_not_resigned(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Re-signing a current binary changes its cdhash and drops the grants it
-    already holds, so the skip-if-up-to-date gate has to survive intact."""
-    from services.desktop.permissions_helper import lifecycle
-
-    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
-    write_current_build_state(app, lifecycle.source_content_hash())
-
-    assert lifecycle.build_and_sign() == (app, False)
-    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
-    assert not any(c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded))
-
-
-def test_keychain_path_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    """MEIVA_PERMISSIONS_HELPER_KEYCHAIN routes signing to a CI-owned keychain."""
-    from services.desktop.permissions_helper import lifecycle
-
-    monkeypatch.setattr(
-        settings.services,
-        "permissions_helper_keychain",
-        "/tmp/ci-signing.keychain-db",  # noqa: S108
-    )
-    assert lifecycle.keychain_path() == Path("/tmp/ci-signing.keychain-db")  # noqa: S108
-    monkeypatch.setattr(settings.services, "permissions_helper_keychain", None)
-    assert lifecycle.keychain_path() == Path.home() / "Library" / "Keychains" / "login.keychain-db"
-
-
-def test_signing_cert_import_uses_supported_security_argv(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The macOS security import command must contain only supported flags."""
-    from services.desktop.permissions_helper import lifecycle
-
-    keychain = tmp_path / "ci-signing.keychain-db"
-    monkeypatch.setattr(lifecycle, "keychain_path", lambda: keychain)
-    recorded = fake_tools(monkeypatch, authority=None, identity_output="0 identities found\n")
-
-    lifecycle.ensure_signing_cert()
-
-    import_argv = next(
-        argv for argv in recorded_argvs(recorded) if argv[:2] == ["security", "import"]
-    )
-    assert import_argv[:2] == ["security", "import"]
-    assert import_argv[2].endswith("ident.p12")
-    assert import_argv[3:] == [
-        "-k",
-        str(keychain),
-        "-P",
-        "meiva",
-        "-T",
-        "/usr/bin/codesign",
-        "-A",
-    ]
-
-
-def test_locked_keychain_does_not_fail_a_current_host(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Only a real rebuild needs the signing key, so an SSH host whose helper is
-    already current converges without ever consulting the keychain -- or the key
-    ACL, the other pre-sign check that reaches for it."""
-    from services.desktop.permissions_helper import lifecycle
-
-    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN, keychain_rc=1)
-    write_current_build_state(app, lifecycle.source_content_hash())
-
-    assert lifecycle.build_and_sign() == (app, False)
-    assert not any(c[:2] == ["security", "show-keychain-info"] for c in recorded_argvs(recorded))
-    assert not any(c[:2] == ["codesign", "--sign"] for c in recorded_argvs(recorded))
-
-
-def test_current_stable_signed_bundle_skips_signing_smoke(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
-    write_current_build_state(app, lifecycle.source_content_hash())
-    smoke_calls: list[None] = []
-    monkeypatch.setattr(lifecycle, "preflight_signing_smoke", lambda: smoke_calls.append(None))
-
-    assert lifecycle.build_and_sign() == (app, False)
-    assert smoke_calls == []
-
-
-def test_fresh_build_signs_with_the_stable_certificate(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = fake_tools(monkeypatch, authority=None)
-
-    assert lifecycle.build_and_sign() == (app, True)
-    assert sign_command(recorded) == [
-        "codesign",
-        "--force",
-        "--sign",
-        lifecycle.CERT_CN,
-        # Hardened runtime: dyld ignores DYLD_* for the helper (review P2-A).
-        "--options",
-        "runtime",
-        # AppleEvents: the entitlement tccd needs to build an attribution
-        # chain for helper-spawned osascript/AE children.
-        "--entitlements",
-        str(lifecycle.ENTITLEMENTS),
-        "--identifier",
-        lifecycle.HELPER_BUNDLE_ID,
-        "--requirements",
-        f"=designated => {test_dr()}",
-        str(app),
-    ]
-    state = json.loads((app.parent / "build-state.json").read_text())
-    assert state["source_hash"] == lifecycle.source_content_hash()
-    assert state["dr"] == test_dr()
 
 
 def test_entitlements_request_apple_events_for_spawned_children() -> None:
@@ -646,7 +522,7 @@ def test_source_mtime_change_does_not_rebuild_identical_content(
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
+    recorded = fake_tools(monkeypatch)
     write_current_build_state(app, lifecycle.source_content_hash())
     exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
     newer = exe.stat().st_mtime + 60

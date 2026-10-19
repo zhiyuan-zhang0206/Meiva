@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import Field
 
 from base.config.base import EnvSettings, unit_home
 
@@ -131,21 +131,6 @@ class ServiceRuntimeSettings(EnvSettings):
         default=None,
         alias="MEIVA_PERMISSIONS_HELPER_ARTIFACT_DIR",
         description="Explicit isolated directory for a reviewed signed helper artifact; never replaces the installed helper bundle.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    permissions_helper_keychain: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("MEIVA_PERMISSIONS_HELPER_KEYCHAIN"),
-        serialization_alias="MEIVA_PERMISSIONS_HELPER_KEYCHAIN",
-        description="Optional keychain path override for the permissions helper's signing identity. None = the user's login keychain; CI sets this to an isolated keychain it owns.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",
