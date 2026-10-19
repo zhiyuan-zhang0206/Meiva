@@ -169,6 +169,8 @@ class FakeClaudeSDKClient:
     async def disconnect(self) -> None:
         self.disconnected = True
         await self._cancel_turn()
+        if self._sdk.probe is not None:
+            self._sdk.probe.reap(self._sdk.cli_pid)
         self._queue.put_nowait(_END)
 
     async def query(self, prompt: str) -> None:
@@ -258,6 +260,12 @@ class FakeSDK:
     def __init__(self, scripts: list[list[Any]] | None = None, *, cli_pid: int = 4242) -> None:
         self.scripts: list[list[Any]] = list(scripts or [])
         self.cli_pid = cli_pid
+        # meiva:note
+        # The real SDK terminates its CLI before `disconnect()` returns; a fake that
+        # left it alive would make every close test wait out the adapter's settle
+        # window and, worse, would stop modelling the one fact the close path relies on.
+        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        self.probe: ScriptedProbe | None = None
         self.new_session_id = "session-1"
         self.clients: list[FakeClaudeSDKClient] = []
         self.ClaudeAgentOptions = ClaudeAgentOptions

@@ -1,25 +1,29 @@
-"""build_graph: assemble 8-Node self-cycling topology, all Command(goto=) routing.
+# meiva:note
+# build_graph: assemble the self-cycling topology, all Command(goto=) routing.
+#
+# Deps (ops_pool / llm / event_publisher) are injected via `Runtime[MeivaContext]` —
+# build_graph does not take them; the caller passes them via
+# `graph.ainvoke(..., context=MeivaContext(...))`. Node functions access them via
+# `runtime.context.X`.
+#
+# Plugins reach the graph as a value: the caller loads them (`meiva.sdk_surface.extensions.load_extensions()`),
+# builds the `ExtensionRegistry` of what they declare (`base.packages.plugins.loading.registry.build_registry()`)
+# and passes it in. The graph is a function of that registry: its hooks run in the hook container
+# nodes, its state classes shape the dynamic `AgentState`. The loader lives in `agent.extensions`
+# (task #3633 moved it off this module so surface-only processes never need the graph kernel); the
+# import mechanics and the fail-soft contract live in `base.packages.plugins.loading.plugin_loader`
+# (`load_plugin_module` / `safe_load_plugin_module`): one module name, package context,
+# `sys.modules` identity, and containment however many times a plugin loads.
+# A repeat load re-executes the module already in `sys.modules` rather than
+# binding a new one, so a plugin module's identity is stable for the life of the
+# process. Layer A wrap monkey-patches the process's meiva module; the exec child
+# re-runs the plugin surface load at its own boot, so agent code there sees the
+# wrapped version too. Config decides what is imported; not imported = not
+# declared.
+# meiva:link agent/graph/docs/graph.meiva.okf.md
 
-Deps (ops_pool / llm / event_publisher) are injected via `Runtime[MeivaContext]` —
-build_graph does not take them; the caller passes them via
-`graph.ainvoke(..., context=MeivaContext(...))`. Node functions access them via
-`runtime.context.X`.
 
-Plugins reach the graph as a value: the caller loads them (`meiva.sdk_surface.extensions.load_extensions()`),
-builds the `ExtensionRegistry` of what they declare (`base.packages.plugins.loading.registry.build_registry()`)
-and passes it in. The graph is a function of that registry: its hooks run in the hook container
-nodes, its state classes shape the dynamic `AgentState`. The loader lives in `agent.extensions`
-(task #3633 moved it off this module so surface-only processes never need the graph kernel); the
-import mechanics and the fail-soft contract live in `base.packages.plugins.loading.plugin_loader`
-(`load_plugin_module` / `safe_load_plugin_module`): one module name, package context,
-`sys.modules` identity, and containment however many times a plugin loads.
-A repeat load re-executes the module already in `sys.modules` rather than
-binding a new one, so a plugin module's identity is stable for the life of the
-process. Layer A wrap monkey-patches the process's meiva module; the exec child
-re-runs the plugin surface load at its own boot, so agent code there sees the
-wrapped version too. Config decides what is imported; not imported = not
-declared.
-"""
+from typing import Any, cast
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -40,6 +44,7 @@ from agent.nodes import (
     BEFORE_LLM,
     CLAIM,
     EXEC,
+    HARNESS_TURN,
     INIT_CONTEXT,
     LLM,
     NodeName,
@@ -49,6 +54,7 @@ from base.agents.context import MeivaContext
 from base.packages.plugins.extensions import ExtensionRegistry
 
 from ._init_context import init_context_node
+from .claim.harness_turn import harness_turn_node
 from .claim.node import claim_node
 from .exec.node import exec_node
 from .llm.goto import LlmGoto
@@ -78,47 +84,53 @@ def build_graph(
     checkpointer: BaseCheckpointSaver | None,
     extensions: ExtensionRegistry,
 ) -> CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]:
-    """Build 8-Node self-cycling graph — deps injected via ainvoke(context=MeivaContext);
-    this function takes the checkpointer and the plugin registry.
+    # meiva:note
+    # Build the self-cycling graph — deps injected via ainvoke(context=MeivaContext);
+    #     this function takes the checkpointer and the plugin registry.
+    #
+    #     9-Node topology:
+    #         START → after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec
+    #                                   ↑          ↑                                              │
+    #                                   │          └──────────────────────────────────────────────┘
+    #                                   │          (always back to claim; claim decides wait or
+    #                                   │           continue based on halted + pending)
+    #                                   ├── harness_turn: claim hands the whole turn to an external
+    #                                   │   harness session instead of before_llm; the three native
+    #                                   │   nodes above it never run on such an agent
+    #                                   └── every compaction: the requester empties `messages`,
+    #                                       parks the post-compact tail in `context_reset`, and
+    #                                       routes here to have the standing head re-established
+    #
+    #     Frontend timeline sync: each node **enter** renders a timeline snapshot
+    #     from the in-memory `state.messages` and publishes it via
+    #     `node_log.node_lifecycle` before yield (includes msg_count =
+    #     `len(state.messages)`); the gateway forwards it to the frontend. Rendering
+    #     from in-memory state (not a checkpoint re-read) is race-free: LangGraph
+    #     commits checkpoints asynchronously, so a re-read could miss the
+    #     just-claimed inbound, but the in-memory state reflects the reducer the
+    #     instant it applies. The msg_count protocol lets the frontend distinguish a
+    #     single future position (LLM/exec streaming the next message) from a stale
+    #     partial via `partial.msg_idx == msg_count`. Fallback (PR #323 streaming
+    #     corruption → non-streaming ainvoke) does not resend streaming events;
+    #     after commit, the next node enter's snapshot has the committed version,
+    #     and the frontend replaces the partial's dirty tokens with the full content
+    #     by item_id.
+    #
+    #     **Routing entirely via Command(goto=)** — the graph build declares a single static edge
+    #     add_edge(START, AFTER_INIT); business nodes hardcode default next; hook
+    #     container Nodes accept a default_next parameter (NodeName or callable
+    #     based on state) + decide based on update["goto"] override.
+    #
+    #     Every node gets `input_schema=state_cls` (the class `build_agent_state` returns): LangGraph would
+    #     otherwise narrow a node's state to the class its first parameter is annotated with, and that
+    #     annotation is the static base class, which carries none of the plugins' channels.
+    #
+    #     type: ignore[arg-type] — langgraph add_node stub narrows action to the
+    #     single-arg StateNode protocol, but runtime accepts the (state, runtime,
+    #     config) multi-arg signature. Functionally correct, just stub doesn't narrow.
+    #
+    # meiva:link agent/graph/docs/graph.meiva.okf.md
 
-    8-Node topology:
-        START → after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec
-                                  ↑          ↑                                              │
-                                  │          └──────────────────────────────────────────────┘
-                                  │          (always back to claim; claim decides wait or
-                                  │           continue based on halted + pending)
-                                  └── every compaction: the requester empties `messages`,
-                                      parks the post-compact tail in `context_reset`, and
-                                      routes here to have the standing head re-established
-
-    Frontend timeline sync: each node **enter** renders a timeline snapshot
-    from the in-memory `state.messages` and publishes it via
-    `node_log.node_lifecycle` before yield (includes msg_count =
-    `len(state.messages)`); the gateway forwards it to the frontend. Rendering
-    from in-memory state (not a checkpoint re-read) is race-free: LangGraph
-    commits checkpoints asynchronously, so a re-read could miss the
-    just-claimed inbound, but the in-memory state reflects the reducer the
-    instant it applies. The msg_count protocol lets the frontend distinguish a
-    single future position (LLM/exec streaming the next message) from a stale
-    partial via `partial.msg_idx == msg_count`. Fallback (PR #323 streaming
-    corruption → non-streaming ainvoke) does not resend streaming events;
-    after commit, the next node enter's snapshot has the committed version,
-    and the frontend replaces the partial's dirty tokens with the full content
-    by item_id.
-
-    **Routing entirely via Command(goto=)** — the graph build declares a single static edge
-    add_edge(START, AFTER_INIT); business nodes hardcode default next; hook
-    container Nodes accept a default_next parameter (NodeName or callable
-    based on state) + decide based on update["goto"] override.
-
-    Every node gets `input_schema=state_cls` (the class `build_agent_state` returns): LangGraph would
-    otherwise narrow a node's state to the class its first parameter is annotated with, and that
-    annotation is the static base class, which carries none of the plugins' channels.
-
-    type: ignore[arg-type] — langgraph add_node stub narrows action to the
-    single-arg StateNode protocol, but runtime accepts the (state, runtime,
-    config) multi-arg signature. Functionally correct, just stub doesn't narrow.
-    """
     state_cls = build_agent_state(extensions)
     g = StateGraph(state_cls, context_schema=MeivaContext)
     # What the llm node remembers per agent between tries and turns belongs to this graph: one
@@ -170,6 +182,7 @@ def build_graph(
         ),
         input_schema=state_cls,
     )
+    g.add_node(HARNESS_TURN, cast("Any", harness_turn_node), input_schema=state_cls)  # pyright: ignore[reportUnknownMemberType]
     g.add_edge(START, AFTER_INIT)
     if checkpointer is None:
         checkpointer = MemorySaver()

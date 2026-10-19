@@ -9,8 +9,8 @@ exports = ["stop_support.py"]
 "test_stop_terminals.py" = ["stop_support.py"]
 
 [debt.env-patch]
-"stop_support.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "stop_support.py#monkeypatch.setenv os.environ.HOME" = 2
+"stop_support.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "stop_support.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 1
 "test_stop.py#monkeypatch.setenv os.environ.HOME" = 4
 "test_stop.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 4

@@ -5,10 +5,10 @@
 "test_sdk_clock_owner.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
+"test_sdk_event_producer.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 2
 "test_sdk_event_producer.py#monkeypatch.setattr meiva.boot.process_clients" = 1
 "test_sdk_event_producer.py#monkeypatch.setattr meiva.context" = 1
 "test_sdk_event_producer.py#monkeypatch.setattr meiva.sdk_surface.extensions.load_extensions" = 1
-"test_sdk_event_producer.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 2
 
 [debt.stdlib-patch]
 "test_sdk_event_producer.py#monkeypatch.setattr atexit.register" = 1

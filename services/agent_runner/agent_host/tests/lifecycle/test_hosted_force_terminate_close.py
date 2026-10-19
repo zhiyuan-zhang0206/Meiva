@@ -110,7 +110,7 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
         graph = Mock()
         graph.ainvoke = AsyncMock(side_effect=graph_return)
         host = _host(graph, aops_pool, model_catalog=model_catalog, database_gate=database_gate)
-        host._runtimes[agent_id] = Mock()
+        host._runtimes[agent_id] = Mock(harness_bridge=None)
         outcome = await host._invoke_until_done(
             agent_id,
             replace(

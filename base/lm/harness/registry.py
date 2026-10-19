@@ -8,7 +8,17 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 _REQUIRED_FIELDS = frozenset({"agent_id", "session_id", "cwd", "model", "created_at", "updated_at"})
-_FIELDS = _REQUIRED_FIELDS | {"resumes"}
+_FIELDS = _REQUIRED_FIELDS | {"resumes", "harness"}
+
+# meiva:note
+# A record written before the harness field existed carries no harness, so it is
+# read as `meiva`: the value the field held before any adapter wrote one, and the
+# only harness that predates the field. New writes always name their harness, so
+# this default can only ever describe a record older than the field itself — and
+# `load(..., harness=...)` still refuses a record naming another harness, so the
+# fallback never resumes a transcript across harnesses.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+LEGACY_HARNESS = "meiva"
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,11 +29,12 @@ class SessionRecord:
     model: str
     created_at: str
     updated_at: str
+    harness: str = LEGACY_HARNESS
     resumes: int = 0
 
 
 class SessionRegistry(Protocol):
-    def load(self, agent_id: int) -> SessionRecord | None: ...
+    def load(self, agent_id: int, *, harness: str | None = None) -> SessionRecord | None: ...
 
     def save(self, record: SessionRecord) -> None: ...
 
@@ -51,7 +62,7 @@ class FileSessionRegistry:
             raise ValueError(f"agent id must be positive, got {agent_id}")
         return self._root / f"{agent_id}.json"
 
-    def load(self, agent_id: int) -> SessionRecord | None:
+    def load(self, agent_id: int, *, harness: str | None = None) -> SessionRecord | None:
         path = self.path(agent_id)
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
@@ -69,6 +80,16 @@ class FileSessionRegistry:
                 f"session record at {path} has unknown fields {sorted(unknown)} "
                 f"and misses {sorted(missing)}"
             )
+        record = self._record(path, payload)
+        if harness is not None and record.harness != harness:
+            raise ValueError(
+                f"session record at {path} belongs to harness {record.harness!r}, "
+                f"not {harness!r}; refusing to resume across harnesses"
+            )
+        return record
+
+    @staticmethod
+    def _record(path: Path, payload: dict[str, Any]) -> SessionRecord:
         try:
             return SessionRecord(
                 agent_id=int(payload["agent_id"]),
@@ -77,6 +98,7 @@ class FileSessionRegistry:
                 model=str(payload["model"]),
                 created_at=str(payload["created_at"]),
                 updated_at=str(payload["updated_at"]),
+                harness=str(payload.get("harness", LEGACY_HARNESS)),
                 resumes=int(payload.get("resumes", 0)),
             )
         except (TypeError, ValueError) as exc:
