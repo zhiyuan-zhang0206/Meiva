@@ -3938,6 +3938,50 @@
         }
       }
     },
+    "/api/cluster/machines/{name}/harnesses": {
+      "get": {
+        "summary": "Get Machine Harnesses",
+        "description": "What one machine can run, one row per harness, cached 30 seconds.",
+        "operationId": "get_machine_harnesses_api_cluster_machines__name__harnesses_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HarnessAvailability"
+                  },
+                  "title": "Response Get Machine Harnesses Api Cluster Machines  Name  Harnesses Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/cluster/machines/{name}/staging": {
       "post": {
         "summary": "Set Machine Staging",
@@ -12124,6 +12168,38 @@
           "antigravity"
         ],
         "title": "Harness"
+      },
+      "HarnessAvailability": {
+        "properties": {
+          "harness": {
+            "$ref": "#/components/schemas/Harness"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable",
+              "unknown"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "launchable": {
+            "type": "boolean",
+            "title": "Launchable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "harness",
+          "status",
+          "reason",
+          "launchable"
+        ],
+        "title": "HarnessAvailability"
       },
       "HeartbeatInfo": {
         "properties": {

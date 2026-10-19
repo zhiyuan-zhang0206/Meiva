@@ -28,7 +28,10 @@ import { ChevronDown, Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Fragment, useState } from "react";
 
+import { DEFAULT_HARNESS, harnessRows, type Harness } from "@/lib/harness/harness";
+import { useHarnessAvailabilityByMachine } from "@/lib/harness/use-harness-availability";
 import { api } from "@/lib/transport/api";
+import { HarnessPicker } from "./harness-picker";
 import { MODEL_PICKER_COLUMNS, ModelPickerRow } from "./model-picker-row";
 import { groupedModels, isSuperseded, providerLabel } from "@/lib/contracts/models";
 import { useUserSettings } from "@/lib/state/use-user-settings";
@@ -39,6 +42,7 @@ interface SpawnOpts {
   machine?: string;
   model?: string;
   reasoning_effort?: string;
+  harness?: Harness;
 }
 
 interface Props {
@@ -69,6 +73,12 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   // re-picking. `null` in the DB means "no override"; expose it as `undefined`
   // to the picker logic below. Written back as `?? null`.
   const { settings, setSetting } = useUserSettings();
+  // meiva:note
+  // The harness is a birth attribute the user picks per spawn and keeps as a
+  // preference, exactly like the model: `null` in the DB means "no override".
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  const selectedHarness = (settings["behavior.spawn_harness"] as Harness | null) ?? DEFAULT_HARNESS;
+  const setSelectedHarness = (v: Harness) => setSetting("behavior.spawn_harness", v);
   const selectedModel = (settings["behavior.spawn_model"] as string | null) ?? undefined;
   const setSelectedModel = (v: string | undefined) => setSetting("behavior.spawn_model", v ?? null);
   const selectedReasoningEffort = (settings["behavior.spawn_reasoning_effort"] as string | null) ?? undefined;
@@ -82,6 +92,19 @@ export function SpawnButton({ onSpawn, variant }: Props) {
     (m) => m.serve_agent_runner && m.online && m.paused === false,
   );
   const spawnable = eligible.filter((m) => m.agent_host_online === true);
+  // meiva:note
+  // A harness a machine cannot start is not offered as a working spawn there: the
+  // row is disabled and says only that it is unavailable, because an agent born on
+  // a harness the machine cannot launch would sit inert while looking created.
+  // Every candidate machine answers for itself - the spawn list names its target
+  // only at click time, so one machine's probe says nothing about another's.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  const harnessByMachine = useHarnessAvailabilityByMachine(spawnable.map((m) => m.name));
+  const harnessBlocked = (machine: string): boolean => {
+    const row = harnessRows(harnessByMachine.get(machine) ?? [])
+      .find((candidate) => candidate.harness === selectedHarness);
+    return row !== undefined && !row.launchable;
+  };
 
   // Provider-grouped model list for the picker — providers in response
   // order, models within each provider in order (see lib/models.ts).
@@ -138,6 +161,11 @@ export function SpawnButton({ onSpawn, variant }: Props) {
       machine,
       model: effectiveModel,
       reasoning_effort: effectiveReasoningEffort,
+      // meiva:note
+      // The built-in runtime is the server's own default: naming it adds nothing,
+      // and an omitted field keeps a spawn request byte-identical to the old one.
+      // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+      ...(selectedHarness === DEFAULT_HARNESS ? {} : { harness: selectedHarness }),
     };
   }
 
@@ -258,12 +286,14 @@ export function SpawnButton({ onSpawn, variant }: Props) {
 
   if (spawnable.length === 1 && eligible.length === 1) {
     const only = spawnable[0];
+    const refusal = harnessBlocked(only.name);
     if (variant === "icon") {
       // Icon variant has no room to render the model select; the selection
       // (effectiveModel via buildOpts) is still preserved and passed on spawn.
       return (
         <TriggerButton
           variant={variant}
+          disabled={refusal}
           onClick={() => onSpawn(buildOpts(only.name))}
         />
       );
@@ -274,9 +304,11 @@ export function SpawnButton({ onSpawn, variant }: Props) {
       <div className={cn("flex-nowrap items-center gap-1 w-full", FLEX, MIN_W_0)}>
         {modelPicker}
         {reasoningEffortSelect}
+        <HarnessPicker machine={only.name} value={selectedHarness} onChange={setSelectedHarness} />
         <span className={cn(FLEX_1, MIN_W_0)} aria-hidden="true" />
         <TriggerButton
           variant={variant}
+          disabled={refusal}
           onClick={() => onSpawn(buildOpts(only.name))}
         />
       </div>
@@ -286,6 +318,35 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   // Multiple eligible runners: the picker includes host-down entries so the
   // unavailable reason is visible instead of silently hiding the machine.
   const sorted = [...eligible].sort((a, b) => a.name.localeCompare(b.name));
+  // meiva:note
+  // One row offers one machine: a host that is down and a harness that machine
+  // cannot start are both refusals, and the row shows the first that applies so
+  // the button never explains one while blocking for the other.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  const machineRow = (m: (typeof sorted)[number]) => {
+    const hostReason = m.agent_host_online === true
+      ? undefined
+      : m.agent_host_online === false ? t("hostUnavailable") : t("hostUnknown");
+    const harnessReason = harnessBlocked(m.name) ? t("harnessStatus.unavailable") : undefined;
+    const reason = hostReason ?? harnessReason;
+    return (
+      <li key={m.name}>
+        <button
+          type="button"
+          disabled={reason !== undefined}
+          title={reason}
+          onClick={() => {
+            onSpawn(buildOpts(m.name));
+            setOpen(false);
+          }}
+          className={cn("w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent disabled:opacity-50 items-center justify-between gap-3", FLEX)}
+        >
+          <span className="truncate">{m.name}</span>
+          {reason !== undefined && <span className="text-xs">{reason}</span>}
+        </button>
+      </li>
+    );
+  };
 
   if (variant === "icon") {
     return (
@@ -302,28 +363,7 @@ export function SpawnButton({ onSpawn, variant }: Props) {
             <div className="px-3 py-2 border-b border-border text-xs font-medium text-muted-foreground">
               {t("spawnOn")}
             </div>
-            <ul className="py-1">
-              {sorted.map((m) => (
-                <li key={m.name}>
-                  <button
-                    type="button"
-                    disabled={m.agent_host_online !== true}
-                    title={m.agent_host_online === true ? undefined
-                      : m.agent_host_online === false ? t("hostUnavailable") : t("hostUnknown")}
-                    onClick={() => {
-                      onSpawn(buildOpts(m.name));
-                      setOpen(false);
-                    }}
-                    className={cn("w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent disabled:opacity-50 items-center justify-between gap-3", FLEX)}
-                  >
-                    <span className="truncate">{m.name}</span>
-                    {m.agent_host_online !== true && <span className="text-xs">
-                      {m.agent_host_online === false ? t("hostUnavailable") : t("hostUnknown")}
-                    </span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <ul className="py-1">{sorted.map(machineRow)}</ul>
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
@@ -336,6 +376,7 @@ export function SpawnButton({ onSpawn, variant }: Props) {
     <div className={cn("flex-nowrap items-center gap-1 w-full", FLEX, MIN_W_0)}>
       {modelPicker}
       {reasoningEffortSelect}
+      <HarnessPicker machine={spawnable[0]?.name} value={selectedHarness} onChange={setSelectedHarness} />
       <span className={cn(FLEX_1, MIN_W_0)} aria-hidden="true" />
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger asChild>
@@ -350,28 +391,7 @@ export function SpawnButton({ onSpawn, variant }: Props) {
             <div className="px-3 py-2 border-b border-border text-xs font-medium text-muted-foreground">
               {t("spawnOn")}
             </div>
-            <ul className="py-1">
-              {sorted.map((m) => (
-                <li key={m.name}>
-                  <button
-                    type="button"
-                    disabled={m.agent_host_online !== true}
-                    title={m.agent_host_online === true ? undefined
-                      : m.agent_host_online === false ? t("hostUnavailable") : t("hostUnknown")}
-                    onClick={() => {
-                      onSpawn(buildOpts(m.name));
-                      setOpen(false);
-                    }}
-                    className={cn("w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent disabled:opacity-50 items-center justify-between gap-3", FLEX)}
-                  >
-                    <span className="truncate">{m.name}</span>
-                    {m.agent_host_online !== true && <span className="text-xs">
-                      {m.agent_host_online === false ? t("hostUnavailable") : t("hostUnknown")}
-                    </span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <ul className="py-1">{sorted.map(machineRow)}</ul>
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>

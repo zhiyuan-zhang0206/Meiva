@@ -6,11 +6,11 @@ import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, NamedTuple, cast
+from typing import Any, NamedTuple, cast
 
 import psycopg
 
-from base.api_contracts.agent_contract import ForkHarnessMismatch, Harness
+from base.api_contracts.agent_contract import ForkHarnessMismatch, Harness, HarnessStatus
 from base.db import fetch_one
 
 DEFAULT_HARNESS = Harness.MEIVA
@@ -22,8 +22,6 @@ DEFAULT_HARNESS = Harness.MEIVA
 # runtime loop that is not actually running.
 # meiva:link base/agents/docs/harness.meiva.okf.md
 LAUNCHABLE_HARNESSES: frozenset[Harness] = frozenset({Harness.MEIVA})
-
-HarnessStatus = Literal["available", "unavailable", "unknown"]
 
 
 class HarnessProbe(NamedTuple):
