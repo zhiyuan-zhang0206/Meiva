@@ -12,18 +12,19 @@
 # identity itself, its codec and three hooks. The sequence below (boot, replay,
 # validate, open, admit, flush, close, detach) exists once so a second identity
 # cannot drift from the first one's failure handling.
-# meiva:link base/agents/external_attachment/docs/external-attachment.meiva.okf.md
+# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from collections.abc import Mapping
 from contextlib import ExitStack
 from threading import Lock, local
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Self, cast
 
-from base.agents.external_attachment.identity import AttachmentCodec, IdentitySource
+from base.agents.context.external_attachment.identity import AttachmentCodec, IdentitySource
 from base.log import logger
 
 _attachment_lock = Lock()
@@ -61,8 +62,6 @@ def _deliver_telemetry_before_detach(*, clients: Any) -> None:
 
 
 class ExternalAttachment:
-    """One borrowed identity in one local Python process."""
-
     def __init__(self, *, identity: IdentitySource, codec: AttachmentCodec) -> None:
         self.identity = identity
         self._codec = codec
@@ -78,8 +77,6 @@ class ExternalAttachment:
         self._state: Any = None
 
     def open(self, prior_context: Any) -> None:
-        """Bind the identity; the subclass calls this once its own fields are set."""
-
         self._prior_context = prior_context
         if not _attachment_lock.acquire(blocking=False):
             raise RuntimeError("this process already has an external attachment")
@@ -109,14 +106,14 @@ class ExternalAttachment:
         self._set_state(state)
 
     def _prepare(self) -> None:
-        """Hook: boot config, resolve the identity, bind the borrowed context."""
+        raise NotImplementedError
 
     def _resolve_config(
         self, overlay: Mapping[str, Any] | None, birth: Mapping[str, Any] | None
     ) -> None:
         raise NotImplementedError
 
-    def _applied_version(self, state: Any, lease: Mapping[str, Any]) -> int:
+    def _applied_version(self, _state: Any, lease: Mapping[str, Any]) -> int:
         return int(lease["applied_version"])
 
     def _set_state(self, state: Any) -> None:
@@ -129,10 +126,10 @@ class ExternalAttachment:
         raise NotImplementedError
 
     def _open_event_participant(self) -> None:
-        """Hook: open the durable event participant, when the identity has one."""
+        return None
 
     def _seal_event_participant(self) -> None:
-        """Hook: seal the participant once its admission has drained."""
+        return None
 
     def _begin_event_participant_close(self) -> None:
         with self._call_lock:
@@ -170,9 +167,10 @@ class ExternalAttachment:
         if self._closing and not allow_closing:
             raise RuntimeError("external attachment is closing")
         self._validate()
-        update = self._state_update()
-        if not isinstance(update, dict):
+        raw_update = self._state_update()
+        if not isinstance(raw_update, dict):
             raise TypeError("external plugin state update must be a dict")
+        update = cast("dict[str, Any]", raw_update)
         if update:
             encoded = self._codec.encode_plugin_delta(update, self._state_cls)
             self.identity.merge_delta(encoded, expected_version=self.identity.delta_version())
@@ -212,7 +210,13 @@ class ExternalAttachment:
             raise primary
 
     def _deliver_telemetry(self) -> None:
-        raise NotImplementedError
+        clients = self._telemetry_clients()
+        if clients is None:
+            raise RuntimeError("the attachment has no event producer owner")
+        _deliver_telemetry_before_detach(clients=clients)
+
+    def _telemetry_clients(self) -> Any:
+        return self._own_clients
 
     def _detach(self) -> None:
         if self._closed:
@@ -234,10 +238,8 @@ class ExternalAttachment:
                     else:
                         primary.add_note(f"Attachment detach cleanup also failed: {secondary!r}")
         finally:
-            try:
+            with contextlib.suppress(RuntimeError):
                 _attachment_lock.release()
-            except RuntimeError:
-                pass
         if primary is not None:
             raise primary
 
@@ -245,7 +247,7 @@ class ExternalAttachment:
         raise NotImplementedError
 
     def _unbind_exec_turn(self) -> None:
-        """Hook: drop the exec-turn binding, when the surface has one."""
+        return None
 
     def _close_owned_clients(self) -> None:
         if self._own_clients is not None:

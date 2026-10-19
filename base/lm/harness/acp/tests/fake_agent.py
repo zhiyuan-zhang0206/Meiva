@@ -1,11 +1,9 @@
-"""A scripted ACP agent: enough of the wire to drive the transport in tests."""
-
 from __future__ import annotations
 
 import json
 import sys
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 _PENDING: dict[str, dict[str, Any]] = {}
 _PERMISSION_WAIT: dict[int, str] = {}
@@ -36,6 +34,11 @@ def _update(session_id: str, update: dict[str, Any]) -> None:
             "params": {"sessionId": session_id, "update": update},
         }
     )
+
+
+def _params(frame: dict[str, Any]) -> dict[str, Any]:
+    raw = frame.get("params")
+    return cast("dict[str, Any]", raw) if isinstance(raw, dict) else {}
 
 
 def _text(prompt: list[dict[str, Any]]) -> str:
@@ -81,14 +84,14 @@ def _close(frame: dict[str, Any]) -> None:
 
 
 def _cancel(frame: dict[str, Any]) -> None:
-    params = frame.get("params") or {}
+    params = _params(frame)
     pending = _PENDING.pop(str(params.get("sessionId", "")), None)
     if pending is not None:
         _result(pending["id"], {"stopReason": "cancelled"})
 
 
 def _prompt(frame: dict[str, Any]) -> None:
-    params = frame.get("params") or {}
+    params = _params(frame)
     session_id = str(params.get("sessionId", ""))
     text = _text(params.get("prompt") or [])
     if "permission" in text:
@@ -130,10 +133,17 @@ def _ask_permission(frame: dict[str, Any], session_id: str) -> None:
 
 
 def _response(frame: dict[str, Any]) -> None:
-    session_id = _PERMISSION_WAIT.pop(frame.get("id"), None)
+    request_id = frame.get("id")
+    session_id = _PERMISSION_WAIT.pop(request_id if isinstance(request_id, int) else -1, None)
     if session_id is None:
         return
-    outcome = (frame.get("result") or {}).get("outcome") or {}
+    raw_result = frame.get("result")
+    outcome: dict[str, Any] = {}
+    if isinstance(raw_result, dict):
+        result = cast("dict[str, Any]", raw_result)
+        inner = result.get("outcome")
+        if isinstance(inner, dict):
+            outcome = cast("dict[str, Any]", inner)
     chosen = outcome.get("optionId") or outcome.get("outcome")
     _update(
         session_id,

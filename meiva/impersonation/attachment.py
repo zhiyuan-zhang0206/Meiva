@@ -2,7 +2,7 @@
 # A takeover attachment. What is lease-specific lives here — the derived lease id,
 # the active-lease recheck on every call, the delta column's optimistic version and
 # the durable event participant the takeover manifest owns. The kernel
-# (`base.agents.external_attachment`) owns the sequence and the failure handling,
+# (`base.agents.context.external_attachment`) owns the sequence and the failure handling,
 # so a second borrowed identity cannot drift from this one's ordering.
 # meiva:link meiva/impersonation/docs/attachment-contracts.meiva.okf.md
 
@@ -16,9 +16,8 @@ from typing import Any, Self, cast
 from base.agents import impersonation as control
 from base.agents.context import MeivaContext
 from base.agents.context.clients import DatabaseFactory
+from base.agents.context.external_attachment import ExternalAttachment
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.agents.external_attachment import ExternalAttachment
-from base.agents.external_attachment.core import _deliver_telemetry_before_detach
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -72,22 +71,22 @@ def _agent_codec() -> Any:
 
 
 class _Codec:
-    """The agent-state codec, bound to this attachment's database."""
-
     def __init__(self, attachment: Attachment) -> None:
         self._attachment = attachment
 
     def load_snapshot(self, agent_id: int) -> Any:
         return _agent_codec().load_snapshot(agent_id, database=self._attachment._database())
 
-    @property
-    def plugin_state_schema(self) -> Any:
+    def plugin_state_schema(self, state: Any) -> Any:
+        del state
         return _agent_codec().plugin_state_schema
 
-    def encode_plugin_delta(self, update: Mapping[str, Any], state_cls: type[Any]) -> str:
-        return _agent_codec().encode_plugin_delta(update, state_cls)
+    def encode_plugin_delta(
+        self, update: Mapping[str, Any], state_cls: type[Any]
+    ) -> dict[str, str]:
+        return cast("dict[str, str]", _agent_codec().encode_plugin_delta(update, state_cls))
 
-    def decode_plugin_delta(self, encoded: str, state_cls: type[Any]) -> Any:
+    def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> Any:
         return _agent_codec().decode_plugin_delta(encoded, state_cls)
 
     def apply_plugin_delta(self, state: Any, delta: Any) -> None:
@@ -95,8 +94,6 @@ class _Codec:
 
 
 class _LeaseIdentity:
-    """The lease row as an identity source."""
-
     def __init__(self, attachment: Attachment) -> None:
         self._attachment = attachment
 
@@ -115,7 +112,7 @@ class _LeaseIdentity:
     def delta_version(self) -> int:
         return self._attachment._version
 
-    def merge_delta(self, encoded: str, *, expected_version: int) -> int:
+    def merge_delta(self, encoded: dict[str, str], *, expected_version: int) -> int:
         attachment = self._attachment
         control.merge_plugin_delta(
             attachment._database(),
@@ -139,8 +136,8 @@ class Attachment(ExternalAttachment):
         self._lease_agent_id = agent_id
         self._lease_session_id = session_id
         self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
-        self._machine: MachineIdentity | None = None
-        self._database: DatabaseFactory | None = None
+        self._machine: MachineIdentity
+        self._database: DatabaseFactory
         self._clock_factory: Any = None
         self._event_seal_wait_reader: Any = None
         self.agent_id: int = 0
@@ -286,13 +283,10 @@ class Attachment(ExternalAttachment):
             )
         return self.agent_id
 
-    def _deliver_telemetry(self) -> None:
-        clients = self._own_clients
+    def _telemetry_clients(self) -> Any:
         if self._prior_context is not None:
-            clients = self._prior_context.clients
-        if clients is None:
-            raise RuntimeError("the attachment has no event producer owner")
-        _deliver_telemetry_before_detach(clients=clients)
+            return self._prior_context.clients
+        return self._own_clients
 
     def _open_event_participant(self) -> None:
         from uuid import uuid4
@@ -355,7 +349,7 @@ class Attachment(ExternalAttachment):
         process_context.unbind_exec_turn()
 
     def __enter__(self) -> Self:
-        return cast(Self, super().__enter__())
+        return super().__enter__()
 
 
 def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
