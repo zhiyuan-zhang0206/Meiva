@@ -9,6 +9,7 @@ import json
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -344,18 +345,18 @@ def evict_runtimes(
     *,
     policy: HostCachePolicy,
     now: float,
-) -> list[AgentRuntime]:
-    evicted: list[AgentRuntime] = []
+) -> list[tuple[int, AgentRuntime]]:
+    evicted: list[tuple[int, AgentRuntime]] = []
     cutoff = now - policy.idle_ttl_seconds
     aged = [a for a, r in runtimes.items() if r.last_used < cutoff and a not in in_flight]
     for agent_id in aged:
-        evicted.append(runtimes.pop(agent_id))
+        evicted.append((agent_id, runtimes.pop(agent_id)))
     cap = policy.size
     for agent_id in list(runtimes):
         if len(runtimes) <= cap:
             break
         if agent_id not in in_flight:
-            evicted.append(runtimes.pop(agent_id))
+            evicted.append((agent_id, runtimes.pop(agent_id)))
     return evicted
 
 
@@ -467,11 +468,19 @@ def refresh_cached_runtime(
 # and raises rather than silently leaving the session open.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 class HarnessSessions:
+    # meiva:note
+    # Closing a session is a child-process teardown, and the same agent can be woken
+    # again before it finishes: an evicted runtime is gone from the cache, so the next
+    # turn builds a fresh bridge and would start a second CLI on the same resumed
+    # session id while the first one is still being reaped. `retire` therefore keeps the
+    # close per agent, and `join` is what the next turn waits on before building.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
     def __init__(self, registrations: RegistrationStore) -> None:
         self._registrations = registrations
         self._tasks = asyncio.TaskGroup()
         self._started = False
         self._pending: set[asyncio.Task[None]] = set()
+        self._retiring: dict[int, asyncio.Task[None]] = {}
         self.failures: list[BaseException] = []
 
     async def start(self) -> None:
@@ -481,7 +490,9 @@ class HarnessSessions:
         self._started = True
         self._registrations.sweep()
 
-    def retire(self, runtime: AgentRuntime, *, reason: str = "runtime retired") -> None:
+    def retire(
+        self, agent_id: int, runtime: AgentRuntime, *, reason: str = "runtime retired"
+    ) -> None:
         bridge = runtime.harness_bridge
         if bridge is None:
             return
@@ -493,7 +504,20 @@ class HarnessSessions:
             self._close(bridge, reason), name=f"harness-close-{runtime.harness.value}"
         )
         self._pending.add(task)
+        self._retiring[agent_id] = task
         task.add_done_callback(self._collect)
+
+    # meiva:note
+    # Wait for this agent's retired session to finish closing, if one is. The next turn
+    # calls it before it builds a runtime, which is the only ordering that keeps one
+    # resumed session id from having two CLIs at once.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    async def join(self, agent_id: int) -> None:
+        task = self._retiring.pop(agent_id, None)
+        if task is None:
+            return
+        with suppress(asyncio.CancelledError):
+            await task
 
     def _collect(self, task: asyncio.Task[None]) -> None:
         self._pending.discard(task)
@@ -523,3 +547,12 @@ class HarnessSessions:
             return
         self._started = False
         await self._tasks.__aexit__(None, None, None)
+        if self.failures:
+            logger.warning(
+                "[{label}] {body}",
+                label="harness",
+                event="harness_close_failures",
+                body=f"{len(self.failures)} session close(s) raised while running: "
+                f"{self.failures!r}",
+            )
+            self.failures.clear()

@@ -46,6 +46,7 @@ from base.agents.impersonation.notes import HandoffNotes
 from base.api_contracts.agent_contract import Harness
 from base.log import logger
 
+from .claim import route_target
 from .node_log import node_lifecycle
 from .prompt.capabilities import indexed_skill_identifiers
 from .prompt.context_notes import context_notes
@@ -96,9 +97,10 @@ async def init_context_node(
                     len(reset.tail),
                 )
                 return Command[NodeName](
-                    update={"context_reset": ContextReset()}, goto=reset.resume
+                    update={"context_reset": ContextReset()},
+                    goto=route_target(runtime.context, reset.resume),
                 )
-            return Command[NodeName](goto=reset.resume)
+            return Command[NodeName](goto=route_target(runtime.context, reset.resume))
 
         # Container mode (eval harness): no ops_pool, so no inbound queue, no
         # workspace, and nothing the notes describe. The head is the system
@@ -165,4 +167,4 @@ async def init_context_node(
         # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
         if runtime.context.harness is not Harness.MEIVA:
             update["harness_cursor"] = len(head)
-        return Command[NodeName](update=update, goto=reset.resume)
+        return Command[NodeName](update=update, goto=route_target(runtime.context, reset.resume))

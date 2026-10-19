@@ -21,7 +21,7 @@ from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
-from base.lm.harness import HarnessTurn, HarnessTurnFaultedError, Usage
+from base.lm.harness import HarnessSetupError, HarnessTurn, HarnessTurnFaultedError, Usage
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.plugin_providers import build_model_catalog
@@ -215,6 +215,23 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
         await harness_turn_node(state, runtime(FaultingEngine()), config())
 
     assert loguru_records.events("llm_usage") == [], "an aborted turn logs no usage"
+
+
+# meiva:note
+# A session that never started is not a crash: an agent whose provider CLI is missing
+# or whose submission was refused settles the turn with a reported abort and idles for
+# the next inbound, the same way a dead model stream does. Before this, the exception
+# escaped the node and cost the host a crash per wake.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+async def test_a_session_that_cannot_start_settles_the_turn_as_a_fatal_stream_abort() -> None:
+    class UnstartableEngine(FakeEngine):
+        async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
+            raise HarnessSetupError("claude_code session could not start: no sdk")
+
+    state = AgentState(messages=[inbound("do it", 7)], harness_cursor=0)
+
+    with pytest.raises(FatalLLMStreamError, match="harness turn aborted"):
+        await harness_turn_node(state, runtime(UnstartableEngine()), config())
 
 
 class SettledReport:

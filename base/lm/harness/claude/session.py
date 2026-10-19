@@ -31,8 +31,10 @@ from base.lm.harness.process import (
     PsutilChildProbe,
     client_pid,
     describe,
+    settle_close,
     snapshot,
     wait_gone,
+    watch_tree,
 )
 from base.lm.harness.registry import SessionRecord, SessionRegistry
 
@@ -222,6 +224,7 @@ class ClaudeSession:
         if self._closed:
             return
         self._closed = True
+        watched = watch_tree(self._probe, self._cli_pid)
         self._fail_pending(SessionClosedError("session closed"))
         for task in list(self._deadlines.values()):
             task.cancel()
@@ -236,6 +239,7 @@ class ClaudeSession:
                 self._emit(SessionFaulted(turn_id=None, error=f"session tasks failed: {group!r}"))
         if self._client is not None:
             await self._client.disconnect()
+        await settle_close(self._probe, watched, "claude_code", self.config.cancel_settle_seconds)
         self._emit(SessionClosed(turn_id=None, reason=reason))
         self._events.put_nowait(_EVENT_STREAM_END)
 

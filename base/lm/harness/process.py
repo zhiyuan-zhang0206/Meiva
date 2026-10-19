@@ -8,6 +8,8 @@ from typing import Any, Protocol
 
 import psutil
 
+from base.log import logger
+
 
 class ChildProbe(Protocol):
     def descendants(self, pid: int) -> dict[int, str]: ...
@@ -84,3 +86,57 @@ async def wait_gone(
 
 def describe(observed: Mapping[int, str], pids: Iterable[int]) -> tuple[ProcessObservation, ...]:
     return tuple(ProcessObservation(pid=pid, command=observed.get(pid, "")) for pid in sorted(pids))
+
+
+# meiva:note
+# A session's process tree plus its root, as `{pid: command}`. `descendants` answers a
+# different question — what the process started — and a close has to wait for both, since
+# the root is what holds the transcript.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def watch_tree(probe: ChildProbe, pid: int | None) -> dict[int, str]:
+    watched = snapshot(probe, pid)
+    if pid is not None:
+        watched[pid] = "cli"
+    return watched
+
+
+# meiva:note
+# Closing a session has to answer the question `interrupt()` answers: is the process
+# tree actually gone? The transport's close asks the CLI to exit and the SDK reaps the
+# CLI itself, but a tool's grandchildren can outlive both — and a session that is
+# "closed" while its CLI still holds the transcript is the one state the next session
+# on that agent must not race. The wait is bounded by the adapter's own settle window,
+# and what is left over is reported, never rounded up to success.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+async def settle_close(
+    probe: ChildProbe,
+    observed: Mapping[int, str],
+    harness: str,
+    timeout_seconds: float,
+    *,
+    poll_seconds: float = 0.02,
+) -> bool:
+    gone, waited_ms = await wait_gone(
+        probe, observed, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds
+    )
+    if gone:
+        logger.info(
+            "[{label}] {body}",
+            label="harness",
+            event="harness_close_settled",
+            body=f"{harness} session closed; {len(observed)} process(es) observed, none left",
+            harness=harness,
+            waited_ms=round(waited_ms, 1),
+        )
+        return True
+    remaining = [pid for pid in observed if probe.is_alive(pid)]
+    logger.warning(
+        "[{label}] {body}",
+        label="harness",
+        event="harness_close_residue",
+        body=f"{harness} session closed with {len(remaining)} process(es) still running",
+        harness=harness,
+        remaining=len(remaining),
+        waited_ms=round(waited_ms, 1),
+    )
+    return False

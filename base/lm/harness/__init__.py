@@ -3,6 +3,7 @@ from __future__ import annotations
 from base.lm.harness.bridge import (
     HarnessBridge,
     HarnessClosedError,
+    HarnessSetupError,
     HarnessTurnFaultedError,
     ScopedSessionRegistry,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "HarnessClosedError",
     "HarnessRegistration",
     "HarnessSession",
+    "HarnessSetupError",
     "HarnessTurn",
     "HarnessTurnFaultedError",
     "RateLimitObserved",
