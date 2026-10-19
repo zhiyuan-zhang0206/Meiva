@@ -56,6 +56,20 @@ class ExecRequestQuarantine(TypedDict):
     vanished: list[str]
 
 
+class ExecRequestEnvelopeMutated(TypedDict):
+    request: str
+    domain: str
+    digest_version: int
+    phase: str
+    condition: str
+    detail: str
+    refused: bool
+    recorded_payload_sha256: str
+    observed_payload_sha256: str | None
+    size_bytes: int | None
+    evidence_path: str
+
+
 class ExecSubprocessKilled(TypedDict):
     """`exec_subprocess_killed` payload — a child survived the signal grace
     and the parent SIGKILLed its process group."""
@@ -112,6 +126,14 @@ EVENTS: dict[str, EventSpec] = {
         "exec_request_quarantine",
         "stale exec request evidence preserved under the explicit quarantine",
         payload=ExecRequestQuarantine,
+    ),
+    "exec_request_envelope_mutated": telemetry_event(
+        "exec_request_envelope_mutated",
+        "exec request payload condition (matched/changed/missing/unreadable/symlink/"
+        "oversize); refused says whether it is authoritative or only reported",
+        payload=ExecRequestEnvelopeMutated,
+        tier="anomaly",
+        persist=True,
     ),
     "exec_cancelled": telemetry_event(
         "exec_cancelled", "execute_code cancelled", tier="anomaly", persist=True

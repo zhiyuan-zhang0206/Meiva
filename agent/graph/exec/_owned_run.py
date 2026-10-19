@@ -26,6 +26,7 @@ from base.agents.incarnation.exec_owner_protocol import (
     read_owner_bytes,
     validate_native_ready,
 )
+from base.agents.incarnation.exec_payload_evidence import observe_exec_payload
 from base.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
@@ -34,6 +35,7 @@ from base.agents.incarnation.resources import (
     attach_exec,
     complete_exec,
     decode_resources,
+    exec_identity_digest,
     register_exec,
 )
 from base.db import Database
@@ -92,10 +94,15 @@ def validate_closed(context: OwnerContext, attached: ExecAllocation, path: Path)
         raise ResourceEvidenceError("terminal owner receipt differs from exact allocation")
     if receipt.observed_at.tzinfo is None or receipt.observed_at > datetime.now(UTC):
         raise ResourceEvidenceError("terminal owner receipt has an invalid observation time")
-    if (
-        hashlib.sha256(read_owner_bytes(context.request_path, 64 * 1024 * 1024)).hexdigest()
-        != attached.request_digest
-    ):
+    observation = observe_exec_payload(
+        attached,
+        request_path=context.request_path,
+        agent_id=context.agent_id,
+        generation=context.generation,
+        runtime_owner=context.runtime_owner,
+        phase="settle",
+    )
+    if observation.refused:
         raise ResourceEvidenceError("terminal owner request has changed")
     return receipt
 
@@ -150,11 +157,26 @@ class OwnedRun:
             state=state,
             incarnation=context.original_incarnation,
         )
+        # meiva:note
+        # The identity digest is fixed here and never re-derived from the envelope:
+        # the exec'd code can rewrite that file, so its bytes cannot decide whether
+        # this domain is discharged.
+        # meiva:link base/agents/incarnation/docs/incarnation-resources.meiva.okf.md
+        domain = uuid4()
         self.allocation = ExecAllocation(
             request=self.request_id,
-            domain=uuid4(),
-            request_digest=hashlib.sha256(self.request.read_bytes()).hexdigest(),
+            domain=domain,
+            request_digest=exec_identity_digest(
+                request=self.request_id,
+                domain=domain,
+                agent_id=target.agent_id,
+                generation=target.generation,
+                runtime_owner=target.owner,
+                deadline=deadline,
+            ),
             deadline=deadline,
+            digest_version=2,
+            request_sha256=hashlib.sha256(self.request.read_bytes()).hexdigest(),
         )
         self.context = OwnerContext(
             agent_id=target.agent_id,

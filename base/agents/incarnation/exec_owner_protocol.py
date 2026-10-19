@@ -14,6 +14,13 @@ from base.agents.incarnation.resources import ExecAllocation, ResourceProcess
 
 MAX_OWNER_MESSAGE = 16 * 1024
 
+# meiva:note
+# Every evidence reader of a request envelope shares this ceiling; the launcher
+# bounds the same file separately, so one observation cannot become an unbounded
+# read.
+# meiva:link base/agents/incarnation/docs/incarnation-resources.meiva.okf.md
+MAX_PAYLOAD_BYTES = 64 * 1024 * 1024
+
 
 class OwnerContext(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)

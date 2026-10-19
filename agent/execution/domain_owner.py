@@ -20,6 +20,7 @@ import psutil
 
 from base.agents.incarnation.exec_owner_protocol import (
     MAX_OWNER_MESSAGE,
+    MAX_PAYLOAD_BYTES,
     OwnerClosed,
     OwnerControl,
     OwnerReady,
@@ -219,8 +220,8 @@ def run(context_path: Path) -> None:
     allocation = context.allocation
     deadline, close_deadline = _deadlines(allocation)
     if (
-        hashlib.sha256(read_owner_bytes(context.request_path, 64 * 1024 * 1024)).hexdigest()
-        != allocation.request_digest
+        hashlib.sha256(read_owner_bytes(context.request_path, MAX_PAYLOAD_BYTES)).hexdigest()
+        != allocation.recorded_payload_sha256
     ):
         raise RuntimeError("exec owner request digest differs from reservation")
     control = ControlPipe(sys.stdin.fileno())

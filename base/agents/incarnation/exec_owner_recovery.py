@@ -4,7 +4,6 @@ Never scan for the latest receipt: the complete database set chooses each exact
 request directory. Missing, malformed, unattached or still-live identities refuse.
 """
 
-import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,9 +13,11 @@ from psycopg import Connection
 
 from base.agents.incarnation.exec_owner_protocol import (
     OwnerClosed,
+    OwnerContext,
     read_owner_bytes,
     read_owner_context,
 )
+from base.agents.incarnation.exec_payload_evidence import observe_exec_payload
 from base.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
@@ -73,6 +74,25 @@ def _load_recoverable(
     return row[0], state, target
 
 
+def _receipt_matches(
+    target: RuntimeIncarnation,
+    allocation: ExecAllocation,
+    context: OwnerContext,
+    receipt: OwnerClosed,
+    directory: Path,
+) -> bool:
+    return (
+        (context.agent_id, context.generation, context.runtime_owner)
+        == (target.agent_id, target.generation, target.owner)
+        and context.allocation
+        == allocation.model_copy(update={"owner_process": None, "root_process": None})
+        and receipt.allocation == allocation
+        and receipt.observed_at.tzinfo is not None
+        and receipt.observed_at <= datetime.now(UTC)
+        and context.request_path.parent == directory
+    )
+
+
 def _verify_closed_receipt(
     target: RuntimeIncarnation, allocation: ExecAllocation, directory: Path
 ) -> bool:
@@ -80,23 +100,29 @@ def _verify_closed_receipt(
 
     False when the owner left no context or receipt yet; a receipt that differs raises.
     """
+    # meiva:note
+    # The payload observation runs only for a matching receipt: a version 1 row
+    # still refuses a rewritten envelope, while a version 2 row records and
+    # reports it without refusing.
+    # meiva:link base/agents/incarnation/docs/incarnation-resources.meiva.okf.md
     try:
         context = read_owner_context(directory / "owner.json")
         receipt = OwnerClosed.model_validate_json(read_owner_bytes(directory / "owner.closed"))
     except FileNotFoundError:
         return False
-    if (
-        (context.agent_id, context.generation, context.runtime_owner)
-        != (target.agent_id, target.generation, target.owner)
-        or context.allocation
-        != allocation.model_copy(update={"owner_process": None, "root_process": None})
-        or receipt.allocation != allocation
-        or receipt.observed_at.tzinfo is None
-        or receipt.observed_at > datetime.now(UTC)
-        or context.request_path.parent != directory
-        or hashlib.sha256(read_owner_bytes(context.request_path, 64 * 1024 * 1024)).hexdigest()
-        != allocation.request_digest
-    ):
+    observation = (
+        observe_exec_payload(
+            allocation,
+            request_path=context.request_path,
+            agent_id=target.agent_id,
+            generation=target.generation,
+            runtime_owner=target.owner,
+            phase="recovery",
+        )
+        if _receipt_matches(target, allocation, context, receipt, directory)
+        else None
+    )
+    if observation is None or observation.refused:
         raise ResourceEvidenceError("recovery receipt differs from exact local allocation")
     return True
 

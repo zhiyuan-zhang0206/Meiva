@@ -66,9 +66,15 @@ metadata lock. Only that committed transaction permits user code. Force winning
 before the transaction leaves no database allocation; the host closes the gated
 owner and requires its exact `host_eof` receipt before clearing the in-process
 scope. An ambiguous commit remains unresolved. The root is gated by
-`agent.execution.owner_child`; after the permit it rechecks the reserved request digest
-and exact request/result paths. Neither child inherits the host's control write
-end. The managed host poll loop publishes pending output incrementally and sends
+`agent.execution.owner_child`; after the permit it rechecks the reserved payload digest
+and exact request/result paths. An allocation's `request_digest` is versioned: version 1 is the envelope's sha256 and
+refuses a mismatch; version 2 is the allocation identity and reports every payload
+condition (`matched`, `changed`, `missing`, `unreadable`, `symlink`, `oversize`)
+instead, recording it under `<exec dir>/<agent_id>/evidence/`. Classification uses
+`lstat` and never follows the entry. Payload integrity is detection, not authority;
+`resources.exec_identity_digest` owns the identity form.
+
+Neither child inherits the host's control write end. The managed host poll loop publishes pending output incrementally and sends
 keepalives while the owner remains live; completion flushes only the unpublished
 tail. Task cancellation closes the owner's control input but does not abandon an
 in-flight registration transaction or an attached allocation. The caller retains
