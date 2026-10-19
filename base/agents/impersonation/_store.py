@@ -65,13 +65,32 @@ def public(lease: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+# meiva:note
+# The one wording for a same-machine refusal, naming the agent and both machines:
+# the operator's next question is always "which host is the agent on, and which
+# one am I on", and the bare sentence turned every mismatch into a manual hunt.
+# Callers keep their own exception types — request/local raise ImpersonationError,
+# history.resolve raises ValueError — so only the text is shared.
+def machine_mismatch_message(*, agent_id: int, agent_machine: str, local_machine: str) -> str:
+    return (
+        "Impersonation is limited to the agent's own machine:"
+        f" agent {agent_id} is on {agent_machine!r}, this process is on {local_machine!r}"
+    )
+
+
 def local(
     lease: Mapping[str, Any],
     *,
     local_machine: str,
 ) -> None:
     if lease["machine"] != local_machine:
-        raise ImpersonationError("Impersonation is limited to the agent's own machine")
+        raise ImpersonationError(
+            machine_mismatch_message(
+                agent_id=lease["agent_id"],
+                agent_machine=lease["machine"],
+                local_machine=local_machine,
+            )
+        )
 
 
 def authenticate(

@@ -8,15 +8,20 @@ from base.agents.impersonation.tests.impersonation_support import recorded_tree
 
 
 def _lease(tree: dict[str, Any]) -> dict[str, Any]:
-    return {"process_metadata": tree, "machine": "attestation-unit"}
+    return {"process_metadata": tree, "machine": "attestation-unit", "agent_id": 426}
 
 
 def test_authenticate_requires_same_machine() -> None:
     lease = _lease(recorded_tree())
     store.authenticate(lease, local_machine="attestation-unit")
     lease["machine"] += "-other"
-    with pytest.raises(store.ImpersonationError, match="own machine"):
+    with pytest.raises(store.ImpersonationError) as refusal:
         store.authenticate(lease, local_machine="attestation-unit")
+    # meiva:note
+    # Both machines are in the message: a bare "own machine" left the operator to
+    # hunt for which host the agent is on and which one the process is on.
+    assert "agent 426 is on 'attestation-unit-other'" in str(refusal.value)
+    assert "this process is on 'attestation-unit'" in str(refusal.value)
 
 
 @pytest.mark.parametrize("provider", ["codex", "antigravity"])
