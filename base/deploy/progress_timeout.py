@@ -99,6 +99,12 @@ GATEWAY_PREFLIGHT_BUDGET_S = 30.0
 # The operation deadline must include both; start never waives its verdict.
 SERVICE_READY_TIMEOUT_S = 180.0
 
+# meiva:note
+# How long one host-package provisioner (apt or brew) may run during a cold
+# start before the host-dependency preflight gives up and prints the repair
+# command. It is a separate, earlier budget from service readiness.
+HOST_PACKAGE_INSTALL_TIMEOUT_S = 1800.0
+
 # The public serving path shares one critical readiness/startup tier across
 # CLI readiness and root monitoring. All other services use the shorter tier.
 CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-host", "im-bridge"})
