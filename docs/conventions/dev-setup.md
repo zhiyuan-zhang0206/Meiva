@@ -18,6 +18,17 @@ Every tool's cache lives under `.cache/<tool>/` (`.cache/pytest`,
 `/.cache/` line in `.gitignore`. Configure a newly added tool the same way
 instead of letting it drop a cache dir at the repo root.
 
+## Heavy jobs on a shared host
+
+If the machine you develop on also runs a deployment (a gateway, a data plane,
+or another cluster), an unconfined job can take that deployment down. On
+2026-10-18 one Python job reached 27.9 GB on the gateway host, pushed the kernel
+into global OOM and stalled the cluster's writes for 18 minutes. Run anything
+that may exceed a couple of GB in a capped transient scope —
+`systemd-run --user --scope -p MemoryMax=12G -- <command>` — and read the
+[runbook](runbook.md#heavy-ad-hoc-jobs-on-a-data-plane-host) before capping a
+scope that already holds a service.
+
 ## Joining a runner
 
 Acquire the checkout's dependencies using the
