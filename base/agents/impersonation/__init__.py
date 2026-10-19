@@ -56,6 +56,32 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import Cancelled
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
+# meiva:note
+# The two lease statements whose column sets the runner's column-level grants
+# must cover. They are named so the grant matrix test reads the executed
+# statement rather than a copy that drifts: `db/schema.sql` and the birth-time
+# convergence (`base.cluster.authority.event_grants`) each grant these columns
+# one by one, and a column added here without both lists is the failure task
+# #5375 fixed — `meiva impersonation request`/`renew` dying on
+# InsufficientPrivilege from the runner login while the gateway's table grant
+# kept working.
+INSERT_LEASE_SQL = (
+    "INSERT INTO agent_impersonations(id,agent_id,source,machine,reason,"
+    "status,ttl_seconds,expires_at,relay_provider,relay_thread_id,relay_codex_remote,"
+    "relay_token_hash,relay_batch_window_seconds,name,executor_name,"
+    "process_metadata,automatic,"
+    "ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version,"
+    "capabilities,capability_declared_by) "
+    "VALUES(%s,%s,%s,%s,%s,'requested',%s,clock_timestamp()+%s*interval '1 second',"
+    "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+)
+
+RENEW_LEASE_SQL = (
+    "UPDATE agent_impersonations SET ttl_seconds=%s,expires_at=clock_timestamp()+"
+    "%s*interval '1 second',capability_declared_by="
+    "COALESCE(capability_declared_by,%s) WHERE id=%s"
+)
+
 
 def _ttl(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 86400:
@@ -196,13 +222,7 @@ def request(
         _reject_open_previous(conn, agent_id)
         set_actor(conn, caller.source())
         conn.execute(
-            "INSERT INTO agent_impersonations(id,agent_id,source,machine,reason,"
-            "status,ttl_seconds,expires_at,relay_provider,relay_thread_id,relay_codex_remote,"
-            "relay_token_hash,relay_batch_window_seconds,name,executor_name,process_metadata,automatic,"
-            "ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version,"
-            "capabilities,capability_declared_by) "
-            "VALUES(%s,%s,%s,%s,%s,'requested',%s,clock_timestamp()+%s*interval '1 second',"
-            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            INSERT_LEASE_SQL,
             (
                 lease_id,
                 agent_id,
@@ -498,9 +518,7 @@ def renew(
         set_actor(conn, lease["source"])
         ttl = lease["ttl_seconds"] if ttl_seconds is None else _ttl(ttl_seconds)
         conn.execute(
-            "UPDATE agent_impersonations SET ttl_seconds=%s,expires_at=clock_timestamp()+"
-            "%s*interval '1 second',capability_declared_by="
-            "COALESCE(capability_declared_by,%s) WHERE id=%s",
+            RENEW_LEASE_SQL,
             (ttl, ttl, DECLARED_LEGACY, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
