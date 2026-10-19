@@ -34,4 +34,4 @@ so its per-host failure line names the step and reason instead of the last line
 of console output; a failed host no longer stops the remaining hosts, and the run
 exits `3` (partial) rather than `1`.
 
-Parent: [[cli/docs/fleet-update-window.meiva.okf.md]].
+Parent: [[cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md]].

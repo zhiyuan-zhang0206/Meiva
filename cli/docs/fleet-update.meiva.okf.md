@@ -14,7 +14,7 @@ commands remain for intermediate manual work and recovery. The operator-facing p
 the runbook
 ([updating a networked cluster in source mode](../../docs/conventions/runbook.md#updating-a-networked-cluster-in-source-mode));
 this node owns the code-side order, and the window's guards are
-[[cli/docs/fleet-update-window.meiva.okf.md]]. The keep decision has its own
+[[cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md]]. The keep decision has its own
 node ([[scripts/host_ops/docs/fleet-update-keep.meiva.okf.md]]) and decision
 record
 ([component-scoped keep](../../docs/decisions/runtime/updates/release/2026-10-17-component-scoped-keep-on-update.md)).
@@ -47,7 +47,9 @@ remain unchanged throughout the update.
    component the window touches restarts as before.
 6. Open the window's Grafana silence on the gateway host.
 7. `meiva stop -y --timeout 600` on each runner, then the gateway. A stop must
-   leave the host paused/stopped; a failure prints the retry step.
+   leave the host paused/stopped; a failure prints the retry step and brings
+   back the hosts this run already stopped
+   ([[cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md]]).
 8. Switch every checkout: check out NEW detached, repair legacy read-only
    `.venv` directories (early converge passes left them 0555, which `uv sync`
    cannot write through), `uv sync --frozen`, then require a clean tree. The

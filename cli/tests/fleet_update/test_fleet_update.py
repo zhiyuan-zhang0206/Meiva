@@ -73,7 +73,7 @@ def test_run_reports_up_failure_without_repeating_down(
 # A host whose converge aborted leaves the rest of the cluster running: the run
 # names that host's step and reason, keeps going, and exits 3 — distinct from a
 # refusal (2) and from a failure before any host started (1).
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def test_a_host_that_fails_to_start_does_not_stop_the_others(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
