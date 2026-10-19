@@ -5,6 +5,7 @@ import os
 import shutil
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
@@ -145,35 +146,153 @@ def _has_value(mapping: object, key: str) -> bool:
     return bool(cast("dict[str, object]", mapping).get(key))
 
 
-def _claude_code_login(home: Path) -> _LoginEvidence:
-    if (home / ".claude" / ".credentials.json").is_file():
+def _nested(value: object, key: str) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    inner = cast("dict[str, object]", value).get(key)
+    return cast("dict[str, object]", inner) if isinstance(inner, dict) else None
+
+
+def _epoch_ms(value: object) -> datetime | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        return datetime.fromtimestamp(float(value) / 1000, UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _iso_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed.astimezone(UTC) if parsed.tzinfo is not None else None
+
+
+# meiva:note
+# A credential store answers the login question only as far as it can be read. A
+# token it holds is evidence; an account name it remembers is not, because that
+# record outlives the login: an ubuntu machine kept `oauthAccount` in
+# `~/.claude.json` while `claude auth status` reported `loggedIn: false`, and the
+# probe called it available. Where the store records an expiry, the one that
+# decides is the deadline of a credential that cannot renew itself; a past
+# access-token expiry only schedules a refresh, so reading it as a logout would
+# mark an idle machine unavailable. `_session_deadline` takes such a deadline and
+# `_renewable_credential` reports a renewable one as the age of the stored token.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+def _session_deadline(deadline: datetime | None, *, where: str) -> _LoginEvidence:
+    if deadline is None:
         return _LoginEvidence(
-            signed_in=True, detail="credentials file found at ~/.claude/.credentials.json"
+            signed_in=True, detail=f"a token is stored in {where}, which records no expiry for it"
         )
+    if deadline <= datetime.now(UTC):
+        return _LoginEvidence(
+            signed_in=False, detail=f"the credentials in {where} expired at {deadline.isoformat()}"
+        )
+    return _LoginEvidence(
+        signed_in=True, detail=f"the credentials in {where} are valid until {deadline.isoformat()}"
+    )
+
+
+def _renewable_credential(
+    deadline: datetime | None, *, where: str, credential: str
+) -> _LoginEvidence:
+    if deadline is None:
+        return _LoginEvidence(signed_in=True, detail=f"a token is stored in {where}")
+    return _LoginEvidence(
+        signed_in=True,
+        detail=f"a token is stored in {where}; its {credential} runs out at "
+        f"{deadline.isoformat()} and is renewed on use",
+    )
+
+
+def _claude_credentials(record: object) -> _LoginEvidence:
+    where = "~/.claude/.credentials.json"
+    oauth = _nested(record, "claudeAiOauth")
+    if oauth is None:
+        return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
+    if not _has_value(oauth, "accessToken") and not _has_value(oauth, "refreshToken"):
+        return _LoginEvidence(signed_in=False, detail=f"{where} holds no token")
+    if _has_value(oauth, "refreshToken"):
+        return _session_deadline(_epoch_ms(oauth.get("refreshTokenExpiresAt")), where=where)
+    return _session_deadline(_epoch_ms(oauth.get("expiresAt")), where=where)
+
+
+def _claude_code_login(home: Path) -> _LoginEvidence:
+    credentials = home / ".claude" / ".credentials.json"
+    if credentials.is_file():
+        return _claude_credentials(_read_json(credentials))
     account = _read_json(home / ".claude.json")
     if _has_value(account, "oauthAccount"):
-        return _LoginEvidence(signed_in=True, detail="signed-in account recorded in ~/.claude.json")
+        return _LoginEvidence(
+            signed_in=None,
+            detail="~/.claude.json names the account that signed in but stores no token, and "
+            "that record outlives the login",
+        )
     if (home / ".claude.json").is_file():
         return _LoginEvidence(signed_in=False, detail="~/.claude.json records no signed-in account")
     return _LoginEvidence(signed_in=None, detail="no Claude Code configuration found")
 
 
 def _codex_login(home: Path) -> _LoginEvidence:
+    where = "~/.codex/auth.json"
     auth = home / ".codex" / "auth.json"
     if not auth.is_file():
-        return _LoginEvidence(signed_in=None, detail="no ~/.codex/auth.json")
-    data = _read_json(auth)
-    if data is None:
-        return _LoginEvidence(signed_in=None, detail="~/.codex/auth.json is unreadable")
-    if _has_value(data, "OPENAI_API_KEY") or _has_value(data, "tokens"):
-        return _LoginEvidence(signed_in=True, detail="credentials found in ~/.codex/auth.json")
-    return _LoginEvidence(signed_in=False, detail="~/.codex/auth.json holds no credentials")
+        return _LoginEvidence(signed_in=None, detail=f"no {where}")
+    record = _read_json(auth)
+    if not isinstance(record, dict):
+        return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
+    data = cast("dict[str, object]", record)
+    if _has_value(data, "OPENAI_API_KEY"):
+        return _LoginEvidence(signed_in=True, detail=f"an API key is stored in {where}")
+    tokens = _nested(data, "tokens")
+    holds_token = _has_value(tokens, "access_token") or _has_value(tokens, "refresh_token")
+    if tokens is None or not holds_token:
+        return _LoginEvidence(signed_in=False, detail=f"{where} holds no credentials")
+    # meiva:note
+    # The file stores opaque tokens and records no expiry for them: the access
+    # token is renewed from the refresh token, and `last_refresh` says when that
+    # last happened. No threshold on that age would be more than a guess, so the
+    # stored token set stands as the evidence and the reason carries the age.
+    # meiva:link base/agents/docs/harness.meiva.okf.md
+    refreshed = data.get("last_refresh")
+    age = f", last refreshed {refreshed}" if isinstance(refreshed, str) else ""
+    return _LoginEvidence(signed_in=True, detail=f"a ChatGPT token set is stored in {where}{age}")
 
 
-def _antigravity_login(_home: Path) -> _LoginEvidence:
-    return _LoginEvidence(
-        signed_in=None, detail="the CLI stores its session outside its config directory"
-    )
+# meiva:note
+# The CLI shipped its session file under a different name before it was renamed;
+# an install that has not run since keeps only the old one, so the probe reads the
+# current path first and falls back to the legacy one.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+_ANTIGRAVITY_TOKEN_FILES = (
+    ".gemini/antigravity-cli/antigravity-oauth-token",
+    ".gemini/jetski-standalone-oauth-token",
+)
+
+
+def _antigravity_session(record: object, where: str) -> _LoginEvidence:
+    token = _nested(record, "token")
+    if token is None:
+        return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
+    if not _has_value(token, "access_token"):
+        return _LoginEvidence(signed_in=False, detail=f"{where} holds no access token")
+    expiry = _iso_timestamp(token.get("expiry"))
+    if _has_value(token, "refresh_token"):
+        return _renewable_credential(expiry, where=where, credential="access token")
+    return _session_deadline(expiry, where=where)
+
+
+def _antigravity_login(home: Path) -> _LoginEvidence:
+    for relative in _ANTIGRAVITY_TOKEN_FILES:
+        token_file = home / relative
+        if token_file.is_file():
+            return _antigravity_session(_read_json(token_file), f"~/{relative}")
+    listed = " or ".join(f"~/{relative}" for relative in _ANTIGRAVITY_TOKEN_FILES)
+    return _LoginEvidence(signed_in=None, detail=f"no Antigravity token file found at {listed}")
 
 
 _LOGIN_CHECKS = {

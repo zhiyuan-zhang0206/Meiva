@@ -99,21 +99,32 @@ missing (`agent/graph/docs/harness-turn.meiva.okf.md`).
 ## The availability probe
 
 `meiva.agents.harness_availability()` reports one row per harness for the machine
-the caller runs on. Each row carries a status — `available` (installed with a
-credential marker present), `unavailable` (not installed, or installed with a
-marker holding no credentials) or `unknown` (installed, but the sign-in state
-cannot be read here) — plus a readable reason, the resolved executable path
+the caller runs on. Each row carries a status — `available` (installed, and the
+credential store holds a token), `unavailable` (not installed, or installed with a
+store holding no token, or one whose credentials cannot renew and have expired)
+or `unknown` (installed, but the store is missing or unreadable, so nothing here
+settles the question) — plus a readable reason, the resolved executable path
 (symlinks followed, so not always the name on PATH) and whether PATH led to it.
-The probe reads that a credential file exists and is shaped like a session; it
-does not validate freshness, so an expired credential still reads as `available`.
+
+The probe reads a credential store; it does not authenticate. That buys two
+distinctions worth stating. A store is evidence, an account record is not:
+`~/.claude.json` keeps `oauthAccount` after the login behind it dies, so a probe
+reading it alone called an ubuntu machine signed in while its CLI reported
+`loggedIn: false`; the record now reads `unknown`. And a recorded expiry proves a
+logout only where the credential cannot renew itself — Claude Code's refresh
+token does, its access token is renewed from it, and Antigravity records a
+one-hour access token plus the refresh token that replaces it. Reading a past
+access-token expiry as a logout would mark a machine that has not run the CLI for
+an hour unavailable, so it is reported as age instead. Where the store records no
+expiry at all (Codex keeps opaque tokens), the stored token is the evidence and
+the reason carries its age.
 
 The probe reads the filesystem only. It runs no CLI, so it cannot hang on a login
 prompt, spend quota or start a session. When PATH misses a user-level install the
 probe still looks in the conventional bin directories, because an agent process
 starts without the interactive shell profile; `on_path=false` says that is how the
-executable was found. A harness whose credentials are kept outside those files
-(Antigravity's CLI keeps its session elsewhere) reports `unknown` rather than an
-invented answer.
+executable was found. A harness whose credentials are kept somewhere the probe
+does not know reports `unknown` rather than an invented answer.
 
 Recording and validating the harness is one slice: the launchers that actually
 start a session on an external harness are separate, and they read this column
