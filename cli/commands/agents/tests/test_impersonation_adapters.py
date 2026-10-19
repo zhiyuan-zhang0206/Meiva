@@ -109,3 +109,29 @@ def test_codex_terminal_notice_is_left_to_the_native_host() -> None:
     assert not adapter.notify_terminal
     ag = adapters.resolve_adapter("antigravity", str(THREAD_ID))
     assert not ag.notify_terminal
+
+
+def test_antigravity_readiness_resolves_the_language_server() -> None:
+    calls: list[str] = []
+
+    def missing() -> object:
+        calls.append("discover")
+        raise RuntimeError(
+            "No running Antigravity language_server with an HTTP Connect endpoint"
+            " was found on this machine"
+        )
+
+    adapter = adapters.resolve_adapter("antigravity", str(THREAD_ID), discover=missing)
+    with pytest.raises(RuntimeError, match="No running Antigravity language_server"):
+        adapter.ready()
+    assert calls == ["discover"]
+
+
+def test_antigravity_readiness_passes_for_a_resolvable_language_server() -> None:
+    adapter = adapters.resolve_adapter("antigravity", str(THREAD_ID), discover=object)
+    assert adapter.ready() is None
+
+
+def test_controller_session_adapters_need_no_destination_probe() -> None:
+    assert adapters.resolve_adapter("claude", None).ready() is None
+    assert adapters.resolve_adapter("dsh", None).ready() is None

@@ -14,21 +14,27 @@ from uuid import UUID
 
 from base.agents.impersonation.host_transport import (
     antigravity_live_submit,
+    discover_antigravity_server,
     live_submit,
     require_control_endpoint,
 )
 
 
+def _no_destination() -> None:
+    pass
+
+
+# meiva:note
+# A bound sender, its terminal-notice ownership and the readiness probe the relay
+# runs before its first heartbeat. The native host submits a Codex lease's ended
+# notice once, when it observes the end; controller-session transports send their
+# own notices.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 @dataclass(frozen=True)
 class RelayAdapter:
-    """A bound sender and its terminal-notice ownership.
-
-    The native host submits a Codex lease's ended notice once, when it observes
-    the end. Controller-session transports send their own notices.
-    """
-
     send: Callable[[str], None]
     notify_terminal: bool
+    ready: Callable[[], None] = _no_destination
 
 
 def emit_claude(message: str) -> None:
@@ -41,14 +47,19 @@ def emit_dsh(message: str) -> None:
     print(json.dumps(message, ensure_ascii=False), flush=True)
 
 
+# meiva:note
+# Bind the provider's destination before the relay opens its inbox. Codex requires
+# live Steer delivery: refusal or transport failure raises without queue fallback,
+# and controller-session destinations reject Codex options. ``discover`` is the
+# Antigravity endpoint lookup; a test supplies its own instead of patching.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 def resolve_adapter(
-    provider: str, thread_id: str | None, *, codex_remote: str | None = None
+    provider: str,
+    thread_id: str | None,
+    *,
+    codex_remote: str | None = None,
+    discover: Callable[[], object] = discover_antigravity_server,
 ) -> RelayAdapter:
-    """Bind the provider's destination before the relay opens its inbox.
-
-    Codex requires live Steer delivery; refusal or transport failure raises
-    without queue fallback. Controller-session destinations reject Codex options.
-    """
     if provider == "codex":
         if thread_id is None:
             raise ValueError("codex relay requires --thread-id for an existing session")
@@ -73,7 +84,10 @@ def resolve_adapter(
             if reason is not None:
                 raise RuntimeError(f"Antigravity SendAgentMessage delivery failed: {reason}")
 
-        return RelayAdapter(send_antigravity, notify_terminal=False)
+        def require_language_server() -> None:
+            discover()
+
+        return RelayAdapter(send_antigravity, notify_terminal=False, ready=require_language_server)
     if provider in ("claude", "dsh"):
         if codex_remote is not None or thread_id is not None:
             raise ValueError(
