@@ -70,6 +70,12 @@ class ExecRequestEnvelopeMutated(TypedDict):
     evidence_path: str
 
 
+class ExecDomainCleanup(TypedDict):
+    agents: list[int]
+    removed: int
+    freed: int
+
+
 class ExecSubprocessKilled(TypedDict):
     """`exec_subprocess_killed` payload — a child survived the signal grace
     and the parent SIGKILLed its process group."""
@@ -126,6 +132,11 @@ EVENTS: dict[str, EventSpec] = {
         "exec_request_quarantine",
         "stale exec request evidence preserved under the explicit quarantine",
         payload=ExecRequestQuarantine,
+    ),
+    "exec_domain_cleanup": telemetry_event(
+        "exec_domain_cleanup",
+        "settled exec domain directories removed by the supported cleanup pass",
+        payload=ExecDomainCleanup,
     ),
     "exec_request_envelope_mutated": telemetry_event(
         "exec_request_envelope_mutated",

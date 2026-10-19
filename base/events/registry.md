@@ -138,6 +138,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `exec_child_boot` | exec child bootstrap duration before agent-authored code | noise | duration_ms | — | events | — |
 | `exec_child_boot_failed` | exec child crashed before running the agent's code (bootstrap-class failure) | anomaly | exc_type, exc_msg | — | events | — |
 | `exec_request_quarantine` | stale exec request evidence preserved under the explicit quarantine | observation | reason, event_dir, sources, vanished | — | events | — |
+| `exec_domain_cleanup` | settled exec domain directories removed by the supported cleanup pass | observation | agents, removed, freed | — | events | — |
 | `exec_request_envelope_mutated` | exec request payload condition (matched/changed/missing/unreadable/symlink/oversize); refused says whether it is authoritative or only reported | anomaly | request, domain, digest_version, phase, condition, detail, refused, recorded_payload_sha256, observed_payload_sha256, size_bytes, evidence_path | — | events | ✓ |
 | `exec_cancelled` | execute_code cancelled | anomaly | — | — | events | ✓ |
 | `exec_timeout` | execute_code timed out | anomaly | — | — | events | ✓ |
