@@ -20,7 +20,7 @@ only what dsh decides differently.
 ## The profile
 
 `dsh --profile acp` is dsh's standard ACP server profile, and it is the only one
-carrying the full turn contract. Measured on dsh 0.x (2026-10-19):
+carrying the full turn contract. Measured on dsh 0.2.1-rc.2 (2026-10-19):
 
 | Profile | Prompt | Cancel | Per-turn usage |
 |---|---|---|---|
