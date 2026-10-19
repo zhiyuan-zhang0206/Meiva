@@ -391,13 +391,13 @@ class AgentHost:
                         outcome = TurnOutcome(exited=False, crashed=False, native_held=True)
                     # meiva:note
                     # A finished turn is a log line, not a notification: it asks the
-                    # user nothing, and the fleet-wide ping was dozens of
-                    # interruptions an hour. The settled agent row and the
-                    # AgentUpdated event already record it; this line keeps it
-                    # greppable.
+                    # user nothing, and at the measured 16k-34k turns a day
+                    # fleet-wide the ping was noise. The durable record is telemetry
+                    # plus the settled agent row; this DEBUG line (the file sink
+                    # records DEBUG) keeps it greppable without flooding INFO.
                     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
                     if not outcome.crashed and not outcome.native_held and not outcome.truncated:
-                        logger.info("hosted turn finished for agent {agent_id}", agent_id=agent_id)
+                        logger.debug("hosted turn finished for agent {agent_id}", agent_id=agent_id)
             except asyncio.CancelledError:
                 # A cancelled turn (stale-turn scan, force terminate, shutdown)
                 # must not keep its runtime either: the next wake re-runs the
