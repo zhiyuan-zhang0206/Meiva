@@ -20,7 +20,6 @@
   "cacheWritePrice": "Cache write ({duration}): {price} / 1M",
   "harness": "Harness",
   "harnessStatus": {
-    "available": "available",
     "unavailable": "unavailable"
   }
 }

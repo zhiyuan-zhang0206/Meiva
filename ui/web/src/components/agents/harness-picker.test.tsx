@@ -41,7 +41,7 @@ describe("HarnessPicker", () => {
   // on it here. An installed-but-unlaunchable harness reads `unavailable` like a
   // missing one, and the probe's diagnostic sentence never reaches the screen.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-  it("shows one word and never the probe's reason", async () => {
+  it("leaves a usable row as plain text and never shows the probe's reason", async () => {
     rows = [
       row("meiva", "available", true, "built-in runtime; needs no external CLI or login"),
       row("codex", "unavailable", false, "no codex executable on PATH or in ~/.local/bin"),
@@ -50,18 +50,17 @@ describe("HarnessPicker", () => {
 
     fireEvent.click(screen.getByLabelText("Harness"));
 
-    const codex = await screen.findByText("Codex");
-    const button = codex.closest("button");
-    expect(button?.disabled).toBe(true);
-    expect(button?.textContent).toContain("unavailable");
+    const meivaRow = (await screen.findAllByText("Meiva")).find((el) => el.closest("li"));
+    expect(meivaRow?.closest("button")?.textContent).toBe("Meiva");
     expect(screen.queryByText("no codex executable on PATH or in ~/.local/bin")).toBeNull();
     expect(screen.queryByText(/unknown/i)).toBeNull();
   });
 
-  it("reads an installed harness with no launcher as unavailable, not available", async () => {
+  it("greys an unusable row and adds one lowercase word", async () => {
     rows = [
       row("meiva", "available", true),
       row("claude_code", "available", false, "credentials file found"),
+      row("codex", "unavailable", false),
     ];
     render(<HarnessPicker machine="local" value="meiva" onChange={() => undefined} />);
 
@@ -70,8 +69,10 @@ describe("HarnessPicker", () => {
     const claude = await screen.findByText("Claude Code");
     const button = claude.closest("button");
     expect(button?.disabled).toBe(true);
-    expect(button?.textContent).toContain("unavailable");
-    expect(button?.textContent).not.toMatch(/\bavailable\b/)
+    expect(button?.textContent).toBe("Claude Codeunavailable");
+    const codex = (await screen.findByText("Codex")).closest("button");
+    expect(codex?.disabled).toBe(true);
+    expect(codex?.textContent).toBe("Codexunavailable");
   });
 
   it("selects a harness this machine can start", async () => {

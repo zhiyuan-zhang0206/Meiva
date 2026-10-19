@@ -1,12 +1,10 @@
 "use client";
 
 // meiva:note
-// Harness choice for a new agent, in one word per row. The picker answers a single
-// question - can this machine start an agent on it here - so a harness that is
-// installed but has no launcher reads `unavailable` like one that is not
-// installed, and the probe's diagnostic sentence stays on the wire instead of in
-// the UI. When the gateway cannot report at all, the built-in runtime stays
-// usable and every external harness reads `unavailable`.
+// Harness choice for a new agent: the usable rows are plain text, the unusable
+// ones are greyed and carry one lowercase word. No dot, no colour bar, no icon and
+// no diagnostic sentence - the form asks one question and the row answers it with
+// its own state.
 // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
 
 import * as Popover from "@radix-ui/react-popover";
@@ -29,21 +27,13 @@ export interface HarnessPickerProps {
   onChange: (harness: Harness) => void;
 }
 
-type ShownStatus = "available" | "unavailable";
-
-const STATUS_DOT: Record<ShownStatus, string> = {
-  available: "bg-emerald-500",
-  unavailable: "bg-muted-foreground/40",
-};
-
 // meiva:note
-// One word answers the only question the form asks. A harness the build has no
-// launcher for is `unavailable` even when the machine has it installed and signed
-// in; the probe's `status` and `reason` stay on the wire for diagnosis and never
-// reach the row.
+// One bit answers the only question the form asks. A harness the build cannot start
+// is unavailable even when the machine has it installed and signed in; the probe's
+// `status` and `reason` stay on the wire for agents and diagnosis.
 // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-function shownStatus(row: HarnessAvailability): ShownStatus {
-  return row.launchable ? "available" : "unavailable";
+function usable(row: HarnessAvailability): boolean {
+  return row.launchable;
 }
 
 export function HarnessPicker({ machine, value, onChange }: HarnessPickerProps) {
@@ -64,7 +54,6 @@ export function HarnessPicker({ machine, value, onChange }: HarnessPickerProps) 
             MIN_W_0,
           )}
         >
-          <span className={cn("size-1.5 rounded-full shrink-0", STATUS_DOT[shownStatus(selected)])} aria-hidden="true" />
           <span className="truncate">{harnessLabel(selected.harness)}</span>
           <ChevronDown className="size-3 shrink-0 opacity-50" />
         </button>
@@ -76,29 +65,27 @@ export function HarnessPicker({ machine, value, onChange }: HarnessPickerProps) 
           className="z-50 w-[220px] max-w-[90vw] rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
         >
           <ul className="py-1">
-            {rows.map((row) => {
-              const status = shownStatus(row);
-              return (
-                <li key={row.harness}>
-                  <button
-                    type="button"
-                    disabled={status === "unavailable"}
-                    onClick={() => onChange(row.harness)}
-                    className={cn(
-                      "w-full text-left px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50",
-                    )}
-                  >
-                    <span className={cn(FLEX, "items-center gap-2")}>
-                      <span className={cn("size-1.5 rounded-full shrink-0", STATUS_DOT[status])} aria-hidden="true" />
-                      <span className="truncate">{harnessLabel(row.harness)}</span>
-                      <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">
-                        {t(`harnessStatus.${status}`)}
+            {rows.map((row) => (
+              <li key={row.harness}>
+                <button
+                  type="button"
+                  disabled={!usable(row)}
+                  onClick={() => onChange(row.harness)}
+                  className={cn(
+                    "w-full text-left px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50",
+                  )}
+                >
+                  <span className={cn(FLEX, "items-center gap-2")}>
+                    <span className="truncate">{harnessLabel(row.harness)}</span>
+                    {usable(row) ? null : (
+                      <span className="ml-auto text-[11px] text-muted-foreground">
+                        {t("harnessStatus.unavailable")}
                       </span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
+                    )}
+                  </span>
+                </button>
+              </li>
+            ))}
           </ul>
         </Popover.Content>
       </Popover.Portal>
