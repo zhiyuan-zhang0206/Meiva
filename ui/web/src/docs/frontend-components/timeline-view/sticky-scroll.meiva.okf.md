@@ -32,11 +32,16 @@ scroll-to-bottom button reads the measured distance to the bottom rather than
 the follow flag (a height change with no scroll event would otherwise leave it
 hidden). Its smooth ride requests the stick instead of pinning, so the
 asynchronous ride survives, and growth mid-ride pins instantly because the
-controller is already following. A send or agent switch hides the button in the
-same commit, supersedes an unreachable restore target, and pins with a fresh run
-so a post-command twitch cannot release following while the awaited reply
-streams in (user report 2026-09-19). Only a following reader releases the oldest
-rows (the 250-row retention rule in the paging doc).
+controller is already following. An agent switch hides the button in the same
+commit, supersedes an unreachable restore target, and pins with a fresh run so a
+post-command twitch cannot release following while the awaited reply streams in
+(user report 2026-09-19). A send re-pins only a follower: the thread is
+unchanged, so it pins just when the controller is already following and no
+restore is steering the viewport — a reader parked mid-history keeps their place
+(user report 2026-10-19). The composer's pending strip lives outside the scroll
+area, so the echo arrives as ordinary growth and a following reader stays on the
+tail either way. Only a following reader releases the oldest rows (the 250-row
+retention rule in the paging doc).
 
 ## Header scrolling scope
 Human-message and agent-reply titles stay in normal flow, including historical,

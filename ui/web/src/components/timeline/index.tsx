@@ -106,8 +106,12 @@ export const TimelineView = memo(function TimelineView({
   const restoreInFlight = useCallback(() => pendingRestoreRef.current !== null || (settledRestoreRef.current !== null && holdRestoredPositionRef.current), []);
   const initialRestorePassRef = useRef(true);
 
-  const restoreRequestRef = useRef<number | null>(null);
-  useLayoutEffect(() => () => { initialRestorePassRef.current = true; restoreRequestRef.current = null; }, []);
+  useLayoutEffect(
+    () => () => {
+      initialRestorePassRef.current = true;
+    },
+    [],
+  );
 
   const scrollMemoryRef = useRef<{ entryKey: string; contentKey: string } | null>(null);
 
@@ -349,7 +353,6 @@ export const TimelineView = memo(function TimelineView({
         return;
       }
       if (!applySavedTimelineScroll(viewport, saved, compactBuffer, canonicalItemsRef.current)) {
-        restoreRequestRef.current ??= useTimelineStore.getState().scrollToBottomRequest;
         controller.notifyRestored({ scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight });
         return;
       }
@@ -461,18 +464,19 @@ export const TimelineView = memo(function TimelineView({
     };
   }, [applyPendingRestore, settleRestoredPosition, restoreInFlight, controller, stickyThresholds, measureAtBottom, maybeColdFill, pinToBottom, trimFollowing, updateStuckHeader, prepareHistoryPull, historyPullActive, pullScroll, pullScrollEnd, pullWheel, pullTouchStart, pullTouchMove, pullTouchEnd, cancelPullTouch]);
 
+  // meiva:note
+  // A send re-pins only a following reader; a thread change always pins.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
   const scrollToBottomRequest = useTimelineStore((s) => s.scrollToBottomRequest);
   const lastForceRequest = useRef<{ request: number; thread: string | undefined } | null>(null);
   useLayoutEffect(() => {
-    if (lastForceRequest.current?.request === scrollToBottomRequest && lastForceRequest.current.thread === threadKey) return;
+    const previous = lastForceRequest.current;
+    if (previous && previous.thread === threadKey && (previous.request === scrollToBottomRequest
+      || !controller.isSticky() || restoreInFlight())) return;
     lastForceRequest.current = { request: scrollToBottomRequest, thread: threadKey };
     pendingAnchorRef.current = null;
     if (pendingRestoreRef.current?.contentKey !== threadKey) pendingRestoreRef.current = null;
-
-    if (pendingRestoreRef.current) {
-      if (restoreRequestRef.current === null || restoreRequestRef.current === scrollToBottomRequest) return;
-      pendingRestoreRef.current = null;
-    }
+    if (pendingRestoreRef.current) return;
     holdRestoredPositionRef.current = false;
 
     setAtBottom(true);
@@ -483,7 +487,7 @@ export const TimelineView = memo(function TimelineView({
     if (!viewport) return;
 
     pinToBottom(viewport, true);
-  }, [scrollToBottomRequest, pinToBottom, threadKey]);
+  }, [scrollToBottomRequest, controller, restoreInFlight, pinToBottom, threadKey]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current ??

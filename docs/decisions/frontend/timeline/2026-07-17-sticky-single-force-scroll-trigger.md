@@ -1,5 +1,10 @@
 # Sticky-bottom: one store-owned force-scroll trigger (and why NOT event-driven)
 
+> **Partly superseded 2026-10-19** — a send now pins only a reader already
+> following the tail
+> ([2026-10-19-send-never-moves-the-viewport.md](2026-10-19-send-never-moves-the-viewport.md)).
+> The single-signal decision and the event-driven analysis below stand.
+
 Extends [2026-07-15-sticky-single-writer-controller.md](2026-07-15-sticky-single-writer-controller.md).
 That decision made the sticky *flag* single-owner (`lib/sticky.ts`). This one
 makes the *force-scroll trigger* single-owner. The controller and its
