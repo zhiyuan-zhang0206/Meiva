@@ -18,7 +18,10 @@ and the gateway endpoint share.
 The converge step runs the same pass on every converge, so an install, a restart
 and a manual verb behave identically; only the ask set differs. A host whose
 helper predates `request_grants_v1` keeps the checklist and loses the automatic
-ask: `onboard` reports that in `diagnostic` and asks the folder rows.
+ask: `onboard` reports that in `diagnostic` and asks the folder rows. The helper
+raises each desktop dialog at most once per process, so a later pass over an
+unanswered row re-reads the state and reports it rather than re-interrupting the
+operator; see the authorization model.
 
 ## A restart is custody, not a button
 

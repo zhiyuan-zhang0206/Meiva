@@ -22,6 +22,7 @@ def test_native_input_events_validation_and_release(tmp_path: Path) -> None:
     dispatch = between(source, "func dispatch(", "// MARK: - Panel mode")
     stubs = dispatch_stubs(
         [
+            "requestGrants",
             "fileList",
             "fileRead",
             "listWindows",

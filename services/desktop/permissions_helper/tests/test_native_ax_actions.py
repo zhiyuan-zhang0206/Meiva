@@ -13,6 +13,8 @@ from .. import lifecycle
 
 
 def section(source: str, start: str, end: str) -> str:
+    assert start in source, start
+    assert end in source, end
     return start + source.split(start, 1)[1].split(end, 1)[0]
 
 
@@ -23,7 +25,7 @@ def test_native_ax_actions_window_identity_selection_and_reported_actions(tmp_pa
     source = lifecycle.SOURCE.read_text()
     actual = "\n".join(
         [
-            section(source, "func numericDouble(", "// Accessibility grant gate."),
+            section(source, "func numericDouble(", "// MARK: - Desktop grant prompts"),
             section(source, "func inputNumber(", "func inputBool("),
             section(source, "private func selectedRunningApp(", "func listApps("),
             section(source, "private let axTreeAttributes:", "private let axVisibleChildrenRoles:"),

@@ -654,41 +654,75 @@ func numericDouble(_ v: Any?) -> Double? {
     return nil
 }
 
-// Accessibility grant gate. Synthetic HID events posted to .cghidEventTap are
-// silently dropped by macOS unless this process holds the Accessibility grant,
-// so the helper refuses those calls loudly instead of returning a success that
-// never happened. The authorization prompt can only be answered by a human in
-// System Settings (and is not shown at all in a launchd background session),
-// so the helper never waits on it: ask at most once per window, fail the call.
-var lastAXPromptAt = Date.distantPast
-let axPromptMinInterval: TimeInterval = 30.0
+// MARK: - Desktop grant prompts
+//
+// The two desktop grants are the only ones a system dialog can still raise from this
+// process, and the dialog steals focus: an operator cannot keep working until it is
+// answered. A background daemon that re-asks on a timer therefore turns one missing
+// grant into a stream of interruptions, which is the bug this section exists to stop.
+//
+// The rule is one sentence: each grant is asked at most once per process lifetime, by
+// the first caller that needs it, and every later caller only probes and reports the
+// grant as state -- never as another dialog. "State" is what the caller acts on: the
+// AX-gated operations fail with `axGrantError`, `ping` reports `ax_trusted` /
+// `preflight_screen`, and `request_grants` returns both booleans so the onboarding gate
+// and the UI can explain the fix once instead of re-asking the operator.
+//
+// A restarted helper asks again, and that is deliberate: a grant nobody has answered
+// yet can only be answered through the dialog, so the first start after an unanswered
+// grant owns the single prompt of its own lifetime. Meanwhile the operator who dismisses
+// a dialog, or opens System Settings by hand, is never interrupted a second time by the
+// same process.
+final class GrantPromptOnce {
+    private let lock = NSLock()
+    private var claimed = false
+
+    /// True for the single caller allowed to raise this grant's dialog in this process.
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
+let axPrompt = GrantPromptOnce()
+let screenPrompt = GrantPromptOnce()
+
 let axGrantError = "Accessibility grant missing (ax_trusted=false): macOS drops synthetic " +
     "click/type/key events from a process without this grant, so the action did not run. " +
-    "The authorization prompt was triggered; enable MeivaPermissionsHelper in System Settings " +
-    "> Privacy & Security > Accessibility, then retry. Rebuilding or re-signing the helper " +
-    "resets this grant once."
+    "This helper process has already asked for the grant once and will not raise the " +
+    "dialog again until it restarts; open System Settings > Privacy & Security > " +
+    "Accessibility and enable MeivaPermissionsHelper, then retry. Rebuilding or " +
+    "re-signing the helper resets this grant once."
 
 func axTrustedOrPrompt() -> Bool {
     if AXIsProcessTrusted() { return true }
-    let now = Date()
-    if now.timeIntervalSince(lastAXPromptAt) >= axPromptMinInterval {
+    if axPrompt.claim() {
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(opts)
-        lastAXPromptAt = now
     }
     return false
 }
 
+func screenGrantOrPrompt() -> Bool {
+    if CGPreflightScreenCaptureAccess() { return true }
+    if screenPrompt.claim() { _ = CGRequestScreenCaptureAccess() }
+    return false
+}
+
+// MARK: - Desktop grant prompts (end)
+
 /// `request_grants`: raise the two desktop dialogs this helper can still get, and report
-/// the grants as they stand afterwards. Screen Recording asks through
-/// `CGRequestScreenCaptureAccess`; Accessibility reuses the rate-limited prompt above,
-/// because its grant is only readable as a boolean from the process that holds it -- a
-/// spawned child inherits its launch chain's trust, so a prompt raised there is answered
-/// for the wrong identity. macOS shows at most one dialog per bundle identity; later
-/// requests for the same grant return false without showing anything.
+/// the grants as they stand afterwards. Accessibility is asked from here rather than from
+/// a spawned child because its grant is only readable as a boolean from the process that
+/// holds it -- a child inherits its launch chain's trust, so a prompt raised there is
+/// answered for the wrong identity. Both asks pass through the once-per-process gates
+/// above: a second request in the same process reports the state and shows nothing.
 func requestGrants(_ req: [String: Any]) throws -> [String: Any] {
     try rejectUnknownFields(req, allowed: [])
-    _ = CGRequestScreenCaptureAccess()
+    _ = screenGrantOrPrompt()
     _ = axTrustedOrPrompt()
     return [
         "screen_recording": CGPreflightScreenCaptureAccess(),
@@ -3299,9 +3333,10 @@ func socketPath() -> String {
     runPanelMode()
 }
 
-/// Register the helper into the Screen Recording and Accessibility lists (and
-/// prompt once if the session allows), so the operator grants by flipping a
-/// toggle rather than hunting via the "+" button. No effect once granted.
+/// Register the helper into the Screen Recording and Accessibility lists so the operator
+/// grants by flipping a toggle rather than hunting via the "+" button. Both grants go
+/// through the once-per-process gates: a granted helper raises nothing, and an unanswered
+/// grant costs this process the one dialog the first start spends.
 func registerPermissions() {
     if ProcessInfo.processInfo.environment[skipRegistrationEnvironment] == "1" {
         FileHandle.standardError.write(
@@ -3309,9 +3344,8 @@ func registerPermissions() {
         )
         return
     }
-    if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
-    let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-    _ = AXIsProcessTrustedWithOptions(opts)
+    _ = screenGrantOrPrompt()
+    _ = axTrustedOrPrompt()
 }
 
 /// Serve desktop requests only through an owner-only Unix socket. `chmod` locks
