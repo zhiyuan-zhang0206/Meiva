@@ -4,7 +4,7 @@
 # worker that built a model and called it directly used to spend money with no row at all
 # (task #5327). Attribution is the process identity bound at telemetry startup; a process
 # without one records `unattributed` and a NULL agent id rather than guessing an owner.
-# meiva:link base/lm/docs/usage.meiva.okf.md
+# meiva:link base/lm/usage/docs/usage.meiva.okf.md
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class LlmUsageMeter(BaseCallbackHandler):
         # meiva:note
         # The call start, kept per run id so `on_llm_end` reports `latency_ms` for the one
         # provider call that ended.
-        # meiva:link base/lm/docs/usage.meiva.okf.md
+        # meiva:link base/lm/usage/docs/usage.meiva.okf.md
         with self._lock:
             self._started[run_id] = time.monotonic()
 
@@ -77,7 +77,7 @@ class LlmUsageMeter(BaseCallbackHandler):
         # One completed call can return several generations (batch / generate); each one that
         # carries provider usage becomes its own row, and a message the meter stamps cannot be
         # logged again by its caller.
-        # meiva:link base/lm/docs/usage.meiva.okf.md
+        # meiva:link base/lm/usage/docs/usage.meiva.okf.md
         with self._lock:
             started = self._started.pop(run_id, None)
         latency_ms = None if started is None else (time.monotonic() - started) * 1_000.0
