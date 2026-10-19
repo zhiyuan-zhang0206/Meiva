@@ -13,7 +13,7 @@
   "forceExpireNotOpen": "That takeover session is no longer open.",
   "forceExpireFailed": "Could not end takeover session",
   "forkAgent": "Fork agent",
-  "forkAgentDesc": "Start a child agent from this agent",
+  "forkAgentDesc": "Start a child agent from this agent. A fork keeps this agent's harness and config — the harness is part of the identity it inherits and cannot be changed here.",
   "forkPromptPlaceholder": "Initial prompt for the forked agent…",
   "resurrectAgent": "Resurrect agent",
   "resurrectDesc": "Bring this terminated agent back, delivering a message as it wakes.",

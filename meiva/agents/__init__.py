@@ -30,9 +30,10 @@ from base.api_contracts.agent_contract import (
 )
 from base.api_contracts.agent_contract import ForkError as ForkError
 from base.api_contracts.agent_contract import ForkHarnessMismatch as ForkHarnessMismatch
+from base.api_contracts.agent_contract import HarnessStatus as HarnessStatus
 
 if TYPE_CHECKING:
-    from base.agents.birth.harness import HarnessProbe, HarnessStatus
+    from base.agents.birth.harness import HarnessProbe
 from base.api_contracts.agent_contract import ForkSourceEmpty as ForkSourceEmpty
 from base.api_contracts.agent_contract import GatewayUnavailable as GatewayUnavailable
 from base.api_contracts.agent_contract import InvalidModelConfig as InvalidModelConfig

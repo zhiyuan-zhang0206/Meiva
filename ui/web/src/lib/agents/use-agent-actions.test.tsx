@@ -36,6 +36,21 @@ it("selects the committed agent after launch failure instead of retrying create"
 });
 
 
+it("sends the chosen harness and leaves the built-in default implicit", async () => {
+  const spawn = vi.spyOn(api, "spawnAgent").mockResolvedValue({ id: 7 });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result } = renderHook(() => useAgentActions(vi.fn(), []), { wrapper });
+
+  await act(async () => { await result.current.spawn(undefined, undefined, undefined, "codex"); });
+  expect(spawn.mock.calls[0][0]).toMatchObject({ harness: "codex" });
+
+  await act(async () => { await result.current.spawn(undefined, undefined, undefined, undefined); });
+  expect(spawn.mock.calls[1][0]).not.toHaveProperty("harness");
+  client.clear();
+});
+
 it("holds one creation key across mutation retries and gives concurrent actions distinct keys", async () => {
   const getRandomValues = crypto.getRandomValues.bind(crypto);
   vi.stubGlobal("crypto", { getRandomValues });

@@ -1,5 +1,6 @@
 "use client";
 
+import type { Harness } from "@/lib/harness/harness";
 import { newOperationKey } from "@/lib/transport/operation-key";
 
 import { useQuery } from "@tanstack/react-query";
@@ -130,12 +131,14 @@ function HomeShell({ showError }: HomeShellProps) {
       machine,
       model,
       reasoning_effort,
+      harness,
     }: {
       machine?: string;
       model?: string;
       reasoning_effort?: string;
+      harness?: Harness;
     }) => {
-      const newId = await spawn(machine, model, reasoning_effort);
+      const newId = await spawn(machine, model, reasoning_effort, harness);
       if (newId !== null) focusComposer();
     },
     [spawn, focusComposer],

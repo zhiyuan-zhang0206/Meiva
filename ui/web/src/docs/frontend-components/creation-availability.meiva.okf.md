@@ -59,3 +59,28 @@ A structured create 502 selects its committed `agent_id` and refreshes
 roster/detail instead of inviting another create.
 
 Creation HTTP calls send one operation key with the `principal-v1` scope. Spawn/fork mutations hold it in their variables; fork placement and prompt are resolved before mutation admission. Explicit API callers can reuse a key with an unchanged body. A new action mints another key. This does not enable automatic ambiguous retries or a browser outbox.
+
+## Harness choice
+
+A spawn names its harness (`meiva` by default; `claude_code`, `codex`,
+`antigravity` for the external CLIs). It is a birth attribute: the row records
+it once and a fork inherits its source's value, so the fork dialog says so
+instead of offering a choice the backend would refuse with
+`fork_harness_mismatch`.
+
+The picker reads `GET /api/cluster/machines/{name}/harnesses` for the machine
+the agent would be placed on — the probe runs where the runtime would run, not
+on the gateway. Each row carries `status` (`available` / `unavailable` /
+`unknown`), the probe's `reason`, and `launchable`: a harness can be installed
+and still not launchable, and the picker says "cannot start a session yet"
+rather than letting the choice look usable. Only `unavailable` rows are disabled
+— that is a harness the machine does not have. A row that is installed but not
+launchable stays pickable and refuses submission with the reason; an `unknown`
+row is treated the same way, because a sign-in this process cannot read is not a
+sign-in that is missing. A gateway with no probe at all reports every external
+harness as `unknown` while the built-in runtime stays selectable.
+
+The chosen harness is a `behavior.spawn_harness` preference. The built-in
+`meiva` value is omitted from the request, because it is the server's own
+default; any other value is sent as `harness` and the backend's refusal (422
+validation, or a `fork_harness_mismatch` reason) is shown verbatim.
