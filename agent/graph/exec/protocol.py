@@ -61,6 +61,11 @@ MAX_ENVELOPE_BYTES = 64 * 1024 * 1024
 
 # Stale result files older than this are pruned when the parent allocates a new
 # pair. Request/gate files are crash-stable resource evidence and are retained.
+# meiva:note
+# Age never removes request evidence here; a settled domain directory leaves
+# only through `base/agents/incarnation/exec_domain_cleanup.py`, which proves
+# settlement from the stored allocation set before it touches a directory.
+# meiva:link base/agents/incarnation/docs/exec-domain-cleanup.meiva.okf.md
 STALE_FILE_AGE_S = 3600.0
 
 # Subdir name when no agent id is established (container/eval mode).
