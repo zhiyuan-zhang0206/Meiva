@@ -631,3 +631,71 @@ async def test_unknown_relay_exit_evidence_degrades_only_when_the_heartbeat_is_s
     assert degradation.call_count == int(not fresh)
     provision.assert_not_called()
     assert session == before
+
+
+def test_an_unreadable_antigravity_record_rolls_back_with_its_path(
+    db_conn: Any,
+    database: Database,
+    event_bus: EventBus,
+    relays: RelaySupervision,
+    *,
+    config_authority: Any,
+    machine_identity: MachineIdentity,
+) -> None:
+    # meiva:note
+    # A relay that dies at startup leaves only an exit code in the lease's reason, so
+    # the accepting runtime resolves the destination first and names the record it
+    # could not use. The assertion is the operator-visible rejection reason, not the
+    # internal call: resolving before spawning is what puts the fact there.
+    # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+    from base.agents import impersonation as leases
+    from base.agents.impersonation.host_transport import antigravity_endpoint_path
+    from base.agents.impersonation.tests.impersonation_support import recorded_tree
+    from base.api_contracts.caller_identity import CallerIdentity
+    from base.db import create_agent
+
+    local_machine = machine_identity.name()
+    agent_id = create_agent(db_conn)
+    owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
+        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'hosted',"
+        "clock_timestamp()+interval '1 hour')",
+        (agent_id, local_machine, owner.generation, owner.owner),
+    )
+    db_conn.commit()
+    thread_id = str(uuid4())
+    session = leases.request(
+        database,
+        event_bus,
+        agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="antigravity"),
+        process_metadata=recorded_tree(),
+        relay_provider="antigravity",
+        relay_thread_id=thread_id,
+        authority=config_authority,
+        local_machine=local_machine,
+    )
+    leases.accept(
+        database,
+        event_bus,
+        session["id"],
+        agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=local_machine,
+    )
+    record = antigravity_endpoint_path(thread_id)
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text("not json", encoding="utf-8")
+    current = leases.get(database, event_bus, session["id"], local_machine=local_machine)
+    assert (
+        impersonation.establish_relay(
+            database, event_bus, current, owner, relays, read_local_machine=machine_identity.name
+        )
+        is False
+    )
+    ended = leases.get(database, event_bus, session["id"], local_machine=local_machine)
+    assert ended["status"] == "rejected"
+    assert "the Antigravity endpoint is unusable" in ended["rejection_reason"]
+    assert str(record) in ended["rejection_reason"]
