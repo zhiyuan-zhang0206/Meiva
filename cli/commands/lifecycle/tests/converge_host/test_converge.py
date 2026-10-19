@@ -218,38 +218,14 @@ def test_host_wiring_leaves_existing_editable_install_unchanged(
     assert (home / ".local" / "bin" / "meiva").is_symlink()
 
 
-def test_permissions_helper_step_refuses_when_this_process_cannot_sign(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    """No launch can bypass the required signed ancestor after signing fails."""
-    from services.desktop.permissions_helper.lifecycle import (
-        PermissionsHelperSigningUnavailableError,
-    )
-
-    ctx = capable_helper_context(
-        monkeypatch, tmp_path, operator_database=operator_database, producer=operator_pipeline
-    )
-
-    def cannot_sign(*, helper: HelperFactory, timers: Timers) -> None:
-        del helper, timers
-        raise PermissionsHelperSigningUnavailableError("the login keychain is not unlocked")
-
-    monkeypatch.setattr(permissions_helper, "converge", cannot_sign)
-    with pytest.raises(PermissionsHelperSigningUnavailableError, match="keychain"):
-        converge_host._ensure_permissions_helper(ctx)
-
-
+# meiva:note
+# A capable host that fails to compile, sign or load the helper is a genuine defect and aborts converge.
 def test_permissions_helper_step_still_aborts_on_a_real_build_defect(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ):
-    """Only the unreachable-key case is downgraded. A capable host that fails to
-    compile or load the helper is a genuine defect and still aborts converge."""
     from services.desktop.permissions_helper.lifecycle import PermissionsHelperBuildError
 
     ctx = capable_helper_context(

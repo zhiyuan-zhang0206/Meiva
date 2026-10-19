@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Permissions Helper — Authorization Model
-description: "The helper's two macOS TCC grants, the two planes each is read on (system record vs the running process), the helper-owned request path, and how a stable signing identity keeps the grants across rebuilds."
+description: "The helper's two macOS TCC grants, the two planes each is read on (system record vs the running process), the helper-owned request path, and why an unchanged ad-hoc signed helper keeps the grants while a rebuild drops them."
 tags: []
 ---
 
@@ -16,4 +16,4 @@ The helper has two independent macOS TCC grants:
 
 `request_grants` (advertised as `ping.request_grants_v1`) asks for the two system dialogs this identity can still get -- `CGRequestScreenCaptureAccess()` for Screen Recording and `AXIsProcessTrustedWithOptions` for Accessibility -- through the same once-per-process gates, and returns both grants as they stand afterwards. It runs inside the helper on purpose: a child process inherits its launch chain's Accessibility trust, so a prompt raised there is answered for an identity that is not the one that will use the grant. A request that finds the gate already spent returns the current booleans and shows nothing, so the caller must read the grant back rather than treat the request as consent.
 
-TCC keys grants on the helper's code identity. A stable certificate plus fixed bundle id preserves both grants across rebuilds; ad-hoc signing or a regenerated identity drops them once and the operator must re-grant in System Settings. Accessibility applies to the already running helper immediately. A changed Screen Recording grant may require an externally coordinated stop and helper restart. A descendant must not kickstart its own ancestor.
+TCC keys grants on the helper's code identity, and for an ad-hoc signed helper that identity is its code hash. An unchanged helper binary keeps both grants across restarts; any rebuild is a new code identity, so the operator must re-grant both in System Settings by hand. Accessibility applies to the already running helper immediately. A changed Screen Recording grant may require an externally coordinated stop and helper restart. A descendant must not kickstart its own ancestor.

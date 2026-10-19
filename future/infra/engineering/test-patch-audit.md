@@ -117,7 +117,7 @@ patched and the test homes that patch them. This is the injection-seam work list
 | `cli.commands.extensions.external_skills` | 28 | `_rename_no_replace` 20, `_stage_copy` 3, `_commit_activation` 2 | `cli/commands` 28 |
 | `base.deploy.git.memory_repo` | 21 | `_run_git` 13, `_download_pool_snapshot` 4, `_init_local_repo` 2 | `base` 21 |
 | `ops.lifecycle` | 21 | `_recovery_halt_reason` 5, `_wake_suppression_active` 3, `_recovery_halted` 3 | `ops` 21 |
-| `services.desktop.permissions_helper.lifecycle` | 19 | `_BUILD_DIR` 3, `_keychain_lock_reason` 3, `_interactive_signing_reason` 3 | `cli/commands/lifecycle` 19 |
+| `services.desktop.permissions_helper.lifecycle` | 13 | `_BUILD_DIR` 3 | `cli/commands/lifecycle` 13 |
 | `meiva.mcps._remote` | 18 | `_remote` 18 | `meiva` 18 |
 | `scripts.lint.async_no_sync_blocking` | 18 | `_REPO_ROOT` 9, `_ROOT` 2, `DEFINITION_DIRS` 2 | `scripts` 18 |
 | `agent.startup` | 16 | `_page_server_alive` 9, `_last_reconcile_at` 7 | `agent/graph/claim` 16 |
