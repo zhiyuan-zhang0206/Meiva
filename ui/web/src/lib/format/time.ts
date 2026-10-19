@@ -1,19 +1,6 @@
-// Shared timestamp formatters — the single place that turns an ISO string
-// into something a human reads. Consolidates what used to be 9 independent,
-// drifting implementations (tz audit, 2026-08).
-//
-// Display principle (audit §4.4): humans see BROWSER-LOCAL time. This is a
-// deliberate divergence from what an agent sees (cluster `MEIVA_TIMEZONE`) —
-// do not read MEIVA_TIMEZONE here. Consistency means "one wording scheme per
-// audience", not "the same clock for every audience".
-//
-// Three shapes, one job each:
-//   - formatAbsolute — full precision + timezone name, for a dedicated
-//     "when exactly" slot (inspector detail).
-//   - formatShort — compact, no timezone, for space-constrained rows
-//     (sidebar time column, a wall-clock cell).
-//   - formatRelative — one signed wording scheme ("in 4m" / "5m ago" / "now")
-//     for every relative-time surface in the app.
+// meiva:note
+// This module is the single owner of turning an ISO instant into text a person reads; it replaced nine drifting implementations at the tz audit (2026-08). Views see BROWSER-LOCAL time, a deliberate divergence from the cluster `MEIVA_TIMEZONE` an agent sees — consistency means one wording scheme per audience, not one clock for every audience. Three shapes, one job each: `formatAbsolute` (full precision plus a zone name) for a dedicated "when exactly" slot, `formatShort` (compact, no zone) for space-constrained rows, and `formatRelative` (one signed wording, `in 4m` / `5m ago` / `just now`) for every relative-time surface.
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 
 export interface FormatAbsoluteOptions {
   /** Include the abbreviated weekday name between date and time. */
@@ -81,16 +68,15 @@ export function formatUptime(seconds: number): string {
   return remH ? `${d}d ${remH}h` : `${d}d`;
 }
 
-/** Signed relative time, both directions: `in 4m` (future) / `5m ago`
- *  (past) / `now` within a minute. Seconds through years. The one wording
- *  scheme every relative-time surface in the app uses. Returns "—" for an
- *  unparseable iso string. */
+// meiva:note
+// Signed relative time in both directions: `in 4m` (future), `5m ago` (past), and `just now` under a minute; seconds through years. The one wording scheme every relative-time surface in the app uses, so a copy change belongs here rather than at a call site. An unparseable iso string yields an em dash.
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 export function formatRelative(iso: string, now: Date = new Date()): string {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return "—";
   const deltaSec = Math.round((t - now.getTime()) / 1000);
   const mag = Math.abs(deltaSec);
-  if (mag < 60) return "now";
+  if (mag < 60) return "just now";
   const min = Math.floor(mag / 60);
   let span: string;
   if (min < 60) span = `${min}m`;
