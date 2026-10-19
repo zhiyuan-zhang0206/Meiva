@@ -31,7 +31,7 @@ class AuthConfig:
 # silently moving a subscription session onto metered billing. API-key mode
 # restores exactly the one variable the caller named; nothing here reads, stores
 # or forwards a secret, which is also why `describe_auth` reports presence only.
-# meiva:link base/lm/claude_sdk/docs/claude_sdk.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
 def build_env(environ: Mapping[str, str], auth: AuthConfig) -> dict[str, str]:
     env = dict.fromkeys(SECRET_ENV_NAMES, "")
     if auth.mode is AuthMode.API_KEY:

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.claude_sdk.auth import (
+from base.lm.harness.claude.auth import (
     AuthConfig,
     AuthMode,
     MissingApiKeyError,

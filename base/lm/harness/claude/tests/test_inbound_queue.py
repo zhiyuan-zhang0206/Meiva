@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.claude_sdk import InboundQueueFullError, SessionClosedError
-from base.lm.claude_sdk.tests.fake_sdk import Block, Delay, Say
-from base.lm.claude_sdk.tests.support import start
+from base.lm.harness.claude import InboundQueueFullError, SessionClosedError
+from base.lm.harness.claude.tests.fake_sdk import Block, Delay, Say
+from base.lm.harness.claude.tests.support import start
 
 
 async def test_second_message_waits_for_the_result_boundary(tmp_path: Path) -> None:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
 
-from base.lm.claude_sdk import ClusterFact, EntryPoint, Handoff
+from base.lm.harness import ClusterFact, EntryPoint, Handoff
+from base.lm.harness.handoff import HANDOFF_VERSION
 
 DEFAULT_CLUSTER = (ClusterFact("macmini", "primary host"),)
 DEFAULT_ENTRIES = (EntryPoint("meiva.files", "read and write files"),)
@@ -74,3 +76,40 @@ def test_defaults_cover_the_overlap_and_reporting_rules(tmp_path: Path) -> None:
 def test_empty_cluster_and_entries_render_placeholders(tmp_path: Path) -> None:
     text = handoff(tmp_path, cluster=(), entries=()).render()
     assert text.count("- (none)") == 2
+
+
+# meiva:note
+# The handoff is a wire format, not an internal dataclass: every provider adapter
+# renders the same document and a waking agent reads it as its first message. So
+# the field set is pinned here against the version — an adapter that reads
+# version 1 must never silently receive a different shape. Add a field, bump
+# HANDOFF_VERSION, extend this tuple; anything less fails here first.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+PINNED_HANDOFF_FIELDS = (
+    "agent_id",
+    "instruction",
+    "machine",
+    "workspace",
+    "label",
+    "cluster",
+    "entries",
+    "overlaps",
+    "discipline",
+)
+
+
+def test_field_set_is_pinned_to_the_handoff_version() -> None:
+    names = tuple(entry.name for entry in fields(Handoff))
+    assert HANDOFF_VERSION == 1, (
+        "HANDOFF_VERSION moved without PINNED_HANDOFF_FIELDS following it; the "
+        "version pins the field set every adapter reads"
+    )
+    assert names == PINNED_HANDOFF_FIELDS, (
+        "Handoff fields changed: bump HANDOFF_VERSION and update "
+        "PINNED_HANDOFF_FIELDS in the same commit"
+    )
+
+
+def test_render_states_the_handoff_version(tmp_path: Path) -> None:
+    text = handoff(tmp_path).render()
+    assert f"- handoff version: {HANDOFF_VERSION}" in text

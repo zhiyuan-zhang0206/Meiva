@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from base.lm.claude_sdk.events import TurnCompleted
-from base.lm.claude_sdk.tests.fake_sdk import Block, Say
-from base.lm.claude_sdk.tests.support import CLI_PID, start
+from base.lm.harness.claude.tests.fake_sdk import Block, Say
+from base.lm.harness.claude.tests.support import CLI_PID, start
+from base.lm.harness.events import TurnCompleted
 
 TOOL_MARKER = "ping -c 40 127.0.0.1"
 
