@@ -14,7 +14,6 @@ from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from gateway.cluster.schemas import HarnessAvailability
-from ops.cluster.operations import harness_probe_op
 from ops.rpc_schemas import HarnessProbeResult, HarnessProbeRow, OpKind
 
 _HARNESS_CACHE_TTL_S = 30.0
@@ -81,28 +80,27 @@ def availability_rows(probed: HarnessProbeResult) -> list[HarnessAvailability]:
 
 
 # meiva:note
-# A box with no runner of its own is probed here instead: the gateway sits on it, so
-# its own filesystem is the answer, and dialing a runner that does not exist would
-# turn a local read into a 503. Every other target must have a runner — that is the
-# machine an agent would be born on.
+# Only a machine that can run agents answers: a box without an agent-runner cannot
+# birth one there, so its install state would be an answer to a question nobody can
+# act on — it reports 503 like any other unrunnable target, and the form shows
+# `unknown` rather than a `launchable` option that leads nowhere.
 # meiva:link base/agents/docs/harness.meiva.okf.md
 async def probe_harnesses(
     target: str, *, db: Database, local_machine: MachineIdentity, dispatch: DispatchOp
 ) -> HarnessProbeResult:
     if target == local_machine.name():
-        if "agent-runner" not in local_machine.role():
-            return await asyncio.to_thread(harness_probe_op, target)
+        role = local_machine.role()
     else:
         try:
             role = await asyncio.to_thread(machines.lookup_role, db, target)
         except machines.MachineNotRegistered:
             raise HTTPException(status_code=404, detail=f"unknown machine: {target!r}") from None
-        if "agent-runner" not in role:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    f"machine {target!r} has no agent-runner ops server — "
-                    "it cannot report which harnesses it can run"
-                ),
-            )
+    if "agent-runner" not in role:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"machine {target!r} has no agent-runner ops server — "
+                "it cannot run an agent, so it cannot report which harnesses it can run"
+            ),
+        )
     return HarnessProbeResult.model_validate(await dispatch(db, target, "harness_probe", {}))

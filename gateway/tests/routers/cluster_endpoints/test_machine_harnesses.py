@@ -89,9 +89,10 @@ async def test_a_remote_machine_answers_from_its_own_runner(
 
 # meiva:note
 # Installed-but-unstartable must not read as a working choice, and an uninstalled
-# harness must not read as launchable either. This build ships no launcher for an
-# external CLI yet, so even a signed-in one is not launchable; the day a harness
-# leaves LAUNCHABLE_HARNESSES' complement, this test changes with it.
+# harness must not read as launchable either. LAUNCHABLE_HARNESSES holds only the
+# built-in runtime until #6393 adds the external launchers, so every external
+# harness reads not-launchable today; when that lands these expectations flip on
+# purpose, and the test follows the set rather than pinning the current answer.
 # meiva:link base/agents/docs/harness.meiva.okf.md
 def test_launchable_needs_a_launcher_and_a_machine_that_can_run_it() -> None:
     available = HarnessProbeRow(harness=Harness.CLAUDE_CODE, status="available", reason="signed in")
@@ -146,21 +147,22 @@ async def test_a_remote_box_without_a_runner_cannot_report(
 
 
 # meiva:note
-# A gateway-only box is its own answer: the probe reads the filesystem it sits on
-# instead of dialing a runner that does not exist.
+# A box without an agent-runner cannot birth an agent, so its install state would
+# answer a question nobody can act on: it refuses like any other unrunnable target
+# instead of offering a `launchable` harness that leads nowhere.
 # meiva:link base/agents/docs/harness.meiva.okf.md
 @pytest.mark.asyncio
-async def test_this_box_is_probed_here_when_it_runs_no_runner(
+async def test_this_box_without_a_runner_refuses(
     set_machine_identity: MachineIdentitySetter, database: Database
 ) -> None:
     local: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
     dispatch = _Dispatch(_WIRE)
 
-    probed = await probe_harnesses("gw-only", db=database, local_machine=local, dispatch=dispatch)
+    with pytest.raises(HTTPException) as raised:
+        await probe_harnesses("gw-only", db=database, local_machine=local, dispatch=dispatch)
 
+    assert raised.value.status_code == 503
     assert dispatch.calls == []
-    assert [row.harness for row in probed.harnesses] == list(Harness)
-    assert probed.harnesses[0].status == "available"
 
 
 # meiva:note
@@ -184,14 +186,25 @@ def test_route_serves_the_cached_rows(set_machine_identity: MachineIdentitySette
     ]
 
 
-def test_route_reports_every_known_harness(
+# meiva:note
+# The two refusals reach the client as HTTP status plus a readable detail, which the
+# form turns into `unknown` — it never renders "no such machine" as "not installed".
+# meiva:link base/agents/docs/harness.meiva.okf.md
+def test_route_refuses_a_machine_that_cannot_run_agents(
     set_machine_identity: MachineIdentitySetter,
 ) -> None:
     machine: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
     with gateway_test_client(machine=machine) as client:
         resp = client.get("/api/cluster/machines/gw-only/harnesses")
-    assert resp.status_code == 200, resp.text
-    rows = resp.json()
-    assert [row["harness"] for row in rows] == ["meiva", "claude_code", "codex", "antigravity"]
-    assert rows[0]["launchable"] is True
-    assert all(row["reason"] for row in rows)
+    assert resp.status_code == 503, resp.text
+    assert "cannot run an agent" in resp.json()["detail"]
+
+
+def test_route_404s_an_unknown_machine(
+    set_machine_identity: MachineIdentitySetter,
+) -> None:
+    machine: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
+    with gateway_test_client(machine=machine) as client:
+        resp = client.get("/api/cluster/machines/ghost-host/harnesses")
+    assert resp.status_code == 404, resp.text
+    assert "unknown machine" in resp.json()["detail"]
