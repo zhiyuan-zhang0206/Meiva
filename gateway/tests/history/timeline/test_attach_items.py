@@ -96,8 +96,9 @@ class TestAttachItems:
             blocks_override=[
                 {
                     "type": "text",
-                    "text": "[system] Files attached during this turn:\n- [1] x.png (image/png) — not delivered",
-                }
+                    "text": "<system_note>\nFiles attached during this turn:\n</system_note>",
+                },
+                {"type": "text", "text": "- [1] x.png (image/png) — not delivered"},
             ],
             model_catalog=model_catalog,
         )
@@ -145,7 +146,7 @@ class TestAttachItems:
             blocks_override=[
                 {
                     "type": "text",
-                    "text": "[system] Files attached during this turn:",
+                    "text": "<system_note>\nFiles attached during this turn:\n</system_note>",
                 },
                 {"type": "text", "text": '- [1] first.png (image/png, 1 B) — "one"'},
                 {
@@ -169,9 +170,12 @@ class TestAttachItems:
             '- [1] first.png (image/png, 1 B) — "one"',
             '- [3] second.png (image/png, 2 B) — "two"',
         ]
-        # The joined payload keeps every line (notice + all three entries).
+        # meiva:note
+        # The joined payload keeps every entry line (notice + all three); the notice's own
+        # system note renders as its text.
+        # meiva:link agent/messages/docs/message-format.meiva.okf.md
         assert item.payload == (
-            "[system] Files attached during this turn:\n"
+            "Files attached during this turn:\n"
             '- [1] first.png (image/png, 1 B) — "one"\n'
             "- [2] notes.txt (unknown) — not delivered\n"
             '- [3] second.png (image/png, 2 B) — "two"'
@@ -422,7 +426,7 @@ class TestTimelineDispatch:
         messages = [
             inbound_message(content="before", source="user", inbound_id=1, body_start=0),  # 0
             system_note_message(  # 1 — system_note branch (lifecycle tag)
-                content="[system] You have been restarted",
+                content="<system_note>\nYou have been restarted\n</system_note>",
                 tag=NoteTag.LIFECYCLE_RESTART,
             ),
             AIMessage(content="after restart, hello"),  # 2 — must render

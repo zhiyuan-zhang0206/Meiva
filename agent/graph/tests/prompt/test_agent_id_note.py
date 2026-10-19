@@ -65,8 +65,8 @@ def _content() -> str:
     assert note is not None
     assert note.additional_kwargs["meiva_note_tag"] == NoteTag.AGENT_ID
     content = str(note.content)
-    assert content.startswith("[system] ")
-    return content[len("[system] ") :]
+    assert content.startswith("<system_note>\n") and content.endswith("\n</system_note>")
+    return content[len("<system_note>\n") : -len("\n</system_note>")]
 
 
 def test_states_the_id_label_and_machine(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -32,7 +32,9 @@ def test_instruction_script_selects_native_prompt_and_preloaded_skills(
         system_note_message(content="Fork-added skill", tag=NoteTag.PRELOADED_SKILLS),
     ]
     assert instruction_reader.instruction_text(messages) == (
-        "Native core and plugin rules\n\n\n[system] Preloaded skill\n\n[system] Fork-added skill"
+        "Native core and plugin rules\n\n\n"
+        "<system_note>\nPreloaded skill\n</system_note>\n\n"
+        "<system_note>\nFork-added skill\n</system_note>"
     )
 
 

@@ -156,7 +156,7 @@ async def test_generate_summary_includes_whole_conversation():
     [llm_input] = call.args
     assert llm_input[:-1] == convo  # whole conversation, no hold-out
     assert isinstance(llm_input[-1], HumanMessage)
-    assert llm_input[-1].content.startswith(COMPACTION_INSTRUCTION)
+    assert llm_input[-1].content.startswith(f"<system_note>\n{COMPACTION_INSTRUCTION}")
 
 
 async def test_generate_summary_reuses_conversation_prefix_for_cache():
@@ -172,7 +172,7 @@ async def test_generate_summary_reuses_conversation_prefix_for_cache():
     [llm_input] = call.args
     assert llm_input[0] is sys_msg  # original object in-place — same byte-for-byte prefix
     assert llm_input[:-1] == [sys_msg, *content]
-    assert llm_input[-1].content.startswith(COMPACTION_INSTRUCTION)
+    assert llm_input[-1].content.startswith(f"<system_note>\n{COMPACTION_INSTRUCTION}")
 
 
 async def test_generate_summary_raises_on_empty_llm_text():

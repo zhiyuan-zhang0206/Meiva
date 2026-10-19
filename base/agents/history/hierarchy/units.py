@@ -40,6 +40,7 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.envelope import inbound_body
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.lm.content import message_addl_kwargs
 
@@ -266,13 +267,18 @@ def inbound_type(source: str | None) -> str:
 
 
 def _inbound_content(msg: BaseMessage) -> str:
-    """An inbound's content without its envelope header, cut where the writer recorded
-    the content to start (`meiva_inbound_body_start`; the sender is the unit's source).
-    Every inbound records the offset; a message without it raises `ValueError`."""
-    start = read_meiva_kwargs(msg).get("meiva_inbound_body_start")
+    # meiva:note
+    # An inbound's own text: cut where the writer recorded the content to start
+    # (`meiva_inbound_body_start`; the sender is the unit's source) and, for a system
+    # source, without the envelope's closing tag. Every inbound records the offset and a
+    # message without it raises `ValueError`; a missing source renders like the user's (see
+    # `inbound_type`) and carries no closing tag.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    kwargs = read_meiva_kwargs(msg)
+    start = kwargs.get("meiva_inbound_body_start")
     if start is None:
         raise ValueError("inbound message lacks meiva_inbound_body_start")
-    return msg.text[start:]
+    return inbound_body(msg.text, source=kwargs.get("meiva_source") or "", body_start=start)
 
 
 def _result_body(msg: ToolMessage) -> str:

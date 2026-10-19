@@ -1,40 +1,41 @@
-"""Inbound envelope — dispatch message prefix to agent by source.
-
-``source`` field value spec (mutually exclusive):
-
-    | source                  | origin / writer                | wrapped prefix                                      |
-    |-------------------------|--------------------------------|-----------------------------------------------------|
-    | ``system``              | framework internal INSERT      | original text (no wrap)                             |
-    | ``system:<subtype>``    | framework internal INSERT      | original text (no wrap)                             |
-    | ``agent:N``             | peer agent N                   | "Agent N [ts]:\n\n..."                            |
-    | ``external_agent:S[:I]``| an agent outside Meiva (CLI/MCP) | "External agent (S / I; asserted provenance) [ts]:\n\n..." |
-    | ``user``                | the human user (the UI)        | "[ts]\n\n..."                                     |
-    | ``ui:page:<name>``      | an HTML page the agent started | "[ts]\n\n..."                                     |
-    | ``watcher:N``           | a watcher session's wake-up    | "Watcher (id N) [ts]:\n\n..."                       |
-    | ``shell:N``             | a background shell command's completion notice | "Shell session (id N) [ts]:\n\n..."  |
-    | ``schedule:N``          | a gateway-hosted schedule N       | "Schedule (id N) [ts]:\n\n..."                      |
-
-``user`` covers every human-originated inbound — chat from the composer,
-question / report replies, and the lifecycle triggers (restart / terminate /
-resurrect) the user fires. A tool the user drives through the Meiva CLI may also
-send as ``user`` (the user speaking through that tool); a tool that wants to
-stay distinguishable from the user declares ``external_agent:<subject>[:<instance>]``
-instead (``subject`` / ``instance`` are 1-20 characters of ``[a-zA-Z0-9_.-]``).
-The declaration is self-asserted, never authenticated: the agent reads it as
-"an external agent says it is S", and no declared field grants authority.
-``ui:page:<name>`` is a callback POSTed by an HTML
-page the agent itself started (a page registered via ``meiva.ui.show``); it wraps
-as the same bare "[ts]" header as ``user``, and the agent recovers which page
-posted from ``<name>``.
-``watcher:N`` is a wake-up delivered from inside a watcher session (a scheduled
-fire, or the exit notice sent when the watcher stops); N is the watcher's
-session id, so the agent recovers which watcher fired from N. ``shell:N`` is
-the completion notice of a background shell command (``meiva.shell.run_background``);
-N is the shell session id the command ran in. ``schedule:N`` is stamped by a
-gateway-hosted schedule (`schedules` row N) when
-it spawns / wakes / resurrects an agent; the agent recovers which schedule acted
-from N.
-"""
+# meiva:note
+# Inbound envelope — dispatch message prefix to agent by source.
+#
+# ``source`` field value spec (mutually exclusive):
+#
+#     | source                  | origin / writer                | wrapped prefix                                      |
+#     |-------------------------|--------------------------------|-----------------------------------------------------|
+#     | ``system``              | framework internal INSERT      | "<system_note>\n...\n</system_note>"                |
+#     | ``system:<subtype>``    | framework internal INSERT      | "<system_note>\n...\n</system_note>"                |
+#     | ``agent:N``             | peer agent N                   | "Agent N [ts]:\n\n..."                            |
+#     | ``external_agent:S[:I]``| an agent outside Meiva (CLI/MCP) | "External agent (S / I; asserted provenance) [ts]:\n\n..." |
+#     | ``user``                | the human user (the UI)        | "[ts]\n\n..."                                     |
+#     | ``ui:page:<name>``      | an HTML page the agent started | "[ts]\n\n..."                                     |
+#     | ``watcher:N``           | a watcher session's wake-up    | "Watcher (id N) [ts]:\n\n..."                       |
+#     | ``shell:N``             | a background shell command's completion notice | "Shell session (id N) [ts]:\n\n..."  |
+#     | ``schedule:N``          | a gateway-hosted schedule N       | "Schedule (id N) [ts]:\n\n..."                      |
+#
+# ``user`` covers every human-originated inbound — chat from the composer,
+# question / report replies, and the lifecycle triggers (restart / terminate /
+# resurrect) the user fires. A tool the user drives through the Meiva CLI may also
+# send as ``user`` (the user speaking through that tool); a tool that wants to
+# stay distinguishable from the user declares ``external_agent:<subject>[:<instance>]``
+# instead (``subject`` / ``instance`` are 1-20 characters of ``[a-zA-Z0-9_.-]``).
+# The declaration is self-asserted, never authenticated: the agent reads it as
+# "an external agent says it is S", and no declared field grants authority.
+# ``ui:page:<name>`` is a callback POSTed by an HTML
+# page the agent itself started (a page registered via ``meiva.ui.show``); it wraps
+# as the same bare "[ts]" header as ``user``, and the agent recovers which page
+# posted from ``<name>``.
+# ``watcher:N`` is a wake-up delivered from inside a watcher session (a scheduled
+# fire, or the exit notice sent when the watcher stops); N is the watcher's
+# session id, so the agent recovers which watcher fired from N. ``shell:N`` is
+# the completion notice of a background shell command (``meiva.shell.run_background``);
+# N is the shell session id the command ran in. ``schedule:N`` is stamped by a
+# gateway-hosted schedule (`schedules` row N) when
+# it spawns / wakes / resurrects an agent; the agent recovers which schedule acted
+# from N.
+# meiva:link agent/messages/docs/message-format.meiva.okf.md
 
 from __future__ import annotations
 
@@ -45,11 +46,14 @@ from typing import Literal
 
 from base.api_contracts.caller_identity import CallerIdentity, is_caller_source
 from base.clock import Clock
+from base.lm.system_note import SYSTEM_NOTE_LEAD, SYSTEM_NOTE_TRAIL
 
 __all__ = [
     "EnvelopeReadInputs",
     "InboundSender",
+    "inbound_body",
     "inbound_head",
+    "inbound_tail",
     "sender_class",
     "validate_source",
     "wrap_inbound",
@@ -59,9 +63,12 @@ _AGENT_PREFIX = "agent:"
 _PAGE_PREFIX = "ui:page:"
 _SCHEDULE_PREFIX = "schedule:"
 _SHELL_PREFIX = "shell:"
-SYSTEM_MARKER = "[system]"
 _SYSTEM_PREFIX = "system:"
 _WATCHER_PREFIX = "watcher:"
+
+
+def _system_source(source: str) -> bool:
+    return source == "system" or source.startswith(_SYSTEM_PREFIX)
 
 
 def _check_positive_int_id(value: str, source: str) -> None:
@@ -86,7 +93,7 @@ def validate_source(source: str) -> None:
     if is_caller_source(source):
         CallerIdentity.from_source(source)
         return
-    if source == "system" or source.startswith(_SYSTEM_PREFIX):
+    if _system_source(source):
         return
     if source == "user":
         return
@@ -166,8 +173,8 @@ def inbound_head(
     even when several messages are claimed in one batch. When None (legacy
     callers / system messages), the current time is used as before.
     """
-    if source == "system" or source.startswith(_SYSTEM_PREFIX):
-        return f"{SYSTEM_MARKER} "
+    if _system_source(source):
+        return SYSTEM_NOTE_LEAD
     formatted, ts = _timestamp(created_at, inputs)
     if is_caller_source(source):
         caller = CallerIdentity.from_source(source)
@@ -192,9 +199,29 @@ def inbound_head(
     )
 
 
+def inbound_tail(source: str) -> str:
+    # meiva:note
+    # The close tag `inbound_head` opens for a system source; empty for every other source,
+    # whose header is one self-contained line.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    return SYSTEM_NOTE_TRAIL if _system_source(source) else ""
+
+
+# meiva:note
+# The inbound's content behind its `inbound_head` and inside its `inbound_tail`. The body
+# begins at `len(inbound_head(...))`, which callers record as `meiva_inbound_body_start`.
+# meiva:link agent/messages/docs/message-format.meiva.okf.md
 def wrap_inbound(
     content: str, source: str, *, inputs: EnvelopeReadInputs, created_at: datetime | None = None
 ) -> str:
-    """The inbound's content behind its `inbound_head`. The body begins at
-    `len(inbound_head(...))`, which callers record as `meiva_inbound_body_start`."""
-    return inbound_head(source, inputs=inputs, created_at=created_at) + content
+    return (
+        inbound_head(source, inputs=inputs, created_at=created_at) + content + inbound_tail(source)
+    )
+
+
+def inbound_body(text: str, *, source: str, body_start: int) -> str:
+    # meiva:note
+    # An inbound's own text — what readers render: the slice from `body_start`, without the
+    # close tag a system source adds after it.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    return text[body_start:].removesuffix(inbound_tail(source))

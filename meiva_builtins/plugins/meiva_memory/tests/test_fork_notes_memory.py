@@ -90,7 +90,7 @@ async def test_fork_end_to_end_keeps_source_notes_and_grafts_own(
 
     def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:
         return HumanMessage(
-            content=f"[system] {content}",
+            content=f"<system_note>\n{content}\n</system_note>",
             id=id,
             additional_kwargs={"meiva_msg_type": "system_note", "meiva_note_tag": tag.value},
         )
@@ -133,7 +133,7 @@ async def test_fork_end_to_end_keeps_source_notes_and_grafts_own(
 
 def _fake_note(tag: NoteTag, content: str, id: str) -> HumanMessage:
     return HumanMessage(
-        content=f"[system] {content}",
+        content=f"<system_note>\n{content}\n</system_note>",
         id=id,
         additional_kwargs={"meiva_msg_type": "system_note", "meiva_note_tag": tag.value},
     )
