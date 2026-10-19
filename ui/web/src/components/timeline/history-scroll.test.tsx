@@ -137,6 +137,62 @@ describe("history entry scroll ownership", () => {
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(700);
   });
+  it("keeps following when a restored reader scrolls back to the bottom and then sends", () => {
+    useTimelineStore.getState().switchThread(42, items, false);
+    saveScrollMemory("history-hold-release", { contentKey: "42", scrollTop: 700, followBottom: false });
+    render(conversation(42, "history-hold-release"));
+    resize();
+    expect(viewport().scrollTop).toBe(700);
+
+    act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
+    act(() => { useTimelineStore.getState().requestScrollToBottom(); });
+    act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
+
+    expect(viewport().scrollTop).toBe(5400);
+  });
+
+  it("pins a send from a real tail while a settled bookmark still holds the viewport", () => {
+    useTimelineStore.getState().switchThread(42, items, false);
+    saveScrollMemory("history-tail-send", {
+      contentKey: "42", scrollTop: 4400, followBottom: false,
+      anchor: { itemId: "1.15", rank: 0, viewportTop: 0 },
+    });
+    render(conversation(42, "history-tail-send"));
+    expect(viewport().scrollTop).toBe(4400);
+
+    act(() => { useTimelineStore.getState().requestScrollToBottom(); });
+    act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
+
+    expect(viewport().scrollTop).toBe(5400);
+  });
+
+  it("remembers a restored reader's later position across an agent switch", () => {
+    useTimelineStore.getState().switchThread(42, items, false);
+    saveScrollMemory("history-hold-save", { contentKey: "42", scrollTop: 700, followBottom: false });
+    const { rerender } = render(conversation(42, "history-hold-save"));
+    resize();
+    expect(viewport().scrollTop).toBe(700);
+
+    act(() => { viewport().scrollTop = 1200; fireEvent.scroll(viewport()); });
+    rerender(conversation(43, "history-hold-save-other"));
+    top = 0; height = 5000;
+    rerender(conversation(42, "history-hold-save"));
+
+    expect(viewport().scrollTop).toBe(1200);
+  });
+
+  it("lands on the end when a bookmark sits past a page that stopped growing", () => {
+    height = 900;
+    saveScrollMemory("history-unreachable", { contentKey: "42", scrollTop: 700, followBottom: false });
+    render(conversation(42, "history-unreachable"));
+    resize();
+    resize();
+
+    expect(viewport().scrollTop).toBe(300);
+    act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(viewport().scrollTop).toBe(4400);
+  });
+
   it("lets a reader replace an unreachable saved position by scrolling", () => {
     height = 900;
     saveScrollMemory("history-short-reader", { contentKey: "42", scrollTop: 700, followBottom: false });
