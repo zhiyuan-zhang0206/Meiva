@@ -4,8 +4,10 @@
 # run `meiva start` with OS jobs enabled, and prove it refuses in the host
 # dependency preflight — naming the tool and its repair — before converge reaches
 # any later step and before a single service starts. Then hand sudo back and
-# prove the second start installs `cron` through scripts/provision/host_utils.sh
-# and refuses only on the host-owned systemd. It is a one-off verification
+# prove the refusal still runs no installer: a host-owned gap (systemd) makes it
+# certain, so nothing is installed first. Running the named provisioner by hand
+# fixes crontab, and the retry refuses only on systemd. With OS jobs off the
+# gateway boots, provisioning the data plane once. It is a one-off verification
 # recipe, not a CI gate: apt and PyPI need the network and the run takes minutes.
 # meiva:link cli/commands/lifecycle/docs/start-readiness.meiva.okf.md
 
@@ -213,9 +215,8 @@ def running_services(container: str, *, docker: list[str]) -> str:
 def phase_refusal(container: str, *, docker: list[str]) -> None:
     print("→ phase 1: no cron, no sudo, OS jobs on — start must refuse before converge")
     # meiva:note
-    # Dropping sudo is what makes the provisioners fail fast instead of installing
-    # for minutes first; the refusal itself does not depend on it (a host-owned
-    # tool refuses before any installer runs).
+    # No sudo on purpose: the refusal must not need root, and the gate's own
+    # message — not a provisioner's failure — is what names the missing tools.
     sh_ok(container, "sudo -n rm -f /etc/sudoers.d/verify", docker=docker)
     result = start(container, os_jobs=True, docker=docker)
     out = result.stdout + result.stderr
@@ -238,8 +239,8 @@ def phase_refusal(container: str, *, docker: list[str]) -> None:
         raise RefusalError(f"a service started despite the refusal:\n{started}")
 
 
-def phase_install(container: str, *, docker: list[str]) -> None:
-    print("→ phase 2: sudo back — start installs cron through the provisioner")
+def phase_host_owned(container: str, *, docker: list[str]) -> None:
+    print("→ phase 2: sudo back — a host-owned gap still refuses with no installer run")
     sh_ok(
         container,
         "printf 'verify ALL=(ALL) NOPASSWD:ALL\\n' > /etc/sudoers.d/verify "
@@ -247,40 +248,67 @@ def phase_install(container: str, *, docker: list[str]) -> None:
         docker=docker,
         user="root",
     )
-    first = start(container, os_jobs=True, docker=docker)
-    out_first = first.stdout + first.stderr
-    print(out_first[-3000:])
-    if first.returncode == 0:
+    result = start(container, os_jobs=True, docker=docker)
+    out = result.stdout + result.stderr
+    print(out[-3000:])
+    if result.returncode == 0:
         raise RefusalError("the start succeeded with no systemd to install the boot unit")
-    installed = sh_ok(container, "command -v crontab || true", docker=docker).strip()
-    if not installed:
-        raise RefusalError(f"the preflight did not install cron:\n{out_first[-4000:]}")
-    if "✗ crontab" in out_first:
-        raise RefusalError("crontab was reported missing after its install landed")
-    if "✗ systemctl" not in out_first:
-        raise RefusalError("the host-owned systemd refusal did not fire:\n" + out_first[-4000:])
-    if "installing" not in out_first:
-        raise RefusalError("the first start did not run the provisioner:\n" + out_first[-4000:])
-    print("→ phase 2b: a second start must not reinstall")
-    second = start(container, os_jobs=True, docker=docker)
-    out_second = second.stdout + second.stderr
-    if "installing" in out_second:
-        raise RefusalError("the second start installed again:\n" + out_second[-4000:])
-    if "✗ crontab" in out_second:
-        raise RefusalError("the second start lost the installed crontab")
+    # meiva:note
+    # With sudo available every provisionable gap could be installed, but the
+    # host-owned systemd row makes the refusal certain; the gate must not spend
+    # minutes installing first. crontab staying absent is that same evidence from
+    # the host's side, not only from the console text.
+    if "installing" in out:
+        raise RefusalError("the preflight installed packages before refusing:\n" + out[-4000:])
+    for expected in ("host dependency preflight failed", "✗ crontab", "✗ systemctl"):
+        if expected not in out:
+            raise RefusalError(f"the refusal did not name {expected!r}:\n{out[-4000:]}")
+    if sh_ok(container, "command -v crontab || true", docker=docker).strip():
+        raise RefusalError("crontab was installed even though the start refused immediately")
+
+
+def phase_provisioner(container: str, *, docker: list[str]) -> None:
+    print("→ phase 2b: run the named provisioner; the retry must stop naming crontab")
+    sh_ok(
+        container,
+        "cd /home/verify/.meiva/source && sudo bash scripts/provision/host_utils.sh",
+        docker=docker,
+        timeout=1800,
+    )
+    if not sh_ok(container, "command -v crontab || true", docker=docker).strip():
+        raise RefusalError("scripts/provision/host_utils.sh left crontab missing")
+    result = start(container, os_jobs=True, docker=docker)
+    out = result.stdout + result.stderr
+    print(out[-3000:])
+    if result.returncode == 0:
+        raise RefusalError("the start succeeded with no systemd to install the boot unit")
+    if "✗ crontab" in out:
+        raise RefusalError("the retry still names the installed crontab:\n" + out[-4000:])
+    if "✗ systemctl" not in out:
+        raise RefusalError("the host-owned systemd refusal did not fire:\n" + out[-4000:])
+    if "installing" in out:
+        raise RefusalError("the retry ran an installer:\n" + out[-4000:])
 
 
 def phase_ready(container: str, *, docker: list[str]) -> None:
-    print("→ phase 3: OS jobs off — the gateway must reach a ready boot")
-    for attempt in (1, 2):
-        result = start(container, os_jobs=False, docker=docker)
-        out = result.stdout + result.stderr
-        if result.returncode != 0:
-            raise RefusalError(f"gateway-only start #{attempt} failed:\n{out[-4000:]}")
-        if "installing" in out:
-            raise RefusalError(
-                f"start #{attempt} reinstalled a ready host's packages:\n{out[-4000:]}"
-            )
+    print("→ phase 3: OS jobs off — the data plane installs once, then the gateway boots")
+    # meiva:note
+    # With OS jobs off the only gap left is the data plane, a group the repository
+    # installs — the end-to-end proof of the gate's install-then-re-probe path.
+    first = start(container, os_jobs=False, docker=docker)
+    out = first.stdout + first.stderr
+    print(out[-3000:])
+    if first.returncode != 0:
+        raise RefusalError(f"gateway-only start failed:\n{out[-4000:]}")
+    if "installing PostgreSQL/Redis/PgBouncer" not in out:
+        raise RefusalError(f"the gate did not provision the data plane:\n{out[-4000:]}")
+    print("→ phase 3b: a second gateway-only start must not reinstall")
+    second = start(container, os_jobs=False, docker=docker)
+    out_second = second.stdout + second.stderr
+    if second.returncode != 0:
+        raise RefusalError(f"gateway-only start #2 failed:\n{out_second[-4000:]}")
+    if "installing" in out_second:
+        raise RefusalError(f"start #2 reinstalled a ready host's packages:\n{out_second[-4000:]}")
     status = sh_ok(
         container, "cd /home/verify/.meiva/source && .venv/bin/meiva status", docker=docker
     )
@@ -320,7 +348,10 @@ def phase_node(container: str, *, docker: list[str]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Prove a host without crontab/systemd refuses before converge, then installs cron."
+        description=(
+            "Prove a host without crontab/systemd refuses before converge and installs "
+            "nothing first, then reaches a ready gateway with OS jobs off."
+        ),
     )
     parser.add_argument("--ref", default="HEAD", help="commit to test (default HEAD)")
     parser.add_argument("--image", default="ubuntu:24.04")
@@ -365,10 +396,11 @@ def main() -> int:
             copy_source(name, source, profile, docker=docker)
             prepare(name, docker=docker)
             phase_refusal(name, docker=docker)
-            phase_install(name, docker=docker)
+            phase_host_owned(name, docker=docker)
+            phase_provisioner(name, docker=docker)
             phase_ready(name, docker=docker)
             phase_node(name, docker=docker)
-            print("✓ clean host: refused early, installed cron, then reached ready")
+            print("✓ clean host: refused early without installing, then reached ready")
             return 0
         finally:
             if args.keep:

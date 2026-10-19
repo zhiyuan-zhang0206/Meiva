@@ -17,13 +17,14 @@ prints that table; this document carries its output, and a test in
 `cli/commands/lifecycle/tests/test_start_host_dependencies.py` fails when the two
 drift apart. Three kinds of row exist:
 
-- **A provisionable group** (`data-plane`, `node`, `host-utils`): a missing tool
+- **A provisionable group** (`data-plane`, `node`, `host-utils`, `cli-tools`): a missing
+tool
   runs its `scripts/provision/*` script once for the group, and the probe runs
   again afterwards. A tool still missing refuses the start.
 - **A host-owned tool** (`systemctl`, `sudo`, `launchctl`, the Apple toolchain
   (`swiftc`, `codesign`, `security`, `openssl`), `/bin/sh`): this repository cannot install it, so the refusal names it
   and prints the decision or command that fixes the host.
-- **An optional tool** (`git`, `gh`, `brew`, `lsof`, `ps`): start warns or skips
+- **An optional tool** (`brew`, `lsof`, `ps`): start warns or skips
   the step that uses it; nothing blocks.
 
 | Tool | When `meiva start` needs it | Who installs it | Missing → start |

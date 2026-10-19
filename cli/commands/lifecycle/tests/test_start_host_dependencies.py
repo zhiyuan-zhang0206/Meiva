@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -28,14 +29,34 @@ def test_host_dependency_step_runs_first() -> None:
     assert steps[0].apply is host_dependencies.ensure_host_dependencies_step
 
 
-def test_the_owner_doc_carries_the_dependency_table() -> None:
-    doc = (
+def _owner_doc() -> Path:
+    return (
         Path(host_dependencies.__file__).resolve().parents[1]
         / "lifecycle"
         / "docs"
         / "start-host-dependencies.meiva.okf.md"
     )
-    assert host_dependencies.render_table() in doc.read_text(encoding="utf-8")
+
+
+def _bullet_names(text: str, label: str) -> set[str]:
+    line = next(row for row in text.splitlines() if row.startswith(f"- **{label}**"))
+    return set(re.findall(r"`([^`]+)`", line))
+
+
+def test_the_owner_doc_carries_the_dependency_table() -> None:
+    assert host_dependencies.render_table() in _owner_doc().read_text(encoding="utf-8")
+
+
+# meiva:note
+# The prose above the table names the provisionable groups and the optional rows.
+# Comparing the table alone let those bullets drift: `git` and `gh` stayed listed
+# as optional after they became required rows.
+def test_the_owner_doc_names_the_same_groups_and_optional_rows() -> None:
+    text = _owner_doc().read_text(encoding="utf-8")
+    groups = {tool.component for tool in host_dependencies.HOST_TOOLS if tool.component is not None}
+    assert _bullet_names(text, "A provisionable group") == groups
+    optional = {tool.name for tool in host_dependencies.HOST_TOOLS if tool.optional}
+    assert _bullet_names(text, "An optional tool") == optional
 
 
 # meiva:note
