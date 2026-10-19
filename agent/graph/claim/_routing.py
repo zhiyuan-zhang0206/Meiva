@@ -35,10 +35,10 @@ Routing semantics (preserved verbatim from the original claim module):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from agent.db import ClaimedInbound, has_pending_inbound_after
-from agent.nodes import BEFORE_LLM, HARNESS_TURN, NodeName
+from agent.nodes import BEFORE_LLM, HARNESS_TURN
 from base.agents.context import MeivaContext
 from base.agents.messages.inbound import InboundKind
 from base.api_contracts.agent_contract import Harness
@@ -77,9 +77,9 @@ ROUTING_KINDS: frozenset[InboundKind] = frozenset(
 # the same verdict one node later, so it goes through here too — otherwise a
 # compaction hands an external-harness agent back to `before_llm`.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-def route_target(ctx: MeivaContext, goto: NodeName) -> NodeName:
+def route_target[Goto](ctx: MeivaContext, goto: Goto) -> Goto:
     if goto == BEFORE_LLM and ctx.harness is not Harness.MEIVA:
-        return HARNESS_TURN
+        return cast("Goto", HARNESS_TURN)
     return goto
 
 

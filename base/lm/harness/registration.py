@@ -19,7 +19,7 @@ from base.log import logger
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
 
 # meiva:note
-# The one status a usable row carries. `meiva.impersonation.harness.attach` refuses a row
+# The one status a usable row carries. `meiva.attach()` refuses a row
 # that says anything else, and the reader owns that vocabulary: this module cannot import
 # it, because the SDK surface sits above `base`, so the word is repeated here and a test
 # pins the pair the moment both land.
