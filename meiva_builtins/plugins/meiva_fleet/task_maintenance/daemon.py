@@ -268,12 +268,15 @@ def _remove_pidfile() -> None:
     remove_pidfile(_pidfile())
 
 
-def _is_running(*, holds: Callable[[Path, str], bool] = pidfile_holds_daemon) -> bool:
+def _is_running(*, pidfile: Path | None = None) -> bool:
     """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return holds(_pidfile(), "meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon")
+    return pidfile_holds_daemon(
+        pidfile or _pidfile(),
+        "meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon",
+    )
 
 
 async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
