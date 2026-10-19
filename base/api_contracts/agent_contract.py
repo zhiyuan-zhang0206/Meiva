@@ -25,7 +25,7 @@ Error wire protocol:
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, ClassVar, Protocol
+from typing import Any, ClassVar, Literal, Protocol
 
 
 class AgentStatus(StrEnum):
@@ -53,6 +53,15 @@ class Harness(StrEnum):
     CLAUDE_CODE = "claude_code"
     CODEX = "codex"
     ANTIGRAVITY = "antigravity"
+
+
+# meiva:note
+# What a local probe can prove about one harness on one machine: `available` is
+# installed and signed in, `unavailable` is missing or not signed in, and
+# `unknown` is installed with a sign-in state this process cannot read — reported
+# as unknown rather than guessed in either direction.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+HarnessStatus = Literal["available", "unavailable", "unknown"]
 
 
 class TerminationSource(StrEnum):
