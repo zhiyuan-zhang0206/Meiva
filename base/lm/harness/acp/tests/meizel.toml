@@ -1,0 +1,5 @@
+exports = ["fake_agent.py", "support.py"]
+
+[uses]
+"support.py" = []
+"test_transport.py" = ["support.py"]

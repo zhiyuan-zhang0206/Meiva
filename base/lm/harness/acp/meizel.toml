@@ -1,0 +1,6 @@
+exports = ["transport.py"]
+
+[uses]
+"__init__.py" = ["transport.py"]
+"transport.py" = []
+"tests" = ["__init__.py", "transport.py"]
