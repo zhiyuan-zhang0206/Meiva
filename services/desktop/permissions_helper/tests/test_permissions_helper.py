@@ -514,9 +514,9 @@ class _FakeToolOutputs:
         if self.dr_streams is not None:
             return subprocess.CompletedProcess(cmd, 0, *self.dr_streams)
         dr = self.designated_requirement or test_dr()
-        # Real codesign on current macOS emits the DR line on stdout
-        # (stderr carries `Executable=...`); the reader accepts either.
-        return subprocess.CompletedProcess(cmd, 0, f"designated => {dr}\n".encode(), b"")
+        # meiva:note
+        # Real codesign on current macOS emits the DR line on stdout with a leading `# ` for an ad-hoc signature (stderr carries `Executable=...`); the reader accepts either stream.
+        return subprocess.CompletedProcess(cmd, 0, f"# designated => {dr}\n".encode(), b"")
 
 
 # meiva:note

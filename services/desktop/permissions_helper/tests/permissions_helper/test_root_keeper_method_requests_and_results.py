@@ -488,7 +488,7 @@ def test_read_dr_accepts_legacy_stderr_stream(
                 cmd,  # pyright: ignore[reportUnknownArgumentType]
                 0,
                 b"",
-                f"designated => {test_dr()}\n".encode(),
+                f"# designated => {test_dr()}\n".encode(),
             )
         raise AssertionError(f"unexpected call {cmd}")
 

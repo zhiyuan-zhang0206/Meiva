@@ -100,8 +100,8 @@ app = str(permissions_helper_app_dir() / "MeivaPermissionsHelper.app")
 record = {"ping": dict(client.ping())}
 signing = subprocess.run(["codesign", "-dv", "-r-", "--verbose=4", app], capture_output=True, text=True)
 record["signature"] = [
-    line for line in (signing.stdout + signing.stderr).splitlines()
-    if line.startswith(("designated =>", "CDHash="))
+    line.removeprefix("# ") for line in (signing.stdout + signing.stderr).splitlines()
+    if line.removeprefix("# ").startswith(("designated =>", "CDHash="))
 ]
 rows = out(
     "sqlite3", "-readonly", "@TCC_DB@",
