@@ -10,7 +10,10 @@
 # declaration is a record, never a check, and reverting that gate on the takeover
 # path means the harness path must not re-introduce the same abstraction under a
 # new name. An attached harness agent therefore has the same rights as a native
-# one. A lifecycle self-call (compact, restart, terminate) is refused by the SDK's
+# one. Closing the attachment never touches the registration row: the bridge owns
+# that document, and a provider sandbox would refuse the write anyway.
+#
+# A lifecycle self-call (compact, restart, terminate) is refused by the SDK's
 # own `assert_self_action`, which requires the caller to own the agent's turn loop
 # and an attachment never does; everything else that a caller might forbid —
 # spawning agents, scheduling, spending on `understand` — is a review convention,
@@ -96,13 +99,11 @@ class HarnessAttachment(ExternalAttachment):
         agent_id: int,
         session_id: str,
         registration: HarnessRegistration,
-        store: RegistrationStore,
         ancestor_check: Callable[[int], bool],
     ) -> None:
         self.handle = handle
         self.session_id = session_id
         self._registration = registration
-        self._store = store
         self._ancestor_check = ancestor_check
         self.agent_id = agent_id
         self.config: tuple[Any, PluginConfigView] | None = None
@@ -217,7 +218,6 @@ class HarnessAttachment(ExternalAttachment):
 
     def close(self) -> None:
         super().close()
-        self._store.delete(self.agent_id)
 
     def __enter__(self) -> Self:
         return super().__enter__()
@@ -301,7 +301,6 @@ def attach(
         agent_id=registration.agent_id,
         session_id=registration.external_session_id,
         registration=registration,
-        store=resolved_store,
         ancestor_check=descends_from,
     )
 
