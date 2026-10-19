@@ -35,6 +35,14 @@ from services.derived.memory_indexer.embeddings.base import EmbeddingProvider
 router = APIRouter()
 
 
+# meiva:note
+# The report set the search endpoint fills: one per process, owned by the app that builds
+# it (see `app.state.memory_unreadable_reports`), never module state — a module-level set
+# is the ambient-container shape the structure gate rejects.
+def unreadable_reports() -> rerank.UnreadableReports:
+    return rerank.UnreadableReports()
+
+
 @dataclass(frozen=True)
 class MemorySearchInputs:
     # meiva:link gateway/routers/docs/memory.meiva.okf.md
@@ -295,6 +303,7 @@ async def _search_and_rank(
         limit=limit,
         exclude=exclude,
         memory_root=request.app.state.gateway_config.memory_root,
+        reports=request.app.state.memory_unreadable_reports,
     )
 
 

@@ -114,6 +114,7 @@ async def _rank(
         limit=limit,
         exclude=exclude,
         memory_root=tmp_path,
+        reports=rerank.UnreadableReports(),
     )
 
 
@@ -317,6 +318,54 @@ async def test_stale_hits_are_skipped(
     assert len(judge.calls) == 1
 
 
+# meiva:note
+# Passive recall searches once per agent turn: an unreadable note that keeps ranking must
+# report once per process, not once per search. Both classes are covered — a decode error
+# and an OSError — and both files stay ranked out of every search.
+def test_unreadable_notes_are_reported_once_per_process(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
+    (tmp_path / "binary.md").write_bytes(b"\xff\xfe\x00bad")
+    (tmp_path / "blocked.md").mkdir()
+    hits = [_hit(tmp_path, "binary.md"), _hit(tmp_path, "blocked.md")]
+    reports = rerank.UnreadableReports()
+
+    assert rerank.load_candidates(hits, tmp_path, frozenset(), 30, reports) == []
+    (reported,) = loguru_records.events("memory_search_rerank")
+    assert reported["extra"]["n"] == 2
+    assert reported["extra"]["first"].startswith("binary.md: ")
+
+    assert rerank.load_candidates(hits, tmp_path, frozenset(), 30, reports) == []
+    assert len(loguru_records.events("memory_search_rerank")) == 1
+
+
+# meiva:note
+# The suppression is per path, not per process-wide mute: a note that becomes unreadable
+# later still reports. `n` stays the count this search skipped, so a partly-suppressed search
+# does not understate what it ranked out.
+def test_a_note_that_newly_becomes_unreadable_is_reported(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
+    (tmp_path / "binary.md").write_bytes(b"\xff\xfe\x00bad")
+    reports = rerank.UnreadableReports()
+    rerank.load_candidates([_hit(tmp_path, "binary.md")], tmp_path, frozenset(), 30, reports)
+    (tmp_path / "blocked.md").mkdir()
+
+    rerank.load_candidates(
+        [_hit(tmp_path, "binary.md"), _hit(tmp_path, "blocked.md")],
+        tmp_path,
+        frozenset(),
+        30,
+        reports,
+    )
+
+    first, second = loguru_records.events("memory_search_rerank")
+    assert first["extra"]["n"] == 1
+    assert first["extra"]["first"].startswith("binary.md: ")
+    assert second["extra"]["n"] == 2
+    assert second["extra"]["first"].startswith("blocked.md: ")
+
+
 # ── how many notes are ranked ──
 
 
@@ -422,7 +471,9 @@ def test_description_and_tags_survive_malformed_frontmatter(tmp_path: Path) -> N
         *(_hit(tmp_path, n) for n in ("bad_yaml.md", "plain.md")),
     ]
 
-    scalar, bad_yaml, plain = rerank.load_candidates(hits, tmp_path, frozenset(), 30)
+    scalar, bad_yaml, plain = rerank.load_candidates(
+        hits, tmp_path, frozenset(), 30, rerank.UnreadableReports()
+    )
 
     assert (scalar.description, scalar.tags, scalar.chunk) == ("123", [], "123")
     assert (bad_yaml.description, bad_yaml.tags) == ("", [])
@@ -536,7 +587,9 @@ def test_unreadable_candidate_is_reported_not_silently_dropped(
     unreadable.chmod(0o000)
     hits = [_hit(tmp_path, "locked.md"), _hit(tmp_path, "readable.md")]
     try:
-        candidates = rerank.load_candidates(hits, tmp_path, frozenset(), 30)
+        candidates = rerank.load_candidates(
+            hits, tmp_path, frozenset(), 30, rerank.UnreadableReports()
+        )
     finally:
         unreadable.chmod(0o600)
 
