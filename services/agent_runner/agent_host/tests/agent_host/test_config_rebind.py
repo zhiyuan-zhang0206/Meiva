@@ -12,9 +12,11 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership import hosted
 from agent.ownership.corpse_reap import ReapedCorpse
+from base.api_contracts.agent_contract import Harness
 from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host import invocation
-from services.agent_runner.agent_host.runtime import config_fingerprint
+from services.agent_runner.agent_host.runtime import StoredConfig, config_fingerprint
+from services.agent_runner.agent_host.scheduling import wake_screening
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     Build,
     GatedGraph,
@@ -659,16 +661,29 @@ class TestRunnability:
         assert graph.observations == []
         assert host.stats.wakes_skipped == 1
 
-    async def test_a_harness_without_a_launcher_never_gets_a_turn(self, wired: Build) -> None:
+    def test_a_harness_without_a_launcher_is_not_runnable(self) -> None:
         # meiva:note
         # A row born on a harness this release cannot start keeps the value as an
-        # intent; it must not quietly run the built-in loop instead.
+        # intent; it must not quietly run the built-in loop instead. Every harness
+        # the enum names has an adapter today, so the gate is given the set a release
+        # without one would carry rather than a name that happens to lack it; the
+        # wake path itself is covered by the other cases in this class.
         # meiva:link base/agents/docs/harness.meiva.okf.md
-        host, graph, _ = wired({1: Row(harness="antigravity")})
-        await asyncio.wait_for(host.run_turn(1), 2)
-        assert graph.observations == []
-        assert host.stats.wakes_skipped == 1
-        assert host.stats.turns_started == 0
+        stored = StoredConfig(
+            machine="macmini",
+            status="idling",
+            harness="antigravity",
+            config_overlay=None,
+            birth_config=None,
+        )
+
+        assert (
+            wake_screening.is_runnable("macmini", 1, stored, launchable=frozenset({Harness.MEIVA}))
+            is False
+        )
+        assert wake_screening.is_runnable(
+            "macmini", 1, stored, launchable=frozenset({Harness.MEIVA, Harness.ANTIGRAVITY})
+        )
 
     async def test_a_missing_row_is_skipped(self, wired: Build) -> None:
         host, graph, _ = wired({})

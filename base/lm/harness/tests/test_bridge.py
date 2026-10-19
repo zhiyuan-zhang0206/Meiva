@@ -30,6 +30,7 @@ from base.lm.harness import (
     Usage,
     handle_digest,
 )
+from base.lm.harness.antigravity import AgySession
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, bridge_for, open_session
 
 
@@ -283,14 +284,48 @@ def test_an_external_harness_builds_its_handoff() -> None:
     assert bridge.harness is Harness.CLAUDE_CODE
 
 
-def test_an_adapter_less_harness_is_refused() -> None:
-    with pytest.raises(ValueError, match="no session adapter"):
-        open_session(
-            Harness.ANTIGRAVITY,
-            agent_id=1,
-            cwd=Path("/agents/6984"),
-            registry=FileSessionRegistry(Path("/registry")),
-        )
+# meiva:note
+# Every harness the enum names now has an adapter, so the refusal in `open_session`
+# guards the next value someone adds rather than a current one; the tests below pin
+# what each adapter is built with instead. A new harness member with no branch fails
+# there, loudly, before a session starts with another provider's flags.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def test_the_antigravity_wake_document_carries_its_shell_semantics() -> None:
+    bridge = bridge_for(
+        Harness.ANTIGRAVITY,
+        agent_id=6984,
+        machine="macmini",
+        workspace=Path("/agents/6984"),
+        registry=FileSessionRegistry(Path("/registry")),
+        registration_ttl_seconds=3600.0,
+    )
+    assert bridge is not None
+    assert bridge.handoff is not None
+    rendered = bridge.handoff.render()
+    assert "setsid" in rendered
+    assert "fresh shell" in rendered
+
+
+def test_an_antigravity_session_is_built_with_the_skip_flag_it_was_given() -> None:
+    session = open_session(
+        Harness.ANTIGRAVITY,
+        agent_id=1,
+        cwd=Path("/agents/6984"),
+        registry=FileSessionRegistry(Path("/registry")),
+        skip_permissions=True,
+    )
+    assert isinstance(session, AgySession)
+    assert session.config.skip_permissions is True
+
+    plain = open_session(
+        Harness.ANTIGRAVITY,
+        agent_id=1,
+        cwd=Path("/agents/6984"),
+        registry=FileSessionRegistry(Path("/registry")),
+        skip_permissions=False,
+    )
+    assert isinstance(plain, AgySession)
+    assert plain.config.skip_permissions is False
 
 
 def record(harness: str = "meiva") -> SessionRecord:

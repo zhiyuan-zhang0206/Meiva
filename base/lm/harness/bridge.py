@@ -111,6 +111,10 @@ class HarnessBridge:
         return self._model
 
     @property
+    def handoff(self) -> Handoff | None:
+        return self._handoff
+
+    @property
     def session_id(self) -> str | None:
         return None if self._session is None else self._session.session_id
 
