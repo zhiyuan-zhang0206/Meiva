@@ -150,6 +150,11 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     agentId == null ? null : readSendAttempt(agentId),
   );
   const sendAttemptRef = useRef<SendAttempt | null>(initialSendAttempt);
+  // meiva:note
+  // The in-flight lock gates submission and attachments — never the textarea's
+  // readOnly/disabled state: on Android that tears down the IME connection and
+  // the next voice/paste commit is lost silently.
+  // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
   const composerLocked = sending;
   const { data: commands = [] } = useQuery({
     queryKey: ["agent-commands", agentId],
@@ -535,9 +540,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
             (agentTerminated ? t("composerPlaceholderResurrect") : t("composerPlaceholder"))
           }
           value={value}
-          readOnly={composerLocked}
           onChange={(e) => {
-            if (composerLocked) return;
             setValue(e.target.value);
             syncCaret(e.target);
           }}
