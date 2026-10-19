@@ -57,8 +57,7 @@ remain unchanged throughout the update.
 ## The up half, in order
 
 1. `meiva start` on the gateway, then each runner; on macOS through a run-once
-   `gui/<uid>` LaunchAgent, because signing the helper needs the login
-   keychain. Each start must release its maintenance hold.
+   `gui/<uid>` LaunchAgent, because the helper's launchd job lives in `gui/<uid>`. Each start must release its maintenance hold.
 2. The roster gate: every listed machine online with checkout and running code
    on one commit; unlisted machines are reported and never block.
 3. The gateway smoke-tests each listed agent-runner with a real agent.

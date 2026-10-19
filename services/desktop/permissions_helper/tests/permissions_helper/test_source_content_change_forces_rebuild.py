@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import plistlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,9 @@ from base.clock.tests.manual_timers import ManualTimers
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.sessions.tests.scripted_helper import ScriptedHelper, serve
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
-    TEST_CERT_SHA1,
+    fake_helper as fake_helper,
+)
+from services.desktop.permissions_helper.tests.test_permissions_helper import (
     fake_tools,
     install_env,
     recorded_argvs,
@@ -18,9 +21,6 @@ from services.desktop.permissions_helper.tests.test_permissions_helper import (
     stage_bundle,
     test_dr,
     write_current_build_state,
-)
-from services.desktop.permissions_helper.tests.test_permissions_helper import (
-    fake_helper as fake_helper,
 )
 
 
@@ -30,7 +30,7 @@ def test_source_content_change_forces_rebuild(
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
+    recorded = fake_tools(monkeypatch)
     write_current_build_state(app, lifecycle.source_content_hash())
     lifecycle.SOURCE.write_text("// changed swift")
 
@@ -47,7 +47,7 @@ def test_locale_content_change_forces_rebuild(
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
+    recorded = fake_tools(monkeypatch)
     write_current_build_state(app, lifecycle.source_content_hash())
     locale_file = lifecycle.LOCALES / "en.lproj" / "Localizable.strings"
     locale_file.write_text('"panel.title" = "Changed";')
@@ -65,7 +65,7 @@ def test_entitlements_content_change_forces_rebuild(
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
+    recorded = fake_tools(monkeypatch)
     write_current_build_state(app, lifecycle.source_content_hash())
     lifecycle.ENTITLEMENTS.write_bytes(b"<plist><dict/></plist>")
 
@@ -82,7 +82,7 @@ def test_build_copies_locale_resources_into_the_bundle(
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    fake_tools(monkeypatch, authority=None)
+    fake_tools(monkeypatch)
 
     assert lifecycle.build_and_sign() == (app, True)
     for language in ("en", "zh-Hans"):
@@ -98,7 +98,7 @@ def test_missing_build_state_forces_rebuild(
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
+    recorded = fake_tools(monkeypatch)
 
     before = (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):
@@ -107,121 +107,140 @@ def test_missing_build_state_forces_rebuild(
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
 
-def test_expected_dr_uses_the_named_identity_sha1(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    mixed_case_sha1 = "aBcDeF0123456789aBcDeF0123456789aBcDeF01"
-    fake_tools(
-        monkeypatch,
-        authority=None,
-        identity_output=(
-            f'  2) {mixed_case_sha1} "{lifecycle.CERT_CN}" (CSSMERR_TP_NOT_TRUSTED)\n'
-        ),
-    )
-
-    assert lifecycle.pinned_designated_requirement() == (
-        f'identifier "{lifecycle.HELPER_BUNDLE_ID}" and certificate leaf = H"{mixed_case_sha1.lower()}"'
-    )
-
-
-def test_expected_dr_rejects_a_missing_or_misnamed_identity(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    fake_tools(
-        monkeypatch,
-        authority=None,
-        identity_output=f'  1) {TEST_CERT_SHA1} "Some Other Identity"\n',
-    )
-
-    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="missing or name mismatch"):
-        lifecycle.pinned_designated_requirement()
-
-
-def test_verify_dr_rejects_permission_reset_risk(
+def test_current_build_is_neither_rebuilt_nor_re_signed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    fake_tools(
-        monkeypatch,
-        authority=lifecycle.CERT_CN,
-        designated_requirement='identifier "wrong.bundle"',
+    recorded = fake_tools(monkeypatch)
+    write_current_build_state(app, lifecycle.source_content_hash())
+
+    assert lifecycle.build_and_sign() == (app, False)
+    assert not any(
+        c[0] == "swiftc" or c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded)
     )
 
-    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="permissions reset risk"):
-        lifecycle.verify_dr(app)
+
+def test_bundle_that_fails_codesign_verification_is_rebuilt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.desktop.permissions_helper import lifecycle
+
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    fake_tools(monkeypatch, verify_rc=1)
+    write_current_build_state(app, lifecycle.source_content_hash())
+
+    with pytest.raises(RuntimeError, match="still in use"):
+        lifecycle.build_and_sign()
 
 
-def test_identity_change_warns_and_rebuilds(
+def test_content_hash_needs_no_signing_tool_or_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.desktop.permissions_helper import lifecycle
+
+    stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    recorded = fake_tools(monkeypatch)
+
+    assert len(lifecycle.source_content_hash()) == 64
+    assert recorded == []
+
+
+def test_build_signs_ad_hoc_with_the_declared_entitlements_and_identifier(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.desktop.permissions_helper import lifecycle
+
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    recorded = fake_tools(monkeypatch)
+
+    assert lifecycle.build_and_sign() == (app, True)
+    assert sign_command(recorded) == [
+        "codesign",
+        "--force",
+        "--sign",
+        "-",
+        "--options",
+        "runtime",
+        "--entitlements",
+        str(lifecycle.ENTITLEMENTS),
+        "--identifier",
+        lifecycle.HELPER_BUNDLE_ID,
+        str(app),
+    ]
+    argvs = recorded_argvs(recorded)
+    assert argvs.index(sign_command(recorded)) > argvs.index(
+        next(c for c in argvs if c[0] == "swiftc")
+    )
+
+
+def test_build_state_records_the_signed_code_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import json
+
+    from services.desktop.permissions_helper import lifecycle
+
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    fake_tools(monkeypatch)
+
+    lifecycle.build_and_sign()
+    state = json.loads((app.parent / "build-state.json").read_text())
+    assert state["source_hash"] == lifecycle.source_content_hash()
+    assert state["dr"] == test_dr()
+
+
+def test_first_build_does_not_warn_about_regranting(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
-    write_current_build_state(app, "hash-for-previous-identity", dr='identifier "old"')
+    stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    fake_tools(monkeypatch)
 
-    before = (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
-    with pytest.raises(RuntimeError, match="still in use"):
-        lifecycle.build_and_sign()
-    assert (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
-    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
-    assert (
-        "code-signing identity changed — macOS permissions may need re-granting"
-        in capsys.readouterr().err
+    lifecycle.build_and_sign()
+    assert "need granting again" not in capsys.readouterr().err
+
+
+def test_rebuild_with_a_new_code_identity_warns_that_grants_are_needed_again(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from services.desktop.permissions_helper import lifecycle
+
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    app.parent.mkdir(parents=True)
+    write_current_build_state(
+        app, "hash-of-the-previous-build", dr='identifier "old" and cdhash H"00"'
     )
+    fake_tools(monkeypatch)
+
+    assert lifecycle.build_and_sign() == (app, True)
+    assert "need granting again" in capsys.readouterr().err
 
 
-def test_ad_hoc_signed_bundle_is_rebuilt_onto_the_stable_certificate(
+def test_codesign_failure_aborts_the_build(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from services.desktop.permissions_helper import lifecycle
+
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    fake_tools(monkeypatch, sign_rc=1)
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match=r"codesign failed \(1\)"):
+        lifecycle.build_and_sign()
+    assert not (app.parent / "build-state.json").exists()
+
+
+def test_unreadable_designated_requirement_aborts_the_build(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = fake_tools(monkeypatch, authority=None)
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    fake_tools(monkeypatch, dr_streams=(b"", b"Executable=/tmp/helper\n"))
 
-    before = (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
-    with pytest.raises(RuntimeError, match="still in use"):
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="did not report a designated"):
         lifecycle.build_and_sign()
-    assert (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
-    assert not any(c[0] == "codesign" and "--force" in c for c in recorded_argvs(recorded))
-
-
-def test_locked_keychain_refuses_instead_of_downgrading_to_ad_hoc(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = fake_tools(monkeypatch, authority=None, keychain_rc=1)
-
-    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
-        lifecycle.build_and_sign()
-    assert "User interaction is not allowed" in str(err.value)
-    assert "unlock-keychain" in str(err.value)
-    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
-    assert not any(c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded))
-
-
-def test_codesign_failure_names_the_ad_hoc_refusal(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    fake_tools(monkeypatch, authority=None, sign_rc=1)
-
-    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
-        lifecycle.build_and_sign()
-    assert "errSecInternalComponent" in str(err.value)
-    assert "unlock-keychain" in str(err.value)
+    assert not (app.parent / "build-state.json").exists()
 
 
 def test_every_call_carries_its_declared_bound(
@@ -230,17 +249,12 @@ def test_every_call_carries_its_declared_bound(
     from services.desktop.permissions_helper import lifecycle
 
     stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = fake_tools(monkeypatch, authority=None)
+    recorded = fake_tools(monkeypatch)
 
     lifecycle.build_and_sign()
     assert recorded
     for call in recorded:
-        expected = (
-            lifecycle.ACL_PROBE_TIMEOUT_S
-            if call.argv[:2] == ["codesign", "--sign"] and Path(call.argv[-1]).name == "acl-probe"
-            else lifecycle.TIMEOUTS_S[call.argv[0]]
-        )
-        assert call.timeout == expected, call.argv
+        assert call.timeout == lifecycle.TIMEOUTS_S[call.argv[0]], call.argv
 
 
 def test_swiftc_hang_fails_the_build_instead_of_blocking(
@@ -249,7 +263,7 @@ def test_swiftc_hang_fails_the_build_instead_of_blocking(
     from services.desktop.permissions_helper import lifecycle
 
     stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = fake_tools(monkeypatch, authority=None, hang=("swiftc",))
+    recorded = fake_tools(monkeypatch, hang=("swiftc",))
 
     with pytest.raises(lifecycle.PermissionsHelperTimeoutError) as err:
         lifecycle.build_and_sign()
@@ -257,232 +271,23 @@ def test_swiftc_hang_fails_the_build_instead_of_blocking(
     assert not any(c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded))
 
 
-def test_codesign_hang_fails_with_the_acl_remedy_not_the_unlock(
+def test_codesign_hang_fails_the_build_instead_of_blocking(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    fake_tools(monkeypatch, authority=None, hang=("codesign", "--force"))
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    fake_tools(monkeypatch, hang=("codesign", "--force"))
 
-    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
+    with pytest.raises(lifecycle.PermissionsHelperTimeoutError) as err:
         lifecycle.build_and_sign()
-    assert "did not finish within" in str(err.value)
-    assert "set-key-partition-list" in str(err.value)
-    assert "unlock-keychain" not in str(err.value)
-
-
-def test_acl_probe_precedes_the_build_and_signs_a_scratch_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = fake_tools(monkeypatch, authority=None)
-
-    assert lifecycle.build_and_sign() == (app, True)
-    argvs = recorded_argvs(recorded)
-    probe = next(c for c in argvs if c[:2] == ["codesign", "--sign"])
-    assert probe[2] == lifecycle.CERT_CN
-    assert str(app) not in probe[3]
-    assert argvs.index(probe) < argvs.index(next(c for c in argvs if c[0] == "swiftc"))
-
-
-def test_signing_smoke_signs_scratch_and_reads_matching_requirement(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = fake_tools(monkeypatch, authority=None)
-
-    lifecycle.preflight_signing_smoke()
-
-    argvs = recorded_argvs(recorded)
-    sign = next(c for c in argvs if c[:2] == ["codesign", "--sign"])
-    scratch = Path(sign[-1])
-    assert sign[:-1] == [
-        "codesign",
-        "--sign",
-        lifecycle.CERT_CN,
-        "-v",
-        "--identifier",
-        lifecycle.HELPER_BUNDLE_ID,
-        "--requirements",
-        f"=designated => {test_dr()}",
-    ]
-    read = ["codesign", "-d", "-r-", str(scratch)]
-    assert argvs.index(sign) < argvs.index(read)
-    assert not scratch.exists()
-
-
-def test_signing_smoke_refuses_a_codesign_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    fake_tools(monkeypatch, authority=None, smoke_sign_rc=1)
-
-    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
-        lifecycle.preflight_signing_smoke()
-    assert "signing smoke failed — refusing to rebuild/deploy" in str(err.value)
-    assert "errSecInternalComponent" in str(err.value)
-    assert lifecycle.SIGNING_REACH_REMEDY not in str(err.value)
-
-
-def test_signing_smoke_exit_25300_names_repair_and_present_search_list(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = fake_tools(monkeypatch, authority=None, smoke_sign_rc=-25300)
-
-    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
-        lifecycle.preflight_signing_smoke()
-    message = str(err.value)
-    assert lifecycle.SIGNING_REACH_REMEDY in message
-    assert "is present in the user keychain search list" in message
-    assert ["security", "list-keychains", "-d", "user"] in recorded_argvs(recorded)
-
-
-def test_signing_smoke_item_not_found_text_names_repair(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    fake_tools(
-        monkeypatch,
-        authority=None,
-        smoke_sign_rc=1,
-        smoke_sign_stderr=b"The specified item could not be found: errSecItemNotFound",
-    )
-
-    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
-        lifecycle.preflight_signing_smoke()
-    assert lifecycle.SIGNING_REACH_REMEDY in str(err.value)
-
-
-def test_signing_smoke_item_not_found_names_missing_search_list_path(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    fake_tools(
-        monkeypatch,
-        authority=None,
-        smoke_sign_rc=-25300,
-        list_keychains_output=b'  "/Library/Keychains/System.keychain"  \n',
-    )
-
-    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
-        lifecycle.preflight_signing_smoke()
-    message = str(err.value)
-    assert lifecycle.SIGNING_REACH_REMEDY in message
-    assert "is missing from the user keychain search list" in message
-
-
-def test_signing_smoke_item_not_found_tolerates_unreadable_search_list(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    fake_tools(
-        monkeypatch,
-        authority=None,
-        smoke_sign_rc=-25300,
-        list_keychains_rc=1,
-    )
-
-    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
-        lifecycle.preflight_signing_smoke()
-    message = str(err.value)
-    assert "signing smoke failed — refusing to rebuild/deploy" in message
-    assert lifecycle.SIGNING_REACH_REMEDY in message
-    assert "user keychain search list is unreadable" in message
-
-
-def test_signing_smoke_refuses_when_requirement_cannot_be_read(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    fake_tools(
-        monkeypatch,
-        authority=None,
-        dr_streams=(b"", b"Executable=/tmp/signing-smoke\n"),
-    )
-
-    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
-        lifecycle.preflight_signing_smoke()
-    assert "signing smoke failed — refusing to rebuild/deploy" in str(err.value)
-    assert "did not report a designated requirement" in str(err.value)
-
-
-def test_rebuild_runs_signing_smoke_after_acl_probe_before_compile(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = fake_tools(monkeypatch, authority=None)
-    smoke_call_offsets: list[int] = []
-    monkeypatch.setattr(
-        lifecycle,
-        "preflight_signing_smoke",
-        lambda: smoke_call_offsets.append(len(recorded)),
-    )
-
-    assert lifecycle.build_and_sign() == (app, True)
-    argvs = recorded_argvs(recorded)
-    acl_probe_index = next(
-        i
-        for i, cmd in enumerate(argvs)
-        if cmd[:2] == ["codesign", "--sign"] and Path(cmd[-1]).name == "acl-probe"
-    )
-    compile_index = next(i for i, cmd in enumerate(argvs) if cmd[0] == "swiftc")
-    assert smoke_call_offsets == [compile_index]
-    assert acl_probe_index < smoke_call_offsets[0]
-
-
-def test_acl_prompt_refuses_before_anything_is_built(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = fake_tools(monkeypatch, authority=None, hang=("codesign", "--sign"))
-
-    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
-        lifecycle.build_and_sign()
-    assert "SecurityAgent" in str(err.value)
-    assert "set-key-partition-list" in str(err.value)
-    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
-    assert not any(c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded))
-
-
-def test_acl_probe_nonzero_is_inconclusive_and_the_build_proceeds(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.desktop.permissions_helper import lifecycle
-
-    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = fake_tools(monkeypatch, authority=None, acl_probe_rc=1)
-
-    assert lifecycle.build_and_sign() == (app, True)
-    assert sign_command(recorded)[3] == lifecycle.CERT_CN
+    assert f"{lifecycle.TIMEOUTS_S['codesign']:.0f}s" in str(err.value)
+    assert not (app.parent / "build-state.json").exists()
 
 
 def test_hung_helper_job_is_unknown_while_build_probes_report_failure(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import subprocess
-
     from services.desktop.permissions_helper import launchd_job, lifecycle
 
     def hang(cmd: list[str], *, timeout: float, **_kwargs: object) -> None:
@@ -491,13 +296,13 @@ def test_hung_helper_job_is_unknown_while_build_probes_report_failure(
     monkeypatch.setattr(lifecycle, "run_bounded", hang)
     monkeypatch.setattr(launchd_job, "run_bounded", hang)
     monkeypatch.setattr(paths, "meiva_home", lambda: Path("/x/.meiva-demo"))
+    app = tmp_path / "MeivaPermissionsHelper.app"
+    lifecycle.app_executable(app).parent.mkdir(parents=True)
+    lifecycle.app_executable(app).write_bytes(b"\x00")
 
     with pytest.raises(subprocess.TimeoutExpired):
         lifecycle.is_loaded()
-    assert lifecycle.signed_with_stable_cert(Path("/nope.app")) is False
-    reason = lifecycle.keychain_lock_reason()
-    assert reason is not None
-    assert "timed out" in reason
+    assert lifecycle.is_valid_app(app) is False
 
 
 def test_helper_ping_settles_until_cold_start_answers() -> None:

@@ -1480,25 +1480,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/meiva-home"
           echo "MEIVA_HOME=$RUNNER_TEMP/meiva-home" >> "$GITHUB_ENV"
 
-      - name: Create isolated signing keychain
-        run: |
-          # CI-only throwaway keychain; the password protects nothing (the lane's
-          # self-signed CI cert lives in it for minutes and is deleted in teardown).
-          export MEIVA_SIGNING_KEYCHAIN="$RUNNER_TEMP/meiva-signing.keychain-db"
-          security create-keychain -p ci-meiva-signing "$MEIVA_SIGNING_KEYCHAIN"
-          security unlock-keychain -p ci-meiva-signing "$MEIVA_SIGNING_KEYCHAIN"
-          security list-keychains -d user -s "$MEIVA_SIGNING_KEYCHAIN"
-          security default-keychain -s "$MEIVA_SIGNING_KEYCHAIN"
-          echo "MEIVA_PERMISSIONS_HELPER_KEYCHAIN=$MEIVA_SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
-
       - name: Real build + ad-hoc sign + DR readback + launchd ping
-        run: |
-          # Hosted macOS runners cannot codesign with an imported identity (platform
-          # limitation, runner-images#13884 family); the module signs ad-hoc so the
-          # build/identity/partition/launchd/ping chain stays real. The password is
-          # the one the keychain step above created the throwaway keychain with.
-          uv run python -m scripts.ci.helper_smoke.signing_smoke run \
-            --keychain-password ci-meiva-signing
+        run: uv run python -m scripts.ci.helper_smoke.signing_smoke run
 
       - name: Two-section chain smoke (keeper semantics)
         run: |
@@ -1524,7 +1507,6 @@ jobs:
           # tears it down itself, this is the belt-and-braces path for a step
           # killed mid-run.
           launchctl bootout "gui/$(id -u)/com.meiva.test.two-section-chain-smoke" || true
-          security delete-keychain "$RUNNER_TEMP/meiva-signing.keychain-db" || true
 
   backend:
     # The aggregator carrying the branch-protection check name. Skipped
