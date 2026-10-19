@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import NoReturn
 from unittest.mock import MagicMock
 from uuid import UUID
 
 import pytest
 
+from base.agents.impersonation import host_transport
 from base.cluster.machine import MachineIdentity
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -54,3 +56,26 @@ def test_unresolvable_destination_exits_before_any_lease_work(
     )
     assert exit_code == 1
     assert capsys.readouterr().err == f"Impersonation relay stopped: {_MISSING_ENDPOINT}\n"
+
+
+def test_relay_reads_the_request_record_by_path(tmp_path: Path) -> None:
+    thread_id = "24b86dd0-2ddf-42fe-975c-c2770a6580e0"
+    csrf = "recorded-csrf"
+    server = host_transport.AntigravityServer(address="127.0.0.1:59901", csrf_token=csrf)
+    record = host_transport.write_antigravity_endpoint(server, thread_id=thread_id, home=tmp_path)
+    destination = relay.antigravity_destination(
+        argparse.Namespace(thread_id=thread_id, antigravity_endpoint_file=str(record))
+    )
+    assert destination() == server
+
+
+def test_relay_names_a_missing_request_record(tmp_path: Path) -> None:
+    absent = tmp_path / "absent.json"
+    destination = relay.antigravity_destination(
+        argparse.Namespace(
+            thread_id="24b86dd0-2ddf-42fe-975c-c2770a6580e0",
+            antigravity_endpoint_file=str(absent),
+        )
+    )
+    with pytest.raises(RuntimeError, match="missing at"):
+        destination()

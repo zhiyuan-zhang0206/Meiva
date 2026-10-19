@@ -1,7 +1,13 @@
-exports = ["impersonation_support.py", "test_history.py", "test_host_transport.py"]
+exports = [
+    "antigravity_endpoint_probe.py",
+    "impersonation_support.py",
+    "test_history.py",
+    "test_host_transport.py",
+]
 
 [uses]
 "test_event_log.py" = ["test_history.py"]
+"test_host_transport.py" = ["antigravity_endpoint_probe.py"]
 "test_history.py" = ["impersonation_support.py"]
 "test_impersonation_attestation.py" = ["impersonation_support.py"]
 "test_impersonation_database_attestation.py" = ["impersonation_support.py"]

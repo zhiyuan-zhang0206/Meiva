@@ -146,31 +146,44 @@ listening `127.0.0.1` TCP ports, and probes `GetUserStatus` to select the
 ConnectRPC HTTP port.
 
 `meiva impersonate request --provider antigravity` resolves `--thread-id` from the
-explicit flag or from `ANTIGRAVITY_CONVERSATION_ID` in the environment, verifies
-that `discover_antigravity_server()` succeeds, and records the cascade ID on the
-lease. At activation, the accepting runtime provisions the scoped relay
-credential and spawns `meiva impersonate relay --provider antigravity --thread-id
-<cascade_id> --token-stdin`. Each relay push calls
-`exa.language_server_pb.LanguageServerService/SendUserCascadeMessage` with
-`cascadeId`, `items=[{"text": message}]`, and `clientType=1` (queue-if-busy /
-steer semantics). When the lease ends, the host terminates the relay child and
-submits the ended-lease notice once via `antigravity_live_submit`.
+explicit flag or from `ANTIGRAVITY_CONVERSATION_ID` in the environment, resolves the
+endpoint (`resolve_antigravity_endpoint`: its own host-injected environment, else a
+recorded endpoint, else a listening `language_server`), and **records that endpoint
+on this host before it creates the lease**:
+`$MEIVA_HOME/impersonation/antigravity/<conversation-uuid>.json`, an owner-only
+directory and file (`0700`/`0600`, atomic replace), keyed by the conversation rather
+than the lease. The CSRF token stays there: never in argv, the environment, the
+database or a log line, and an error names the record path without its contents.
+Every request rewrites the record, so a restarted host replaces a token that no
+longer answers.
 
-The relay resolves that endpoint in **its own** environment before its first
-heartbeat, because the accepting runtime's readiness gate reads the heartbeat as
-proof the relay can reach the host. A destination the relay cannot resolve fails
-startup and rolls the acceptance back; it never activates a lease whose inbound
-messages could not be pushed.
+At activation, the accepting runtime provisions the scoped relay credential and
+spawns `meiva impersonate relay --provider antigravity --thread-id <cascade_id>
+--token-stdin --antigravity-endpoint-file <record>`. Each relay push calls
+`exa.language_server_pb.LanguageServerService/SendAgentMessage` with `recipient`
+(the cascade id) and `content` (queue-if-busy / steer semantics). The relay reads
+the record once, before its first heartbeat, and reuses that one destination for
+every push. When the lease ends, the host terminates the relay child and submits
+the ended-lease notice once via `antigravity_live_submit` to the same endpoint,
+read from the same record.
 
-That distinction matters for the Antigravity **CLI** (`agy`). The CLI hosts the
-same ConnectRPC service inside its own process (`127.0.0.1:<port>`, CSRF-gated),
-and it injects the endpoint and token into the commands it runs
-(`ANTIGRAVITY_LS_ADDRESS`, `ANTIGRAVITY_CSRF_TOKEN`). A takeover requested from
-inside that session therefore passes the request-time check, while a relay
-spawned by the Meiva host on the same machine sees neither the injected
-environment nor a discoverable `language_server` process. The CLI cannot host a
-takeover until the request hands the relay an endpoint it can use; task #5371
-failed exactly this way.
+The readiness gate reads the first heartbeat as proof the relay can reach the host,
+so a destination the relay cannot resolve fails startup and rolls the acceptance
+back; it never activates a lease whose inbound messages could not be pushed. The
+same holds for a replacement runtime's admission: when a restart ends a takeover,
+that admission is what closes the lease, so it submits the ended-lease notice once
+from the record — the in-memory relay child does not survive the restart, and no
+retry ledger exists.
+
+That separation matters for the Antigravity **CLI** (`agy`). The CLI hosts the same
+ConnectRPC service inside its own process (`127.0.0.1:<port>`, CSRF-gated), and it
+injects the endpoint and token into the commands it runs
+(`ANTIGRAVITY_LS_ADDRESS`, `ANTIGRAVITY_CSRF_TOKEN`). Its own process environment
+carries neither, its argv carries no `--csrf_token`, and it writes no port or token
+file — so only a command it runs can learn the endpoint, and every later host-side
+reader (the relay, the ended-lease notice) uses the record that command wrote. A
+takeover with no record can only target a separately running `language_server`, and
+fails loudly with the record path in the reason (tasks #5371, #5432).
 
 ## Claude Code Monitor
 

@@ -35,9 +35,13 @@ renewal reminders and records `terminated: agent was terminated` on the session.
 When the host sees its Codex or Antigravity relay's lease ended, it submits one lease-scoped
 notice to the immutable recorded endpoint/thread, even if a new lease has
 replaced it. No inbox authority is reopened. Native restoration never waits for
-notice delivery. The submission is not retried and nothing records its outcome; a
-failure raises `impersonation_terminal_notice_failed`, and a lease that ended while
-no host held its relay child, or after a termination, gets no notice. Only first
+notice delivery. A replacement runtime's admission is the second submission site when it closes the
+lease it inherited: that admission is the host that ended the takeover. The
+submission is not retried and nothing records its outcome; a failure raises
+`impersonation_terminal_notice_failed`, and a lease that ended with no host-held
+relay child and no replacement admission, or after a termination, gets no notice.
+An Antigravity destination is read from the endpoint record its request wrote on
+this host; a missing record is named in the failure reason. Only first
 open-to-terminal transitions snapshot a notice; existing ended history is not
 backfilled. A restart ends the lease.
 The native pair carries `impersonation_termination_notice: true`; the watchdog

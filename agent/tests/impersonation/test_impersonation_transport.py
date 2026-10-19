@@ -238,3 +238,26 @@ async def test_ended_lease_notice_is_submitted_once_and_a_failure_is_reported_no
     ]
     assert [failure["error"] for failure in failures] == ([] if error is None else [error])
     assert 42 not in gate_ctx.relays.children
+
+
+def test_relay_argv_carries_the_record_path_and_no_credential(tmp_path: Path) -> None:
+    record = str(tmp_path / "conversation.json")
+    argv = impersonation_process.relay_argv(
+        42,
+        "lease-1",
+        "24b86dd0-2ddf-42fe-975c-c2770a6580e0",
+        None,
+        provider="antigravity",
+        antigravity_endpoint_file=record,
+    )
+    assert argv[-2:] == ["--antigravity-endpoint-file", record]
+    assert "--token-stdin" in argv
+    assert "--codex-remote" not in argv
+
+
+def test_relay_argv_keeps_the_codex_shape_without_the_antigravity_record() -> None:
+    argv = impersonation_process.relay_argv(
+        42, "lease-1", "thread-1", "unix:///tmp/codex.sock", provider="codex"
+    )
+    assert argv[-2:] == ["--codex-remote", "unix:///tmp/codex.sock"]
+    assert "--antigravity-endpoint-file" not in argv

@@ -10,9 +10,11 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import cast
 from uuid import UUID
 
 from base.agents.impersonation.host_transport import (
+    AntigravityServer,
     antigravity_live_submit,
     discover_antigravity_server,
     live_submit,
@@ -50,8 +52,13 @@ def emit_dsh(message: str) -> None:
 # meiva:note
 # Bind the provider's destination before the relay opens its inbox. Codex requires
 # live Steer delivery: refusal or transport failure raises without queue fallback,
-# and controller-session destinations reject Codex options. ``discover`` is the
-# Antigravity endpoint lookup; a test supplies its own instead of patching.
+# and controller-session destinations reject Codex options. The Antigravity
+# destination resolves once and every push reuses it: a per-message lookup is a
+# second chance to fail after the first heartbeat promised delivery, and the
+# relay's projected environment cannot discover an Antigravity CLI at all.
+# ``discover`` is the endpoint lookup — the host's live environment by default,
+# the request's recorded endpoint when the relay is spawned outside that
+# environment; a test supplies its own instead of patching.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 def resolve_adapter(
     provider: str,
@@ -78,14 +85,24 @@ def resolve_adapter(
         if thread_id is None:
             raise ValueError("antigravity relay requires --thread-id for an existing conversation")
         target = UUID(thread_id)
+        resolved: AntigravityServer | None = None
+
+        # meiva:note
+        # One destination for the whole relay: re-resolving per message is a second
+        # chance to fail after the first heartbeat already promised delivery.
+        def destination() -> AntigravityServer:
+            nonlocal resolved
+            if resolved is None:
+                resolved = cast("AntigravityServer", discover())
+            return resolved
 
         def send_antigravity(message: str) -> None:
-            reason = antigravity_live_submit(str(target), message)
+            reason = antigravity_live_submit(str(target), message, server=destination())
             if reason is not None:
                 raise RuntimeError(f"Antigravity SendAgentMessage delivery failed: {reason}")
 
         def require_language_server() -> None:
-            discover()
+            destination()
 
         return RelayAdapter(send_antigravity, notify_terminal=False, ready=require_language_server)
     if provider in ("claude", "dsh"):

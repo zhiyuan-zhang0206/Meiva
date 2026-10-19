@@ -208,8 +208,9 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
     """`impersonate request` — create the lease, then hand its relay the credential."""
     from base.agents.impersonation import sessions
     from base.agents.impersonation.host_transport import (
-        discover_antigravity_server,
         require_control_endpoint,
+        resolve_antigravity_endpoint,
+        write_antigravity_endpoint,
     )
     from base.config import Settings, settings
     from base.config.service_read import ConfigAuthority
@@ -231,7 +232,14 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
                 "the antigravity relay needs --thread-id or ANTIGRAVITY_CONVERSATION_ID in the environment"
             )
         thread_id = str(UUID(thread_id))
-        discover_antigravity_server()
+        # meiva:note
+        # Recorded before the lease exists: the accepting runtime and the ended-lease
+        # notice both run outside this process's environment, and the Antigravity CLI
+        # injects its endpoint only into the commands it runs, so this request is the
+        # one place that can learn it. The record is owner-only; its CSRF token never
+        # reaches argv, the environment, the database or a log line.
+        # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+        write_antigravity_endpoint(resolve_antigravity_endpoint(thread_id), thread_id=thread_id)
     response = sessions.request(
         database_factory(),
         EventBus.from_settings(),

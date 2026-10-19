@@ -409,6 +409,16 @@ async def admit_hosted_runtime(
         return None
     for event in recorded:
         telemetry.emit_prepared(event)
+    if ended_lease is not None:
+        # meiva:note
+        # This admission is what ended the lease, so this process is the host that
+        # owes the external conversation its one ended-lease notice: the in-memory
+        # relay child registry does not survive a restart, and there is no retry
+        # ledger, so without this submission the notice is never attempted.
+        # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+        from base.agents.impersonation.terminal_notices import deliver_ended_notice
+
+        await asyncio.to_thread(deliver_ended_notice, db, agent_id, ended_lease)
     logger.info(
         "hosted runtime admitted", agent_id=agent_id, generation=str(row[0]), owner=str(owner)
     )
