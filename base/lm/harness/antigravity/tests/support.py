@@ -89,7 +89,8 @@ class Harness:
     def argv_seen(self) -> list[str]:
         if not self.argv.exists():
             return []
-        return json.loads(self.argv.read_text(encoding="utf-8").splitlines()[0])
+        lines = [line for line in self.argv.read_text(encoding="utf-8").splitlines() if line]
+        return json.loads(lines[0]) if lines else []
 
     async def stop(self) -> None:
         await self.session.close(reason="test done")
