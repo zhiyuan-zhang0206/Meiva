@@ -7,10 +7,12 @@ import { useTranslations } from "next-intl";
 import { buttonVariants } from "@/components/ui/button";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 
 import { axisTicks, zoomView, type AxisMap, type Viewport } from "../model/timeline-model";
 
 const BUTTON_ZOOM = 0.5;
+const AXIS_TICK_TARGET = 6;
 
 export function RunTimelineAxis({
   view,
@@ -25,7 +27,8 @@ export function RunTimelineAxis({
   axis: AxisMap;
 }) {
   const t = useTranslations("runTimeline");
-  const ticks = axisTicks(view);
+  const { clockFormat } = useTimeFormat();
+  const ticks = axisTicks(view, AXIS_TICK_TARGET, clockFormat);
   const zoomButton = (factor: number) => onView(zoomView(axis, view, base, 0.5, factor));
   const atBase = view.from <= base.from && view.to >= base.to;
   return (

@@ -49,7 +49,8 @@ import type {
   ShellInfo,
   SystemEvent,
 } from "@/lib/contracts/types";
-import { formatAbsolute, formatRelative, formatUpcoming, formatUptime } from "@/lib/format/time";
+import { formatRelative, formatUptime } from "@/lib/format/time";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import { useEventStream } from "@/lib/transport/useEventStream";
 import { cn } from "@/lib/format/utils";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
@@ -714,7 +715,8 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   const t = useTranslations("inspector");
   const tStatus = useTranslations("agentRow");
   const now = useNow(1_000);
-  const next = nextHeartbeatCell(heartbeat, { pending: t("pending"), due: t("due") }, now);
+  const { formatAbsolute, formatUpcoming } = useTimeFormat();
+  const next = nextHeartbeatCell(heartbeat, { pending: t("pending"), due: t("due") }, now, formatUpcoming);
   const lastPause = heartbeat.last_pause;
   const impersonated =
     inspect.status !== "terminated" &&
@@ -752,6 +754,7 @@ function nextHeartbeatCell(
   hb: HeartbeatInfo,
   labels: { pending: string; due: string },
   now: Date,
+  formatUpcoming: (iso: string, now: Date) => string,
 ): string {
   if (hb.paused_until) return formatUpcoming(hb.paused_until, now);
   if (hb.heartbeat_pending) return labels.pending;

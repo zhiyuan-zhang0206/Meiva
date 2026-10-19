@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { Metric, Section } from "@/components/inspector/inspector-section";
 import { approx, formatTokensCompact } from "@/lib/format/format-number";
 import { FLEX } from "@/lib/layout/layout";
-import { formatAbsolute } from "@/lib/format/time";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import type { RunTimelineNode, RunTimelineUnit, RunTimelineUsage } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 
@@ -80,6 +80,7 @@ function Details({
   usage?: RunTimelineUsage | null;
 }) {
   const t = useTranslations("runTimeline");
+  const { formatAbsolute } = useTimeFormat();
   return (
     <Section icon={<Info className="size-3" />} title={t("detailsHeading")}>
       <div className="grid grid-cols-2 gap-1" data-testid="run-timeline-details">

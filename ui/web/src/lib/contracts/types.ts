@@ -838,6 +838,8 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.show_activity_line": false,
   "display.show_agent_status": false,
   "display.show_timestamp_weekday": true,
+  "display.clock_format": "24h",
+  "display.show_timezone": false,
   // Render agent reasoning content as markdown in the timeline; off shows raw text.
   "display.render_reasoning_markdown": true,
   // Width tier of the composer's collapsed context-usage bar (ContextMeter).

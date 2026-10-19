@@ -1,32 +1,30 @@
 "use client";
 
-import { formatAbsolute } from "@/lib/format/time";
+import { formatAbsolute, type ClockFormat } from "@/lib/format/time";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 
-// Timestamp on agent_reasoning / agent_chat / agent_code headers.
-// `[YYYY-MM-DD HH:MM:SS TZ]`, e.g. `[2026-05-06 16:56:29 PDT]`. When
-// `showWeekday` is true, the weekday abbreviated name is included between
-// date and time: `[YYYY-MM-DD DayOfWeek HH:MM:SS TZ]`,
-// e.g. `[2026-05-06 Tue 16:56:29 PDT]`.
-//
-// Uses the viewer's local timezone (Intl default); TZ abbrev follows the
-// locale. May disagree with backend `settings.timezone` on cross-tz
-// deployments — accepted as the trade-off for not needing server-side
-// tz config in the frontend.
-//
-// The shape mirrors the agent-facing stamp (`base.config.format_timestamp`)
-// but keeps the trailing timezone, which the backend dropped: the agent is
-// told its cluster timezone once, in a standing context note, and every
-// timestamp it reads is in that one timezone. A viewer has no such
-// declaration — the timezone here is whatever browser they opened — so the
-// label has to ride along.
+// meiva:note
+// Timestamp on agent_reasoning / agent_chat / agent_code headers: `[YYYY-MM-DD HH:MM:SS]`, with the abbreviated weekday inserted when showWeekday is set, `2:53:29 AM` on the 12-hour clock, and the zone name (`[2026-05-06 16:56:29 PDT]`) only when Show timezone is on. It renders the viewer's local timezone (Intl default) and may disagree with backend `settings.timezone` on cross-tz deployments — the accepted trade-off for needing no server-side tz config. The shape mirrors the agent-facing stamp but can carry the trailing zone the backend dropped: the agent is told its cluster timezone once and every stamp it reads is in it, while a viewer has no such declaration, so the label is offered as a preference instead of always riding along.
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 
-export function formatItemTime(iso: string, showWeekday = false): string {
-  const formatted = formatAbsolute(iso, { weekday: showWeekday });
+export interface FormatItemTimeOptions {
+  showWeekday?: boolean;
+  clockFormat?: ClockFormat;
+  showTimeZone?: boolean;
+}
+
+export function formatItemTime(iso: string, opts: FormatItemTimeOptions = {}): string {
+  const formatted = formatAbsolute(iso, {
+    weekday: opts.showWeekday,
+    clockFormat: opts.clockFormat,
+    showTimeZone: opts.showTimeZone,
+  });
   return formatted ? `[${formatted}]` : "";
 }
 
 export function ItemTimestamp({ iso, showWeekday = false }: { iso: string; showWeekday?: boolean }) {
-  const time = formatItemTime(iso, showWeekday);
+  const { clockFormat, showTimeZone } = useTimeFormat();
+  const time = formatItemTime(iso, { showWeekday, clockFormat, showTimeZone });
   if (!time) return null;
   return (
     <span className="ml-2 text-[10px] text-muted-foreground/60 font-mono tabular-nums">

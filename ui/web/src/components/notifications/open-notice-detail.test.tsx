@@ -1,9 +1,6 @@
 // OpenNoticeDetail — the shared open-notice reply surface used by the inspector
 // (and, after the queue-merge cut, the fleet queue). Verifies the resolve calls
 // per notice kind, the empty-reply guard, the 409 message, and onResolved.
-//
-// api.resolveNotice is the only network dependency; it is fully mocked, so no
-// gateway is touched. The component uses no react-query, so it renders bare.
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,12 +9,14 @@ import { OpenNoticeDetail } from "./open-notice-detail";
 import { formatAbsolute, formatRelative } from "@/lib/format/time";
 import type { OpenNotice } from "@/lib/contracts/types";
 
-// vi.hoisted so the fn exists before the hoisted vi.mock factory runs.
 const { resolveNotice } = vi.hoisted(() => ({
   resolveNotice:
     vi.fn<(agentId: number, noticeId: number, body: unknown, key?: string) => Promise<{ status: string }>>(),
 }));
-vi.mock("@/lib/transport/api", () => ({ api: { resolveNotice } }));
+vi.mock("@/lib/transport/api", () => ({
+  api: { resolveNotice },
+}));
+vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
 
 function ntc(overrides: Partial<OpenNotice> = {}): OpenNotice {
   return {

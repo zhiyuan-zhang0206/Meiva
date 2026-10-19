@@ -28,7 +28,8 @@ import { useDisplayLimit } from "@/lib/format/display-limits";
 import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
 import { useNow } from "@/lib/format/use-now";
 import { useUserSettings } from "@/lib/state/use-user-settings";
-import { formatShort, formatUptime } from "@/lib/format/time";
+import { formatUptime } from "@/lib/format/time";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
@@ -98,6 +99,7 @@ export default function ShellMonitorPage() {
   const [lines, setLines] = useState(configuredDefaultLines);
   const [inputValue, setInputValue] = useState(String(configuredDefaultLines));
   const [theme, toggleTheme] = useTerminalTheme();
+  const { formatShort } = useTimeFormat();
 
   // Adopt the configured default once /api/config resolves, unless the
   // user has already committed an explicit window.

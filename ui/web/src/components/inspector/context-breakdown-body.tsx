@@ -8,7 +8,7 @@ import { useState } from "react";
 import { api } from "@/lib/transport/api";
 import { categoryColor } from "@/lib/context-colors";
 import { errMsg } from "@/lib/contracts/errors";
-import { formatShort } from "@/lib/format/time";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import { approx, formatTokens } from "@/lib/format/format-number";
 import type { ContextBreakdownResponse } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
@@ -58,6 +58,7 @@ export function ContextBreakdownCard({
   categoryHighlight?: CategoryHighlight;
 }) {
   const t = useTranslations("contextBreakdown");
+  const { formatShort } = useTimeFormat();
   const pointed = at !== undefined;
   const point = useQuery({
     queryKey: ["run-timeline-context", agentId, at, snapshot] as const,

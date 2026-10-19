@@ -37,6 +37,8 @@ describe("useUserSettings", () => {
 
     expect(result.current.settings["display.show_timestamp_weekday"]).toBe(true);
     expect(result.current.settings["display.time_mode"]).toBe("last_active");
+    expect(result.current.settings["display.clock_format"]).toBe("24h");
+    expect(result.current.settings["display.show_timezone"]).toBe(false);
   });
 
   it("merges server values over defaults", async () => {

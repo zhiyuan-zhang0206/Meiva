@@ -312,7 +312,7 @@ describe("CardHeader", () => {
     const { getByText, getByTestId } = renderWithQuery(
       <CardHeader item={event} config={messageCardConfig(event)!} expanded={false} onToggle={noop} />,
     );
-    const timestamp = getByText(formatItemTime(event.created_at!, true));
+    const timestamp = getByText(formatItemTime(event.created_at!, { showWeekday: true }));
     // happy-dom does not evaluate responsive Tailwind CSS. Guard the hiding
     // class responsible for the real narrow-panel regression explicitly.
     expect(timestamp.parentElement?.classList.contains("hidden")).toBe(false);
@@ -329,7 +329,7 @@ describe("CardHeader", () => {
         <CardHeader item={undated} config={messageCardConfig(undated)!} expanded={false} onToggle={noop} />
       </>,
     );
-    expect(container.textContent).not.toContain(formatItemTime(standing.created_at!, true));
+    expect(container.textContent).not.toContain(formatItemTime(standing.created_at!, { showWeekday: true }));
     expect(container.querySelectorAll(".tabular-nums")).toHaveLength(0);
   });
 

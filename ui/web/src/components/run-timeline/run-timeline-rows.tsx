@@ -53,6 +53,7 @@ import { paintBars, paintNodes, paintUnits, type PaintState, type RowDeco, type 
 import { RunTimelineLegend } from "./run-timeline-legend";
 import { RowShell } from "./run-timeline-row-shell";
 import { readoutText } from "./model/run-timeline-readout";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 
 const DEFAULT_TRACK_PX = 1000;
 
@@ -129,6 +130,7 @@ export function RunTimelineRows({
   const linkKey = linkKeys.length === 1 ? linkKeys[0] : null;
   const onSelectLink = (key: string) => onSelectLinks([key]);
   const t = useTranslations("runTimeline");
+  const { clockFormat } = useTimeFormat();
   const linkLabels = useLinkKindLabels();
   const [hover, setHover] = useState<AgentSelection | null>(null);
 
@@ -427,7 +429,7 @@ export function RunTimelineRows({
   const describe = (target: AgentSelection | null) => {
     const owner = target === null ? undefined : byId.get(target.agent);
     if (target === null || owner === undefined) return null;
-    const line = readoutText(target.selection, { data: owner.data, t, unitLabel, sourceLabel });
+    const line = readoutText(target.selection, { data: owner.data, t, unitLabel, sourceLabel, clockFormat });
     return line !== null && agents.length > 1 ? t("readoutAgent", { id: target.agent, line }) : line;
   };
   const paintStateOf = (agent: ViewAgent): PaintState => {

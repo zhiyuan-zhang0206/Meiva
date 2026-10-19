@@ -12,7 +12,11 @@ import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas
 import type { Selection } from "./model/timeline-model";
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getAgentRoster: vi.fn(() => Promise.resolve({ agents: [], ancestors: [] })), getAgent: vi.fn() },
+  api: {
+    getAgentRoster: vi.fn(() => Promise.resolve({ agents: [], ancestors: [] })),
+    getAgent: vi.fn(),
+    getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
+  },
 }));
 
 function render(ui: React.ReactElement) {

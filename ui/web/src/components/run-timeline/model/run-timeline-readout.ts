@@ -3,7 +3,7 @@
 import type { useTranslations } from "next-intl";
 
 import { approx, formatTokensCompact } from "@/lib/format/format-number";
-import { formatShort } from "@/lib/format/time";
+import { formatShort, type ClockFormat } from "@/lib/format/time";
 import type {
   RunTimelineNode,
   RunTimelineResponse,
@@ -16,11 +16,11 @@ const PREVIEW_CHARS = 80;
 
 type Translate = ReturnType<typeof useTranslations<"runTimeline">>;
 
-function nodeReadout(t: Translate, node: RunTimelineNode): string {
+function nodeReadout(t: Translate, node: RunTimelineNode, clockFormat: ClockFormat): string {
   const line = t("readoutNode", {
     level: node.level,
-    from: formatShort(node.start),
-    to: formatShort(node.end),
+    from: formatShort(node.start, { clockFormat }),
+    to: formatShort(node.end, { clockFormat }),
     count: node.span_end - node.span_start + 1,
     summary: firstLine(node.summary, PREVIEW_CHARS),
     calls: node.usage.calls,
@@ -40,13 +40,14 @@ export function readoutText(
     t: Translate;
     unitLabel: (unit: RunTimelineUnit) => string;
     sourceLabel: (source: string) => string;
+    clockFormat: ClockFormat;
   },
 ): string | null {
   const { data, t } = ctx;
   if (target === null) return null;
   if (target.kind === "node") {
     const node = data.nodes.find((candidate) => candidate.id === target.id);
-    return node === undefined ? null : nodeReadout(t, node);
+    return node === undefined ? null : nodeReadout(t, node, ctx.clockFormat);
   }
   const unit = data.units.find(
     (candidate) => candidate.i0 === target.i0 && candidate.i1 === target.i1 && candidate.kind === target.unitKind,
@@ -55,7 +56,7 @@ export function readoutText(
   const line = t("readoutUnit", {
     kind: ctx.unitLabel(unit),
     count: unit.i1 - unit.i0 + 1,
-    time: formatShort(unit.start),
+    time: formatShort(unit.start, { clockFormat: ctx.clockFormat }),
     source: unit.source === null ? t("readoutNoSource") : ctx.sourceLabel(unit.source),
     preview: firstLine(unit.preview, PREVIEW_CHARS),
   });
