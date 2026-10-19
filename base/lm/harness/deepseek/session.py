@@ -52,6 +52,7 @@ from base.lm.harness.process import (
     wait_gone,
 )
 from base.lm.harness.registry import SessionRecord, SessionRegistry
+from base.lm.pricing import PriceBook, quote
 
 # meiva:note
 # One session is one ACP connection with a single in-flight prompt, because the
@@ -95,8 +96,10 @@ class DeepSeekSession:
         probe: ChildProbe | None = None,
         connect: Any | None = None,
         kill: Callable[[int, int], None] | None = None,
+        prices: PriceBook | None = None,
     ) -> None:
         self.config = config
+        self._prices = prices
         self.agent_id = agent_id
         self._kill = kill or os.kill
         self._environ = dict(environ)
@@ -491,7 +494,8 @@ class DeepSeekSession:
         fields = parse_prompt_result(result)
         text = "\n".join(ticket.parts).strip()
         usage, measured = await self._turn_usage()
-        self._totals = self._totals.with_turn(usage, measured=measured)
+        cost = self._turn_cost(usage) if measured else None
+        self._totals = self._totals.with_turn(usage, measured=measured, cost=cost)
         outcome = TurnOutcome(
             turn_id=ticket.turn_id,
             text=text,
@@ -500,7 +504,7 @@ class DeepSeekSession:
             interrupted=ticket.interrupt_requested or fields.interrupted,
             stop_reason=fields.stop_reason,
             usage=usage,
-            cost_usd=None,
+            cost_usd=cost,
             permission_denials=tuple(self._permission_denials),
             per_turn_usage=measured,
         )
@@ -526,8 +530,8 @@ class DeepSeekSession:
                     (time.monotonic() - (ticket.started_at or time.monotonic())) * 1000
                 ),
                 usage=usage,
-                cost_usd=None,
-                cumulative_cost_usd=None,
+                cost_usd=cost,
+                cumulative_cost_usd=self._totals.cost_usd if self._totals.cost_known else None,
                 permission_denials=outcome.permission_denials,
             )
         )
@@ -555,6 +559,19 @@ class DeepSeekSession:
             ),
             True,
         )
+
+    def _turn_cost(self, usage: Usage) -> float | None:
+        model = self.config.model
+        if self._prices is None or model is None:
+            return None
+        quoted = quote(
+            model,
+            usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens,
+            usage.output_tokens,
+            usage.cache_read_input_tokens,
+            prices=self._prices,
+        )
+        return None if quoted is None else quoted.cost_usd
 
     def _resume_from_registry(self) -> str | None:
         if self._registry is None or self.agent_id is None:

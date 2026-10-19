@@ -24,6 +24,7 @@ from base.lm.harness.events import (
     TextDelta,
     TurnCompleted,
 )
+from base.lm.pricing import PriceBook, load_archive
 
 
 def permission_request(
@@ -156,6 +157,39 @@ async def test_per_turn_usage_comes_from_the_session_log(tmp_path: Path) -> None
         assert harness.session.totals.turns == 1
         [completed] = harness.of(TurnCompleted)
         assert completed.usage.input_tokens == 120
+    finally:
+        await harness.stop()
+
+
+async def test_a_priced_session_reports_turn_and_cumulative_cost(tmp_path: Path) -> None:
+    prices = PriceBook(load_archive(), {})
+    harness = await start(tmp_path, prices=prices)
+    try:
+        usage_log(tmp_path, "session-1", turn=1, text=1000, out=500)
+        first = await harness.session.submit("hello").outcome()
+        assert first.cost_usd is not None and first.cost_usd > 0
+        [completed] = harness.of(TurnCompleted)
+        assert completed.cost_usd == first.cost_usd
+        assert completed.cumulative_cost_usd == first.cost_usd
+        usage_log(tmp_path, "session-1", turn=2, text=2000, out=1000)
+        second = await harness.session.submit("again").outcome()
+        assert second.cost_usd is not None and second.cost_usd > first.cost_usd
+        assert harness.session.totals.cost_usd == first.cost_usd + second.cost_usd
+        assert harness.session.totals.cost_known is True
+    finally:
+        await harness.stop()
+
+
+async def test_without_a_price_book_the_cost_is_unknown(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
+    try:
+        usage_log(tmp_path, "session-1", turn=1, text=1000, out=500)
+        outcome = await harness.session.submit("hello").outcome()
+        assert outcome.per_turn_usage is True
+        assert outcome.cost_usd is None
+        [completed] = harness.of(TurnCompleted)
+        assert completed.cumulative_cost_usd is None
+        assert harness.session.totals.cost_known is False
     finally:
         await harness.stop()
 
