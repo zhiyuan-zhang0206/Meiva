@@ -143,6 +143,28 @@ async def test_cli_send_as_external_agent_reaches_the_agent_as_that_agent(
     )
 
 
+async def test_a_system_sourced_chat_reaches_the_agent_as_a_system_note(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    # meiva:note
+    # The upload delivery writes its file list as `system:upload`. The agent reads it enclosed
+    # in the system-note tags — framework machinery, not the human speaking — and it is still a
+    # chat inbound the claim delivers.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    incarnation = await _admit(db_conn, aops_pool, database)
+    notice = "Uploaded files on m:\n- a.png: /tmp/a.png"
+    with authenticated_gateway(monkeypatch, machine=machine_identity):
+        assert cmd_agents_send(incarnation.agent_id, notice, "system:upload") == 0
+    source, content, _ = await _claimed_text(aops_pool, incarnation)
+    assert source == "system:upload"
+    assert content == f"<system_note>\n{notice}\n</system_note>"
+
+
 async def test_external_agent_message_is_listed_with_its_source_for_the_timeline(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,

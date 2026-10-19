@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound
 from agent.messages import inbound_message
-from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head
+from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head, inbound_tail
 from base.agents.messages.inbound_images import parse_upload_url
 from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.security_finding import SecurityFindingEntry
@@ -49,12 +49,12 @@ def build_chat_inbound(
     a "[image unavailable]" text note rather than crashing the claim — the miss
     is logged, the rest of the message still delivers.
     """
-    # Inbound chat is untrusted (a user message, or a peer agent that may itself
-    # be injected), so its text is scanned before entering the conversation. The
-    # scan runs on the *raw* content before envelope wrapping — the envelope
-    # framing is trusted text (e.g. `[system]` prefix added by inbound_head for
-    # system-sourced messages) and must not trip the scan itself; image blocks
-    # are binary and not scanned.
+    # meiva:note
+    # Inbound chat is untrusted (a user, or a peer agent that may itself be injected), so
+    # its text is scanned before entering the conversation. The scan runs on the raw
+    # content before envelope wrapping: the framing around it is trusted text and must not
+    # trip the scan itself, and image blocks are binary.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
     scan_src = f"inbound.chat:{item.source}"
     raw_blocks = item.payload.get("content_blocks") if item.payload else None
     if not isinstance(raw_blocks, list):
@@ -62,7 +62,7 @@ def build_chat_inbound(
         finding = scan_inbound_content(raw, source=scan_src, enabled=read_security_enabled())
         head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
         message = inbound_message(
-            content=head + raw,
+            content=head + raw + inbound_tail(item.source),
             source=item.source,
             inbound_id=item.id,
             body_start=len(head),
@@ -75,7 +75,9 @@ def build_chat_inbound(
     raw_text = expand_command(text)
     finding = scan_inbound_content(raw_text, source=scan_src, enabled=read_security_enabled())
     head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
-    content: list[dict[str, Any]] = [{"type": "text", "text": head + raw_text}]
+    content: list[dict[str, Any]] = [
+        {"type": "text", "text": head + raw_text + inbound_tail(item.source)}
+    ]
     image_urls: list[str] = []
     for b in blocks:
         if b.get("type") != "image_url":

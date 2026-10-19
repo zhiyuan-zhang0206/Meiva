@@ -69,7 +69,16 @@ def test_blocks_interleave_each_caption_line_with_its_media(
     )
 
     assert pack is not None
+    # meiva:note
+    # The leading notice is one complete system note in its own block; the caption lines
+    # follow it outside the note, each directly before its media block. The tag pair never
+    # adds or moves a block.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
     assert [b.get("type") for b in pack.blocks] == ["text", "text", "image_url", "text"]
+    assert pack.blocks[0] == {
+        "type": "text",
+        "text": "<system_note>\nFiles attached during this turn:\n</system_note>",
+    }
     line1 = pack.blocks[1]["text"]
     assert isinstance(line1, str) and line1.startswith("- [1] example.png (image/png,")
     assert isinstance(line1, str) and '— "shot"' in line1
@@ -362,7 +371,12 @@ def test_empty_and_all_skipped_entries_preserve_the_text_notice(
     pack = pack_attachments("glm-5.3", [_entry(image_path)], catalog=model_catalog)
 
     assert pack is not None
+    # meiva:note
+    # The notice block keeps its complete system note; the skipped entry's caption follows.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
     assert [b.get("type") for b in pack.blocks] == ["text", "text"]
+    assert pack.text.startswith("<system_note>\nFiles attached during this turn:")
+    assert pack.text.endswith("cannot receive image")
     assert pack.delivered == []
     assert pack.skipped == [(str(image_path.resolve()), "your model cannot receive image")]
     assert "not delivered: your model cannot receive image" in pack.text

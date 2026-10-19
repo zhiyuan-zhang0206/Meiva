@@ -39,7 +39,7 @@ from meiva.boot import process_clients
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}
 _FIRST = SecurityFindingEntry(source="web.fetch", triggers=["ignore previous instructions"])
-_SECOND = SecurityFindingEntry(source="context-file:/repo/AGENTS.md", triggers=["[system]"])
+_SECOND = SecurityFindingEntry(source="context-file:/repo/AGENTS.md", triggers=["<system_note>"])
 
 
 @pytest.fixture(autouse=True)

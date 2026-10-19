@@ -84,11 +84,15 @@ def get_injected_context_notes(state_update: dict[str, object]) -> list[dict[str
             kw.get("meiva_msg_type") == MeivaMsgType.SYSTEM_NOTE.value
             and kw.get("meiva_note_tag") == NoteTag.CONTEXT.value
         ):
-            # system_note_message prepends "[system] " to the content
+            # meiva:note
+            # system_note_message wraps the content in the system-note envelope.
+            # meiva:link agent/messages/docs/message-format.meiva.okf.md
             content = msg.content  # pyright: ignore[reportUnknownMemberType]
             assert isinstance(content, str)
-            assert content.startswith("[system] ")
-            head, _, body = content[len("[system] ") :].partition("\n\n")
+            assert content.startswith("<system_note>\n") and content.endswith("\n</system_note>")
+            head, _, body = content[len("<system_note>\n") : -len("\n</system_note>")].partition(
+                "\n\n"
+            )
             notes.append({"prefix": head, "content": body})
     return notes
 

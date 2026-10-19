@@ -143,7 +143,9 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     assert spec is not None and spec.loader is not None
     reader = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(reader)
-    expected = "Native core and plugin rules\n\n[system] Configured skill rules"
+    expected = (
+        "Native core and plugin rules\n\n<system_note>\nConfigured skill rules\n</system_note>"
+    )
     assert reader.read_instructions(lease["session_id"], agent_id) == expected
     with impersonation.attach(lease["id"]):
         assert agent_id == meiva.self.AGENT_ID

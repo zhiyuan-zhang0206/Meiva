@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.messages import COMPACT_SUMMARY_HEADER
 from base.agents.history.closing_request import ClosingRequest
+from base.lm.system_note import wrap_system_note
 
 
 class SummaryText(str):
@@ -46,6 +47,10 @@ def closing_request_of(response: AIMessage, instruction: HumanMessage) -> Closin
     )
 
 
+# meiva:note
+# The whole summary travels as one system note, so the model reads where it ends; the
+# header inside it stays the classifier's one invariant.
+# meiva:link agent/messages/docs/message-format.meiva.okf.md
 def compose_summary_message(summary: str) -> str:
     """The header + the summary, as the single text injected on the agent's
     behalf when its context is replaced. Shared by every compact path so the
@@ -53,4 +58,4 @@ def compose_summary_message(summary: str) -> str:
     The header itself (with the rationale for its wording) lives in
     `agent/messages/__init__.py:COMPACT_SUMMARY_HEADER` — the read-side classifier
     (base/agents/history/context_breakdown.py) keys on it too."""
-    return f"{COMPACT_SUMMARY_HEADER}\n\n{summary}"
+    return wrap_system_note(f"{COMPACT_SUMMARY_HEADER}\n\n{summary}")
