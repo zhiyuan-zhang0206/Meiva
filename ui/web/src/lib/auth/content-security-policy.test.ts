@@ -74,6 +74,18 @@ describe("buildContentSecurityPolicy", () => {
     expect(directive(policy, "script-src")).not.toContain("'unsafe-inline'");
   });
 
+  it("allows object-URL image previews without widening other sources", () => {
+    const policy = buildContentSecurityPolicy({
+      nonce: "request-nonce",
+      gatewayOrigin: "https://gateway.example.test:8443",
+      isDevelopment: false,
+    });
+
+    expect(directive(policy, "img-src")).toBe("img-src 'self' data: blob: http: https:");
+    expect(directive(policy, "script-src")).not.toContain("blob:");
+    expect(directive(policy, "connect-src")).not.toContain("blob:");
+  });
+
   it("limits connections to the gateway HTTP and WebSocket origins", () => {
     const policy = buildContentSecurityPolicy({
       nonce: "request-nonce",

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Browser origin and content security policy
-description: Forwarded browser origins and the production script, style and connection directives.
+description: Forwarded browser origins and the production script, style, image and connection directives.
 tags: [frontend, security, contracts]
 ---
 
@@ -19,3 +19,8 @@ React's dynamic layouts use style attributes. The attribute directive does not
 relax the production directive for style elements. The sandboxed reader can
 display shared HTTP(S) links through frame-src. Development adds the allowances
 tested by the same suite; they are not production guarantees.
+
+A pending attachment previews from an object URL, and the browser matches that
+`blob:` scheme against img-src rather than treating it as the page's own origin.
+The image directive therefore names `blob:` beside same-origin, `data:` and HTTP(S)
+sources; without it every attachment renders as a broken thumbnail.

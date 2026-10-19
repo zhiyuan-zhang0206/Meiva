@@ -1486,6 +1486,22 @@ describe("Composer image attachments", () => {
     expect(screen.getByTestId("composer-attachments")).toBeTruthy();
   });
 
+  it("revokes the preview object URL when the composer unmounts", async () => {
+    const revoke = vi.fn();
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: revoke,
+    });
+    const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
+    const { unmount } = render(<Composer {...baseProps} mode="idle" onAttachImage={onAttachImage} />);
+    const ta = screen.getByTestId("composer-input");
+    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
+    await waitFor(() => expect(screen.getByTestId("composer-attachments")).toBeTruthy());
+    unmount();
+    expect(revoke).toHaveBeenCalledWith("blob:preview");
+  });
+
   it("sends text + the resolved image url as onSend's second arg", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
