@@ -1,9 +1,10 @@
-exports = ["bringup.py", "cluster_instance.py", "config.py", "maintenance_stop.py", "maintenance_stop_report.py", "pgbouncer.py", "stop_waits.py", "tests", "walg.py"]
+exports = ["bringup.py", "cluster_instance.py", "config.py", "host_dependencies.py", "maintenance_stop.py", "maintenance_stop_report.py", "pgbouncer.py", "stop_waits.py", "tests", "walg.py"]
 
 [uses]
 "bringup.py" = ["cluster_instance.py", "config.py", "pgbouncer.py", "stop_waits.py"]
 "cluster_instance.py" = ["config.py", "walg.py"]
+"host_dependencies.py" = ["cluster_instance.py", "config.py"]
 "maintenance_stop.py" = ["_pooler_stop.py", "cluster_instance.py", "config.py", "pgbouncer.py", "stop_waits.py"]
 "pgbouncer.py" = ["_pooler_stop.py", "cluster_instance.py", "config.py"]
 "stop_waits.py" = ["maintenance_stop_report.py"]
-"tests" = ["_pooler_stop.py", "bringup.py", "cluster_instance.py", "config.py", "maintenance_stop.py", "pgbouncer.py"]
+"tests" = ["_pooler_stop.py", "bringup.py", "cluster_instance.py", "config.py", "host_dependencies.py", "maintenance_stop.py", "pgbouncer.py"]

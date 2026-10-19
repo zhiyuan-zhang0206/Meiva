@@ -11,8 +11,10 @@
 # cached template (cli/commands/data_plane/cluster_instance.py:ensure_pg_data), so there
 # is no system data dir to bootstrap. The former `--initdb` block that initdb'd
 # /var/lib/postgresql/17/data (a legacy path `meiva start` never reads) is
-# removed. An apt failure degrades to a warning; the packages can be installed
-# later via `sudo apt-get install ...`.
+# removed. A package manager failure is not silently swallowed: the final
+# verification reports exactly what is still missing and exits non-zero, so a
+# caller (`meiva start`'s host-dependency preflight) can refuse instead of
+# claiming the data plane is ready.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
 # The operator-approved PgBouncer build (pgdg, Ubuntu 24.04). The CI install
@@ -26,6 +28,14 @@ PGBOUNCER_APT_VERSION="1.26.0-1.pgdg24.04+1"
 REDIS_APT_VERSION="6:8.2.*"
 
 OS="$(prov_os)"
+
+# apt installs pgbouncer under /usr/sbin, which is often off a non-root PATH.
+pgbouncer_present() {
+  command -v pgbouncer >/dev/null 2>&1 \
+    || [ -x /usr/sbin/pgbouncer ] \
+    || [ -x /usr/bin/pgbouncer ]
+}
+
 case "$OS" in
   linux)
     # Presence gate: skip apt when the data plane is already installed. The
@@ -33,12 +43,12 @@ case "$OS" in
     # provisioned under $MEIVA_HOME by `meiva start`.
     if [ -x /usr/lib/postgresql/17/bin/initdb ] \
         && command -v redis-server >/dev/null 2>&1 \
-        && command -v pgbouncer >/dev/null 2>&1 \
+        && pgbouncer_present \
         && [ -f /usr/share/postgresql/17/extension/vector.control ]; then
       prov_log "pg17 + redis + pgbouncer + pgvector already present — skipping apt (works without sudo)"
     elif ! prov_sudo apt-get update; then
       prov_log "WARNING apt-get update failed (no passwordless sudo?) — data-plane packages not installed."
-      prov_log "  Install them later with: sudo apt-get install -y postgresql-17 redis pgbouncer"
+      prov_log "  Re-run this script with passwordless sudo, or install the packages manually."
     else
       prov_apt_install ca-certificates curl gnupg locales
 
@@ -82,4 +92,28 @@ case "$OS" in
     brew install postgresql@17 redis@8.2 pgbouncer pgvector
     ;;
 esac
+
+# Prove the result instead of trusting the branch above: `prov_sudo` degrades to
+# a bare command when sudo is password-gated, and a skipped apt branch must not
+# read as "installed" to its caller.
+missing=""
+case "$OS" in
+  linux)
+    [ -x /usr/lib/postgresql/17/bin/initdb ] || missing="$missing postgresql-17"
+    command -v redis-server >/dev/null 2>&1 || missing="$missing redis-server"
+    pgbouncer_present || missing="$missing pgbouncer"
+    [ -f /usr/share/postgresql/17/extension/vector.control ] || missing="$missing pgvector"
+    ;;
+  macos)
+    [ -x "$(brew --prefix postgresql@17)/bin/initdb" ] || missing="$missing postgresql@17"
+    [ -x "$(brew --prefix redis@8.2)/bin/redis-server" ] || missing="$missing redis@8.2"
+    [ -x "$(brew --prefix pgbouncer)/bin/pgbouncer" ] || missing="$missing pgbouncer"
+    ;;
+esac
+if [ -n "$missing" ]; then
+  prov_log "ERROR data plane still incomplete after provisioning:$missing"
+  prov_log "  Linux: sudo apt-get install -y postgresql-17 postgresql-17-pgvector redis-server pgbouncer"
+  prov_log "  macOS: brew install postgresql@17 redis@8.2 pgbouncer pgvector"
+  exit 1
+fi
 prov_log "postgres 17 + redis + pgbouncer installed"

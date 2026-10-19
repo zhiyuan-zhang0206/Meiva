@@ -10,7 +10,16 @@ tags:
 
 # Start readiness
 
-`meiva start` first validates the persisted home (initialized by `meiva init`) and service selection. The
+`meiva start` first validates the persisted home (initialized by `meiva init`) and service selection.
+Before converge, `cli/commands/lifecycle/host_dependencies.py` ensures the host
+packages the selected roster actually executes: PostgreSQL 17 tools, Redis,
+PgBouncer when pooling is enabled, and Node/npm/npx when the frontend or browser
+service is selected. It resolves the same binaries the launch resolves, installs
+a missing group through `scripts/provision/database.sh` / `node.sh` (Homebrew on
+macOS, apt on Debian/Ubuntu), and re-probes. A component still missing after the
+attempt refuses the start before any service launch and prints the exact repair
+command; a runner-only unit and a remote-managed plane skip the local data-plane
+group. The
 pre-bind gate in `cli/commands/lifecycle/start.py:refuse_occupied_health_ports` refuses
 ports held by another unit before launching application processes. It reads the
 selected core roster; optional port conflicts cannot block the core.

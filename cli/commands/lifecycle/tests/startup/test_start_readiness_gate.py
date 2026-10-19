@@ -330,6 +330,7 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
         database_factory: Callable[[], Any],
         producer: Callable[[], EventPipeline],
         command: CommandRuntime,
+        **_kwargs: object,
     ) -> None:
         assert command is command_runtime
         assert database_factory is operator_database

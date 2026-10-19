@@ -336,7 +336,7 @@ def ensure_pgbouncer(
     if not Path(binary).exists() and shutil.which(binary) is None:
         # Enabled but pgbouncer is not installed. Fail fast (do NOT silently fall back
         # to direct — the operator asked for pooling): install it, then retry.
-        how = "brew install pgbouncer" if is_macos() else "sudo apt-get install -y pgbouncer"
+        how = "brew install pgbouncer" if is_macos() else _apt_provision_command()
         print(
             f"  ✗ MEIVA_PGBOUNCER_ENABLED is set but pgbouncer is not installed ({binary!r}). "
             f"Install it (`{how}`) and retry, or unset MEIVA_PGBOUNCER_ENABLED to run direct.",
@@ -527,27 +527,25 @@ def _normalized_db_url(
     return None
 
 
+# meiva:note
+# Ubuntu's own archive carries an older PgBouncer; the pinned build comes from
+# the repository's PGDG provisioner.
+def _apt_provision_command() -> str:
+    from base.paths import repo_root
+
+    return f"sudo bash {repo_root() / 'scripts/provision/database.sh'}"
+
+
 def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
-    """Converge step: reconcile the one DB URL with the pooler toggle, and
-    preflight the binary. Gateway-only.
-
-    MEIVA_DB_URL's port is decided by MEIVA_PGBOUNCER_ENABLED at URL generation, so
-    converge (which runs before the data-plane bring-up on every `meiva start` /
-    the fleet update) keeps the `.env` value in sync, idempotently:
-
-    1. Normalize MEIVA_DB_URL's port: the pooler listener (the record's `pgbouncer` port)
-       when the toggle is on, the direct Postgres port (the record's `postgres` port)
-       when off. Only a URL currently carrying the OTHER port of this cluster is
-       rewritten — the direct value becomes the pooler port on an enabled
-       cluster, and a kill-switch flip back is equally one line; an
-       operator stand-in URL naming neither port is left untouched. Fresh births
-       already carry the toggle-matched port from derive_env.
-    2. When the pooler is enabled but the binary is missing, warn with the exact
-       install command; the data-plane bring-up then fail-fasts on the same
-       condition, so a deliberately-enabled pooler never silently degrades to
-       direct. The install itself lives in the provision scripts
-       (`brew install pgbouncer` / apt), not here, so `meiva start` never triggers
-       a heavyweight package install."""
+    # meiva:note
+    # MEIVA_DB_URL's port follows MEIVA_PGBOUNCER_ENABLED at URL generation, so this
+    # step rewrites only a URL carrying this cluster's other port; a stand-in URL
+    # naming neither port is left untouched, and a fresh birth already carries the
+    # toggle-matched port.
+    #
+    # A missing pooler binary is reported here and refused by data-plane bring-up;
+    # the start-wide host dependency preflight installs it before converge.
+    # meiva:link cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md
     converge_pgbouncer(data_plane_config_from_settings(), ctx.meiva_home)
 
 
@@ -584,5 +582,5 @@ def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
     binary = pooler.pgbouncer_bin()
     if Path(binary).exists() or shutil.which(binary) is not None:
         return
-    how = "brew install pgbouncer" if is_macos() else "sudo apt-get install -y pgbouncer"
+    how = "brew install pgbouncer" if is_macos() else _apt_provision_command()
     print(f"  ! pgbouncer enabled but not installed ({binary!r}) — run `{how}`", file=sys.stderr)
