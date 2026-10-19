@@ -292,6 +292,12 @@ lives with `AgentRuntime`, so the existing idle TTL/LRU is what closes it.
 `before_llm`, `llm`, `before_exec`, `exec` and `after_exec` never run on such an
 agent, and the graph test asserts that over a real compiled graph.
 
+**2026-10-19 22:44 update (ruled):** the public entry is `meiva.attach()`, not
+`meiva.impersonation.harness.attach`: the binding is shared by every harness, so the
+impersonation namespace was the wrong home for it. The old path is removed rather
+than aliased (it has no external callers yet), and the handoff's entry points name
+the new one.
+
 **2026-10-19 21:25 update (ruled):** every registration row carries `expires_at`,
 and the bridge rewrites it at the start of each turn. `descends_from(controller_pid)`
 is only as good as the kernel's pid allocation, so a row without an expiry plus a
