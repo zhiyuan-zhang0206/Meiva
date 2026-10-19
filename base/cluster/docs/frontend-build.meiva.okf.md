@@ -57,4 +57,10 @@ rebuilds.
 - Nothing here skips a *correctness* gate: the type check, the bundle build and
   the `exec` on the serve stage all still run whenever a build runs.
 - The command shape stays a single compound whose final stage execs, so
-  `base.sessions.env_forwarding.exec_into` keeps accepting it.
+  `base.sessions.env_forwarding.exec_into` keeps accepting it. That shape is not
+  cosmetic: the 2026-08-27 outage was a frontend restart whose command lost its
+  `exec`, so the session validator rejected it and a dead frontend could never
+  self-heal.
+- The serve stage passes the port explicitly (`-p <port>`): Next.js would
+  otherwise default to 3000, and a restart would silently move the app
+  off-cluster.
