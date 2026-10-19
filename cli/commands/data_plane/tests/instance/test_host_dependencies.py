@@ -22,6 +22,13 @@ FRONTEND_ONLY = frozenset({"frontend"})
 HEADLESS = frozenset({"gateway"})
 _DEFAULT = object()
 
+# meiva:note
+# The systemctl probe reads the real `/run/systemd/system`, which the fake `Host` cannot supply, so a start that requires the boot unit only passes on a host that is running systemd.
+requires_systemd = pytest.mark.skipif(
+    not Path("/run/systemd/system").is_dir(),
+    reason="the systemctl probe reads the real /run/systemd/system",
+)
+
 
 # meiva:note
 # A test-only data-plane config; these credentials never leave the fake value.
@@ -253,6 +260,7 @@ def test_optional_tools_are_never_required() -> None:
     assert all(not tool.optional for tool in hd.required_tools(_scope()))
 
 
+@requires_systemd
 def test_all_present_is_silent(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     assert (
         hd.ensure_host_dependencies(
@@ -266,6 +274,7 @@ def test_all_present_is_silent(capsys: pytest.CaptureFixture[str], tmp_path: Pat
     assert capsys.readouterr().out == ""
 
 
+@requires_systemd
 def test_missing_crontab_installs_host_utils_then_passes(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
@@ -287,6 +296,7 @@ def test_missing_crontab_installs_host_utils_then_passes(
     assert "crontab" in capsys.readouterr().out
 
 
+@requires_systemd
 def test_a_second_start_does_not_reinstall(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
@@ -383,6 +393,7 @@ def test_a_host_owned_tool_refuses_with_the_escape_command(
     assert installs == []
 
 
+@requires_systemd
 def test_missing_postgres_installs_the_database_group(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
@@ -498,6 +509,7 @@ def test_node_tool_problem_rejects_the_ubuntu_18_default() -> None:
     assert "older than 20.9" in problem.detail
 
 
+@requires_systemd
 def test_the_postgres_probe_names_only_the_missing_tool() -> None:
     probes = _DataPlane(missing_postgres=("pg_isready",)).probes()
     missing = hd.missing_tools(_scope(), probes=probes)
@@ -506,6 +518,7 @@ def test_the_postgres_probe_names_only_the_missing_tool() -> None:
     assert "vendored" in named["pg_isready"]
 
 
+@requires_systemd
 def test_the_pgbouncer_probe_reports_the_resolved_path() -> None:
     probes = _DataPlane(pgbouncer="/missing/pgbouncer").probes()
     missing = hd.missing_tools(_scope(), probes=probes)
