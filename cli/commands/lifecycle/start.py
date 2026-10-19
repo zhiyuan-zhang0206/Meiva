@@ -25,6 +25,7 @@ from base.paths import prod_service_checkout_error
 from base.telemetry import EventPipeline
 from cli.commands._repo import repo_root
 from cli.commands._setup import SetupValues, missing_setup_message
+from cli.commands.converge.spec import ConvergeStep
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
 from cli.commands.lifecycle import root_readiness
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
@@ -104,6 +105,23 @@ def _prepare_start_schema(
     return 0
 
 
+# meiva:note
+# The host-package step is deliberately first: a missing redis/pgbouncer/node
+# must refuse before any green converge step or service launch, not after them.
+def cold_start_steps() -> tuple[ConvergeStep, ...]:
+    from cli.commands.data_plane import host_dependencies
+    from cli.commands.lifecycle import converge_host
+
+    return (
+        ConvergeStep(
+            "host dependency packages",
+            host_dependencies.ensure_host_dependencies_step,
+            roles=frozenset({"gateway", "agent-runner"}),
+        ),
+        *converge_host.CONVERGE_STEPS,
+    )
+
+
 def prepare_cold_start(
     repo: Path,
     roles: MachineRoles,
@@ -118,6 +136,8 @@ def prepare_cold_start(
     import cli.commands._repo as _repo_commands
     from cli.commands.lifecycle import converge_host
 
+    data_plane = data_plane_config_from_settings() if "gateway" in roles else None
+
     # 1) converge host state (symlink / PATH / $MEIVA_HOME dirs / plugin config
     # images). Memory initialization is explicit (`meiva memory init`).
     try:
@@ -128,6 +148,7 @@ def prepare_cold_start(
             database_factory=database_factory,
             producer=producer,
             command=command,
+            steps=cold_start_steps(),
         )
     except Exception as e:
         print(f"  ✗ converge failed: {e}", file=sys.stderr)
@@ -137,7 +158,6 @@ def prepare_cold_start(
     #    $MEIVA_HOME, on its recorded ports); a runner-only host skips (uses the
     #    central node's DB/Redis). macOS: brew binaries via pg_ctl + redis-server;
     #    Linux: pg_ctl + redis-server. No docker on any POSIX platform.
-    data_plane = data_plane_config_from_settings() if "gateway" in roles else None
     if data_plane is not None:
         rc = ensure_gateway_data_plane(
             data_plane,

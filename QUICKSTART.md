@@ -16,8 +16,9 @@ the entire cluster.
 | Model API Key | Anthropic (`ANTHROPIC_API_KEY`), DeepSeek (`DEEPSEEK_API_KEY`), or OpenAI (`OPENAI_API_KEY`) |
 | Git | For cloning the repo |
 | A terminal | All commands in this guide run in a terminal |
-| Homebrew (macOS) | The first `meiva start` provisions Postgres/Redis via Homebrew — install it first: `https://brew.sh` |
-| Non-root user (Linux) | The first `meiva start` births a per-cluster Postgres via `initdb`, which **refuses to run as root**. Fresh VPS images land you as root — create a user with passwordless sudo first, then run the install as that user: `adduser meiva && echo 'meiva ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/meiva && su - meiva` |
+| Homebrew (macOS) | The first `meiva start` installs PostgreSQL 17, Redis 8.2, PgBouncer and Node through Homebrew (packages you already have are reused) — install Homebrew first: `https://brew.sh` |
+| Debian/Ubuntu (Linux) | The first `meiva start` installs the same missing packages through `apt`; other distributions need PostgreSQL 17, Redis 8.2, PgBouncer and Node 22 installed first |
+| Non-root user (Linux) | The first `meiva start` births a per-cluster Postgres via `initdb`, which **refuses to run as root**, and its `apt` package install needs root. Fresh VPS images land you as root — create a user with passwordless sudo first, then run the install as that user: `adduser meiva && echo 'meiva ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/meiva && su - meiva` |
 
 ---
 
@@ -35,8 +36,12 @@ uv sync
 .venv/bin/meiva init --serve-gateway --serve-agent-runner --machine-name my-machine
 ```
 
-`uv sync` installs the dependencies: uv, Python 3.12, Postgres 17, Redis, and
-Node.js (Node is recommended on macOS; the web UI and browser tools need it).
+`uv sync` installs the locked Python dependencies into `.venv` (fetching Python
+3.12 through uv when needed). It does **not** install host packages: the first
+`meiva start` installs missing PostgreSQL 17, Redis 8.2, PgBouncer and Node.js
+through Homebrew (macOS) or apt (Debian/Ubuntu). If a package cannot be
+installed, start stops before convergence with the exact repair command; it
+never reports a green start and then dies on the missing binary.
 `meiva init` records the cluster's identity: its ports, its generated credentials
 (including the cluster secret, `MEIVA_CLUSTER_SECRET`) and `~/.meiva/.env`. It starts no process and creates no database; an initialized home
 refuses a second `meiva init`.
@@ -62,10 +67,10 @@ Then start the cluster:
 .venv/bin/meiva start
 ```
 
-The first `meiva start` creates the cluster's own Postgres/Redis, applies the schema and
-brings up services; its converge phase also links `~/.local/bin/meiva` to this checkout's
-CLI. You'll see `ready` when it succeeds. Later starts reconcile the running cluster
-against the edited file.
+The first `meiva start` installs any missing host packages, creates the cluster's own
+Postgres/Redis, applies the schema and brings up services; its converge phase also links
+`~/.local/bin/meiva` to this checkout's CLI. You'll see `ready` when it succeeds. Later
+starts reconcile the running cluster against the edited file.
 
 > **After the first start**, reopen your terminal, or run `source ~/.bashrc` (Linux) /
 > `source ~/.zshrc` (macOS), to put `~/.local/bin` on PATH. If `meiva` is still not
@@ -166,6 +171,25 @@ Every gateway home needs a cluster secret, and `meiva init` mints one. A home wh
 has no `MEIVA_CLUSTER_SECRET` (hand-edited, or born before this rule) refuses to start. Set the
 line in `~/.meiva/.env` to a fresh URL-safe token, for example the output of
 `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`, and run `meiva start` again.
+
+### `meiva start` says "host dependency preflight failed"
+
+Start installs missing host packages itself. When the install cannot run — no
+Homebrew, no passwordless sudo, no network, or a locked package manager — it
+stops before converge or any service launch and prints the command for the
+missing component. The repository's provisioners are the same ones CI uses:
+
+```bash
+# Debian/Ubuntu
+sudo bash scripts/provision/database.sh   # PostgreSQL 17 + pgvector, Redis 8.2, PgBouncer
+sudo bash scripts/provision/node.sh       # Node 22 + npm/npx
+
+# macOS
+brew install postgresql@17 redis@8.2 pgbouncer pgvector node
+```
+
+A headless gateway that does not serve the web UI can skip Node entirely:
+`meiva start --disable-service frontend`.
 
 ### Postgres connection failed
 

@@ -6,7 +6,7 @@ description: "Sets up Meiva on a new machine or joins a runner. Use for initial 
 # Deploy an Meiva cluster
 
 `meiva init` owns first initialization and its interrupted resume; `meiva start` owns
-every startup of an initialized home. Package acquisition is a separate operation.
+every startup of an initialized home, including acquisition of missing host packages.
 Use the same two entries for a single box, a gateway, and a runner joining a gateway.
 
 The `docs/conventions/runbook.md` in the Meiva source checkout describes the runtime contract.
@@ -17,12 +17,18 @@ Use [secrets](references/secrets.md) for credential handling and
 
 Use macOS or Linux.
 
-Acquire Git, uv, Python 3.12, and the host packages independently. A gateway with
+Install Git and uv first. The first `meiva start` detects and installs the
+remaining host packages through the repository's provisioners: Homebrew on macOS,
+apt on Debian/Ubuntu (passwordless sudo for a non-root user). A gateway with
 local storage requires Postgres 17 with pgvector, Redis 8.2, and PgBouncer
-(default enabled). Run Postgres under a non-root user. The frontend requires
-Node supported by the repository's frontend dependencies. macOS additionally
-requires the signed permissions helper and a logged-in GUI session for desktop
-capabilities. A pure runner does not acquire local Postgres or Redis.
+(default enabled). The frontend and browser require Node >= 20.9. Run Postgres
+under a non-root user. macOS additionally requires the signed permissions helper
+and a logged-in GUI session for desktop capabilities. A pure runner does not
+acquire local Postgres or Redis.
+
+If the install cannot run, start refuses before converge and any service launch,
+and prints the exact command: `scripts/provision/database.sh` and
+`scripts/provision/node.sh` on Debian/Ubuntu, their Homebrew equivalent on macOS.
 
 Clone the production source into the canonical home source directory:
 
@@ -60,9 +66,10 @@ chmod 600 ~/.meiva/.env
 .venv/bin/meiva status
 ```
 
-The first start converges host prerequisites, starts private storage, prepares the
-owned database and checkpoints, applies migrations and runner grants, and only
-then starts PgBouncer and the root-owned application services. Exit 0 requires
+The first start installs missing host packages, converges host prerequisites,
+starts private storage, prepares the owned database and checkpoints, applies
+migrations and runner grants, and only then starts PgBouncer and the root-owned
+application services. Exit 0 requires
 all selected services to be ready. macOS root is a child of the signed
 permissions helper; Linux root runs directly or under systemd.
 

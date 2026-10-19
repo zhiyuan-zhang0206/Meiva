@@ -46,6 +46,7 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from base.cluster import ensure_cluster_redis_acl, ownership, port_preflight
@@ -59,7 +60,6 @@ from base.config import ConfigBoot
 from base.host.brew_pin import brew_prefix
 from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
-from base.host.system.backend import PG_BIN_LINUX
 from base.native_process.child_env import daemon_process_env, inherited_process_env
 from base.native_process.os_platform import is_macos
 from base.paths import meiva_home
@@ -130,8 +130,13 @@ def redis_cli_bin(config: DataPlaneConfig) -> str:
     return _redis_bin(config, "redis-cli")
 
 
-def pg_bin(name: str) -> str:
-    return str(pg_tool(name)) if is_macos() else str(PG_BIN_LINUX / name)
+# meiva:note
+# Resolve through the shared resolver: the vendored tree first (it carries
+# initdb/pg_ctl/postgres), then the host install for the client tools it does
+# not ship. The hardcoded Linux apt layout failed a clean host on initdb even
+# after converge had downloaded the vendored tree.
+def pg_bin(name: str, *, tool: Callable[[str], Path] = pg_tool) -> str:
+    return str(tool(name))
 
 
 def addr_assigned(addr: str) -> bool:
