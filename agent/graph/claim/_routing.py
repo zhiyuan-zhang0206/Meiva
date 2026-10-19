@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from agent.db import ClaimedInbound, has_pending_inbound_after
-from agent.nodes import BEFORE_LLM, HARNESS_TURN
+from agent.nodes import BEFORE_LLM, HARNESS_TURN, NodeName
 from base.agents.context import MeivaContext
 from base.agents.messages.inbound import InboundKind
 from base.api_contracts.agent_contract import Harness
@@ -73,9 +73,11 @@ ROUTING_KINDS: frozenset[InboundKind] = frozenset(
 # before_llm; an agent on an external harness continues into the one node that hands
 # the whole turn to its session, and the native nodes behind before_llm never run for
 # it. Every other verdict (wait, cancel re-entry, compaction, exit) is the same for
-# both, which is why only this one target is rewritten.
+# both, which is why only this one target is rewritten. A reset's parked `resume` is
+# the same verdict one node later, so it goes through here too — otherwise a
+# compaction hands an external-harness agent back to `before_llm`.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-def route_target(ctx: MeivaContext, goto: ClaimGoto) -> ClaimGoto:
+def route_target(ctx: MeivaContext, goto: NodeName) -> NodeName:
     if goto == BEFORE_LLM and ctx.harness is not Harness.MEIVA:
         return HARNESS_TURN
     return goto

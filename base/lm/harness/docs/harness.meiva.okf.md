@@ -32,7 +32,9 @@ invariants the host relies on:
 7. the handoff is injected once, when the session is created, and never again on
    resume;
 8. a faulted or closed session stops being usable: the bridge retires it instead of
-   submitting to it again.
+   submitting to it again;
+9. `close()` returns only after the session's process tree is gone, or after the
+   adapter's settle window proved it is not — residue is reported, never assumed.
 
 Adapters: [[../claude/docs/claude.meiva.okf.md]],
 [[../deepseek/docs/deepseek.meiva.okf.md]]. Contract, provider differences

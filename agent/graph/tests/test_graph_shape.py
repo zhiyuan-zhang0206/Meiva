@@ -16,7 +16,7 @@ from pydantic import BaseModel
 import agent.state as agent_state
 from agent.graph import build_graph
 from agent.graph.claim.node import route_target
-from agent.state import AgentState
+from agent.state import AgentState, ContextReset
 from base.agents.context import MeivaContext
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
@@ -147,6 +147,31 @@ async def test_the_built_in_loop_never_enters_the_harness_node() -> None:
 
     assert "before_llm" in seen, "the built-in loop still runs its own nodes"
     assert "harness_turn" not in seen
+
+
+# meiva:note
+# The compaction path parks its destination in `ContextReset.resume` and lets
+# `init_context` jump there, so the harness rewrite has to happen at that jump too:
+# routing only claim's verdicts left a compacted external-harness agent resuming into
+# `before_llm`, where the native model answered and the CLI session sat idle.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() -> None:
+    engine = FakeEngine()
+    state = AgentState(
+        messages=[],
+        context_reset=ContextReset(
+            resume="before_llm", tail=[HumanMessage(content="the compacted summary")]
+        ),
+    )
+    seen: list[str] = []
+    async for chunk in _stream(
+        build_graph(None, EMPTY), state, make_context(Harness.CLAUDE_CODE, engine)
+    ):
+        seen.extend(chunk.keys())
+
+    assert "init_context" in seen
+    assert "harness_turn" in seen, "the reset resumes into the harness node"
+    assert not NATIVE_NODES.intersection(seen), f"native turn nodes ran: {seen}"
 
 
 def test_route_target_rewrites_only_the_work_verdict() -> None:

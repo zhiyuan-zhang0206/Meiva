@@ -35,6 +35,16 @@ class HarnessClosedError(RuntimeError):
     pass
 
 
+# meiva:note
+# A turn that never got a session, or that the session refused to accept. It is a
+# different failure from a turn that died mid-flight: nothing was sent, so there is no
+# half-written transcript to reconcile — but from the graph's side both mean the same
+# thing, and both settle the turn as a reported abort rather than a host crash.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+class HarnessSetupError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class ScopedSessionRegistry:
     # meiva:note
@@ -124,9 +134,18 @@ class HarnessBridge:
         return session
 
     async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
-        session = await self.ensure()
+        try:
+            session = await self.ensure()
+        except HarnessClosedError:
+            raise
+        except Exception as exc:
+            raise HarnessSetupError(f"{self.harness.value} session could not start: {exc}") from exc
         self._register(session.session_id or "")
-        ticket: Any = session.submit(text, key=key)
+        try:
+            ticket: Any = session.submit(text, key=key)
+        except Exception as exc:
+            await self._retire(session, reason="submission refused")
+            raise HarnessSetupError(f"{self.harness.value} refused the turn: {exc}") from exc
         try:
             return await self._await_turn(session, str(ticket.turn_id))
         except (HarnessTurnFaultedError, HarnessClosedError):

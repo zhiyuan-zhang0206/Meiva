@@ -19,6 +19,7 @@ from base.lm.harness import (
     HarnessBridge,
     HarnessClosedError,
     HarnessRegistration,
+    HarnessSetupError,
     HarnessTurnFaultedError,
     RegistrationStore,
     ScopedSessionRegistry,
@@ -114,6 +115,11 @@ class FakeSession:
         self.close_reason = reason
 
 
+class RefusingSession(FakeSession):
+    def submit(self, text: str, *, key: str | None = None) -> FakeTicket:
+        raise RuntimeError("queue is full")
+
+
 def make_bridge(
     session: FakeSession,
     *,
@@ -203,6 +209,38 @@ async def test_a_faulted_session_fails_the_turn() -> None:
 
     with pytest.raises(HarnessTurnFaultedError, match="cli died"):
         await bridge.run_turn("hello", key="inbound-1")
+
+
+async def test_a_session_that_cannot_start_fails_the_turn_as_a_setup_error() -> None:
+    def refuse(_handle: str) -> FakeSession:
+        raise ImportError("the claude-agent-sdk extra is not installed")
+
+    bridge = HarnessBridge(
+        Harness.CLAUDE_CODE,
+        6984,
+        refuse,
+        machine="macmini",
+        registration_ttl_seconds=3600.0,
+    )
+
+    with pytest.raises(HarnessSetupError, match="could not start"):
+        await bridge.run_turn("hello", key="inbound-1")
+
+
+async def test_a_refused_submission_fails_the_turn_and_retires_the_session() -> None:
+    session = RefusingSession()
+    bridge = HarnessBridge(
+        Harness.CLAUDE_CODE,
+        6984,
+        lambda _handle: session,
+        machine="macmini",
+        registration_ttl_seconds=3600.0,
+    )
+
+    with pytest.raises(HarnessSetupError, match="refused the turn"):
+        await bridge.run_turn("hello", key="inbound-1")
+
+    assert session.closed, "a session that refused a submission is not reused"
 
 
 async def test_close_closes_the_session_and_refuses_later_turns() -> None:

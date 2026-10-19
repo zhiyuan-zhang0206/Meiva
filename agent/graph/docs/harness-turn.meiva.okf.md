@@ -20,6 +20,12 @@ claim ──(native)──→ before_llm → llm → before_exec → exec → af
   └──(harness)────→ harness_turn ──→ claim
 ```
 
+The rewrite lives in `route_target`, and it covers one more producer than claim's
+own verdicts: a compaction parks its destination in `ContextReset.resume` and
+`init_context` jumps there, so that jump goes through `route_target` too. Without it
+a compacted external-harness agent resumes into `before_llm`, where the native model
+answers while the CLI session sits idle.
+
 `before_llm`, `llm`, `before_exec`, `exec` and `after_exec` never run on such an
 agent. That is not a convention: the harness turn is the whole loop — model call,
 tool calls, transcript — and those nodes exist to drive the pieces of a loop the
@@ -77,6 +83,15 @@ is why an agent id must be stable across resurrect.
   holds the transcript. The node raises that as a fatal stream abort, so the graph
   settles the turn the way it settles any aborted model call rather than stopping
   with half a reply in the window.
+- Retirement is asynchronous, and the next turn waits for it. An evicted runtime
+  leaves the cache immediately, so without that wait a wake a second later would
+  start a second CLI on the same resumed session id while the first one is still
+  inside its terminate/kill window. `HarnessSessions.retire` therefore keeps the
+  close per agent and `join` is what the next turn waits on; the close itself waits
+  out the adapter's settle window and reports residue instead of assuming it.
+- A turn that never got a session (a missing provider SDK, a refused submission) is
+  a setup failure, not a crash: the bridge raises `HarnessSetupError` and the node
+  settles it on the same fatal-stream path.
 - `interrupt` is called from the node's cancel race: the durable cancel path is
   the existing `subscribe_interrupt`, and the adapter's `settled` report is logged
   as it came back — `None` (unobservable CLI tree) is not rounded up to "reaped".
