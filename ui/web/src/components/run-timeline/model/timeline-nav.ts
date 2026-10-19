@@ -10,6 +10,7 @@ import {
   contextUnits,
   type AxisMap,
   type Selection,
+  type SpanItem,
   type Viewport,
 } from "./timeline-model";
 
@@ -60,26 +61,43 @@ export function navRowIds(data: NavData, options: RowOptions = ALL_ROWS): string
   return rows;
 }
 
-const itemCache = new WeakMap<NavData, WeakMap<object, Map<string, NavItem[]>>>();
+// meiva:note
+// A row's items are built once per data and axis, together with the two lookups the layout and the hit test ask for on every frame: the same items as spans in `u0` order, and the key-to-item map. Rebuilding them per render made a deep zoom-out recreate 52 000 keys and a 52 000-entry map on every viewport sample (user report 2026-10-19).
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
+export interface NavRow {
+  items: NavItem[];
+  keyed: readonly SpanItem[];
+  byKey: ReadonlyMap<string, NavItem>;
+}
 
-/** The items of one row, left to right on the axis (remembered per data and axis: a render, a hover or a keypress asks again and again). */
-export function navItems(row: string, data: NavData, axis: Pick<AxisMap, "toU" | "unitSpan" | "nodeSpan">): NavItem[] {
-  let byAxis = itemCache.get(data);
+const rowCache = new WeakMap<NavData, WeakMap<object, Map<string, NavRow>>>();
+
+export function navRow(row: string, data: NavData, axis: Pick<AxisMap, "toU" | "unitSpan" | "nodeSpan">): NavRow {
+  let byAxis = rowCache.get(data);
   if (byAxis === undefined) {
     byAxis = new WeakMap();
-    itemCache.set(data, byAxis);
+    rowCache.set(data, byAxis);
   }
   let rows = byAxis.get(axis);
   if (rows === undefined) {
     rows = new Map();
     byAxis.set(axis, rows);
   }
-  let items = rows.get(row);
-  if (items === undefined) {
-    items = buildItems(row, data, axis);
-    rows.set(row, items);
+  let cached = rows.get(row);
+  if (cached === undefined) {
+    const items = buildItems(row, data, axis);
+    cached = {
+      items,
+      keyed: items.map((item) => ({ key: selectionKey(item.selection), u0: item.u0, u1: item.u1 })),
+      byKey: new Map(items.map((item) => [selectionKey(item.selection), item])),
+    };
+    rows.set(row, cached);
   }
-  return items;
+  return cached;
+}
+
+export function navItems(row: string, data: NavData, axis: Pick<AxisMap, "toU" | "unitSpan" | "nodeSpan">): NavItem[] {
+  return navRow(row, data, axis).items;
 }
 
 function buildItems(row: string, data: NavData, axis: Pick<AxisMap, "toU" | "unitSpan" | "nodeSpan">): NavItem[] {
