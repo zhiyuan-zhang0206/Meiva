@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+from base.lm.claude_sdk.approval import (
+    ApprovalBroker,
+    ApprovalOutcome,
+    ApprovalPolicyResult,
+    PendingApproval,
+)
+from base.lm.claude_sdk.auth import (
+    AuthConfig,
+    AuthMode,
+    MissingApiKeyError,
+    build_env,
+    describe_auth,
+)
+from base.lm.claude_sdk.config import DEFAULT_MODEL, BridgeConfig
+from base.lm.claude_sdk.events import (
+    ApprovalDecided,
+    ApprovalRequested,
+    AssistantText,
+    BridgeEvent,
+    RateLimitObserved,
+    SessionClosed,
+    SessionFaulted,
+    SessionStarted,
+    TextDelta,
+    ToolResult,
+    ToolUse,
+    TurnCompleted,
+    Usage,
+    is_droppable,
+)
+from base.lm.claude_sdk.session import (
+    CancelReport,
+    ClaudeSdkMissingError,
+    ClaudeSession,
+    InboundQueueFullError,
+    SessionClosedError,
+    SessionTotals,
+    TurnOutcome,
+    TurnTicket,
+)
+
+__all__ = [
+    "DEFAULT_MODEL",
+    "ApprovalBroker",
+    "ApprovalDecided",
+    "ApprovalOutcome",
+    "ApprovalPolicyResult",
+    "ApprovalRequested",
+    "AssistantText",
+    "AuthConfig",
+    "AuthMode",
+    "BridgeConfig",
+    "BridgeEvent",
+    "CancelReport",
+    "ClaudeSdkMissingError",
+    "ClaudeSession",
+    "InboundQueueFullError",
+    "MissingApiKeyError",
+    "PendingApproval",
+    "RateLimitObserved",
+    "SessionClosed",
+    "SessionClosedError",
+    "SessionFaulted",
+    "SessionStarted",
+    "SessionTotals",
+    "TextDelta",
+    "ToolResult",
+    "ToolUse",
+    "TurnCompleted",
+    "TurnOutcome",
+    "TurnTicket",
+    "Usage",
+    "build_env",
+    "describe_auth",
+    "is_droppable",
+]
