@@ -145,6 +145,15 @@ class BaseAgentState(BaseModel):
     """Identifiers of the skills whose body an exec child loaded this context window:
     `meiva.skills` appends through `meiva.state_update`; the skill-recall hook resets it on a compaction."""
     halted: bool = False
+    # meiva:note
+    # How many of `messages` the external harness has already received. Only a run whose
+    # harness is not `meiva` reads or writes it: `init_context` sets it past the standing
+    # head it just laid down (the harness gets that context from its handoff document, not
+    # as messages), and `harness_turn` advances it over everything it submitted plus its
+    # own reply. A resumed session therefore re-submits exactly the messages a crash left
+    # undelivered, and never the ones already in the harness transcript.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    harness_cursor: int = 0
     native_work: NativeWorkTarget | None = None
     native_cancel: NativeCancelMarker | None = None
     native_compact: CompactMarker | None = None

@@ -29,13 +29,30 @@ DEFAULT_DISCIPLINE: tuple[str, ...] = (
     "The host records your final text; do not message other agents or the user directly.",
 )
 
-DEFAULT_ENTRIES: tuple[EntryPoint, ...] = ()
-
 
 @dataclass(frozen=True, slots=True)
 class EntryPoint:
     name: str
     purpose: str
+
+
+# meiva:note
+# What every external harness is told it may reach. One entry, because there is exactly
+# one thing an attached process has to know about: how it acts as this agent. `import
+# meiva` already binds the identity in a process the bridge started, so the call is
+# named as the explicit case rather than as a prerequisite — an agent that is told it
+# "must attach first" will spend a turn doing something the import already did.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+DEFAULT_ENTRIES: tuple[EntryPoint, ...] = (
+    EntryPoint(
+        name="meiva.attach()",
+        purpose=(
+            "the SDK surface as this agent; `import meiva` has already done this in a "
+            "process the bridge started, so call it yourself only when you need the "
+            "binding to be explicit"
+        ),
+    ),
+)
 
 
 @dataclass(frozen=True, slots=True)

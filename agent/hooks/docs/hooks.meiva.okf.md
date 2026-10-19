@@ -27,7 +27,7 @@ Together with SDK wraps (a plugin's declared `SdkWrap`, applied by `meiva/sdk_su
 ## Key Dependencies
 
 - [[agent/docs/state.meiva.okf.md]] — The hook's `state` parameter is the `AgentState` passed by LangGraph; the returned dict goes through standard LangGraph reducer merging; hooks run at the graph-node level and directly receive/return the whole state. A plugin hook reads its own fields with the handle's pure `view(state)` and returns writes through `delta({...})`; `read` / `update` are the exec child's channel (`meiva.state` / `meiva.state_update` exist only there). A hook module imports no `meiva` (`scripts/lint/plugins/no_meiva_in_hooks.py`)
-- [[agent/graph/docs/graph.meiva.okf.md]] — Placement of hook container nodes in the 8-node topology
+- [[agent/graph/docs/graph.meiva.okf.md]] — Placement of hook container nodes in the graph topology
 
 ## Entry Points
 

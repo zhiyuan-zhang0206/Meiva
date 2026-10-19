@@ -206,6 +206,26 @@ def workspace_dir_readonly(agent_id: int) -> Path:
     return workspaces_root() / str(agent_id)
 
 
+# meiva:note
+# Where an external harness session id is remembered per agent
+# (`FileSessionRegistry`'s one JSON document per agent). It outlives a process on
+# purpose: resurrect resumes the transcript by that id, so the pair has to survive
+# the restart that loses everything else. The writer creates the directory.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def harness_sessions_dir() -> Path:
+    return meiva_home() / "harness" / "sessions"
+
+
+# meiva:note
+# Where the bridge registers a live external session (`RegistrationStore`): one
+# document per agent, written by the controller, read by the crash sweep and by an
+# operator. Kept apart from the resume registry beside it: this one describes a live
+# attachment, that one describes a transcript.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def harness_registrations_dir() -> Path:
+    return meiva_home() / "harness" / "registrations"
+
+
 def exec_run_dir(home: Path) -> Path:
     """Per-unit exec-subprocess scratch dir (`<home>/run/exec`) — request /
     result envelopes for one execute_code run each (agent/graph/exec/protocol.py),

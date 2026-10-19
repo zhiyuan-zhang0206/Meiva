@@ -4,8 +4,8 @@ exports = ["homes.py"]
 "conftest.py" = ["homes.py"]
 
 [debt.env-patch]
-"homes.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
 "homes.py#monkeypatch.setenv os.environ.HOME" = 1
+"homes.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
 "test_paths.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]

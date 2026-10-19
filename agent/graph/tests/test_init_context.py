@@ -24,6 +24,7 @@ from agent.graph.hooks import compact
 from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState, ContextReset
 from base.agents.context import MeivaContext
+from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.config import settings
 from base.db import Database, create_agent
@@ -53,11 +54,13 @@ def _runtime(
     extensions: ExtensionRegistry = EMPTY,
     *,
     resources: HostedTurnResources | None = None,
+    harness: Harness = Harness.MEIVA,
     database_gate: ProcessDbGate,
 ) -> Runtime[MeivaContext]:
     """`ops_pool=None` takes the container path."""
     return Runtime(
         context=MeivaContext(
+            harness=harness,
             hosted_resources=resources,
             ops_pool=ops_pool,
             llm=AsyncMock(),
@@ -592,3 +595,32 @@ async def test_compacted_takeover_context_restores_explanation_before_summary(
     assert (
         await init_context_node(restored, _runtime(None, database_gate=database_gate), _config(42))
     ).update is None
+
+
+# meiva:note
+# The head is the graph's context, not a message an external harness receives: an agent
+# on one gets those facts from its handoff document. `harness_cursor` is what keeps
+# `harness_turn` from sending the head as user turns, so it must cover the whole head
+# exactly, and the built-in loop must not carry a cursor at all.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+async def test_a_cold_start_starts_the_harness_cursor_after_the_head(
+    database_gate: ProcessDbGate,
+) -> None:
+    command = await init_context_node(
+        AgentState(),
+        _runtime(None, harness=Harness.CLAUDE_CODE, database_gate=database_gate),
+        _config(42),
+    )
+
+    assert command.update is not None
+    assert command.update["harness_cursor"] == len(command.update["messages"])
+    assert command.update["harness_cursor"] > 0
+
+
+async def test_the_built_in_loop_writes_no_cursor(database_gate: ProcessDbGate) -> None:
+    command = await init_context_node(
+        AgentState(), _runtime(None, database_gate=database_gate), _config(42)
+    )
+
+    assert command.update is not None
+    assert "harness_cursor" not in command.update

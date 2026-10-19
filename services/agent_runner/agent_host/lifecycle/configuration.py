@@ -55,6 +55,9 @@ def host_policy(config: ConfigBoot) -> HostPolicy:
             clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             timestamps_enabled=lambda: config.view.general.message_timestamps,
         ),
+        harness_registration_ttl_seconds=lambda: (
+            config.view.daemon.harness_registration_ttl_seconds
+        ),
     )
 
 

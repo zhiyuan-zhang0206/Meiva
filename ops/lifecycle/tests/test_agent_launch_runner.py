@@ -32,7 +32,7 @@ def test_a_harness_without_a_launcher_is_refused(
         database,
         event_bus,
         machine=machine_identity.name(),
-        harness="codex",
+        harness="antigravity",
         catalog=build_model_catalog(),
         authority=config_authority,
     )
@@ -42,7 +42,7 @@ def test_a_harness_without_a_launcher_is_refused(
         launch.validate_launch_row(pool, body, local_machine=machine_identity.name())
     assert db_conn.execute(
         "SELECT status, harness FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchall() == [("idling", "codex")]
+    ).fetchall() == [("idling", "antigravity")]
 
 
 @pytest.mark.asyncio

@@ -46,9 +46,11 @@ from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
+from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.lm.catalog import ModelCatalog
+from base.lm.harness.engine import TurnEngine
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 
@@ -172,6 +174,22 @@ class MeivaContext:
             raise RuntimeError("this MeivaContext carries no original RuntimeIncarnation")
         return self.original_incarnation.require_agent(agent_id)
 
+    # meiva:note
+    # Which turn engine this run executes on. A context that names none runs the built-in
+    # loop: the eval driver, the exec child and every test build one without saying so, and
+    # the built-in loop is what they run. `harness_turn` and claim route on this value, and
+    # an agent's harness is immutable, so one row never runs two engines.
+    # meiva:link base/agents/docs/harness.meiva.okf.md
+    harness: Harness = Harness.MEIVA
+
+    # meiva:note
+    # The live session an external harness runs this turn in. The host attaches it to the
+    # runtime it caches, so it lives and dies with that runtime; a run on the built-in loop
+    # carries none and never asks for one. `require_harness_bridge` fails instead of
+    # falling back, because a missing engine is a wiring defect, not a mode.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    harness_bridge: TurnEngine | None = None
+
     clients: ClientSet = field(default_factory=ClientSet)
     """The connections this run's process holds. Built on first use; the owner of the context
     (the exec child, a launched script, an attachment, the host) closes them."""
@@ -196,6 +214,18 @@ class MeivaContext:
     def gateway(self) -> httpx.Client:
         """The HTTP client for the gateway API."""
         return self.clients.gateway
+
+    # meiva:note
+    # The external-harness session this run submits its turn to. A missing engine is a
+    # wiring defect — the run says it is on another harness and carries no way to reach
+    # it — so it raises rather than falling back to the built-in loop.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    def require_harness_bridge(self) -> TurnEngine:
+        if self.harness_bridge is None:
+            raise RuntimeError(
+                "this MeivaContext carries no harness engine (ctx.harness_bridge is None)"
+            )
+        return self.harness_bridge
 
     def require_identity(self) -> AgentIdentity:
         """The identity of this run; a context built without one fails here."""
