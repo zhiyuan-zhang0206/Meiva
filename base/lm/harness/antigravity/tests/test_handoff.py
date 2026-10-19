@@ -44,6 +44,20 @@ async def test_the_handoff_is_the_first_message_exactly_once(tmp_path: Path) -> 
         await harness.stop()
 
 
+async def test_an_explicit_resume_is_not_treated_as_a_fresh_session(tmp_path: Path) -> None:
+    harness = await start(
+        tmp_path, turns=[say("one")], resume="conv-fake", handoff=a_handoff()
+    )
+    try:
+        assert harness.session.resumed is True
+        assert harness.session.handoff_ticket is None
+        assert harness.of(HandoffInjected) == []
+        await harness.wait_until(lambda: harness.argv_seen() != [])
+        assert "conv-fake" in harness.argv_seen()
+    finally:
+        await harness.stop()
+
+
 async def test_a_resumed_session_does_not_reinject(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "reg")
     registry.save(
