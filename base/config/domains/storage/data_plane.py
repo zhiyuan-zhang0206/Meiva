@@ -433,6 +433,45 @@ class DataPlaneSettings(EnvSettings):
         },
     )
 
+    db_pool_restore_timeout_seconds: float = Field(
+        default=5.0,
+        alias="MEIVA_DB_POOL_RESTORE_TIMEOUT_SECONDS",
+        description=(
+            "Budget, in seconds, for one per-borrow session restore (RESET ALL "
+            "plus the baseline SET), separate from the wait for a free connection "
+            "(db_pool_acquire_timeout_seconds does that). It becomes two "
+            "session-local settings on this connection, both at this value: "
+            "statement_timeout, which cancels a slow statement, and "
+            "transaction_timeout (Postgres 17), which terminates the session when "
+            "a COMMIT stalls in its WAL flush — the one wait statement_timeout "
+            "cannot interrupt. Both timers start at the restore's BEGIN, so an "
+            "over-budget restore is ended by the transaction timer and its "
+            "connection is terminated; the pool replaces it, where a cancel would "
+            "return a backend that stalled to the pool. SET LOCAL reverts both at "
+            "that COMMIT, so the borrower's own transactions never inherit either "
+            "ceiling. The statement budget is the one that still applies where no "
+            "transaction spans the restore (an autocommit pool); elsewhere the "
+            "transaction timer is what fires. Budget accordingly: a restore that "
+            "blows it costs its connection, and a contention window churns one "
+            "connection per budget per borrow rather than reusing a cancelled one. "
+            "A restore that blows the budget logs db_pool_restore_timeout "
+            "with the timer that ended it (ended_by), and the pool counts the "
+            "check as failed and retries against its own deadline. Neither timer "
+            "reaches a backend wedged in uninterruptible I/O or a client/network "
+            "wait — the 2026-10-18 event (check_ms 389 s, a host-level OOM freeze) "
+            "was that class. Every process that pools connections runs this "
+            "restore, so the field lives in the data_plane domain, not in the "
+            "agent-only one."
+        ),
+        gt=0,
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     transport_encryption: str = Field(
         default="",
         alias="MEIVA_TRANSPORT_ENCRYPTION",

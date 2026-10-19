@@ -162,6 +162,7 @@ _DECLARED_PAYLOAD_KEYS = {
     "heartbeat_backoff_raised": ("level", "interval_seconds"),
     "heartbeat_backoff_reset": ("previous_level", "reason"),
     "delivery_stalled": ("inbound_id", "age_s"),
+    "db_pool_restore_timeout": ("name", "budget_ms", "elapsed_ms", "ended_by"),
     "db_pool_acquire_slow": (
         "name",
         "elapsed",

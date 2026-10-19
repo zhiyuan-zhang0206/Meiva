@@ -53,7 +53,7 @@ class _AttachmentDial:
     def __exit__(self, *_args: object) -> None:
         self.close()
 
-    def execute(self, sql: str, _params: object = None) -> Self:
+    def execute(self, sql: str, _params: object = None, **_kwargs: object) -> Self:
         self.statements.append(sql)
         return self
 

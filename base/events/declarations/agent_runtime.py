@@ -72,6 +72,18 @@ class DbPoolAcquireSlow(TypedDict):
     connections_errors: int
 
 
+# meiva:note
+# `db_pool_restore_timeout` payload — base/db/connections.py
+# `restore_pooled_session`. One pooled-borrow session restore that outlasted
+# its statement budget: the connection name, the budget that fired, and how
+# long the restore ran before the server cancelled it.
+class DbPoolRestoreTimeout(TypedDict):
+    name: str
+    budget_ms: int
+    elapsed_ms: int
+    ended_by: str
+
+
 class HeartbeatNudged(TypedDict):
     """`heartbeat_nudged` payload — services/wake/heartbeat/daemon.py."""
 
@@ -295,6 +307,13 @@ EVENTS: dict[str, EventSpec] = {
         payload=DbPoolAcquireSlow,
         tier="anomaly",
         site="agent/db/__init__.py:LoggingConnectionPool.getconn",
+    ),
+    "db_pool_restore_timeout": telemetry_event(
+        "db_pool_restore_timeout",
+        "db pool restore timeout",
+        payload=DbPoolRestoreTimeout,
+        tier="anomaly",
+        site="base/db/connections.py:restore_pooled_session",
     ),
     "checkpoint_write_failed": telemetry_event(
         "checkpoint_write_failed", "checkpoint write failed", tier="anomaly"
