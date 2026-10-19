@@ -40,6 +40,23 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); _qc.clear(); vi.restoreAllMocks(); });
 
+describe("agent switches ride the browser history", () => {
+  it("pushes one entry per switch and restores the earlier agent on a traversal", async () => {
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitFor(() => expect(result.current.activeId).toBe(1));
+    const entries = window.history.length;
+    act(() => result.current.setActiveId(2));
+    await waitFor(() => expect(new URL(window.location.href).searchParams.get("agent_id")).toBe("2"));
+    expect(window.history.length).toBe(entries + 1);
+    act(() => {
+      window.history.replaceState(null, "", "?agent_id=1");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await waitFor(() => expect(result.current.activeId).toBe(1));
+    expect(window.history.length).toBe(entries + 1);
+  });
+});
+
 describe("bounded roster and independent selection", () => {
   it("replaces cached vision support with authoritative unknown metadata", async () => {
     const { result } = renderHook(() => useAgents(noop), { wrapper });
