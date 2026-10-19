@@ -49,6 +49,7 @@ Follow the user's authorized scope.
 | Task | Reference |
 |---|---|
 | Set up development | [Development setup](docs/conventions/dev-setup.md) |
+| Refresh a checkout's venv after a lock change | [Development setup](docs/conventions/dev-setup.md#refreshing-a-venv-after-a-lock-change) |
 | Run relevant tests | [Testing](docs/conventions/testing.md) |
 | Review this contribution | [review-contribution](.agents/skills/review-contribution/SKILL.md) |
 | Change the database | [Migration guide](db/docs/migrations.md) |

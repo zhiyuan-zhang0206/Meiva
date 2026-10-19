@@ -82,7 +82,9 @@ cd <printed-worktree-path>             # a script cannot change your directory
 For a manual dependency operation in an existing worktree, clear inherited
 `VIRTUAL_ENV` and run `scripts/host_ops/guard_editable_venv.py` first.
 
-**A lock change does not reach an existing venv.** Pulling moves `uv.lock` and
+### Refreshing a venv after a lock change
+
+A lock change does not reach an existing venv. Pulling moves `uv.lock` and
 `pyproject.toml`; nothing reinstalls. A checkout whose venv predates the lock then
 fails in ways that read as source bugs — an `ImportError` for a symbol the newer
 dependency provides, or collection errors in the suites that import the module — while
