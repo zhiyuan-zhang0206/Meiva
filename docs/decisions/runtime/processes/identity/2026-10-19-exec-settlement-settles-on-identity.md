@@ -41,6 +41,11 @@ rewriting history:
   default): `request_digest` stays the payload sha and a mismatch still refuses.
   The `request_sha256` field is absent. Historical rows keep today's behaviour
   exactly; nothing becomes passable because it is old.
+- **The canonical form is frozen.** Every stored version 2 allocation re-derives
+  its identity during recovery, so reordering the lines, printing the deadline with
+  `str()` or changing the agent id's encoding would refuse all of them at once. A
+  change to the form needs a new `digest_version`; a fixed-vector test pins the
+  exact bytes.
 - Every payload condition is observed, not only a rewrite: `missing`,
   `unreadable`, `symlink` and `oversize` join `changed`, classified with `lstat`
   without following the entry. The evidence file and the event carry the condition,

@@ -177,7 +177,8 @@ class ExecAllocation(_StrictEvidence):
 # rewritten by the exec'd code, which is what makes this digest fit to settle on.
 # The canonical form is the UTF-8 lines `v1`, request hex, domain hex, agent id,
 # generation, runtime owner and the deadline as ISO-8601 UTC microseconds, joined
-# by newlines, hashed with sha256.
+# by newlines, hashed with sha256. That form is frozen: every stored version 2
+# allocation re-derives it, so a change needs a new `digest_version`.
 # meiva:link base/agents/incarnation/docs/incarnation-resources.meiva.okf.md
 def exec_identity_digest(
     *,
