@@ -16,7 +16,13 @@ from pydantic import (
 from base.agents.messages.envelope import validate_source
 from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
-from base.api_contracts.agent_contract import Harness, RestartResult, ResurrectResult, ShellKillMode
+from base.api_contracts.agent_contract import (
+    Harness,
+    HarnessStatus,
+    RestartResult,
+    ResurrectResult,
+    ShellKillMode,
+)
 from base.api_contracts.caller_identity import CallerIdentity, is_caller_source
 from base.api_contracts.op_envelope import OpEnvelope as OpEnvelope
 
@@ -329,6 +335,7 @@ OpKind = Literal[
     "shell_kill",
     "agent_skill_view",
     "shell_capture",
+    "harness_probe",
     "upload-receive-v1",
     "to_user_read",
 ]
@@ -521,6 +528,27 @@ class InventoryWriteOpResult(BaseModel):
     plugin_results: dict[str, FieldWriteResult]
     mcp_results: dict[str, FieldWriteResult]
     applied: bool
+
+
+# meiva:note
+# The probe reports what one machine can run, never what it will run: `status` is
+# what the filesystem could prove about install and sign-in, `binary` the
+# executable a session would start (None when the harness has no CLI of its own),
+# and `on_path` whether PATH alone found it — False means only a conventional
+# install directory held it, so a process started with a trimmed PATH may not see
+# it. Whether a launcher exists at all is the gateway's answer, not the probe's.
+# meiva:link base/agents/docs/harness.meiva.okf.md
+class HarnessProbeRow(BaseModel):
+    harness: Harness
+    status: HarnessStatus
+    reason: str
+    binary: str | None = None
+    on_path: bool = False
+
+
+class HarnessProbeResult(BaseModel):
+    machine: str
+    harnesses: list[HarnessProbeRow]
 
 
 class ShellProbeResult(BaseModel):

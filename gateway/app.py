@@ -46,6 +46,7 @@ from gateway.cluster import machine_pause as machine_pause_router
 from gateway.cluster import ops_monitor as ops_monitor_router
 from gateway.cluster import router as cluster_router
 from gateway.cluster import status as status_router
+from gateway.cluster.harness_probe import HarnessProbeCache
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.server import main as _run_gateway
@@ -162,6 +163,7 @@ def _build_request_resources(
     app.state.machine_token_acceptance = machine_token_acceptance
     app.state.telemetry_staleness = TelemetryStaleness()
     app.state.status_cache = StatusCache()
+    app.state.harness_cache = HarnessProbeCache()
     app.state.identity_mismatch_log = IdentityMismatchLog()
     inspect_queries: Any = inspect_router.build_query_cache()
     app.state.inspect_query_cache = inspect_queries
