@@ -156,6 +156,22 @@ credential and spawns `meiva impersonate relay --provider antigravity --thread-i
 steer semantics). When the lease ends, the host terminates the relay child and
 submits the ended-lease notice once via `antigravity_live_submit`.
 
+The relay resolves that endpoint in **its own** environment before its first
+heartbeat, because the accepting runtime's readiness gate reads the heartbeat as
+proof the relay can reach the host. A destination the relay cannot resolve fails
+startup and rolls the acceptance back; it never activates a lease whose inbound
+messages could not be pushed.
+
+That distinction matters for the Antigravity **CLI** (`agy`). The CLI hosts the
+same ConnectRPC service inside its own process (`127.0.0.1:<port>`, CSRF-gated),
+and it injects the endpoint and token into the commands it runs
+(`ANTIGRAVITY_LS_ADDRESS`, `ANTIGRAVITY_CSRF_TOKEN`). A takeover requested from
+inside that session therefore passes the request-time check, while a relay
+spawned by the Meiva host on the same machine sees neither the injected
+environment nor a discoverable `language_server` process. The CLI cannot host a
+takeover until the request hands the relay an endpoint it can use; task #5371
+failed exactly this way.
+
 ## Claude Code Monitor
 
 Ask the existing Claude session, or the subagent taking the lease, to invoke its

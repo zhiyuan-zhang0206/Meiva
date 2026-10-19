@@ -436,7 +436,8 @@ def _establish_codex_relay(
                 session,
                 incarnation,
                 fail_acceptance,
-                f"relay process exited during startup (exit code {child.process.returncode})",
+                f"{session['relay_provider']} relay exited during startup"
+                f" (exit code {child.process.returncode}); its transport error is on stderr",
             )
         try:
             latest = relay_get(
