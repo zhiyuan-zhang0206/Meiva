@@ -108,6 +108,20 @@ def test_a_cached_probe_costs_no_second_run(tmp_path: Path) -> None:
     assert len(calls) == first
 
 
+def test_cache_freshness_is_judged_at_the_supplied_instant(tmp_path: Path) -> None:
+    binary = _binary(tmp_path)
+    spec = _spec(binary)
+    store = tmp_path / "probes.json"
+    run, calls = _runner()
+    caps.probe_tool(spec, run=run, store=store, now=NOW)
+    first = len(calls)
+
+    later = NOW + dt.timedelta(seconds=caps.PROBE_TTL_SECONDS + 1)
+    caps.probe_tool(spec, run=run, store=store, now=later)
+
+    assert len(calls) > first
+
+
 def test_an_upgraded_binary_is_probed_again(tmp_path: Path) -> None:
     binary = _binary(tmp_path)
     spec = _spec(binary)
