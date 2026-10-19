@@ -3,11 +3,16 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-from base.lm.claude_sdk.events import TurnCompleted
 from base.lm.harness.antigravity.tests.support import config, start
 from base.lm.harness.antigravity.transport import AgyTransport
+from base.lm.harness.events import TurnCompleted
+
+
+def _reap_nothing(observed: Mapping[int, str], pids: Iterable[int]) -> tuple[int, ...]:
+    return ()
 
 
 async def test_interrupt_reaps_the_tool_children_the_cli_leaves_behind(tmp_path: Path) -> None:
@@ -44,7 +49,7 @@ async def test_an_unkillable_child_is_still_reported_as_residue(tmp_path: Path) 
     # signal: the report must stay honest instead of claiming a clean cancel.
     turn = {"hang": True, "spawn_child": True, "kill_child_on_interrupt": False}
     harness = await start(
-        tmp_path, turns=[turn], cancel_settle_seconds=0.2, reap=lambda *_: ()
+        tmp_path, turns=[turn], cancel_settle_seconds=0.2, reap=_reap_nothing
     )
     child = None
     try:

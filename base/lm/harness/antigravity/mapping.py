@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-from base.lm.claude_sdk.events import (
+from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
     SessionStarted,

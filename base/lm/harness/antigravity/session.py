@@ -9,19 +9,6 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
-from base.lm.claude_sdk.events import (
-    BridgeEvent,
-    HandoffInjected,
-    SessionBound,
-    SessionClosed,
-    SessionFaulted,
-    TurnCompleted,
-    Usage,
-    is_droppable,
-)
-from base.lm.claude_sdk.handoff import Handoff
-from base.lm.claude_sdk.process import ChildProbe, PsutilChildProbe, snapshot
-from base.lm.claude_sdk.registry import SessionRecord, SessionRegistry
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.mapping import (
     assistant_text,
@@ -34,6 +21,19 @@ from base.lm.harness.antigravity.transport import (
     InterruptReport,
     TransportClosedError,
 )
+from base.lm.harness.events import (
+    BridgeEvent,
+    HandoffInjected,
+    SessionBound,
+    SessionClosed,
+    SessionFaulted,
+    TurnCompleted,
+    Usage,
+    is_droppable,
+)
+from base.lm.harness.handoff import Handoff
+from base.lm.harness.process import ChildProbe, PsutilChildProbe, snapshot
+from base.lm.harness.registry import SessionRecord, SessionRegistry
 
 # meiva:note
 # Same three boundaries as the Claude bridge — ordered inbound, one outbound
