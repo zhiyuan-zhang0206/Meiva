@@ -6,7 +6,7 @@
 // (each body has its own test file), and keeps the heavy deps (api) out.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Stubs carry the section element ids (their bodies are covered by each
@@ -49,8 +49,9 @@ describe("InsightsPage shell", () => {
     expect(screen.getByRole("link", { name: /back to agents/i })).toBeTruthy();
   });
 
-  it("renders the Status + Ops section headings + anchors", () => {
+  it("renders the Status + Ops section headings + anchors", async () => {
     wrap(<InsightsPage />);
+    await waitFor(() => expect(screen.getByText("STATUS_BODY")).toBeTruthy());
     for (const section of INSIGHTS_SECTIONS) {
       expect(screen.getByRole("heading", { name: section.label })).toBeTruthy();
       expect(document.getElementById(section.id)).toBeTruthy();
@@ -59,8 +60,9 @@ describe("InsightsPage shell", () => {
     expect(screen.getByText("OPS_BODY")).toBeTruthy();
   });
 
-  it("composes Status before Ops", () => {
+  it("composes Status before Ops", async () => {
     const { container } = wrap(<InsightsPage />);
+    await waitFor(() => expect(container.innerHTML).toContain("OPS_BODY"));
     const text = container.innerHTML;
     const status = text.indexOf("STATUS_BODY");
     const ops = text.indexOf("OPS_BODY");
@@ -68,8 +70,9 @@ describe("InsightsPage shell", () => {
     expect(status).toBeLessThan(ops);
   });
 
-  it("requires an agent id before exposing the run timeline link", () => {
+  it("requires an agent id before exposing the run timeline link", async () => {
     wrap(<InsightsPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open agent view" })).toBeTruthy());
 
     expect(screen.getByRole("button", { name: "Open agent view" }).hasAttribute("disabled")).toBe(true);
     fireEvent.change(screen.getByRole("spinbutton", { name: "Agent ID" }), {
@@ -100,8 +103,9 @@ describe("InsightsPage shell", () => {
     expect(window.location.hash).toBe("#ops");
   });
 
-  it("nav lists every section sub-anchor and jumps to it", () => {
+  it("nav lists every section sub-anchor and jumps to it", async () => {
     wrap(<InsightsPage />);
+    await waitFor(() => expect(document.getElementById("ops-metrics")).toBeTruthy());
     const nav = screen.getByRole("navigation", { name: /insights sections/i });
     // Every sub-anchor (Status' blocks, Ops' Metrics/Alerts) appears in the nav.
     for (const section of INSIGHTS_SECTIONS) {
