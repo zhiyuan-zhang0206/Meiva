@@ -403,6 +403,32 @@ def _establish_codex_relay(
         relay_get,
     )
 
+    # meiva:note
+    # Resolve the Antigravity destination here, before a relay exists: a relay that
+    # dies at startup leaves only an exit code in the lease's reason, and the path or
+    # token problem is exactly what the accepting runtime can name while it still has
+    # the record in hand. The cost is one owner-only file read plus at most one probe.
+    # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+    antigravity_endpoint_file = None
+    if session["relay_provider"] == "antigravity":
+        from base.agents.impersonation.host_transport import (
+            antigravity_endpoint_path,
+            resolve_antigravity_endpoint,
+        )
+
+        try:
+            resolve_antigravity_endpoint(session["relay_thread_id"])
+        except (OSError, RuntimeError, ValueError) as exc:
+            return _roll_back_relay_failure(
+                db,
+                bus,
+                session,
+                incarnation,
+                fail_acceptance,
+                f"the Antigravity endpoint is unusable: {exc}",
+            )
+        antigravity_endpoint_file = str(antigravity_endpoint_path(session["relay_thread_id"]))
+
     relay_token = secrets.token_urlsafe(32)
     try:
         minted = provision_relay(db, session["id"], incarnation, relay_token)
@@ -410,16 +436,6 @@ def _establish_codex_relay(
             return False
     except ImpersonationError:
         return False  # the lease is no longer native-held accepted state
-    antigravity_endpoint_file = None
-    if session["relay_provider"] == "antigravity":
-        from base.agents.impersonation.host_transport import antigravity_endpoint_path
-
-        # meiva:note
-        # The relay inherits the session env projection, which carries no
-        # host-injected ANTIGRAVITY_* variables; it gets the record the request
-        # wrote, by path, so the endpoint never rides argv or the environment.
-        # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
-        antigravity_endpoint_file = str(antigravity_endpoint_path(session["relay_thread_id"]))
     child = RelayChild(
         session["id"],
         _relay_process.spawn_codex_relay(
