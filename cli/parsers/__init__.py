@@ -34,6 +34,7 @@ from cli.commands.extensions.parsers.plugins import add_plugins_parser, add_skil
 from cli.parsers.backup import add_backup_parser
 from cli.parsers.cluster import add_cluster_parser
 from cli.parsers.computer import add_computer_parser
+from cli.parsers.harness import add_harness_parser
 from cli.parsers.host import (
     add_converge_parser,
     add_firewall_parser,
@@ -77,6 +78,7 @@ def build_parser(
     add_restart_parser(sub, retained_children=retained_children)
     add_status_parser(sub)
     add_pty_parser(sub)
+    add_harness_parser(sub)
     add_converge_parser(sub)
     add_firewall_parser(sub)
     add_permissions_parser(sub)

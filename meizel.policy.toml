@@ -25,6 +25,7 @@
 "base/packages/plugins/config_face.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "base/packages/plugins/loading/plugin_loader.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "cli/commands/agents/impersonation.py" = "runs the Python the operator pipes in or names as a file"
+"cli/commands/harness.py" = "runs the Python file or stdin the operator names, inside a harness attachment: the operator-authored program is run content, not a dependency of this repository"
 "cli/commands/extensions/_plugin_scaffold.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "cli/commands/management/schedule_verify_child.py" = "dry-runs the imports of a user-written schedule script and checks its syntax"
 "gateway/inspect/_plugin_metrics.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
