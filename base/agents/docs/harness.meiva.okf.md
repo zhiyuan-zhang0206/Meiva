@@ -119,6 +119,12 @@ an hour unavailable, so it is reported as age instead. Where the store records n
 expiry at all (Codex keeps opaque tokens), the stored token is the evidence and
 the reason carries its age.
 
+The store has to belong to the CLI. Antigravity's IDE writes
+`~/.gemini/jetski-standalone-oauth-token`, the CLI reads only
+`~/.gemini/antigravity-cli/antigravity-oauth-token`, and a machine holding just
+the IDE's fresh token answers `authentication required` when the CLI runs — so
+only the CLI's file is read, and an IDE-only machine reports `unknown`.
+
 The probe reads the filesystem only. It runs no CLI, so it cannot hang on a login
 prompt, spend quota or start a session. When PATH misses a user-level install the
 probe still looks in the conventional bin directories, because an agent process
