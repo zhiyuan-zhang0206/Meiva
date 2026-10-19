@@ -4,10 +4,11 @@
 # Submodules split by node (one file per node); leading underscore marks
 # package-private, no underscore marks a module promoted to a real public door
 # (other packages import it directly — plugin registration points, the exec
-# child's protocol, etc.). Four node families are subpackages, one package per
-# node (`claim/`, `llm/`, `exec/`, `harness/`) — each re-exports its node from
-# `node.py`, so callers do not name the file. Two more packages group what the
-# nodes read: `prompt/` (system prompt and standing context notes) and `recall/`
+# child's protocol, etc.). Three node families are subpackages, one package per
+# node (`claim/`, `llm/`, `exec/`) — each re-exports its node from `node.py`, so
+# callers do not name the file; the external-harness turn is one node inside
+# `claim/`, not a family of its own. Two more packages group what the nodes
+# read: `prompt/` (system prompt and standing context notes) and `recall/`
 # (passive memory recall):
 #
 #   - `claim/node.py`      — claim node: pipeline orchestrator (long await + dispatch by inbound kind)
@@ -32,8 +33,8 @@
 #   - `node_log.py`      — node enter/exit lifecycle log + publish timeline snapshot
 #   - `prompt/system_prompt.py` — system prompt dynamic assembly (base + plugin contributions)
 #   - `prompt/capabilities.py`, `prompt/context_notes.py` — the `# Capabilities` index, standing context notes
-#   - `harness/node.py`    — harness_turn: the whole turn of an external-CLI agent
-#   - `harness/bridge.py`  — the session behind it: open, resume, submit, close
+#   - `claim/harness_turn.py` — harness_turn: the whole turn of an external-CLI agent
+#                               (the session behind it lives in `base/lm/harness/`)
 #   - `recall/memory_recall.py` — passive memory recall
 #
 # Public API is lazily re-exported via this __init__.py (PEP 562) — external
