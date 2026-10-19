@@ -33,6 +33,16 @@ export const metadata: Metadata = {
 // what the palette shows (task #2695 — Dark Reader reads the same signals).
 export const viewport: Viewport = {
   colorScheme: "dark light",
+  // meiva:note
+  // Android Chrome paints the status/toolbar and navigation-bar areas from
+  // `theme-color`; without it the system chrome stays light under a dark page.
+  // These are the first-paint values — the palette owns them (`--theme-color`
+  // in globals.css) and `ThemeColorSync` follows an in-app theme override.
+  // meiva:link ui/web/src/docs/frontend.meiva.okf.md
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#222222" },
+  ],
   // Android Chrome shrinks the LAYOUT viewport (and with it the h-full shell)
   // for the on-screen keyboard when asked to; the default `resizes-visual`
   // would leave the composer under the keyboard. iOS Safari ignores this meta
