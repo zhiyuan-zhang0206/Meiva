@@ -1,0 +1,10 @@
+exports = ["fake_app_server.py", "fake_stdio_server.py", "support.py"]
+
+[uses]
+"support.py" = ["fake_app_server.py"]
+"test_approvals.py" = ["support.py"]
+"test_cancel.py" = ["fake_app_server.py", "support.py"]
+"test_inbound_queue.py" = ["support.py"]
+"test_mapping.py" = []
+"test_session.py" = ["fake_app_server.py", "support.py"]
+"test_transport.py" = ["fake_stdio_server.py"]
