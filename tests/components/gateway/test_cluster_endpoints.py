@@ -640,6 +640,16 @@ def seed_agent_on_machine(
     return aid
 
 
+# meiva:note
+# The pause endpoint reassigns a paused machine's tasks to a fixed drain owner
+# (`_MACHINE_PAUSE_DRAIN_OWNER`, #405), so the row has to exist here as the FK
+# target. Writing an id by hand does not move the id sequence, and the next spawn
+# then takes a number that is already in the table: with two spawns, the second
+# took 405 and the insert failed on `agents_pkey`. Whether that happens depends on
+# how many agents the tests before this one created, which is how a green suite
+# went red after unrelated tests were added. Moving the sequence past every id the
+# table holds makes the manual row a reservation instead of a trap.
+# meiva:link gateway/tests/routers/cluster_endpoints/test_admin_machine_delete.py
 def seed_drain_owner(db_conn: psycopg.Connection, agent_id: int = 405) -> None:
     """The drain-owner agent row the pause endpoint reassigns tasks to (the
     FK target `agent_tasks.owner -> agents(id)`)."""
@@ -647,6 +657,9 @@ def seed_drain_owner(db_conn: psycopg.Connection, agent_id: int = 405) -> None:
         cur.execute(
             "INSERT INTO agents (id) VALUES (%s) ON CONFLICT (id) DO NOTHING",
             (agent_id,),
+        )
+        cur.execute(
+            "SELECT setval(pg_get_serial_sequence('agents', 'id'), (SELECT max(id) FROM agents))"
         )
     db_conn.commit()
 

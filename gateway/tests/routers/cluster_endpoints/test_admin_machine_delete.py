@@ -538,3 +538,39 @@ class TestMachinePauseResume:
         with gateway_test_client(machine=machine) as client:
             r = client.post("/api/cluster/machines/ghost/resume", json={})
         assert r.status_code == 404
+
+
+# meiva:note
+# The reserved drain-owner id must not be a number the id sequence hands out. The
+# failure this pins is real: with the sequence where the shard's earlier tests left
+# it, the second spawn of the pause test took the reserved id and the insert failed
+# on `agents_pkey`. The sequence is placed by hand here so the collision is a test
+# outcome, not a property of how many agents happened to be born before this file.
+# meiva:link tests/components/gateway/test_cluster_endpoints.py
+def test_a_spawn_never_takes_the_reserved_drain_owner_id(
+    db_conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT setval(pg_get_serial_sequence('agents', 'id'), 404, true)")
+    db_conn.commit()
+
+    seed_away_machine(db_conn)
+    seed_drain_owner(db_conn)
+    born = [
+        seed_agent_on_machine(
+            db_conn,
+            "away",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            machine_identity=machine_identity,
+        )
+        for _ in range(2)
+    ]
+
+    assert born == [406, 407]
