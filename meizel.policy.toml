@@ -191,6 +191,7 @@ pure-chain-callees = [
 # Files that ARE a sink facade: the module-level state in them is the facade's own write-only
 # machinery. The exemption covers state only; a thread or task a facade starts is still reported.
 [ambient-state.sink-facades]
+"base/deploy/start_trace.py" = "the start-phase meter: spans are written at the call sites and read only by the one report printed at exit"
 "agent/graph/node_log.py" = "snapshot cursor and node-exit aggregate buffered for the log/event stream; written by node exits, read only by the flush that emits them"
 "base/log/process.py" = "the concrete loguru startup and sink facade: its idempotency guard is read only by process logging initialization"
 "cli/database/lifecycle_audit.py" = "the lifecycle-request audit sink: the recorder one operator command installs and `record_lifecycle_request` writes through; no decision reads it"

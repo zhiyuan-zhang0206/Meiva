@@ -16,6 +16,7 @@ from typing import Any
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import session_name
 from base.cluster.machine import MachineIdentity, MachineRoles
+from base.deploy import start_trace
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
@@ -141,15 +142,16 @@ def prepare_cold_start(
     # 1) converge host state (symlink / PATH / $MEIVA_HOME dirs / plugin config
     # images). Memory initialization is explicit (`meiva memory init`).
     try:
-        converge_host.converge_host(
-            repo,
-            roles,
-            services=frozenset(spec.session for spec in roster),
-            database_factory=database_factory,
-            producer=producer,
-            command=command,
-            steps=cold_start_steps(),
-        )
+        with start_trace.phase("converge host"):
+            converge_host.converge_host(
+                repo,
+                roles,
+                services=frozenset(spec.session for spec in roster),
+                database_factory=database_factory,
+                producer=producer,
+                command=command,
+                steps=cold_start_steps(),
+            )
     except Exception as e:
         print(f"  ✗ converge failed: {e}", file=sys.stderr)
         return 1
@@ -159,31 +161,38 @@ def prepare_cold_start(
     #    central node's DB/Redis). macOS: brew binaries via pg_ctl + redis-server;
     #    Linux: pg_ctl + redis-server. No docker on any POSIX platform.
     if data_plane is not None:
-        rc = ensure_gateway_data_plane(
-            data_plane,
-            retained_children=retained_children,
-            database_factory=database_factory,
-            machine=command.machine,
-        )
+        with start_trace.phase("data plane (pg + redis)"):
+            rc = ensure_gateway_data_plane(
+                data_plane,
+                retained_children=retained_children,
+                database_factory=database_factory,
+                machine=command.machine,
+            )
         if rc != 0:
             return rc
         from cli.commands.data_plane.bringup import prepare_gateway_schema
 
-        prepare_gateway_schema(data_plane)
+        with start_trace.phase("gateway schema"):
+            prepare_gateway_schema(data_plane)
     else:
         print("\n→ local services: skipped (agent-runner uses central node's DB/Redis)")
 
-    rc = _prepare_start_schema(database_factory=database_factory, machine_name=command.machine.name)
+    with start_trace.phase("migrations"):
+        rc = _prepare_start_schema(
+            database_factory=database_factory, machine_name=command.machine.name
+        )
     if rc:
         return rc
 
     if data_plane is not None:
         from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
-        complete_gateway_data_plane(
-            data_plane, database_factory=database_factory, machine=command.machine
-        )
-    rc = _repo_commands.assert_schema_current_or_die(database_factory.db_url())
+        with start_trace.phase("pgbouncer"):
+            complete_gateway_data_plane(
+                data_plane, database_factory=database_factory, machine=command.machine
+            )
+    with start_trace.phase("schema check"):
+        rc = _repo_commands.assert_schema_current_or_die(database_factory.db_url())
     if rc != 0:
         return rc
 
@@ -204,12 +213,13 @@ def prepare_cold_start(
     # invisible to the materializer until it has a row, and sweeping first means
     # one pass leaves machine and cluster agreeing rather than two.
     skills_root = skills_dir(meiva_home())
-    adopt_local_extensions(
-        database_factory=database_factory,
-        machine_name=command.machine.name,
-        skills_root=skills_root,
-    )
-    materialize_cluster_extensions(database_factory=database_factory, skills_root=skills_root)
+    with start_trace.phase("extensions materialize"):
+        adopt_local_extensions(
+            database_factory=database_factory,
+            machine_name=command.machine.name,
+            skills_root=skills_root,
+        )
+        materialize_cluster_extensions(database_factory=database_factory, skills_root=skills_root)
 
     return 0
 
@@ -342,17 +352,19 @@ def _admit_start(
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 
     # Resolve desired services without publishing changes before admission.
-    roster = _roster_for(
-        state.roles, selection, publish=False, machine=command.machine, host=command.host
-    )
-    try:
-        state.live = _root_driver_commands.admit_live_start(
-            roster,
-            state.repo,
-            state.roles,
-            reconcile=selection.persist_services,
-            helper=command.helper,
+    with start_trace.phase("roster resolve"):
+        roster = _roster_for(
+            state.roles, selection, publish=False, machine=command.machine, host=command.host
         )
+    try:
+        with start_trace.phase("live generation check"):
+            state.live = _root_driver_commands.admit_live_start(
+                roster,
+                state.repo,
+                state.roles,
+                reconcile=selection.persist_services,
+                helper=command.helper,
+            )
         if not state.live:
             rc = prepare_cold_start(
                 state.repo,
@@ -370,13 +382,14 @@ def _admit_start(
         return 1
     # A live generation may only be inspected here; pending schema changes
     # require a stopped writer boundary and never run as a repeat-start effect.
-    rc = _repo_commands.assert_schema_current_or_die(database_factory.db_url())
-    if rc:
-        return rc
-    if state.live:
-        from base import cluster
+    with start_trace.phase("schema check (post-admission)"):
+        rc = _repo_commands.assert_schema_current_or_die(database_factory.db_url())
+        if rc:
+            return rc
+        if state.live:
+            from base import cluster
 
-        cluster.assert_checkpoint_schema_current(database_factory.db_url())
+            cluster.assert_checkpoint_schema_current(database_factory.db_url())
     return None
 
 
@@ -392,9 +405,10 @@ def _register_and_probe(state: _StartState, *, database_factory: DatabaseFactory
     # agent-runner will also fail every subsequent `meiva cluster status` and
     # The fleet update orchestration.
     print("\n→ register machine in central DB")
-    rc = _repo_commands.register_machine_or_die(
-        database_factory(), state.resolved, state.roles, command=state.command
-    )
+    with start_trace.phase("register machine"):
+        rc = _repo_commands.register_machine_or_die(
+            database_factory(), state.resolved, state.roles, command=state.command
+        )
     if rc != 0:
         return rc
 
@@ -406,7 +420,8 @@ def _register_and_probe(state: _StartState, *, database_factory: DatabaseFactory
     # is on this stdout and the host fails non-zero.
     if "agent-runner" in state.roles and "gateway" not in state.roles:
         print("\n→ probe gateway")
-        rc = _repo_commands.probe_gateway_or_die(state.resolved["gateway_url"])
+        with start_trace.phase("gateway probe"):
+            rc = _repo_commands.probe_gateway_or_die(state.resolved["gateway_url"])
         if rc != 0:
             return rc
     return None
@@ -443,6 +458,29 @@ def print_gateway_hint(*, machine: MachineIdentity) -> None:
             "(bundle from `meiva cluster db-authority issue-unit` here; MEIVA_DB_CAPABILITY_KEY "
             "set from a non-echoing prompt)"
         )
+
+
+def _report_running_tree(
+    *,
+    database_factory: OperatorDatabaseFactory,
+    command: CommandRuntime,
+    started: tuple[ServiceSpec, ...],
+    wait: Any,
+) -> None:
+    # meiva:note
+    # The snapshot and the reach-me hint stay one unit so the status block keeps one
+    # owner; both read the same launch outcome the verdict below judges.
+    print("\n→ status")
+    with start_trace.phase("status"):
+        cmd_status(
+            database_factory=database_factory,
+            machine=command.machine,
+            config=command.config,
+            host=command.host,
+        )
+    if any(spec.session == "gateway" for spec in started) and not wait.unready:
+        print_gateway_hint(machine=command.machine)
+        print_login_link({spec.session for spec in started})
 
 
 def _critical_launch_failures(launch: Any) -> tuple[str, ...]:
@@ -517,11 +555,13 @@ def cmd_start_body(
     import cli.commands.lifecycle.root_driver as _root_driver_commands
     from base.deploy.maintenance import admission
 
-    guarded = _guard_start(runtime, operation)
+    with start_trace.phase("admission"):
+        guarded = _guard_start(runtime, operation)
     if isinstance(guarded, int):
         return guarded
     runtime, repo = guarded
-    identity = _resolve_identity(command)
+    with start_trace.phase("identity"):
+        identity = _resolve_identity(command)
     if isinstance(identity, int):
         return identity
     resolved, roles = identity
@@ -539,28 +579,32 @@ def cmd_start_body(
         return rc
 
     # Preparation may materialize plugins on a cold start; publish only now.
-    roster = _roster_for(roles, selection, machine=command.machine, host=command.host)
+    with start_trace.phase("roster publish"):
+        roster = _roster_for(roles, selection, machine=command.machine, host=command.host)
 
     # 4a) probe before binding: refuse to launch a daemon onto a health port
     # another unit already answers on — this is the last point at which nothing
     # has been spawned, and the roster is knowable only after the skip resolves.
-    rc = refuse_occupied_health_ports(roster)
+    with start_trace.phase("health-port preflight"):
+        rc = refuse_occupied_health_ports(roster)
     if rc != 0:
         return rc
 
     # Failed start attempts must leave recovery actions gated.
-    serving_generation = start_serving.begin_start()
-    record_running_sha(repo)
-    launch = _root_driver_commands.launch_service_tree(
-        roster,
-        repo,
-        roles,
-        reconcile=persist_services,
-        retained_children=state.retained_children,
-        helper=command.helper,
-        runtime=runtime,
-        honor_restart_budget=boot_attempt,
-    )
+    with start_trace.phase("serving generation"):
+        serving_generation = start_serving.begin_start()
+        record_running_sha(repo)
+    with start_trace.phase("launch service tree"):
+        launch = _root_driver_commands.launch_service_tree(
+            roster,
+            repo,
+            roles,
+            reconcile=persist_services,
+            retained_children=state.retained_children,
+            helper=command.helper,
+            runtime=runtime,
+            honor_restart_budget=boot_attempt,
+        )
     started = launch.started
     # 4a) hand the launch failures to whoever runs this start from another process.
     # Written unconditionally so a clean start clears a previous run's list; the
@@ -580,24 +624,16 @@ def cmd_start_body(
 
     # Success requires real readiness for every launched service, frontend included.
     print("\n→ waiting for services to come up")
-    wait = root_readiness.wait_for_service_tree(
-        tuple(started),
-        timeout_s=SERVICE_READY_TIMEOUT_S,
-        timers=command.timers,
-    )
+    with start_trace.phase("readiness wait"):
+        wait = root_readiness.wait_for_service_tree(
+            tuple(started),
+            timeout_s=SERVICE_READY_TIMEOUT_S,
+            timers=command.timers,
+        )
 
-    print("\n→ status")
-    cmd_status(
-        database_factory=database_factory,
-        machine=command.machine,
-        config=command.config,
-        host=command.host,
+    _report_running_tree(
+        database_factory=database_factory, command=command, started=tuple(started), wait=wait
     )
-
-    # 7) gateway reachability hint.
-    if any(spec.session == "gateway" for spec in started) and not wait.unready:
-        print_gateway_hint(machine=command.machine)
-        print_login_link({spec.session for spec in started})
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
     rc = readiness_verdict(launch, wait)
@@ -606,13 +642,14 @@ def cmd_start_body(
 
     _assert_archive_after_readiness(wait, roles=state.roles, machine=state.command.machine)
 
-    if not start_serving.mark_serving(serving_generation, runtime=runtime.identity()):
-        print("  ✗ this start lost its serving generation", file=sys.stderr)
-        return 1
-    from base.paths import meiva_home
-    from cli.start_identity import mark_phase
+    with start_trace.phase("finalize"):
+        if not start_serving.mark_serving(serving_generation, runtime=runtime.identity()):
+            print("  ✗ this start lost its serving generation", file=sys.stderr)
+            return 1
+        from base.paths import meiva_home
+        from cli.start_identity import mark_phase
 
-    mark_phase(meiva_home(), "ready")
+        mark_phase(meiva_home(), "ready")
     return 0
 
 
