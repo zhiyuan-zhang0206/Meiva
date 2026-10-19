@@ -66,7 +66,7 @@ none of it is inferred from a vendor document.
 
 | Harness | Store | Shape | Copy verdict |
 |---|---|---|---|
-| `claude` | `~/.claude/.credentials.json` (Linux, and macOS when the Keychain item is absent) | `claudeAiOauth.{accessToken, refreshToken, expiresAt, refreshTokenExpiresAt, scopes, subscriptionType}` | unmeasured — see below |
+| `claude` | `~/.claude/.credentials.json` (Linux, and macOS when the Keychain item is absent) | `claudeAiOauth.{accessToken, refreshToken, expiresAt, refreshTokenExpiresAt, scopes, subscriptionType}` | **evicts the source** — the refresh token is single-use |
 | `claude` | macOS login Keychain, generic password `service="Claude Code-credentials"` | same blob | not automated; the Keychain is per-machine state |
 | `codex` | `~/.codex/auth.json` | `auth_mode="chatgpt"` → `tokens.{id_token, access_token, refresh_token, account_id}` + `last_refresh`; `auth_mode="apikey"` → static `OPENAI_API_KEY` | the API-key form is safe; the ChatGPT form is usable on a second machine immediately |
 | `agy` | `~/.gemini/antigravity-cli/antigravity-oauth-token` | `token.{access_token, token_type, refresh_token, expiry}` + `auth_method` + `id_token` | **copies successfully** |
@@ -127,7 +127,31 @@ copied. `catalog.Store.rotation` therefore stays `unknown` for those stores and
 | `agy` | **copyable, and the copy keeps itself alive** | copied to a machine with no Google login, answered, then refreshed by itself an hour later |
 | `codex`, ChatGPT mode | **copyable and usable now; the refresh path is unobserved** | `codex exec` answered on the copy; no refresh happened, so eviction stays open |
 | `codex`, API-key mode | safe to copy | a static key, like `dsh` |
-| `claude` | **sign in once per machine** | the only live login is the primary's, its macOS copy lives in the Keychain, and no copy experiment ran against it |
+| `claude` | **copyable, but it evicts the source: sign in once per machine** | a copy answered on the target; when it refreshed, the source lost its login for good |
+
+### The `claude` experiment, and what it proves
+
+Measured on 2026-10-19 between two secondary machines:
+
+1. `company-mini` signed in interactively (browser + hCaptcha, by the user);
+   `~/.claude/.credentials.json` appeared with a 524-byte blob and an access
+   token good for about eight hours.
+2. The file was copied to `company-air`, which had a signed-out CLI and a stale
+   Keychain item. `claude auth status` there reported `loggedIn: true` — **a file
+   at this path wins over a stale Keychain item** — and a real
+   `claude -p "Reply with exactly: OK"` answered.
+3. To force the question the copy had not yet asked, the copy's `accessToken`
+   was replaced with a dead value. The next call still answered `OK`: the CLI
+   refreshed with the shared refresh token.
+4. The refresh had rotated that token (`refresh_sha` changed on the target,
+   stayed put on the source). The source's next call returned
+   `Failed to authenticate: OAuth session expired and could not be refreshed`.
+
+So a Claude login is **single-holder**: copying it moves the login, it does not
+share it. The machine that refreshes first keeps it; the other machine needs a
+new interactive sign-in. `catalog` records this as `rotation = "rotating"`, and
+`sync` will not copy this store without `--accept-credential-risk`, which is the
+honest label for "you are moving the login, not duplicating it".
 
 ## Choosing the golden machine
 
