@@ -23,7 +23,18 @@ class TestLoadManifest:
     def test_loads_repo_manifest(self) -> None:
         scheds = load_manifest()
         by_name = {s.name: s for s in scheds}
-        assert set(by_name) == {
+        assert {name: s.klass for name, s in by_name.items()} == {
+            "c9-daily-report": "product",
+            "debt-sweep-daily": "product",
+            "dev-ci-metrics": "product",
+            "adversarial-eval-weekly": "product",
+            "self-evolution-weekly": "product",
+            "self-evolution-daily": "product",
+            "memory-arbiter": "product",
+            "model-update-tracker": "product",
+            "db-write-stall-watch": "operator",
+        }
+        assert {name for name, s in by_name.items() if s.default_enabled} == {
             "c9-daily-report",
             "debt-sweep-daily",
             "dev-ci-metrics",
@@ -33,7 +44,6 @@ class TestLoadManifest:
             "memory-arbiter",
             "model-update-tracker",
         }
-        assert all(s.klass == "product" and s.default_enabled for s in scheds)
 
     def test_unknown_class_fails_fast(self, tmp_path: Path) -> None:
         path = _manifest(

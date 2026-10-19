@@ -2,6 +2,7 @@
 "adversarial-eval-weekly-schedule.py" = ["adversarial_eval_cases.py", "agent_status_guard.py", "catchup.py", "entry.py"]
 "c9-daily-report-schedule.py" = ["agent_status_guard.py", "catchup.py", "daily_host.py", "entry.py"]
 "daily_host.py" = ["catchup.py"]
+"db-write-stall-watch-schedule.py" = ["catchup.py"]
 "debt-sweep-daily-schedule.py" = ["agent_status_guard.py", "catchup.py", "entry.py"]
 "dev-ci-metrics-schedule.py" = ["agent_status_guard.py", "catchup.py", "daily_host.py", "entry.py"]
 "memory-steward-schedule.py" = ["agent_status_guard.py", "catchup.py", "entry.py"]
