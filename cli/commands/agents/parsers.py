@@ -389,6 +389,6 @@ def _add_notices_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser
         action="append",
         default=None,
         metavar="SWITCH=on|off",
-        help="flip one input: turn_finished=on|off, requestion=on|off (repeatable)",
+        help="flip one input: requestion=on|off (repeatable)",
     )
     notices_audit_p.set_defaults(func=_h_notices_audit)

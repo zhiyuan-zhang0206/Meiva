@@ -1,27 +1,29 @@
 ---
 type: doc
-title: Notify — User Notification System
-description: "meiva.ui.notify namespace: push notifications (FYI / response required / blocking) to user queues, edit pending notifications, dismiss expired notifications. This is the only reliable channel for agents to report results and request decisions from humans."
+title: Notify — the user's notice inbox
+description: "meiva.ui.notify namespace: post notices to the user's inbox (FYI / response required / blocking), edit pending notices, dismiss expired ones. A notice that needs a reply is also delivered as a notification; the only reliable channel for an agent's results and decisions."
 tags:
 - fleet
 - notify
 - user-communication
 ---
 
-# Notify — User Notification System
+# Notify — the user's notice inbox
 
 ## Responsibility
 
-The notification system is the only reliable channel for agents to push messages to users. The user's aggregated notification feed shows only content sent via
-`meiva.ui.notify`—the agent's ordinary text output is not included.
+The notice system is the only reliable channel for agents to reach users: the
+inbox shows only what `meiva.ui.notify` posted, never the agent's ordinary text.
+A notice that needs a reply is also delivered as a notification; an FYI notice
+stays in the inbox.
 
-## Three Notification Tiers
+## Three notice tiers
 
 | Tier | Parameters | Purpose | Agent Behavior |
 |------|------------|---------|----------------|
 | **FYI** | `require_response=False` | Milestones, minor issues already bypassed, directional choices | Continues working, does not wait for a reply |
 | **Response Required** | `require_response=True` | Decisions only a human can make (irreversible operations, spending money, sending messages to real people) | Can continue doing other things |
-| **Blocking** | `require_response=True, blocking=True` | Same as above + agent cannot proceed until a reply | Ends turn after posting notification, idles waiting |
+| **Blocking** | `require_response=True, blocking=True` | Same as above + agent cannot proceed until a reply | Ends turn after posting the notice, idles waiting |
 
 **Communication bisection** (roll-up, #620): **authorization / decisions** (irreversible, spending money, messaging real people) reach the user directly from any depth via `notify`; **progress / conclusions** go to one's delegator via `send_message` for aggregation—the user queue holds only manager-level rollups or deliveries from delegator-less agents; peer-decidable things go to the peer. Default to queueing, never push—out-of-band push only when truly urgent, see [[meiva_builtins/plugins/meiva_fleet/skills/reduce-context-switch-for-human/docs/reduce-context-switch-for-human.meiva.okf.md|interruption discipline skill]].
 
@@ -29,11 +31,11 @@ The notification system is the only reliable channel for agents to push messages
 
 ### `meiva.ui.notify(title, content=None, *, require_response=False, blocking=False, priority='P2', task=None, expire_at=None, idempotency_key, question=None) -> Notice`
 
-Push a notification, automatically superseding any previously unresolved notification from the same agent (resolution=`"superseded"`).
+Post a notice, automatically superseding any previously unresolved notice from the same agent (resolution=`"superseded"`).
 
 - `idempotency_key` (required): retain this operation key for the same notice across retries; use an absolute expiration deadline. Missing or invalid keys fail before HTTP.
 - `title` (required): A one-line title; this is exactly what the user sees in their queue.
-- `content` (optional): Detailed content displayed when the user opens the notification. For a structured question, use this as background and put the question itself in `title`; legacy notices may still offer A/B/C in plain text.
+- `content` (optional): Detailed content displayed when the user opens the notice. For a structured question, use this as background and put the question itself in `title`; legacy notices may still offer A/B/C in plain text.
 - `question` (optional): one `text`, `single_select`, or `multi_select` question. Choice questions carry ordered `options` (`id`, `label`, optional `description`) and `allow_other`. Requires `require_response=True`.
 - `priority`: `"P0"` (highest) to `"P3"` (lowest), suggesting how the user should sort.
 - `task` (optional, #663): the owning task's ID—the human queue groups by the notice's **own** task, not just the owner agent; validated at post time (`ValueError` if absent, no dangling FK); immutable after posting (`edit_notice` rejects it).

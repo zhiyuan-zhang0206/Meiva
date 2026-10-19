@@ -49,8 +49,6 @@
   "composerContextMeter": "Context window in the composer",
   "composerContextMeterDesc": "Show a context-window gauge beside the composer. Off by default — the numbers live in the inspector's Context section, and an enabled gauge is a bare bar with no text.",
   "categories": {
-    "coreTurnFinished": "Agent finished its turn",
-    "coreNeedsInput": "Agent is waiting on your answer",
-    "fleetTaskClosed": "Task closed"
+    "coreNeedsInput": "Agent is waiting on your answer"
   }
 }

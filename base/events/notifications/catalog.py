@@ -1,3 +1,9 @@
+# meiva:note
+# A notification is a request that needs the user's reply. An event the user does
+# not have to answer — a finished turn, a closed task — belongs in the log, the
+# task board or the inbox that already carries it, never in this catalog.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
@@ -31,16 +37,11 @@ class NotificationCategory:
 # meiva:note
 # Core ids are `core.`-prefixed and a plugin contributes only `<plugin>.` ids, so
 # the merged catalog can reject a duplicate id as a programming error rather than
-# resolve an ownership clash at delivery time.
+# resolve an ownership clash at delivery time. The catalog holds requests, not
+# events: `core.needs_input` is the only thing the user has to answer, so it is
+# the only core category. A finished turn or a closed task is a log line.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 CORE_CATEGORIES: tuple[NotificationCategory, ...] = (
-    NotificationCategory(
-        id="core.turn_finished",
-        label="Agent finished its turn",
-        description="An agent settled back to idle after working.",
-        importance="normal",
-        default_enabled=False,
-    ),
     NotificationCategory(
         id="core.needs_input",
         label="Agent is waiting on your answer",
