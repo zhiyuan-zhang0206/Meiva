@@ -1,5 +1,3 @@
-"""Daily official-model detection, reporting actionable additions to the P0 lead."""
-
 import json
 import os
 import subprocess
@@ -111,7 +109,6 @@ def _report_from_result(result: subprocess.CompletedProcess[str], report_dir: Pa
 
 
 def run_tracker() -> None:
-    """Run one detection cycle and notify on candidate, error, or status change."""
     root = repo_root()
     report_dir = meiva_home() / "model-tracker"
     child_env = os.environ.copy()

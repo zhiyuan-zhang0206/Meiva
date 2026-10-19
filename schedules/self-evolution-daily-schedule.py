@@ -1,11 +1,4 @@
-"""self-evolution daily incremental scan — daily 00:00 cluster time.
-
-Runs daily_scan.py (collect --days 1 + metrics + threshold alerts).
-- exit code 2 (ALERT) -> wakes the self-evolution agent to act
-- timeout/failure/missing script -> prints to the schedule log (runner
-  records last_error) AND wakes the agent to investigate
-Resumable: recomputes next_fire from the clock every iteration.
-"""
+# meiva:link schedules/docs/self-evolution.meiva.okf.md
 
 from uuid import uuid4
 
@@ -24,12 +17,11 @@ from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
 
 
-# daily_scan.py ships with the meiva-self-evolution skill. The load-dir copy is
-# converge-managed but bootstrap-only (R5): converge lands it once, and the
-# product rollout's update legs refresh it to the landed revision (issue
-# #1289 — before that wiring, the copy stayed at its first-landing version
-# and a script added later never arrived; `meiva skill update` is the manual
-# equivalent).
+# meiva:note
+# `daily_scan.py` ships with the meiva-self-evolution skill, and this reads the skill's
+# load-directory copy: converge-managed but bootstrap-only (R5), refreshed to the landed
+# revision by the rollout's update legs, with `meiva skill update` as the manual.
+# meiva:link schedules/docs/self-evolution.meiva.okf.md
 def _daily_scan_path() -> str:
     return os.path.join(
         os.environ.get("MEIVA_HOME", os.path.expanduser("~/.meiva")),
@@ -40,22 +32,18 @@ def _daily_scan_path() -> str:
     )
 
 
-CRON = "0 0 * * *"  # 00:00 cluster time — the off-peak trough of a cluster workday
+CRON = "0 0 * * *"
 
 
-# Daily report recipient (an agent id) — defaults to the CEO #228 per the
-# 2026-08-09 ruling (daily reports replaced the weekly ones); an env override
-# wins, and an explicit empty env value skips the report.
 def _report_agent() -> str:
     return os.environ.get("MEIVA_SELF_EVOLUTION_DAILY_REPORT_AGENT", "228")
 
 
-# Measured full-day scan T >= 108 min: 112.9 min total on 2026-09-25 while
-# two collect streams ran (task #4743 log, #4750 tracker). 10800 s = 180 min,
-# about 1.6x the measured contended T. This remains the final bound between
-# a slow scan (allowed) and a wedged one: beyond it, subprocess.TimeoutExpired
-# prints the timeout line and wakes the agent. The longer bound only delays
-# wedge detection, which is accepted.
+# meiva:note
+# The measured full day is about 113 minutes with two collect streams running
+# (2026-09-25), so 180 minutes is roughly 1.6x contended time: the bound separates a slow
+# scan from a wedged one, and the extra margin only delays wedge detection.
+# meiva:link schedules/docs/self-evolution.meiva.okf.md
 _SCAN_TIMEOUT_SECONDS = 10800
 
 
@@ -63,7 +51,6 @@ def ensure_agent(label: str, prompt: str) -> int:
     before_id = None
     while True:
         page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
-        # Directory pages are newest first; substring search still needs an exact label match.
         for agent in page.agents:
             if agent.label != label:
                 continue
@@ -81,9 +68,9 @@ def ensure_agent(label: str, prompt: str) -> int:
 def run_scan() -> None:
     daily = _daily_scan_path()
     if not os.path.isfile(daily):
-        # A missing script must not masquerade as an ALERT: python exits 2
-        # when it cannot open the file, which the rc==2 branch would read
-        # as "bad runs found". Fail loudly and wake the agent instead.
+        # meiva:note
+        # A missing script must not masquerade as an ALERT: python exits 2 when it cannot
+        # open the file, which the rc==2 branch would read as "bad runs found".
         msg = (
             f"daily_scan.py missing at {daily} — run `meiva skill update meiva-self-evolution` "
             f"(or `meiva skill update` for all repo-native skills) to refresh the load-dir copy"
@@ -140,10 +127,10 @@ def main(*, inputs: ScheduleInputs) -> None:
     db = inputs.database()
     started_at = datetime.now(UTC)
     while True:
-        # after=now-2min gives trigger tolerance: sleep precision delay can land `now`
-        # a fraction of a second past the hour; croniter get_next (strictly > base)
-        # would then jump to the next day (deterministic miss, observed 2026-08-06).
-        # tolerance window = [-120s, +60s].
+        # meiva:note
+        # `after=now-2min` is the trigger tolerance: croniter's get_next is strictly
+        # greater than its base, so a `now` a fraction of a second past the hour would jump
+        # to the next day (deterministic miss, observed 2026-08-06). Window: [-120s, +60s].
         now = datetime.now(UTC)
         nxt = next_fire(
             CRON, after=max(started_at, now - timedelta(minutes=2)), timezone=cluster_timezone()

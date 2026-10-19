@@ -1,5 +1,3 @@
-"""Shared slot loop and report recipient lookup for the two daily CI hosts."""
-
 from __future__ import annotations
 
 import os
@@ -15,7 +13,6 @@ from base.db import Database
 
 
 def report_agent(env_name: str, label: str) -> int:
-    """Resolve an explicit recipient or search every page for the exact label."""
     configured = os.environ.get(env_name)
     if configured is not None and configured.strip():
         try:
@@ -40,7 +37,6 @@ def report_agent(env_name: str, label: str) -> int:
 def run_daily_loop(
     db: Database, cron: str, tz: str, fire: Callable[[datetime, None], None]
 ) -> None:
-    """Claim online slots at most once, skipping slots before this start."""
     last_run_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)

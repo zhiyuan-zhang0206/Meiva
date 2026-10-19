@@ -1,22 +1,4 @@
-"""Daily CI-minute reconciliation — the C9 daily report host.
-
-Fires once per day at 05:00 cluster time (after the 4AM memory consolidation),
-collects the trailing 24h of CI runs, appends them to the attribution ledger
-idempotently (keyed by run id — `scripts/ci/pull_requests/accounting.py`), and emits one
-`ci_usage_daily` telemetry event carrying the day's totals. The per-agent
-breakdown stays in the ledger; `ci_utils.py --ci-usage` reads it on demand.
-
-The reconciliation window is the CLAIMED slot passed to the callback, so a
-catch-up boot that fires several missed slots reconciles each slot's own day —
-windows stay gapless and each
-day emits exactly one event. Idempotency: the slot claim
-(`schedules.catchup.fire_slot_once`) is at-most-once, and the ledger append
-is run-id-keyed, so a re-run of the same window is a no-op for
-already-recorded runs. A failed reconciliation does NOT
-retry automatically (the claim stays committed — the documented
-at-most-once trade-off); the failure message tells the P0 lead to backfill
-manually with `scripts/ci/pull_requests/accounting.py --since ... --until ... --append-ledger`.
-"""
+# meiva:link schedules/docs/c9-daily-report.meiva.okf.md
 
 from __future__ import annotations
 
@@ -43,7 +25,9 @@ _REPORT_AGENT_ENV = "MEIVA_CI_USAGE_REPORT_AGENT"
 _REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
 _PROCESS_NAME = "schedule-c9-daily"
 
-# GitHub-hosted overage rates (private-repo equivalent; scripts/ci/pull_requests/accounting.py).
+# meiva:note
+# GitHub-hosted overage rates, private-repo equivalent; `scripts/ci/pull_requests/accounting.py`
+# owns the same numbers.
 _LINUX_MINUTE_USD = 0.006
 _MACOS_MINUTE_USD = 0.062
 
@@ -65,13 +49,10 @@ def _report_failure(detail: str) -> None:
         raise
 
 
+# meiva:note
+# Slot-based, not trailing-now: a late catch-up fire still covers its own 05:00-05:00 day,
+# and the day label is the slot's cluster-tz date, which can differ from its UTC date.
 def window_bounds(slot_end: datetime) -> tuple[str, str, str]:
-    """The reconciliation window for a slot: [slot_end - 24h, slot_end).
-
-    Slot-based (not trailing-now), so a late catch-up fire still covers its
-    own 05:00-05:00 day and windows stay gapless across fires. Returns the
-    UTC ISO since/until pair plus the window's day label (cluster-tz date).
-    """
     since = slot_end - timedelta(hours=24)
     day = slot_end.astimezone(ZoneInfo(cluster_timezone()))
     return (
@@ -82,7 +63,6 @@ def window_bounds(slot_end: datetime) -> tuple[str, str, str]:
 
 
 def _load_accounting() -> Any:
-    """Load the accounting module through its repository package."""
     from scripts.ci.pull_requests import accounting
 
     return accounting
@@ -96,7 +76,6 @@ def summarize(
     window_end: str,
     appended_runs: int,
 ) -> dict:
-    """Flat `ci_usage_daily` payload from the window's attribution entries."""
     attributed = [e for e in entries if isinstance(e.get("agent_id"), int)]
     linux_minutes = sum(int(e.get("linux_minutes") or 0) for e in entries)
     macos_minutes = sum(int(e.get("macos_minutes") or 0) for e in entries)

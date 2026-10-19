@@ -1,11 +1,4 @@
-"""self-evolution-weekly — dynamic trigger based on weekly event volume.
-
-Fires the self-evolution agent on Tuesday 00:00 cluster time, but only when the
-past week's agent event volume exceeds a minimum threshold. Busy weeks also get
-a Thursday mid-week follow-up trigger.
-
-Resumable: recomputes on every iteration, acts only when the window is open.
-"""
+# meiva:link schedules/docs/self-evolution.meiva.okf.md
 
 from uuid import uuid4
 
@@ -22,31 +15,28 @@ from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
 
 
-# ── Configuration ──────────────────────────────────────────────────────────
-
 LABEL = "self-evolution"
 PROMPT = "Read and run $MEIVA_HOME/skills/meiva-self-evolution/SKILL.md for this week."
 
-# Main weekly check: Tuesday 00:00 cluster time
+# meiva:note
+# Despite the MONDAY_*/THURSDAY_* names, the main check is Tuesday 00:00 and the mid-week
+# follow-up Friday 00:00 cluster time; the trigger values travel in the slot payload.
 MONDAY_CRON = "0 0 * * 2"
-# Mid-week follow-up for busy weeks: Friday 00:00 cluster time
 THURSDAY_CRON = "0 0 * * 5"
 MONDAY_TRIGGER = "monday"
 THURSDAY_TRIGGER = "thursday"
 
-# Minimum weekly events to trigger self-evolution (~4K/day floor).
-# Below this the week is too quiet for meaningful analysis.
+# meiva:note
+# A weekly floor of about 4K events a day: below it the week is too quiet for meaningful
+# analysis, so no pass runs at all.
 MIN_WEEKLY_EVENTS = 30000
 
-# Above this threshold, also schedule a Thursday mid-week follow-up.
+# meiva:note
+# Above this many events in the week, the main trigger also enables the mid-week follow-up.
 HIGH_WEEKLY_EVENTS = 200000
-
-# ── Helpers ────────────────────────────────────────────────────────────────
 
 
 def count_events(since: datetime) -> int:
-    """Count events since `since` (UTC) via the /api/events count path. The weekly trigger must count the live stream or it silently
-    skips every week."""
     import os
 
     import httpx
@@ -68,9 +58,10 @@ def count_events(since: datetime) -> int:
         "to": datetime.now(UTC).isoformat(),
         "limit": 1,
         "offset": 0,
-        # 2026-08-18 contract change: meta.total is opt-in; without this flag
-        # the gateway returns total=None and int(None) crashes the weekly
-        # trigger (and a silent 0 would skip the week's deep run).
+        # meiva:note
+        # `meta.total` is opt-in since the 2026-08-18 contract change: without this flag the
+        # gateway returns no total, which crashes the trigger on `int(None)`, while a silent
+        # 0 would skip the week's deep run.
         "with_total": 1,
     }
     resp = httpx.get(f"{base}/api/events", params=params, headers=headers, timeout=120.0)
@@ -85,12 +76,9 @@ def count_events(since: datetime) -> int:
 
 
 def ensure_agent(label: str, prompt: str) -> int:
-    """Return the agent id of a running/idle agent with `label`, resurrecting a
-    terminated one or spawning a fresh one if none exists."""
     before_id = None
     while True:
         page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
-        # Directory pages are newest first; substring search still needs an exact label match.
         for agent in page.agents:
             if agent.label != label:
                 continue
@@ -106,13 +94,11 @@ def ensure_agent(label: str, prompt: str) -> int:
 
 
 def fire(prompt: str) -> None:
-    """Trigger the self-evolution agent."""
     agent_id = ensure_agent(LABEL, prompt)
     print(f"[{datetime.now(UTC).isoformat()}] self-evolution agent #{agent_id} triggered")
 
 
 def should_fire_monday() -> bool:
-    """Check whether Monday trigger should fire based on event volume."""
     week_ago = datetime.now(UTC) - timedelta(days=7)
     total = count_events(week_ago)
     print(
@@ -129,8 +115,10 @@ def should_fire_monday() -> bool:
     return True
 
 
+# meiva:note
+# The follow-up bar is half the weekly high threshold, counted from the main trigger rather
+# than from the whole week.
 def should_fire_thursday() -> bool:
-    """Check whether the mid-week follow-up (Friday 00:00 cluster time) should fire."""
     monday = datetime.now(UTC) - timedelta(days=4)
     count = count_events(monday)
     bar = HIGH_WEEKLY_EVENTS // 2
@@ -142,14 +130,7 @@ def should_fire_thursday() -> bool:
     return count >= bar
 
 
-# ── Main loop ──────────────────────────────────────────────────────────────
-
-
 def _main_loop(*, inputs: ScheduleInputs) -> None:
-    """Run the weekly loop with the executable entry's explicit inputs.
-
-    Importing the template keeps the loop idle, so tests can load the module
-    and call count_events directly."""
     db = inputs.database()
     thursday_enabled = False
 
@@ -180,10 +161,10 @@ def _main_loop(*, inputs: ScheduleInputs) -> None:
     while True:
         now = datetime.now(UTC)
 
-        # after=now-2min gives trigger tolerance: sleep precision delay can land `now`
-        # a fraction of a second past the hour; croniter get_next (strictly > base)
-        # would then jump to the next day (deterministic miss, observed 2026-08-06).
-        # Tolerance window = [-120s, +90s].
+        # meiva:note
+        # `after=now-2min` is the trigger tolerance: croniter's get_next is strictly greater
+        # than its base, so a `now` a fraction of a second past the hour would jump to the
+        # next day (deterministic miss, observed 2026-08-06). Window: [-120s, +90s].
         nxt_monday = next_fire(
             MONDAY_CRON,
             after=max(started_at, now - timedelta(minutes=2)),

@@ -1,12 +1,3 @@
-"""Reconcile Meiva's tech-debt ledger once per cluster day at 06:30.
-
-Each claimed cron slot first runs the project-local mechanical debt scan and
-persists its report, then wakes exactly one debt-clearing worker. The worker
-uses the normal worktree and PR workflow; this schedule owns no resident
-worker. Claims commit before this callback runs, so a process failure is an
-intentional at-most-once loss that the P0 lead must recover manually.
-"""
-
 from __future__ import annotations
 
 from uuid import uuid4
@@ -52,8 +43,6 @@ _SCAN_TIMEOUT_SECONDS = 15 * 60
 
 @dataclass(frozen=True)
 class ScanReport:
-    """The durable scan artifact and its status for one clearing pass."""
-
     succeeded: bool
     artifact_path: Path
     summary: str
@@ -62,8 +51,6 @@ class ScanReport:
 
 @dataclass(frozen=True)
 class WorkerDispatch:
-    """One worker action, recorded in the day's telemetry event."""
-
     agent_id: int
     action: Literal["spawned", "resurrected", "messaged"]
 
@@ -114,7 +101,6 @@ def _report_failure(detail: str) -> None:
 
 
 def ensure_worker(label: str, prompt: str) -> WorkerDispatch:
-    """Reuse a matching worker by label, or spawn the day's one worker."""
     before_id = None
     while True:
         page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
@@ -179,7 +165,6 @@ def _run_mechanical_scan(repo: Path, artifact_path: Path | None) -> ScanReport:
 
 
 def worker_prompt(day: str, scan: ScanReport) -> str:
-    """The complete, one-run instruction for the debt-clearing worker."""
     return f"""You are today's debt-clearing pass for the Meiva repository ({day}).
 
 Start a fresh worktree from origin/main and follow the normal PR workflow; never push main.
@@ -198,7 +183,6 @@ open no PR and report the no-op. When done, report your result and end your own 
 
 
 def event_payload(*, day: str, scan: ScanReport, dispatch: WorkerDispatch) -> dict[str, str | int]:
-    """The compact fact emitted once for a claimed debt-clearing slot."""
     return {
         "day": day,
         "scan_status": "ok" if scan.succeeded else "failed",
@@ -294,7 +278,6 @@ def _main_loop(*, inputs: ScheduleInputs) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """The script's CLI — flags for manual runs and dry-run demos."""
     parser = argparse.ArgumentParser(description="Run the daily tech-debt clearing schedule.")
     parser.add_argument("--once", action="store_true", help="run one dry-run demonstration")
     parser.add_argument("--dry-run", action="store_true", help="scan without schedule side effects")

@@ -1,5 +1,3 @@
-"""Contract tests for the daily tech-debt clearing schedule."""
-
 from __future__ import annotations
 
 import importlib.util
@@ -306,11 +304,11 @@ def test_ensure_worker_spawns_only_after_matching_pages_are_exhausted(
     assert seen_before_ids == [None, 300]
 
 
+# meiva:note
+# The runner hands this script a clean argv (``python <script>``), so the CLI carries no
+# positional runner id — only the manual-run flags. The runner-side contract is pinned by
+# `test_run_hands_py_script_a_clean_argv` in gateway/tests/extensions/test_schedule_runner.py.
 def test_cli_takes_flags_only() -> None:
-    """The runner hands this script a clean argv (``python <script>``), so its
-    CLI carries no positional runner id — only the manual-run flags. The
-    runner-side contract is pinned by gateway/tests/extensions/test_schedule_runner.py
-    (``test_run_hands_py_script_a_clean_argv``)."""
     module = _load_schedule_module()
     parser = module.build_parser()
 

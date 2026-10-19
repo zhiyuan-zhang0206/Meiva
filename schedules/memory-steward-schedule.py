@@ -1,24 +1,4 @@
-# Memory Arbiter schedule — TEMPLATE (source of truth)
-#
-# This file is the version-controlled template for the cluster's memory
-# schedule (gateway schedule id=2). The running copy lives at
-# ~/.meiva/schedules/2/memory-steward-schedule.py (deployed copy, same name) and is deployed with:
-#
-#     meiva schedules update 2 --script-file <this file>
-#     meiva schedules restart 2
-#
-# Edit the template here, PR it, then deploy from the merged main.
-
-"""Memory Arbiter schedule — 4AM consolidation, 7AM health check.
-
-Gateway-hosted, resumable. Reuses the Memory Arbiter agent by label.
-Fire times are CLUSTER wall clock (`MEIVA_TIMEZONE`, `cluster-pinned`), not the
-host's OS timezone: every machine in the fleet fires at the same instant, and
-moving a laptop across timezones does not move the schedule. Both hours sit in
-the off-peak trough of a workday whose peak is 9-12 / 14-18 cluster time.
-`MEIVA_TIMEZONE` is read at process start, so changing it needs
-`meiva schedules restart <id>`.
-"""
+# meiva:link schedules/README.md
 
 from uuid import uuid4
 
@@ -35,19 +15,19 @@ from schedules.entry import fresh_schedule_entry, schedule_entry
 
 MEMORY_ARBITRATOR_LABEL = "memory-arbiter"
 
+# meiva:note
+# The 12:00 merge trigger was removed on 2026-08-01: merge/close/revert is the merge
+# captain's job, not the arbiter's.
 TRIGGERS = [
     ("0 4 * * *", "Daily consolidation (commit + push + PR merge)"),
     ("0 7 * * *", "Daily health check — OKF, size, dedup, stale"),
-    # 12PM merge removed (2026-08-01): merge/close/revert is the merge captain's job.
 ]
 
 
 def ensure_agent(label, prompt):
-    """Find or resurrect the Memory Steward agent by label."""
     before_id = None
     while True:
         page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
-        # Directory pages are newest first; substring search still needs an exact label match.
         for agent in page.agents:
             if agent.label != label:
                 continue
@@ -75,17 +55,14 @@ def fire_memory_maintenance(_slot: datetime, message: str) -> None:
 def main(*, inputs: ScheduleInputs) -> None:
     db = inputs.database()
     while True:
-        # Find the next fire among all triggers
         now = datetime.now(UTC)
         next_times = []
         for cron_expr, message in TRIGGERS:
             nxt = next_fire(cron_expr, after=now, timezone=cluster_timezone())
             next_times.append((nxt, cron_expr, message))
 
-        # Pick the earliest
         next_fire_time, cron_expr, message = min(next_times, key=lambda x: x[0])
 
-        # Sleep until then
         wait = (next_fire_time - datetime.now(UTC)).total_seconds()
         if wait > 0:
             print(f"[schedule] Next: {next_fire_time} ({cron_expr}) — sleeping {wait:.0f}s")
@@ -93,7 +70,6 @@ def main(*, inputs: ScheduleInputs) -> None:
 
         fire_slot_once(db, next_fire_time, message, fire=fire_memory_maintenance)
 
-        # Small debounce to avoid double-fire
         time.sleep(60)
 
 
