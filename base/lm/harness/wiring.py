@@ -70,6 +70,7 @@ def bridge_for(
     workspace: Path,
     registry: SessionRegistry,
     registrations: RegistrationStore | None = None,
+    registration_ttl_seconds: float,
     environ: Mapping[str, str] | None = None,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
@@ -99,4 +100,5 @@ def bridge_for(
         machine=machine,
         handoff=handoff,
         registrations=registrations,
+        registration_ttl_seconds=registration_ttl_seconds,
     )

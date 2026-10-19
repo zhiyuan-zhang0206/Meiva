@@ -162,6 +162,7 @@ def test_the_built_in_loop_builds_no_bridge() -> None:
             Harness.MEIVA,
             registry=FileSessionRegistry(Path("/registry")),
             registrations=None,
+            registration_ttl_seconds=3600.0,
             machine="macmini",
         )
         is None
@@ -171,7 +172,12 @@ def test_the_built_in_loop_builds_no_bridge() -> None:
 def test_an_external_runtime_without_a_registry_is_refused() -> None:
     try:
         harness_bridge_for(
-            1, Harness.CLAUDE_CODE, registry=None, registrations=None, machine="macmini"
+            1,
+            Harness.CLAUDE_CODE,
+            registry=None,
+            registrations=None,
+            registration_ttl_seconds=3600.0,
+            machine="macmini",
         )
     except ValueError as exc:
         assert "session registry" in str(exc)
@@ -185,6 +191,7 @@ def test_an_external_runtime_carries_a_scoped_bridge() -> None:
         Harness.CODEX,
         registry=FileSessionRegistry(Path("/registry")),
         registrations=None,
+        registration_ttl_seconds=3600.0,
         machine="macmini",
     )
     assert bridge is not None
