@@ -194,7 +194,8 @@ are never attempted, by decision.
   preflight-only; see `scripts/host_ops/tcc/verify-spawn-chain.sh` for the pattern.
 - **A helper build without the nursery `spawn` wire method can not be
   onboarded.** Older builds answer `unknown method: spawn`; rebuild the helper
-  first (same signing identity), then run this tool.
+  first (the rebuild is a new code identity, so its grants are given again), then
+  run this tool.
 - **AppleEvents rows need the helper's AppleEvents entitlement.** The helper
   is signed with `com.apple.security.automation.apple-events` (input:
   `services/desktop/permissions_helper/helper/helper.entitlements`), and only then
@@ -209,14 +210,13 @@ are never attempted, by decision.
   silently; the 2026-09-17 validation also showed the readings discriminate
   (bogus service name -> denied; Microphone -> not-determined; FDA -> denied),
   so a granted reading is meaningful; the trigger side is the archive below.
-- **Multiple helper instances on one host share the same TCC identity.** A
-  second cluster instance (its own build, launchd service and socket -- e.g. a
-  dev/test instance) needs no separate onboarding when its helper is built
-  from the same signing identity: TCC grants are keyed to the bundle
-  identifier plus certificate, so every instance carrying the same designated
-  requirement inherits the same grants. Observed on macmini 2026-09-14: a
-  dev-instance helper came up alongside the main one with no prompts. Only a
-  new signing identity requires a fresh onboarding pass.
+- **Helper instances share a TCC identity only while their code hash matches.**
+  The helper is signed ad-hoc, so TCC keys its grants on the code hash (its
+  designated requirement is `cdhash H"..."`), not on a certificate. A second
+  cluster instance (its own build, launchd service and socket -- e.g. a
+  dev/test instance) inherits the same grants only while its helper has the same
+  code hash. Any other helper binary is a new identity and needs a fresh
+  onboarding pass.
 
 ## Extended-group trigger methods (archive)
 
@@ -239,11 +239,9 @@ from the preflight re-read, not from the child's own output.
   prompts, each later attributed to a process scanning the home directory
   (`find`, `du`, a recursive glob). Prompts DO write `AUTHREQ_PROMPTING` +
   `AUTHREQ_SUBJECT` (subject = the helper), but no `RESULT` row.
-- Rebuild gotcha: unlike the DR-held rows, this row does NOT survive a
-  same-identity helper rebuild -- it returns to `not-determined` and the next
-  scan re-prompts (observed 2026-09-18: the routine update wave rebuilt the
-  helper, the next scan re-prompted, and the user re-allowed the row the same
-  day). Expect to re-run the fill after every helper rebuild.
+- Rebuild gotcha: like every grant of an ad-hoc signed helper, this row does
+  NOT survive a helper rebuild -- it returns to `not-determined` and the next
+  scan re-prompts. Expect to re-run the fill after every helper rebuild.
 - The fill path replays the evidenced surface; a deliberate fill of a missing
   row has not yet been exercised (macmini's row reads granted).
 
@@ -295,9 +293,10 @@ present. A historical grant on another machine is not evidence for this unit.
 
 Per-machine rebuild/reinstall flow gains one step, inserted before the flip:
 
-1. Rebuild / reinstall the helper (design: stable signing identity, pinned
-   designated requirement -- a rebuild that changes identity invalidates every
-   existing grant and the onboarding must be redone).
+1. Rebuild / reinstall the helper (design: ad-hoc signing, so TCC keys the
+   grants on the code hash -- an unchanged helper keeps every grant, a rebuild
+   is a new code identity that invalidates every existing grant, and the
+   onboarding must be redone by hand).
 2. Run the inventory: `.venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --check`.
 3. Complete the missing grants with the user present: run the tool without
    `--check`; add `--fill-pending --confirm-user-present` to also attempt the

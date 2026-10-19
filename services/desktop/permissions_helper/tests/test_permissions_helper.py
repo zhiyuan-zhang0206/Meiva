@@ -431,11 +431,8 @@ def parse_strings(path: Path) -> dict[str, str]:
 
 
 # --- Signing --------------------------------------------------------------
-# TCC keys the helper's grants on the stable certificate, so an ad-hoc identity
-# is never an acceptable substitute -- and a current bundle is never re-signed.
 
-
-TEST_CERT_SHA1 = "0123456789ABCDEF0123456789ABCDEF01234567"
+TEST_CDHASH = "0123456789abcdef0123456789abcdef01234567"
 
 
 def stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present: bool) -> Path:
@@ -470,10 +467,7 @@ def stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present
 
 
 def test_dr() -> str:
-    return (
-        'identifier "com.meiva.permissions-helper" and certificate leaf = '
-        f'H"{TEST_CERT_SHA1.lower()}"'
-    )
+    return f'identifier "com.meiva.permissions-helper" and cdhash H"{TEST_CDHASH}"'
 
 
 def write_current_build_state(app: Path, source_hash: str, *, dr: str | None = None) -> None:
@@ -495,133 +489,58 @@ class _Call(NamedTuple):
     timeout: float
 
 
+# meiva:note
+# What the stand-in swiftc / codesign answer, per `fake_tools`'s arguments.
 @dataclass(frozen=True)
 class _FakeToolOutputs:
-    """What the stand-in swiftc / codesign / security answer, per `fake_tools`'s arguments."""
-
-    authority: str | None
-    keychain_rc: int
     sign_rc: int
-    acl_probe_rc: int
-    smoke_sign_rc: int
-    smoke_sign_stderr: bytes
     verify_rc: int
     designated_requirement: str | None
     dr_streams: tuple[bytes, bytes] | None
-    identity_output: str | None
-    keychain_identity_output: str
-    list_keychains_output: bytes | None
-    list_keychains_rc: int
 
     def respond(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
         """The result of one tool invocation; unmatched commands succeed silently."""
         if cmd[0] == "swiftc":
             Path(cmd[cmd.index("-o") + 1]).write_bytes(b"\x00")
-        if cmd[:3] == ["security", "find-identity", "-p"]:
-            return self._find_identity(cmd)
-        if cmd[:4] == ["security", "list-keychains", "-d", "user"]:
-            return self._list_keychains(cmd)
         if cmd[:2] == ["codesign", "--verify"]:
             return subprocess.CompletedProcess(cmd, self.verify_rc, b"", b"invalid")
-        if cmd[:2] == ["codesign", "--display"]:
-            shown = f"Authority={self.authority}\n" if self.authority else "Signature=adhoc\n"
-            return subprocess.CompletedProcess(cmd, 0, b"", shown.encode())
         if cmd[:3] == ["codesign", "-d", "-r-"]:
             return self._designated_requirement(cmd)
-        if cmd[:2] == ["security", "show-keychain-info"] and self.keychain_rc != 0:
-            return subprocess.CompletedProcess(
-                cmd, self.keychain_rc, b"", b"User interaction is not allowed."
-            )
-        if cmd[:2] == ["codesign", "--sign"]:
-            return self._sign_probe(cmd)
         if cmd[:2] == ["codesign", "--force"] and self.sign_rc != 0:
-            return subprocess.CompletedProcess(cmd, self.sign_rc, b"", b"errSecInternalComponent")
+            return subprocess.CompletedProcess(cmd, self.sign_rc, b"", b"code object is not signed")
         return subprocess.CompletedProcess(cmd, 0, b"", b"")
-
-    def _find_identity(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
-        from services.desktop.permissions_helper import lifecycle
-
-        scoped_to_keychain = len(cmd) > 4
-        if scoped_to_keychain:
-            return subprocess.CompletedProcess(cmd, 0, self.keychain_identity_output.encode(), b"")
-        output = self.identity_output or f'  1) {TEST_CERT_SHA1} "{lifecycle.CERT_CN}"\n'
-        return subprocess.CompletedProcess(cmd, 0, output.encode(), b"")
-
-    def _list_keychains(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
-        from services.desktop.permissions_helper import lifecycle
-
-        output = self.list_keychains_output
-        if output is None:
-            output = f'    "{lifecycle.keychain_path()}"\n'.encode()
-        return subprocess.CompletedProcess(
-            cmd,
-            self.list_keychains_rc,
-            output,
-            b"search list unavailable" if self.list_keychains_rc else b"",
-        )
 
     def _designated_requirement(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
         if self.dr_streams is not None:
             return subprocess.CompletedProcess(cmd, 0, *self.dr_streams)
         dr = self.designated_requirement or test_dr()
-        # Real codesign on current macOS emits the DR line on stdout
-        # (stderr carries `Executable=...`); the reader accepts either.
-        return subprocess.CompletedProcess(cmd, 0, f"designated => {dr}\n".encode(), b"")
-
-    def _sign_probe(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
-        smoke = Path(cmd[-1]).name == "signing-smoke"
-        rc = self.smoke_sign_rc if smoke else self.acl_probe_rc
-        stderr = self.smoke_sign_stderr if smoke else b"errSecInternalComponent"
-        return subprocess.CompletedProcess(cmd, rc, b"", stderr)
+        # meiva:note
+        # Real codesign on current macOS emits the DR line on stdout with a leading `# ` for an ad-hoc signature (stderr carries `Executable=...`); the reader accepts either stream.
+        return subprocess.CompletedProcess(cmd, 0, f"# designated => {dr}\n".encode(), b"")
 
 
+# meiva:note
+# Stand in for swiftc / codesign, recording every invocation.
+#
+# `hang` is an argv prefix whose call raises TimeoutExpired exactly as `run_bounded` does once it has killed the tree.
+#
+# This patches `run_bounded`, not `subprocess.run`: routing every call through it IS the invariant under test, so a call site that regressed to plain `subprocess.run` would reach the real tool and fail here rather than pass against a stub.
 def fake_tools(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    authority: str | None,
-    keychain_rc: int = 0,
     sign_rc: int = 0,
-    acl_probe_rc: int = 0,
-    smoke_sign_rc: int = 0,
-    smoke_sign_stderr: bytes = b"errSecInternalComponent",
     verify_rc: int = 0,
     designated_requirement: str | None = None,
     dr_streams: tuple[bytes, bytes] | None = None,
-    identity_output: str | None = None,
-    keychain_identity_output: str = "",
-    list_keychains_output: bytes | None = None,
-    list_keychains_rc: int = 0,
     hang: tuple[str, ...] = (),
 ) -> list[_Call]:
-    """Stand in for swiftc / codesign / security, recording every invocation.
-
-    `authority` is what `codesign --display` reports for the staged bundle: the
-    certificate CN, or None for an ad-hoc signature (which has no Authority).
-    `acl_probe_rc` is what the pre-sign ACL probe (`codesign --sign` on a scratch
-    file) exits with. `hang` is an argv prefix whose call raises TimeoutExpired
-    exactly as `run_bounded` does once it has killed the tree -- the real hang is
-    a GUI dialog no test may summon.
-
-    This patches `run_bounded`, not `subprocess.run`: routing every call through
-    it IS the invariant under test, so a call site that regressed to plain
-    `subprocess.run` would reach the real tool and fail here rather than pass
-    against a stub."""
     from services.desktop.permissions_helper import lifecycle
 
     outputs = _FakeToolOutputs(
-        authority=authority,
-        keychain_rc=keychain_rc,
         sign_rc=sign_rc,
-        acl_probe_rc=acl_probe_rc,
-        smoke_sign_rc=smoke_sign_rc,
-        smoke_sign_stderr=smoke_sign_stderr,
         verify_rc=verify_rc,
         designated_requirement=designated_requirement,
         dr_streams=dr_streams,
-        identity_output=identity_output,
-        keychain_identity_output=keychain_identity_output,
-        list_keychains_output=list_keychains_output,
-        list_keychains_rc=list_keychains_rc,
     )
     recorded: list[_Call] = []
 
@@ -644,15 +563,6 @@ def recorded_argvs(recorded: list[_Call]) -> list[list[str]]:
 
 def sign_command(recorded: list[_Call]) -> list[str]:
     return next(c.argv for c in recorded if c.argv[:2] == ["codesign", "--force"])
-
-
-# --- Bounded calls + pre-sign probes --------------------------------------
-# Nothing in lifecycle.py touches a network, so a step that runs long is one
-# waiting on a human. On 2026-08-02 a headless rollout sat 67 minutes inside
-# `codesign --sign` on a SecurityAgent dialog nobody could answer -- the abort
-# path was fine, the trigger that converts a hang into a failure was missing.
-# These pin that trigger: every call carries a bound, an expired bound raises,
-# and the prompt is probed for before anything is compiled or written.
 
 
 # --- Install, in-place upgrade, and launchd repair ------------------------
