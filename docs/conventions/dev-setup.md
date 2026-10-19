@@ -82,6 +82,27 @@ cd <printed-worktree-path>             # a script cannot change your directory
 For a manual dependency operation in an existing worktree, clear inherited
 `VIRTUAL_ENV` and run `scripts/host_ops/guard_editable_venv.py` first.
 
+**A lock change does not reach an existing venv.** Pulling moves `uv.lock` and
+`pyproject.toml`; nothing reinstalls. A checkout whose venv predates the lock then
+fails in ways that read as source bugs — an `ImportError` for a symbol the newer
+dependency provides, or collection errors in the suites that import the module — while
+CI, which installs from the lock, stays green. Refresh every checkout you run tests in
+after a pull that moves the lock or the pins, and check it without changing anything:
+
+```bash
+uv sync --frozen              # install exactly the lock (add --inexact to keep extras)
+uv sync --frozen --dry-run    # "Would make no changes" = in sync; a "Would install" line = stale
+```
+
+`python cli/python_install.py --locked --inexact` installs the same pins through the
+machine's configured index, and `scripts/setup-worktree.sh` runs it for a worktree. The
+main clone is not covered by that script: only running one of these commands in it
+refreshes its venv.
+
+Smoke before trusting local results: `uv sync --frozen --dry-run` prints "Would make no
+changes", and `.venv/bin/pytest --collect-only -q <affected suite>` collects without
+errors.
+
 **Which home a worktree reads.** With `MEIVA_HOME` unset the home is `~/.meiva`; on a
 development machine that also runs production, that is the production cluster. A
 home that carries its own `<home>/source` checkout is operated only by that
