@@ -32,14 +32,9 @@ from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import ClockConfig, clock_config_from_boot
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import db_config_from_boot
-from base.native_process.code_version import CodeVersion
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.loading import StateGate
 from meiva.mcps import McpClients
@@ -464,6 +459,12 @@ def _external_database_factory(
         return bound.clients.database
     if config is None:
         raise RuntimeError("an independent attachment needs its configuration owner")
+    from base.cluster.dataplane.direct_url import ClusterDirectUrl
+    from base.db import Database
+    from base.db.code_version_gate import ProcessDbGate
+    from base.db.config import db_config_from_boot
+    from base.native_process.code_version import CodeVersion
+
     version = CodeVersion(process_context.loaded_code_image())
     gate = ProcessDbGate(version=version.get, process="unknown")
     return lambda: Database(
