@@ -50,7 +50,7 @@ formatting and source validation keep their existing order.
 
 ### Attachments (`attach_message`)
 - Appends one HumanMessage at the completed-turn boundary for files registered with `meiva.self.attach`
-- The whole message is one system note: content blocks interleave per file between the note's tags — `[text(open + notice), text(line1), media1, text(line2), media2, ..., text(close)]` — so each file's caption line sits directly before its model-native media block while the note still closes after the last one; `meiva_msg_type="attach"` distinguishes it without image URL metadata, and the timeline pairs every image with its own caption line structurally
+- The leading notice is one complete system note inside its own text block; the caption lines follow it outside the note — `[text(<system_note> notice </system_note>), text(line1), media1, text(line2), media2, ...]`. A note spanning the captions would have to interleave with media blocks, so the notice states what the block is and the lines stay exactly where the pairing needs them; `meiva_msg_type="attach"` distinguishes the message without image URL metadata, and the timeline pairs every image with its own caption line structurally
 
 ### Chat Inbound Assembly (`_chat_inbound.py`)
 - Assembles `kind='chat'` inbound rows into `(HumanMessage, finding)`: plain text via envelope wrapper as string message; multimodal inbound places text as first block, then uploads referenced images as native base64 blocks inline to the model. `finding` is the injection-scan result for the row's text (None when clean); the claim node owns delivering it as a SECURITY note

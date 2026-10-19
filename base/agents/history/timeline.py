@@ -61,13 +61,18 @@ _NO_TIMESTAMP_NOTE_TAGS = frozenset(
 
 
 def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
+    # meiva:note
+    # A message's text blocks joined, each rendered as its own text: a block that is one
+    # complete system note loses its envelope, because the framing is not content the card
+    # shows. The attach notice and a system-sourced inbound's body are the two such blocks.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
     from base.lm.reasoning import content_blocks
 
     if isinstance(content, str):
-        return content
+        return unwrap_system_note(content)
     if isinstance(content, list):
         return "\n".join(
-            text
+            unwrap_system_note(text)
             for b in content_blocks(content)
             if isinstance(b, dict)
             and b.get("type") == "text"
@@ -208,7 +213,7 @@ def _inbound_item(
         # A system source's body sits inside the envelope's note tags; the card shows the
         # text, not the framing (the source metadata classifies it).
         # meiva:link agent/messages/docs/message-format.meiva.okf.md
-        payload=unwrap_system_note(_inbound_text(raw_content)),
+        payload=_inbound_text(raw_content),
         created_at=kwargs_read_time(kwargs),
         inbound_id=embedded_id,
         images=images if images else None,
@@ -267,7 +272,7 @@ def _attach_item(
         item_id=f"{msg_idx}.0",
         kind="attach",
         source=None,
-        payload=unwrap_system_note(_inbound_text(raw_content)),
+        payload=_inbound_text(raw_content),
         created_at=created_at,
         inbound_id=None,
         images=_attach_images(raw_content),
