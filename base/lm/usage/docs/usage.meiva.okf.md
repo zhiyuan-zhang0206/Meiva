@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Durable LLM Usage
-description: '`base/lm/usage.py` — canonical durable usage events and matching billing spans for completed LLM calls.'
+description: '`base/lm/usage/` — canonical durable usage events and matching billing spans for completed LLM calls.'
 tags:
 - base
 - library
@@ -11,7 +11,7 @@ tags:
 
 # Durable LLM Usage
 
-`base/lm/usage.py` turns completed LLM calls into durable `llm_usage` events and matching billing spans. It is the shared accounting boundary for both LangChain messages and provider-specific raw usage fields.
+`base/lm/usage/` turns completed LLM calls into durable `llm_usage` events and matching billing spans. It is the shared accounting boundary for both LangChain messages and provider-specific raw usage fields.
 
 ## Usage emitters
 
@@ -25,7 +25,7 @@ tags:
 
 ## Direct callers
 
-`build_chat_model(...)` meters its own calls: `base/lm/metering.py` attaches one LangChain callback handler to the built model, and every completed provider call (`invoke`, `ainvoke`, `stream`, `astream`, `batch`) writes the same `llm_usage` event `log_usage_from_message` writes, with `usage_kind="direct"`. Before this, a worker or script that built a model and called it directly spent money with no row at all (task #5327).
+`build_chat_model(...)` meters its own calls: `base/lm/usage/metering.py` attaches one LangChain callback handler to the built model, and every completed provider call (`invoke`, `ainvoke`, `stream`, `astream`, `batch`) writes the same `llm_usage` event `log_usage_from_message` writes, with `usage_kind="direct"`. Before this, a worker or script that built a model and called it directly spent money with no row at all (task #5327).
 
 Exactly one layer owns a call's row. The factory owns it by default. A caller that emits the row itself — with its own `usage_kind`, `source` or agent id — builds with `meter=False`, or strips the meter from an injected build with `unmeter(model)`. The meter also stamps `msg.additional_kwargs["meiva_usage"]`, and `log_usage_from_message` refuses a message that already carries the stamp, so a caller that logs the same response cannot produce a second row.
 
@@ -51,7 +51,7 @@ Exactly one layer owns a call's row. The factory owns it by default. A caller th
 ## Selecting usage scopes
 
 LLM usage is attributed to agents, not Fleet task records. The independent
-`meiva-being-a-long-running-agent` [usage script](../../../meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/references/usage.md)
+`meiva-being-a-long-running-agent` [usage script](../../../../meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/references/usage.md)
 selects IDs, windows, and birth ancestry. `base/telemetry/metrics/usage.py` owns its
 read-only aggregation over retained events or lifetime ledger + tail. Threshold
 notifications leave convergence, preservation, and handoff to the agent.

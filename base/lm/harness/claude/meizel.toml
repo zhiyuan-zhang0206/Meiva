@@ -1,0 +1,8 @@
+exports = ["auth.py", "config.py", "mapping.py", "session.py"]
+
+[uses]
+"__init__.py" = ["auth.py", "config.py", "session.py"]
+"config.py" = ["auth.py"]
+"mapping.py" = []
+"session.py" = ["auth.py", "config.py", "mapping.py"]
+"tests" = ["__init__.py", "auth.py", "mapping.py"]
