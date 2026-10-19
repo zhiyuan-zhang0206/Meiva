@@ -41,9 +41,9 @@ from base.agents.history.message_tokens import (
     total_of,
 )
 from base.agents.messages.kwargs import (
-    COMPACT_SUMMARY_HEADER,
     MeivaMsgType,
     NoteTag,
+    is_compact_summary_text,
     read_meiva_kwargs,
 )
 from base.agents.messages.token_estimate import estimate_text_tokens
@@ -114,9 +114,11 @@ def _human_bucket(msg: HumanMessage) -> str:
         return "compact_summary"
     if meiva_type == MeivaMsgType.SYSTEM_NOTE:
         return _note_bucket(kwargs.get("meiva_note_tag"))
-    if isinstance(msg.content, str) and msg.content.startswith(COMPACT_SUMMARY_HEADER):  # pyright: ignore[reportUnknownMemberType]
+    if isinstance(msg.content, str) and is_compact_summary_text(msg.content):  # pyright: ignore[reportUnknownMemberType]
+        # meiva:note
         # The auto-compact summary is injected as an untagged HumanMessage
-        # (compose_summary_message); the header is its one invariant.
+        # (compose_summary_message); the header inside its system note is its one invariant.
+        # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
         return "compact_summary"
     return "user_input"
 

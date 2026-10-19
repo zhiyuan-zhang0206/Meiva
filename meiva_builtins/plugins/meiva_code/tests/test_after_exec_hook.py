@@ -41,10 +41,14 @@ def _hook_notes(result: dict | None) -> list[tuple[str, str]]:
     from langchain_core.messages import AnyMessage
 
     from agent.messages import read_meiva_kwargs
+    from base.lm.system_note import unwrap_system_note
 
     assert result is not None
     return [
-        (read_meiva_kwargs(m).get("meiva_note_tag", ""), str(m.content).removeprefix("[system] "))  # pyright: ignore[reportUnknownMemberType]
+        (  # pyright: ignore[reportUnknownMemberType]
+            read_meiva_kwargs(m).get("meiva_note_tag", ""),
+            unwrap_system_note(str(m.content)),
+        )
         for m in cast(list[AnyMessage], result["messages"])
     ]
 

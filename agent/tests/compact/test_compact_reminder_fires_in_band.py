@@ -70,7 +70,7 @@ async def test_compact_reminder_fires_in_band(
     assert isinstance(note, HumanMessage)
     assert note.additional_kwargs["meiva_msg_type"] == "system_note"
     assert note.additional_kwargs["meiva_note_tag"] == "compact_reminder"
-    assert note.text.startswith(f"[system] {_p.COMPACT_REMINDER_NOTE}")
+    assert note.text.startswith(f"<system_note>\n{_p.COMPACT_REMINDER_NOTE}")
     compact = result["compact"]
     assert isinstance(compact, CompactState)
     assert compact.reminder_shown is True
@@ -216,7 +216,7 @@ async def test_compact_contract_reaches_request_without_resident_self(meiva_comp
     assert request[0] is head
     from inspect import cleandoc
 
-    assert request[-1].content.startswith(COMPACTION_INSTRUCTION)
+    assert request[-1].content.startswith(f"<system_note>\n{COMPACTION_INSTRUCTION}")
     assert cleandoc(contract) in request[-1].content
     for section in COMPACT_SECTIONS:
         assert section in request[-1].content, (

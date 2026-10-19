@@ -155,7 +155,7 @@ async def test_all_takeover_notes_stamp_their_real_creation_time(
     ]
     assert "Reply to the user in ordinary assistant text in this conversation" in notes[-1].content
     date = "2026-10-06 Tue" if weekday else "2026-10-06"
-    prefix = f"[system] [{date} 09:39:25] " if timestamps else "[system] Impersonation"
+    prefix = f"<system_note>\n[{date} 09:39:25] " if timestamps else "<system_note>\nImpersonation"
     for note in notes:
         assert str(note.content).startswith(prefix)
         assert note.additional_kwargs["meiva_created_at"] == moment.isoformat()
@@ -207,7 +207,7 @@ def test_notes_keep_two_live_configuration_roots_and_read_order() -> None:
             first_message = start_marker(_session(), notes=first_notes)
             second_message = start_marker(_session(), notes=second_notes)
             assert "13:39:25" in str(first_message.content)
-            assert str(second_message.content).startswith("[system] Impersonation session")
+            assert str(second_message.content).startswith("<system_note>\nImpersonation session")
             assert "13:39:25" not in str(second_message.content)
             assert events == [
                 "first.clock",
@@ -222,7 +222,7 @@ def test_notes_keep_two_live_configuration_roots_and_read_order() -> None:
             second.set_field("message_timestamps", True)
             second.set_field("timezone", "America/New_York")
             assert str(start_marker(_session(), notes=first_notes).content).startswith(
-                "[system] Impersonation session"
+                "<system_note>\nImpersonation session"
             )
             assert "09:39:25" in str(start_marker(_session(), notes=second_notes).content)
             assert events == [

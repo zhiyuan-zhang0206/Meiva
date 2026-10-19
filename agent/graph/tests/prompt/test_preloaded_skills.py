@@ -245,8 +245,7 @@ def test_note_carries_full_body_and_tag(
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = note.content
-    # system_note_message prefixes "[system] "; framing + PRELOADED_SKILLS tag.
-    assert content.startswith("[system] Preloaded skills")
+    assert content.startswith("<system_note>\nPreloaded skills")
     assert note.additional_kwargs["meiva_note_tag"] == NoteTag.PRELOADED_SKILLS.value  # pyright: ignore[reportUnknownMemberType]
     # The access-path heading + the full SKILL.md body (frontmatter included, as
     # meiva.help renders a skill) are both present.

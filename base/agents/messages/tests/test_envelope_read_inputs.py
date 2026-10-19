@@ -42,7 +42,7 @@ def test_system_header_does_not_read_policy_or_clock() -> None:
         raise AssertionError("early envelope returns do not construct a clock")
 
     inputs = EnvelopeReadInputs(no_clock, unused)
-    assert inbound_head("system:update", inputs=inputs) == "[system] "
+    assert inbound_head("system:update", inputs=inputs) == "<system_note>\n"
 
 
 def test_external_agent_header_names_the_sender_and_follows_the_timestamp_policy() -> None:

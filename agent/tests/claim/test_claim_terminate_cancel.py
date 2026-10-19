@@ -68,9 +68,12 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     assert isinstance(lifecycle.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = lifecycle.content
     assert "Termination was accepted from user" in content
-    # marker content has timestamp prefix + [system] in single brackets (now_timestamp already has square brackets, no nesting)
-    assert content.startswith("[")  # timestamp start: e.g. [2026-...
-    assert "[system]" in content
+    # meiva:note
+    # The marker is a system note: open tag, the bracketed timestamp (single pair — now_timestamp
+    # carries its own), the text, close tag.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    assert content.startswith("<system_note>\n[")
+    assert content.endswith("\n</system_note>")
     assert "[system [" not in content  # anti-regression: double bracket bug
     assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
     assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_terminate"  # pyright: ignore[reportUnknownMemberType]
@@ -403,8 +406,9 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    """settings.general.message_timestamps=False → the lifecycle marker has no leading
-    timestamp; it starts straight at `[system]` with no stray space."""
+    # meiva:note
+    # message_timestamps=False → no timestamp: the open tag leads, then the text, no stray space.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
     monkeypatch.setattr(settings.general, "message_timestamps", False)
     tid = running_agent()
     insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
@@ -417,7 +421,9 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
         ),
     )
     content = cmd.update["messages"][-1].content  # type: ignore[index]
-    assert content.startswith("[system] Termination was accepted from user")  # pyright: ignore[reportUnknownMemberType]
+    assert content.startswith(  # pyright: ignore[reportUnknownMemberType]
+        "<system_note>\nTermination was accepted from user"
+    )
 
 
 async def test_claim_terminate_self_renders_by_yourself(

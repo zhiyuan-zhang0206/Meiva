@@ -74,15 +74,15 @@ function splitEnvelope(payload: string): { header: string; body: string } {
   return { header: "", body: payload };
 }
 
-// Envelope content — dim single-line header + monospace body + optional image
-// thumbnails. The card frame provides the colored border / background; this
-// renders only the inner text, unpadded.
-//
-// Attach items (attachMode) render through AttachContent: the backend caption
-// lines interleave with their thumbnails (label → image → label → image), the
-// "[system] …" notice renders dimmed, and every thumbnail opens a lightbox on
-// click instead of navigating away. Multimodal inbound_chat keeps the
-// envelope layout but shares the same lightbox thumbnails.
+// meiva:note
+// Envelope content — dim single-line header + monospace body + optional image thumbnails.
+// The card frame provides the colored border / background; this renders only the inner
+// text, unpadded. Attach items (attachMode) render through AttachContent: the backend
+// caption lines interleave with their thumbnails (label → image → label → image), the
+// leading notice line renders dimmed, and every thumbnail opens a lightbox on click
+// instead of navigating away. Multimodal inbound_chat keeps the envelope layout but
+// shares the same lightbox thumbnails.
+// meiva:link agent/messages/docs/message-format.meiva.okf.md
 function Thumbnail({ src, alt }: { src: string; alt: string }) {
   // Click-to-zoom overlay: no navigation (user ruling 2026-08-27 — the old
   // <a target="_blank"> opened the raw data-URI in a new tab). Click anywhere
@@ -183,13 +183,14 @@ function Thumbnail({ src, alt }: { src: string; alt: string }) {
   );
 }
 
-// Attach item body: the caption lines rendered one per row, each delivered
-// image's thumbnail directly under its own line (label1 → image1 → label2 →
-// image2 — user ruling 2026-08-27). Pairing is structural: `imageCaptions`
-// holds the exact backend-generated caption line of each image (1:1 with
-// `images`), so a line matches at most one image and skipped entries (no
-// image, "not delivered" reason) fall through as plain rows. The leading
-// "[system] …" notice renders dimmed and small.
+// meiva:note
+// Attach item body: the caption lines rendered one per row, each delivered image's
+// thumbnail directly under its own line (label1 → image1 → label2 → image2 — user ruling
+// 2026-08-27). Pairing is structural: `imageCaptions` holds the exact backend-generated
+// caption line of each image (1:1 with `images`), so a line matches at most one image and
+// skipped entries (no image, "not delivered" reason) fall through as plain rows. The
+// leading notice line renders dimmed and small.
+// meiva:link agent/messages/docs/message-format.meiva.okf.md
 function AttachContent({
   payload,
   images,
@@ -205,7 +206,11 @@ function AttachContent({
   const rows = lines.map((line, i) => {
     const hasImage = imageCaptions?.[imgIdx] === line;
     const src = hasImage && images != null ? images[imgIdx++] : null;
-    const isNotice = line.startsWith("[system]");
+    // meiva:note
+    // The backend always opens the payload with its notice line, and the envelope framing
+    // is stripped before it reaches the timeline.
+    // meiva:link agent/messages/docs/message-format.meiva.okf.md
+    const isNotice = i === 0;
     return (
       <Fragment key={i}>
         <div

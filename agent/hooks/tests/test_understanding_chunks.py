@@ -325,7 +325,9 @@ async def test_closing_chunk_stops_before_an_unanswered_tool_call(
 
 def _framework(kind: str, id_: str) -> HumanMessage:
     return HumanMessage(
-        content=f"[system] {id_}", id=id_, additional_kwargs={"meiva_msg_type": kind}
+        content=f"<system_note>\n{id_}\n</system_note>",
+        id=id_,
+        additional_kwargs={"meiva_msg_type": kind},
     )
 
 

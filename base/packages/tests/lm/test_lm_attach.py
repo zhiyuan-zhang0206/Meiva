@@ -69,7 +69,22 @@ def test_blocks_interleave_each_caption_line_with_its_media(
     )
 
     assert pack is not None
-    assert [b.get("type") for b in pack.blocks] == ["text", "text", "image_url", "text"]
+    # meiva:note
+    # The note opens the message and closes it: open+notice, then each entry's caption before
+    # its media block, then the close tag.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    assert [b.get("type") for b in pack.blocks] == [
+        "text",
+        "text",
+        "image_url",
+        "text",
+        "text",
+    ]
+    assert pack.blocks[0] == {
+        "type": "text",
+        "text": "<system_note>\nFiles attached during this turn:",
+    }
+    assert pack.blocks[-1] == {"type": "text", "text": "</system_note>"}
     line1 = pack.blocks[1]["text"]
     assert isinstance(line1, str) and line1.startswith("- [1] example.png (image/png,")
     assert isinstance(line1, str) and '— "shot"' in line1
@@ -130,7 +145,7 @@ def test_bad_files_are_skipped_without_aborting_the_pack(
     )
 
     assert pack is not None
-    assert [b.get("type") for b in pack.blocks] == ["text", "text", "text", "text"]
+    assert [b.get("type") for b in pack.blocks] == ["text", "text", "text", "text", "text"]
     assert [reason for _, reason in pack.skipped] == [
         "file does not exist",
         "not a regular file",
@@ -362,7 +377,12 @@ def test_empty_and_all_skipped_entries_preserve_the_text_notice(
     pack = pack_attachments("glm-5.3", [_entry(image_path)], catalog=model_catalog)
 
     assert pack is not None
-    assert [b.get("type") for b in pack.blocks] == ["text", "text"]
+    # meiva:note
+    # open+notice, the skipped entry's caption, and the note's close tag.
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    assert [b.get("type") for b in pack.blocks] == ["text", "text", "text"]
+    assert pack.text.startswith("<system_note>\nFiles attached during this turn:\n- [1]")
+    assert pack.text.endswith("cannot receive image\n</system_note>")
     assert pack.delivered == []
     assert pack.skipped == [(str(image_path.resolve()), "your model cannot receive image")]
     assert "not delivered: your model cannot receive image" in pack.text
