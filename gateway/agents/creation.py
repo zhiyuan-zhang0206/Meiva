@@ -137,6 +137,7 @@ async def create_and_launch_agent(
             config=body.config,
             label=body.label,
             fork_tail_skills=tail_skills,
+            harness=body.harness.value if body.harness is not None else None,
             prompt=body.prompt,
             prompt_source=body.prompt_source,
             creation_key=creation_key,

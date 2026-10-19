@@ -9,7 +9,12 @@ import pytest
 from base.agents.impersonation.status import ImpersonationStatus
 from base.agents.messages.inbound import InboundKind
 from base.agents.tasks.status import TaskStatus
-from base.api_contracts.agent_contract import AgentStatus, LivenessState, TerminationSource
+from base.api_contracts.agent_contract import (
+    AgentStatus,
+    Harness,
+    LivenessState,
+    TerminationSource,
+)
 from base.cluster.machine import MachineRole
 from base.packages.extensions.install_registry import TrustTier
 from base.packages.extensions.registry import ExtensionKind
@@ -23,6 +28,7 @@ _SCHEMA = re.sub(
 _CASES: dict[tuple[str, str], set[str]] = {
     ("agents_meta", "status"): {s.value for s in AgentStatus},
     ("agents_meta", "liveness_state"): {s.value for s in LivenessState},
+    ("agents_meta", "harness"): {s.value for s in Harness},
     ("agent_impersonations", "status"): {s.value for s in ImpersonationStatus},
     ("agents_meta", "termination_source"): {s.value for s in TerminationSource},
     ("inbound_messages", "kind"): {s.value for s in InboundKind},

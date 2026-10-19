@@ -89,6 +89,7 @@ def spawn(
     machine: str | None = None,
     config: dict[str, object] | None = None,
     label: str | None = None,
+    harness: str | None = None,
     idempotency_key: str,
 ) -> int:
     """Create or fork an agent with a caller-owned immutable identity."""
@@ -108,6 +109,8 @@ def spawn(
         body["config"] = config
     if label is not None:
         body["label"] = label
+    if harness is not None:
+        body["harness"] = harness
     # Every retry keeps the caller's key, body and fixed admission path, so an
     # ambiguous outcome is retried and the server replays the original creation.
     resp = _transport.post(

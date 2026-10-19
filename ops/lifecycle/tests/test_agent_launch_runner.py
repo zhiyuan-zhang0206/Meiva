@@ -20,6 +20,31 @@ from ops.lifecycle import launch
 from ops.rpc_schemas import LaunchAgentRequest
 
 
+def test_a_harness_without_a_launcher_is_refused(
+    database: Database,
+    event_bus: EventBus,
+    db_conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
+) -> None:
+    agent_id, _birth_config, _inbound_id, attempt = create_agent_row(
+        database,
+        event_bus,
+        machine=machine_identity.name(),
+        harness="codex",
+        catalog=build_model_catalog(),
+        authority=config_authority,
+    )
+    pool: ConnectionPool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1)
+    body = LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=attempt)
+    with pool, pytest.raises(ValueError, match="no launcher yet"):
+        launch.validate_launch_row(pool, body, local_machine=machine_identity.name())
+    assert db_conn.execute(
+        "SELECT status, harness FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchall() == [("idling", "codex")]
+
+
 @pytest.mark.asyncio
 async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
     monkeypatch: pytest.MonkeyPatch,

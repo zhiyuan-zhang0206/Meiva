@@ -12115,6 +12115,16 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "Harness": {
+        "type": "string",
+        "enum": [
+          "meiva",
+          "claude_code",
+          "codex",
+          "antigravity"
+        ],
+        "title": "Harness"
+      },
       "HeartbeatInfo": {
         "properties": {
           "interval_s": {
@@ -18154,6 +18164,16 @@
               }
             ],
             "title": "Label"
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Harness"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,

@@ -1,5 +1,6 @@
 [uses]
 "test_agent_forks.py" = ["test_agents_internals.py"]
+"test_agent_harness.py" = ["test_agents_internals.py"]
 "test_spawn_audit.py" = ["test_agents_internals.py"]
 
 [debt.first-party-patch]

@@ -117,6 +117,7 @@ def create_agent_row(
     prompt: str | None = None,
     prompt_source: str | None = None,
     fork_tail_skills: list[str] | None = None,
+    harness: str | None = None,
     creation_key: str | None = None,
     creation_request_hash: str | None = None,
 ) -> tuple[int, dict[str, object] | None, int | None, UUID]:
@@ -207,6 +208,7 @@ def create_agent_row(
             prompt=prompt,
             prompt_source=prompt_source,
             fork_tail_skills=fork_tail_skills,
+            harness=harness,
             creation_key=creation_key,
             creation_request_hash=creation_request_hash,
         )
