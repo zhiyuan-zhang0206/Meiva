@@ -5,16 +5,16 @@
 "test_brew_pin.py#monkeypatch.setenv os.environ.PATH" = 2
 
 [debt.first-party-patch]
+"test_brew_pin.py#monkeypatch.setattr base.host.proc.run_bounded" = 2
+"test_healthcheck_browser_reach_meiva_root_glue.py#monkeypatch.setattr services.desktop.browser.probe.probe_browser" = 1
+"test_healthcheck_browser_reach_meiva_root_glue.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.canary" = 1
+"test_healthcheck_browser_reach_meiva_root_glue.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.host_probe" = 1
+"test_healthcheck_browser_reach_meiva_root_glue.py#monkeypatch.setattr services.supervision.meiva_root_glue.diagnostic_probes.settings" = 1
 "test_meiva_root_glue.py#monkeypatch.setattr services.supervision.meiva_root_glue.glue.ConfigBoot" = 1
 "test_meiva_root_glue.py#monkeypatch.setattr services.supervision.meiva_root_glue.glue.Database" = 1
 "test_meiva_root_glue.py#monkeypatch.setattr services.supervision.meiva_root_glue.glue.STATIC_PROBES" = 2
 "test_meiva_root_glue.py#monkeypatch.setattr services.supervision.meiva_root_glue.glue.build_diagnostics" = 2
 "test_meiva_root_glue.py#monkeypatch.setattr services.supervision.meiva_root_glue.glue.build_services" = 6
-"test_brew_pin.py#monkeypatch.setattr base.host.proc.run_bounded" = 2
-"test_healthcheck_browser_reach_meiva_root_glue.py#monkeypatch.setattr services.desktop.browser.probe.probe_browser" = 1
-"test_healthcheck_browser_reach_meiva_root_glue.py#monkeypatch.setattr services.supervision.meiva_root_glue.diagnostic_probes.settings" = 1
-"test_healthcheck_browser_reach_meiva_root_glue.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.canary" = 1
-"test_healthcheck_browser_reach_meiva_root_glue.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.host_probe" = 1
 "test_pgbouncer_healthcheck.py#monkeypatch.setattr base.cluster.dataplane.pooler.pgbouncer_listener_reachable" = 1
 "test_pgbouncer_healthcheck.py#monkeypatch.setattr base.cluster.dataplane.pooler.pgbouncer_public_listener_reachable" = 1
 "test_pgbouncer_healthcheck.py#monkeypatch.setattr base.cluster.get_record" = 2
@@ -31,13 +31,13 @@
 "test_root_diagnostics.py#monkeypatch.setattr base.host.proc.run_bounded" = 1
 "test_root_diagnostics.py#monkeypatch.setattr base.telemetry.process_logging.init_gateway_process" = 3
 "test_root_diagnostics.py#monkeypatch.setattr base.telemetry.sync" = 1
+"test_root_diagnostics.py#monkeypatch.setattr services.supervision.healthchecks.redis_acl.ping" = 1
 "test_root_diagnostics.py#monkeypatch.setattr services.supervision.meiva_root_glue.diagnostic_probes.is_macos" = 4
 "test_root_diagnostics.py#monkeypatch.setattr services.supervision.meiva_root_glue.diagnostic_probes.settings" = 4
-"test_root_diagnostics.py#monkeypatch.setattr services.supervision.healthchecks.redis_acl.ping" = 1
 
 [debt.restricted-python]
-"test_meiva_root_glue.py#python -c" = 1
 "test_diagnostic_work_ownership.py#python -c" = 1
+"test_meiva_root_glue.py#python -c" = 1
 
 [debt.unresolved-patch]
 "test_root_diagnostics.py#monkeypatch.setattr probe._module._station_answers" = 1

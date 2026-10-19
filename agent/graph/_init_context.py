@@ -29,7 +29,9 @@ history, so its context is not established from empty. It grafts
 
 from __future__ import annotations
 
-from langchain_core.messages import SystemMessage
+from typing import Any
+
+from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
@@ -41,6 +43,7 @@ from agent.state import CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.impersonation.notes import HandoffNotes
+from base.api_contracts.agent_contract import Harness
 from base.log import logger
 
 from .node_log import node_lifecycle
@@ -132,26 +135,34 @@ async def init_context_node(
         # order would mark it known and drop it silently until the next
         # compaction.
         indexed = indexed_skill_identifiers(runtime.context.require_agent().prompt)
-        return Command[NodeName](
-            update={
-                "messages": [
-                    SystemMessage(
-                        content=build_system_prompt(
-                            runtime.context.plugin_registry(),
-                            runtime.context.require_agent(),
-                            catalog=runtime.context.require_catalog(),
-                            agent_id=runtime.context.identity.agent_id
-                            if runtime.context.identity is not None
-                            else None,
-                        )
-                    ),
-                    *notes,
-                    *reset.tail,
-                ],
-                "capabilities": CapabilitiesState(indexed=indexed),
-                # Clear the channel: the reset has been served. Written back as
-                # the default so a later invocation cannot re-consume this tail.
-                "context_reset": ContextReset(),
-            },
-            goto=reset.resume,
-        )
+        head: list[BaseMessage] = [
+            SystemMessage(
+                content=build_system_prompt(
+                    runtime.context.plugin_registry(),
+                    runtime.context.require_agent(),
+                    catalog=runtime.context.require_catalog(),
+                    agent_id=runtime.context.identity.agent_id
+                    if runtime.context.identity is not None
+                    else None,
+                )
+            ),
+            *notes,
+            *reset.tail,
+        ]
+        update: dict[str, Any] = {
+            "messages": head,
+            "capabilities": CapabilitiesState(indexed=indexed),
+            # Clear the channel: the reset has been served. Written back as
+            # the default so a later invocation cannot re-consume this tail.
+            "context_reset": ContextReset(),
+        }
+        # meiva:note
+        # The head is the graph's own context, not a message an external harness
+        # receives: an agent on one gets the same facts from its handoff document, and
+        # the bridge must not duplicate a provider's system prompt. Starting the
+        # submission cursor after the head is what keeps `harness_turn` from sending
+        # it as user turns; the built-in loop never reads this channel.
+        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+        if runtime.context.harness is not Harness.MEIVA:
+            update["harness_cursor"] = len(head)
+        return Command[NodeName](update=update, goto=reset.resume)

@@ -21,7 +21,7 @@ Overview of the Agent subsystem.
 > are defined here as the authoritative terminology; check here before adding new terms.
 
 - **Agent** — one OS process = one LangGraph `thread_id` = one conversation / task execution unit. Has a unique
-  `agent_id` (int, `str(agent_id)` is the thread_id); runs the same 8-node graph (after_init→init_context→claim→before_llm→llm→before_exec→exec→after_exec self-loop).
+  `agent_id` (int, `str(agent_id)` is the thread_id); runs the same graph (after_init→init_context→claim→before_llm→llm→before_exec→exec→after_exec self-loop, plus `harness_turn` for an agent whose loop runs in an external CLI).
   Agents are **equal peers**, OS-level isolated — child agents are **not** child processes of the parent, but detached,
   reparented to init as independent processes; one dying does not affect others.
 - **Mode (not a framework concept)** — "one-shot vs persistent" are **not** framework-level modes, just differences in
