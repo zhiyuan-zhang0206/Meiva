@@ -42,6 +42,7 @@ and open questions are recorded in
 | Module | Owns |
 |---|---|
 | `events.py` | `BridgeEvent` and its members, plus the droppable (text delta) versus control split |
+| `engine.py` | `HarnessSession` (the adapter contract), `TurnEngine` (what a graph run needs), and `HarnessTurn` (one turn's reply, usage and boundary) |
 | `handoff.py` | the six-section handoff document, `HANDOFF_VERSION`, and its rendered byte size |
 | `registry.py` | `SessionRecord` and `FileSessionRegistry`: one JSON document per agent id, atomic replace |
 | `process.py` | `ChildProbe`, the psutil implementation, tree snapshots and the bounded wait for a pid to disappear |
@@ -71,11 +72,20 @@ changes the shape fails until the version moves with it.
 
 ## Identity
 
-`FileSessionRegistry` writes `agent_id ↔ session_id` (plus cwd, model and resume
-count) as soon as the adapter reports the session started. Writes are a temp file
+`FileSessionRegistry` writes `agent_id ↔ session_id` (plus cwd, model, resume
+count and the harness that wrote it) as soon as the adapter reports the session
+started. Writes are a temp file
 plus `Path.replace`, so a reader never sees a half-written record, and a corrupt
 document raises instead of silently starting a fresh session under an id that
 already has history.
+
+`SessionRecord.harness` makes the registry self-describing. A record written
+before the field existed reads as `meiva` — the only harness that predates it —
+and every write names its harness, so the fallback can only describe an older
+document. `load(agent_id, harness=...)` refuses a record that names another
+harness instead of resuming one provider's transcript under another provider's
+session, and the wiring passes its harness through a scoped registry rather than
+trusting every caller to remember.
 
 ## Testing
 

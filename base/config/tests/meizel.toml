@@ -7,8 +7,8 @@ exports = ["api_keys.py", "config_authority.py", "configuration.py", "served_gat
 
 [debt.env-patch]
 "configuration.py#patch.dict os.environ" = 1
-"test_config_authority.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 3
 "test_config_authority.py#monkeypatch.setenv os.environ.HOME" = 2
+"test_config_authority.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 3
 "test_config_authority.py#monkeypatch.setitem os.environ.MEIVA_IM_SEND_RETRY_DELAYS" = 1
 "test_config_authority.py#monkeypatch.setitem os.environ.MEIVA_PROCESS_PROFILE" = 2
 "test_config_boot_lite.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1

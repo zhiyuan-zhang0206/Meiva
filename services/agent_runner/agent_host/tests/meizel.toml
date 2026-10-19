@@ -21,9 +21,9 @@ exports = ["guarded_compact_support.py", "host_policy.py", "lifecycle", "managed
 "test_boot_sdk_posture.py#patch.dict os.environ" = 2
 
 [debt.first-party-patch]
-"test_boot_sdk_posture.py#monkeypatch.setattr meiva.sdk_surface.process_context.bind_host_process" = 1
 "test_boot_sdk_posture.py#monkeypatch.setattr base.config.Settings" = 1
 "test_boot_sdk_posture.py#monkeypatch.setattr base.config.ensure_eager" = 1
+"test_boot_sdk_posture.py#monkeypatch.setattr meiva.sdk_surface.process_context.bind_host_process" = 1
 "test_circuit_breaker.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 1
 "test_circuit_breaker_audit.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_standalone_async" = 1
 "test_maintenance_prior_failure.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 1

@@ -50,7 +50,7 @@ async def close_host_resources(
     clients: ClientSet,
     release_owner: Callable[[], Awaitable[None]],
     *,
-    clear_runtimes: Callable[[], None],
+    close_runtimes: Callable[[], Awaitable[None]],
     resource_deadline: float | None,
     release_timeout: float,
 ) -> None:
@@ -65,7 +65,13 @@ async def close_host_resources(
     except BaseException as exc:
         primary = exc
     if service.joined:
-        clear_runtimes()
+        try:
+            await close_runtimes()
+        except BaseException as secondary:
+            if primary is None:
+                primary = secondary
+            else:
+                primary.add_note(f"Retiring cached runtimes also failed: {secondary!r}")
         try:
             await _close_joined_clients_and_owner(
                 clients, release_owner, release_timeout=release_timeout

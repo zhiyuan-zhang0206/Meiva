@@ -1,7 +1,7 @@
-exports = ["node.py", "tests"]
+exports = ["harness_turn.py", "node.py", "tests"]
 
 [uses]
 "_decide.py" = ["_batch.py", "_dispatch.py", "_routing.py"]
 "_dispatch.py" = ["_chat_inbound.py", "_routing.py"]
 "node.py" = ["_decide.py", "_dispatch.py", "_present.py", "_routing.py"]
-"tests" = ["_chat_inbound.py", "_dispatch.py", "node.py"]
+"tests" = ["_chat_inbound.py", "_dispatch.py", "harness_turn.py", "node.py"]
