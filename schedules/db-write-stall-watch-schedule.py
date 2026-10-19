@@ -14,8 +14,10 @@ import time
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import meiva
+from schedules.catchup import cluster_timezone
 
 REPORT_AGENTS = (1818, 405)
 POLL_SECONDS = 60
@@ -27,6 +29,14 @@ STATS = re.compile(
     r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+) CST \[\d+\] LOG stats: "
     r"(\d+) xacts/s, (\d+) queries/s,.*?, xact \d+ us, query (\d+) us, wait (\d+) us"
 )
+
+
+# meiva:note
+# A line in this session's output reads on the cluster wall clock (`MEIVA_TIMEZONE`),
+# the clock the pgbouncer stats lines parsed here are stamped in and the clock the
+# operator reads the cluster's dashboards on — never the host's OS timezone.
+def stamp(zone: ZoneInfo) -> str:
+    return f"[{datetime.now(zone):%Y-%m-%d %H:%M:%S %Z}]"
 
 
 def log_path() -> Path:
@@ -96,6 +106,7 @@ def report(text: str) -> None:
 
 
 def main() -> None:
+    zone = ZoneInfo(cluster_timezone())
     seen: str | None = None
     samples: deque[tuple[str, int, int, int]] = deque(maxlen=12)
     log = log_path()
@@ -111,9 +122,7 @@ def main() -> None:
                 samples.append(sample)
                 write_state(state, last_alert=last_alert, last_sample=seen)
                 if is_stalled(sample):
-                    print(
-                        f"[{datetime.now(UTC):%H:%M:%SZ}] stalled: {describe([sample])}", flush=True
-                    )
+                    print(f"{stamp(zone)} stalled: {describe([sample])}", flush=True)
                 if confirmed(list(samples)):
                     if time.time() - last_alert >= COOLDOWN_SECONDS:
                         last_alert = time.time()
@@ -129,15 +138,9 @@ def main() -> None:
                         )
                 elif alerted:
                     alerted = False
-                    print(
-                        f"[{datetime.now(UTC):%H:%M:%SZ}] recovered: {describe([sample])}",
-                        flush=True,
-                    )
+                    print(f"{stamp(zone)} recovered: {describe([sample])}", flush=True)
         except Exception as exc:
-            print(
-                f"[{datetime.now(UTC):%H:%M:%SZ}] probe failed: {type(exc).__name__}: {exc}",
-                flush=True,
-            )
+            print(f"{stamp(zone)} probe failed: {type(exc).__name__}: {exc}", flush=True)
         time.sleep(POLL_SECONDS)
 
 
