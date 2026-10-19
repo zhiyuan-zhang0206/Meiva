@@ -13,14 +13,19 @@ drives; `conftest.py` builds the shared `env` fixture on top — a real git
 repository with an OLD and a NEW commit, `fleet_update.ssh` patched to the
 cluster, `fleet_update.time` patched to its fake clock. `test_fleet_update.py`
 covers the halves' behavior, `test_fleet_update_keep.py` the keep decision's
-effect on `down`, and `test_fleet_update_programs.py` runs the shipped
+effect on `down`, `test_fleet_update_leases.py` the lease announcement and its
+confirm window, and `test_fleet_update_programs.py` runs the shipped
 `cli/commands/management/fleet_gateway.py` program for real against a local
 HTTP server standing in for the gateway API.
 
 The cluster records every command and every effect it accepts, and the order
 of those effects is what the tests assert. `hosts`, `names`, `silent`,
-`hidden`, `roster_lag`, `stored_schedules`, `silence_reply` and `fail` are
-per-test knobs; the fake clock makes the roster's poll interval observable.
+`hidden`, `roster_lag`, `stored_schedules`, `silence_reply`, `leases`,
+`lease_reply` and `fail` are per-test knobs; the fake clock makes the roster's
+poll interval and the lease countdown observable. `lease_reads` records how
+many effects the cluster had already accepted at each lease read, so a test can
+prove the leases are named before anything stops; a read is never an effect, so
+`--dry-run` stays effect-free.
 
 Tests never run the real keep-decision script. The shared fixture stubs a
 decision that keeps nothing — the full-stop shape the pre-keep tests expect —
