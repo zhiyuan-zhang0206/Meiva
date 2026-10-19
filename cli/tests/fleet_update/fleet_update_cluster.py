@@ -53,6 +53,14 @@ class Cluster:
         self.silence_hours = 0.0
         self.silence_comment = ""
         self.silence_reply: str | None = None
+        self.leases: list[dict[str, Any]] = []
+        self.lease_reply: str | None = None
+        self.lease_rc = 0
+        # meiva:note
+        # Where each read happened: the effects already accepted, so a test can prove the leases
+        # are named before anything stops.
+        # meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
+        self.lease_reads: list[int] = []
 
     def monotonic(self) -> float:
         return self.now
@@ -135,8 +143,8 @@ class Cluster:
             assert stdin == fleet_update.gateway_program()
             emit(self._roster_json())
             return 0
-        if stdin == fleet_update.silence_program():
-            return self._silence(alias, command, emit)
+        if stdin in (fleet_update.silence_program(), fleet_update.leases_program()):
+            return self._shipped(alias, command, stdin, emit)
         if "converge-incomplete.json" in command:
             return self._incomplete(alias, emit)
         if "verify" in command:
@@ -167,6 +175,20 @@ class Cluster:
         for line in recorded.splitlines():
             emit(line)
         return 0
+
+    # meiva:note
+    # A program `fleet_update` ships to the gateway over stdin: silence, else leases.
+    # meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
+    def _shipped(
+        self, alias: str, command: str, stdin: str | None, emit: Callable[[str], None]
+    ) -> int:
+        if stdin == fleet_update.silence_program():
+            return self._silence(alias, command, emit)
+        self.lease_reads.append(len(self.effects))
+        assert alias == "gw", "the lease table is read on the gateway host"
+        reply = self.lease_reply
+        emit(reply if reply is not None else json.dumps({"leases": self.leases}))
+        return self.lease_rc
 
     def _silence(self, alias: str, command: str, emit: Callable[[str], None]) -> int:
         assert alias == "gw", "the silence is Grafana's: it runs on the gateway host"

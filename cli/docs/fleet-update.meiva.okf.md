@@ -35,17 +35,20 @@ remain unchanged throughout the update.
 
 1. Preflight each listed host and compute OLD: the one commit every host
    agrees on that is not NEW.
-2. Fetch NEW on every host, so a host that cannot get it is found before
+2. Read the gateway's active impersonation leases and name them: a stop ends
+   every takeover in flight. `--lease-confirm-seconds` holds the stops open
+   for that long first.
+3. Fetch NEW on every host, so a host that cannot get it is found before
    anything stops.
-3. NEW's offline `meiva schedules verify` over the gateway's stored schedule
+4. NEW's offline `meiva schedules verify` over the gateway's stored schedule
    table — a red or an unevaluable check refuses `down` before any stop.
-4. The keep decision: the stateful components this window's changes do not
+5. The keep decision: the stateful components this window's changes do not
    reach; its verdicts ride every stop as `--keep-service` flags, and a
    component the window touches restarts as before.
-5. Open the window's Grafana silence on the gateway host.
-6. `meiva stop -y --timeout 600` on each runner, then the gateway. A stop must
+6. Open the window's Grafana silence on the gateway host.
+7. `meiva stop -y --timeout 600` on each runner, then the gateway. A stop must
    leave the host paused/stopped; a failure prints the retry step.
-7. Switch every checkout: check out NEW detached, repair legacy read-only
+8. Switch every checkout: check out NEW detached, repair legacy read-only
    `.venv` directories (early converge passes left them 0555, which `uv sync`
    cannot write through), `uv sync --frozen`, then require a clean tree. The
    check shows a dirty tree and never cleans it: untracked files are the
