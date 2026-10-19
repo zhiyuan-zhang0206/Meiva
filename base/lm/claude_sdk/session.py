@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+import claude_agent_sdk
+
 from base.lm.claude_sdk.auth import build_env
 from base.lm.claude_sdk.config import BridgeConfig
 from base.lm.claude_sdk.events import (
@@ -50,27 +52,12 @@ CANCEL_POLL_SECONDS = 0.02
 _EVENT_STREAM_END = object()
 
 
-class ClaudeSdkMissingError(RuntimeError):
-    pass
-
-
 class InboundQueueFullError(RuntimeError):
     pass
 
 
 class SessionClosedError(RuntimeError):
     pass
-
-
-def load_sdk() -> Any:
-    try:
-        import claude_agent_sdk
-    except ModuleNotFoundError as exc:
-        raise ClaudeSdkMissingError(
-            "claude-agent-sdk is not installed; install the 'claude-sdk' extra "
-            "(uv sync --extra claude-sdk)"
-        ) from exc
-    return claude_agent_sdk
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,7 +158,7 @@ class ClaudeSession:
     ) -> None:
         self.config = config
         self.agent_id = agent_id
-        self._sdk: Any = sdk
+        self._sdk: Any = sdk if sdk is not None else claude_agent_sdk
         self._probe: ChildProbe = probe or PsutilChildProbe()
         self._registry = registry
         self._environ = dict(environ)
@@ -201,9 +188,7 @@ class ClaudeSession:
         if self._closed:
             raise SessionClosedError("session is closed")
         resume = resume or self._resume_from_registry()
-        sdk = self._sdk or load_sdk()
-        self._sdk = sdk
-        client = sdk.ClaudeSDKClient(options=self._build_options(resume))
+        client = self._sdk.ClaudeSDKClient(options=self._build_options(resume))
         await client.connect()
         self._client = client
         self._cli_pid = client_pid(client)

@@ -28,7 +28,6 @@ from base.lm.claude_sdk.handoff import ClusterFact, EntryPoint, Handoff
 from base.lm.claude_sdk.registry import FileSessionRegistry, SessionRecord, SessionRegistry
 from base.lm.claude_sdk.session import (
     CancelReport,
-    ClaudeSdkMissingError,
     ClaudeSession,
     InboundQueueFullError,
     SessionClosedError,
@@ -45,7 +44,6 @@ __all__ = [
     "BridgeConfig",
     "BridgeEvent",
     "CancelReport",
-    "ClaudeSdkMissingError",
     "ClaudeSession",
     "ClusterFact",
     "EntryPoint",

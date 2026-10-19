@@ -78,16 +78,13 @@ dependencies = [
     "lark-oapi>=1.7.1",
     "websockets>=15.0.1",
     "oss2>=2.19.1",
+    # Drives a Claude Code CLI session as an agent brain (base/lm/claude_sdk).
+    # The wheel bundles a ~240MB CLI, which is the piece the bridge actually
+    # runs. The minor bound is deliberate: the bridge dispatches on the SDK's
+    # message class names, so a 0.x minor bump is a mapping change to review,
+    # not to pick up silently.
+    "claude-agent-sdk>=0.2.168,<0.3",
 ]
-
-[project.optional-dependencies]
-# The Claude Agent SDK bridge (`base/lm/claude_sdk`) runs a Claude Code CLI
-# session as an agent brain. It stays optional: the wheel bundles a ~240MB CLI
-# binary, and the bridge is not wired into the agent turn yet. The minor bound
-# is deliberate — the bridge dispatches on the SDK's message class names, so a
-# 0.x minor bump is a mapping change that must be reviewed, not picked up
-# silently. Install with `uv sync --extra claude-sdk`.
-claude-sdk = ["claude-agent-sdk>=0.2.168,<0.3"]
 
 [project.scripts]
 # `uv sync` installs `.venv/bin/meiva` — cluster ops CLI (start/stop/status/update/...).

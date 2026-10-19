@@ -2321,6 +2321,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "beautifulsoup4" },
+    { name = "claude-agent-sdk" },
     { name = "croniter" },
     { name = "cryptography" },
     { name = "fastapi" },
@@ -2374,11 +2375,6 @@ dependencies = [
     { name = "yt-dlp" },
 ]
 
-[package.optional-dependencies]
-claude-sdk = [
-    { name = "claude-agent-sdk" },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "httpx2" },
@@ -2399,7 +2395,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "beautifulsoup4", specifier = ">=4.12.3" },
-    { name = "claude-agent-sdk", marker = "extra == 'claude-sdk'", specifier = ">=0.2.168,<0.3" },
+    { name = "claude-agent-sdk", specifier = ">=0.2.168,<0.3" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=42.0.0" },
     { name = "fastapi", specifier = ">=0.120" },
@@ -2452,7 +2448,6 @@ requires-dist = [
     { name = "xlsxwriter", specifier = ">=3.2.0" },
     { name = "yt-dlp", specifier = ">=2026.3.17" },
 ]
-provides-extras = ["claude-sdk"]
 
 [package.metadata.requires-dev]
 dev = [

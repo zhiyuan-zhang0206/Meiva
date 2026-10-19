@@ -5,7 +5,6 @@ handoff injection, the persisted agent-id ↔ session-id pair, a cancelled tool,
 a resume from the registry.
 
 ```bash
-uv sync --extra claude-sdk      # once: the SDK is an optional extra
 .venv/bin/python demos/claude-sdk-bridge/bridge_demo.py
 ```
 
