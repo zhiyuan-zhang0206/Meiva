@@ -335,11 +335,20 @@ def _wrapped_append(inner: Callable[..., None], path: str | Path, content: str) 
     return inner(str(p), content)
 
 
-# ── delete ──
+# meiva:note
+# ── delete / restore ──
+# Both directions of the same move resolve their path against the tracked cwd like
+# every other files operation.
+# meiva:link meiva/docs/files.meiva.okf.md
 def _wrapped_delete(inner: Callable[..., None], path: str | Path) -> None:
     path = coerce_str(path, "path", allow_types=(Path,))
     p = _resolve_for_cwd(path)
     return inner(str(p))
+
+
+def _wrapped_restore(inner: Callable[..., Path], path: str | Path) -> Path:
+    path = coerce_str(path, "path", allow_types=(Path,))
+    return inner(str(_resolve_for_cwd(path)))
 
 
 # ── glob ──
@@ -434,6 +443,7 @@ def contribute() -> PluginContributions:
             SdkWrap("files.write", _wrapped_write),
             SdkWrap("files.append", _wrapped_append),
             SdkWrap("files.delete", _wrapped_delete),
+            SdkWrap("files.restore", _wrapped_restore),
             SdkWrap("files.glob", _wrapped_glob),
             SdkWrap("understand", _wrapped_understand),
             SdkWrap("ui.serve", wrapped_serve),

@@ -71,6 +71,7 @@ ENTRY_CAPABILITIES: Mapping[str, tuple[Capability, ...]] = {
     "files.append": _FILES_WRITE,
     "files.edit": _FILES_WRITE,
     "files.delete": _FILES_WRITE,
+    "files.restore": _FILES_WRITE,
     "agents.list_agents": _READ,
     "agents.get_status": _READ,
     "agents.get_neighbors": _READ,

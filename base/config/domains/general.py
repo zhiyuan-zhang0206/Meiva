@@ -302,6 +302,20 @@ class GeneralSettings(EnvSettings):
         },
     )
 
+    trash_retention_days: int = Field(
+        default=30,
+        ge=1,
+        alias="MEIVA_TRASH_RETENTION_DAYS",
+        description="Days a file moved to $MEIVA_HOME/trash by `meiva.files.delete` stays recoverable. The agent-host purges older entries at boot, next to the trace-mirror prune. Workspace and upload files have no other backup, so this window is the only recovery path for a deleted one.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     require_github_pr: bool = Field(
         default=True,
         alias="MEIVA_REQUIRE_GITHUB_PR",

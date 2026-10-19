@@ -7,6 +7,7 @@ __all_for_meiva__ = [
     "edit",
     "glob",
     "read",
+    "restore",
     "write",
 ]
 
@@ -14,12 +15,18 @@ import difflib
 import errno
 import glob as _glob
 import os
+import re
+import shutil
 import stat
 import uuid
+from collections.abc import Callable
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from base.config import settings
 from base.log import logger
-from base.paths import workspace_dir
+from base.paths import meiva_home, trash_dir, workspace_dir
+from base.paths.private_dir import ensure_private_dir
 from meiva.sdk_surface import agent_identity
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.security import scan_content
@@ -276,7 +283,239 @@ def glob(pattern: str = "*") -> list[Path]:
     return sorted(Path(s) for s in _glob.glob(str(p), recursive=True))  # noqa: PTH207
 
 
+_TRASH_BUCKET = re.compile(r"(\d{4}-\d{2}-\d{2})(?:\.\d+)?")
+
+
+def _trash_root(home: Path | None = None, *, create: bool = False) -> Path:
+    """The trash tree one home keeps (`$MEIVA_HOME/trash`), symlinks resolved.
+
+    Every path this module builds and parses goes through here, so a delete and a
+    later restore agree on the prefix even when the home is reached through a
+    symlink. `create=True` makes the directory owner-only and re-checks that it
+    still is: a trash that became a symlink or a foreign directory is refused
+    rather than written through."""
+    root = trash_dir(home if home is not None else meiva_home())
+    if create:
+        ensure_private_dir(root)
+    return Path(os.path.realpath(root))
+
+
+def _machine_label() -> str:
+    """This machine's layer in the trash: the configured name, never the hostname.
+
+    Machine names are deployment labels (`settings.general.machine_name`). An
+    uninitialized home — a test, a bare REPL — has none and gets `local`; the tree
+    is per home, so that bucket cannot collide across machines. A value that is not
+    one plain path component also falls back: it must not steer the layout."""
+    label = settings.general.machine_name.strip()
+    if not label or label in {".", ".."} or "/" in label or "\\" in label:
+        return "local"
+    return label
+
+
+def _absolute(path: Path) -> Path:
+    """`path` as a lexical absolute path: `..` collapsed, symlinks untouched.
+
+    The kernel resolves `..` after following a symlink; the payload's recorded
+    origin is also the path the move itself acts on, so the two always agree."""
+    # meiva:note
+    # `Path.resolve()` follows symlinks and would record a link's target instead of
+    # the link the delete actually moves; `..` must collapse lexically here.
+    # meiva:link meiva/docs/files.meiva.okf.md
+    return Path(os.path.abspath(path))  # noqa: PTH100
+
+
+def _today() -> date:
+    """The local calendar day a delete or a purge reasons about.
+
+    Local, not UTC: the day layer is what a person reads when they go looking for
+    a file deleted this morning. The caller may pin it (`today=`) in tests."""
+    return datetime.now().astimezone().date()
+
+
+def _relative_to_root(origin: Path) -> Path:
+    """The part of an absolute path below its filesystem root — the payload's path
+    inside a trash entry. Refuses a path with no such part or a `..` component."""
+    relative = origin.relative_to(origin.anchor)
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError(f"cannot trash {str(origin)!r}: no path below its filesystem root")
+    return relative
+
+
+def _trash_entry(origin: Path, *, today: date | None = None) -> Path:
+    """The trash path a delete of `origin` lands in, unique for the day.
+
+    `<trash>/<machine>/<YYYY-MM-DD>/<origin without its root>`; while that path is
+    already taken by an earlier delete of the same origin, the day bucket moves on
+    (`<YYYY-MM-DD>.2`, `.3`, …). The payload therefore always keeps its exact
+    origin path, which is what lets `restore` recover it without a manifest."""
+    relative = _relative_to_root(origin)
+    machine_dir = _trash_root(create=True) / _machine_label()
+    day = (today or _today()).isoformat()
+    index = 1
+    while True:
+        bucket = machine_dir / (day if index == 1 else f"{day}.{index}")
+        entry = bucket / relative
+        if not os.path.lexists(entry):
+            return entry
+        index += 1
+
+
+def move_file(
+    src: Path,
+    dst: Path,
+    *,
+    replace: Callable[[Path, Path], None] = os.replace,
+    copy: Callable[..., object] = shutil.copy2,
+) -> None:
+    """Move `src` to `dst` so `src` is never lost.
+
+    Same filesystem: one atomic rename. Across devices (EXDEV): copy to a
+    temporary sibling of `dst`, flush it, rename it into place, and only then
+    unlink `src` — a failure before that rename leaves `src` untouched, and a
+    crash after it leaves both copies rather than neither.
+
+    `replace` and `copy` are the two filesystem primitives the move needs; they
+    are parameters so the cross-device drill can pass a fake in instead of
+    mounting a second filesystem. The trash passes the defaults."""
+    dst.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        replace(src, dst)
+        return
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+    temporary = dst.with_name(f".{dst.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        copy(src, temporary, follow_symlinks=False)
+        if not temporary.is_symlink():
+            descriptor = os.open(temporary, os.O_RDONLY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        replace(temporary, dst)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    src.unlink()
+
+
 def delete(path: str | Path) -> None:
-    """Delete a file (not a directory)."""
+    """Move a file to the trash instead of unlinking it, so a wrong delete stays recoverable.
+
+    The file leaves its path immediately and lands under
+    `$MEIVA_HOME/trash/<machine>/<YYYY-MM-DD>/<its path without the filesystem root>`;
+    a second delete of the same path that day uses the next bucket
+    (`<YYYY-MM-DD>.2`). `restore` moves it back; entries past the configured
+    retention are purged by the machine's boot maintenance. Directories are refused.
+    """
     path = coerce_str(path, "path", allow_types=(os.PathLike,))
-    resolve(path).unlink()
+    origin = _absolute(resolve(path))
+    if not os.path.lexists(origin):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(origin))
+    if origin.is_dir() and not origin.is_symlink():
+        raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(origin))
+    move_file(origin, _trash_entry(origin))
+
+
+def _trash_origin(entry: Path) -> Path:
+    """The absolute path a trash entry restores to, read from its place in the tree.
+
+    The entry's parent is resolved — not the entry, which may itself be a symlink
+    that must be restored as a link — then `<machine>/<day bucket>` is checked and
+    dropped, leaving the original path below its filesystem root."""
+    root = _trash_root()
+    resolved = Path(os.path.realpath(entry.parent)) / entry.name
+    try:
+        relative = resolved.relative_to(root)
+    except ValueError:
+        raise ValueError(f"{str(entry)!r} is not inside the trash ({root})") from None
+    parts = relative.parts
+    if len(parts) < 3 or _TRASH_BUCKET.fullmatch(parts[1]) is None:
+        raise ValueError(
+            f"{str(entry)!r} is not a trash entry: expected "
+            f"{root}/<machine>/<YYYY-MM-DD>/<original path>"
+        )
+    return Path(entry.anchor).joinpath(*parts[2:])
+
+
+def restore(path: str | Path) -> Path:
+    """Move a file back out of the trash to the path it was deleted from.
+
+    `path` is the file's path inside the trash, exactly as `delete` leaves it.
+    Fails when the original path exists again — restore never overwrites — and for
+    a path that is not a trash entry. Returns the restored path.
+    """
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
+    entry = _absolute(resolve(path))
+    origin = _trash_origin(entry)
+    if not os.path.lexists(entry):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(entry))
+    if entry.is_dir() and not entry.is_symlink():
+        raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(entry))
+    if os.path.lexists(origin):
+        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(origin))
+    origin.parent.mkdir(parents=True, exist_ok=True)
+    move_file(entry, origin)
+    return origin
+
+
+def _bucket_day(name: str) -> date | None:
+    """The day a trash bucket directory stands for, or None when it is not one."""
+    match = _TRASH_BUCKET.fullmatch(name)
+    if match is None:
+        return None
+    try:
+        return date.fromisoformat(match.group(1))
+    except ValueError:
+        return None
+
+
+def _real_subdirectories(directory: Path) -> list[Path]:
+    """Direct child directories that are directories themselves — never a symlink."""
+    try:
+        entries = list(os.scandir(directory))
+    except OSError:
+        return []
+    return sorted(Path(e.path) for e in entries if e.is_dir(follow_symlinks=False))
+
+
+def _remove_bucket(bucket: Path) -> int:
+    """Remove one expired day bucket; return how many files it held."""
+    files = 0
+    for _directory, _subdirectories, names in os.walk(bucket, followlinks=False):
+        files += len(names)
+    shutil.rmtree(bucket, ignore_errors=True)
+    return files
+
+
+def sweep_trash(retention_days: int, *, home: Path | None = None, today: date | None = None) -> int:
+    """Purge trash entries older than `retention_days`; return the files removed.
+
+    The machine's boot maintenance calls this next to the trace-mirror prune. It
+    reads and removes nothing outside the trash tree: only `<machine>` and day
+    buckets that are real directories are entered, and `shutil.rmtree` removes a
+    symlink instead of descending through it. `retention_days <= 0` disables the
+    pass (nothing is provably expired)."""
+    if retention_days <= 0:
+        return 0
+    raw = trash_dir(home if home is not None else meiva_home())
+    if raw.is_symlink() or not raw.is_dir():
+        return 0
+    root = _trash_root(home)
+    cutoff = (today or _today()) - timedelta(days=retention_days)
+    removed = 0
+    for machine in _real_subdirectories(root):
+        for bucket in _real_subdirectories(machine):
+            day = _bucket_day(bucket.name)
+            if day is not None and day < cutoff:
+                removed += _remove_bucket(bucket)
+    if removed:
+        logger.info(
+            "purged expired trash entries",
+            event="trash",
+            files=removed,
+            cutoff=cutoff.isoformat(),
+        )
+    return removed

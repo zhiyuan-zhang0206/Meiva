@@ -69,6 +69,7 @@ UNSAFE_PREFIXES = (
     "meiva.files.edit",
     "meiva.files.write",
     "meiva.files.delete",
+    "meiva.files.restore",
     "meiva.mcps.",
 )
 

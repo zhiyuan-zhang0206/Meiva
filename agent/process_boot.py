@@ -44,10 +44,20 @@ def _isolated_memory_search(_query: str, _k: int = 5) -> list[Any]:
     return []
 
 
+# meiva:note
+# One-shot per-machine boot maintenance: arming tracing runs its trace-mirror disk
+# guards, and the trash purge past `trash_retention_days` runs beside them. Both
+# belong to the agent-host's single boot, so neither needs a daemon of its own.
+# The purge covers the whole home, not just this agent: every delete on the
+# machine parks files in the same tree.
+# meiva:link meiva/docs/files.meiva.okf.md
 def init_process_scope(*, machine: MachineIdentity, home: Path) -> None:
+    from base.config import settings
     from base.telemetry.tracing import initialize_tracing
+    from meiva.files import sweep_trash
 
     initialize_tracing(machine=machine, home=home)
+    sweep_trash(settings.general.trash_retention_days, home=home)
 
 
 def land_cluster_extensions(db: Database) -> None:

@@ -174,6 +174,7 @@ def test_plugin_wraps_all_files_ops_for_cwd():
         "files.edit",
         "files.glob",
         "files.delete",
+        "files.restore",
         "shell.run",
         "understand",
     ):

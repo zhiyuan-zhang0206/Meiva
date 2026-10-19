@@ -177,6 +177,16 @@ def workspaces_root() -> Path:
     return meiva_home() / "workspaces"
 
 
+# meiva:note
+# Where a home parks deleted files (`<home>/trash`). Pure: the path only, no
+# creation. One tree per home, layered by machine and day below it, so an entry
+# names its origin without a manifest. `meiva.files.delete` writes it; the file API
+# and the machine's boot maintenance read it.
+# meiva:link meiva/docs/files.meiva.okf.md
+def trash_dir(home: Path) -> Path:
+    return home / "trash"
+
+
 def workspace_dir(agent_id: int) -> Path:
     """Per-agent workspace ($MEIVA_HOME/workspaces/<agent_id>); create if missing.
 
