@@ -26,8 +26,7 @@ the database layer imports none of them.
   breadcrumb. It returns whether the wake reached Redis; callers that meter delivery must read it.
 - `compact.py` — `insert_compact_request_inbound`, the native compact envelope.
 - `live.py` — `ALIVE_STATUSES` / `ALIVE_SQL` / `agent_is_alive` (the one alive predicate: status
-  plus an unexpired lease), `list_live_agent_ids` and `signal_live_agents_restart` (the fleet
-  update's quiesce signal).
+  plus an unexpired lease), and `list_live_agent_ids`.
 - `rows.py` — `InboundRow`, `list_pending_inbounds` and
   `NOTICE_FYI_TTL_DAYS`, the open-feed lifetime of FYI notices.
 
@@ -43,4 +42,4 @@ the database layer imports none of them.
 
 - `base/agents/inbox/insert.py:insert_inbound_message`
 - `base/agents/impersonation/wake.py:publish_inbound_wake`
-- `base/agents/inbox/live.py:signal_live_agents_restart`
+- `base/agents/inbox/live.py:list_live_agent_ids`

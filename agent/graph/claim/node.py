@@ -169,9 +169,7 @@ async def claim_node_impl(
     routing = await resolve_routing(ctx, agent_id, batch)  # pyright: ignore[reportUnknownArgumentType]
 
     # ── Dispatch: run every item through its handler ──
-    st = BatchState(
-        update_initiated=state.update_initiated,
-    )
+    st = BatchState()
     await dispatch_batch(ctx, state, agent_id, batch, routing, st)  # pyright: ignore[reportUnknownArgumentType]
 
     # ── Display: tell the frontend which chat inbounds were committed ──
