@@ -403,6 +403,32 @@ def _establish_codex_relay(
         relay_get,
     )
 
+    # meiva:note
+    # Resolve the Antigravity destination here, before a relay exists: a relay that
+    # dies at startup leaves only an exit code in the lease's reason, and the path or
+    # token problem is exactly what the accepting runtime can name while it still has
+    # the record in hand. The cost is one owner-only file read plus at most one probe.
+    # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+    antigravity_endpoint_file = None
+    if session["relay_provider"] == "antigravity":
+        from base.agents.impersonation.host_transport import (
+            antigravity_endpoint_path,
+            resolve_antigravity_endpoint,
+        )
+
+        try:
+            resolve_antigravity_endpoint(session["relay_thread_id"])
+        except (OSError, RuntimeError, ValueError) as exc:
+            return _roll_back_relay_failure(
+                db,
+                bus,
+                session,
+                incarnation,
+                fail_acceptance,
+                f"the Antigravity endpoint is unusable: {exc}",
+            )
+        antigravity_endpoint_file = str(antigravity_endpoint_path(session["relay_thread_id"]))
+
     relay_token = secrets.token_urlsafe(32)
     try:
         minted = provision_relay(db, session["id"], incarnation, relay_token)
@@ -420,6 +446,7 @@ def _establish_codex_relay(
             session["relay_codex_remote"],
             session["process_metadata"].get("codex_home"),
             provider=session["relay_provider"],
+            antigravity_endpoint_file=antigravity_endpoint_file,
         ),
         relay_token,
         time.monotonic(),
@@ -629,15 +656,6 @@ async def _record_stale_relay(
 
 async def _send_ended_notice(db: Database, agent_id: int, lease_id: str) -> None:
     """Submit the ended lease's notice once; a failure is logged and never retried."""
-    from base.agents.impersonation.terminal_notices import send_ended_notice
-    from base.log import logger
+    from base.agents.impersonation.terminal_notices import deliver_ended_notice
 
-    error = await asyncio.to_thread(send_ended_notice, db, lease_id)
-    if error is not None:
-        logger.error(
-            "ended impersonation lease notice was not delivered and will not be retried",
-            event="impersonation_terminal_notice_failed",
-            agent_id=agent_id,
-            lease_id=str(lease_id),
-            error=error,
-        )
+    await asyncio.to_thread(deliver_ended_notice, db, agent_id, lease_id)

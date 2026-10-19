@@ -1,5 +1,8 @@
+import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 from uuid import uuid4
@@ -282,3 +285,97 @@ def test_already_terminal_insert_is_not_historically_backfilled(
             (session["id"],),
         )
     db_conn.rollback()
+
+
+def test_ended_antigravity_notice_uses_the_endpoint_the_request_recorded(
+    active: tuple[dict[str, Any], RuntimeIncarnation],
+    database: Database,
+    event_bus: EventBus,
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    from functools import partial
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    session, _ = active
+    thread_id = str(uuid4())
+    db_conn.execute(
+        "UPDATE agent_impersonations SET relay_provider='antigravity',relay_thread_id=%s,"
+        "relay_codex_remote=NULL WHERE id=%s",
+        (thread_id, session["id"]),
+    )
+    db_conn.commit()
+    received: list[tuple[str, str | None, dict[str, Any]]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            received.append((self.path, self.headers.get("x-codeium-csrf-token"), body))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    httpd = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    port = httpd.server_address[1]
+    csrf = "recorded-csrf"
+    recorded = host_transport.AntigravityServer(address=f"127.0.0.1:{port}", csrf_token=csrf)
+    host_transport.write_antigravity_endpoint(recorded, thread_id=thread_id, home=tmp_path)
+    end(database, event_bus, session, local_machine=machine_identity.name())
+    try:
+        reason = terminal_notices.send_ended_notice(
+            database,
+            session["id"],
+            resolve_antigravity=partial(
+                host_transport.resolve_antigravity_endpoint, home=tmp_path, environment={}
+            ),
+        )
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=5)
+        httpd.server_close()
+    assert reason is None
+    assert len(received) == 1
+    path, header_value, body = received[0]
+    assert path == "/exa.language_server_pb.LanguageServerService/SendAgentMessage"
+    assert header_value == csrf
+    assert body["recipient"] == thread_id
+    assert session["id"] in body["content"]
+
+
+def test_ended_antigravity_notice_without_a_record_names_the_record_it_looked_for(
+    active: tuple[dict[str, Any], RuntimeIncarnation],
+    database: Database,
+    event_bus: EventBus,
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    session, _ = active
+    thread_id = str(uuid4())
+    db_conn.execute(
+        "UPDATE agent_impersonations SET relay_provider='antigravity',relay_thread_id=%s,"
+        "relay_codex_remote=NULL WHERE id=%s",
+        (thread_id, session["id"]),
+    )
+    db_conn.commit()
+    path = host_transport.antigravity_endpoint_path(thread_id, home=tmp_path)
+
+    def missing(_thread_id: str) -> "host_transport.AntigravityServer":
+        raise RuntimeError(f"No Antigravity endpoint record exists at {path}")
+
+    end(database, event_bus, session, local_machine=machine_identity.name())
+    reason = terminal_notices.send_ended_notice(
+        database, session["id"], resolve_antigravity=missing
+    )
+    assert reason is not None
+    assert str(path) in reason

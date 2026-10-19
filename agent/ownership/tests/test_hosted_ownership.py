@@ -24,6 +24,7 @@ from base.agents.incarnation.resources import (
     ResourceProcess,
     decode_resources,
 )
+from base.cluster.machine import MachineIdentity
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -537,3 +538,79 @@ async def test_settle_stale_running_rows_without_owner_filter_keeps_boot_semanti
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id = %s", (expired,)
     ).fetchone() == ("idling",)
+
+
+async def test_replacement_admission_submits_the_interrupted_lease_notice_once(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    # meiva:note
+    # A restart is what ends the takeover, so the replacement host owes the notice:
+    # the in-memory relay child does not survive it and there is no retry ledger. The
+    # fake app server speaks the recorded thread's transport, so the assertion is
+    # that the notice arrived rather than that a function was called.
+    # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+    import shutil
+    import tempfile
+    from pathlib import Path
+    from uuid import uuid4
+
+    from base.agents.impersonation.tests.test_host_transport import FakeAppServer
+
+    agent_id = _agent(db_conn)
+    local_machine = machine_identity.name()
+    db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (local_machine, agent_id))
+    db_conn.commit()
+    old = await admit_hosted_runtime(
+        aops_pool, agent_id, local_machine, uuid4(), expected_from="idling", db=database
+    )
+    assert old is not None
+    lease_id = uuid4()
+    thread_id = str(uuid4())
+    directory = Path(tempfile.mkdtemp(prefix="cxown-", dir="/tmp"))
+    socket = directory / "host.sock"
+    app_server = FakeAppServer()
+    app_server.start(socket)
+    try:
+        db_conn.execute(
+            "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,"
+            "expires_at,relay_provider,relay_thread_id,relay_codex_remote,"
+            "accepted_generation,accepted_owner) "
+            "VALUES(%s,%s,'external_agent:codex',%s,'active',3600,"
+            "clock_timestamp()+interval '1 hour','codex',%s,%s,%s,%s)",
+            (
+                lease_id,
+                agent_id,
+                local_machine,
+                thread_id,
+                f"unix://{socket}",
+                old.generation,
+                old.owner,
+            ),
+        )
+        db_conn.commit()
+        db_conn.execute(
+            "UPDATE agents_meta SET lease_expires_at=clock_timestamp()-interval '1 second'"
+            " WHERE id=%s",
+            (agent_id,),
+        )
+        db_conn.commit()
+        successor = await admit_hosted_runtime(
+            aops_pool, agent_id, local_machine, uuid4(), expected_from="running", db=database
+        )
+    finally:
+        app_server.stop()
+        shutil.rmtree(directory, ignore_errors=True)
+    assert successor is not None and successor.generation != old.generation
+    row = db_conn.execute(
+        "SELECT status,rejection_reason FROM agent_impersonations WHERE id=%s", (lease_id,)
+    ).fetchone()
+    assert row == ("expired", "aborted: native runtime restarted")
+    turns = [message for message in app_server.received if message.get("method") == "turn/start"]
+    assert len(turns) == 1
+    payload = turns[0]["params"]
+    assert payload["threadId"] == thread_id
+    assert str(lease_id) in payload["input"][0]["text"]
