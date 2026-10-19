@@ -214,12 +214,13 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
       return [];
     });
   };
+  const imagesRef = useRef(images);
+  useEffect(() => {
+    imagesRef.current = images;
+  }, [images]);
   useEffect(() => {
     return () => {
-      setImages((prev) => {
-        for (const img of prev) URL.revokeObjectURL(img.previewUrl);
-        return prev;
-      });
+      for (const img of imagesRef.current) URL.revokeObjectURL(img.previewUrl);
     };
   }, []);
 
@@ -271,6 +272,9 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     if (composerLocked || !onAttachImage) return;
     for (const file of files) {
       const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      // meiva:note
+      // A pending attachment previews from an object URL, so the page image policy must allow blob:.
+      // meiva:link ui/web/src/lib/auth/docs/content-security-policy.meiva.okf.md
       const previewUrl = URL.createObjectURL(file);
       setImages((prev) => [...prev, { key, name: file.name, previewUrl, status: "uploading" }]);
       onAttachImage(file)

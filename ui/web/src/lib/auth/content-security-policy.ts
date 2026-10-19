@@ -70,7 +70,7 @@ export function buildContentSecurityPolicy({
     `script-src ${scriptSources.join(" ")}`,
     `style-src ${styleSources.join(" ")}`,
     "style-src-attr 'unsafe-inline'",
-    "img-src 'self' data: http: https:",
+    "img-src 'self' data: blob: http: https:",
     "font-src 'self' data:",
     `connect-src 'self' ${resolvedGatewayOrigin} ${webSocketOrigin(resolvedGatewayOrigin)}`,
     "frame-src 'self' http: https:",
