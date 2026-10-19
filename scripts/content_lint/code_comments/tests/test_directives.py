@@ -177,6 +177,49 @@ def test_the_stop_window_lint_keeps_its_own_marker_requirement() -> None:
     assert any("stale" in message for _, message in violations_in_source(misplaced))
 
 
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "# time-bomb-ok",
+        "# time-bomb-ok:",
+        "# time-bomb-ok: ",
+        "# time-bomb-ok:explicit fixture input",
+        "# time-bomb-ok:  explicit fixture input",
+    ],
+)
+def test_a_bare_time_bomb_marker_is_not_machine_syntax(tmp_path: Path, marker: str) -> None:
+    repo = repository(
+        tmp_path,
+        source_with('def test_window() -> None:\n    day = "2026-09-07"  ' + marker + "\n"),
+    )
+    assert codes(repo) == ["free-comment"]
+
+
+def test_a_time_bomb_marker_with_its_own_reason_is_machine_syntax(tmp_path: Path) -> None:
+    repo = repository(
+        tmp_path,
+        source_with(
+            "def test_window() -> None:\n"
+            '    day = "2026-09-07"  # time-bomb-ok: explicit fixture window input\n'
+        ),
+    )
+    assert codes(repo) == []
+
+
+def test_a_time_bomb_reason_cannot_continue_on_the_next_line(tmp_path: Path) -> None:
+    repo = repository(
+        tmp_path,
+        source_with(
+            "def test_window() -> None:\n"
+            "    day = (  # time-bomb-ok: explicit fixture window input\n"
+            "        # and the same fixture feeds the ledger assertion\n"
+            '        "2026-09-07"\n'
+            "    )\n"
+        ),
+    )
+    assert codes(repo) == ["free-comment"]
+
+
 @pytest.mark.parametrize("path", ["pkg/core.py", "pkg/tests/test_core.py"])
 @pytest.mark.parametrize("call", ["gateway_access_from_settings()", "other()"])
 def test_an_ambient_marker_only_names_an_audited_call(tmp_path: Path, path: str, call: str) -> None:

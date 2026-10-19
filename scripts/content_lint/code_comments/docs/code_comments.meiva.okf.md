@@ -80,7 +80,11 @@ repeated qualified names; an inline directive cannot borrow the next definition'
 rationale. The ambient audit retains its own batch vocabulary and caller
 inventory; the parser only admits a single batch token on a call that audit
 examines. `# quiesce-exempt: <reason>` keeps the exact form the stop-window lint
-matches; that lint still owns loop placement and stale-marker checks. No rule registry, runtime
+matches; that lint still owns loop placement and stale-marker checks.
+`# time-bomb-ok: <reason>` likewise keeps the exact form the time-bomb lint
+matches: that lint requires the marker on the assertion's or binding's own lines
+(`scripts/lint/diagnostics/time_bomb.py`), which a note block above the statement
+cannot reach, so the reason travels inline and the marker alone is not syntax. No rule registry, runtime
 import or path exemption is added.
 
 Docstrings remain prose in source and fail the strict check, except pytest
