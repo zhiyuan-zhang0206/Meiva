@@ -20,17 +20,22 @@ and borders carry the separation.
 ## The dark block: warm graphite
 
 User pick 2026-10-19. One near-neutral warm family (OKLCH hue 75, chroma 0.005) and
-a four-step elevation ladder:
+a four-step elevation ladder. The **canvas is the darkest surface** and the sidebar
+sits just above it; cards and popovers rise above the canvas:
 
 | Surface | Token | Value |
 |---|---|---|
-| sidebar | `--sidebar` | `#1e1d1a` |
-| canvas | `--background` | `#252421` |
-| card | `--card` | `#2e2c2a` |
-| popover | `--popover` | `#373533` |
+| canvas | `--background` | `#1e1d1b` |
+| sidebar | `--sidebar` | `#232220` |
+| card | `--card` | `#2b2a27` |
+| popover | `--popover` | `#35332f` |
 
-Depth comes from that ladder, not from heavier borders, so a dark surface never
-needs a 2px line to separate two panes.
+The order matters. The conversation is the field the eye reads, so it is the
+quietest, deepest surface; chrome recedes into it rather than floating above it.
+The canvas-to-sidebar step stays tiny on purpose (1.06:1): a wider gap reads as
+two competing surfaces, which is what the first draft of this ladder did (user
+report 2026-10-19). Cards and popovers still rise, so depth comes from the ladder
+and a dark surface never needs a 2px line to separate two panes.
 
 The block it replaced failed on structure rather than on hue: the card sat *darker*
 than the canvas (OKLCH 0.205 vs 0.25), the sidebar, card and popover were the same
@@ -39,9 +44,9 @@ together — a ladder, one temperature, and a `--muted-foreground` that clears 7
 the canvas — are what the palette is.
 
 Measured from computed styles on the rendered page (Chromium, not from the token
-table): body text 14.4:1, muted text 7.35:1 on the canvas and 5.8:1 on a popover,
-popover text 11.3:1, sidebar text 15.7:1; canvas-to-popover 1.27:1 and
-canvas-to-sidebar 1.09:1 for the ladder steps.
+table): body text 15.6:1 on the canvas, muted text 8.0:1 on the canvas and 6.0:1 on
+a popover, popover text 11.7:1, sidebar text 14.8:1; ladder steps canvas-to-card
+1.17:1, canvas-to-popover 1.34:1, canvas-to-sidebar 1.06:1.
 
 ## Two component rules that ride along
 
