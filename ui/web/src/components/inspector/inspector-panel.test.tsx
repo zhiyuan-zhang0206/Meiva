@@ -1562,7 +1562,7 @@ function widgetFixture(over: Partial<InspectWidget> = {}): InspectWidget {
     plugin: "meiva_fleet",
     id: "today-tasks",
     kind: "taskList",
-    order: 150,
+    order: 250,
     title: null,
     tasks: [
       { id: 42, title: "Ship the inspector fix", priority: "P1" },
@@ -1593,6 +1593,32 @@ describe("InspectorPanel plugin widgets", () => {
     expect(screen.getByRole("link", { name: /Reply to QA/ }).getAttribute("href")).toBe(
       "/fleet?task=43",
     );
+  });
+
+  it("puts the fleet task list below the page section and above the runtime sections", async () => {
+    const page = {
+      id: 7,
+      agent_id: 1,
+      name: "task-dashboard",
+      port: 4173,
+      title: "Task dashboard",
+      serve_dir: null,
+      url: "http://gateway.test/pages/7-task-dashboard/",
+      created_at: "2026-08-24T12:00:00Z",
+      closed_at: null,
+    } satisfies PageRow;
+    listPages.mockResolvedValue([page]);
+    getAgentInspectWidgets.mockResolvedValue([widgetFixture()]);
+    render(<InspectorPanel agentId={1} />);
+
+    const pageSection = await screen.findByText("Page");
+    const tasks = await screen.findByText("Tasks");
+    const shells = await screen.findByText("Persistent shells");
+    const before = (first: Node, second: Node) =>
+      first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(before(pageSection, tasks)).toBeTruthy();
+    expect(before(tasks, shells)).toBeTruthy();
+    listPages.mockResolvedValue([]);
   });
 
   it("slots a widget into the section order (750: between the configuration overlay and the notice)", async () => {

@@ -1,17 +1,6 @@
-"""meiva_fleet inspector widgets — the fleet's embed in the Inspector Panel.
-
-Declares the fleet plugin's per-agent task list (task #2909; reshaped for
-task #3216, user request 2026-09-12): the inspector shows the agent's active
-tasks as a section, each row jumping to the task in the
-fleet task view.
-
-The kernel resolves the rows (its ownership rule, see
-``base/packages/plugins/surface/inspector.py``), so this module carries no ids and no
-callables. ``order=150`` sits the section directly below the built-in page
-section (page=100, shells=200): the agent's open pages first, its work queue
-next (user ruling 2026-09-18, task #3903; the order scale and the built-in
-sections' keys are documented in ``docs/conventions/extensions/plugin-spec-v2.md``).
-"""
+# meiva:note
+# The fleet's embed in the Inspector Panel: this face declares the agent's per-agent task list (task #2909, reshaped for #3216 on the 2026-09-12 user request) whose rows jump to the task in the fleet task view; the kernel resolves the rows by its ownership rule (base/packages/plugins/surface/inspector.py), so the module carries no ids and no callables. order=250 keeps the work queue directly below the built-in page section (page=200, shells=300) and above the runtime sections, in step with the 2026-10-18 renumbering that the user reported on 2026-10-19 had left the task list above the page.
+# meiva:link docs/conventions/extensions/plugin-spec-v2.md
 
 from base.packages.plugins.extensions import PluginContributions
 from base.packages.plugins.surface.inspector import InspectWidgetSpec
@@ -20,7 +9,7 @@ WIDGETS: tuple[InspectWidgetSpec, ...] = (
     InspectWidgetSpec(
         id="today-tasks",
         kind="taskList",
-        order=150,
+        order=250,
     ),
 )
 
