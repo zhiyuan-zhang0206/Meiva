@@ -13,8 +13,14 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 
 ## Message Types
 
+### System note envelope
+- Framework text the model must read as framework-originated — not as the human or a peer — is wrapped in a pair of tags: `<system_note>` on its own line, the text, then `</system_note>` on its own line. `base/lm/system_note.py` owns them: `wrap_system_note` is the one construction point, `SYSTEM_NOTE_LEAD` / `SYSTEM_NOTE_TRAIL` are the tags with the newline that always separates them from a body, and `unwrap_system_note` is the reader's inverse. The leaf sits in the LLM layer because both sides already reach it (attach packing and the message builders).
+- Writers: `system_note_message` (every NoteTag note), the compaction instruction, the compact summary (`compose_summary_message`), the attachment block, and every system-sourced inbound (below).
+- Inbounds keep the offset contract: `inbound_head` returns the open tag as the header, `inbound_tail` the close tag after the body, and `meiva_inbound_body_start` stays the header length. Readers render `inbound_body(text, source=…, body_start=…)` (drops the close tag) or `unwrap_system_note` when the whole payload is one note, so the framing never reaches a rendered timeline entry or catalog line.
+- The injection scan (`base/agents/messages/injection_scan.py`) triggers on both tags: a message that tries to forge or close a system note is flagged like any other forged structural markup.
+
 ### Inbound Messages (`inbound_message`)
-- `inbound_message(*, content, source, inbound_id, body_start, created_at=, image_urls=, message_id=)` — envelope wrapper (the header is `base/agents/messages/envelope.py:inbound_head`; `meiva_inbound_body_start` records its length so readers cut the content out by offset and never parse the header; the sender is `meiva_source`). Inbounds written before the field existed show whole, header included, in the hierarchy catalog
+- `inbound_message(*, content, source, inbound_id, body_start, created_at=, image_urls=, message_id=)` — envelope wrapper (the header is `base/agents/messages/envelope.py:inbound_head`; `meiva_inbound_body_start` records its length so readers cut the content out by offset and never parse the header; the sender is `meiva_source`). Inbounds written before the field existed show whole, header included, in the hierarchy catalog. A system source (`system`, `system:<subtype>`) is wrapped as a system note (see above); every other source's header is a self-contained sender line.
 - `source` is the original source string (`"system"` / `"agent:N"` / `"user"`), `meiva_inbound_id` records the source row id so history readers can correlate a message with its queue row. `inbound_id=None` (no key written) is for the one inbound with no queue row, the impersonation consent request, which is stamped with both times like every other injected message
 - `content` plain text or multimodal block list
 - Two times in metadata: `meiva_created_at` keeps its meaning (an inbound's is its ARRIVAL time, the source row's `created_at`; other messages' is when they were produced). `meiva_picked_up_at` is when an injected message (inbound, note, attachment) was put into the LLM context, i.e. when the model reads it; the builders stamp it. AIMessage and tool output are produced inside the context, so their `meiva_created_at` already is the read time and they carry no `meiva_picked_up_at`. Time-ordered readers (timeline, history tree, history dump) use `message_read_time()` (`meiva_picked_up_at`, else `meiva_created_at`); delivery tracking uses `inbound_messages.created_at`. The body envelope header (`wrap_inbound`) keeps the arrival time so the agent knows when a message came in.
@@ -34,7 +40,7 @@ formatting and source validation keep their existing order.
 - canonical definition + `meiva_msg_type` discriminator (`MeivaMsgType`) + typed reading `read_meiva_kwargs()` all in `base/agents/messages/kwargs.py` (see [[messages.meiva.okf.md]])
 
 ### System Messages (`system_note_message`)
-- Builds system notification messages such as heartbeats, watcher wake-up calls
+- Builds system notification messages such as heartbeats, watcher wake-up calls, and process-lifecycle transitions; the content is wrapped by `wrap_system_note`, so the model reads where the note ends
 - `security_note_message(*, source, triggers, created_at=)` is the one writer of the SECURITY note for a prompt-injection scan finding (source + matched triggers, never the content); the claim node (behind a flagged inbound) and the exec node (child-drained findings) both use it
 
 ### Exec Output (`exec_output_message`)
@@ -44,7 +50,7 @@ formatting and source validation keep their existing order.
 
 ### Attachments (`attach_message`)
 - Appends one HumanMessage at the completed-turn boundary for files registered with `meiva.self.attach`
-- Content blocks are interleaved per file: a leading notice text block, then each file's caption line directly before its model-native media block (`[text(notice), text(line1), media1, ...]`); `meiva_msg_type="attach"` distinguishes it without image URL metadata, and the timeline pairs every image with its own caption line structurally
+- The whole message is one system note: content blocks interleave per file between the note's tags — `[text(open + notice), text(line1), media1, text(line2), media2, ..., text(close)]` — so each file's caption line sits directly before its model-native media block while the note still closes after the last one; `meiva_msg_type="attach"` distinguishes it without image URL metadata, and the timeline pairs every image with its own caption line structurally
 
 ### Chat Inbound Assembly (`_chat_inbound.py`)
 - Assembles `kind='chat'` inbound rows into `(HumanMessage, finding)`: plain text via envelope wrapper as string message; multimodal inbound places text as first block, then uploads referenced images as native base64 blocks inline to the model. `finding` is the injection-scan result for the row's text (None when clean); the claim node owns delivering it as a SECURITY note

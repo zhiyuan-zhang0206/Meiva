@@ -354,7 +354,12 @@ def complete(pool: ConnectionPool, request: ReceiveRequest, proof: CopyProof) ->
             conn,
             agent_id=manifest.agent_id,
             content=content,
-            source="user",
+            # meiva:note
+            # The delivery is framework machinery, not the human speaking: the agent reads it
+            # as a system note. The wake does not depend on the source, so the upload still
+            # reaches the agent.
+            # meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
+            source="system:upload",
             payload=None,
             client_message_id=f"upload-delivery-v1:{manifest.batch_id}",
             provenance=InboundProvenance(**row[3]),

@@ -22,7 +22,8 @@ _MARKUP = (
     "<tool_calls>",
     "</tool_calls>",
     "<tool_call>",
-    "[system]",
+    "<system_note>",
+    "</system_note>",
     "[system prompt]",
 )
 

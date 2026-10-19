@@ -3687,7 +3687,7 @@ describe("ItemView: inbound_chat images", () => {
         items={[
           makeItem({
             kind: "attach",
-            payload: "[system] Files attached during this turn:\n- [1] render.png (image/png, 1.2 KiB)",
+            payload: "Files attached during this turn:\n- [1] render.png (image/png, 1.2 KiB)",
             images: ["data:image/png;base64,iVBORw0KGgo="],
           }),
         ]}
@@ -3718,7 +3718,7 @@ describe("ItemView: inbound_chat images", () => {
 });
 
 describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
-  const NOTICE = "[system] Files attached during this turn:";
+  const NOTICE = "Files attached during this turn:";
   const LINE1 = '- [1] screen.png (image/png, 12.3 KiB) — "shot A"';
   const LINE2 = '- [2] chart.png (image/png, 45.6 KiB) — "chart B"';
   const IMG1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";

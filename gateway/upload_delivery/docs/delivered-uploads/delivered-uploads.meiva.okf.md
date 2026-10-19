@@ -72,7 +72,9 @@ is not automatically unsealed by another overlapping worker.
 
 For pending delivery, the transaction locks current agent/placement and matching
 registered unit, then calls `insert_chat_inbound_in_transaction` with fixed
-batch-derived ID, original user source and frozen verified provenance. Original
+batch-derived ID, source `system:upload` (the delivery is framework machinery,
+so the agent reads the file list as a system note, not as the human speaking)
+and frozen verified provenance. Original
 IID, copy proof and delivery outcome commit in the same transaction. Rollback
 creates neither acceptance nor chat; lost commit response recovers the original
 outcome. No mutable-target FK or TTL deletes this evidence.

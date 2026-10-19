@@ -115,10 +115,14 @@ def test_inbound_transaction_rollback_and_commit_ack_loss(
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (1,)
+    # meiva:note
+    # The delivery is framework machinery: the agent reads it as a system note, not as the
+    # human speaking.
+    # meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
     assert db_conn.execute(
         "SELECT source, source_verified_by, source_transport FROM inbound_messages WHERE id=%s",
         (iid,),
-    ).fetchone() == ("user", "cluster_bearer", "http")
+    ).fetchone() == ("system:upload", "cluster_bearer", "http")
 
 
 @pytest.mark.parametrize("version", [None, True, 1.0, 2, "1"])

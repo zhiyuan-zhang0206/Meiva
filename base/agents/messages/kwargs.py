@@ -4,6 +4,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from base.lm.content import message_addl_kwargs
+from base.lm.system_note import SYSTEM_NOTE_LEAD
 
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
@@ -114,9 +115,23 @@ def message_read_time(msg: BaseMessage) -> str | None:
 
 
 # meiva:note
-# COMPACT_SUMMARY_HEADER is prepended to every replacement compact summary and is the read side's classifier for the untagged summary HumanMessage; it is also the standing "a compaction just happened" signal, without which an agent re-reads a /compact order in the summary's verbatim tail and runs it again every turn. The string lives in the leaf message-contract module so gateway and insights callers import it without agent.graph.
+# COMPACT_SUMMARY_HEADER opens every replacement compact summary, inside the system note `compose_summary_message` wraps it in, and is the read side's classifier for the untagged summary HumanMessage; it is also the standing "a compaction just happened" signal, without which an agent re-reads a /compact order in the summary's verbatim tail and runs it again every turn. The string lives in the leaf message-contract module so gateway and insights callers import it without agent.graph.
 # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
 COMPACT_SUMMARY_HEADER = (
-    "[system] Your context was just compacted. The following is the summary of "
-    "your own prior context:"
+    "Your context was just compacted. The following is the summary of your own prior context:"
 )
+
+# meiva:note
+# The opening marker summaries carried before the note had tags; stored summaries are
+# immutable, so the classifier still recognizes them.
+# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+_LEGACY_COMPACT_SUMMARY_PREFIX = "[system] "
+
+
+def is_compact_summary_text(text: str) -> bool:
+    # meiva:note
+    # Whether the text is a replacement compact summary: the note that opens it. Accepts the
+    # current wrapped form and the legacy opening of one written before the note had tags.
+    # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+    stripped = text.removeprefix(SYSTEM_NOTE_LEAD).removeprefix(_LEGACY_COMPACT_SUMMARY_PREFIX)
+    return stripped.startswith(COMPACT_SUMMARY_HEADER)

@@ -199,6 +199,15 @@ async def test_accepted_upload_wakes_once_and_a_lost_wake_is_not_repeated(
     await recovery.round()
     status = source.status(client.app.state.db_pool, agent, batch_id)
     assert status.state == "accepted" and status.inbound_id is not None
+    # meiva:note
+    # The accepted chat is a system-sourced notice (the list of files, not the human
+    # speaking) — and it still wakes the agent, which is what makes the delivery reach the
+    # model.
+    # meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
+    with client.app.state.db_pool.connection() as conn:
+        assert conn.execute(
+            "SELECT source FROM inbound_messages WHERE id=%s", (status.inbound_id,)
+        ).fetchone() == ("system:upload",)
     # One wake at acceptance; the still-pending chat is never re-announced by a scan.
     assert woken == [status.inbound_id]
     await recovery.close()

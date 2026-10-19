@@ -23,6 +23,7 @@ from base.agents.messages.kwargs import (
 )
 from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
 from base.lm.content import message_addl_kwargs, message_content
+from base.lm.system_note import unwrap_system_note
 
 __all__ = [
     "build_timeline_items",
@@ -203,7 +204,11 @@ def _inbound_item(
         item_id=f"{msg_idx}.0",
         kind="inbound_chat",
         source=kwargs.get("meiva_source"),
-        payload=_inbound_text(raw_content),
+        # meiva:note
+        # A system source's body sits inside the envelope's note tags; the card shows the
+        # text, not the framing (the source metadata classifies it).
+        # meiva:link agent/messages/docs/message-format.meiva.okf.md
+        payload=unwrap_system_note(_inbound_text(raw_content)),
         created_at=kwargs_read_time(kwargs),
         inbound_id=embedded_id,
         images=images if images else None,
@@ -262,7 +267,7 @@ def _attach_item(
         item_id=f"{msg_idx}.0",
         kind="attach",
         source=None,
-        payload=_inbound_text(raw_content),
+        payload=unwrap_system_note(_inbound_text(raw_content)),
         created_at=created_at,
         inbound_id=None,
         images=_attach_images(raw_content),
@@ -291,7 +296,7 @@ def _system_note_item(
         item_id=f"{msg_idx}.0",
         kind="system_marker",
         source=note_tag,
-        payload=content,
+        payload=unwrap_system_note(content),
         created_at=created_at,
         inbound_id=None,
         show_timestamp=note_tag not in _NO_TIMESTAMP_NOTE_TAGS,
@@ -313,7 +318,7 @@ def _compact_item(
         item_id=f"{msg_idx}.0",
         kind=kind,
         source=None,
-        payload=f"{label}{ts}:\n\n{content}",
+        payload=f"{label}{ts}:\n\n{unwrap_system_note(content)}",
         created_at=created_at,
         inbound_id=None,
         compact_id=compact_id,
@@ -326,7 +331,7 @@ def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> 
         item_id=f"{msg_idx}.0",
         kind="system_marker",
         source=None,
-        payload=content,
+        payload=unwrap_system_note(content),
         created_at=created_at,
         inbound_id=None,
     )

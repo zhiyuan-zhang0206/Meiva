@@ -51,9 +51,9 @@ def _notes(call: Call, tag: str) -> list[str]:
 
 def _context_headers(call: Call) -> list[str]:
     return [
-        text.split("\n", 1)[0].removeprefix("[system] ").removesuffix(":")
+        text.removeprefix("<system_note>\n").split("\n", 1)[0].removesuffix(":")
         for text in _notes(call, "context")
-        if text.startswith("[system] Project ")
+        if text.startswith("<system_note>\nProject ")
     ]
 
 
@@ -75,7 +75,7 @@ def _checkpoint(agent_id: int, ready: Callable[[Values], bool]) -> Values:
 
 def _assert_notes_follow_the_tool_result(after: Call, proj: str) -> None:
     cwd_notes = [t for t in _notes(after, "context") if "Working directory set to" in t]
-    assert cwd_notes == [f"[system] Working directory set to {proj}"], (
+    assert cwd_notes == [f"<system_note>\nWorking directory set to {proj}\n</system_note>"], (
         f"cwd-change note missing from the model's input after meiva.cwd.set; notes seen: "
         f"{[(m['tag'], m['text'][:100]) for m in after if m['tag']]}"
     )

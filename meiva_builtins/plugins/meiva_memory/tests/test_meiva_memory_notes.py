@@ -336,11 +336,12 @@ def _write_index(agent_id: int, text: str) -> None:
 
 
 def _per_agent_text(machine: MachineIdentity, *, cap: int | None = None) -> str:
+    from base.lm.system_note import unwrap_system_note
     from meiva_builtins.plugins.meiva_memory import notes
 
     note = notes.per_agent_memory_note(_context(machine, 17, cap=cap))
     assert note is not None
-    return note.text
+    return unwrap_system_note(note.text)
 
 
 def test_the_over_cap_index_keeps_the_full_body_and_gets_the_nudge(
