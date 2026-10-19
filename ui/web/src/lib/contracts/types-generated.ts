@@ -2972,6 +2972,7 @@ export interface components {
         HTTPValidationError: {
             detail?: components["schemas"]["ValidationError"][];
         };
+        Harness: "meiva" | "claude_code" | "codex" | "antigravity";
         HeartbeatInfo: {
             interval_s: number;
             next_at?: string | null;
@@ -3910,6 +3911,7 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             label?: string | null;
+            harness?: components["schemas"]["Harness"] | null;
         };
         SpawnedAgent: {
             id: number;

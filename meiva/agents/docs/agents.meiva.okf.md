@@ -17,7 +17,7 @@ tags:
 ## Core API
 
 ### Lifecycle
-- `spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, label=None, *, idempotency_key) → int` — start a new agent, returns agent ID, non-blocking. `prompt` is the first message (should be self-contained); `fork_from` copies the parent agent's conversation state as of the call — a fork taken while that agent is inside a tool call carries the call without its result, and the new agent sees it as already interrupted rather than still running; `machine` defaults to self. `config_overlay` carries per-agent config fields; keys it does not name follow the cluster default. `config_overlay={"eval_isolation": true}` starts an eval-isolated agent; `eval_network_allowlist` can explicitly retain `web` or `understand`, while `mcps` and `ui` have no allowlist. Identity-class config you do NOT name (model, reasoning effort, skill set, prompt shaping) is resolved from the cluster default at spawn and frozen onto the new agent for its life — a later default change never re-brains it. `label` sets the new agent's role name, which peers and the fleet view show.
+- `spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, label=None, harness=None, *, idempotency_key) → int` — start a new agent, returns agent ID, non-blocking. `harness` selects the runtime loop ([[harness.meiva.okf.md|Harness]]); it is fixed for the agent's life. `prompt` is the first message (should be self-contained); `fork_from` copies the parent agent's conversation state as of the call — a fork taken while that agent is inside a tool call carries the call without its result, and the new agent sees it as already interrupted rather than still running; `machine` defaults to self. `config_overlay` carries per-agent config fields; keys it does not name follow the cluster default. `config_overlay={"eval_isolation": true}` starts an eval-isolated agent; `eval_network_allowlist` can explicitly retain `web` or `understand`, while `mcps` and `ui` have no allowlist. Identity-class config you do NOT name (model, reasoning effort, skill set, prompt shaping) is resolved from the cluster default at spawn and frozen onto the new agent for its life — a later default change never re-brains it. `label` sets the new agent's role name, which peers and the fleet view show.
 - `terminate(agent_id, *, message=None, force=False) → TerminateOutcome` — agent exits after completing the current turn; `message` is retained without another response and is visible after resurrection; `force=True` requests interruption instead. An `enqueued` result confirms acceptance, not exit or completion of owned work. Use force only when a clean stop cannot progress. The outcome compares as the acceptance status string and carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first; None when none).
 - `restart(agent_id) → RestartResult` — agent restarts as a fresh process with the same ID after completing the current turn.
 - `resurrect(agent_id, prompt) → ResurrectResult` — wake up a terminated agent, preserving its conversation state; `prompt` required.
@@ -31,6 +31,7 @@ tags:
 - `list_agents(*, scope="live", query="", before_id=None, limit=100) → AgentDirectoryPage` — read one newest-first page, at most 200 rows; search by label substring or exact ID. `live` includes all nonterminated states; `terminated` and `all` make history explicit. Continue with `next_cursor` and the same filters; no implicit traversal.
 - `get_status(agent_id) → AgentStatus` — current status read directly by ID, independent of directory pages.
 - `list_machines() → list[Machine]` — list all machines and their alive status.
+- `harness_availability() → list[HarnessAvailability]` — which harnesses this machine can run ([[harness.meiva.okf.md|Harness]]).
 - `get_neighbors(agent_id, depth=1, limit=20) → list[Neighbor]` — related agents ranked by connection strength. Connections are established on spawn/fork/resurrect/send_message and decay over time.
 - `get_ancestors(agent_id) → list[Neighbor]` — the spawn/fork chain ABOVE an agent (who spawned whom), nearest ancestor first; `depth` = hops up. Message ties never form ancestors; a user-spawned agent returns [].
 
@@ -40,6 +41,8 @@ tags:
 - `AgentStatus`: RUNNING / IDLING / TERMINATED — three states, no ops-only states to project away.
 - `Neighbor`: agent_id, label, status, depth (hops from the queried agent — out for neighbors, up for ancestors), score (connection strength)
 - `Machine`: name, description, live (detected at call time, not cached)
+- `Harness`: MEIVA / CLAUDE_CODE / CODEX / ANTIGRAVITY — the runtime loop an agent runs on, fixed at birth.
+- `HarnessAvailability`: one row per harness — see [[harness.meiva.okf.md|Harness]] for the five fields
 - `TerminateOutcome`: reads as the status string (`enqueued` / `already_terminated`); `status` is the enum, `open_tasks` the still-open task hint (or None). Its optional `shell_sessions` report uses `ShellSessionKillTiming` from `base/api_contracts/agent_contract.py`: `now` means cleanup already ran, `at_exit` means cleanup is scheduled before exit. The SDK validates the response timing and rejects unknown values; JSON spellings are unchanged.
 - `OpenTasksHint`: count of open tasks, up to five `tasks` newest first (id, title, status, updated_at), and `more` — how many beyond those five remain.
 
@@ -57,6 +60,11 @@ execution status; see [[meiva/agents/docs/compaction.meiva.okf.md]].
 `observe`, `cancel`, `restart` and `restart_status`; see [[work-control.meiva.okf.md]].
 
 Every creation and fork requires an explicit 1–128 character `idempotency_key`. Retain the same key, effective body and verified principal on retry. All SDK calls use the fixed keyed admission path. A fork copies the original resolved checkpoint and first prompt once; replay returns its committed child before inspecting later source state. See [[strong-creation.meiva.okf.md|Keyed agent creation]]. Ambiguous transport outcomes are retried automatically under the same key and replay the original birth.
+
+**Harness.** A new agent's runtime loop is chosen at spawn and never changes;
+a fork keeps its source's. Details, value set and the local availability probe:
+[[harness.meiva.okf.md|Harness]]. The column contract is
+[[base/agents/docs/harness.meiva.okf.md|agent harness identity]].
 
 **Fork copy boundary.** A fork copies the source agent's newest saved conversation state, not its
 live turn. When the source is between a tool call and its result, the fork inherits the call

@@ -123,6 +123,7 @@ class TestSpawn:
             machine: str,
             config: object = None,
             label: object = None,
+            harness: object = None,
             idempotency_key: str | None = None,
         ) -> int:
             captured["machine"] = machine

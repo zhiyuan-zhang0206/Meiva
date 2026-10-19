@@ -6,9 +6,10 @@ import asyncio
 
 from psycopg_pool import ConnectionPool
 
+from base.agents.birth.harness import LAUNCHABLE_HARNESSES
 from base.agents.birth.spawn import latest_checkpoint_id
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.api_contracts.agent_contract import ForkSourceEmpty
+from base.api_contracts.agent_contract import ForkSourceEmpty, Harness
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
@@ -55,12 +56,24 @@ def validate_launch_row(
     """A stale attempt cannot wake an identity now placed somewhere else."""
     with db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT machine, last_launch_attempt_id, status FROM agents_meta WHERE id=%s",
+            "SELECT machine, last_launch_attempt_id, status, harness FROM agents_meta WHERE id=%s",
             (body.agent_id,),
         )
         row = cur.fetchone()
-    if row is None or row != (local_machine, body.launch_attempt_id, "idling"):
+    if row is None or row[:3] != (local_machine, body.launch_attempt_id, "idling"):
         raise ValueError(f"agent {body.agent_id} launch attempt is stale or misplaced")
+    # meiva:note
+    # A row records the harness it was born on; refusing to wake one whose
+    # launcher does not exist keeps that record honest instead of quietly
+    # running the built-in loop under an external harness label.
+    # meiva:link base/agents/docs/harness.meiva.okf.md
+    harness = Harness(row[3])
+    if harness not in LAUNCHABLE_HARNESSES:
+        raise ValueError(
+            f"agent {body.agent_id} was born on harness {harness.value!r}, which has no "
+            f"launcher yet; only {sorted(item.value for item in LAUNCHABLE_HARNESSES)} can "
+            f"start a session today"
+        )
 
 
 def spawn_prechecks_blocking(

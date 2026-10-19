@@ -16,7 +16,7 @@ from pydantic import (
 from base.agents.messages.envelope import validate_source
 from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
-from base.api_contracts.agent_contract import RestartResult, ResurrectResult, ShellKillMode
+from base.api_contracts.agent_contract import Harness, RestartResult, ResurrectResult, ShellKillMode
 from base.api_contracts.caller_identity import CallerIdentity, is_caller_source
 from base.api_contracts.op_envelope import OpEnvelope as OpEnvelope
 
@@ -80,6 +80,12 @@ class SpawnAgentRequest(BaseModel):
     # Optional initial label (spawner-assigned role). Stored sticky so the
     # labeler does not overwrite it; the agent can change it via meiva.self.set_label.
     label: str | None = Field(default=None, max_length=64)
+    # meiva:note
+    # The runtime loop the agent is born on. A fork inherits its source's harness;
+    # naming a different one fails the birth instead of overriding it, and an
+    # unknown value is a 422 here rather than a fallback to the default.
+    # meiva:link base/agents/docs/harness.meiva.okf.md
+    harness: Harness | None = Field(default=None)
 
     @model_validator(mode="after")
     def _validate_prompt_source(self) -> "SpawnAgentRequest":

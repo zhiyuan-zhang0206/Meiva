@@ -63,7 +63,11 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
         "read_stored_config",
         AsyncMock(
             return_value=StoredConfig(
-                machine="local", status="idling", config_overlay=None, birth_config=None
+                machine="local",
+                status="idling",
+                harness="meiva",
+                config_overlay=None,
+                birth_config=None,
             )
         ),
     )

@@ -15,6 +15,16 @@ stores it as sent, and the agent applies it at boot
 including a leftover `config["preset"]` — fails that boot. Spawn requests
 reject unknown top-level fields with 422.
 
+`harness` names the runtime loop the agent is born on (`meiva` by default, or
+`claude_code` / `codex` / `antigravity`). It is written once in the birth
+transaction and a `BEFORE UPDATE OF harness` trigger rejects any later change, so
+restart, resurrect and repair cannot move an agent onto another runtime. An
+unknown value fails schema validation with 422; nothing falls back to the default.
+A fork inherits its source's harness, and naming a different one returns 400
+`fork_harness_mismatch` with the source's value in the detail — the rule is
+enforced inside the birth transaction, not only here. See
+[[base/agents/docs/harness.meiva.okf.md|agent harness identity]].
+
 A fork must keep the source's effective config so its inherited context stays
 cache-valid: only ADDITIONS to `skills_to_inject_into_system_prompt` /
 `skills_to_expand_at_start` are allowed (supersets — rejected otherwise with

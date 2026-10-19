@@ -72,6 +72,7 @@ def spawn_agent(
     label: str | None = None,
     prompt: str | None = None,
     prompt_source: str | None = None,
+    harness: str | None = None,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
@@ -88,6 +89,7 @@ def spawn_agent(
         label=label,
         prompt=prompt,
         prompt_source=prompt_source,
+        harness=harness,
         catalog=model_catalog,
         authority=config_authority,
     )
