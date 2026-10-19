@@ -109,6 +109,10 @@ class _SdkModule(_ModuleType):
             launched = bind_launched_context()
             if launched is not None:
                 return launched
+            from .self.harness import ensure_identity
+
+            if ensure_identity() is not None:
+                return process_context.require_bound_context()
         return process_context.require_bound_context()
 
     @context.setter
@@ -231,6 +235,9 @@ def __getattr__(name: str) -> Any:
         # Reached only when the slot property raised (an AttributeError falls through to here).
         raise process_context.outside_exec_turn(name)
     if name == "context":
+        from .self.harness import ensure_identity
+
+        ensure_identity()
         raise process_context.outside_process("context")
     if name == "DB":
         return _sys.modules[__name__].context.sql
@@ -241,6 +248,9 @@ def __getattr__(name: str) -> Any:
 
         return getattr(_settings, name)
     if not name.startswith("_") and _init_complete:
+        from .self.harness import ensure_identity
+
+        ensure_identity()
         from .boot import maybe_load_plugins_for_missing
 
         if maybe_load_plugins_for_missing(name):
@@ -296,6 +306,7 @@ extend._qualname = "meiva.extend"  # type: ignore[attr-defined]  # agent-facing 
 # the SDK install runs.
 __all_for_meiva__ = [
     "agents",
+    "attach",
     "context",
     "files",
     "help",
@@ -346,3 +357,22 @@ if (
     and boot.is_launched_process()
 ):
     ensure_plugins_loaded()
+
+
+def attach(handle: str | None = None) -> Any:
+    """Bind this external process to the Meiva agent identity it was started as.
+
+    Call it with no argument: the handle comes from `MEIVA_HARNESS_HANDLE`, which the
+    bridge exported into this process. The call is idempotent — the first one
+    attaches, later ones return the same attachment — and every session's first
+    identity read does the same thing, so calling it explicitly is optional.
+
+    Raises:
+        RegistrationError: no handle in this process, or no session matches it.
+        HarnessAttachError: the session could not be attached (expired, ended,
+            another machine); the message carries the reason and says not to retry.
+        RuntimeError: this process already has an identity of its own.
+    """
+    from .self.harness import attach as attach_identity
+
+    return attach_identity(handle)

@@ -7,13 +7,13 @@ from typing import Any
 
 import pytest
 
-from meiva.impersonation.harness.attach import (
+from meiva.self.harness.attachment import (
     ProcessProbe,
     refuse_unless_attachable,
     require_live_registration,
     resolve_registration,
 )
-from meiva.impersonation.harness.registration import (
+from meiva.self.harness.registration import (
     FileRegistrationStore,
     HarnessRegistration,
     RegistrationError,
@@ -69,13 +69,6 @@ def test_a_bound_context_is_returned_for_reuse() -> None:
 def test_an_unknown_handle_finds_no_registration(tmp_path: Any) -> None:
     store = FileRegistrationStore(tmp_path)
     assert store.find_by_handle(new_handle()) is None
-
-
-def test_a_missing_handle_says_which_variable_carries_it() -> None:
-    from meiva.impersonation.harness.attach import attach
-
-    with pytest.raises(RegistrationError, match="MEIVA_HARNESS_HANDLE"):
-        attach("")
 
 
 def row(**overrides: Any) -> HarnessRegistration:

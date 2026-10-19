@@ -1,4 +1,5 @@
-exports = ["wake.py"]
+exports = ["harness", "wake.py"]
 
 [uses]
-"__init__.py" = ["wake.py"]
+"__init__.py" = ["harness", "wake.py"]
+"harness" = []

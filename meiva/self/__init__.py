@@ -61,7 +61,9 @@ def __getattr__(name: str) -> object:
         # the name from the AnnAssign + PEP 224 docstring above — a bare value
         # routes through the doc-carrying constant renderer there.
         import meiva.sdk_surface.agent_identity
+        from meiva.self.harness import ensure_identity
 
+        ensure_identity()
         return meiva.sdk_surface.agent_identity.agent_id()
     if name == "MACHINE_SPEC":
         machine = process_context.current_context().require_machine()

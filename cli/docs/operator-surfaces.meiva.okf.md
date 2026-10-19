@@ -57,7 +57,7 @@ tags:
   `$MEIVA_HARNESS_HANDLE`, which is how the bridge hands it to the child; nothing is
   written to the workspace. The process refuses to attach a second identity, so a script
   that calls `attach()` itself fails instead of nesting
-  ([[meiva/impersonation/harness/docs/harness-attach.meiva.okf.md|harness attach]]).
+  ([[meiva/self/harness/docs/harness-attach.meiva.okf.md|meiva.attach]]).
 
 ## Local and package operations
 
