@@ -17,7 +17,7 @@ from pathlib import Path
 
 import meiva
 
-REPORT_AGENT = 1818
+REPORT_AGENTS = (1818, 405)
 POLL_SECONDS = 60
 WINDOW = 3
 MIN_XACTS = 20
@@ -88,10 +88,11 @@ def describe(samples: list[tuple[str, int, int, int]]) -> str:
 
 
 def report(text: str) -> None:
-    try:
-        meiva.agents.send_message(REPORT_AGENT, text)
-    except Exception as exc:
-        print(f"db-write-stall-watch could not notify: {exc}", flush=True)
+    for agent in REPORT_AGENTS:
+        try:
+            meiva.agents.send_message(agent, text)
+        except Exception as exc:
+            print(f"db-write-stall-watch could not notify {agent}: {exc}", flush=True)
 
 
 def main() -> None:
