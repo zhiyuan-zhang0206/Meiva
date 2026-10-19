@@ -69,16 +69,19 @@ instead of offering a choice the backend would refuse with
 `fork_harness_mismatch`.
 
 The picker reads `GET /api/cluster/machines/{name}/harnesses` for the machine
-the agent would be placed on — the probe runs where the runtime would run, not
-on the gateway. Each row carries `status` (`available` / `unavailable` /
-`unknown`), the probe's `reason`, and `launchable`: a harness can be installed
-and still not launchable, and the picker says "cannot start a session yet"
-rather than letting the choice look usable. Only `unavailable` rows are disabled
-— that is a harness the machine does not have. A row that is installed but not
-launchable stays pickable and refuses submission with the reason; an `unknown`
-row is treated the same way, because a sign-in this process cannot read is not a
-sign-in that is missing. A gateway with no probe at all reports every external
-harness as `unknown` while the built-in runtime stays selectable.
+the agent would be placed on — the probe runs where the runtime would run, not on
+the gateway. The wire row carries `status` (`available` / `unavailable` /
+`unknown`), the probe's `reason`, and `launchable`; the row on screen carries one
+word. `available` when `launchable`, `unavailable` otherwise, and the row is
+disabled in the second case. `unknown` and `unavailable` are one thing to the
+user — "you cannot pick this" — so the picker never shows the word `unknown`, a
+harness the machine has installed but this build cannot start reads `unavailable`
+like a missing one, and the probe's diagnostic sentence never reaches the
+interface. Those stay on the wire: an agent asked "why can't I use codex here"
+reads them from `meiva.agents.harness_availability()` instead of the UI.
+
+The same rule covers the spawn target list: a machine that cannot start the
+chosen harness has its row disabled with `unavailable`, no reason text.
 
 The chosen harness is a `behavior.spawn_harness` preference. The built-in
 `meiva` value is omitted from the request, because it is the server's own

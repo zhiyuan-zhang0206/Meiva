@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { harnessRows, type HarnessAvailability } from "@/lib/harness/harness";
@@ -12,7 +12,12 @@ import { HarnessPicker } from "./harness-picker";
 
 afterEach(cleanup);
 
-function row(harness: HarnessAvailability["harness"], status: HarnessAvailability["status"], launchable: boolean, reason = ""): HarnessAvailability {
+function row(
+  harness: HarnessAvailability["harness"],
+  status: HarnessAvailability["status"],
+  launchable: boolean,
+  reason = "",
+): HarnessAvailability {
   return { harness, status, reason, launchable };
 }
 
@@ -23,7 +28,7 @@ describe("harnessRows", () => {
     expect(rows.filter((r) => r.harness !== "meiva").every((r) => r.status === "unknown")).toBe(true);
   });
 
-  it("never reports an unprobed harness as unavailable", () => {
+  it("never reports an unprobed harness as unavailable at the data layer", () => {
     const rows = harnessRows([row("codex", "available", false)]);
     expect(rows.find((r) => r.harness === "codex")).toMatchObject({ status: "available", launchable: false });
     expect(rows.find((r) => r.harness === "claude_code")?.status).toBe("unknown");
@@ -31,8 +36,16 @@ describe("harnessRows", () => {
 });
 
 describe("HarnessPicker", () => {
-  it("disables an unavailable harness and shows the probe's reason", async () => {
-    rows = [row("meiva", "available", true), row("codex", "unavailable", false, "codex binary not on PATH")];
+  // meiva:note
+  // The row answers one question with one word: can this machine start an agent
+  // on it here. An installed-but-unlaunchable harness reads `unavailable` like a
+  // missing one, and the probe's diagnostic sentence never reaches the screen.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  it("shows one word and never the probe's reason", async () => {
+    rows = [
+      row("meiva", "available", true, "built-in runtime; needs no external CLI or login"),
+      row("codex", "unavailable", false, "no codex executable on PATH or in ~/.local/bin"),
+    ];
     render(<HarnessPicker machine="local" value="meiva" onChange={() => undefined} />);
 
     fireEvent.click(screen.getByLabelText("Harness"));
@@ -40,21 +53,28 @@ describe("HarnessPicker", () => {
     const codex = await screen.findByText("Codex");
     const button = codex.closest("button");
     expect(button?.disabled).toBe(true);
-    expect(button?.getAttribute("title")).toBe("codex binary not on PATH");
+    expect(button?.textContent).toContain("unavailable");
+    expect(screen.queryByText("no codex executable on PATH or in ~/.local/bin")).toBeNull();
+    expect(screen.queryByText(/unknown/i)).toBeNull();
   });
 
-  it("lets an unprovable harness be picked, since only its start is refused", async () => {
-    rows = [row("meiva", "available", true), row("codex", "unknown", false, "login state unknown")];
-    const onChange = vi.fn();
-    render(<HarnessPicker machine="local" value="meiva" onChange={onChange} />);
+  it("reads an installed harness with no launcher as unavailable, not available", async () => {
+    rows = [
+      row("meiva", "available", true),
+      row("claude_code", "available", false, "credentials file found"),
+    ];
+    render(<HarnessPicker machine="local" value="meiva" onChange={() => undefined} />);
 
     fireEvent.click(screen.getByLabelText("Harness"));
-    fireEvent.click(await screen.findByText("Codex"));
 
-    expect(onChange).toHaveBeenCalledWith("codex");
+    const claude = await screen.findByText("Claude Code");
+    const button = claude.closest("button");
+    expect(button?.disabled).toBe(true);
+    expect(button?.textContent).toContain("unavailable");
+    expect(button?.textContent).not.toMatch(/\bavailable\b/)
   });
 
-  it("selects an available harness", async () => {
+  it("selects a harness this machine can start", async () => {
     rows = [row("meiva", "available", true), row("claude_code", "available", true)];
     const onChange = vi.fn();
     render(<HarnessPicker machine="local" value="meiva" onChange={onChange} />);
@@ -63,14 +83,5 @@ describe("HarnessPicker", () => {
     fireEvent.click(await screen.findByText("Claude Code"));
 
     expect(onChange).toHaveBeenCalledWith("claude_code");
-  });
-
-  it("says a harness cannot be started yet instead of letting it look usable", async () => {
-    rows = [row("meiva", "available", true), row("codex", "available", false)];
-    render(<HarnessPicker machine="local" value="codex" onChange={() => undefined} />);
-
-    fireEvent.click(screen.getByLabelText("Harness"));
-
-    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("cannot start a session yet"));
   });
 });

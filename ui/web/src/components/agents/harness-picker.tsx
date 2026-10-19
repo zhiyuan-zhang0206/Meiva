@@ -1,7 +1,12 @@
 "use client";
 
 // meiva:note
-// Harness choice for a new agent, with what the target machine can actually run. Rows come from the availability probe; a harness that is not `available` cannot be picked, and one that is installed but not `launchable` can be picked only to be refused at spawn, with the reason on screen - a harness the platform cannot start must not look like a working choice. When the gateway has no probe at all, the built-in `meiva` runtime stays selectable and every external harness reads `unknown`, never `unavailable`.
+// Harness choice for a new agent, in one word per row. The picker answers a single
+// question - can this machine start an agent on it here - so a harness that is
+// installed but has no launcher reads `unavailable` like one that is not
+// installed, and the probe's diagnostic sentence stays on the wire instead of in
+// the UI. When the gateway cannot report at all, the built-in runtime stays
+// usable and every external harness reads `unavailable`.
 // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
 
 import * as Popover from "@radix-ui/react-popover";
@@ -9,7 +14,7 @@ import { ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
+import { MIN_W_0, FLEX } from "@/lib/layout/layout";
 import {
   harnessLabel,
   harnessRows,
@@ -18,16 +23,27 @@ import {
 } from "@/lib/harness/harness";
 import { useHarnessAvailability } from "@/lib/harness/use-harness-availability";
 
-const STATUS_DOT: Record<HarnessAvailability["status"], string> = {
-  available: "bg-emerald-500",
-  unavailable: "bg-muted-foreground/40",
-  unknown: "bg-amber-500",
-};
-
 export interface HarnessPickerProps {
   machine: string | undefined;
   value: Harness;
   onChange: (harness: Harness) => void;
+}
+
+type ShownStatus = "available" | "unavailable";
+
+const STATUS_DOT: Record<ShownStatus, string> = {
+  available: "bg-emerald-500",
+  unavailable: "bg-muted-foreground/40",
+};
+
+// meiva:note
+// One word answers the only question the form asks. A harness the build has no
+// launcher for is `unavailable` even when the machine has it installed and signed
+// in; the probe's `status` and `reason` stay on the wire for diagnosis and never
+// reach the row.
+// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+function shownStatus(row: HarnessAvailability): ShownStatus {
+  return row.launchable ? "available" : "unavailable";
 }
 
 export function HarnessPicker({ machine, value, onChange }: HarnessPickerProps) {
@@ -48,7 +64,7 @@ export function HarnessPicker({ machine, value, onChange }: HarnessPickerProps) 
             MIN_W_0,
           )}
         >
-          <span className={cn("size-1.5 rounded-full shrink-0", STATUS_DOT[selected.status])} aria-hidden="true" />
+          <span className={cn("size-1.5 rounded-full shrink-0", STATUS_DOT[shownStatus(selected)])} aria-hidden="true" />
           <span className="truncate">{harnessLabel(selected.harness)}</span>
           <ChevronDown className="size-3 shrink-0 opacity-50" />
         </button>
@@ -57,42 +73,33 @@ export function HarnessPicker({ machine, value, onChange }: HarnessPickerProps) 
         <Popover.Content
           sideOffset={6}
           align="start"
-          className="z-50 w-[300px] max-w-[90vw] rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
+          className="z-50 w-[220px] max-w-[90vw] rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
         >
           <ul className="py-1">
             {rows.map((row) => {
-              const selectable = row.status !== "unavailable";
+              const status = shownStatus(row);
               return (
                 <li key={row.harness}>
                   <button
                     type="button"
-                    disabled={!selectable}
-                    title={row.reason || undefined}
+                    disabled={status === "unavailable"}
                     onClick={() => onChange(row.harness)}
                     className={cn(
                       "w-full text-left px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50",
                     )}
                   >
                     <span className={cn(FLEX, "items-center gap-2")}>
-                      <span className={cn("size-1.5 rounded-full shrink-0", STATUS_DOT[row.status])} aria-hidden="true" />
+                      <span className={cn("size-1.5 rounded-full shrink-0", STATUS_DOT[status])} aria-hidden="true" />
                       <span className="truncate">{harnessLabel(row.harness)}</span>
                       <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">
-                        {t(`harnessStatus.${row.status}`)}
+                        {t(`harnessStatus.${status}`)}
                       </span>
                     </span>
-                    {row.reason ? (
-                      <span className="block mt-0.5 text-[11px] text-muted-foreground/80">{row.reason}</span>
-                    ) : null}
                   </button>
                 </li>
               );
             })}
           </ul>
-          {!selected.launchable ? (
-            <div role="status" className="px-3 py-2 border-t border-border text-[11px] text-amber-600 dark:text-amber-400">
-              {t("harnessNotLaunchable", { harness: harnessLabel(selected.harness) })}
-            </div>
-          ) : null}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
