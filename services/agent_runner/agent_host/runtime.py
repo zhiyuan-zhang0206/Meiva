@@ -63,6 +63,7 @@ class HostPolicy:
     default_reader: Callable[[str, str], Any]
     clock_factory: Callable[[], Clock]
     handoff_notes: HandoffNotes
+    harness_registration_ttl_seconds: Callable[[], float]
 
     def resolve_slices(
         self,
@@ -389,6 +390,7 @@ async def build_runtime(
     harness: Harness = Harness.MEIVA,
     registry: SessionRegistry | None = None,
     registrations: RegistrationStore | None = None,
+    registration_ttl_seconds: float,
     machine: str,
 ) -> AgentRuntime:
     """Build the retained model after the host repaired its original admission."""
@@ -404,7 +406,12 @@ async def build_runtime(
         llm=llm,
         harness=harness,
         harness_bridge=harness_bridge_for(
-            agent_id, harness, registry=registry, registrations=registrations, machine=machine
+            agent_id,
+            harness,
+            registry=registry,
+            registrations=registrations,
+            registration_ttl_seconds=registration_ttl_seconds,
+            machine=machine,
         ),
     )
 
@@ -415,6 +422,7 @@ def harness_bridge_for(
     *,
     registry: SessionRegistry | None,
     registrations: RegistrationStore | None,
+    registration_ttl_seconds: float,
     machine: str,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
@@ -430,6 +438,7 @@ def harness_bridge_for(
         workspace=workspace_dir(agent_id),
         registry=registry,
         registrations=registrations,
+        registration_ttl_seconds=registration_ttl_seconds,
     )
 
 

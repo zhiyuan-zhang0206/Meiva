@@ -292,6 +292,14 @@ lives with `AgentRuntime`, so the existing idle TTL/LRU is what closes it.
 `before_llm`, `llm`, `before_exec`, `exec` and `after_exec` never run on such an
 agent, and the graph test asserts that over a real compiled graph.
 
+**2026-10-19 21:25 update (ruled):** every registration row carries `expires_at`,
+and the bridge rewrites it at the start of each turn. `descends_from(controller_pid)`
+is only as good as the kernel's pid allocation, so a row without an expiry plus a
+reused pid is a bearer capability that never dies; the TTL
+(`MEIVA_HARNESS_REGISTRATION_TTL_SECONDS`, one hour, above the adapter's own 900 s
+turn timeout) is what makes a crashed host's claim lapse on its own. A reader may
+still accept a row without one; the writer may not produce it.
+
 **2026-10-19 21:18 update (ruled):** two semantics belong to the wiring slice
 rather than a later one. A `SessionFaulted` (or a session closing) under a turn
 settles as a fatal stream abort — the agent does not stop half-way — and the

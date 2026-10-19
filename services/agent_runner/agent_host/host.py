@@ -556,6 +556,7 @@ class AgentHost:
             harness=harness,
             registry=self._harness_registry,
             registrations=self._registrations,
+            registration_ttl_seconds=self._policy.harness_registration_ttl_seconds(),
             machine=self._machine,
         )
 

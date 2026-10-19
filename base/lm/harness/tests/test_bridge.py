@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import AsyncIterator
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -125,6 +127,7 @@ def make_bridge(
         machine="macmini",
         handoff=handoff,
         registrations=registrations,
+        registration_ttl_seconds=3600.0,
     )
 
 
@@ -169,6 +172,7 @@ async def test_a_faulted_turn_retires_its_session_and_the_next_one_starts_fresh(
         lambda _handle: sessions.pop(0),
         machine="macmini",
         handoff=handoff(),
+        registration_ttl_seconds=3600.0,
     )
 
     with pytest.raises(HarnessTurnFaultedError, match="cli died"):
@@ -222,6 +226,7 @@ def test_the_built_in_loop_has_no_bridge() -> None:
             machine="macmini",
             workspace=Path("/agents/6984"),
             registry=FileSessionRegistry(Path("/registry")),
+            registration_ttl_seconds=3600.0,
         )
         is None
     )
@@ -234,6 +239,7 @@ def test_an_external_harness_builds_its_handoff() -> None:
         machine="macmini",
         workspace=Path("/agents/6984"),
         registry=FileSessionRegistry(Path("/registry")),
+        registration_ttl_seconds=3600.0,
     )
     assert bridge is not None
     assert bridge.harness is Harness.CLAUDE_CODE
@@ -309,12 +315,14 @@ def test_a_session_registers_its_handle_digest_and_retires_the_line(tmp_path: Pa
         lambda handle: handles.append(handle) or session,
         machine="macmini",
         registrations=store,
+        registration_ttl_seconds=3600.0,
     )
 
     asyncio.run(bridge.run_turn("hello", key="inbound-1"))
 
     registration = store.read(6984)
     assert registration is not None
+    assert registration.expires_at is not None, "a row without an expiry outlives its host"
     assert registration.external_session_id == "session-1"
     assert registration.machine == "macmini"
     assert registration.handle_sha256 == handle_digest(handles[0]), "only the digest lands on disk"
@@ -322,6 +330,34 @@ def test_a_session_registers_its_handle_digest_and_retires_the_line(tmp_path: Pa
 
     asyncio.run(bridge.close(reason="evicted"))
     assert store.read(6984) is None
+
+
+def test_a_registration_expires_within_the_configured_ttl(tmp_path: Path) -> None:
+    store = RegistrationStore(tmp_path / "registrations")
+    bridge = make_bridge(FakeSession(), registrations=store)
+
+    asyncio.run(bridge.run_turn("hello", key="inbound-1"))
+
+    written = json.loads((tmp_path / "registrations" / "6984.json").read_text(encoding="utf-8"))
+    assert written["expires_at"], "a row without an expiry is a capability with no end"
+    created = datetime.fromisoformat(written["created_at"])
+    expires = datetime.fromisoformat(written["expires_at"])
+    assert expires - created == timedelta(seconds=3600)
+    assert expires > datetime.now(UTC), "a live controller's row is valid, not expired"
+
+
+def test_every_turn_renews_the_row_without_restamping_its_creation(tmp_path: Path) -> None:
+    store = RegistrationStore(tmp_path / "registrations")
+    bridge = make_bridge(FakeSession(), registrations=store)
+
+    asyncio.run(bridge.run_turn("one", key="inbound-1"))
+    first = store.read(6984)
+    asyncio.run(bridge.run_turn("two", key="inbound-2"))
+    second = store.read(6984)
+
+    assert first is not None and second is not None
+    assert second.created_at == first.created_at, "a renewal is not a new registration"
+    assert second.expires_at >= first.expires_at, "each turn pushes the deadline forward"
 
 
 def test_the_sweep_drops_a_registration_whose_controller_is_gone(tmp_path: Path) -> None:
@@ -353,6 +389,6 @@ def registration(
         controller_pid=controller_pid,
         handle_sha256="0" * 64,
         created_at="2026-10-19T08:00:00+00:00",
-        expires_at=expires_at,
-        status="active",
+        expires_at=expires_at or "2027-10-19T08:00:00+00:00",
+        status="attached",
     )
