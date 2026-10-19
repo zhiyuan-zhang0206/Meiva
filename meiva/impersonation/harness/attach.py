@@ -25,6 +25,7 @@ from __future__ import annotations
 import dataclasses
 import os
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any, Self, cast
 
 import psutil
@@ -48,6 +49,42 @@ from meiva.sdk_surface import process_context
 
 __all_for_meiva__ = []
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
+
+
+# meiva:note
+# Admission is three questions about one row, asked again on every SDK call: is the
+# session still attached, has it expired, and does this process run where and under
+# the controller the row names. They are a pure function of the row, the machine and
+# the ancestry answer, so the decision is testable without booting a process, and a
+# row that stops qualifying stops the caller at its next action.
+# meiva:link meiva/impersonation/harness/docs/harness-attach.meiva.okf.md
+def require_live_registration(
+    registration: HarnessRegistration,
+    *,
+    machine: str,
+    descends: Callable[[int], bool],
+    now: datetime | None = None,
+) -> HarnessRegistration:
+    if not registration.attached:
+        raise RegistrationError(
+            f"harness session {registration.external_session_id} is {registration.status}"
+        )
+    if registration.expired(now):
+        raise RegistrationError(
+            f"harness session {registration.external_session_id} expired at "
+            f"{registration.expires_at}"
+        )
+    if registration.machine != machine:
+        raise RegistrationError(
+            f"the harness session belongs to machine {registration.machine!r}; "
+            f"this process runs on {machine!r}"
+        )
+    if not descends(registration.controller_pid):
+        raise RegistrationError(
+            "this process does not descend from the controller that started the "
+            f"harness session (pid {registration.controller_pid})"
+        )
+    return registration
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -131,28 +168,11 @@ class HarnessAttachment(ExternalAttachment):
         )
 
     def _require_registration(self) -> HarnessRegistration:
-        registration = self._registration
-        if not registration.attached:
-            raise RegistrationError(
-                f"harness session {registration.external_session_id} is {registration.status}"
-            )
-        if registration.expired():
-            raise RegistrationError(
-                f"harness session {registration.external_session_id} expired at "
-                f"{registration.expires_at}"
-            )
-        machine = self._machine.name()
-        if registration.machine != machine:
-            raise RegistrationError(
-                f"the harness session belongs to machine {registration.machine!r}; "
-                f"this process runs on {machine!r}"
-            )
-        if not self._ancestor_check(registration.controller_pid):
-            raise RegistrationError(
-                "this process does not descend from the controller that started the "
-                f"harness session (pid {registration.controller_pid})"
-            )
-        return registration
+        return require_live_registration(
+            self._registration,
+            machine=self._machine.name(),
+            descends=self._ancestor_check,
+        )
 
     def _validate(self) -> int:
         if self._closed:
@@ -273,6 +293,26 @@ def _codec_module() -> Any:
     return plugin_state_codec()
 
 
+def resolve_registration(
+    handle: str,
+    *,
+    agent_id: int | None = None,
+    session_id: str | None = None,
+    store: RegistrationStore | None = None,
+) -> HarnessRegistration:
+    resolved_store = store if store is not None else default_store()
+    registration = resolved_store.find_by_handle(handle)
+    if registration is None:
+        raise RegistrationError("no harness session matches this handle")
+    if agent_id is not None and registration.agent_id != agent_id:
+        raise RegistrationError(
+            f"this handle belongs to agent {registration.agent_id}, not {agent_id}"
+        )
+    if session_id is not None and registration.external_session_id != session_id:
+        raise RegistrationError("this handle belongs to another external session")
+    return registration
+
+
 def attach(
     handle: str | None = None,
     *,
@@ -286,16 +326,9 @@ def attach(
             "meiva.impersonation.harness.attach needs the session handle: pass it, or run inside a "
             f"harness process started by the bridge, which exports {HANDLE_ENV}"
         )
-    resolved_store = store if store is not None else default_store()
-    registration = resolved_store.find_by_handle(resolved_handle)
-    if registration is None:
-        raise RegistrationError("no harness session matches this handle")
-    if agent_id is not None and registration.agent_id != agent_id:
-        raise RegistrationError(
-            f"this handle belongs to agent {registration.agent_id}, not {agent_id}"
-        )
-    if session_id is not None and registration.external_session_id != session_id:
-        raise RegistrationError("this handle belongs to another external session")
+    registration = resolve_registration(
+        resolved_handle, agent_id=agent_id, session_id=session_id, store=store
+    )
     return HarnessAttachment(
         resolved_handle,
         agent_id=registration.agent_id,

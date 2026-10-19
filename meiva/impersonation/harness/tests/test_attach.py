@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import os
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from meiva.impersonation.harness.attach import ProcessProbe, refuse_unless_attachable
+from meiva.impersonation.harness.attach import (
+    ProcessProbe,
+    refuse_unless_attachable,
+    require_live_registration,
+    resolve_registration,
+)
 from meiva.impersonation.harness.registration import (
     FileRegistrationStore,
+    HarnessRegistration,
     RegistrationError,
+    handle_digest,
     new_handle,
 )
 
@@ -67,3 +76,104 @@ def test_a_missing_handle_says_which_variable_carries_it() -> None:
 
     with pytest.raises(RegistrationError, match="MEIVA_HARNESS_HANDLE"):
         attach("")
+
+
+def row(**overrides: Any) -> HarnessRegistration:
+    values: dict[str, Any] = {
+        "agent_id": 41,
+        "harness": "deepseek",
+        "external_session_id": "session-1",
+        "machine": "ubuntu",
+        "controller_pid": os.getpid(),
+        "handle_sha256": handle_digest("hx_test"),
+        "created_at": "2026-10-19T00:00:00+00:00",
+    }
+    values.update(overrides)
+    return HarnessRegistration(**values)
+
+
+def test_a_live_registration_passes() -> None:
+    registration = row()
+    assert (
+        require_live_registration(registration, machine="ubuntu", descends=lambda _pid: True)
+        is registration
+    )
+
+
+def test_a_detached_registration_is_refused() -> None:
+    with pytest.raises(RegistrationError, match="is closed"):
+        require_live_registration(
+            row(status="closed"), machine="ubuntu", descends=lambda _pid: True
+        )
+
+
+def test_an_expired_registration_is_refused() -> None:
+    expired = row(expires_at="2026-10-18T00:00:00+00:00")
+    with pytest.raises(RegistrationError, match="expired at"):
+        require_live_registration(expired, machine="ubuntu", descends=lambda _pid: True)
+
+
+def test_expiry_is_judged_at_the_supplied_instant() -> None:
+    registration = row(expires_at="2026-10-19T12:00:00+00:00")
+    before = datetime(2026, 10, 19, 11, 0, tzinfo=UTC)
+    after = datetime(2026, 10, 19, 13, 0, tzinfo=UTC)
+    assert require_live_registration(
+        registration, machine="ubuntu", descends=lambda _pid: True, now=before
+    )
+    with pytest.raises(RegistrationError, match="expired at"):
+        require_live_registration(
+            registration, machine="ubuntu", descends=lambda _pid: True, now=after
+        )
+
+
+def test_another_machines_registration_is_refused() -> None:
+    with pytest.raises(RegistrationError, match="belongs to machine 'macmini'"):
+        require_live_registration(
+            row(machine="macmini"), machine="ubuntu", descends=lambda _pid: True
+        )
+
+
+def test_a_process_outside_the_controller_tree_is_refused() -> None:
+    registration = row(controller_pid=4242)
+    with pytest.raises(RegistrationError, match="does not descend"):
+        require_live_registration(registration, machine="ubuntu", descends=lambda _pid: False)
+
+
+def test_the_ancestry_check_receives_the_recorded_controller_pid() -> None:
+    seen: list[int] = []
+
+    def descends(pid: int) -> bool:
+        seen.append(pid)
+        return True
+
+    require_live_registration(row(controller_pid=4242), machine="ubuntu", descends=descends)
+    assert seen == [4242]
+
+
+def test_a_handle_issued_for_another_agent_is_refused(tmp_path: Any) -> None:
+    store = FileRegistrationStore(tmp_path)
+    store.save(row(handle_sha256=handle_digest("hx_mine")))
+    with pytest.raises(RegistrationError, match="belongs to agent 41, not 42"):
+        resolve_registration("hx_mine", agent_id=42, store=store)
+
+
+def test_a_handle_issued_for_another_session_is_refused(tmp_path: Any) -> None:
+    store = FileRegistrationStore(tmp_path)
+    store.save(row(handle_sha256=handle_digest("hx_mine")))
+    with pytest.raises(RegistrationError, match="another external session"):
+        resolve_registration("hx_mine", session_id="session-2", store=store)
+
+
+def test_a_matching_handle_agent_and_session_resolve_the_row(tmp_path: Any) -> None:
+    store = FileRegistrationStore(tmp_path)
+    saved = row(handle_sha256=handle_digest("hx_mine"))
+    store.save(saved)
+    resolved = resolve_registration("hx_mine", agent_id=41, session_id="session-1", store=store)
+    assert resolved == saved
+
+
+def test_a_handle_alone_resolves_without_naming_the_agent(tmp_path: Any) -> None:
+    store = FileRegistrationStore(tmp_path)
+    saved = row(handle_sha256=handle_digest("hx_mine"))
+    store.save(saved)
+    assert resolve_registration("hx_mine", store=store) == saved
