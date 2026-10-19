@@ -1,5 +1,3 @@
 [uses]
+"onboard-helper-grants.py" = ["scan_child.py"]
 "tests" = ["request_grants_evidence.py"]
-
-[debt.restricted-python]
-"onboard-helper-grants.py#python subprocess that runs something other than a literal repository file" = 1

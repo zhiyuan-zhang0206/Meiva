@@ -19,7 +19,7 @@ def start_cluster_through_ready_gate(
         local_host=machine.host, open_database=open_operator_database
     )
     from base.deploy.lifecycle import start_serving
-    from cli.commands.lifecycle._pause_resume import resume_after_start
+    from cli.commands.lifecycle import resume_after_start
 
     monkeypatch.setattr(host_deploy_state, "set_posture", MagicMock())
     monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())

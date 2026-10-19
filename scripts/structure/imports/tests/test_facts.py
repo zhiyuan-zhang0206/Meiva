@@ -372,18 +372,18 @@ def test_unsupported_path_operation_read_is_explicitly_unknown(tmp_path: Path) -
     assert found.unknown[0].kind == facts.FactKind.RESOURCE
 
 
-def test_no_launcher_avoids_repeating_execution_analysis(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_no_launcher_avoids_repeating_execution_analysis() -> None:
     def refuse_execution_analysis(*_args: object) -> executed.Inputs:
         pytest.fail("A source without a launcher needs no execution analysis")
 
-    monkeypatch.setattr(executed, "inputs", refuse_execution_analysis)
-    found = evidence(
-        make_repo(tmp_path), "import importlib\nimportlib.import_module('base.net.retry')\n"
+    analyzed = executed.launched_inputs(
+        ast.parse("import importlib\nimportlib.import_module('base.net.retry')\n"),
+        "cli/tests/test_probe.py",
+        has_launches=False,
+        resolve=refuse_execution_analysis,
     )
-    assert [fact.target for fact in found.records] == ["base.net.retry"]
-    assert found.unknown == ()
+
+    assert analyzed.sources == [] and analyzed.unresolved == []
 
 
 @pytest.mark.parametrize(

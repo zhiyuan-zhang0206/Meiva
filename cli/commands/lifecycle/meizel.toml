@@ -1,6 +1,7 @@
 exports = ["converge_host.py", "hold_report.py", "lgtm_toggle.py", "migrations.py", "root_driver.py", "start.py", "status.py", "stop.py", "tests"]
 
 [uses]
+"__init__.py" = ["_pause_resume.py"]
 "_start_readiness_preflight.py" = ["root_driver.py"]
 "_temporary_stop.py" = ["_stop_extras.py", "root_driver.py", "service_stop.py"]
 "lgtm_toggle.py" = ["start.py"]

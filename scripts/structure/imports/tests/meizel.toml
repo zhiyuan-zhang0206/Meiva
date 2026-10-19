@@ -1,2 +1,0 @@
-[debt.first-party-patch]
-"test_facts.py#monkeypatch.setattr scripts.structure.imports.executed.inputs" = 1

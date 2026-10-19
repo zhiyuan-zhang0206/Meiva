@@ -745,10 +745,8 @@ def collect(
 def _analyze(tree: ast.AST, collector: _Collector) -> Evidence:
     rel_path, index, tops = collector.path, collector.index, collector.tops
     collector.visit(tree)
-    inputs = (
-        executed.inputs(tree, rel_path, context=collector.context)
-        if collector.has_launches
-        else executed.Inputs()
+    inputs = executed.launched_inputs(
+        tree, rel_path, context=collector.context, has_launches=collector.has_launches
     )
     collector.context.clear_scopes()
     collector.unknown.extend(

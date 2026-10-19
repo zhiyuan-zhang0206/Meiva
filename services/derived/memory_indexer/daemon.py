@@ -36,7 +36,7 @@ from services.derived.memory_indexer import config as indexer_config
 from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.derived.memory_indexer.backends.factory import get_backend
 from services.derived.memory_indexer.backends.probe import probe_backend
-from services.derived.memory_indexer.chunking import _file_rows
+from services.derived.memory_indexer.chunking import chunk_rows
 from services.derived.memory_indexer.config import MemoryIndexerConfig, MemoryIndexerInputs
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
 from services.derived.memory_indexer.embeddings.factory import get_provider
@@ -217,14 +217,14 @@ def process_paths(
     # file at a time so per-file completeness stays visible. A file whose
     # content hash is unchanged is skipped before this point, so a re-embed
     # only happens when the file actually changed.
-    file_rows: list[tuple[Path, list[tuple[float, str, str, int, str]]]] = []
+    rendered: list[tuple[Path, list[tuple[float, str, str, int, str]]]] = []
     for path, mtime, hash_, content in sorted(to_embed, key=lambda t: str(t[0])):
         rows = [
-            (mtime, hash_, kind, chunk_idx, text) for kind, chunk_idx, text in _file_rows(content)
+            (mtime, hash_, kind, chunk_idx, text) for kind, chunk_idx, text in chunk_rows(content)
         ]
-        file_rows.append((path, rows))
+        rendered.append((path, rows))
 
-    total_by_file = {path: len(rows) for path, rows in file_rows}
+    total_by_file = {path: len(rows) for path, rows in rendered}
     progress = _EmbedProgress(
         # A file that produces no rows (empty body, no description) is complete
         # by definition — committing it means deleting every row it used to have.
@@ -232,7 +232,7 @@ def process_paths(
     )
     flat_rows = [
         (path, mtime, hash_, kind, chunk_idx, text)
-        for path, rows in file_rows
+        for path, rows in rendered
         for mtime, hash_, kind, chunk_idx, text in rows
     ]
     try:
@@ -242,14 +242,14 @@ def process_paths(
         # file keeps its old rows intact (consistent old state, re-embeds on
         # the next trigger against its still-mismatching hash).
         committed = _commit_files(
-            backend, progress.upsert_rows, progress.embedded_files, file_rows, liveness
+            backend, progress.upsert_rows, progress.embedded_files, rendered, liveness
         )
         for path in committed:
             _log.info("[indexer] indexed %s", path)
         raise
 
     committed = _commit_files(
-        backend, progress.upsert_rows, progress.embedded_files, file_rows, liveness
+        backend, progress.upsert_rows, progress.embedded_files, rendered, liveness
     )
     for path in committed:
         _log.info("[indexer] indexed %s", path)
@@ -259,14 +259,14 @@ def _commit_files(
     backend: MemorySearchBackend,
     upsert_rows: list[tuple[str, float, str, np.ndarray, str, int]],
     embedded_files: list[Path],
-    file_rows: list[tuple[Path, list[tuple[float, str, str, int, str]]]],
+    rendered: list[tuple[Path, list[tuple[float, str, str, int, str]]]],
     liveness: Liveness,
 ) -> list[Path]:
     if not embedded_files:
         return []
     embedded = set(embedded_files)
     committed_rows = [row for row in upsert_rows if Path(row[0]) in embedded]
-    limits_by_file = {path: _kind_limits(rows) for path, rows in file_rows if path in embedded}
+    limits_by_file = {path: _kind_limits(rows) for path, rows in rendered if path in embedded}
     liveness.beat()
     backend.delete_stale_rows([(str(path), limits_by_file[path]) for path in embedded_files])
     liveness.beat()

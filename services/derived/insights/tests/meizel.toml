@@ -7,7 +7,6 @@
 "test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.ConfigBoot" = 1
 "test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.Database" = 1
 "test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.LoadedCommit.capture" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon._hard_exit" = 1
 "test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.asyncio.Runner" = 1
 "test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.build_model_catalog" = 1
 "test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.build_pipeline" = 1

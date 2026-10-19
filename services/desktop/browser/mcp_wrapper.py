@@ -71,7 +71,7 @@ def _connector(
     return connect
 
 
-class _ReconnectingLink(ReconnectingLink):
+class ReconnectingSocketLink(ReconnectingLink):
     def __init__(
         self,
         *,
@@ -91,7 +91,7 @@ class _ReconnectingLink(ReconnectingLink):
 
 
 async def _serve(*, socket_path: Path, timeout_reader: Callable[[], float]) -> None:
-    link = _ReconnectingLink(socket_path=socket_path, timeout_reader=timeout_reader)
+    link = ReconnectingSocketLink(socket_path=socket_path, timeout_reader=timeout_reader)
 
     async def _list_tools(_ctx: Any, _params: Any) -> types.ListToolsResult:
         tools = await link.request({"method": "list_tools"})

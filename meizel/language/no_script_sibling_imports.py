@@ -186,8 +186,9 @@ def _nested_blocks(stmt: ast.stmt) -> list[list[ast.stmt]] | None:
     return None
 
 
-def scan_file(path: Path) -> list[str]:
+def scan_file(path: Path, *, root: Path | None = None) -> list[str]:
     """Return one error string per unguarded sibling import in a script-mode file."""
+    repo_root = _REPO_ROOT if root is None else root
     try:
         src = path.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(src)
@@ -196,7 +197,7 @@ def scan_file(path: Path) -> list[str]:
     if not _is_script_mode(tree, src):
         return []
     try:
-        rel = path.relative_to(_REPO_ROOT).as_posix()
+        rel = path.relative_to(repo_root).as_posix()
     except ValueError:
         # Path not under repo — pre-commit usually passes absolute paths so this
         # is rare; safety net so an out-of-tree target cannot crash the run.

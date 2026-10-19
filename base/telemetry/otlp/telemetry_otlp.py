@@ -311,8 +311,10 @@ class OtlpBackend:
         export_allowed: Callable[[], bool],
         providers: tuple[Any, Any] | None = None,
         queue_maxsize: int = _QUEUE_MAXSIZE,
+        enabled: Callable[[], bool] | None = None,
     ) -> None:
         self._export_allowed = export_allowed
+        self._enabled_flag = enabled
         self._export_decision: bool | None = None
         self._eligibility_lock = threading.Lock()
         self._queue: queue.Queue[Any] = queue.Queue(maxsize=queue_maxsize)
@@ -498,19 +500,23 @@ class OtlpBackend:
 
     def _enabled(self) -> bool:
         """Keep transport settings isolated; identity defects remain caller errors."""
-        try:
-            from base.config import settings
-
-            enabled = bool(settings.observability.telemetry_otlp_enabled)
-        except Exception as exc:
-            report_sink_failure("otlp enabled-flag read", exc)
-            return False
-        if not enabled:
+        if not self._kill_switch():
             return False
         with self._eligibility_lock:
             if self._export_decision is None:
                 self._export_decision = self._export_allowed()
             return self._export_decision
+
+    def _kill_switch(self) -> bool:
+        if self._enabled_flag is not None:
+            return self._enabled_flag()
+        try:
+            from base.config import settings
+
+            return bool(settings.observability.telemetry_otlp_enabled)
+        except Exception as exc:
+            report_sink_failure("otlp enabled-flag read", exc)
+            return False
 
     def warmup(self) -> None:
         """Resolve eligibility before isolating lazy SDK and network preparation."""

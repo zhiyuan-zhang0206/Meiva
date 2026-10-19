@@ -1,3 +1,8 @@
+# meiva:note
+# A wiring hook whose units spawn children that are already reaped. Installed on
+# the supervisor's own spawn seam, so the daemon's other children and the rest of
+# the process keep the stock launcher.
+
 import asyncio
 from typing import Any
 
@@ -11,6 +16,5 @@ async def reaped_first(*args: Any, **kwargs: Any) -> asyncio.subprocess.Process:
 
 
 def build(context: Any) -> list[object]:
-    del context
-    asyncio.create_subprocess_exec = reaped_first
+    context.supervisor.spawn = reaped_first
     return []

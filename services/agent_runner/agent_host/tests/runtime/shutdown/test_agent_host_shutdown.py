@@ -177,7 +177,6 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
         patch.object(graph, "build_graph", return_value=MagicMock()),
         patch.multiple(
             daemon,
-            _is_running=MagicMock(return_value=False),
             acquire_pidfile=MagicMock(return_value=True),
             remove_pidfile=MagicMock(side_effect=partial(_note_pidfile_removed, events)),
             build_shared_pool=MagicMock(return_value=workload),

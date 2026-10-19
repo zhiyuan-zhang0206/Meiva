@@ -146,50 +146,6 @@ POLL_S = 2.0
 PREFLIGHT_EVERY_N_POLLS = 3
 PROBE_WAIT_S = 10.0
 
-_SCAN_CHILD = '''"""Helper-spawned child: bounded scan of a guarded tree (the fill trigger)."""
-import os
-import sys
-
-MAX_DIRS = 64
-MAX_READS = 32
-READ_BYTES = 16
-
-target, result_path = sys.argv[1], sys.argv[2]
-visited = 0
-sampled = 0
-
-
-def scan(path, depth):
-    global visited, sampled
-    if visited >= MAX_DIRS:
-        return
-    visited += 1
-    for name in sorted(os.listdir(path))[:MAX_DIRS]:
-        if visited >= MAX_DIRS:
-            return
-        full = os.path.join(path, name)
-        if os.path.isdir(full):
-            if depth > 1:
-                scan(full, depth - 1)
-        elif sampled < MAX_READS:
-            with open(full, "rb") as handle:
-                handle.read(READ_BYTES)
-            sampled += 1
-
-
-try:
-    scan(target, 2)
-    text = "granted dirs=%d files=%d" % (visited, sampled)
-except FileNotFoundError:
-    text = "missing %s" % target
-except PermissionError as exc:
-    text = "denied %s" % exc
-except OSError as exc:
-    text = "error %s: %s" % (type(exc).__name__, exc)
-with open(result_path, "w") as handle:
-    handle.write(text)
-'''
-
 
 class OnboardError(RuntimeError):
     """A user-facing onboarding failure."""
@@ -526,15 +482,18 @@ def _fill_pending_grants(
                         print(f"  [{target_id}] already granted, skipping")
                         continue
                     fill_attempted.add(group)
-                    child = workdir / f"fill-{target_id}.child.py"
-                    child.write_text(_SCAN_CHILD)
                     result_path = workdir / f"fill-{target_id}-{run_id}.result"
                     text = wait_for_item(
                         client,
                         workdir,
                         run_id,
                         f"fill-{target_id}",
-                        [sys.executable, str(child), str(Path.home() / rel), str(result_path)],
+                        [
+                            sys.executable,
+                            str(Path(__file__).with_name("scan_child.py")),
+                            str(Path.home() / rel),
+                            str(result_path),
+                        ],
                         result_path,
                         args.timeout,
                         service,

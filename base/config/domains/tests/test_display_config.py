@@ -16,12 +16,14 @@ DISPLAY_RANGES = (
 )
 
 
-def _load(monkeypatch: pytest.MonkeyPatch, name: str, value: int, source: str) -> DisplaySettings:
+def _load(name: str, value: int, source: str) -> DisplaySettings:
     alias = DisplaySettings.model_fields[name].alias
     assert isinstance(alias, str)
     if source == "env":
-        monkeypatch.setenv(alias, str(value))
-        return DisplaySettings()
+        # meiva:note
+        # The environment source is this model's input: hand it the values it would
+        # have read from the process, instead of rewriting the process environment.
+        return DisplaySettings.from_environment({alias: str(value)})
     key = alias if source == "alias" else name
     return DisplaySettings.model_validate({key: value})
 
@@ -29,18 +31,18 @@ def _load(monkeypatch: pytest.MonkeyPatch, name: str, value: int, source: str) -
 @pytest.mark.parametrize(("name", "minimum", "maximum"), DISPLAY_RANGES)
 @pytest.mark.parametrize("source", ("field", "alias", "env"))
 def test_display_window_accepts_both_endpoints_without_clamping(
-    monkeypatch: pytest.MonkeyPatch, name: str, minimum: int, maximum: int, source: str
+    name: str, minimum: int, maximum: int, source: str
 ) -> None:
     for value in (minimum, maximum):
-        configured = _load(monkeypatch, name, value, source)
+        configured = _load(name, value, source)
         assert getattr(configured, name) == value
 
 
 @pytest.mark.parametrize(("name", "minimum", "maximum"), DISPLAY_RANGES)
 @pytest.mark.parametrize("source", ("field", "alias", "env"))
 def test_display_window_rejects_values_outside_request_range(
-    monkeypatch: pytest.MonkeyPatch, name: str, minimum: int, maximum: int, source: str
+    name: str, minimum: int, maximum: int, source: str
 ) -> None:
     for value in (minimum - 1, maximum + 1):
         with pytest.raises(ValidationError):
-            _load(monkeypatch, name, value, source)
+            _load(name, value, source)

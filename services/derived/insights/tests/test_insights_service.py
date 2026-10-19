@@ -337,11 +337,13 @@ def _assert_gate_matches_image(
         assert reads == [(image.source_root, image.sha)]
 
 
-def _run_main(monkeypatch: pytest.MonkeyPatch) -> None:
+def _run_main(
+    monkeypatch: pytest.MonkeyPatch, *, exit_process: Callable[[int], None] | None = None
+) -> None:
     runner = asyncio.Runner()
     monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
     try:
-        daemon.main()
+        daemon.main() if exit_process is None else daemon.main(exit_process=exit_process)
     finally:
         runner.close()
 
@@ -415,8 +417,7 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
     monkeypatch.setattr(migrations, "assert_schema_current", checked_schema)
     monkeypatch.setattr(daemon, "install_graceful_shutdown", no_signal_handlers)
     monkeypatch.setattr(daemon, "run", work)
-    monkeypatch.setattr(daemon, "_hard_exit", exit_process)
-    _run_main(monkeypatch)
+    _run_main(monkeypatch, exit_process=exit_process)
     assert stages == ["capture", "schema", "producer", "logging", "run", "exit:0"]
     assert len(slices) == 2 and slices[1].db_pool_max_size == 37
     _assert_gate_matches_image(gates, reads, image)

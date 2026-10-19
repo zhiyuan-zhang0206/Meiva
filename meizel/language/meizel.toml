@@ -4,6 +4,3 @@ exports = ["fixtures.py", "mounts.py", "no_script_sibling_imports.py", "path_imp
 "python_commands.py" = ["restricted.py"]
 "scan.py" = ["bindings.py", "fixtures.py", "python_commands.py", "restricted.py"]
 "tests" = ["no_script_sibling_imports.py", "path_imports.py"]
-
-[debt.private-name]
-"tests/test_lint_no_script_sibling_imports.py -> no_script_sibling_imports.py#_REPO_ROOT" = 2

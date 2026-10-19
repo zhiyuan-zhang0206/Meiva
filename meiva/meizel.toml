@@ -17,6 +17,3 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 "understand" = ["files.py", "sdk_surface", "security.py"]
 "watcher" = ["sdk_surface", "shell"]
 "web" = ["sdk_surface", "security.py"]
-
-[debt.private-module]
-"tests/namespaces/shell/coding_tools/test_sdk_entry_counting.py -> shell/coding_tools/_common.py" = 1

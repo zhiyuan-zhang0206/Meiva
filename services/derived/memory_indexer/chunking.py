@@ -96,13 +96,13 @@ def chunk_body(
     return chunks
 
 
-def _file_rows(content: str) -> list[tuple[str, int, str]]:
-    """The chunk rows of one file: (kind, chunk_idx, text).
+def chunk_rows(content: str) -> list[tuple[str, int, str]]:
+    # meiva:note
+    # The chunk rows of one file: (kind, chunk_idx, text). The frontmatter
+    # `description` becomes one KIND_DESC row when present; the body splits into
+    # KIND_BODY chunks. A file with neither produces no rows (it is not searchable
+    # content; the cold-start reconcile tolerates that).
 
-    The frontmatter `description` becomes one KIND_DESC row when present; the
-    body splits into KIND_BODY chunks. A file with neither produces no rows
-    (it is not searchable content; the cold-start reconcile tolerates that).
-    """
     description, body = split_note(content)
     rows: list[tuple[str, int, str]] = []
     if description:
@@ -119,7 +119,7 @@ def chunk_text(content: str, kind: str, chunk_idx: int) -> str | None:
     when the file no longer produces that row (it was edited since it was
     indexed), so a caller never pairs a stale row with unrelated text.
     """
-    for row_kind, row_idx, text in _file_rows(content):
+    for row_kind, row_idx, text in chunk_rows(content):
         if row_kind == kind and row_idx == chunk_idx:
             return text
     return None

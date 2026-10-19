@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 import pytest
 from fastapi import Request
@@ -56,11 +55,6 @@ def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
         return _RedisClient()
 
     patch_open_async_redis(monkeypatch, open_redis)
-
-    async def pass_through(call: Callable[[], Awaitable[Any]]) -> Any:
-        return await call()
-
-    monkeypatch.setattr(sse, "retry_auth_failures_async", pass_through)
 
     runtime_metrics.initialize_sse_metrics()
     emitted_events.clear()

@@ -72,9 +72,8 @@ def test_restart_validates_birth_effort_when_only_the_model_changes(
 
 
 def test_legacy_restart_validates_effort_against_the_unpinned_model(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
-    monkeypatch.setattr(settings.lm, "llm_model", "mimo-v2.6-pro")
     agent_id = create_agent(db_conn)
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'idling','model-config-test')",
@@ -88,7 +87,7 @@ def test_legacy_restart_validates_effort_against_the_unpinned_model(
                 {"reasoning_effort": "max"},
                 catalog=model_catalog,
                 llm_override=settings.lm.llm_override,
-                default_model=settings.lm.llm_model,
+                default_model="mimo-v2.6-pro",
             )
         validate_restart_model_config(
             cur,
@@ -96,5 +95,5 @@ def test_legacy_restart_validates_effort_against_the_unpinned_model(
             {"reasoning_effort": "high"},
             catalog=model_catalog,
             llm_override=settings.lm.llm_override,
-            default_model=settings.lm.llm_model,
+            default_model="mimo-v2.6-pro",
         )

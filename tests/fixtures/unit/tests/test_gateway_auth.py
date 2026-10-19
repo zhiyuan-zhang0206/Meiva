@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -31,10 +30,16 @@ def test_an_explicit_authorization_header_wins(
 
 
 def test_the_default_follows_the_secret_current_when_the_client_is_built(
-    gateway_data_plane: None, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
+    gateway_data_plane: None, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-before-build")
-    with gateway_test_client(machine=machine_identity) as client:
+    # meiva:note
+    # The default header is read from the app's own config at build time, so a
+    # config carrying a rotated secret yields a client carrying it — no
+    # process-wide settings write.
+    with gateway_test_client(
+        machine=machine_identity,
+        cluster_secret="rotated-before-build",  # noqa: S106
+    ) as client:
         assert client.headers["Authorization"] == "Bearer rotated-before-build"
         assert client.get("/api/status").status_code == 200
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import inspect
 from pathlib import Path
 
 _SCRIPT = (
@@ -68,8 +69,13 @@ def test_fill_specs_reference_declared_services_by_home_relative_path() -> None:
             assert rel and not rel.startswith(("/", "~"))
 
 
-def test_scan_child_compiles() -> None:
-    ast.parse(_mod._SCAN_CHILD, "<scan-child>")
+def test_scan_child_file_is_the_script_the_step_runs() -> None:
+    # meiva:note
+    # The fill trigger runs `scan_child.py` by path, so it must parse and sit next
+    # to the grant helper.
+    script = Path(__file__).resolve().parent.parent / "scan_child.py"
+    ast.parse(script.read_text(encoding="utf-8"), str(script))
+    assert "scan_child.py" in inspect.getsource(_mod)
 
 
 def test_state_status_is_granted_only_when_every_service_is() -> None:

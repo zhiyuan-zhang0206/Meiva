@@ -7,6 +7,7 @@ followed. Other execution inputs stay unresolved; this is not a Python evaluator
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from . import bindings
@@ -19,6 +20,7 @@ __all__ = [
     "import_facts",
     "inputs",
     "is_launcher",
+    "launched_inputs",
     "module_input",
 ]
 
@@ -339,6 +341,25 @@ def inputs(tree: ast.AST, path: str, *, context: bindings.ModuleContext | None =
         return visitor.finish()
     finally:
         context.clear_scopes()
+
+
+def launched_inputs(
+    tree: ast.AST,
+    path: str,
+    *,
+    context: bindings.ModuleContext | None = None,
+    has_launches: bool,
+    resolve: Callable[..., Inputs] = inputs,
+) -> Inputs:
+    # meiva:note
+    # The launch analysis of one source, or an empty result when it has no
+    # launcher. A source that starts no process has nothing to analyse, and the
+    # analysis is the expensive half of the pass: `facts.collect` asks here rather
+    # than walking every module twice. `resolve` is the analysis itself, so a
+    # caller that already knows the answer (a test) passes its own.
+    if not has_launches:
+        return Inputs()
+    return resolve(tree, path, context=context)
 
 
 @dataclass

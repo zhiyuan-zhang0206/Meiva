@@ -70,7 +70,7 @@ async def _connect() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     )
 
 
-class _ReconnectingLink(ReconnectingLink):
+class ReconnectingSocketLink(ReconnectingLink):
     def __init__(self, *, timeout_reader: Callable[[], float]) -> None:
         super().__init__(
             _connect,
@@ -82,7 +82,7 @@ class _ReconnectingLink(ReconnectingLink):
 
 
 async def _serve(*, timeout_reader: Callable[[], float]) -> None:
-    link = _ReconnectingLink(timeout_reader=timeout_reader)
+    link = ReconnectingSocketLink(timeout_reader=timeout_reader)
 
     async def _list_tools(_ctx: Any, _params: Any) -> types.ListToolsResult:
         tools = await link.request({"method": "list_tools"})
