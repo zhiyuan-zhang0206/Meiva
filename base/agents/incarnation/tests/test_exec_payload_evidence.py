@@ -126,6 +126,24 @@ def test_identity_digest_depends_only_on_the_allocation_fields() -> None:
         digest(deadline=deadline.replace(tzinfo=None))
 
 
+# meiva:note
+# This vector is frozen on purpose: every stored version 2 allocation re-derives its
+# identity during recovery, so reordering the canonical lines, printing the deadline
+# with `str()` or changing how the agent id is encoded would refuse all of them.
+# Changing the canonical form needs a new `digest_version`, not a new value here.
+def test_the_identity_digest_canonical_form_is_frozen() -> None:
+    digest = exec_identity_digest(
+        request=UUID("72643f35-9ed4-4da3-91ac-5c92fdb960c9"),
+        domain=UUID("003224e7-4109-4a03-962e-68cbfda89655"),
+        agent_id=6090,
+        generation=UUID("b9b073aa-7e4f-4b2f-a4a9-1b21a1564168"),
+        runtime_owner=UUID("8c99ab4a-7dc7-4fc7-b11c-1112f8fb451e"),
+        deadline=datetime(2026, 10, 19, 4, 58, 6, 146566, tzinfo=UTC),
+    )
+
+    assert digest == "a88f219f1918307ee979288f47e20887bc55d37e96b3f0cfa006f35b08b47c60"
+
+
 def test_a_legacy_row_decodes_as_payload_authoritative() -> None:
     legacy = {
         "request": str(uuid4()),
