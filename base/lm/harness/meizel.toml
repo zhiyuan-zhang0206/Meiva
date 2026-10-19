@@ -2,7 +2,6 @@ exports = ["acp", "antigravity", "claude", "codex", "deepseek", "events.py", "ha
 
 [uses]
 "__init__.py" = ["events.py", "handoff.py", "registry.py"]
-"acp" = ["events.py"]
 "antigravity" = ["events.py", "handoff.py", "process.py", "registry.py"]
 "claude" = ["__init__.py", "events.py", "handoff.py", "process.py", "registry.py"]
 "codex" = ["events.py", "handoff.py", "process.py", "registry.py"]
