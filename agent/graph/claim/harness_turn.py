@@ -18,7 +18,7 @@ from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.events.live.projection import Cancelled
 from base.lm.content import message_content
-from base.lm.harness import HarnessClosedError, HarnessTurnFaultedError
+from base.lm.harness import HarnessClosedError, HarnessSetupError, HarnessTurnFaultedError
 from base.lm.harness.engine import HarnessTurn, TurnEngine
 from base.lm.usage import log_usage_fields
 from base.log import logger
@@ -123,7 +123,7 @@ async def harness_turn_node(
         _announce_cancel(ctx, agent_id)
         await interrupt_engine(agent_id, bridge)
         return Command[HarnessGoto](update={"halted": True}, goto=CLAIM)
-    except (HarnessTurnFaultedError, HarnessClosedError) as exc:
+    except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
         raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
 
     turns = (*turn.prelude, turn)

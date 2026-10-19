@@ -532,6 +532,11 @@ class AgentHost:
             self._evict,
         )
 
+    # meiva:note
+    # Every hosted turn builds its runtime here, so this is where the agent's retired
+    # session is joined: without that wait the next turn starts a second CLI on the
+    # session id the first one still holds.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
     async def _build_runtime(
         self,
         agent_id: int,
@@ -544,6 +549,7 @@ class AgentHost:
     ) -> AgentRuntime:
         """Reconcile claimed inbounds, then prepare the model."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
+        await self._sessions.join(agent_id)
         await consume_claimed_inbounds(
             self._pool, agent_id, incarnation=incarnation, unknown_execution=True
         )
@@ -562,10 +568,10 @@ class AgentHost:
 
     def _evict(self) -> None:
         """Evict settled runtimes by idle age and least-recent use."""
-        for runtime in evict_runtimes(
+        for agent_id, runtime in evict_runtimes(
             self._runtimes, self._in_flight, policy=self._policy.cache(), now=time.monotonic()
         ):
-            self._sessions.retire(runtime)
+            self._sessions.retire(agent_id, runtime)
 
     async def last_active_at(self, agent_id: int) -> datetime | None:
         """Read the scheduler's actual LLM activity clock."""
@@ -581,7 +587,7 @@ class AgentHost:
         real state, is untouched, exactly as a process restart leaves it."""
         runtime = self._runtimes.pop(agent_id, None)
         if runtime is not None:
-            self._sessions.retire(runtime)
+            self._sessions.retire(agent_id, runtime)
         self.relays.drop(agent_id)
 
     # meiva:note

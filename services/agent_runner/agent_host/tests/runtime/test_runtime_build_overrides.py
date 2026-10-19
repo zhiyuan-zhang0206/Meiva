@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections import OrderedDict
 from pathlib import Path
@@ -143,6 +144,20 @@ class FakeEngine:
         self.reason = reason
 
 
+class SlowClosingEngine(FakeEngine):
+    # meiva:note
+    # A close that a test can hold open, so the gap between "runtime dropped" and
+    # "CLI gone" is observable instead of a race.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+
+    async def close(self, *, reason: str = "closed") -> None:
+        await self.release.wait()
+        await super().close(reason=reason)
+
+
 def runtime(
     agent_id: int, *, engine: FakeEngine | None = None, last_used: float = 0.0
 ) -> AgentRuntime:
@@ -210,7 +225,7 @@ def test_eviction_returns_what_it_removed() -> None:
         now=time.monotonic(),
     )
 
-    assert evicted == [retained]
+    assert evicted == [(1, retained)]
     assert not runtimes
 
 
@@ -244,8 +259,39 @@ async def test_dropping_an_agent_closes_its_session() -> None:
     host._runtimes[1] = runtime(1, engine=engine)
 
     host.drop_agent(1)
-    await host._sessions.aclose()
+    await host._sessions.join(1)
 
     assert 1 not in host._runtimes
     assert engine.closed
     assert engine.reason == "runtime retired"
+
+
+# meiva:note
+# The window this closes is short and real: an evicted runtime is out of the cache the
+# moment `_evict` runs, so a wake a second later builds a fresh bridge. Without the
+# join, that bridge would start a second CLI on the resumed session id while the first
+# one is still inside its terminate/kill window.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+async def test_the_next_turn_waits_for_the_retired_session_to_close() -> None:
+    host = AgentHost(
+        policy=configured_policy(),
+        pool=Mock(),
+        checkpointer=Mock(),
+        graph=Mock(),
+        bus=Mock(),
+        db=Mock(),
+        catalog=Mock(),
+        machine=configured_machine(),
+    )
+    await host._sessions.start()
+    engine = SlowClosingEngine()
+    host._runtimes[1] = runtime(1, engine=engine)
+
+    host.drop_agent(1)
+    await asyncio.sleep(0)
+    assert not engine.closed, "the close is still running when the runtime is gone"
+
+    engine.release.set()
+    await host._sessions.join(1)
+
+    assert engine.closed, "the next turn only proceeds once the old CLI is gone"

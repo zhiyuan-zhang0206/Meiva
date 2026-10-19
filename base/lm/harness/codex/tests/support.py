@@ -111,6 +111,7 @@ async def start(
 ) -> Harness:
     fake = server if server is not None else FakeAppServer(pid=CODEX_PID if observe_pid else None)
     scripted_probe = probe if probe is not None else ScriptedProbe()
+    fake.probe = scripted_probe
     if observe_pid and fake.pid is not None:
         scripted_probe.alive.add(fake.pid)
     session = CodexSession(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 from base.lm.harness.codex.transport import (
     ClosedHandler,
@@ -19,6 +19,10 @@ CODEX_PID = 4242
 # An in-process app-server with the same transport surface and scripted replies.
 # The test pushes notifications through the helpers below, so it controls exactly
 # where in the turn each one lands.
+class _Reapable(Protocol):
+    def reap(self, *pids: int) -> None: ...
+
+
 class FakeAppServer:
     def __init__(
         self,
@@ -30,6 +34,7 @@ class FakeAppServer:
     ) -> None:
         self.thread_id = thread_id
         self._pid = pid
+        self.probe: _Reapable | None = None
         self.resume_fails = resume_fails
         self.resume_cwd = resume_cwd
         self.started = False
@@ -91,6 +96,13 @@ class FakeAppServer:
 
     async def close(self) -> None:
         self.closed = True
+        # meiva:note
+        # The real app-server process ends with the transport; a fake that stayed
+        # "alive" would make every close test pay the adapter's settle window and stop
+        # modelling the fact the close path checks.
+        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        if self.probe is not None and self._pid is not None:
+            self.probe.reap(self._pid)
         if self._closed_handler is not None:
             self._closed_handler("closed by client")
 
