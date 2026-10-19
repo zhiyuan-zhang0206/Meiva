@@ -30,7 +30,10 @@ of page-level scroll without touching scrollTop. A pending bookmark restore
 lands before the pin, so the reader never sees the bottom first. The
 scroll-to-bottom button reads the measured distance to the bottom rather than
 the follow flag (a height change with no scroll event would otherwise leave it
-hidden). Its smooth ride requests the stick instead of pinning, so the
+hidden). While a refresh is in flight it rests on the same ring the
+pull-to-load gesture uses and swaps to the arrow on hover or keyboard
+focus, so waiting never hides that the control is still a button (user
+report 2026-10-19). Its smooth ride requests the stick instead of pinning, so the
 asynchronous ride survives, and growth mid-ride pins instantly because the
 controller is already following. An agent switch hides the button in the same
 commit, supersedes an unreachable restore target, and pins with a fresh run so a
