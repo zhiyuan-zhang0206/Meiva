@@ -14,6 +14,21 @@ class SessionStarted:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionBound:
+    agent_id: int
+    session_id: str
+    resumed: bool
+    turn_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HandoffInjected:
+    agent_id: int
+    turn_id: str
+    size_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class TextDelta:
     turn_id: str
     text: str
@@ -39,27 +54,6 @@ class ToolResult:
     tool_use_id: str
     is_error: bool
     content: str
-
-
-@dataclass(frozen=True, slots=True)
-class ApprovalRequested:
-    turn_id: str
-    approval_id: str
-    tool_name: str
-    tool_input: dict[str, Any]
-    tool_use_id: str | None
-    title: str | None
-    description: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class ApprovalDecided:
-    turn_id: str
-    approval_id: str
-    allow: bool
-    source: str
-    message: str | None
-    latency_ms: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,12 +104,12 @@ class SessionFaulted:
 
 BridgeEvent = (
     SessionStarted
+    | SessionBound
+    | HandoffInjected
     | TextDelta
     | AssistantText
     | ToolUse
     | ToolResult
-    | ApprovalRequested
-    | ApprovalDecided
     | RateLimitObserved
     | TurnCompleted
     | SessionClosed
@@ -123,5 +117,10 @@ BridgeEvent = (
 )
 
 
+# meiva:note
+# `TextDelta` alone is droppable: a consumer that falls behind may skip text, but
+# never a turn boundary, a tool result or a session binding, because losing one of
+# those loses structure rather than detail.
+# meiva:link base/lm/claude_sdk/docs/claude_sdk.meiva.okf.md
 def is_droppable(event: object) -> bool:
     return isinstance(event, TextDelta)

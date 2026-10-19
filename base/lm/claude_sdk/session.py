@@ -5,15 +5,17 @@ import time
 from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from base.lm.claude_sdk.approval import ApprovalBroker, ApprovalPolicy
 from base.lm.claude_sdk.auth import build_env
 from base.lm.claude_sdk.config import BridgeConfig
 from base.lm.claude_sdk.events import (
     AssistantText,
     BridgeEvent,
+    HandoffInjected,
+    SessionBound,
     SessionClosed,
     SessionFaulted,
     SessionStarted,
@@ -21,6 +23,7 @@ from base.lm.claude_sdk.events import (
     Usage,
     is_droppable,
 )
+from base.lm.claude_sdk.handoff import Handoff
 from base.lm.claude_sdk.mapping import map_message, parse_result
 from base.lm.claude_sdk.process import (
     ChildProbe,
@@ -31,6 +34,7 @@ from base.lm.claude_sdk.process import (
     snapshot,
     wait_gone,
 )
+from base.lm.claude_sdk.registry import SessionRecord, SessionRegistry
 
 # meiva:note
 # One session is one turn engine with three boundaries. Inbound is synchronous and
@@ -63,7 +67,8 @@ def load_sdk() -> Any:
         import claude_agent_sdk
     except ModuleNotFoundError as exc:
         raise ClaudeSdkMissingError(
-            "claude-agent-sdk is not installed; install the 'claude-sdk' extra (uv sync --extra claude-sdk)"
+            "claude-agent-sdk is not installed; install the 'claude-sdk' extra "
+            "(uv sync --extra claude-sdk)"
         ) from exc
     return claude_agent_sdk
 
@@ -81,8 +86,9 @@ class SessionTotals:
         return SessionTotals(
             input_tokens=self.input_tokens + usage.input_tokens,
             output_tokens=self.output_tokens + usage.output_tokens,
-            cache_creation_input_tokens=self.cache_creation_input_tokens
-            + usage.cache_creation_input_tokens,
+            cache_creation_input_tokens=(
+                self.cache_creation_input_tokens + usage.cache_creation_input_tokens
+            ),
             cache_read_input_tokens=self.cache_read_input_tokens + usage.cache_read_input_tokens,
             cost_usd=self.cost_usd + (cost_usd or 0.0),
             turns=self.turns + 1,
@@ -158,17 +164,17 @@ class ClaudeSession:
         config: BridgeConfig,
         *,
         environ: Mapping[str, str],
+        agent_id: int | None = None,
+        registry: SessionRegistry | None = None,
         sdk: Any | None = None,
         probe: ChildProbe | None = None,
-        approval_policy: ApprovalPolicy | None = None,
     ) -> None:
         self.config = config
+        self.agent_id = agent_id
         self._sdk: Any = sdk
         self._probe: ChildProbe = probe or PsutilChildProbe()
+        self._registry = registry
         self._environ = dict(environ)
-        self._approvals = ApprovalBroker(
-            timeout_seconds=config.approval_timeout_seconds, emit=self._emit, policy=approval_policy
-        )
         self._events: asyncio.Queue[Any] = asyncio.Queue()
         self._pending: deque[TurnTicket] = deque()
         self._completed: OrderedDict[str, TurnOutcome] = OrderedDict()
@@ -185,14 +191,18 @@ class ClaudeSession:
         self._baseline: dict[int, str] = {}
         self._closed = False
         self._dropped_deltas = 0
+        self._resumed_existing = False
+        self._record: SessionRecord | None = None
+        self._handoff_ticket: TurnTicket | None = None
 
-    async def start(self, *, resume: str | None = None) -> None:
+    async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         if self._client is not None:
             raise RuntimeError("session already started")
         if self._closed:
             raise SessionClosedError("session is closed")
+        resume = resume or self._resume_from_registry()
         sdk = self._sdk or load_sdk()
-        self._sdk: Any = sdk
+        self._sdk = sdk
         client = sdk.ClaudeSDKClient(options=self._build_options(resume))
         await client.connect()
         self._client = client
@@ -201,12 +211,12 @@ class ClaudeSession:
             await self._tasks.__aenter__()
             self._tasks_entered = True
         self._reader = self._spawn(self._read_loop())
+        self._inject_handoff(handoff)
 
     async def close(self, *, reason: str = "closed") -> None:
         if self._closed:
             return
         self._closed = True
-        self._approvals.deny_all("The session closed before this approval was answered.")
         self._fail_pending(SessionClosedError("session closed"))
         for task in list(self._deadlines.values()):
             task.cancel()
@@ -244,7 +254,8 @@ class ClaudeSession:
                 return existing
         if len(self._pending) >= self.config.max_pending_turns:
             raise InboundQueueFullError(
-                f"{len(self._pending)} turns already queued (limit {self.config.max_pending_turns}); keep the message and retry"
+                f"{len(self._pending)} turns already queued "
+                f"(limit {self.config.max_pending_turns}); keep the message and retry"
             )
         ticket = TurnTicket(
             turn_id=f"turn-{uuid4().hex[:12]}",
@@ -272,6 +283,18 @@ class ClaudeSession:
         return self._session_id
 
     @property
+    def handoff_ticket(self) -> TurnTicket | None:
+        return self._handoff_ticket
+
+    @property
+    def record(self) -> SessionRecord | None:
+        return self._record
+
+    @property
+    def resumed(self) -> bool:
+        return self._resumed_existing
+
+    @property
     def cli_pid(self) -> int | None:
         return self._cli_pid
 
@@ -282,15 +305,6 @@ class ClaudeSession:
     @property
     def dropped_deltas(self) -> int:
         return self._dropped_deltas
-
-    @property
-    def pending_approvals(self) -> Mapping[str, Any]:
-        return self._approvals.pending
-
-    def resolve_approval(
-        self, approval_id: str, *, allow: bool, message: str | None = None
-    ) -> bool:
-        return self._approvals.resolve(approval_id, allow=allow, message=message)
 
     async def interrupt(self) -> CancelReport:
         client = self._require_client()
@@ -350,33 +364,74 @@ class ClaudeSession:
             model=self.config.model,
             cwd=str(self.config.cwd),
             tools=list(self.config.tools),
-            allowed_tools=list(self.config.allowed_tools),
             permission_mode=self.config.permission_mode,
-            system_prompt=self.config.system_prompt,
             max_turns=self.config.max_turns,
             setting_sources=[],
             strict_mcp_config=True,
             include_partial_messages=True,
             env=build_env(self._environ, self.config.auth),
-            can_use_tool=self._can_use_tool,
             resume=resume,
         )
 
-    async def _can_use_tool(self, tool_name: str, tool_input: dict[str, Any], context: Any) -> Any:
-        ticket = self._active
-        outcome = await self._approvals.request(
-            turn_id=ticket.turn_id if ticket is not None else "",
-            tool_name=tool_name,
-            tool_input=dict(tool_input or {}),
-            tool_use_id=getattr(context, "tool_use_id", None),
-            title=getattr(context, "title", None),
-            description=getattr(context, "description", None),
+    def _resume_from_registry(self) -> str | None:
+        if self._registry is None or self.agent_id is None:
+            return None
+        record = self._registry.load(self.agent_id)
+        if record is None:
+            return None
+        self._resumed_existing = True
+        self._record = record
+        return record.session_id
+
+    def _inject_handoff(self, handoff: Handoff | None) -> None:
+        if handoff is None or self._resumed_existing:
+            return
+        key = f"handoff:{self.agent_id}" if self.agent_id is not None else None
+        ticket = self.submit(handoff.render(), key=key)
+        self._handoff_ticket = ticket
+        self._emit(
+            HandoffInjected(
+                agent_id=self.agent_id or 0,
+                turn_id=ticket.turn_id,
+                size_bytes=handoff.size_bytes(),
+            )
         )
-        if outcome.allow:
-            return self._sdk.PermissionResultAllow()
-        return self._sdk.PermissionResultDeny(
-            message=outcome.message or "Denied by the host approval policy."
+
+    def _bind(self) -> None:
+        if self._registry is None or self.agent_id is None or not self._session_id:
+            return
+        previous = self._registry.load(self.agent_id)
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        self._record = SessionRecord(
+            agent_id=self.agent_id,
+            session_id=self._session_id,
+            cwd=str(self.config.cwd),
+            model=self.config.model,
+            created_at=previous.created_at if previous is not None else now,
+            updated_at=now,
+            resumes=(previous.resumes if previous is not None else 0)
+            + (1 if self._resumed_existing else 0),
         )
+        self._registry.save(self._record)
+        self._emit(
+            SessionBound(
+                agent_id=self.agent_id, session_id=self._session_id, resumed=self._resumed_existing
+            )
+        )
+
+    def _touch(self) -> None:
+        if self._registry is None or self._record is None:
+            return
+        self._record = SessionRecord(
+            agent_id=self._record.agent_id,
+            session_id=self._record.session_id,
+            cwd=self._record.cwd,
+            model=self._record.model,
+            created_at=self._record.created_at,
+            updated_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            resumes=self._record.resumes,
+        )
+        self._registry.save(self._record)
 
     async def _begin(self, ticket: TurnTicket) -> None:
         client = self._require_client()
@@ -389,7 +444,6 @@ class ClaudeSession:
             self._fail_turn(ticket, exc)
 
     def _start_deadline(self, ticket: TurnTicket) -> None:
-
         async def expire() -> None:
             await asyncio.sleep(self.config.turn_timeout_seconds)
             if self._active is not ticket:
@@ -397,7 +451,7 @@ class ClaudeSession:
             self._emit(
                 SessionFaulted(
                     turn_id=ticket.turn_id,
-                    error=f"turn exceeded {self.config.turn_timeout_seconds:.0f}s; interrupting",
+                    error=(f"turn exceeded {self.config.turn_timeout_seconds:.0f}s; interrupting"),
                 )
             )
             try:
@@ -427,6 +481,9 @@ class ClaudeSession:
             for event in map_message(message, turn_id=None):
                 if isinstance(event, SessionStarted):
                     self._session_id = event.session_id or self._session_id
+                    self._emit(event)
+                    self._bind()
+                    continue
                 self._emit(event)
             return
         ticket = self._active
@@ -443,7 +500,8 @@ class ClaudeSession:
         if ticket is None:
             self._emit(
                 SessionFaulted(
-                    turn_id=None, error=f"result for no active turn (subtype={fields.subtype})"
+                    turn_id=None,
+                    error=f"result for no active turn (subtype={fields.subtype})",
                 )
             )
             return
@@ -486,12 +544,13 @@ class ClaudeSession:
         ticket._settle(outcome)
         if ticket.key is not None:
             self._remember(ticket.key, outcome)
+        self._touch()
         if self._active is ticket:
             self._active = None
         self._promote()
 
     def _promote(self) -> None:
-        if self._closed or self._active is not None or (not self._pending):
+        if self._closed or self._active is not None or not self._pending:
             return
         ticket = self._pending.popleft()
         self._active = ticket

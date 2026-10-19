@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-from base.lm.claude_sdk.approval import (
-    ApprovalBroker,
-    ApprovalOutcome,
-    ApprovalPolicyResult,
-    PendingApproval,
-)
 from base.lm.claude_sdk.auth import (
     AuthConfig,
     AuthMode,
@@ -15,11 +9,11 @@ from base.lm.claude_sdk.auth import (
 )
 from base.lm.claude_sdk.config import DEFAULT_MODEL, BridgeConfig
 from base.lm.claude_sdk.events import (
-    ApprovalDecided,
-    ApprovalRequested,
     AssistantText,
     BridgeEvent,
+    HandoffInjected,
     RateLimitObserved,
+    SessionBound,
     SessionClosed,
     SessionFaulted,
     SessionStarted,
@@ -30,6 +24,8 @@ from base.lm.claude_sdk.events import (
     Usage,
     is_droppable,
 )
+from base.lm.claude_sdk.handoff import ClusterFact, EntryPoint, Handoff
+from base.lm.claude_sdk.registry import FileSessionRegistry, SessionRecord, SessionRegistry
 from base.lm.claude_sdk.session import (
     CancelReport,
     ClaudeSdkMissingError,
@@ -43,11 +39,6 @@ from base.lm.claude_sdk.session import (
 
 __all__ = [
     "DEFAULT_MODEL",
-    "ApprovalBroker",
-    "ApprovalDecided",
-    "ApprovalOutcome",
-    "ApprovalPolicyResult",
-    "ApprovalRequested",
     "AssistantText",
     "AuthConfig",
     "AuthMode",
@@ -56,13 +47,20 @@ __all__ = [
     "CancelReport",
     "ClaudeSdkMissingError",
     "ClaudeSession",
+    "ClusterFact",
+    "EntryPoint",
+    "FileSessionRegistry",
+    "Handoff",
+    "HandoffInjected",
     "InboundQueueFullError",
     "MissingApiKeyError",
-    "PendingApproval",
     "RateLimitObserved",
+    "SessionBound",
     "SessionClosed",
     "SessionClosedError",
     "SessionFaulted",
+    "SessionRecord",
+    "SessionRegistry",
     "SessionStarted",
     "SessionTotals",
     "TextDelta",

@@ -5,7 +5,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from base.lm.claude_sdk import BridgeConfig, ClaudeSession
+from base.lm.claude_sdk import BridgeConfig, ClaudeSession, Handoff
+from base.lm.claude_sdk.registry import FileSessionRegistry
 from base.lm.claude_sdk.tests.fake_sdk import FakeSDK, ScriptedProbe
 
 CLI_PID = 4242
@@ -60,13 +61,17 @@ async def start(
     *,
     scripts: list[list[Any]] | None = None,
     probe: ScriptedProbe | None = None,
-    approval_policy: Any = None,
     resume: str | None = None,
+    handoff: Handoff | None = None,
+    agent_id: int | None = None,
+    registry: FileSessionRegistry | None = None,
     observe_pid: bool = True,
     environ: dict[str, str] | None = None,
+    session_id: str = "session-1",
     **config_overrides: Any,
 ) -> Harness:
     sdk = FakeSDK(scripts, cli_pid=CLI_PID)
+    sdk.new_session_id = session_id
     if not observe_pid:
         create_client = sdk.ClaudeSDKClient
 
@@ -81,10 +86,11 @@ async def start(
         scripted_probe.alive.add(CLI_PID)
     session = ClaudeSession(
         config(tmp_path, **config_overrides),
+        environ=environ if environ is not None else {},
+        agent_id=agent_id,
+        registry=registry,
         sdk=sdk,
         probe=scripted_probe,
-        approval_policy=approval_policy,
-        environ=environ if environ is not None else {},
     )
-    await session.start(resume=resume)
+    await session.start(resume=resume, handoff=handoff)
     return Harness(session, sdk, scripted_probe)
