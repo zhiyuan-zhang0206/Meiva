@@ -41,6 +41,10 @@ rewriting history:
   default): `request_digest` stays the payload sha and a mismatch still refuses.
   The `request_sha256` field is absent. Historical rows keep today's behaviour
   exactly; nothing becomes passable because it is old.
+- Every payload condition is observed, not only a rewrite: `missing`,
+  `unreadable`, `symlink` and `oversize` join `changed`, classified with `lstat`
+  without following the entry. The evidence file and the event carry the condition,
+  so an operator can tell a deleted envelope from a rewritten one.
 - A payload mismatch is **always** observed: `observe_exec_payload` writes
   `<exec dir>/<agent_id>/evidence/<request>.json` (expected and observed digests,
   size, phase, whether that mismatch is authoritative) and emits one
@@ -60,6 +64,9 @@ both versions.
   discharge rather than a re-verification.
 - Settlement no longer re-reads a 0.8-3 MB envelope on every close and on every
   admission (the read ceiling remains `MAX_PAYLOAD_BYTES` for the observation).
+- **No payload condition may block a version 2 settlement.** A deleted, unreadable,
+  linked or oversized envelope is exactly the failure mode a cleanup command reaches
+  for, and refusing on it would move the wedge from "rewritten" to "removed".
 - **Payload integrity is no longer authoritative.** This is the deliberate
   downgrade: the envelope and the code that can rewrite it share a uid, so byte
   identity was never a boundary, only a detection that fired when nobody had
