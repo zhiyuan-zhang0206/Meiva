@@ -28,7 +28,9 @@ invariants the host relies on:
 4. `interrupt()` asserts that tool child processes were reaped — an unobservable
    process tree is reported as unknown, not as success;
 5. a turn timeout interrupts; it never silently drops the turn;
-6. usage and cost accumulate per turn;
+6. usage and cost accumulate per turn, and `Usage.input_tokens` is the whole
+   prompt — cache reads and cache writes included, with those two fields as
+   subsets — whatever shape the provider reports them in;
 7. the handoff is injected once, when the session is created, and never again on
    resume;
 8. a faulted or closed session stops being usable: the bridge retires it instead of
