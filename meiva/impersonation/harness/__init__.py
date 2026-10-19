@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from meiva.impersonation.harness.attach import HarnessAttachment, attach
+from meiva.impersonation.harness.attach import HarnessAttachment, attach, resolve_registration
 from meiva.impersonation.harness.registration import (
     FileRegistrationStore,
     HarnessRegistration,
@@ -21,4 +21,5 @@ __all__ = [
     "default_store",
     "handle_digest",
     "new_handle",
+    "resolve_registration",
 ]

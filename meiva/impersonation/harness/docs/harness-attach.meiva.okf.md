@@ -32,15 +32,31 @@ bootstrap file in the child's workspace.
 
 ## The registration row
 
-The bridge writes one row per started session
-(`base/lm/harness/` adapters own the writing; `FileRegistrationStore` owns the
-file format under `$MEIVA_HOME/harness/registrations/`). The fields are the
-agent id, the harness name, the provider-side session id, the machine, the
-controller pid, the handle digest, the creation time, and an optional expiry and
-status. The bridge owns the row: it writes it before the child starts and retires
-it when the session ends. The child never writes it back — a provider sandbox
-allows writes only inside the workspace, so a closing child could not delete the
-row anyway, and a failed cleanup must not turn a finished turn into an error.
+**No writer lives in this tree.** This package reads and validates a registration
+row; nothing here writes one, so a machine without the wiring piece answers
+`attach()` with `no harness session matches this handle`. The writer is the
+bridge's half of the seam: it creates one row per started session, hands the
+handle to the child, and retires the row when the session ends. Until that half
+is connected, the end-to-end path is only as complete as the test that fabricates
+a row itself.
+
+`FileRegistrationStore` owns the file format under
+`$MEIVA_HOME/harness/registrations/`: the agent id, the harness name, the
+provider-side session id, the machine, the controller pid, the handle digest, the
+creation time, and an optional expiry and status. The bridge owns the row; the
+child never writes it back — a provider sandbox allows writes only inside the
+workspace, so a closing child could not delete the row anyway, and a failed
+cleanup must not turn a finished turn into an error.
+
+Two constraints the writer must honour, both about the window in which a stale row
+still admits a caller:
+
+- `expires_at` must not outlive the session it belongs to. It is optional in the
+  format, so an expiry-less row stays valid until the bridge retires it; the
+  ancestry check is the only remaining guard, and it accepts the recorded
+  controller pid itself, which a reused pid would satisfy.
+- The row names a controller pid, not a start time; keeping the session short and
+  the expiry no later than it keeps a recycled pid from reviving the authority.
 
 **The handle** is an opaque `hx_<random>` string. Only its SHA-256 is stored, so a
 leaked registration file does not yield a usable handle. The bridge hands the
@@ -55,6 +71,12 @@ revalidates the identity: the row is still attached and unexpired, the process
 runs on the row's machine, and the process descends from the controller pid
 recorded at start. A failed check raises `RegistrationError` at the call site; the
 attachment never degrades into one that writes anyway.
+
+**Plugin-state deltas are not persisted by this identity.** The harness does not
+write plugin state back: `merge_delta` records nothing, so a flush succeeds and
+changes nothing. A harness agent therefore starts from the snapshot the row's
+agent already has and leaves it untouched — deliberate, because the bridge owns
+the agent's durable state and two writers would race.
 
 **There is no capability gate.** A stored declaration is a record, not a check
 (user ruling, 2026-10-19), so an attached harness agent has the same rights as a
