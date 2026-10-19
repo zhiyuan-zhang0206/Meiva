@@ -15,7 +15,8 @@ def grant_event_log_runner_access(conn: psycopg.Connection, runner_role: str) ->
             "GRANT INSERT (id,agent_id,source,machine,reason,status,ttl_seconds,expires_at,"
             "relay_provider,relay_thread_id,relay_codex_remote,relay_token_hash,"
             "relay_batch_window_seconds,name,executor_name,process_metadata,automatic,"
-            "ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version) "
+            "ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version,"
+            "capabilities,capability_declared_by) "
             "ON agent_impersonations TO {}"
         ).format(role)
     )
@@ -27,7 +28,8 @@ def grant_event_log_runner_access(conn: psycopg.Connection, runner_role: str) ->
             "relay_last_failure_at,relay_minted_at,relay_minted_generation,relay_minted_owner,"
             "relay_generation,relay_degraded_reason,relay_degraded_at,"
             "handoff_document,handoff_path,handoff_applied_at,"
-            "next_entry,event_delivery_pending_reason,start_message) ON agent_impersonations TO {}"
+            "next_entry,event_delivery_pending_reason,start_message,capability_declared_by)"
+            " ON agent_impersonations TO {}"
         ).format(role)
     )
     for table in ("agent_impersonation_entries", "agent_impersonation_event_participants"):
