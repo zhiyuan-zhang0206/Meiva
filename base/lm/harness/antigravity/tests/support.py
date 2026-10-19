@@ -10,6 +10,7 @@ from typing import Any
 from base.lm.claude_sdk.process import ChildProbe
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.session import AgySession
+from base.lm.harness.antigravity.transport import AgyTransport, Reaper
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
 CLI_PID = 4242
@@ -120,6 +121,7 @@ async def start(
     agent_id: int | None = None,
     registry: Any | None = None,
     conversation_id: str = "conv-fake",
+    reap: Reaper | None = None,
     **config_overrides: Any,
 ) -> Harness:
     plan = tmp_path / "plan.json"
@@ -127,19 +129,26 @@ async def start(
     received = tmp_path / "received.jsonl"
     argv = tmp_path / "argv.jsonl"
     child = tmp_path / "child.jsonl"
+    settings = config(tmp_path, **config_overrides)
+    environ = {
+        "FAKE_AGY_PLAN": str(plan),
+        "FAKE_AGY_RECEIVED": str(received),
+        "FAKE_AGY_ARGV": str(argv),
+        "FAKE_AGY_CHILD": str(child),
+        "FAKE_AGY_CURSOR": str(tmp_path / "cursor.txt"),
+        "PATH": "/usr/bin:/bin",
+    }
+
+    def factory() -> AgyTransport:
+        return AgyTransport(settings, environ=environ, probe=probe, reap=reap)
+
     session = AgySession(
-        config(tmp_path, **config_overrides),
-        environ={
-            "FAKE_AGY_PLAN": str(plan),
-            "FAKE_AGY_RECEIVED": str(received),
-            "FAKE_AGY_ARGV": str(argv),
-            "FAKE_AGY_CHILD": str(child),
-            "FAKE_AGY_CURSOR": str(tmp_path / "cursor.txt"),
-            "PATH": "/usr/bin:/bin",
-        },
+        settings,
+        environ=environ,
         agent_id=agent_id,
         registry=registry,
         probe=probe,
+        transport_factory=factory,
     )
     await session.start(resume=resume, handoff=handoff)
     return Harness(session, received, argv, child)

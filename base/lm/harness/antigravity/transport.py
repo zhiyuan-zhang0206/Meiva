@@ -6,9 +6,11 @@ import json
 import signal
 import time
 from collections import deque
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
+
+import psutil
 
 from base.lm.claude_sdk.process import (
     ChildProbe,
@@ -42,6 +44,39 @@ class InterruptReport:
     waited_ms: float
     cli_pid: int | None
     cli_alive: bool | None
+    killed: tuple[int, ...] = ()
+
+
+Reaper = Callable[[Mapping[int, str], "Iterable[int]"], "tuple[int, ...]"]
+
+
+# meiva:note
+# The CLI exits on SIGINT but its tool tree does not: `run_command` children are
+# orphaned, and nobody outside this call knows their pids. The adapter therefore
+# reaps what it observed, and still reports honestly — `settled` is true only when
+# every observed pid is gone, so a process that survives SIGKILL shows up in
+# `remaining` instead of being rounded up to a clean cancel.
+# meiva:link base/lm/harness/antigravity/docs/antigravity.meiva.okf.md
+def kill_orphans(observed: Mapping[int, str], pids: Iterable[int]) -> tuple[int, ...]:
+    """SIGKILL the observed children, skipping pids that were reused."""
+
+    killed: list[int] = []
+    for pid in pids:
+        if pid <= 1:
+            continue
+        try:
+            process = psutil.Process(pid)
+            command = " ".join(process.cmdline())[:200]
+        except psutil.Error:
+            continue
+        if observed.get(pid) and command != observed[pid]:
+            continue
+        try:
+            process.kill()
+        except psutil.Error:
+            continue
+        killed.append(pid)
+    return tuple(killed)
 
 
 # meiva:note
@@ -60,8 +95,10 @@ class AgyTransport:
         *,
         environ: Mapping[str, str] | None = None,
         probe: ChildProbe | None = None,
+        reap: Reaper | None = None,
     ) -> None:
         self._config = config
+        self._reap: Reaper = reap or kill_orphans
         self._environ = dict(environ) if environ else None
         self._probe: ChildProbe = probe or PsutilChildProbe()
         self._process: asyncio.subprocess.Process | None = None
@@ -159,6 +196,19 @@ class AgyTransport:
             timeout_seconds=self._config.cancel_settle_seconds,
             poll_seconds=CANCEL_POLL_SECONDS,
         )
+        killed: tuple[int, ...] = ()
+        if not gone:
+            alive = tuple(child for child in spawned if self._probe.is_alive(child))
+            killed = self._reap(observed, alive)
+            if killed:
+                reaped, extra_ms = await wait_gone(
+                    self._probe,
+                    killed,
+                    timeout_seconds=self._config.cancel_settle_seconds,
+                    poll_seconds=CANCEL_POLL_SECONDS,
+                )
+                waited_ms += extra_ms
+                gone = reaped
         remaining = (
             ()
             if gone
@@ -173,6 +223,7 @@ class AgyTransport:
             waited_ms=waited_ms,
             cli_pid=pid,
             cli_alive=self._probe.is_alive(pid),
+            killed=killed,
         )
 
     async def close(self) -> None:
