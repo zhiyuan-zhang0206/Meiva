@@ -54,6 +54,7 @@ vi.mock("@/lib/transport/api", () => ({
     getAgentRoster,
     listPages,
     resolveNotice,
+    getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
   },
 }));
 
@@ -953,7 +954,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     );
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
-    expect(screen.getByText("4:30 PM")).toBeTruthy();
+    expect(screen.getByText("16:30")).toBeTruthy();
     expect(screen.getByText("never paused")).toBeTruthy();
   });
 
@@ -967,8 +968,12 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     );
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
-    expect(screen.getByText("Tomorrow 3:21 PM")).toBeTruthy();
-    expect(vi.mocked(formatUpcoming)).toHaveBeenCalledWith(nextAt, expect.any(Date));
+    expect(screen.getByText("Tomorrow 15:21")).toBeTruthy();
+    expect(vi.mocked(formatUpcoming)).toHaveBeenCalledWith(
+      nextAt,
+      expect.any(Date),
+      expect.objectContaining({ clockFormat: "24h" }),
+    );
   });
 
   it("shows the active pause window when paused", async () => {
@@ -979,7 +984,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("4:38 PM")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("16:38")).toBeTruthy());
     expect(screen.queryByText("every 15m")).toBeNull();
   });
 

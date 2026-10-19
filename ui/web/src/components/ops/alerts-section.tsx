@@ -24,6 +24,7 @@ import { formatRelativeTime } from "@/lib/agents/sidebar";
 import type { Alert, AlertSeverity, AlertStatus } from "@/lib/contracts/types";
 import { useAlertsSection } from "@/lib/notifications/use-alerts";
 import { cn } from "@/lib/format/utils";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 
 // Unresolved severity pill fill — critical = destructive, error = orange,
 // warning = yellow. Resolved pills use muted tokens below; the word stays
@@ -60,6 +61,7 @@ function summaryOf(a: Alert): string {
 
 export default function AlertsSection() {
   const t = useTranslations("alerts");
+  const { formatAbsolute } = useTimeFormat();
   const { data, isLoading, error } = useAlertsSection();
 
   const alerts = data?.alerts ?? [];
@@ -138,7 +140,7 @@ export default function AlertsSection() {
                   )}
                 </TableCell>
                 <TableCell className="hidden lg:table-cell">
-                  <span className="tabular-nums" title={new Date(a.starts_at).toLocaleString()}>
+                  <span className="tabular-nums" title={formatAbsolute(a.starts_at)}>
                     {formatRelativeTime(a.starts_at)}
                   </span>
                 </TableCell>

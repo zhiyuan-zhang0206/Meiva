@@ -18,6 +18,7 @@ const resolveNotice = vi.fn<
 vi.mock("@/lib/transport/api", () => ({
   api: {
     resolveNotice: (a: number, n: number, b: { action: string; reply?: string }) => resolveNotice(a, n, b),
+    getSettings: () => Promise.resolve({ settings: [] }),
   },
 }));
 

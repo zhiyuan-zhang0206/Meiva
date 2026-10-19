@@ -1,58 +1,97 @@
 // meiva:note
-// This module is the single owner of turning an ISO instant into text a person reads; it replaced nine drifting implementations at the tz audit (2026-08). Views see BROWSER-LOCAL time, a deliberate divergence from the cluster `MEIVA_TIMEZONE` an agent sees — consistency means one wording scheme per audience, not one clock for every audience. Three shapes, one job each: `formatAbsolute` (full precision plus a zone name) for a dedicated "when exactly" slot, `formatShort` (compact, no zone) for space-constrained rows, and `formatRelative` (one signed wording, `in 4m` / `5m ago` / `just now`) for every relative-time surface.
+// This module is the single owner of turning an ISO instant into text a person reads; it replaced nine drifting implementations at the tz audit (2026-08). Views see BROWSER-LOCAL time, a deliberate divergence from the cluster `MEIVA_TIMEZONE` an agent sees — consistency means one wording scheme per audience, not one clock for every audience. Three shapes, one job each: `formatAbsolute` (full precision, zone name optional) for a dedicated "when exactly" slot, `formatShort` (compact, no zone) for space-constrained rows, and `formatRelative` (one signed wording, `in 4m` / `5m ago` / `just now`) for every relative-time surface.
 // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 
-export interface FormatAbsoluteOptions {
-  /** Include the abbreviated weekday name between date and time. */
-  weekday?: boolean;
+// meiva:note
+// Clock times are written in one of two formats, chosen by the viewer's `display.clock_format` setting and 24-hour by default: `15:45` or `3:45 PM`. `formatClockText` is the single owner of that choice for the viewer's local zone; every formatter here takes `clockFormat` so no call site can hard-code a 12-hour clock. `formatAbsolute` appends the zone name only when `showTimeZone` is on (setting `display.show_timezone`, default off): the viewer's own zone is implied context, and a bare offset is noise.
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+
+export type ClockFormat = "24h" | "12h";
+
+// meiva:note
+// DEFAULT_CLOCK_FORMAT is 24-hour: the AM/PM suffix is noise beside 24-hour logs, so 12-hour is opt-in (user ruling 2026-10-19).
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+export const DEFAULT_CLOCK_FORMAT: ClockFormat = "24h";
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
-/** Full datetime with seconds and a short timezone name, in the viewer's
- *  local timezone: `2026-07-25 02:53:29 PDT`, or with `weekday: true`:
- *  `2026-07-25 Sat 02:53:29 PDT`. Returns "" for an unparseable iso string —
- *  callers that need a placeholder substitute one (e.g. "—"). */
+// meiva:note
+// ClockTextOptions picks the clock reading and its precision: `seconds` appends `:SS`, and `milliseconds` appends `.mmm` (implying seconds).
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+export interface ClockTextOptions {
+  clockFormat?: ClockFormat;
+  seconds?: boolean;
+  milliseconds?: boolean;
+}
+
+// meiva:note
+// formatClockText renders the viewer-local wall clock and is the one place the 12/24-hour choice is made: `15:45` in 24-hour or `3:45 PM` in 12-hour, with optional seconds and milliseconds for the run-timeline axis.
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+export function formatClockText(d: Date, opts: ClockTextOptions = {}): string {
+  const { clockFormat = DEFAULT_CLOCK_FORMAT, seconds = false, milliseconds = false } = opts;
+  const hour24 = d.getHours();
+  const twelveHour = clockFormat === "12h";
+  const hour = twelveHour ? (hour24 % 12 === 0 ? 12 : hour24 % 12) : hour24;
+  let text = `${twelveHour ? hour : pad2(hour)}:${pad2(d.getMinutes())}`;
+  if (seconds || milliseconds) text += `:${pad2(d.getSeconds())}`;
+  if (milliseconds) text += `.${String(d.getMilliseconds()).padStart(3, "0")}`;
+  if (twelveHour) text += hour24 < 12 ? " AM" : " PM";
+  return text;
+}
+
+// meiva:note
+// FormatAbsoluteOptions: `weekday` inserts the abbreviated weekday between date and time, `clockFormat` chooses 24- or 12-hour (default 24), and `showTimeZone` appends the short zone name (`GMT+8`, `PDT`, `UTC`; default off).
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+export interface FormatAbsoluteOptions {
+  weekday?: boolean;
+  clockFormat?: ClockFormat;
+  showTimeZone?: boolean;
+}
+
+// meiva:note
+// formatAbsolute renders the viewer-local full datetime with seconds: `2026-07-25 02:53:29`, `2026-07-25 Sat 02:53:29` with the weekday, `2:53:29 AM` on the 12-hour clock, and a trailing zone name only when asked. The zone name is requested without any time field, so formatToParts yields date parts plus the zone while the clock comes from formatClockText, the one 12/24-hour implementation. An unparseable iso string yields an empty string; the caller substitutes its own placeholder.
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 export function formatAbsolute(iso: string, opts: FormatAbsoluteOptions = {}): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  const options: Intl.DateTimeFormatOptions = {
+  const { weekday = false, clockFormat = DEFAULT_CLOCK_FORMAT, showTimeZone = false } = opts;
+  const parts = new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-    timeZoneName: "short",
-  };
-  if (opts.weekday) options.weekday = "short";
-  const parts = new Intl.DateTimeFormat("en-US", options).formatToParts(d);
+    ...(weekday ? { weekday: "short" } : {}),
+    ...(showTimeZone ? { timeZoneName: "short" } : {}),
+  }).formatToParts(d);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   const datePart = `${get("year")}-${get("month")}-${get("day")}`;
-  const weekdayPart = opts.weekday ? ` ${get("weekday")}` : "";
-  const timePart = `${get("hour")}:${get("minute")}:${get("second")}`;
-  return `${datePart}${weekdayPart} ${timePart} ${get("timeZoneName")}`;
+  const weekdayPart = weekday ? ` ${get("weekday")}` : "";
+  const timePart = formatClockText(d, { clockFormat, seconds: true });
+  const zonePart = showTimeZone ? ` ${get("timeZoneName")}` : "";
+  return `${datePart}${weekdayPart} ${timePart}${zonePart}`;
 }
 
+// meiva:note
+// FormatShortOptions: `includeDate` prefixes `M/D` (default true; false gives a bare clock cell for a time today), and `clockFormat` chooses 24- or 12-hour (default 24).
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 export interface FormatShortOptions {
-  /** Include the `M/D` date prefix. Default true; pass false for a bare
-   *  wall-clock cell (e.g. "a paused-until time today"). */
   includeDate?: boolean;
+  clockFormat?: ClockFormat;
 }
 
-/** Compact, no timezone: `7/12 15:45`, or with `includeDate: false`:
- *  `15:45`. For space-constrained rows where a full timestamp doesn't fit —
- *  the viewer's own clock is implied context. Returns "—" for an
- *  unparseable iso string. */
+// meiva:note
+// formatShort renders the compact form `7/12 15:45` (`1:45 PM` on the 12-hour clock), or a bare wall-clock cell with `includeDate: false`, for space-constrained rows where the viewer's own clock is implied. An unparseable iso string yields an em dash.
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 export function formatShort(iso: string, opts: FormatShortOptions = {}): string {
-  const { includeDate = true } = opts;
+  const { includeDate = true, clockFormat = DEFAULT_CLOCK_FORMAT } = opts;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  const h = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  if (!includeDate) return `${h}:${mi}`;
+  const clock = formatClockText(d, { clockFormat });
+  if (!includeDate) return clock;
   const mo = d.getMonth() + 1;
   const day = d.getDate();
-  return `${mo}/${day} ${h}:${mi}`;
+  return `${mo}/${day} ${clock}`;
 }
 
 /** Compact elapsed span, floors: `45s` / `2h 14m` / `24d 3h` (the day tier
@@ -94,10 +133,11 @@ const DATE_DAYS_MIN = 30;
 
 export interface FormatUpcomingOptions {
   timeZone?: string;
+  clockFormat?: ClockFormat;
 }
 
 // meiva:note
-// formatUpcoming renders an upcoming instant as a 12-hour clock time plus the day context its viewer-local calendar date requires, and never as a bare clock time for a future day: clock only later today, 'Tomorrow' on the next local date, a weekday name from two to six days, a day count with the date from seven to 29 days, and the date alone from 30 days. The boundary is local midnight, not 24 elapsed hours, so a DST day still counts as one day. A past instant keeps the shared relative wording and an unparseable input yields an em dash.
+// formatUpcoming renders an upcoming instant as a clock time in the viewer's format (24-hour by default, 12-hour when `clockFormat` says so) plus the day context its viewer-local calendar date requires, and never as a bare clock time for a future day: clock only later today, 'Tomorrow' on the next local date, a weekday name from two to six days, a day count with the date from seven to 29 days, and the date alone from 30 days. The boundary is local midnight, not 24 elapsed hours, so a DST day still counts as one day. A past instant keeps the shared relative wording and an unparseable input yields an em dash.
 // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 export function formatUpcoming(
   iso: string | Date,
@@ -109,10 +149,11 @@ export function formatUpcoming(
   if (target.getTime() <= now.getTime()) return formatRelative(target.toISOString(), now);
 
   const zone = opts.timeZone;
+  const clockFormat = opts.clockFormat ?? DEFAULT_CLOCK_FORMAT;
   const targetDate = localDateFields(target, zone);
   const nowDate = localDateFields(now, zone);
   const days = dayOrdinal(targetDate) - dayOrdinal(nowDate);
-  const clock = clockLabel(target, zone);
+  const clock = clockLabel(target, zone, clockFormat);
   const monthDay = monthDayLabel(target, zone, targetDate.year !== nowDate.year);
 
   if (days <= 0) return clock;
@@ -161,9 +202,14 @@ export function normalizeDayPeriodSpace(value: string): string {
   return value.replace(/[\u202f\u00a0]/g, " ");
 }
 
-function clockLabel(d: Date, timeZone?: string): string {
+function clockLabel(d: Date, timeZone: string | undefined, clockFormat: ClockFormat): string {
+  const twelveHour = clockFormat === "12h";
   return normalizeDayPeriodSpace(
-    intlPart(d, timeZone, { hour: "numeric", minute: "2-digit", hour12: true }),
+    intlPart(d, timeZone, {
+      hour: twelveHour ? "numeric" : "2-digit",
+      minute: "2-digit",
+      hour12: twelveHour,
+    }),
   );
 }
 

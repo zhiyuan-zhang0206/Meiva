@@ -9,6 +9,7 @@ import type {
 } from "@/lib/contracts/types";
 import { categoryColor } from "@/lib/context-colors";
 import { EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
+import { DEFAULT_CLOCK_FORMAT, formatClockText, type ClockFormat } from "@/lib/format/time";
 
 export interface TimelineWindow {
   from: string;
@@ -267,21 +268,21 @@ export interface AxisTick {
   label: string;
 }
 
-function pad(value: number, width = 2): string {
-  return String(value).padStart(width, "0");
-}
-
-function tickLabel(ms: number, step: number): string {
+function tickLabel(ms: number, step: number, clockFormat: ClockFormat): string {
   const d = new Date(ms);
-  const clock = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const clock = formatClockText(d, { clockFormat });
   if (step >= DAY) return `${d.getMonth() + 1}/${d.getDate()}`;
   if (step >= MINUTE) return step >= HOUR * 6 ? `${d.getMonth() + 1}/${d.getDate()} ${clock}` : clock;
-  const seconds = `${clock}:${pad(d.getSeconds())}`;
-  return step >= SECOND ? seconds : `${seconds}.${pad(d.getMilliseconds(), 3)}`;
+  if (step >= SECOND) return formatClockText(d, { clockFormat, seconds: true });
+  return formatClockText(d, { clockFormat, milliseconds: true });
 }
 
 /** Round-number ticks (local time) across the viewport, at most about `target` of them. */
-export function axisTicks(view: Viewport, target = 6): AxisTick[] {
+export function axisTicks(
+  view: Viewport,
+  target = 6,
+  clockFormat: ClockFormat = DEFAULT_CLOCK_FORMAT,
+): AxisTick[] {
   const span = view.to - view.from;
   if (!(span > 0)) return [];
   const step = TICK_STEPS.find((candidate) => span / candidate <= target) ?? DAY;
@@ -289,7 +290,7 @@ export function axisTicks(view: Viewport, target = 6): AxisTick[] {
   const offset = step >= HOUR ? new Date(view.from).getTimezoneOffset() * MINUTE : 0;
   const ticks: AxisTick[] = [];
   for (let at = Math.ceil((view.from - offset) / step) * step + offset; at <= view.to; at += step) {
-    ticks.push({ left: ((at - view.from) / span) * 100, label: tickLabel(at, step) });
+    ticks.push({ left: ((at - view.from) / span) * 100, label: tickLabel(at, step, clockFormat) });
   }
   return ticks;
 }

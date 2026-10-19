@@ -6,7 +6,11 @@ import type { RunTimelineMessages, RunTimelineNode, RunTimelineUnit } from "@/li
 import { api } from "@/lib/transport/api";
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getRunTimelineMessages: vi.fn(() => new Promise<never>(() => undefined)), getRunTimelineLinkContent: vi.fn() },
+  api: {
+    getRunTimelineMessages: vi.fn(() => new Promise<never>(() => undefined)),
+    getRunTimelineLinkContent: vi.fn(),
+    getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
+  },
 }));
 
 import { preloadChatMarkdown } from "@/components/content/markdown";

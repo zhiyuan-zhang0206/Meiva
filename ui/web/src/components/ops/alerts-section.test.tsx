@@ -13,6 +13,7 @@ afterEach(cleanup);
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.spyOn(api, "getSettings").mockResolvedValue({ settings: [] });
 });
 
 function response(overrides: Partial<AlertsResponse> = {}): AlertsResponse {

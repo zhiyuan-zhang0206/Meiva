@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 
 import { Metric, Section } from "@/components/inspector/inspector-section";
 import { buttonVariants } from "@/components/ui/button";
-import { formatAbsolute } from "@/lib/format/time";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import { api } from "@/lib/transport/api";
 
 import { useLinkKindLabels } from "./agent-view/agent-view-link-labels";
@@ -51,6 +51,7 @@ function LinkText({ link }: { link: ResolvedLink["link"] }) {
 // meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md
 export function LinkDetail({ resolved, snapshot, onAddAgent }: { resolved: ResolvedLink; snapshot?: string; onAddAgent: (agent: number) => void }) {
   const t = useTranslations("runTimeline");
+  const { formatAbsolute } = useTimeFormat();
   const labels = useLinkKindLabels();
   const { link, external } = resolved;
   const end = (agent: number | null) =>
