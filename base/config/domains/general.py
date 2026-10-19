@@ -43,24 +43,6 @@ class GeneralSettings(EnvSettings):
         },
     )
 
-    impersonation_capability_enforcement: Literal["off", "warn", "enforce"] = Field(
-        default="warn",
-        alias="MEIVA_IMPERSONATION_CAPABILITY_ENFORCEMENT",
-        description=(
-            "How an external controller's declared capabilities are enforced. `warn` (the "
-            "default) records a refused call as impersonation_capability_refused and lets it "
-            "run; `enforce` refuses it; `off` neither records nor refuses. An SDK entry no "
-            "capability classifies counts as refused, so a new surface cannot pass silently. "
-            "Ship warn first: enforce turns a misclassified entry into a broken takeover."
-        ),
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     self_evolution_coverage_alert_floor: float = Field(
         default=0.5,
         ge=0.0,

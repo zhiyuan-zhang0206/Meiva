@@ -26,11 +26,6 @@ from base.agents import impersonation as control
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.agents.impersonation.capabilities import (
-    Capability,
-    CapabilityDenied,
-    declared_capabilities,
-)
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -47,16 +42,7 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from meiva.boot import initialize_context, process_clients
-from meiva.impersonation.capabilities import primary_capability, required_capabilities
 from meiva.sdk_surface import process_context
-
-# meiva:note
-# Enforcement of a lease's declared capabilities
-# (base/agents/impersonation/capabilities.py). `warn` is the shipped default: an
-# unclassified entry must not stop a takeover that worked yesterday, so the first
-# release records what it would have refused and changes no behaviour. Turning
-# this to `enforce` is an operational decision, not a code change.
-CAPABILITY_MODES = ("off", "warn", "enforce")
 
 _attachment_lock = Lock()
 _close_flush_permission = local()
@@ -213,15 +199,9 @@ class Attachment:
             self._event_seal_wait_reader = lambda: cast(
                 float, authority.service_field_value("impersonation_event_seal_wait_seconds")
             )
-            self._capability_mode_reader = lambda: cast(
-                str, authority.service_field_value("impersonation_capability_enforcement")
-            )
         else:
             self._event_seal_wait_reader = lambda: (
                 config.view.general.impersonation_event_seal_wait_seconds
-            )
-            self._capability_mode_reader = lambda: (
-                config.view.general.impersonation_capability_enforcement
             )
         state, overlay, birth = _agent_codec().load_snapshot(
             self.agent_id, database=self._database()
@@ -286,70 +266,19 @@ class Attachment:
             clients=self._own_clients, clock_factory=self._clock_factory, machine=self._machine
         )
 
-    def admit_sdk_call(self, fn: str) -> Any:
+    def admit_sdk_call(self) -> Any:
         with self._call_lock:
             if self._closed or self._closing:
                 raise RuntimeError("external attachment is closing or closed")
             gate = self._event_gate
             if gate is None:
-                self._check_capability(fn, self._checked_lease())
+                self._validate()
                 return None
             with gate.condition:
                 if self._closed or self._closing or gate.admission_closed:
                     raise RuntimeError("external attachment is closing or closed")
-                self._check_capability(fn, self._checked_lease())
+                self._validate()
                 return gate.admit()
-
-    # meiva:note
-    # Refuse (or record) an SDK entry this lease does not declare. A lease without
-    # a declaration is a pre-vocabulary one and keeps the full surface it was issued
-    # with; NULL never means "minimal". Everything else is closed by default: an
-    # entry nobody classified is refused, because a silent allowance is how a
-    # surface grows past its owner. An entry that needs several capabilities passes
-    # only when the lease holds every one of them - partial authority is not authority.
-    def _check_capability(self, fn: str, lease: Mapping[str, Any]) -> None:
-        declared = declared_capabilities(lease)
-        if declared is None:
-            return
-        required = required_capabilities(fn)
-        if required is not None and set(required) <= declared:
-            return
-        mode = self._capability_mode_reader()
-        if mode not in CAPABILITY_MODES:
-            raise RuntimeError(f"unknown impersonation_capability_enforcement value: {mode!r}")
-        if mode == "off":
-            return
-        self._record_capability_refusal(fn, required, mode, lease)
-        if mode == "enforce":
-            raise CapabilityDenied(fn, required, mode)
-
-    # meiva:note
-    # One event per refused (or would-be-refused) call. `capability` keeps the entry's
-    # primary requirement and stays empty when no capability classifies the entry -
-    # that is the finding, not a missing field. `capabilities` carries the whole
-    # requirement set so a reader can see every missing piece, not just the first.
-    def _record_capability_refusal(
-        self,
-        fn: str,
-        required: tuple[Capability, ...] | None,
-        mode: str,
-        lease: Mapping[str, Any],
-    ) -> None:
-        from base import telemetry
-
-        telemetry.emit(
-            "telemetry",
-            "impersonation_capability_refused",
-            level="warning" if mode == "warn" else "error",
-            agent_id=self.agent_id,
-            attributes={
-                "lease_id": str(lease.get("id", self.lease_id)),
-                "entry": fn,
-                "capability": "" if required is None else primary_capability(required).value,
-                "capabilities": [] if required is None else [item.value for item in required],
-                "mode": mode,
-            },
-        )
 
     def capture_local_event(self, event: Any) -> Any:
         from base.agents.impersonation.manifest import capture_local_event
@@ -364,7 +293,7 @@ class Attachment:
             raise RuntimeError(f"external SDK must run on agent machine {lease['machine']!r}")
         return lease
 
-    def _checked_lease(self) -> dict[str, Any]:
+    def _validate(self) -> int:
         if self._closed:
             raise RuntimeError("external attachment is closed")
         lease = self._lease()
@@ -372,10 +301,6 @@ class Attachment:
             raise RuntimeError(
                 "another attachment changed plugin state; attach again before acting"
             )
-        return lease
-
-    def _validate(self) -> int:
-        self._checked_lease()
         return self.agent_id
 
     def flush(self) -> None:

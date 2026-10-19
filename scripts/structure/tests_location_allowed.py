@@ -159,6 +159,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "keeps ci.yml, .pre-commit-config.yaml and ui/web/openapi.json in step with the codegen coverage",
     ),
+    "tests/ci/test_version_pins.py": (
+        "contract",
+        "keeps pyproject.toml, the app crate, the frontend package, their lockfiles, the OpenAPI document and the release docs on one product version",
+    ),
     "tests/ci/test_workflow_paths.py": (
         "contract",
         "scans every .github/workflows file for unfiltered pull_request/push triggers",

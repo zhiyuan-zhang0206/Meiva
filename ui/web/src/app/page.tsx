@@ -86,7 +86,7 @@ function HomeShell({ showError }: HomeShellProps) {
     isLoading: sidebarSettingsLoading,
   } = useSidebarCollapsed();
   const sidebarEntryResetDone = useRef(false);
-  const { settings: userSettings } = useUserSettings();
+  const { settings: userSettings, setSetting } = useUserSettings();
 
   useEffect(() => {
     if (sidebarSettingsLoading || sidebarEntryResetDone.current) return;
@@ -198,6 +198,7 @@ function HomeShell({ showError }: HomeShellProps) {
           noticesFailed={noticeFeed.error}
           mobile={!isLarge}
           onClose={() => { setMobileContextOpen(false); if (inspectorOpen) toggleInspector(); }}
+          onCollapse={isLarge ? () => setSetting("display.context_panel_open", false) : undefined}
         />
       </ErrorBoundary>
     ) : null;
@@ -392,13 +393,11 @@ function HomeContent({
           >
             <AlertsBadge />
             {contextAvailable && <button onClick={openContext} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent">{contextText("openContext")}</button>}
-            {isLarge && activeId != null ? (
+            {isLarge && activeId != null && userSettings["display.context_panel_open"] === false ? (
               <ContextPanelToggle
-                open={userSettings["display.context_panel_open"] !== false}
-                onToggle={() => setSetting(
-                  "display.context_panel_open",
-                  userSettings["display.context_panel_open"] === false,
-                )}
+                open={false}
+                iconClass="size-4"
+                onToggle={() => setSetting("display.context_panel_open", true)}
               />
             ) : null}
           </HeaderBar>
