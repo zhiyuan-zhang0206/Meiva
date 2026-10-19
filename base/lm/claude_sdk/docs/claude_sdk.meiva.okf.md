@@ -16,9 +16,9 @@ engine. It is not a LangChain chat model and not a provider plugin: the SDK driv
 a bundled Claude Code CLI, so a turn is an agentic loop with real tool calls, a
 resumable transcript and a subscription-backed quota.
 
-The bridge is optional infrastructure. The SDK is an optional extra
-(`uv sync --extra claude-sdk`) because it bundles a ~240MB CLI binary, and no
-production path calls the bridge yet — the wiring design is
+The SDK is a regular dependency: its wheel bundles the ~240MB Claude Code CLI the
+bridge drives, so there is no useful state in which the package is installed
+without it. No production path calls the bridge yet — the wiring design is
 [wiring the session into the turn model](../../../../docs/decisions/agents/graph/2026-10-19-claude-sdk-session-bridge.md).
 
 ## Three responsibilities
