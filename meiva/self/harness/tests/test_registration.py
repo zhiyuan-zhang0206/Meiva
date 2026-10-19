@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from meiva.impersonation.harness.attach import attach, descends_from
-from meiva.impersonation.harness.registration import (
+from meiva.self.harness import HANDLE_ENV
+from meiva.self.harness import attach as meiva_attach
+from meiva.self.harness.attachment import descends_from, open_attachment
+from meiva.self.harness.registration import (
     FileRegistrationStore,
     HarnessRegistration,
     RegistrationError,
@@ -73,12 +75,14 @@ def test_an_unknown_pid_is_not_an_ancestor() -> None:
 
 
 def test_attach_without_a_handle_says_how_to_get_one() -> None:
+    if HANDLE_ENV in os.environ:
+        pytest.skip("this session exports a harness handle of its own")
     with pytest.raises(RegistrationError) as caught:
-        attach("")
+        meiva_attach()
     assert "MEIVA_HARNESS_HANDLE" in str(caught.value)
 
 
 def test_attach_with_an_unknown_handle_is_refused(tmp_path: Path) -> None:
     with pytest.raises(RegistrationError) as caught:
-        attach(new_handle(), store=FileRegistrationStore(tmp_path))
+        open_attachment(new_handle(), store=FileRegistrationStore(tmp_path))
     assert "matches this handle" in str(caught.value)

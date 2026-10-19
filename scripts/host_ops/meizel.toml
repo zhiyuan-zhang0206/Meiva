@@ -1,4 +1,4 @@
-exports = ["check_worktree_remove.py", "fleet_update_keep.py"]
+exports = ["check_worktree_remove.py", "fleet_update_keep.py", "onboarding"]
 
 [uses]
 "tests" = [

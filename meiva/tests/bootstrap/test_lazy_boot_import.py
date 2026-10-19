@@ -40,6 +40,7 @@ _CLEAN_ENV_STRIP = frozenset(
         "MEIVA_LOG_DIR",
         "MEIVA_AGENT_LABEL",
         "MEIVA_AGENT_DIR",
+        "MEIVA_HARNESS_HANDLE",
     }
 )
 

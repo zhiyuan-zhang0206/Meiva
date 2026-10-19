@@ -71,6 +71,10 @@ def require_agent_id(context: MeivaContext | None = None) -> int:
     """
     resolved = agent_id(context)
     if resolved is None:
+        if context is None:
+            from meiva.sdk_surface import install as sdk_install
+
+            sdk_install.raise_load_failure()
         raise RuntimeError(
             "this process has no established agent identity — "
             "meiva.agents.spawn / send_message / get_last_message require "
@@ -131,6 +135,10 @@ def require_actor(context: MeivaContext | None = None) -> str:
         return external.source()
     if identity is not None and identity.actor is not None:
         return identity.actor
+    if identity is None and context is None:
+        from meiva.sdk_surface import install as sdk_install
+
+        sdk_install.raise_load_failure()
     if identity is None or identity.agent_id is None:
         raise RuntimeError(
             "this process has no established actor or agent identity — "

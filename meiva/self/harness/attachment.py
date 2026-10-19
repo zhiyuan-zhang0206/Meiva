@@ -18,7 +18,7 @@
 # and an attachment never does; everything else that a caller might forbid —
 # spawning agents, scheduling, spending on `understand` — is a review convention,
 # not a runtime rule.
-# meiva:link meiva/impersonation/harness/docs/harness-attach.meiva.okf.md
+# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
 
 from __future__ import annotations
 
@@ -38,14 +38,14 @@ from base.config.agent_pins import resolve_agent_config_pins
 from base.host.env.agent_slices import PluginConfigView
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from meiva.boot import boot_external_process, initialize_context, plugin_state_codec
-from meiva.impersonation.harness.registration import (
+from meiva.sdk_surface import process_context
+from meiva.self.harness.registration import (
     HarnessRegistration,
     RegistrationError,
     RegistrationStore,
     default_store,
     handle_digest,
 )
-from meiva.sdk_surface import process_context
 
 __all_for_meiva__ = []
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
@@ -57,7 +57,7 @@ HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
 # the controller the row names. They are a pure function of the row, the machine and
 # the ancestry answer, so the decision is testable without booting a process, and a
 # row that stops qualifying stops the caller at its next action.
-# meiva:link meiva/impersonation/harness/docs/harness-attach.meiva.okf.md
+# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
 def require_live_registration(
     registration: HarnessRegistration,
     *,
@@ -313,24 +313,19 @@ def resolve_registration(
     return registration
 
 
-def attach(
-    handle: str | None = None,
+def open_attachment(
+    handle: str,
     *,
     agent_id: int | None = None,
     session_id: str | None = None,
     store: RegistrationStore | None = None,
 ) -> HarnessAttachment:
-    resolved_handle = handle or os.environ.get(HANDLE_ENV)
-    if not resolved_handle:
-        raise RegistrationError(
-            "meiva.impersonation.harness.attach needs the session handle: pass it, or run inside a "
-            f"harness process started by the bridge, which exports {HANDLE_ENV}"
-        )
+    """Build the attachment for one registration handle; the caller owns its lifetime."""
     registration = resolve_registration(
-        resolved_handle, agent_id=agent_id, session_id=session_id, store=store
+        handle, agent_id=agent_id, session_id=session_id, store=store
     )
     return HarnessAttachment(
-        resolved_handle,
+        handle,
         agent_id=registration.agent_id,
         session_id=registration.external_session_id,
         registration=registration,

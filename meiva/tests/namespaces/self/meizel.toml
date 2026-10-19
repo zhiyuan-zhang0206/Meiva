@@ -1,0 +1,5 @@
+exports = []
+
+[uses]
+"test_attach_import.py" = ["attach_probes.py"]
+"attach_probes.py" = []

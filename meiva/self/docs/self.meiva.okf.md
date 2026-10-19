@@ -38,6 +38,9 @@ own an independent identity or borrow and restore the prior context's exact one.
 The following members are mounted onto the `meiva.self` namespace by the `meiva_fleet` plugin (non-core), allowing agents to report status to the fleet monitoring view. See plugin-side OKF for details.
 - `set_label(text)` — Set role label (stable role name, not task summary); peers discover you via this label using `get_neighbors`, and your responsibility chain via `get_ancestors`. The label is also stated in your own agent-ID context note at every window establishment.
 
+## Borrowed harness identity
+An external harness process acts as this agent through `meiva.attach()`: the bridge writes one registration row, exports the handle, and the SDK borrows that identity on the process's first read that needs one. See [[meiva/self/harness/docs/harness-attach.meiva.okf.md|harness attach]].
+
 ## Key Dependencies
 - [[agent/docs/lifecycle.meiva.okf.md]] — underlying implementation of restart/terminate
 - [[env-vars.meiva.okf.md]] — AGENT_ID environment variable passing
