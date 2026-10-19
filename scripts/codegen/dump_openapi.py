@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tomllib
 from pathlib import Path
 
 # Put project root on sys.path so the explicit gateway app factory can be imported.
@@ -31,10 +32,22 @@ if __name__ == "__main__":
 # does not exercise the SDK or make any gateway HTTP calls.
 
 
+def _product_version() -> str:
+    pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
+    version = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+    if not isinstance(version, str):
+        raise TypeError(f"{pyproject} [project].version is not a string")
+    return version
+
+
 def main() -> int:
     from gateway.app import openapi_schema
 
     spec = openapi_schema()
+    # meiva:note
+    # FastAPI defaults info.version to 0.1.0; the checked-in contract carries
+    # the product version instead so the document has one version answer.
+    spec["info"]["version"] = _product_version()
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "ui/web/openapi.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     # Trailing newline so the pre-commit `end-of-file-fixer` hook stops
