@@ -105,6 +105,17 @@ Smoke before trusting local results: `uv sync --frozen --dry-run` prints "Would 
 changes", and `.venv/bin/pytest --collect-only -q <affected suite>` collects without
 errors.
 
+**A hook that cannot start has not passed.** The same failure shape hides in the pre-push
+stage: `check-code-comments` runs in a throwaway checkout under `/tmp`, which has no
+`ui/web/node_modules`, so on a host without the frontend dependencies it stops at
+`Cannot find module 'typescript'` and reports nothing. Twenty-nine free-comment
+violations accumulated on one branch that way, and CI was the first place they showed.
+Point the hook at a checkout that has them:
+
+```bash
+NODE_PATH=<any-checkout>/ui/web/node_modules git push
+```
+
 **Which home a worktree reads.** With `MEIVA_HOME` unset the home is `~/.meiva`; on a
 development machine that also runs production, that is the production cluster. A
 home that carries its own `<home>/source` checkout is operated only by that
