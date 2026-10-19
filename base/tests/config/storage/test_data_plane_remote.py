@@ -11,6 +11,9 @@ makes the pool footprint config-driven with explicit caller sizes winning.
 
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from base.config.domains.storage.data_plane import (
     DataPlaneSettings,
     resolved_pool_size,
@@ -161,3 +164,33 @@ def test_local_url_credentials_are_never_rederived() -> None:
         MEIVA_CLUSTER_SECRET=_LOCAL_SECRET,
     )
     assert s.db_url == delivered + "?hostaddr=127.0.0.1"
+
+
+# meiva:note
+# The two restore budgets answer different questions and must stay ordered: the
+# server timers end a slow backend, the client deadline ends a silent one. At
+# equal values the client preempts a cancel that was about to complete, costing
+# the connection and the `ended_by` attribution. Refused at load, not clamped.
+def test_the_client_restore_deadline_must_exceed_the_statement_budget() -> None:
+    with pytest.raises(ValidationError, match="must be greater than"):
+        DataPlaneSettings(
+            MEIVA_DB_URL=_FOREIGN_DB,
+            MEIVA_REDIS_URL=_FOREIGN_REDIS,
+            MEIVA_CLUSTER_SECRET=_LOCAL_SECRET,
+            MEIVA_DB_POOL_RESTORE_TIMEOUT_SECONDS=10.0,
+            MEIVA_DB_POOL_RESTORE_CLIENT_DEADLINE_SECONDS=10.0,
+        )
+
+
+# meiva:note
+# The shipped defaults satisfy the ordering (5 s server, 8 s client), so no
+# deployment that leaves both unset starts failing after this rule.
+def test_the_default_deadline_leaves_room_for_the_server_timer() -> None:
+    s = DataPlaneSettings(
+        MEIVA_DB_URL=_FOREIGN_DB,
+        MEIVA_REDIS_URL=_FOREIGN_REDIS,
+        MEIVA_CLUSTER_SECRET=_LOCAL_SECRET,
+    )
+    assert s.db_pool_restore_client_deadline_seconds > s.db_pool_restore_timeout_seconds, (
+        "a client deadline at or below the statement budget would preempt it"
+    )
