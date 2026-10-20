@@ -8,8 +8,17 @@ import { useTranslations } from "next-intl";
 import { cn } from "@/lib/format/utils";
 import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 
-// The circle is clipped above the revealed native scroll space. No visible
-// instructions compete with the conversation; the label remains accessible.
+// meiva:note
+// The ring's natural box: the pull strip scales it, so this is the height at
+// which the whole circle is on screen.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+const RING_SIZE = 20;
+
+// meiva:note
+// The circle sits inside the revealed native scroll space and scales with it.
+// No visible instructions compete with the conversation; the label remains
+// accessible.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
 export function LoadOlderSpinner({ loadingOlder, pullProgress = 0, pullOffset = 0, returning = false }: {
   loadingOlder: boolean; pullProgress?: number; pullOffset?: number; returning?: boolean;
 }) {
@@ -17,6 +26,13 @@ export function LoadOlderSpinner({ loadingOlder, pullProgress = 0, pullOffset = 
   const visible = loadingOlder || pullOffset > 0;
   const state = loadingOlder ? "loading" : pullProgress >= 1 ? "ready" : "pulling";
   const height = pullOffset || (loadingOlder ? 40 : 0);
+  // meiva:note
+  // The strip is the revealed pull space and it is `overflow-hidden`, so a
+  // fixed-size ring is sliced into a bar for the first few pixels of a pull
+  // (user report 2026-10-20: "a spinner with no bottom"). Scaling it with the
+  // strip keeps the whole ring on screen at every pull distance.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  const ringScale = height > 0 ? Math.min(1, height / RING_SIZE) : 1;
   const circumference = 2 * Math.PI * 8;
   const arc = loadingOlder ? 0.72 : 0.18 + 0.54 * pullProgress;
   return (
@@ -35,7 +51,8 @@ export function LoadOlderSpinner({ loadingOlder, pullProgress = 0, pullOffset = 
       )}
     >
       {visible ? (
-        <svg viewBox="0 0 24 24" className="size-5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true">
+        <svg viewBox="0 0 24 24" style={{ transform: `scale(${ringScale})` }}
+          className="size-5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true">
           <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" opacity="0.15" />
           <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"
             strokeDasharray={`${circumference * arc} ${circumference * (1 - arc)}`} />

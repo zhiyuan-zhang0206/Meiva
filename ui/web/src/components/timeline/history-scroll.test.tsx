@@ -329,6 +329,21 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(700);
   });
 
+  it("one loading ring at a time: an older-history load keeps the bottom button quiet", () => {
+    render(<TimelineView items={items} threadKey="one-ring" loadingNew loadingOlder />, {
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    });
+    // meiva:note
+    // A background refetch and an older-page fetch can overlap; two rings spun at
+    // once on the same screen (user report 2026-10-20). The pull strip owns the
+    // ring while older history loads.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    const button = screen.getByTestId("scroll-to-bottom");
+    expect(button.getAttribute("aria-busy")).toBe("false");
+    expect(button.querySelector(".animate-spin")).toBeNull();
+    expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("loading");
+  });
+
   it("uses the bottom button's existing footprint for a refresh without moving content", () => {
     const { rerender } = render(<TimelineView items={items} threadKey="spinner" loadingNew />, {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,

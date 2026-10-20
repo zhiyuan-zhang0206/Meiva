@@ -33,7 +33,12 @@ the follow flag (a height change with no scroll event would otherwise leave it
 hidden). While a refresh is in flight it rests on the same ring the
 pull-to-load gesture uses and swaps to the arrow on hover or keyboard
 focus, so waiting never hides that the control is still a button (user
-report 2026-10-19). Its smooth ride requests the stick instead of pinning, so the
+report 2026-10-19). Only one ring is ever on screen: a background refetch does
+not put one on this button while the pull strip is spinning for an
+older-history load, which it would otherwise do beside it (user report
+2026-10-20). The pull strip's own ring scales with the revealed pull space, so
+the first pixels of a pull show a small whole circle instead of a fixed circle
+sliced into a bar by the strip's clipping (same report). Its smooth ride requests the stick instead of pinning, so the
 asynchronous ride survives, and growth mid-ride pins instantly because the
 controller is already following. An agent switch hides the button in the same
 commit, supersedes an unreachable restore target, and pins with a fresh run so a

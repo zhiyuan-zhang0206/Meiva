@@ -881,7 +881,7 @@ export const TimelineView = memo(function TimelineView({
           <div ref={endRef} />
         </div>
       </ScrollArea>
-      <ScrollToBottomButton atBottom={atBottom} refreshing={loadingNew} onClick={handleScrollToBottom} />
+      <ScrollToBottomButton atBottom={atBottom} refreshing={loadingNew && !loadingOlder} onClick={handleScrollToBottom} />
     </div>
   );
 });

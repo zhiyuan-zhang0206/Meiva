@@ -204,13 +204,27 @@ describe("spawn table", () => {
     const form = await table();
     expect(selected(form, MODEL_COLUMN, /deepseek-v4-pro/)).toBe(true);
     expect(selected(form, EFFORT_COLUMN, "max")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Spawn on test-host" }));
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     expect(onSpawn).toHaveBeenCalledWith({
       machine: "test-host",
       model: "deepseek-v4-pro",
       reasoning_effort: "max",
     });
     expect(onDone).toHaveBeenCalledOnce();
+  });
+
+  it("one spawnable host is just Spawn: the machine name is not a label", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
+    wrap();
+    await table();
+    // meiva:note
+    // The footer names no machine when there is only one: the host name is a
+    // deployment detail, and "Spawn on preview" read as if the product knew it
+    // was a preview build (user 2026-10-20).
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    expect(screen.getByRole("button", { name: "Spawn" })).toBeTruthy();
+    expect(screen.queryByText(/Spawn on/)).toBeNull();
   });
 
   it("opens with the stored spawn config marked selected", async () => {
@@ -253,7 +267,7 @@ describe("spawn table", () => {
     wrap();
     const form = await table();
     pick(form, EFFORT_COLUMN, "high");
-    fireEvent.click(screen.getByRole("button", { name: "Spawn on test-host" }));
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     // meiva:note
     // No stored model or effort means the cascade filled them in; the spawn
     // writes what it actually sent, so the next open marks the same rows.
@@ -273,7 +287,7 @@ describe("spawn table", () => {
     pick(form, HARNESS_COLUMN, "Claude Code");
     expect(within(column(form, MODEL_COLUMN)).queryByText("deepseek-v4-pro")).toBeNull();
     expect(selected(form, MODEL_COLUMN, /claude-opus-4-8/)).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Spawn on test-host" }));
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     expect(onSpawn).toHaveBeenCalledWith({
       machine: "test-host",
       model: "claude-opus-4-8",
@@ -303,7 +317,7 @@ describe("spawn table", () => {
     const form = await table();
     pick(form, EFFORT_COLUMN, "high");
     expect(selected(form, EFFORT_COLUMN, "high")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Spawn on test-host" }));
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     expect(onSpawn).toHaveBeenCalledWith(expect.objectContaining({ reasoning_effort: "high" }));
   });
 
@@ -317,7 +331,7 @@ describe("spawn table", () => {
     const efforts = within(column(form, EFFORT_COLUMN)).getAllByRole("button").map((b) => b.textContent);
     expect(efforts).toEqual(["minimal", "low", "medium", "high"]);
     expect(selected(form, EFFORT_COLUMN, "medium")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Spawn on test-host" }));
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     expect(onSpawn).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.6", reasoning_effort: "medium" }));
   });
 

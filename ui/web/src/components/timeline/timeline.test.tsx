@@ -203,6 +203,7 @@ vi.mock("@/lib/state/use-user-settings", () => ({
 }));
 
 import { TimelineView } from ".";
+import { LoadOlderSpinner } from "./overlays";
 import { ItemView, streamingParseIntervalMs } from "./item";
 import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "./markers";
 import { resolveSavedTimelineAnchor } from "./model/use-timeline-window";
@@ -1575,6 +1576,18 @@ describe("load-older circle (revealed above the messages)", () => {
     expect(overlay?.className).not.toContain("opacity-0");
     expect(overlay?.getAttribute("aria-hidden")).toBe("false");
     expect(overlay?.querySelector(".animate-spin")).not.toBeNull();
+  });
+
+  // meiva:note
+  // The pull strip is overflow-hidden and only as tall as the revealed space, so
+  // a fixed-size ring is sliced into a bar for the first few pixels of a pull
+  // (user report 2026-10-20). The ring scales with the strip instead.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  it("a short pull scales the ring instead of slicing it into a bar", () => {
+    render(<LoadOlderSpinner loadingOlder={false} pullProgress={0.4} pullOffset={8} />);
+    const ring = screen.getByTestId("load-older-spinner").querySelector("svg");
+    expect(ring?.getAttribute("style")).toContain("scale(0.4)");
+    expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("pulling");
   });
 
   // An idle overlay must not keep an invisible animation running.
