@@ -83,7 +83,14 @@ def test_failed_refresh_preserves_policy_and_warns(monkeypatch: pytest.MonkeyPat
     finally:
         logger.remove(sink)
     assert cache.value.sample_every == 5
-    warned = [row for row in reports if row["level"].name == "WARNING"]
+    # meiva:note
+    # The sink is process-wide: keep this module's own report, not whichever
+    # warning another producer emitted first.
+    warned = [
+        row
+        for row in reports
+        if row["level"].name == "WARNING" and "sampling config fetch unavailable" in row["message"]
+    ]
     assert warned and warned[0]["exception"] is not None  # the traceback rides it (#4979)
     assert warned[0]["exception"].type is httpx.ConnectError
     assert warned[0]["extra"]["_no_emitter"] is True

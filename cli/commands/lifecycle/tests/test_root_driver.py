@@ -88,8 +88,11 @@ def test_raising_identity_probe_reads_unavailable_and_warns() -> None:
         }
     finally:
         logger.remove(sink)
-    assert len(records) == 1
-    assert "ValueError: probe bug" in records[0]
+    # meiva:note
+    # The sink is process-wide: count this probe's own report, not every warning
+    # another producer emitted in the same window.
+    reported = [record for record in records if "ValueError: probe bug" in record]
+    assert len(reported) == 1
 
 
 def test_readiness_uses_one_status_observation(monkeypatch: pytest.MonkeyPatch) -> None:

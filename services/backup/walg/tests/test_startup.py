@@ -43,10 +43,21 @@ def _connect(row: tuple[Any, ...] | None) -> Callable[[], Any]:
     return connect
 
 
+# meiva:note
+# loguru's sink is process-wide, so these fixtures keep only this module's records:
+# "silent" has to mean "startup logged nothing", not "no other thread logged".
+_MODULE = "services.backup.walg.startup"
+
+
 @pytest.fixture
 def errors() -> Generator[list[str]]:
     captured: list[str] = []
-    handler = logger.add(lambda message: captured.append(str(message)), level="ERROR")
+    handler = logger.add(
+        lambda message: (
+            captured.append(str(message)) if message.record["name"] == _MODULE else None
+        ),
+        level="ERROR",
+    )
     yield captured
     logger.remove(handler)
 
@@ -54,7 +65,12 @@ def errors() -> Generator[list[str]]:
 @pytest.fixture
 def warnings() -> Generator[list[str]]:
     captured: list[str] = []
-    handler = logger.add(lambda message: captured.append(str(message)), level="WARNING")
+    handler = logger.add(
+        lambda message: (
+            captured.append(str(message)) if message.record["name"] == _MODULE else None
+        ),
+        level="WARNING",
+    )
     yield captured
     logger.remove(handler)
 
