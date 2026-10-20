@@ -292,26 +292,6 @@ systemd-run --user --scope -p MemoryMax=12G -- python heavy_job.py
   reads the cgroup tree only and raises no alert: an alarm needs a baseline
   first.
 
-### Optional rendered-page inspection
-
-`scripts/post_deploy_visual/check.py` is an optional inspection tool. It grants
-no production access and is not a release gate. Choose an authorized target;
-the deployment owner supplies any authentication and notification policy.
-
-Run `--check --base-url <frontend-entry-url> --health-url <gateway-origin-url>`.
-The frontend URL must serve the UI, while the health URL names the gateway:
-the script appends `/api/health` and rejects a frontend URL serving gateway
-health JSON. It uses repo-pinned Playwright Chromium and writes browser probes,
-metadata and capture artifacts. Use `--output-root <artifact-directory>` for
-the target; choose the monitoring schedule as part of the deployment policy.
-
-If authentication is needed, `MEIVA_VISUAL_GATE_COOKIE_FILE` accepts a mode-0600
-Playwright storage-state JSON, Netscape cookie jar or `name=value` file. Protect
-that file as a credential and revoke a leaked session through the target's
-supported logout flow. No command implicitly accepts a new visual baseline;
-`--accept-wave <sha> --accepted-by <reviewer>` records an explicit acceptance.
-The output's escalation policy is diagnostic; an operator decides its use.
-
 ### Start / check / restart
 
 The CLI owns local lifecycle; `meiva start` initializes a fresh home and resumes an

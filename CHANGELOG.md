@@ -7,6 +7,14 @@ and the matching GitHub Releases.
 
 ## [Unreleased]
 
+### Removed
+
+- The frontend pixel-regression apparatus is gone (user ruling 2026-10-20): the
+  Visual baselines workflow, the screenshot regression suite with its goldens, the
+  preview-gate matrix with its 44 captures, and the post-deploy visual gate. The
+  real-browser structural probes it shared (overflow, containment, occlusion,
+  visibility) remain, unused by any pixel comparison.
+
 ### Changed
 - The create popover is one table instead of three dropdowns: harness, then the models that
   harness runs, then the efforts that model publishes — each column narrows the next and the
