@@ -532,8 +532,14 @@ half, use the separate commands:
   decision too. Then, before the first stop, it opens the window's
   alert silence (below). Then it runs `meiva stop -y --timeout 600` on each runner and
   then the gateway (each must leave phase `stopped` with no failures; the keep flags ride
-  the same stop), then on
-  every host checks out NEW detached, repairs legacy read-only venv
+  the same stop). A stop that fails part-way does not leave the cluster half
+  stopped: `down` brings back every host it took down (a host that was serving
+  when the window began, is down now, and whose stop completed here or whose
+  `run/lifecycle-op.json` records a failed stop), on the OLD commit it still
+  carries, through `up`'s own start shape; the failure output names `recovered:`
+  and `needs manual:` and the half still exits non-zero. Then, when every stop
+  succeeded, it moves on to the switch: on
+  every host it checks out NEW detached, repairs legacy read-only venv
   directories, runs `uv sync --frozen` and requires a clean tree.
 - Runners fetch through the gateway's source clone (their checkout's `origin` is the gateway host's `~/.meiva/source`): the target commit is fetched by SHA before it is reachable from any of the clone's refs, so the clone carries `uploadpack.allowAnySHA1InWant=true` (repo-local; set 2026-09-30). A reclone of the clone must re-apply it.
 - A failed stop prints the next step: on that host retry

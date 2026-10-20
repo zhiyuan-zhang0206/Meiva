@@ -57,6 +57,16 @@ class Cluster:
         self.lease_reply: str | None = None
         self.lease_rc = 0
         # meiva:note
+        # The daemon each host still runs, the last stop journal its lifecycle file holds, and the
+        # two stop failures a test can stage: one that takes the daemon with it (the #5438 shape)
+        # and one that leaves it running (a failed stop is not automatically an outage).
+        # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+        self.host_up: dict[str, bool] = dict.fromkeys(self.hosts, True)
+        self.journal: dict[str, dict[str, Any] | None] = dict.fromkeys(self.hosts)
+        self.stop_fails: dict[str, int] = {}
+        self.stop_fails_leaves_up: set[str] = set()
+        self.recover_fails: set[str] = set()
+        # meiva:note
         # Where each read happened: the effects already accepted, so a test can prove the leases
         # are named before anything stops.
         # meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
@@ -71,14 +81,29 @@ class Cluster:
     def _runners_up(self) -> bool:
         return any(h["up"] for a, h in self.hosts.items() if a != "gw")
 
+    # meiva:note
+    # One stop: a staged failure keeps its daemon only when the test says so.
+    # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+    def _stop(self, alias: str, host: dict[str, Any]) -> int:
+        assert not (alias == "gw" and self._runners_up()), "gateway stopped before a runner"
+        rc = self.stop_fails.get(alias, 0)
+        if not rc or alias not in self.stop_fails_leaves_up:
+            host["up"], host["hold"] = False, ("paused", "stopped")
+            self.host_up[alias] = False
+        self.journal[alias] = {
+            "operation": "stop",
+            "complete": True,
+            "result": {"rc": rc, "error": None if not rc else "RuntimeError: helper busy"},
+        }
+        return rc
+
     def _effect(self, kind: str, alias: str, host: dict[str, Any], command: str) -> int:
         self.effects.append((kind, alias))
         if self.fail.get((kind, alias)):
             return self.fail[(kind, alias)]
         if kind == "stop":
-            assert not (alias == "gw" and self._runners_up()), "gateway stopped before a runner"
-            host["up"], host["hold"] = False, ("paused", "stopped")
-        elif kind == "switch":
+            return self._stop(alias, host)
+        if kind == "switch":
             assert not host["up"] and self.new in command
             assert fleet_update.CLEAN in shlex.split(command)[2]
             assert "uv sync --frozen --compile-bytecode" in command
@@ -86,11 +111,27 @@ class Cluster:
         elif kind in ("start", "oneshot"):
             assert (kind == "oneshot") == (host["os"] == "Darwin")
             assert self.hosts["gw"]["up"] if alias != "gw" else not self._runners_up()
+            if alias in self.recover_fails:
+                return 1
             host["up"], host["hold"] = True, ("resumed", None)
+            self.host_up[alias] = True
         elif kind == "smoke":
             self.smoked.append(command.partition(" - smoke ")[2].split()[0].strip("'"))
         elif kind == "refresh":
             assert "--force" not in command
+        return 0
+
+    def _hold_json(self, host: dict[str, Any]) -> str:
+        status, phase = host["hold"]
+        return json.dumps({"hold": {"status": status, "maintenance": phase and {"phase": phase}}})
+
+    def _reported(self, host: dict[str, Any], probing: bool, emit: Callable[[str], None]) -> int:
+        if not probing:
+            emit(self._hold_json(host))
+            return 0
+        for key in ("head", "dirty", "hook", "active"):
+            emit(f"{key}={host[key]}")
+        emit(f"hold={self._hold_json(host)}")
         return 0
 
     def _roster_json(self) -> str:
@@ -119,23 +160,9 @@ class Cluster:
         if command == "uname -s":
             emit(str(host["os"]))
             return 0
-        status, phase = host["hold"]
-        hold = json.dumps(
-            {
-                "hold": {
-                    "status": status,
-                    "maintenance": phase and {"phase": phase},
-                }
-            }
-        )
-        if '"head=$(git rev-parse HEAD)"' in command:
-            for key in ("head", "dirty", "hook", "active"):
-                emit(f"{key}={host[key]}")
-            emit(f"hold={hold}")
-            return 0
-        if command.endswith("status --json'"):
-            emit(hold)
-            return 0
+        probing = '"head=$(git rev-parse HEAD)"' in command
+        if probing or command.endswith("status --json'"):
+            return self._reported(host, probing, emit)
         if "machine_from_boot(ConfigBoot()).name()" in command:
             emit(self.names[alias])
             return 0
@@ -145,6 +172,12 @@ class Cluster:
             return 0
         if stdin in (fleet_update.silence_program(), fleet_update.leases_program()):
             return self._shipped(alias, command, stdin, emit)
+        if "agent_host.pid" in command:
+            emit(f"host={'up' if self.host_up[alias] else 'down'}")
+            journal = self.journal.get(alias)
+            if journal is not None:
+                emit(json.dumps(journal))
+            return 0
         if "converge-incomplete.json" in command:
             return self._incomplete(alias, emit)
         if "verify" in command:
