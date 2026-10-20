@@ -37,8 +37,12 @@ from tests.fixtures.gateway_config import gateway_test_client
 Channels = dict[str, list[dict[str, Any]]]
 
 
+def _no_report(queue: ChannelQueue, n: int) -> None:
+    return None
+
+
 def _alert_payload(row_id: int = 1) -> str:
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(UTC)
     return AlertRow(
         id=row_id,
         status="unresolved",
@@ -78,7 +82,7 @@ class Collected:
 
 
 async def _collect(
-    publisher: sync_redis.Redis,
+    publisher: Any,
     publishes: list[tuple[str | None, str]],
     stop: Callable[[Collected], bool],
     *,
@@ -86,7 +90,7 @@ async def _collect(
     agent_filter: set[int] | None = None,
     throttle_rate: float = 50.0,
     pending_limit: int = 1000,
-    reporter: Callable[[Any, int], None] | None = None,
+    reporter: Callable[[ChannelQueue, int], None] = _no_report,
     frame_timeout: float = 5.0,
     overall_timeout: float = 60.0,
 ) -> Collected:
@@ -98,7 +102,7 @@ async def _collect(
         agent_filter=agent_filter,
         throttle_rate=throttle_rate,
         pending_limit=pending_limit,
-        **({} if reporter is None else {"reporter": reporter}),
+        reporter=reporter,
     )
     seen = Collected(by_channel={}, errors=[], dropped=[])
 
@@ -113,14 +117,12 @@ async def _collect(
         channel = str(payload["ch"])
         if payload.get("dropped"):
             seen.dropped.append((channel, int(payload["dropped"])))
-        events = payload["events"]
-        assert isinstance(events, list), f"events is not an array: {payload!r}"
+        raw_events = payload["events"]
+        assert isinstance(raw_events, list), f"events is not an array: {payload!r}"
         bucket = seen.by_channel.setdefault(channel, [])
-        bucket.extend(
-            event
-            for event in events
-            if isinstance(event, dict) and event.get("role") != "heartbeat"
-        )
+        for event in cast(list[Any], raw_events):
+            if isinstance(event, dict) and event.get("role") != "heartbeat":
+                bucket.append(cast(dict[str, Any], event))
 
     async def _publish() -> None:
         await asyncio.sleep(0.05)
