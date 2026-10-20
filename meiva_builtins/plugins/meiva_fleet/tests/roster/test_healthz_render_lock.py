@@ -26,7 +26,7 @@ import pytest
 from base.cluster.machine import MachineRole
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
-from base.native_process.stop_timing import HOST_STOP_CEILING_S
+from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
 from base.packages.plugins.config_registration import disk_image_path
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from services.supervision import roster
@@ -72,9 +72,10 @@ class _Legacy:
 
 
 # meiva:note
-# The agent-host row also declares the stop ceiling its graceful exit added after the
-# migration: the TERM window it derives is a deliberate change, every other launch fact of
-# the row stays locked.
+# The agent-host and ops rows also declare the stop ceiling their SIGTERM exits added after
+# the migration (the host settles running turns to their restart, ops drains the requests it
+# admitted): the TERM window each derives is a deliberate change, every other launch fact of
+# the rows stays locked.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 _LEGACY = (
     _Legacy("im-bridge", "services.entrypoints.im_bridge.daemon", _GATEWAY, True),
@@ -110,7 +111,13 @@ _LEGACY = (
         profile="agent",
         stop_ceiling_s=HOST_STOP_CEILING_S,
     ),
-    _Legacy("ops", "services.agent_runner.agent_ops.daemon", _RUNNER, True),
+    _Legacy(
+        "ops",
+        "services.agent_runner.agent_ops.daemon",
+        _RUNNER,
+        True,
+        stop_ceiling_s=OPS_STOP_CEILING_S,
+    ),
     _Legacy(
         "task-maintenance",
         "meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon",
