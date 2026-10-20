@@ -13,7 +13,6 @@ import { api } from "@/lib/transport/api";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { errMsg } from "@/lib/contracts/errors";
 import { useSidebarCollapsed, useSidebarViewMode } from "@/lib/agents/sidebar";
-import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { useStore } from "@/lib/state/store";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 
@@ -39,12 +38,12 @@ export function AgentSidebar(props: Props) {
   const { isNarrow } = useBreakpoint();
   const { collapsed: collapsedSetting, setCollapsed } = useSidebarCollapsed();
   // meiva:note
-  // Inspector mode hides the rail without writing `display.sidebar_collapsed`:
-  // the hide is the mode's, not the user's preference, so leaving the mode must
-  // bring back exactly what was there (user 2026-10-20).
+  // The rail stays mounted in inspector mode: the mode changes what the right
+  // column shows, not whether the agent tree is reachable (user 2026-10-20,
+  // reversing the earlier mode-hides-the-rail rule). `display.sidebar_collapsed`
+  // remains the only thing that collapses it.
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
-  const { open: inspectorMode } = useInspectorOpen();
-  const collapsed = collapsedSetting || inspectorMode;
+  const collapsed = collapsedSetting;
   const { viewMode, setViewMode } = useSidebarViewMode();
   // Show-terminated is a DB-backed user setting (display.show_terminated), the
   // single source of truth shared with the Display settings page — toggling
