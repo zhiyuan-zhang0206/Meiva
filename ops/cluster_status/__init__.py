@@ -104,9 +104,10 @@ class ClusterStatus(BaseModel):
     # here — they live in the gateway services panel.
     agent_host_online: bool | None = None
     supervisor_online: bool | None = None
+    # meiva:note
     # Agent-runner detail surfaced on the Status Page. `agent_count` is this
     # host's non-terminated agent identities, including idle and paused agents.
-    # `session_count` counts live service and persistent terminal sessions.
+    # `session_count` counts live service and persistent shell sessions.
     agent_count: int = 0
     session_count: int = 0
     # The agents' shell/watcher sessions grouped by agent for hierarchical

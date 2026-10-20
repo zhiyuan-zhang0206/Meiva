@@ -17,19 +17,21 @@ from base.native_process.ownership import OwnedProcess, capture_tree, retain_pro
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.maintenance_stop_report import occupied_groups
 
-# How long a normal stop's terminal closure waits between its HUP/TERM and the
+# meiva:note
+# How long a normal stop's shell-session closure waits between its HUP/TERM and the
 # SIGKILL of whatever is left (docs/decisions/runtime/processes/shutdown/2026-09-28-stop-escalates-to-sigkill.md),
 # and how long Postgres' immediate shutdown is given to finish at the data-plane stop: a job
 # that handles TERM gets this long to clean up. The stop's own deadline caps it as well.
 PROCESS_CLEANUP_WAIT_S = 10.0
 
+# meiva:note
 # The SIGKILL leg's own bound at a normal stop: each wait inside a session kill,
 # the wait for the killed sessions' hosts to end, and the least the closure
 # evidence waits (it also gets the rest of the stop deadline); at the data-plane stop, how
 # long the SIGKILL of what outlives the immediate shutdown is waited for.
 # Every wait ends as soon as its processes are gone. The leg runs even when the
-# grace spent the rest of the stop deadline — a stop that reached its terminal
-# phase closes its terminals — so a stop can overrun its deadline by this
+# grace spent the rest of the stop deadline — a stop that reached its shell-sessions
+# phase closes its shell sessions — so a stop can overrun its deadline by this
 # bounded leg.
 PROCESS_KILL_WAIT_S = 3.0
 

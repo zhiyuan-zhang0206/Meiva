@@ -102,7 +102,7 @@ host as `paused` with `paused_reason` `startup` from the moment the stop clears 
 serving gate until a start passes readiness. Services kept up with `--keep-service`
 keep working.
 
-Persistent terminals and the data plane stop after the services, as the table above
+Persistent shell sessions and the data plane stop after the services, as the table above
 says. Once the root is no longer running, repeating `meiva stop` needs no cluster
 configuration and finishes without fetching an offline gateway; while the root runs,
 the first stop needs the actual cluster configuration.
@@ -138,7 +138,7 @@ instance lock, preserves schedule activation state, and does not waive schedule
 verification.
 A running schedule or PTY can retain old code and DB access outside application
 root, so root exit alone is not a writer barrier: the stop gives persistent
-terminals a bounded completed-work wait, then closes known shells/terminals
+shell sessions a bounded completed-work wait, then closes known shell sessions
 best effort. This does not prove detached/background writers disappeared;
 inspect residual writers before treating it as an external-work barrier. Each
 busy owner receives the same closure notice as
@@ -208,7 +208,7 @@ failure after services began stopping leaves the host stopped until `meiva start
 Meiva root supervises the admitted application roster. Deliberate stops
 remove services from that roster before closing their captured processes;
 service supervision cannot reinterpret a planned stop as an unexpected crash.
-The ordinary root boot unit owns replacement applications. Data-plane and persistent-terminal
+The ordinary root boot unit owns replacement applications. Data-plane and persistent shell-session
 custody are separate and must be reconciled explicitly.
 
 Host startup settles its machine's `running` rows to `idling`

@@ -227,7 +227,7 @@ def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_ses
     leader.kill()
     leader.wait(timeout=10)
     assert psutil.pid_exists(job_pid), "precondition: the job outlives its session leader"
-    assert ledger.leftovers(path) == [], "a known job alone is not a live terminal"
+    assert ledger.leftovers(path) == [], "a known job alone is not a live shell session"
 
     started = time.monotonic()
     outcome = ledger.sweep(path)
@@ -258,7 +258,7 @@ def test_a_surviving_shell_remains_recorded_for_the_next_sweep(
             blocked.setattr(closure.process_groups, "signal", record_without_signalling)
             first = ledger.sweep(path)
         assert child.poll() is None
-        assert first.survivors == (closure.Survivor(target.name, identity, "terminal"),)
+        assert first.survivors == (closure.Survivor(target.name, identity, "shell"),)
         assert ((identity,), signal.SIGKILL) in attempts
         assert ledger.leftovers(path) == [target.name]
         assert ledger.read(path) == [target], "a failed shell cleanup must retain its retry target"
@@ -275,10 +275,11 @@ def test_a_surviving_shell_remains_recorded_for_the_next_sweep(
         child.wait(timeout=10)
 
 
-def test_a_known_job_only_survivor_does_not_retain_a_terminal_gate(
+# meiva:note
+# Known job survivors remain in the outcome, without a shell-presence retry gate.
+def test_a_known_job_only_survivor_does_not_retain_a_shell_session_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Known job survivors remain in the outcome, without a shell-presence retry gate."""
     child = subprocess.Popen(["sleep", "300"], start_new_session=True)
     path = tmp_path / "ledger.json"
     job = OwnedProcess.capture(psutil.Process(child.pid))

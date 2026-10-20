@@ -1,10 +1,10 @@
-"""Bounded best-effort terminal closure using explicitly known process groups.
-
-Closing a terminal attempts HUP, TERM and KILL, then reports known shell/job
-identities still alive. It never discovers descendants, scans the host process
-table or certifies that every process originally launched from the terminal is
-gone. Residual host processes belong to operational investigation.
-"""
+# meiva:note
+# Bounded best-effort shell-session closure using explicitly known process groups.
+#
+# Closing a shell session attempts HUP, TERM and KILL, then reports known shell/job
+# identities still alive. It never discovers descendants, scans the host process
+# table or certifies that every process originally launched from the shell session is
+# gone. Residual host processes belong to operational investigation.
 
 from __future__ import annotations
 
@@ -51,13 +51,15 @@ class Survivor:
 
     session: str
     process: OwnedProcess
-    role: str  # "terminal" (the shell) or "job" (any other member)
+    # meiva:note
+    # `role` is "shell" (the shell itself) or "job" (any other member).
+    role: str
 
 
+# meiva:note
+# Closed busy shell sessions and known survivors; no descendant-clearance proof.
 @dataclass(frozen=True)
 class Outcome:
-    """Closed busy terminals and known survivors; no descendant-clearance proof."""
-
     closed: tuple[ClosedSession, ...] = ()
     survivors: tuple[Survivor, ...] = ()
 
@@ -154,7 +156,7 @@ def close_sessions(targets: Iterable[Target], *, grace_s: float, kill_s: float) 
     for target in entries:
         left = _present(_known(target))
         survivors.extend(
-            Survivor(target.name, identity, "terminal" if identity == target.shell else "job")
+            Survivor(target.name, identity, "shell" if identity == target.shell else "job")
             for identity in left
         )
         if target.members and not process_groups.live(target.shell):

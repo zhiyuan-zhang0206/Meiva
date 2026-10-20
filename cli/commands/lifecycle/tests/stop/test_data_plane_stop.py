@@ -44,21 +44,22 @@ def forbidden(*_args: object, **_kwargs: object) -> NoReturn:
     pytest.fail("unexpected force/signal path")
 
 
+# meiva:note
+# A shell session refuses a stop that closes none; nothing is signalled.
 def test_a_session_in_the_service_refuses_before_any_signal(
     home: Path, launch: Launcher, pty_service: PtyServiceProcess
 ) -> None:
-    """A terminal refuses a stop that closes none; nothing is signalled."""
     del pty_service
     proc = launch("meiva-agent-host")
     assert new_session("meiva-agent-123-shell-1", home)
     with pytest.raises(RuntimeError, match="will not kill or replay"):
-        stop.require_no_terminals()
+        stop.require_no_shell_sessions()
     assert proc.poll() is None
 
 
-def test_no_terminal_is_no_refusal(home: Path, pty_service: PtyServiceProcess) -> None:
+def test_no_shell_session_is_no_refusal(home: Path, pty_service: PtyServiceProcess) -> None:
     del home, pty_service
-    stop.require_no_terminals()
+    stop.require_no_shell_sessions()
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
@@ -283,8 +284,8 @@ def _dead_shell(launch: Launcher) -> OwnedProcess:
 
 
 # meiva:note
-# A recorded job is not a live terminal.
-def test_a_dead_service_with_only_a_known_job_does_not_block_terminal_closure(
+# A recorded job is not a live shell session.
+def test_a_dead_service_with_only_a_known_job_does_not_block_shell_session_closure(
     home: Path, launch: Launcher
 ) -> None:
     journal = home / "run/lifecycle-op.json"
@@ -296,9 +297,9 @@ def test_a_dead_service_with_only_a_known_job_does_not_block_terminal_closure(
     )
     with pytest.raises(client.ServiceDownError):
         client.request("list")
-    stop.require_no_terminals()
-    stop.await_no_terminals(time.monotonic(), "terminals")
-    assert job.poll() is None, "fixture teardown, not terminal-presence probing, owns this job"
+    stop.require_no_shell_sessions()
+    stop.await_no_shell_sessions(time.monotonic(), "shell-sessions")
+    assert job.poll() is None, "fixture teardown, not shell-session-presence probing, owns this job"
     assert not journal.exists()
 
 
@@ -307,7 +308,7 @@ def test_a_dead_service_whose_ledger_names_only_dead_processes_does_not_refuse(
 ) -> None:
     del home
     ledger.write(ledger_path(), [closure.Target("meiva-agent-123-shell-1", _dead_shell(launch))])
-    stop.require_no_terminals()
+    stop.require_no_shell_sessions()
 
 
 def test_redis_admin_credential_is_independent_of_runtime_url(

@@ -51,7 +51,7 @@ readiness reports, with an explicit `__all__` contract. Its declaration predicat
 stays local; tiering and source drift stay with their `base.deploy` owners.
 
 `stop.py` exposes `stop` through `_temporary_stop`; restart calls the same stop
-kernel with the data plane and browser kept; terminals are closed like in any
+kernel with the data plane and browser kept; shell sessions are closed like in any
 stop. The agent host settles running turns itself on SIGTERM, ahead of the other
 services in root's order; `service_stop` and
 `data_plane/maintenance_stop` verify resource exits.

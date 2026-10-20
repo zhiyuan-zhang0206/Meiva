@@ -53,7 +53,7 @@ background work (Claude Code, watchers, a long training run)
 outlives the process that started it. The machine's `pty-sessions` service holds
 them, so restarting those processes cannot kill them; only
 their own `kill`, their shell exiting, `meiva stop` or `meiva restart` with `--close-shell-sessions` (updates
-included; they close terminals, `meiva stop --mode force` without notices), a restart
+included; they close shell sessions, `meiva stop --mode force` without notices), a restart
 or crash of the service, or a machine reboot ends them. After a service crash, the next start sweeps leftover shells from the
 service's ledger.
 

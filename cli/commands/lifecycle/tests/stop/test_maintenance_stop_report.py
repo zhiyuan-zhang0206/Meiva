@@ -43,7 +43,7 @@ pytestmark = [
 ]
 
 
-def test_terminal_survivor_names_itself_and_persists_exact_inventory(
+def test_shell_survivor_names_itself_and_persists_exact_inventory(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
@@ -53,18 +53,18 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
     command_machine: MachineIdentity,
 ) -> None:
     process = launch(
-        "private-terminal",
+        "private-shell-session",
         term="ignore",
         ignore_hangup=True,
     )
     identity = identity_of(process)
     stub_closure(
         monkeypatch,
-        closure.Outcome(survivors=(closure.Survivor("private-terminal", identity, "terminal"),)),
+        closure.Outcome(survivors=(closure.Survivor("private-shell-session", identity, "shell"),)),
     )
     assert status_journal.begin("stop")
     with pytest.raises(report.StopIncompleteError) as caught:
-        stop.close_terminals(
+        stop.close_shell_sessions(
             time.monotonic() + 0.25,
             direct_db=False,
             database_factory=operator_database,
@@ -72,7 +72,7 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
         )
     failure = caught.value
     assert identity.live(), "the survivor outlived its SIGKILL"
-    assert failure.stage == "terminals"
+    assert failure.stage == "shell-sessions"
     assert f"pid={identity.pid}" in str(failure) and "SIG_IGN" in str(failure)
     assert len(failure.survivors) == 1
     survivor = failure.survivors[0]
@@ -81,11 +81,11 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
         identity.birth,
         identity.starttime,
     )
-    assert survivor["role"] == "terminal" and survivor["service"] == "private-terminal"
-    command.report_incomplete(failure, [("terminals", 0.25)], owns_journal=True)
+    assert survivor["role"] == "shell" and survivor["service"] == "private-shell-session"
+    command.report_incomplete(failure, [("shell-sessions", 0.25)], owns_journal=True)
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
     assert journal["complete"] and journal["result"]["rc"] == 1
-    assert journal["result"]["stage"] == "terminals"
+    assert journal["result"]["stage"] == "shell-sessions"
     assert journal["result"]["survivors"] == failure.survivors
     assert f"pid={identity.pid}" in capsys.readouterr().err
 
@@ -100,7 +100,7 @@ def test_report_keeps_known_job_diagnostic_of_a_closed_session(
     command_machine: MachineIdentity,
 ) -> None:
     armed = home / "job-armed"
-    parent = launch("private-terminal", child_armed=armed)
+    parent = launch("private-shell-session", child_armed=armed)
     deadline = time.monotonic() + 5
     while not armed.exists():
         assert time.monotonic() < deadline
@@ -111,11 +111,11 @@ def test_report_keeps_known_job_diagnostic_of_a_closed_session(
     stub_closure(
         monkeypatch,
         closure.Outcome(
-            closed=(closed_session("private-terminal", ((child.pid, "python"),)),),
-            survivors=(closure.Survivor("private-terminal", child, "job"),),
+            closed=(closed_session("private-shell-session", ((child.pid, "python"),)),),
+            survivors=(closure.Survivor("private-shell-session", child, "job"),),
         ),
     )
-    stop.close_terminals(
+    stop.close_shell_sessions(
         time.monotonic() + 0.35,
         direct_db=False,
         database_factory=operator_database,
@@ -124,7 +124,7 @@ def test_report_keeps_known_job_diagnostic_of_a_closed_session(
     assert child.live()
     diagnostic = capsys.readouterr().err
     assert f"pid={child.pid}" in diagnostic
-    assert "private-terminal" in diagnostic
+    assert "private-shell-session" in diagnostic
     assert "inspect the process" in diagnostic
 
 
@@ -145,7 +145,7 @@ def test_unknown_identity_is_retained_without_unrelated_live_facts(
     identity = OwnedProcess(os.getpid(), 1.0, None)
     monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
     assert report.live_identities([identity]) == [identity]
-    survivor = report.capture_survivor(identity, service="private-terminal", role="job")
+    survivor = report.capture_survivor(identity, service="private-shell-session", role="job")
     assert survivor.pid == identity.pid and survivor.birth == identity.birth
     assert survivor.cmdline is None and survivor.ppid is None and survivor.status is None
 

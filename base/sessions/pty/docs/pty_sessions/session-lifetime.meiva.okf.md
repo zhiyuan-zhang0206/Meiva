@@ -23,7 +23,7 @@ tags:
   1-second exit check when a background child keeps the slave open), removes the
   session from the table first (a concurrent same-name `new` can never adopt a
   dying session), then reaps the child and closes the master.
-- **kill** — closes the known shell and terminal with bounded known-group
+- **kill** — closes the known shell session with bounded known-group
   signaling ([[../session-kill.meiva.okf.md|session kill]]).
 - **signals** — a stray signal at the shell's tree cannot take the service
   down; the service handles SIGTERM and SIGINT by closing what is alive and

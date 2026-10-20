@@ -133,7 +133,7 @@ def root_stop_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_root_driver_commands, "root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_stop_commands, "reap_cluster_chrome", lambda: None)
-    monkeypatch.setattr(_stop_commands, "force_close_terminals", lambda: None)
+    monkeypatch.setattr(_stop_commands, "force_close_shell_sessions", lambda: None)
 
 
 def ignore_retained_children[T](callback: Callable[[], T]) -> Callable[..., T]:

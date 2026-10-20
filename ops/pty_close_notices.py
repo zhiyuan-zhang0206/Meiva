@@ -1,35 +1,35 @@
-"""Close notices for busy persistent shells a unit closes at `meiva stop` or loses to a crash (issue #2044).
-
-`meiva stop` closes busy persistent-shell sessions in its `terminals` phase,
-after the services are down and before the data plane stops. Each session it
-VERIFIED closed (its shell's exact identity gone — also when another session
-leaves the stop incomplete) gets one system inbound message for its owner
-agent, naming why it closed and known processes observed still running. The stop writes them itself over one short connection
-(`write_notices`) opened and closed inside that phase: the database is still
-up, and no pool or background task holds a client connection into the data
-plane's shutdown. A notice for a terminated owner is dropped without delivery
-(a closure notice must never resurrect a dead agent — the TTL reaper's
-boundary, gateway/ttl_reaper/__init__.py:83). The inbound row is pending for
-the owner's next claim (the canonical insert's best-effort wake finds no
-listener: the owner's agent host is already down).
-
-A gateway unit dials Postgres directly (its own pooler is about to stop); a
-runner-only unit has no local data plane and dials its configured URL — the
-gateway's database, the same dial the stop's posture write already made. A
-stop's notice that could not be written (the database became unreachable) is
-returned to the caller, which reports it on stderr; the stop neither retries
-nor stages.
-
-`write_notices` writes its whole batch in ONE transaction over that one
-connection — every idempotency claim and every inbound commits together or not
-at all — so a long sweep cannot leave a tail half-written. Delivery is
-idempotent per (machine, agent_id, session_id, shell-birth): the
-`api_idempotency` claim row and the inbound insert commit in one transaction,
-so a notice written twice is delivered once.
-
-Crash sweeps log locally. They neither stage notices nor replay a previous
-start's journal. Files an earlier version staged are left untouched and unread.
-"""
+# meiva:note
+# Close notices for busy persistent shells a unit closes at `meiva stop` or loses to a crash (issue #2044).
+#
+# `meiva stop` closes busy persistent-shell sessions in its `shell-sessions` phase,
+# after the services are down and before the data plane stops. Each session it
+# VERIFIED closed (its shell's exact identity gone — also when another session
+# leaves the stop incomplete) gets one system inbound message for its owner
+# agent, naming why it closed and known processes observed still running. The stop writes them itself over one short connection
+# (`write_notices`) opened and closed inside that phase: the database is still
+# up, and no pool or background task holds a client connection into the data
+# plane's shutdown. A notice for a terminated owner is dropped without delivery
+# (a closure notice must never resurrect a dead agent — the TTL reaper's
+# boundary, gateway/ttl_reaper/__init__.py:83). The inbound row is pending for
+# the owner's next claim (the canonical insert's best-effort wake finds no
+# listener: the owner's agent host is already down).
+#
+# A gateway unit dials Postgres directly (its own pooler is about to stop); a
+# runner-only unit has no local data plane and dials its configured URL — the
+# gateway's database. A
+# stop's notice that could not be written (the database became unreachable) is
+# returned to the caller, which reports it on stderr; the stop neither retries
+# nor stages.
+#
+# `write_notices` writes its whole batch in ONE transaction over that one
+# connection — every idempotency claim and every inbound commits together or not
+# at all — so a long sweep cannot leave a tail half-written. Delivery is
+# idempotent per (machine, agent_id, session_id, shell-birth): the
+# `api_idempotency` claim row and the inbound insert commit in one transaction,
+# so a notice written twice is delivered once.
+#
+# Crash sweeps log locally. They neither stage notices nor replay a previous
+# start's journal. Files an earlier version staged are left untouched and unread.
 
 from __future__ import annotations
 
@@ -57,8 +57,9 @@ from ops.rpc_schemas import OpStatus
 # notice; anything else (terminated / missing) drops the notice.
 _NOTIFIABLE_STATUSES = ("running", "idling")
 
-# Why a unit closed the session, as the owner's notice names it. A pause
-# retains terminals and records nothing.
+# meiva:note
+# Why a unit closed the session, as the owner's notice names it. A stop that keeps
+# shell sessions (`--keep-shell-sessions`) closes none and records nothing.
 STOP_REASON = "an operator stop (meiva stop)"
 
 # The same, for sessions a pty-sessions service that ended uncleanly left behind
@@ -199,8 +200,8 @@ def content(notice: ClosureNotice) -> str:
     if notice.survivors:
         left = ", ".join(f"pid {pid} ({shown_name(name)})" for pid, name in notice.survivors)
         text += (
-            f" Known processes observed after terminal closure are still running: {left}. "
-            "Inspect their ownership and current work before taking action; terminal "
+            f" Known processes observed after shell-session closure are still running: {left}. "
+            "Inspect their ownership and current work before taking action; shell-session "
             "closure does not prove that all background or detached processes ended."
         )
     return text
@@ -298,21 +299,21 @@ def _write_batch(
     return delivered
 
 
+# meiva:note
+# Write every notice in one transaction over one short connection; return those that failed.
+#
+# `direct` dials Postgres itself, bypassing the local pooler (a gateway
+# unit, whose pooler stops right after the stop's shell-sessions phase); otherwise
+# the configured URL is dialed (a runner-only unit: the gateway's database).
+# No notice, no connection. The batch is one transaction — every claim and
+# every inbound commits together or not at all — so a failed batch leaves
+# nothing behind (no claim to skip the retry, no inbound that landed alone)
+# and returns every notice with the error. The connection is closed before
+# this returns. A notice written twice is delivered once: its key is spelled
+# once per call, and a call that finds the key claimed skips it.
 def write_notices(
     db: Database, bus: EventBus, notices: Sequence[ClosureNotice], *, direct: bool
 ) -> list[tuple[ClosureNotice, Exception]]:
-    """Write every notice in one transaction over one short connection; return those that failed.
-
-    `direct` dials Postgres itself, bypassing the local pooler (a gateway
-    unit, whose pooler stops right after the stop's terminal phase); otherwise
-    the configured URL is dialed (a runner-only unit: the gateway's database).
-    No notice, no connection. The batch is one transaction — every claim and
-    every inbound commits together or not at all — so a failed batch leaves
-    nothing behind (no claim to skip the retry, no inbound that landed alone)
-    and returns every notice with the error. The connection is closed before
-    this returns. A notice written twice is delivered once: its key is spelled
-    once per call, and a call that finds the key claimed skips it.
-    """
     batch = _one_per_key(notices)
     if not batch:
         return []
