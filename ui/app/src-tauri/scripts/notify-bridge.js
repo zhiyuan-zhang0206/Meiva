@@ -10,6 +10,7 @@
 
   var SEEN_LIMIT = 200;
   var CURSOR_KEY = "meiva.notify.cursor";
+  var TARGET_KEY = "meiva.notify.target";
   var CATCHUP_LIMIT = 10;
   var CATCHUP_DEBOUNCE_MS = 400;
 
@@ -31,13 +32,53 @@
         });
     }
 
+    // meiva:note
+    // A legal tap target is one same-origin PATH the delivery named (`href`, e.g.
+    // `/fleet?notice=3103`). Everything else — a scheme, a protocol-relative
+    // `//host`, a backslash the URL parser folds into a slash — would take the
+    // webview off the console, and the value comes off the wire.
+    // meiva:link ui/app/docs/notifications.meiva.okf.md
+    function legalTarget(href) {
+      return (
+        typeof href === "string" &&
+        href.length > 1 &&
+        href.charAt(0) === "/" &&
+        href.charAt(1) !== "/" &&
+        href.indexOf("\\") === -1 &&
+        !/\s/.test(href)
+      );
+    }
+
+    function rememberTarget(href) {
+      if (!legalTarget(href)) return;
+      try {
+        window.localStorage.setItem(TARGET_KEY, href);
+      } catch (error) {
+        console.error("[meiva-app] notification target not persisted", error);
+      }
+    }
+
+    function loadTarget() {
+      try {
+        var stored = window.localStorage.getItem(TARGET_KEY);
+        return legalTarget(stored) ? stored : null;
+      } catch (error) {
+        return null;
+      }
+    }
+
     function consumeDeeplink() {
       if (!sseOpen || !cfg.entryUrl) return;
       var target;
       try {
-        target = new URL("fleet#inbox", cfg.entryUrl);
+        // meiva:note
+        // The delivery's own notice when the bridge saw one; the inbox otherwise, so
+        // an install whose first tap precedes any delivery still lands there.
+        // meiva:link ui/app/docs/notifications.meiva.okf.md
+        target = new URL(loadTarget() || "fleet#inbox", cfg.entryUrl);
+        if (target.origin !== new URL(cfg.entryUrl).origin) return;
       } catch (error) {
-        console.error("[meiva-app] could not resolve Inbox deep link", error);
+        console.error("[meiva-app] could not resolve the notification deep link", error);
         return;
       }
       window.__TAURI_INTERNALS__
@@ -90,6 +131,11 @@
       if (remember(event.notification_id)) {
         var body = typeof event.subject === "string" ? event.subject : "";
         if (body) notify("Meiva", body);
+        // meiva:note
+        // Remember where this delivery points BEFORE the user can tap it: the tap is
+        // consumed by the native side, which then only asks the bridge for a target.
+        // meiva:link ui/app/docs/notifications.meiva.okf.md
+        rememberTarget(event.href);
       }
       scheduleCatchUp();
     }
@@ -136,6 +182,7 @@
             if (typeof item.id !== "number" || !remember(item.id)) return;
             if (typeof item.subject !== "string" || !item.subject) return;
             notify("Meiva", item.subject);
+            rememberTarget(item.href);
           });
           if (rows.length) saveCursor(rows[rows.length - 1].id);
         })

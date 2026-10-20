@@ -67,7 +67,10 @@ that writes it — `gateway/agents/notices.py` and
 `gateway/agents/notice_operations/current.py` on the gateway path — keyed by the
 notice id plus a fingerprint of its question, so a retried post stays silent
 while editing a container to add a question delivers again: a new question is
-what the user has to act on. `ops/lifecycle/events.py` publishes only the inbox's
+what the user has to act on. The staged row also carries the notice's own route
+in `href` (`/fleet?notice=<id>`, the inbox route that selects a row), so a
+transport that can open a link opens *that* notice instead of a queue the user
+then has to search. `ops/lifecycle/events.py` publishes only the inbox's
 live hint. The spine reads the notice row itself rather than trusting either
 post path to pass the right shape.
 

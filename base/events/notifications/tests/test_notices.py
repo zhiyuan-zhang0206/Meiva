@@ -69,6 +69,24 @@ def test_a_response_notice_stages_one_unannounced_delivery(
     assert announced_at is None
 
 
+# meiva:note
+# The delivery names the notice it is about: a transport that can open a link
+# opens this notice, not the inbox in general, so a tap answers "which one is
+# this?" instead of leaving the user to search a queue.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def test_a_notice_delivery_links_to_the_notice(db_conn: psycopg.Connection, db_url: str) -> None:
+    agent_id = create_agent(db_conn)
+    db_conn.commit()
+    notice_id = _notice(db_conn, agent_id, require_response=True)
+    with _pool(db_url) as pool:
+        staged = _stage(pool, agent_id, notice_id)
+    assert staged is not None
+    row = db_conn.execute(
+        "SELECT href FROM notification_events WHERE id = %s", (staged,)
+    ).fetchone()
+    assert row == (f"/fleet?notice={notice_id}",)
+
+
 def test_an_fyi_notice_is_never_a_notification(db_conn: psycopg.Connection, db_url: str) -> None:
     agent_id = create_agent(db_conn)
     db_conn.commit()
