@@ -93,6 +93,11 @@ export interface UseTimelineResult {
   /** The authoritative read failed; retained rows remain available. */
   error: Error | null;
   isFetching: boolean;
+  /** The tail read that follows a switch or a reconnect: the reconcile brings
+   *  the newest messages the reader missed while away. Distinct from
+   *  `isFetching`, which also covers background refetches of a settled thread —
+   *  a spinner on those would flicker for no arrival (user 2026-10-20). */
+  loadingNewer: boolean;
   retryTimeline: () => void;
   /** Whether older items exist before the oldest loaded one — the timeline
    *   shows a scroll-up affordance only when true. */
@@ -494,6 +499,7 @@ export function useTimeline(
     isRefetching: timelineQuery.isRefetching || isReconciling,
     error: timelineQuery.error,
     isFetching: timelineQuery.isFetching || isReconciling,
+    loadingNewer: selected && isReconciling,
     retryTimeline,
     hasMoreOlder: selected ? hasMoreOlder : retained?.hasMoreOlder ?? timelineQuery.data?.has_more ?? false,
     loadingOlder: selected && loadingOlder,
