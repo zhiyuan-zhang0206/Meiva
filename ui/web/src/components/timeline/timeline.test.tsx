@@ -1,12 +1,6 @@
-// timeline.tsx component test — ItemView per-kind render + envelope split +
-// system_marker dispatch + LifecycleChip + UnknownMarkerChip +
-// InterruptedNotice + CopyButton + ForkButton.
-//
-// jsdom does not actually render scroll, so scroll behavior is not
-// tested (the sticky state machine was extracted to lib/sticky.ts and
-// is covered by sticky.test.ts). ChatMarkdown / PythonCode / ScrollArea
-// are mocked as stubs to reduce noise and avoid the runtime complexity
-// of react-markdown / Prism / base-ui.
+// meiva:note
+// timeline.tsx component test — ItemView per-kind render + envelope split + system_marker dispatch + LifecycleChip + UnknownMarkerChip + InterruptedNotice + CopyButton. jsdom does not actually render scroll, so scroll behavior is not tested (the sticky state machine was extracted to lib/sticky.ts and is covered by sticky.test.ts). ChatMarkdown / PythonCode / ScrollArea are mocked as stubs to reduce noise and avoid the runtime complexity of react-markdown / Prism / base-ui.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -305,7 +299,7 @@ describe("timeline document work", () => {
     fireEvent.click(screen.getByTestId("turn-toggle"));
     expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByTestId("python-code")).toBeNull();
-    rerender(<TimelineView items={items} threadKey="first" forkPending />);
+    rerender(<TimelineView items={items} threadKey="first" />);
     expect(calls).not.toHaveBeenCalled();
 
     const next = makeItem({
@@ -1411,55 +1405,7 @@ describe("ItemView: inbound_compact_*", () => {
   });
 });
 
-describe("ForkButton + CopyButton", () => {
-  it("under the last agent_chat shows fork button (icon-only, aria-label)", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "agent_chat", payload: "ok" })]}
-        onFork={vi.fn()}
-      />,
-    );
-    expect(screen.getByLabelText("Fork a new agent from here")).toBeTruthy();
-  });
-
-  it("forkPending=true → disabled + pulse animation", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "agent_chat", payload: "ok" })]}
-        onFork={vi.fn()}
-        forkPending
-      />,
-    );
-    const btn = screen.getByLabelText("Fork a new agent from here").closest("button");
-    if (!btn) throw new Error("btn null");
-    expect(btn.hasAttribute("disabled")).toBe(true);
-    expect(btn.className).toContain("animate-pulse");
-  });
-
-  it("no onFork prop → no fork button", () => {
-    render(
-      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />,
-    );
-    expect(screen.queryByLabelText("Fork a new agent from here")).toBeNull();
-  });
-
-  it("click fork button → onFork called", () => {
-    const onFork = vi.fn();
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "agent_chat", payload: "ok" })]}
-        onFork={onFork}
-      />,
-    );
-    fireEvent.click(screen.getByLabelText("Fork a new agent from here"));
-    expect(onFork).toHaveBeenCalledTimes(1);
-  });
-
-  // Fork/copy's own title-tooltip removal + aria-label coverage lives in
-  // "copy/fork buttons carry no title tooltip (aria-label only)" below —
-  // that button relocation (below-card row → hover-reveal pill) landed
-  // concurrently with this PR's tooltip sweep and already covers it.
-
+describe("CopyButton", () => {
   it("partial agent_chat does not show CopyButton (only final is copyable)", () => {
     render(
       <TimelineView
@@ -2571,44 +2517,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
   });
 });
 
-describe("fork only attaches to the last agent_chat (lastAgentChatIdx)", () => {
-  it("two agent_chats → fork only attaches to the last (one fork button)", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "1", kind: "agent_chat", payload: "first" }),
-          makeItem({ item_id: "2", kind: "agent_chat", payload: "second" }),
-        ]}
-        onFork={vi.fn()}
-      />,
-    );
-    expect(screen.getAllByLabelText("Fork a new agent from here")).toHaveLength(1);
-  });
-
-  it("timeline without agent_chat → no fork button", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "agent_code", payload: "print(1)" })]}
-        onFork={vi.fn()}
-      />,
-    );
-    expect(screen.queryByLabelText("Fork a new agent from here")).toBeNull();
-  });
-
-  it("agent_chat followed by agent_code → fork still attaches to the agent_chat (lastAgentChatIdx points to it)", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "1", kind: "agent_chat", payload: "say hi" }),
-          makeItem({ item_id: "2", kind: "agent_code", payload: "print(1)" }),
-        ]}
-        onFork={vi.fn()}
-      />,
-    );
-    expect(screen.getAllByLabelText("Fork a new agent from here")).toHaveLength(1);
-  });
-});
-
 describe("CopyButton click behavior", () => {
   beforeEach(() => {
     Object.defineProperty(navigator, "clipboard", {
@@ -2961,38 +2869,6 @@ describe("streamingCode last-item only", () => {
   });
 });
 
-// lastAgentChatIdx uses a reverse for-loop (i-- decrement). UnaryOperator
-// mutants flip i-- to +i — the loop never advances. Killed by the
-// "fork attached to the last of multiple agent_chats" assertion below.
-describe("lastAgentChatIdx reverse scan", () => {
-  it("agent_chat → agent_code → agent_chat → agent_code: fork attaches to row 3 (second agent_chat), not row 1", () => {
-    const onFork = vi.fn();
-    render(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "1", kind: "agent_chat", payload: "first chat" }),
-          makeItem({ item_id: "2", kind: "agent_code", payload: "code1" }),
-          makeItem({ item_id: "3", kind: "agent_chat", payload: "second chat" }),
-          makeItem({ item_id: "4", kind: "agent_code", payload: "code2" }),
-        ]}
-        onFork={onFork}
-      />,
-    );
-    // Only one fork (lastAgentChatIdx picks the last agent_chat, not the first)
-    const forks = screen.getAllByLabelText("Fork a new agent from here");
-    expect(forks).toHaveLength(1);
-    // Fork button (icon-only, aria-label) attaches only inside the second
-    // agent_chat's card. Verify it's a descendant of the card containing
-    // "second chat", not "first chat".
-    const forkBtn = forks[0];
-    const secondChatCard = screen.getByText("second chat").closest('[class*="group/msgcard"]');
-    const firstChatCard = screen.getByText("first chat").closest('[class*="group/msgcard"]');
-    expect(secondChatCard).toBeTruthy();
-    expect(secondChatCard!.contains(forkBtn)).toBe(true);
-    expect(firstChatCard?.contains(forkBtn)).toBe(false);
-  });
-});
-
 // splitEnvelope header length cap — prevents a long stdout first paragraph being mistaken for the header.
 describe("splitEnvelope header length guard", () => {
   it("\\n\\n distance > 200 chars → entire payload is body, no header split", () => {
@@ -3136,15 +3012,9 @@ describe("CopyButton feedback state machine", () => {
   });
 });
 
-// The icon-only CopyButton from ./copy-button (aria-label "Copy <label>", no
-// visible text) is separate from the block-level copy button
-// (timeline/buttons.tsx, covered by the "block-level copy/fork actions"
-// describe block below). agent_code (via PythonCode) and code_output (via
-// EnvelopeContent showCopy) render ONLY the icon-only per-block copy —
-// the card-level block copy is skipped for these kinds to avoid duplicate
-// overlapping buttons that copy the same payload. This block only guards the
-// icon-only one; it must not appear under a still-partial agent_chat (no
-// code/output content to speak of) or an ephemeral system_marker (no card).
+// meiva:note
+// The icon-only CopyButton from ./copy-button (aria-label "Copy <label>", no visible text) is separate from the block-level copy button (timeline/buttons.tsx, covered by the "block-level copy actions" describe block below). agent_code (via PythonCode) and code_output (via EnvelopeContent showCopy) render ONLY the icon-only per-block copy — the card-level block copy is skipped for these kinds to avoid duplicate overlapping buttons that copy the same payload. This block only guards the icon-only one; it must not appear under a still-partial agent_chat (no code/output content to speak of) or an ephemeral system_marker (no card).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 describe("CopyButton render guard (icon-only, code/output-scoped)", () => {
   it("agent_code item shows copy button (via PythonCode)", () => {
     render(
@@ -3183,13 +3053,10 @@ describe("CopyButton render guard (icon-only, code/output-scoped)", () => {
   });
 });
 
-// The general block-level copy (text "copy", timeline/buttons.tsx) attaches
-// inside EVERY card's bottom-right corner via MessageCard's `actions` overlay
-// — any kind that renders a card (messageCardConfig !== null), once expanded
-// and no longer partial. Fork attaches additionally, only under the last
-// agent_chat card. Both mount only while eligible — a collapsed card has
-// neither in the DOM at all (not just hidden).
-describe("block-level copy/fork actions (MessageCard overlay)", () => {
+// meiva:note
+// The general block-level copy (text "copy", timeline/buttons.tsx) attaches inside EVERY card's bottom-right corner via MessageCard's `actions` overlay — any kind that renders a card (messageCardConfig !== null), once expanded and no longer partial. It mounts only while eligible — a collapsed card has no copy button in the DOM at all (not just hidden).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+describe("block-level copy actions (MessageCard overlay)", () => {
   it("human inbound_chat (a user message) shows the copy button", () => {
     render(
       <TimelineView
@@ -3231,57 +3098,43 @@ describe("block-level copy/fork actions (MessageCard overlay)", () => {
     render(
       <TimelineView items={[makeItem({ kind: "system_prompt", payload: "line1\nline2" })]} />,
     );
-    // Turn is collapsed → no copy button anywhere
     expect(screen.queryByLabelText("Copy message")).toBeNull();
-    // None mode (#4780): opening the turn keeps the inner card collapsed, and
-    // copy attaches to expanded cards only — it appears on the CARD's own
-    // click, not the turn's.
+    // meiva:note
+    // None mode (#4780): opening the turn keeps the inner card collapsed, and copy attaches to expanded cards only — it appears on the CARD's own click, not the turn's.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
     fireEvent.click(screen.getByTestId("turn-toggle"));
     expect(screen.queryByLabelText("Copy message")).toBeNull();
     fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.getByLabelText("Copy message")).toBeTruthy();
-    // Collapsing the inner card hides the copy button again.
     fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
 
-  it("action row renders fork before copy — copy is always the rightmost action", () => {
+  it("the action row carries the copy button and nothing else", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "ok" })]}
-        onFork={vi.fn()}
       />,
     );
 
-
-    // Icon-only buttons: check order by DOM position, not text content
-    const buttons = screen.getAllByRole("button");
-    const labels = buttons.map(b => b.getAttribute("aria-label"));
-    const forkIdx = labels.indexOf("Fork a new agent from here");
-    const copyIdx = labels.indexOf("Copy message");
-    expect(forkIdx).toBeGreaterThan(-1);
-    expect(forkIdx).toBeLessThan(copyIdx);
+    const pill = screen.getByLabelText("Copy message").closest("button")?.parentElement;
+    expect(pill?.querySelectorAll("button")).toHaveLength(1);
   });
 
-  it("copy/fork buttons carry no title tooltip (aria-label only)", () => {
+  it("copy button carries no title tooltip (aria-label only)", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "ok" })]}
-        onFork={vi.fn()}
       />,
     );
     const copyBtn = screen.getByLabelText("Copy message").closest("button");
-    const forkBtn = screen.getByLabelText("Fork a new agent from here").closest("button");
     expect(copyBtn?.hasAttribute("title")).toBe(false);
-    expect(forkBtn?.hasAttribute("title")).toBe(false);
     expect(screen.getByLabelText("Copy message")).toBeTruthy();
-    expect(screen.getByLabelText("Fork a new agent from here")).toBeTruthy();
   });
 
-  // Actual hover reveal is CSS-only (opacity-0 / group-hover/msgcard) — jsdom
-  // has no layout/paint engine to simulate a real :hover-triggered opacity
-  // change, so this only pins the structural classes are present, NOT that
-  // hovering visually reveals the pill. See PR description NOT-tested note.
+  // meiva:note
+  // Actual hover reveal is CSS-only (opacity-0 / group-hover/msgcard) — jsdom has no layout/paint engine to simulate a real :hover-triggered opacity change, so this only pins that the structural classes are present, NOT that hovering visually reveals the pill.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   it("actions pill starts hidden (opacity-0) and is wired to reveal on card hover", () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />,
@@ -3291,14 +3144,13 @@ describe("block-level copy/fork actions (MessageCard overlay)", () => {
     expect(pill?.className).toContain("group-hover/msgcard:opacity-100");
   });
 
-  // A hidden pill (opacity-0) is still hit-testable unless pointer-events is
-  // ALSO gated — otherwise a tap in the card's bottom-right corner on a touch
-  // device (no real :hover) silently hits an unseen copy/fork button.
+  // meiva:note
+  // A hidden pill (opacity-0) is still hit-testable unless pointer-events is ALSO gated — otherwise a tap in the card's bottom-right corner on a touch device (no real :hover) silently hits an unseen copy button.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   it("actions pill defaults to pointer-events-none while hidden; only switches on with the same hover/focus variant that reveals it", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "ok" })]}
-        onFork={vi.fn()}
       />,
     );
     const pill = screen.getByLabelText("Copy message").closest("button")?.parentElement;

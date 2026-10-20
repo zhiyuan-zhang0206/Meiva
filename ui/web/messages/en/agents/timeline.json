@@ -25,7 +25,6 @@
   "agentMessages": "{count} {unit}",
   "message": "message",
   "messages": "messages",
-  "forkFromHere": "Fork a new agent from here",
   "copyMessage": "Copy message",
   "streamingInterrupted": "Streaming interrupted, content may be incomplete (reconnects resume receiving)",
   "commandOutput": "command output",

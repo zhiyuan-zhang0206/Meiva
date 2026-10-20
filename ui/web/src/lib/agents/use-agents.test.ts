@@ -315,35 +315,6 @@ describe("useAgents.fork", () => {
     expect(showError).toHaveBeenCalledWith(expect.stringContaining("Fork failed"));
     expect(showError).toHaveBeenCalledWith(expect.stringContaining("fork-boom"));
   });
-
-  it("forkPending=true while mutation in-flight; resets after resolve", async () => {
-    let resolve: ((v: { id: number }) => void) | undefined;
-    vi.mocked(api.spawnAgent).mockImplementation(
-      () => new Promise((res) => { resolve = res; }),
-    );
-    const { result } = renderHook(() => useAgents(noop), { wrapper });
-    await waitFor(() => {
-      expect(result.current.activeId).toBe(1);
-    });
-
-    let forkPromise: Promise<number | null>;
-    act(() => {
-      forkPromise = result.current.fork(2);
-    });
-
-    await waitFor(() => {
-      expect(result.current.forkPending).toBe(true);
-    });
-
-    await act(async () => {
-      resolve!({ id: 8 });
-      await forkPromise!;
-    });
-
-    await waitFor(() => {
-      expect(result.current.forkPending).toBe(false);
-    });
-  });
 });
 
 describe("useAgents.terminate", () => {

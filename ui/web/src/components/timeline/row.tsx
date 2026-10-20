@@ -9,7 +9,7 @@ import { memo, useCallback } from "react";
 import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
-import { CopyButton, ForkButton } from "./buttons";
+import { CopyButton } from "./buttons";
 import { type CardConfig, CardHeader, MessageCard, messageCardConfig } from "./card";
 import { ItemView } from "./item";
 import { ItemErrorBoundary } from "./item-error-boundary";
@@ -40,14 +40,9 @@ export function cardConfigFor(
   return config;
 }
 
-// One timeline row, memoized so an unchanged item skips its entire subtree
-// (card container + header summary scan + body) on every streaming chunk.
-// Every prop is either a primitive or a reference stable across commits for an
-// unchanged item: `item` (store-preserved ref), `config` (WeakMap cache),
-// `expanded`/`streaming`/`showActions` (booleans), `onToggle` (parent's stable
-// useCallback), and `onFork`/`forkPending` (inert — null/false — for every row
-// except the single fork row). config === null is the ephemeral system marker,
-// which renders bare (no card, not collapsible).
+// meiva:note
+// One timeline row, memoized so an unchanged item skips its entire subtree (card container + header summary scan + body) on every streaming chunk. Every prop is either a primitive or a reference stable across commits for an unchanged item: `item` (store-preserved ref), `config` (WeakMap cache), `expanded`/`streaming`/`showActions` (booleans) and `onToggle` (parent's stable useCallback). config === null is the ephemeral system marker, which renders bare (no card, not collapsible).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
 export const TimelineRow = memo(function TimelineRow({
   item,
   config,
@@ -57,8 +52,6 @@ export const TimelineRow = memo(function TimelineRow({
   stickyHeader = false,
   isStuck,
   onToggle,
-  onFork,
-  forkPending,
   timelineSource = "canonical",
   displayRank,
 }: {
@@ -75,8 +68,6 @@ export const TimelineRow = memo(function TimelineRow({
   /** The header is currently pinned at the sticky line (task #3136). */
   isStuck: boolean;
   onToggle: (id: string, kind: BackendTimelineItem["kind"]) => void;
-  onFork: (() => void) | null;
-  forkPending: boolean;
   timelineSource?: "buffer" | "canonical";
   displayRank?: number;
 }) {
@@ -98,25 +89,15 @@ export const TimelineRow = memo(function TimelineRow({
     );
   }
 
-  // Built inside the memoized row (not passed in from the parent's per-render
-  // `renderRow` closure) so the JSX element stays a fresh object only when
-  // THIS row's own props change — passing it down from renderRow would
-  // recreate the node on every TimelineView render and defeat TimelineRow's
-  // memo for every row, not just this one. Fork sits left of copy; copy is
-  // always the rightmost action (row is `justify-end`, so DOM order = visual
-  // left-to-right order).
+  // meiva:note
+  // Built inside the memoized row (not passed in from the parent's per-render `renderRow` closure) so the JSX element stays a fresh object only when THIS row's own props change — passing it down from renderRow would recreate the node on every TimelineView render and defeat TimelineRow's memo for every row, not just this one.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
   //
-  // Skip the card-level CopyButton for kinds that already render their own
-  // per-block copy button inside the item body (agent_code via PythonCode,
-  // code_output via EnvelopeContent showCopy) — the card-level button would
-  // copy the same payload and overlap visually with the body-level one.
+  // meiva:note
+  // Skip the card-level CopyButton for kinds that already render their own per-block copy button inside the item body (agent_code via PythonCode, code_output via EnvelopeContent showCopy) — the card-level button would copy the same payload and overlap visually with the body-level one.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   const hasInternalCopy = item.kind === "agent_code" || item.kind === "code_output";
-  const actions = showActions ? (
-    <>
-      {onFork ? <ForkButton onFork={onFork} pending={forkPending} /> : null}
-      {!hasInternalCopy ? <CopyButton text={item.payload} /> : null}
-    </>
-  ) : null;
+  const actions = showActions && !hasInternalCopy ? <CopyButton text={item.payload} /> : null;
 
   // Sticky only while expanded — a collapsed row has nothing to scroll under
   // its header. The level decides the scan bucket + the pin line: a work
