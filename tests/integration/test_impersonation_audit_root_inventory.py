@@ -30,6 +30,7 @@ _INVENTORY: dict[str, str] = {
     "base/agents/inbox/control_delivery.py::insert_compact_in_transaction": "ineligible",
     "ops/env_audit.py::_emit_audit_event": "ineligible",
     "cli/database/lifecycle_audit.py::_record": "local",
+    "cli/database/lifecycle_audit.py::_record_result": "local",
 }
 
 

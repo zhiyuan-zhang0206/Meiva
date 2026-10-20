@@ -7,7 +7,9 @@ import cli.commands.lifecycle.root_driver as driver
 from base.events.contract import EVENTS
 from cli.database.lifecycle_audit import (
     lifecycle_audit,
+    operator_lifecycle_audit,
     operator_request_recorder,
+    operator_result_recorder,
     record_lifecycle_request,
 )
 from services.supervision.roster.service_spec import ServiceSpec
@@ -81,6 +83,84 @@ class _UnitClient:
 
 def test_the_event_is_registered_as_audit() -> None:
     assert EVENTS["lifecycle_request"].category == "audit"
+    assert EVENTS["lifecycle_result"].category == "audit"
+
+
+def _result_recorder_for(capture: _Recorder, head: str | None = "ce79dbbb") -> Any:
+    return operator_result_recorder(
+        database_factory=lambda: "db",
+        caller_identity=_caller,
+        record_audit_reported=capture.audit,
+        head_sha=lambda: head,
+    )
+
+
+def test_the_request_and_the_result_name_the_same_version(tmp_path: Any) -> None:
+    capture = _Recorder()
+    request = operator_request_recorder(
+        database_factory=lambda: "db",
+        caller_identity=_caller,
+        record_audit_reported=capture.audit,
+        head_sha=lambda: "39d4614c1",
+    )
+    result = _result_recorder_for(capture, head="39d4614c1")
+
+    with lifecycle_audit(request, result) as command:
+        record_lifecycle_request("down", ["gateway", "agent-host"])
+        command.exited(0)
+
+    request_event, result_event = capture.events
+    assert request_event.attributes["head_sha"] == "39d4614c1"
+    assert result_event.event_name == "lifecycle_result"
+    assert result_event.attributes["verb"] == "down"
+    assert result_event.attributes["units"] == ["gateway", "agent-host"]
+    assert result_event.attributes["outcome"] == "ok"
+    assert result_event.attributes["head_sha"] == "39d4614c1"
+    assert result_event.attributes["seconds"] >= 0
+
+
+def test_a_failed_command_records_a_failed_outcome() -> None:
+    capture = _Recorder()
+    with lifecycle_audit(None, _result_recorder_for(capture)) as command:
+        record_lifecycle_request("up", ["gateway"])
+        command.exited(1)
+
+    assert capture.events[0].attributes["outcome"] == "failed"
+
+
+def test_a_command_without_a_request_records_no_result() -> None:
+    capture = _Recorder()
+
+    with lifecycle_audit(None, _result_recorder_for(capture)) as command:
+        command.exited(0)
+
+    assert capture.events == []
+
+
+def test_a_boot_start_is_not_attributed_to_an_operator() -> None:
+    capture = _Recorder()
+    recorded: list[tuple[str, list[str]]] = []
+
+    def refuse() -> Any:
+        raise AssertionError("a boot start must not reach the database")
+
+    with operator_lifecycle_audit(database_factory=refuse, enabled=False) as command:
+        record_lifecycle_request("up", ["gateway"])
+        command.exited(0)
+
+    assert capture.events == []
+    assert recorded == []
+
+
+def test_the_outcome_is_recorded_once() -> None:
+    raised = False
+    with lifecycle_audit(None) as command:
+        command.exited(0)
+        try:
+            command.exited(0)
+        except RuntimeError:
+            raised = True
+    assert raised
 
 
 def test_a_command_scope_records_and_restores_the_previous_recorder() -> None:

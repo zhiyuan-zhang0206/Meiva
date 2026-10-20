@@ -36,6 +36,12 @@ and the matching GitHub Releases.
   nothing. This replaces the lifecycle pointer the graceful exit relied on to wake the next
   host
   ([decision](docs/decisions/runtime/processes/2026-10-20-restart-interrupts-after-a-grace-and-resumes-by-a-note.md)).
+- An operator `meiva stop` / `meiva start` / `meiva restart` now records how it ended,
+  not only that it was asked: `lifecycle_result` carries the verb, the units, `outcome`
+  (`ok`/`failed`), the seconds the command held and the same `head_sha` the request
+  named. A request with no result is a command that died mid-flight, and a stop followed
+  by a start with the same `head_sha` is a same-code restart — two facts that took log
+  archaeology to establish for the 2026-10-14 outage (task #5464).
 - The gateway `/mcp` endpoint is a thin forwarder onto the HTTP API (user ruling 2026-10-20):
   it authenticates like any API route (cluster bearer, session or `trusted_network`), each
   tool is one in-process request to its API route, and an API error becomes the tool error.
