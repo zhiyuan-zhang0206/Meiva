@@ -173,8 +173,9 @@ async def _subscribe(
 
 
 def open_pubsub(bus: EventBus) -> PubsubPair:
-    client = bus.open_async_redis()
-    return client.pubsub(), client
+    client: Any = bus.open_async_redis()
+    pubsub: Any = client.pubsub()
+    return pubsub, client
 
 
 def _route(
