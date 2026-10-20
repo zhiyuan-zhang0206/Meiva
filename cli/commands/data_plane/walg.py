@@ -7,7 +7,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from base.agents.context.clients import DatabaseFactory
 from base.cluster.dataplane import walg_binary
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.config import ConfigBoot
@@ -38,9 +37,7 @@ def _stamped(line: str) -> None:
     print(f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ} {line}", flush=True)
 
 
-def cmd_walg_run(
-    *, database_factory: DatabaseFactory, database_for_url: Callable[[str], Database]
-) -> int:
+def cmd_walg_run(*, database_for_url: Callable[[str], Database]) -> int:
     """Run one daily tick (backup, verify, retention); non-zero only when a step failed.
 
     The OS job runs exactly this, and so can an operator: concurrent runs stand down
@@ -57,7 +54,6 @@ def cmd_walg_run(
         config.read_process_environment()
     throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
     return tick.run_tick(
-        database_factory(),
         _stamped,
         path_reader=path_reader,
         database_for_url=database_for_url,
