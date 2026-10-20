@@ -17,10 +17,22 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+from scripts.host_ops.admission_ledger import (
+    current_boot_id,
+    live_reservations,
+    lock_holder,
+    lock_path,
+    reserve,
+    reserved_gib,
+    take_lock,
+    wait_for_lock,
+)
 
 GIB = 1024**3
 DATA_VOLUME = "/System/Volumes/Data"
@@ -32,6 +44,13 @@ NVIDIA_SMI = (
     "--format=csv,noheader,nounits",
 )
 DEFAULT_RESERVE_GIB = 12.0
+# meiva:note
+# The size at which a job is big enough to be visible to its peers: it writes a reservation
+# and takes its class lock. One threshold, not two — a job that is reserved is also the one
+# that waits. Below it, a job is left alone: its RSS is already inside MemAvailable, so
+# reserving it too would count it twice and keep small jobs off a busy host.
+BIG_JOB_GIB = 8.0
+DEFAULT_MAX_WAIT_SECONDS = 1800.0
 DEFAULT_SWAP_MULTIPLIER = 2.0
 UNSTABLE_PCT_DELTA = 2.0
 POLL_SECONDS = 1.0
@@ -413,7 +432,10 @@ def _announce_gate(
         emit(events, "unknown", script=script, reason="budget", platform=sys.platform)
         return requested
     pressure = pressure_reader()
-    outcome = plan(requested, peak_mb, budget.free_gib, pressure, reserve_gib, multiplier)
+    live = live_reservations(events.parent)
+    reserved = reserved_gib(live) if budget.source == "memory" else 0.0
+    room = max(0.0, budget.free_gib - reserved)
+    outcome = plan(requested, peak_mb, room, pressure, reserve_gib, multiplier)
     if budget.unstable:
         print(
             f"admission: unstable sample — {budget.detail} disagrees with statvfs; "
@@ -433,7 +455,8 @@ def _announce_gate(
     why = "overcommitted, still starting one" if outcome.overcommitted else "lowered"
     print(
         f"admission: jobs {requested}->{outcome.jobs} ({why}: free {budget.free_gib:.1f} GiB "
-        f"({budget.source}) - reserve {reserve_gib:.1f} GiB = {outcome.budget_gib:.1f} GiB / "
+        f"({budget.source}) - reserved {reserved:.1f} - reserve {reserve_gib:.1f} = "
+        f"{outcome.budget_gib:.1f} GiB / "
         f"{outcome.cost_gib:.2f} GiB per worker; pressure {pressure}; {swap_line()})",
         flush=True,
     )
@@ -448,6 +471,8 @@ def _announce_gate(
         multiplier=multiplier,
         budget_source=budget.source,
         free_gib=round(budget.free_gib, 2),
+        reserved_gib=round(reserved, 2),
+        active_jobs=len(live),
         budget_gib=round(outcome.budget_gib, 2),
         pressure=pressure,
         psi_some_avg10=psi_reader(),
@@ -522,6 +547,13 @@ def main(
     parser.add_argument("--reserve-gib", type=float, default=DEFAULT_RESERVE_GIB)
     parser.add_argument("--swap-multiplier", type=float, default=DEFAULT_SWAP_MULTIPLIER)
     parser.add_argument("--no-admission", metavar="REASON", help="run unchanged and record why")
+    parser.add_argument(
+        "--max-wait",
+        type=float,
+        default=DEFAULT_MAX_WAIT_SECONDS,
+        help="seconds to wait for a running job of the same class (default 1800)",
+    )
+    parser.add_argument("--no-wait", action="store_true", help="do not wait for that job")
     parser.add_argument("--dry-run", action="store_true", help="print the plan, run nothing")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
@@ -561,7 +593,84 @@ def main(
         print(f"admission: dry run — would start {jobs} of {requested} workers", flush=True)
         return 0
     _rewrite(command, jobs, requested, flag_index, script)
-    return _start(executor, command, script, jobs, requested, resolved_home)
+    held = hold(
+        script=script,
+        peak_mb=peak_mb,
+        jobs=jobs,
+        home=resolved_home,
+        events=events,
+        max_wait=args.max_wait,
+        no_wait=args.no_wait,
+    )
+    try:
+        return _start(executor, command, script, jobs, requested, resolved_home)
+    finally:
+        release(held)
+
+
+def hold(
+    *,
+    script: str,
+    peak_mb: float,
+    jobs: int,
+    home: Path,
+    events: Path,
+    max_wait: float,
+    no_wait: bool,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[Path | None, Path | None, dict[str, object]]:
+    # meiva:note
+    # A job big enough to matter makes itself visible to its peers: it waits for its class
+    # lock (naming whoever holds it) and writes a reservation the next start subtracts. It
+    # waits, never refuses — on the cap it runs anyway and says so in one line and one event.
+    entry: dict[str, object] = {
+        "pid": os.getpid(),
+        "boot_id": current_boot_id(),
+        "script": script,
+        "peak_mb": peak_mb,
+        "jobs": jobs,
+        "started_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+    }
+    size_gib = peak_mb * jobs / 1024
+    if size_gib < BIG_JOB_GIB:
+        return None, None, {"wait_outcome": "none", "waited_seconds": 0.0}
+    path = lock_path(home, script)
+    if no_wait:
+        acquired = take_lock(path, entry)
+        status: dict[str, object] = {
+            "wait_outcome": "none" if acquired else "abandoned_by_operator",
+            "waited_seconds": 0.0,
+        }
+    else:
+        outcome, waited = wait_for_lock(path, entry, max_wait=max_wait, sleep=sleep)
+        status = {"wait_outcome": outcome, "waited_seconds": round(waited, 1)}
+        if outcome == "timeout":
+            holder = lock_holder(path) or {}
+            print(
+                f"admission: gave up waiting {waited:.0f} s for the {script} lock "
+                f"(held by {holder.get('script')} since {holder.get('started_at')}); "
+                f"starting overcommitted",
+                file=sys.stderr,
+            )
+    reservation = reserve(home, entry)
+    emit(
+        events,
+        "reserved",
+        script=script,
+        peak_mb=peak_mb,
+        jobs=jobs,
+        size_gib=round(size_gib, 2),
+        **status,
+    )
+    return path, reservation, status
+
+
+def release(held: tuple[Path | None, Path | None, dict[str, object]]) -> None:
+    lock, reservation, _ = held
+    for path in (lock, reservation):
+        if path is not None:
+            with contextlib.suppress(OSError):
+                path.unlink()
 
 
 def _start(
