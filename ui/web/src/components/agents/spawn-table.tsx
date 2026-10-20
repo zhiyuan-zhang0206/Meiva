@@ -23,7 +23,7 @@ import {
   type HarnessAvailability,
 } from "@/lib/harness/harness";
 
-const COLUMNS = "grid grid-cols-[7rem_7.5rem_minmax(0,1fr)_4.5rem] text-xs";
+const COLUMNS = "grid grid-cols-[7rem_7.5rem_minmax(0,1fr)_4.5rem] border-b border-border text-xs";
 const CELL = "flex w-full items-center gap-1 rounded-sm px-2 py-1 text-left";
 const SELECTED = "bg-foreground/10 font-medium text-foreground";
 const IDLE = "text-muted-foreground hover:bg-accent hover:text-foreground";
