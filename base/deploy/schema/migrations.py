@@ -195,7 +195,7 @@ def check_schema_version(conn: psycopg.Connection) -> None:
     if missing:
         raise SchemaVersionMismatch(
             f"Schema behind code: DB is missing {len(missing)} migration(s): "
-            f"{sorted(missing)}. Run `meiva start` (which applies pending migrations) "
+            f"{sorted(missing)}. Run `meiva start --all-services` (or this unit's own service selection) (which applies pending migrations) "
             "to catch up."
         )
 

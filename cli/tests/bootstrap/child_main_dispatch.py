@@ -168,7 +168,9 @@ def _init_and_start_settings_free() -> None:
     start_intent.run_start_command = start
     start_intent.complete_start = lambda **_kw: calls.append("boot-complete")
     start_intent.release_serving = lambda: calls.append("clear-serving")
-    assert main.main(["start"]) == 1 and not home.exists()  # nothing to start yet, and nothing made
+    assert (
+        main.main(["start", "--all-services"]) == 1 and not home.exists()
+    )  # nothing to start yet, and nothing made
     assert (
         main.main(["init", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"])
         == 0
@@ -181,7 +183,7 @@ def _init_and_start_settings_free() -> None:
     assert "base.config" not in sys.modules
     if not authority or scenario == "start_delivery_foreign":
         _boot_start_delivery(scenario, home)
-    assert main.main(["start"]) == 0
+    assert main.main(["start", "--all-services"]) == 0
     assert calls == ["logging", "runtime", "boot-complete"]
     assert "base.config" in sys.modules  # admitted root types are allowed; delivery stayed lazy
 

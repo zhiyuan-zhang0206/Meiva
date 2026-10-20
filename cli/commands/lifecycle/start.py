@@ -240,12 +240,16 @@ class _StartState:
 
 @dataclass(frozen=True)
 class _Selection:
-    """The caller's service selection for this start."""
+    # meiva:note
+    # The caller's explicit service selection for this start.
+    #
+    # `reconcile` refuses a live root that runs units outside the selection; restart
+    # leaves it off because the units its stop kept still run.
 
     only_services: tuple[str, ...]
     disabled_services: tuple[str, ...]
     all_services: bool
-    persist_services: bool
+    reconcile: bool
 
 
 def _guard_start(
@@ -316,11 +320,11 @@ def _roster_for(
     roles: MachineRoles,
     selection: _Selection,
     *,
-    publish: bool = True,
     machine: MachineIdentity,
     host: Host,
 ) -> tuple[ServiceSpec, ...]:
-    """The launch roster of the resolved service selection; `publish=False` only inspects it."""
+    # meiva:note
+    # The launch roster of the caller's explicit service selection.
     import cli.commands.lifecycle.root_driver as _root_driver_commands
     from base.deploy.lifecycle.service_selection import resolve_selection
     from services.supervision.roster.spec import services_for_capabilities_annotated
@@ -334,8 +338,6 @@ def _roster_for(
         only=selection.only_services,
         excluded=selection.disabled_services,
         all_services=selection.all_services,
-        persist=selection.persist_services,
-        **({} if publish else {"publish": False}),
     )
     return _root_driver_commands.start_roster(roles, launch_skip, machine=machine, host=host)
 
@@ -352,18 +354,15 @@ def _admit_start(
     import cli.commands._repo as _repo_commands
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 
-    # Resolve desired services without publishing changes before admission.
     with start_trace.phase("roster resolve"):
-        roster = _roster_for(
-            state.roles, selection, publish=False, machine=command.machine, host=command.host
-        )
+        roster = _roster_for(state.roles, selection, machine=command.machine, host=command.host)
     try:
         with start_trace.phase("live generation check"):
             state.live = _root_driver_commands.admit_live_start(
                 roster,
                 state.repo,
                 state.roles,
-                reconcile=selection.persist_services,
+                reconcile=selection.reconcile,
                 helper=command.helper,
             )
         if not state.live:
@@ -510,7 +509,7 @@ def _assert_archive_after_readiness(
     )
 
 
-def readiness_verdict(launch: Any, wait: Any) -> int | None:
+def readiness_verdict(launch: Any, wait: Any, *, ready_timeout: float) -> int | None:
     """Report all failures, but gate serving only on selected core services."""
     import cli.commands.probe as _probe_commands
 
@@ -521,7 +520,7 @@ def readiness_verdict(launch: Any, wait: Any) -> int | None:
             file=sys.stderr,
         )
     if wait.unready:
-        _probe_commands.print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
+        _probe_commands.print_unready_services(wait, ready_timeout)
     if wait.non_critical_unready:
         _probe_commands.print_non_critical_unready_services(wait.non_critical_unready)
         _probe_commands.report_non_critical_unready_services(wait.non_critical_unready)
@@ -534,22 +533,23 @@ def readiness_verdict(launch: Any, wait: Any) -> int | None:
 def cmd_start_body(
     operation: PauseOwnerSnapshot | None,
     database_factory: OperatorDatabaseFactory,
-    disabled_services: tuple[str, ...] = (),
-    only_services: tuple[str, ...] = (),
     *,
-    all_services: bool = False,
-    persist_services: bool = True,
+    disabled_services: tuple[str, ...],
+    only_services: tuple[str, ...],
+    all_services: bool,
+    reconcile: bool,
+    ready_timeout: float,
     runtime: StartRuntime | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
     boot_attempt: bool = False,
 ) -> int | StartDelegation:
-    """Core start logic, shared by cmd_start and cmd_restart.
-
-    Explicit selection is durable when ``persist_services`` is true; omission
-    retains prior intent. Internal restarts may add transient exclusions only.
-    """
+    # meiva:note
+    # Core start logic, shared by cmd_start and cmd_restart.
+    #
+    # The caller names exactly one service selection; nothing is persisted, so no
+    # later start inherits it. ``reconcile`` is off only for restart's start leg.
     if retained_children is None:
         raise ValueError("start requires its caller-owned PostgreSQL child retention")
     # Resolve the defining modules at the lifecycle operation boundary.
@@ -569,7 +569,7 @@ def cmd_start_body(
     state = _StartState(
         runtime, command, repo, resolved, roles, live=False, retained_children=retained_children
     )
-    selection = _Selection(only_services, disabled_services, all_services, persist_services)
+    selection = _Selection(only_services, disabled_services, all_services, reconcile)
     rc = _admit_start(
         state, selection, database_factory=database_factory, producer=producer, command=command
     )
@@ -579,8 +579,9 @@ def cmd_start_body(
     if rc is not None:
         return rc
 
-    # Preparation may materialize plugins on a cold start; publish only now.
-    with start_trace.phase("roster publish"):
+    # meiva:note
+    # Preparation may materialize plugins on a cold start; resolve the launch roster now.
+    with start_trace.phase("roster resolve (launch)"):
         roster = _roster_for(roles, selection, machine=command.machine, host=command.host)
 
     # 4a) probe before binding: refuse to launch a daemon onto a health port
@@ -600,7 +601,7 @@ def cmd_start_body(
             roster,
             repo,
             roles,
-            reconcile=persist_services,
+            reconcile=reconcile,
             retained_children=state.retained_children,
             helper=command.helper,
             runtime=runtime,
@@ -628,7 +629,7 @@ def cmd_start_body(
     with start_trace.phase("readiness wait"):
         wait = root_readiness.wait_for_service_tree(
             tuple(started),
-            timeout_s=SERVICE_READY_TIMEOUT_S,
+            timeout_s=ready_timeout,
             timers=command.timers,
         )
 
@@ -637,7 +638,7 @@ def cmd_start_body(
     )
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
-    rc = readiness_verdict(launch, wait)
+    rc = readiness_verdict(launch, wait, ready_timeout=ready_timeout)
     if rc is not None:
         return rc
 
@@ -655,11 +656,10 @@ def cmd_start_body(
 
 
 def cmd_start(
-    disabled_services: tuple[str, ...] = (),
-    only_services: tuple[str, ...] = (),
     *,
-    all_services: bool = False,
-    persist_services: bool = True,
+    disabled_services: tuple[str, ...],
+    only_services: tuple[str, ...],
+    all_services: bool,
     runtime: StartRuntime | None = None,
     operation: PauseOwnerSnapshot | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -671,8 +671,7 @@ def cmd_start(
     # meiva:note
     # Converge one configured unit through storage, schema, root and readiness.
     # `meiva init` persisted the unit's identity before the public CLI reaches this
-    # entry; internal restart callers reuse that identity and its durable service
-    # selection. `boot_attempt` marks the OS boot job's retried start, which leaves
+    # entry; every caller names its service selection explicitly. `boot_attempt` marks the OS boot job's retried start, which leaves
     # a unit whose meiva-root circuit breaker is open down — the health monitor keeps
     # retrying that unit on its backoff ladder (task #5315).
     if retained_children is None:
@@ -688,7 +687,8 @@ def cmd_start(
             disabled_services=disabled_services,
             only_services=only_services,
             all_services=all_services,
-            persist_services=persist_services,
+            reconcile=True,
+            ready_timeout=SERVICE_READY_TIMEOUT_S,
             runtime=runtime,
             retained_children=retained_children,
             producer=producer,

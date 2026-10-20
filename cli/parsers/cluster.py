@@ -40,7 +40,12 @@ def _h_cluster_resume(args: argparse.Namespace) -> int:
 def _h_cluster_destroy(args: argparse.Namespace) -> int:
     from cli.commands.cluster.home import cmd_cluster_destroy
 
-    return cmd_cluster_destroy(drop_db=args.drop_db, host=args.runtime.host)
+    return cmd_cluster_destroy(
+        drop_db=args.drop_db,
+        stop_mode=args.stop_mode,
+        stop_timeout=args.stop_timeout,
+        host=args.runtime.host,
+    )
 
 
 def _h_cluster_health_probe(args: argparse.Namespace) -> int:
@@ -189,6 +194,19 @@ def add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         action="store_true",
         default=False,
         help="also remove the cluster's own pg/redis data dirs (default: keep data)",
+    )
+    cluster_destroy_p.add_argument(
+        "--stop-mode",
+        choices=("smooth", "force"),
+        required=True,
+        help="the stop's interruption mode, passed to `meiva stop --mode`",
+    )
+    cluster_destroy_p.add_argument(
+        "--stop-timeout",
+        type=float,
+        required=True,
+        metavar="SECONDS",
+        help="the stop's deadline, passed to `meiva stop --timeout`",
     )
     cluster_destroy_p.set_defaults(func=_h_cluster_destroy)
 

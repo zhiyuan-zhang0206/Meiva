@@ -93,7 +93,8 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
         *,
         preserve_sessions: frozenset[str],
         keep_browser: bool,
-        keep_infra: bool,
+        keep_shell_sessions: bool,
+        keep_infra: bool | None,
         machine: MachineIdentity,
     ) -> tuple[MachineRoles, frozenset[str], frozenset[str]]:
         assert machine is command_machine
@@ -146,6 +147,7 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
             keep_infra=False,
             preserve_sessions=frozenset(),
             keep_browser=False,
+            keep_shell_sessions=False,
             announce=False,
             teardown_extras=True,
             timeout=3,

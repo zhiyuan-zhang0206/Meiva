@@ -180,16 +180,20 @@ def test_main_reuses_only_the_explicit_caller_child_owner(monkeypatch: pytest.Mo
     monkeypatch.setattr(start_identity, "require_initialized", _ignoring_retention(lambda: None))
     monkeypatch.setattr(stop, "cmd_stop", stopped)
     shared: list[subprocess.Popen[bytes]] = []
-    assert _main.main(["start"], retained_children=shared) == 0
-    assert _main.main(["stop", "--yes"], retained_children=shared) == 0
+    assert _main.main(["start", "--all-services"], retained_children=shared) == 0
+    full_stop = ["--yes", "--close-shell-sessions", "--stop-browser", "--stop-extras"]
+    # meiva:note
+    # a runner home
+    full_stop += ["--keep-no-services", "--mode", "smooth", "--timeout", "60"]
+    assert _main.main(["stop", *full_stop], retained_children=shared) == 0
     assert owners[0] is shared and owners[1] is shared
-    assert _main.main(["start"]) == 0
-    assert _main.main(["start"]) == 0
+    assert _main.main(["start", "--all-services"]) == 0
+    assert _main.main(["start", "--all-services"]) == 0
     assert owners[2] is not shared and owners[3] is not owners[2]
 
 
 def test_inspection_parser_cannot_launch_without_a_child_owner() -> None:
-    args = build_parser().parse_args(["start"])
+    args = build_parser().parse_args(["start", "--all-services"])
     with pytest.raises(ValueError, match="caller-owned child retention"):
         args.func(args)
 

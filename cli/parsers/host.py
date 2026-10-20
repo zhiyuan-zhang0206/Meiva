@@ -11,7 +11,15 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
+from collections.abc import Sequence
 from functools import partial
+
+# meiva:note
+# A lifecycle verb defaults and infers nothing: every choice is the operator's
+# explicit answer, and a missing answer is a usage error naming every missing
+# choice at once (docs/conventions/engineering/cli-argument-discipline.md).
+USAGE_EXIT = 2
 
 
 def h_init(args: argparse.Namespace) -> int:
@@ -37,18 +45,93 @@ def _h_start(
     )
 
 
-def _h_stop(
+def add_choice(
+    parser: argparse.ArgumentParser | argparse._ArgumentGroup,
+    dest: str,
+    flags: tuple[str, str],
+    *,
+    helps: tuple[str, str],
+) -> None:
+    # meiva:note
+    # One required keep-or-stop choice: `flags[0]` answers True, `flags[1]` False.
+    #
+    # Unanswered reads None; `missing_choices` turns that into the usage error.
+    group = parser.add_mutually_exclusive_group()
+    for flag, value, text in zip(flags, (True, False), helps, strict=True):
+        group.add_argument(
+            flag, dest=dest, action="store_const", const=value, default=None, help=text
+        )
+
+
+def missing_choices(args: argparse.Namespace, choices: Sequence[tuple[str, str]]) -> list[str]:
+    # meiva:note
+    # The answer forms of every choice in `(dest, answer form)` left unanswered.
+    return [form for dest, form in choices if getattr(args, dest) is None]
+
+
+def refuse_usage(verb: str, problems: Sequence[str]) -> int:
+    # meiva:note
+    # Name every missing or inapplicable choice at once, then exit as a usage error.
+    print(
+        f"meiva {verb}: every lifecycle choice is explicit; fix all of:\n"
+        + "\n".join(f"  {problem}" for problem in problems),
+        file=sys.stderr,
+    )
+    return USAGE_EXIT
+
+
+_STOP_CHOICES = (
+    ("keep_shell_sessions", "--keep-shell-sessions | --close-shell-sessions"),
+    ("keep_browser", "--keep-browser | --stop-browser"),
+    ("keep_extras", "--keep-extras | --stop-extras"),
+    ("keep_service", "--keep-service NAME [--keep-service NAME ...] | --keep-no-services"),
+    ("mode", "--mode smooth|force"),
+    ("timeout", "--timeout SECONDS"),
+    ("assume_yes", "--yes | --prompt"),
+)
+
+
+def stop_problems(args: argparse.Namespace, roles: frozenset[str] | None) -> list[str]:
+    # meiva:note
+    # Every missing or inapplicable `meiva stop` choice. The host's capabilities
+    # (`roles`, None when unreadable) only refuse: a gateway requires the data-plane
+    # choice, any other host accepts none, unreadable capabilities refuse the stop.
+    problems = missing_choices(args, _STOP_CHOICES)
+    if roles is None:
+        problems.append(
+            "this home's capabilities are unreadable, so --keep-infra/--stop-infra cannot be "
+            "validated; finish `meiva init` first"
+        )
+    elif "gateway" in roles and args.keep_infra is None:
+        problems.append("--keep-infra | --stop-infra (this host serves the gateway)")
+    elif "gateway" not in roles and args.keep_infra is not None:
+        problems.append("--keep-infra/--stop-infra: this host has no local data plane")
+    return problems
+
+
+def h_stop(
     args: argparse.Namespace,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
+    from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing
+
+    try:
+        roles: frozenset[str] | None = args.runtime.machine.role()
+    except (MachineRoleMissing, MachineRoleInvalid):
+        roles = None
+    if problems := stop_problems(args, roles):
+        return refuse_usage("stop", problems)
     from cli.commands.lifecycle.stop import cmd_stop
 
     return cmd_stop(
         keep_infra=args.keep_infra,
-        require_confirmation=not args.yes,
+        require_confirmation=not args.assume_yes,
+        keep_browser=args.keep_browser,
+        keep_shell_sessions=args.keep_shell_sessions,
+        teardown_extras=not args.keep_extras,
         preserve_sessions=frozenset(args.keep_service),
-        force=args.force,
+        force=args.mode == "force",
         timeout=args.timeout,
         retained_children=retained_children,
         database_factory=args.database_factory,
@@ -58,17 +141,69 @@ def _h_stop(
     )
 
 
-def _h_restart(
+_RESTART_TREE_CHOICES = (
+    ("keep_shell_sessions", "--keep-shell-sessions | --close-shell-sessions"),
+    ("keep_browser", "--keep-browser | --restart-browser"),
+    ("keep_extras", "--keep-extras | --restart-extras"),
+)
+_RESTART_COMMON_CHOICES = (
+    ("mode", "--mode smooth|force"),
+    ("timeout", "--timeout SECONDS"),
+    ("start_timeout", "--start-timeout SECONDS"),
+)
+_RESTART_TREE_FORMS = "--all-services | --only-service NAME ... | --disable-service NAME ..."
+
+
+def restart_problems(args: argparse.Namespace) -> list[str]:
+    # meiva:note
+    # Every missing or inapplicable `meiva restart` choice for the scope named.
+    tree = bool(args.all_services or args.only_service or args.disable_service)
+    problems = missing_choices(args, _RESTART_COMMON_CHOICES)
+    if args.only is not None:
+        if tree:
+            problems.append(f"--only {args.only} excludes {_RESTART_TREE_FORMS}")
+        problems += [
+            f"{form}: not part of --only {args.only}"
+            for dest, form in _RESTART_TREE_CHOICES
+            if getattr(args, dest) is not None
+        ]
+        return problems
+    if not tree:
+        problems.append(f"the scope: --only agent-host | {_RESTART_TREE_FORMS}")
+    return problems + missing_choices(args, _RESTART_TREE_CHOICES)
+
+
+def h_restart(
     args: argparse.Namespace,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
+    if problems := restart_problems(args):
+        return refuse_usage("restart", problems)
+    if args.only is not None:
+        from cli.commands.lifecycle.stop import cmd_restart_agent_host
+
+        return cmd_restart_agent_host(
+            force=args.mode == "force",
+            timeout=args.timeout,
+            start_timeout=args.start_timeout,
+            database_factory=args.database_factory,
+            command=args.runtime,
+        )
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from cli.commands.lifecycle.stop import cmd_restart
 
     return cmd_restart(
-        mode=args.mode,
+        only_services=tuple(args.only_service or ()),
+        disabled_services=tuple(args.disable_service or ()),
+        all_services=args.all_services,
+        keep_shell_sessions=args.keep_shell_sessions,
+        keep_browser=args.keep_browser,
+        restart_extras=not args.keep_extras,
+        force=args.mode == "force",
+        timeout=args.timeout,
+        start_timeout=args.start_timeout,
         retained_children=retained_children,
         database_factory=args.database_factory,
         producer=args.producer,
@@ -95,7 +230,12 @@ def _h_converge(args: argparse.Namespace) -> int:
     from cli.commands.lifecycle.converge_host import cmd_converge
 
     return cmd_converge(
-        database_factory=args.database_factory, producer=args.producer, command=args.runtime
+        only_services=tuple(args.only_service or ()),
+        disabled_services=tuple(args.disable_service or ()),
+        all_services=args.all_services,
+        database_factory=args.database_factory,
+        producer=args.producer,
+        command=args.runtime,
     )
 
 
@@ -203,24 +343,16 @@ def add_start_parser(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> None:
-    # `meiva start` — brings up a home `meiva init` initialized; the service selection
-    # is its only input.
+    # meiva:note
+    # `meiva start` — brings up a home `meiva init` initialized; the explicit service
+    # selection is its only input.
     start_p = sub.add_parser(
         "start",
-        help="[host] bring up this unit's full stack (idempotent). The home is "
-        "$MEIVA_HOME, else ~/.meiva — never a flag. It must be initialized first: "
+        help="[host] bring up this unit's stack with the named service selection (idempotent). "
+        "The home is $MEIVA_HOME, else ~/.meiva — never a flag. It must be initialized first: "
         "`meiva init` takes the machine identity (name, capabilities, gateway).",
     )
-    selection = start_p.add_mutually_exclusive_group()
-    selection.add_argument(
-        "--disable-service",
-        action="append",
-        default=[],
-        metavar="SERVICE",
-        help="durably disable this service session (repeatable; e.g. --disable-service labeler "
-        "--disable-service frontend). Pass the bare service name. Bare `meiva start` preserves "
-        "this selection; use `--all-services` to reset it or `--only-service` to replace it.",
-    )
+    add_service_selection(start_p)
     start_p.add_argument(
         # Internal: the OS boot job (launchd plist / systemd unit) passes it. A boot
         # start is retried by its scheduler, so it counts its attempts and stops
@@ -231,21 +363,54 @@ def add_start_parser(
         action="store_true",
         help=argparse.SUPPRESS,
     )
-    selection.add_argument(
-        "--all-services", action="store_true", help="explicitly select the entire roster"
-    )
-    selection.add_argument(
-        "--only-service",
-        action="append",
-        default=[],
-        metavar="SERVICE",
-        help="run only these services (repeatable; persisted for restart)",
-    )
     start_p.set_defaults(
         func=_h_start
         if retained_children is None
         else partial(_h_start, retained_children=retained_children)
     )
+
+
+def add_service_selection(parser: argparse.ArgumentParser, *, required: bool = True) -> None:
+    # meiva:note
+    # The start selection: exactly one of the three forms; nothing is persisted.
+    selection = parser.add_mutually_exclusive_group(required=required)
+    selection.add_argument(
+        "--all-services", action="store_true", help="select this unit's entire roster"
+    )
+    selection.add_argument(
+        "--only-service",
+        action="append",
+        metavar="SERVICE",
+        help="run only these services (repeatable; bare service names)",
+    )
+    selection.add_argument(
+        "--disable-service",
+        action="append",
+        metavar="SERVICE",
+        help="run every service but these (repeatable; e.g. --disable-service labeler "
+        "--disable-service frontend)",
+    )
+
+
+def _add_mode_and_timeout(parser: argparse.ArgumentParser, *, timeout_help: str) -> None:
+    parser.add_argument(
+        "--mode",
+        choices=("smooth", "force"),
+        default=None,
+        help="required: 'smooth' never force-kills; 'force' explicitly permits force-killing "
+        "work that cannot exit normally",
+    )
+    parser.add_argument("--timeout", type=_positive_seconds, default=None, help=timeout_help)
+
+
+def _positive_seconds(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number of seconds") from exc
+    if value <= 0:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number of seconds > 0")
+    return value
 
 
 def add_stop_parser(
@@ -255,46 +420,71 @@ def add_stop_parser(
 ) -> None:
     stop_p = sub.add_parser(
         "stop",
-        help="[host] stop services, terminals and data plane; preserve data and agent identities",
+        help="[host] stop this unit as the operator chooses; preserve data and agent "
+        "identities. Every choice below is required (none has a default).",
     )
-    stop_p.add_argument(
-        "--keep-infra",
-        action="store_true",
-        help="do not stop THIS cluster's own Postgres/Redis instance (every "
-        "cluster owns one, under its $MEIVA_HOME). Used by `meiva restart`, whose start "
-        "leg still needs the database. A plain `meiva stop` means 'fully stop' and "
-        "leaves this off.",
+    add_choice(
+        stop_p,
+        "keep_shell_sessions",
+        ("--keep-shell-sessions", "--close-shell-sessions"),
+        helps=(
+            "keep the pty-sessions service and every shell session it holds",
+            "close every shell session, then stop the pty-sessions service",
+        ),
     )
-    stop_p.add_argument(
-        "-y",
-        "--yes",
-        action="store_true",
-        help="skip the stdin y/N confirmation (non-interactive / scripted use).",
+    add_choice(
+        stop_p,
+        "keep_browser",
+        ("--keep-browser", "--stop-browser"),
+        helps=("keep the shared browser (its login session) running", "stop the shared browser"),
     )
-    stop_p.add_argument(
+    add_choice(
+        stop_p,
+        "keep_extras",
+        ("--keep-extras", "--stop-extras"),
+        helps=(
+            "keep Gate, the permissions helper and native LGTM",
+            "stop Gate, the permissions helper and native LGTM",
+        ),
+    )
+    add_choice(
+        stop_p,
+        "keep_infra",
+        ("--keep-infra", "--stop-infra"),
+        helps=(
+            "gateway hosts only: keep THIS cluster's own Postgres/PgBouncer/Redis running",
+            "gateway hosts only: stop THIS cluster's own Postgres/PgBouncer/Redis (data kept)",
+        ),
+    )
+    kept = stop_p.add_mutually_exclusive_group()
+    kept.add_argument(
         "--keep-service",
         action="append",
-        default=[],
+        default=None,
         metavar="SERVICE",
-        help="retain a named service (repeatable); DB-dependent services require --keep-infra",
+        help="retain this other service (repeatable); DB-dependent services require "
+        "--keep-infra. Shell sessions and the browser have their own choices",
     )
-    # task #4092 cli-default inventory: bounded graceful drain — "failure never
-    # silently forces" makes the default safe, and ops scripts rely on it.
-    stop_p.add_argument(
-        "--timeout",
-        type=float,
-        default=300,
-        help="total normal drain/stop deadline; failure never silently forces",
+    kept.add_argument(
+        "--keep-no-services",
+        dest="keep_service",
+        action="store_const",
+        const=[],
+        help="retain no other service",
     )
-    stop_p.add_argument(
-        "--force",
-        action="store_true",
-        help="explicitly permit force-killing work that cannot exit normally",
+    add_choice(
+        stop_p,
+        "assume_yes",
+        ("--yes", "--prompt"),
+        helps=("proceed without the stdin y/N confirmation", "ask y/N on stdin before stopping"),
+    )
+    _add_mode_and_timeout(
+        stop_p, timeout_help="required: total drain/stop deadline in seconds; failure never forces"
     )
     stop_p.set_defaults(
-        func=_h_stop
+        func=h_stop
         if retained_children is None
-        else partial(_h_stop, retained_children=retained_children)
+        else partial(h_stop, retained_children=retained_children)
     )
 
 
@@ -305,20 +495,54 @@ def add_restart_parser(
 ) -> None:
     restart_p = sub.add_parser(
         "restart",
-        help="[host] normal stop then start, retaining the data plane and browser (persistent terminals close, as at stop)",
+        help="[host] stop then start, without a confirmation prompt; the data plane always "
+        "stays up. Name the scope: `--only agent-host` (root brings agent-host back; only "
+        "--mode, --timeout and --start-timeout apply) or a service selection (--all-services, "
+        "--only-service, --disable-service) that the start leg launches, with every "
+        "keep-or-restart choice.",
     )
-    # task #4092 cli-default inventory: "smooth" is the safe default — force
-    # must be asked for explicitly.
     restart_p.add_argument(
-        "--mode",
-        choices=("smooth", "force"),
-        default="smooth",
-        help="'smooth' preserves completed work; 'force' explicitly permits forced resource shutdown",
+        "--only",
+        choices=("agent-host",),
+        default=None,
+        help="restart agent-host alone; nothing else is touched",
+    )
+    add_service_selection(restart_p, required=False)
+    add_choice(
+        restart_p,
+        "keep_shell_sessions",
+        ("--keep-shell-sessions", "--close-shell-sessions"),
+        helps=(
+            "keep the pty-sessions service and its shell sessions (they keep running old code)",
+            "close every shell session; the restarted pty-sessions runs the new code",
+        ),
+    )
+    add_choice(
+        restart_p,
+        "keep_browser",
+        ("--keep-browser", "--restart-browser"),
+        helps=("keep the shared browser running", "stop the shared browser; start relaunches it"),
+    )
+    add_choice(
+        restart_p,
+        "keep_extras",
+        ("--keep-extras", "--restart-extras"),
+        helps=(
+            "keep Gate, the permissions helper and native LGTM",
+            "stop Gate, the permissions helper and native LGTM; start brings them back",
+        ),
+    )
+    _add_mode_and_timeout(restart_p, timeout_help="required: the stop leg's deadline in seconds")
+    restart_p.add_argument(
+        "--start-timeout",
+        type=_positive_seconds,
+        default=None,
+        help="required: how long the start leg waits for the restarted services' readiness",
     )
     restart_p.set_defaults(
-        func=_h_restart
+        func=h_restart
         if retained_children is None
-        else partial(_h_restart, retained_children=retained_children)
+        else partial(h_restart, retained_children=retained_children)
     )
 
 
@@ -341,8 +565,10 @@ def add_converge_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     converge_p = sub.add_parser(
         "converge",
         help="[host] re-apply idempotent host wiring (symlink/PATH/dirs/plugin images/memory pool); "
-        "normally run automatically by meiva start",
+        "normally run automatically by meiva start. The service selection names the services "
+        "whose wiring (and boot job) it converges, exactly as `meiva start` takes it",
     )
+    add_service_selection(converge_p)
     converge_p.set_defaults(func=_h_converge)
 
 
@@ -370,18 +596,20 @@ def _h_lgtm(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
-    from cli.commands.lifecycle.lgtm_toggle import cmd_lgtm_off, cmd_lgtm_on
+    from cli.commands.lifecycle.lgtm_toggle import cmd_lgtm_off, cmd_lgtm_on, selection_problem
     from cli.commands.observability.lgtm import cmd_lgtm_status
 
-    if args.lgtm_cmd == "on":
-        return cmd_lgtm_on(
-            retained_children=retained_children,
-            database_factory=args.database_factory,
-            producer=args.producer,
-            command=args.runtime,
-        )
-    if args.lgtm_cmd == "off":
-        return cmd_lgtm_off(
+    if args.lgtm_cmd in ("on", "off"):
+        only = tuple(args.only_service or ())
+        disabled = tuple(args.disable_service or ())
+        enabled = args.lgtm_cmd == "on"
+        problem = selection_problem(enabled=enabled, only_services=only, disabled_services=disabled)
+        if problem is not None:
+            return refuse_usage(f"lgtm {args.lgtm_cmd}", [problem])
+        return (cmd_lgtm_on if enabled else cmd_lgtm_off)(
+            only_services=only,
+            disabled_services=disabled,
+            all_services=args.all_services,
             retained_children=retained_children,
             database_factory=args.database_factory,
             producer=args.producer,
@@ -412,11 +640,21 @@ def add_lgtm_parser(
     )
     lgtm_sub = lgtm_p.add_subparsers(dest="lgtm_cmd", required=True)
     for name, help_text in (
-        ("on", "designate this host as the LGTM host + bring the stack up (idempotent)"),
-        ("off", "take the stack down + stop being the LGTM host (volumes persist)"),
+        (
+            "on",
+            "designate this host as the LGTM host and start the named service selection, "
+            "which must include the LGTM backends (idempotent)",
+        ),
+        (
+            "off",
+            "stop being the LGTM host and start the named service selection without the "
+            "backends (volumes persist)",
+        ),
         ("status", "marker + containers + readiness probes"),
     ):
         p = lgtm_sub.add_parser(name, help=help_text)
+        if name != "status":
+            add_service_selection(p)
         p.set_defaults(
             func=_h_lgtm
             if retained_children is None or name == "status"

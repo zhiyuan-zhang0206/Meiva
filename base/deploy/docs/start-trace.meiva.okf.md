@@ -18,7 +18,7 @@ environment and hands the answer to `start_trace.begin`, so no module below the
 CLI consults the environment on its own.
 
 ```bash
-MEIVA_START_TIMING=1 meiva start
+MEIVA_START_TIMING=1 meiva start --all-services
 ```
 
 ## What a run prints

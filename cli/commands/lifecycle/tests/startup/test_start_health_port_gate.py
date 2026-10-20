@@ -246,6 +246,9 @@ def test_start_refuses_and_launches_nothing(
     _verdicts(monkeypatch, {"agent-host": DaemonProbe.port_taken(_FOREIGN)})
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -272,6 +275,9 @@ def test_a_clear_roster_starts_normally(
     _verdicts(monkeypatch, {"ops": DaemonProbe.down("cold")})
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -297,6 +303,8 @@ def test_a_disabled_service_cannot_block_start(
     assert (
         _start_commands.cmd_start(
             disabled_services=("labeler",),
+            only_services=(),
+            all_services=False,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -319,6 +327,9 @@ def test_optional_port_conflict_does_not_block_core_start(
     _verdicts(monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN)})
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,

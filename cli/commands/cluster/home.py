@@ -65,19 +65,44 @@ def _confirm_destroy(home: Path, *, roles: list[str], drop_db: bool) -> bool:
     return True
 
 
-def stop_cluster() -> int:
-    """Stop this cluster's services and its own pg/redis (does not drop data).
+def stop_command(*, roles: list[str], mode: str, timeout: float) -> list[str]:
+    # meiva:note
+    # Stop this cluster entirely: services, shell sessions, browser, extras, data plane.
+    #
+    # The child is `meiva stop`, run from this checkout with the same home. A
+    # detach leaves nothing of the cluster running, so every keep-or-stop choice
+    # is "stop" by the verb's meaning; the operator names the mode and the budget.
+    # A gateway also stops its own data plane: `--drop-db` then removes the data
+    # directories of a genuinely stopped instance, never a live one. `--yes`
+    # because the child has no terminal to confirm on (destroy confirmed already).
+    return [
+        sys.executable,
+        "-m",
+        "cli.main",
+        "stop",
+        "--yes",
+        "--close-shell-sessions",
+        "--stop-browser",
+        "--stop-extras",
+        "--keep-no-services",
+        "--mode",
+        mode,
+        "--timeout",
+        f"{timeout:g}",
+        *(["--stop-infra"] if "gateway" in roles else []),
+    ]
 
-    The child is `meiva stop`, run from this checkout with the same home. No
-    `--keep-infra`: `--drop-db` then removes the data directories of a genuinely
-    stopped instance, never a live one. `-y` because the child has no terminal to
-    confirm on (destroy confirmed already); a plain stop takes the headed
-    browser down too."""
-    cmd = [sys.executable, "-m", "cli.main", "stop", "-y"]
+
+def stop_cluster(*, roles: list[str], mode: str, timeout: float) -> int:
+    # meiva:note
+    # Run `stop_command` from this checkout with the same home.
+    cmd = stop_command(roles=roles, mode=mode, timeout=timeout)
     return subprocess.run(cmd, cwd=_repo_root(), check=False).returncode
 
 
-def cmd_cluster_destroy(*, drop_db: bool = False, host: Host) -> int:
+def cmd_cluster_destroy(
+    *, drop_db: bool = False, stop_mode: str, stop_timeout: float, host: Host
+) -> int:
     """Detach the host's cluster: stop it, retire its OS jobs and helper, mark the
     home detached, optionally remove its data dirs.
 
@@ -114,7 +139,7 @@ def cmd_cluster_destroy(*, drop_db: bool = False, host: Host) -> int:
     # refuse it from the first moment of the teardown.
     with file_lock(home / "start-intent.lock", timeout_s=30):
         write_private_bytes(home / "destroy-intent.json", b'{"version":1,"state":"destroying"}\n')
-        rc = stop_cluster()
+        rc = stop_cluster(roles=list(intent["roles"]), mode=stop_mode, timeout=stop_timeout)
         if rc != 0:
             print("cluster stop incomplete; destroy intent retained", file=sys.stderr)
             return rc

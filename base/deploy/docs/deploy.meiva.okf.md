@@ -13,7 +13,7 @@ Its component nodes describe the current contracts and implementation.
 ## Documented components
 
 - [[base/deploy/lifecycle/docs/home_lifecycle_locks.meiva.okf.md]] — Home Lifecycle Mutex.
-- [[base/deploy/lifecycle/docs/service-selection.meiva.okf.md]] — Durable service intent.
+- [[base/deploy/lifecycle/docs/service-selection.meiva.okf.md]] — Explicit per-start service selection.
 - [[base/deploy/maintenance/docs/maintenance.meiva.okf.md]] — Native pause and maintenance.
 - [[base/deploy/release/docs/collector-artifact.meiva.okf.md]] — Collector artifact download.
 - [[base/deploy/schema/docs/migrations.meiva.okf.md]] — Schema Migrations (baseline + deltas).

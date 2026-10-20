@@ -13,7 +13,6 @@ exports = ["__main__.py", "commands", "database", "parsers", "start_identity.py"
 
 [debt.private-module]
 "tests/test_plugin_scaffold.py -> commands/extensions/_plugin_scaffold.py" = 1
-"tests/test_stop_parser.py -> commands/lifecycle/_pause_resume.py" = 1
 
 [debt.private-name]
 "commands/lifecycle/tests/test_commands_status.py -> database/tests/command_fakes.py#_sess" = 1

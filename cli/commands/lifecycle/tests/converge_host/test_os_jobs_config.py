@@ -102,7 +102,7 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
         machine=machine_from_boot(owner),
         helper=refuse_helper,
         host=fake_host(),
-        services=frozenset(),
+        services=frozenset({"gateway", "frontend"}),
         timers=ManualTimers(),
     )
     readers: list[Callable[[], bool]] = []
@@ -132,7 +132,15 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
         hours.append(backup_hour_reader)
 
     monkeypatch.setattr(cron, "register_os_cron", register)
-    monkeypatch.setattr(autostart, "register_autostart", register)
+    autostart_services: list[frozenset[str]] = []
+
+    def register_autostart(
+        *, services: frozenset[str], enabled_reader: Callable[[], bool], host: Host
+    ) -> None:
+        autostart_services.append(services)
+        register(enabled_reader=enabled_reader, host=host)
+
+    monkeypatch.setattr(autostart, "register_autostart", register_autostart)
     monkeypatch.setattr(logs_job, "register_logs_job", register)
 
     def register_pr_flow(
@@ -159,6 +167,9 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
     ]:
         step(ctx)
     assert len(readers) == 6
+    # meiva:note
+    # the boot job launches the selected services
+    assert autostart_services == [ctx.services]
     assert [read() for read in readers] == [True] * 6
     assert (refresh[0](), ticks[0](), hours[0]()) == (True, 1200, 21)
     owner.set_field("os_jobs_enabled", False)

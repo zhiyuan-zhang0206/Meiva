@@ -49,7 +49,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, roles: list[str]) -> P
     def read_intent(_home: Path) -> dict[str, object]:
         return {"roles": roles}
 
-    def stop() -> int:
+    def stop(*, roles: list[str], mode: str, timeout: float) -> int:
         return 0
 
     def unregister_jobs(*, host: Host) -> None:
@@ -73,7 +73,7 @@ def _no_intent(_home: Path) -> None:
     return None
 
 
-def _nothing_to_stop() -> int:
+def _nothing_to_stop(*, roles: list[str], mode: str, timeout: float) -> int:
     return 0
 
 
@@ -108,7 +108,9 @@ def test_destroy_checks_helper_before_detaching(
 
     monkeypatch.setattr(launchd_job, "unregister_helper", unregister)
     _at_a_terminal(monkeypatch, str(home))
-    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 0
+    assert (
+        lifecycle.cmd_cluster_destroy(stop_mode="smooth", stop_timeout=300, host=fake_host()) == 0
+    )
     assert seen == [home]
     assert _detached(home)
 
@@ -132,7 +134,9 @@ def test_destroy_refuses_without_an_interactive_terminal(
     stop = Mock()
     monkeypatch.setattr(lifecycle, "stop_cluster", stop)
 
-    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 1
+    assert (
+        lifecycle.cmd_cluster_destroy(stop_mode="smooth", stop_timeout=300, host=fake_host()) == 1
+    )
     assert "interactive terminal" in err.getvalue()
     prompt.assert_not_called()
     stop.assert_not_called()
@@ -149,7 +153,12 @@ def test_a_different_answer_changes_nothing(
     data = home / "pg"
     data.mkdir()
 
-    assert lifecycle.cmd_cluster_destroy(drop_db=True, host=fake_host()) == 1
+    assert (
+        lifecycle.cmd_cluster_destroy(
+            stop_mode="smooth", stop_timeout=300, drop_db=True, host=fake_host()
+        )
+        == 1
+    )
     stop.assert_not_called()
     assert data.is_dir()
     assert not (home / "destroy-intent.json").exists()
@@ -160,7 +169,9 @@ def test_end_of_input_changes_nothing(home: Path, monkeypatch: pytest.MonkeyPatc
     stop = Mock()
     monkeypatch.setattr(lifecycle, "stop_cluster", stop)
 
-    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 1
+    assert (
+        lifecycle.cmd_cluster_destroy(stop_mode="smooth", stop_timeout=300, host=fake_host()) == 1
+    )
     stop.assert_not_called()
     assert not (home / "destroy-intent.json").exists()
 
@@ -172,7 +183,12 @@ def test_the_prompt_says_what_happens_and_what_is_deleted(
     from base.cluster.dataplane.pg_admin import pg_socket_path
 
     _at_a_terminal(monkeypatch, str(home))
-    assert lifecycle.cmd_cluster_destroy(drop_db=True, host=fake_host()) == 0
+    assert (
+        lifecycle.cmd_cluster_destroy(
+            stop_mode="smooth", stop_timeout=300, drop_db=True, host=fake_host()
+        )
+        == 0
+    )
 
     out = capsys.readouterr().out
     assert str(home) in out and "agent-runner, gateway" in out
@@ -186,7 +202,9 @@ def test_the_prompt_lists_no_deletion_without_drop_db(
     home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _at_a_terminal(monkeypatch, str(home))
-    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 0
+    assert (
+        lifecycle.cmd_cluster_destroy(stop_mode="smooth", stop_timeout=300, host=fake_host()) == 0
+    )
 
     out = capsys.readouterr().out
     assert "DELETE" not in out and "cannot be undone" not in out
@@ -208,19 +226,26 @@ def test_the_default_home_can_be_destroyed(
     monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", _no_helper)
     _at_a_terminal(monkeypatch, str(prod))
 
-    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 0
+    assert (
+        lifecycle.cmd_cluster_destroy(stop_mode="smooth", stop_timeout=300, host=fake_host()) == 0
+    )
     assert _detached(prod)
 
 
 def test_stop_failure_leaves_home_attached_and_never_unloads_helper(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(lifecycle, "stop_cluster", lambda: 4)
+    def refused(*, roles: list[str], mode: str, timeout: float) -> int:
+        return 4
+
+    monkeypatch.setattr(lifecycle, "stop_cluster", refused)
     unload = Mock()
     monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", unload)
     _at_a_terminal(monkeypatch, str(home))
 
-    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 4
+    assert (
+        lifecycle.cmd_cluster_destroy(stop_mode="smooth", stop_timeout=300, host=fake_host()) == 4
+    )
     assert not _detached(home)
     unload.assert_not_called()
 
@@ -238,7 +263,9 @@ def test_ambiguous_cleanup_leaves_home_attached(
         monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", fail)
     _at_a_terminal(monkeypatch, str(home))
 
-    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 1
+    assert (
+        lifecycle.cmd_cluster_destroy(stop_mode="smooth", stop_timeout=300, host=fake_host()) == 1
+    )
     assert not _detached(home)
 
 
@@ -251,7 +278,9 @@ def test_destroy_preserves_credentials_and_data(
     data.mkdir(parents=True)
     _at_a_terminal(monkeypatch, str(home))
 
-    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 0
+    assert (
+        lifecycle.cmd_cluster_destroy(stop_mode="smooth", stop_timeout=300, host=fake_host()) == 0
+    )
     assert env.read_text() == "PRIVATE_KEY=retain\n"
     assert data.is_dir()
 
@@ -264,7 +293,7 @@ def test_drop_db_removes_the_data_directories_after_the_stop(
     (home / ".env").write_text("KEEP=1\n")
     order: list[str] = []
 
-    def stop() -> int:
+    def stop(*, roles: list[str], mode: str, timeout: float) -> int:
         assert (home / "pg").is_dir()
         order.append("stop")
         return 0
@@ -272,7 +301,12 @@ def test_drop_db_removes_the_data_directories_after_the_stop(
     monkeypatch.setattr(lifecycle, "stop_cluster", stop)
     _at_a_terminal(monkeypatch, str(home))
 
-    assert lifecycle.cmd_cluster_destroy(drop_db=True, host=fake_host()) == 0
+    assert (
+        lifecycle.cmd_cluster_destroy(
+            stop_mode="smooth", stop_timeout=300, drop_db=True, host=fake_host()
+        )
+        == 0
+    )
     assert order == ["stop"]
     assert not (home / "pg").exists() and not (home / "redis").exists()
     assert (home / ".env").read_text() == "KEEP=1\n"
@@ -284,7 +318,9 @@ def test_destroy_refuses_a_home_without_a_start_intent(
     monkeypatch.setattr(start_identity, "read_intent", _no_intent)
     prompt = _at_a_terminal(monkeypatch)
 
-    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 1
+    assert (
+        lifecycle.cmd_cluster_destroy(stop_mode="smooth", stop_timeout=300, host=fake_host()) == 1
+    )
     prompt.assert_not_called()
     assert not (home / "destroy-intent.json").exists()
 
@@ -304,12 +340,16 @@ def test_interrupted_cleanup_retries_to_completion(
 
     monkeypatch.setattr(target, interrupted)
     _at_a_terminal(monkeypatch, str(home), str(home))
-    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 1
+    assert (
+        lifecycle.cmd_cluster_destroy(stop_mode="smooth", stop_timeout=300, host=fake_host()) == 1
+    )
     assert not _detached(home)
     assert (home / "destroy-intent.json").exists()
 
     monkeypatch.setattr(target, recovered)
-    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 0
+    assert (
+        lifecycle.cmd_cluster_destroy(stop_mode="smooth", stop_timeout=300, host=fake_host()) == 0
+    )
     assert _detached(home)
 
 
@@ -421,3 +461,28 @@ def test_cron_cli_keeps_registration_failure_returncode(
     monkeypatch.setattr(command, "register_os_cron", failed)
     assert command.cmd_cron_register(host=fake_host()) == 1
     assert capsys.readouterr().out == "  * scheduler denied\n"
+
+
+def test_destroy_stops_everything_with_the_operators_mode_and_budget() -> None:
+    # meiva:note
+    # A detach stops every component; only a gateway names its data plane.
+    common = ["--yes", "--close-shell-sessions", "--stop-browser", "--stop-extras"]
+    gateway = lifecycle.stop_command(roles=["gateway"], mode="force", timeout=120)
+    runner = lifecycle.stop_command(roles=["agent-runner"], mode="smooth", timeout=60)
+    assert gateway[gateway.index("stop") + 1 :] == [
+        *common,
+        "--keep-no-services",
+        "--mode",
+        "force",
+        "--timeout",
+        "120",
+        "--stop-infra",
+    ]
+    assert runner[runner.index("stop") + 1 :] == [
+        *common,
+        "--keep-no-services",
+        "--mode",
+        "smooth",
+        "--timeout",
+        "60",
+    ]

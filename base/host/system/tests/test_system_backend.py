@@ -43,7 +43,8 @@ def test_backend_type_is_stable_across_calls() -> None:
 def test_linux_autostart_has_one_native_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
-    def install(*, host: Host) -> list[str]:
+    def install(*, services: frozenset[str], host: Host) -> list[str]:
+        assert services == frozenset({"gateway"})
         calls.append("install")
         return []
 
@@ -53,7 +54,7 @@ def test_linux_autostart_has_one_native_manager(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(autostart, "install", install)
     monkeypatch.setattr(autostart, "uninstall", uninstall)
-    autostart.register_linux(host=fake_host(platform=LINUX_X86))
+    autostart.register_linux(services=frozenset({"gateway"}), host=fake_host(platform=LINUX_X86))
     autostart.unregister_linux(host=fake_host(platform=LINUX_X86))
     assert calls == ["install", "uninstall"]
 
@@ -66,4 +67,6 @@ def test_linux_autostart_propagates_unavailable_systemd(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(boot_unit, "systemd_running", no_systemd)
     with pytest.raises(RuntimeError, match="systemd"):
-        autostart.register_linux(host=fake_host(platform=LINUX_X86))
+        autostart.register_linux(
+            services=frozenset({"gateway"}), host=fake_host(platform=LINUX_X86)
+        )

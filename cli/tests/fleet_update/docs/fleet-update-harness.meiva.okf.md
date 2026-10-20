@@ -12,8 +12,9 @@ launchd. `fleet_update_cluster.py` holds the in-memory `Cluster` each test
 drives; `conftest.py` builds the shared `env` fixture on top — a real git
 repository with an OLD and a NEW commit, `fleet_update.ssh` patched to the
 cluster, `fleet_update.time` patched to its fake clock. `test_fleet_update.py`
-covers the halves' behavior, `test_fleet_update_keep.py` the keep decision's
-effect on `down`, `test_fleet_update_leases.py` the lease announcement and its
+covers the halves' behavior and the explicit-argument forwarding (the `run`
+fixture supplies a default for every required choice, which a test overrides by
+passing that choice), `test_fleet_update_leases.py` the lease announcement and its
 confirm window, and `test_fleet_update_programs.py` runs the shipped
 `cli/commands/management/fleet_gateway.py` program for real against a local
 HTTP server standing in for the gateway API.
@@ -26,12 +27,6 @@ poll interval and the lease countdown observable. `lease_reads` records how
 many effects the cluster had already accepted at each lease read, so a test can
 prove the leases are named before anything stops; a read is never an effect, so
 `--dry-run` stays effect-free.
-
-Tests never run the real keep-decision script. The shared fixture stubs a
-decision that keeps nothing — the full-stop shape the pre-keep tests expect —
-and a test that cares writes its own payload with `stub_decision`, which
-records each invocation's argv by appending to `<script>.argv`, so a test can
-prove the decision ran, over which revisions, or did not run at all.
 
 ## Contracts
 

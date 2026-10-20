@@ -26,4 +26,4 @@ start_intent.complete_start = lambda **_kw: None
 assert (
     main.main(["init", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"]) == 0
 )
-raise SystemExit(main.main(["start"]))
+raise SystemExit(main.main(["start", "--all-services"]))

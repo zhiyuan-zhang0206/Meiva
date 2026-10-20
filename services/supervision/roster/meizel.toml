@@ -1,7 +1,8 @@
-exports = ["healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
+exports = ["__main__.py", "healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
 
 [uses]
 "__init__.py" = ["healthz.py", "plugin_services.py", "service_spec.py"]
+"__main__.py" = ["__init__.py"]
 "healthz.py" = ["service_spec.py"]
 "plugin_services.py" = ["service_spec.py"]
 "spec.py" = ["__init__.py", "plugin_services.py", "service_spec.py"]

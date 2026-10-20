@@ -55,7 +55,9 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
         monkeypatch.setattr(_probe_commands, "probe_service", probe)
         assert (
             _start_commands.cmd_start(
-                persist_services=False,
+                disabled_services=(),
+                only_services=(),
+                all_services=True,
                 retained_children=[],
                 database_factory=operator_database,  # pyright: ignore[reportArgumentType] — the real operator factory, typed as a plain callable here
                 producer=operator_pipeline,

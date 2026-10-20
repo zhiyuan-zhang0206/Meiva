@@ -175,7 +175,7 @@ def print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
             f"  They died or were never launched, so the {timeout_s:.0f}s readiness bound was "
             f"not spent and raising it would change nothing;\n"
             f"  read why in $MEIVA_HOME/logs. meiva-root keeps trying to revive them and "
-            f"`meiva start` is idempotent to retry.",
+            f"re-running `meiva start` with the same service selection is idempotent.",
             file=sys.stderr,
         )
         return
@@ -185,7 +185,7 @@ def print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
         f"  Their sessions are running and still not serving — their rows above show the "
         f"failing probe. Every start step itself succeeded,\n"
         f"  so this host is up but incomplete; meiva-root keeps trying to revive them, "
-        f"`meiva status` re-checks, and `meiva start` is idempotent to retry.",
+        f"`meiva status` re-checks, and re-running `meiva start` with the same service selection is idempotent.",
         file=sys.stderr,
     )
 
@@ -203,7 +203,7 @@ def print_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
         f"  They do not fail this start (the readiness gate waits for the critical roster "
         f"only),\n"
         f"  but a service_start_unready event was emitted; meiva-root keeps trying to revive them and "
-        f"`meiva start` is idempotent to retry.",
+        f"re-running `meiva start` with the same service selection is idempotent.",
         file=sys.stderr,
     )
 

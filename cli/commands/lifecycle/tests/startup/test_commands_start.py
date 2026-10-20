@@ -47,6 +47,9 @@ def test_cmd_start_needs_no_tty(
     )
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -79,6 +82,9 @@ def test_root_launch_uses_the_start_callers_child_owner(
     monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=children,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -108,6 +114,9 @@ def test_cmd_start_aborts_when_schema_mismatched(
     monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda _db_url: 1)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _start_commands.cmd_start(
+        disabled_services=(),
+        only_services=(),
+        all_services=True,
         retained_children=[],
         database_factory=operator_database,
         producer=operator_pipeline,
@@ -146,6 +155,9 @@ def test_start_missing_capability_reports_serve_flags_only(
     monkeypatch.setattr(_setup_commands, "collect_setup_values", _real_collect_setup_values)
 
     rc = _start_commands.cmd_start(
+        disabled_services=(),
+        only_services=(),
+        all_services=True,
         retained_children=[],
         database_factory=operator_database,
         producer=operator_pipeline,
@@ -184,6 +196,9 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
     monkeypatch.setattr(_setup_commands, "collect_setup_values", _real_collect_setup_values)
 
     rc = _start_commands.cmd_start(
+        disabled_services=(),
+        only_services=(),
+        all_services=True,
         retained_children=[],
         database_factory=operator_database,
         producer=operator_pipeline,
@@ -218,6 +233,9 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     monkeypatch.setattr(_setup_commands, "collect_setup_values", _real_collect_setup_values)
 
     rc = _start_commands.cmd_start(
+        disabled_services=(),
+        only_services=(),
+        all_services=True,
         retained_children=[],
         database_factory=operator_database,
         producer=operator_pipeline,
@@ -291,6 +309,9 @@ def test_start_refuses_capabilities_that_differ_from_the_ones_init_recorded(
     # The hermetic start resolves a gateway-only unit; the intent says agent-runner.
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -314,7 +335,12 @@ def test_start_requires_child_owner_before_entering_lifecycle(
     monkeypatch.setattr(_start_commands, "cmd_start_body", body)
     with pytest.raises(ValueError, match="caller-owned PostgreSQL child retention"):
         _start_commands.cmd_start(
-            database_factory=operator_database, producer=operator_pipeline, command=command_runtime
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
     body.assert_not_called()
 
@@ -334,6 +360,9 @@ def test_start_refreshes_only_its_invocations_machine(
 
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,

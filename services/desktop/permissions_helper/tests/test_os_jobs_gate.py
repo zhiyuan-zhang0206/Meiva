@@ -88,7 +88,9 @@ _REGISTERS = [
     ),
     pytest.param(
         partial(
-            autostart.register_autostart, enabled_reader=lambda: settings.general.os_jobs_enabled
+            autostart.register_autostart,
+            services=frozenset({"gateway"}),
+            enabled_reader=lambda: settings.general.os_jobs_enabled,
         ),
         id="autostart",
     ),
@@ -157,7 +159,9 @@ def test_registration_dispatches_when_enabled(
     monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
     cron.register_os_cron(enabled_reader=lambda: settings.general.os_jobs_enabled, host=fake_host())
     autostart.register_autostart(
-        enabled_reader=lambda: settings.general.os_jobs_enabled, host=fake_host()
+        services=frozenset({"gateway"}),
+        enabled_reader=lambda: settings.general.os_jobs_enabled,
+        host=fake_host(),
     )
     logs_job.register_logs_job(
         enabled_reader=lambda: settings.general.os_jobs_enabled, host=fake_host()
@@ -299,7 +303,10 @@ def test_health_probe_plist_pins_meiva_home(
 @pytest.mark.parametrize(
     "render",
     [
-        pytest.param(autostart.autostart_plist_content, id="autostart"),
+        pytest.param(
+            partial(autostart.autostart_plist_content, services=frozenset({"gateway"})),
+            id="autostart",
+        ),
     ],
 )
 def test_every_launchagent_pins_meiva_home(

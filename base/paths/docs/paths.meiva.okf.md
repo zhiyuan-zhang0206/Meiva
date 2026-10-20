@@ -57,7 +57,6 @@ $MEIVA_HOME/
 ├── skills/<name>/SKILL.md      # the single skill load dir (gated by the registry)
 ├── mcps/<name>/                # installed MCP packages, each with its own .venv
 ├── plugins/<name>/plugin.py    # externally installed plugins
-├── disabled_services           # durable `--disable-service` set the watchdog honors
 └── deploy-state.*.lock         # home lifecycle mutexes (+ .holder.json diagnostics)
 ```
 
@@ -87,9 +86,6 @@ only itself.
   see [[base.meiva.okf.md|the base overview]].
 - `run/` exists so ephemeral runtime artifacts (pidfiles, sockets, session
   records) do not litter the home's top level.
-- `$MEIVA_HOME/disabled_services` records the operator's durable disabled set.
-  An empty file means no services are disabled; an absent file reads the same.
-  Operator starts rewrite it, while internal restarts and the watchdog read it.
 - Daemon pidfiles live only under `$MEIVA_HOME/run/`.
 - Operational procedures that act on these paths (backup/restore, log reading,
   recovery) are in `.agents/skills/meiva-guide/operations/`.

@@ -85,7 +85,7 @@ def _guard_gateway_write(target: str) -> None:
     if home_base is None:
         raise ConfigError(
             "refusing to write gateway config: this home carries no gateway "
-            "identity yet. Run `meiva start` for it first."
+            "identity yet. Run `meiva start --all-services` (or this unit's own service selection) for it first."
         )
     if target != home_base:
         raise ConfigError(

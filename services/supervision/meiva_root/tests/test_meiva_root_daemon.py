@@ -487,6 +487,7 @@ def _systemd_test_context(home: Path) -> BootUnitContext:
         entry.pw_name,
         grp.getgrgid(entry.pw_gid).gr_name,
         Path(entry.pw_dir),
+        services=frozenset({"app"}),
     )
 
 

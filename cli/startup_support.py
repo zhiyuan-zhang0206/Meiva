@@ -67,7 +67,7 @@ def print_settings_load_failure(e: ValidationError) -> int:
     print(
         "\nAdd the lines above to ~/.meiva/.env, then re-run your command. For the full\n"
         "agent-runner bring-up flow, use `meiva init --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> "
-        "--machine-host <this-host-addr> --db-capability <bundle>`, then `meiva start`.",
+        "--machine-host <this-host-addr> --db-capability <bundle>`, then `meiva start` with this unit's explicit service selection.",
         file=sys.stderr,
     )
     return 1

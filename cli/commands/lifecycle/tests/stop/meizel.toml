@@ -6,6 +6,7 @@ exports = ["stop_support.py"]
 "test_stop.py" = ["stop_support.py"]
 "test_stop_close_notices.py" = ["stop_support.py"]
 "test_stop_escalation_report.py" = ["stop_support.py"]
+"test_stop_explicit_choices.py" = ["stop_support.py"]
 "test_stop_terminals.py" = ["stop_support.py"]
 
 [debt.env-patch]
@@ -50,7 +51,6 @@ exports = ["stop_support.py"]
 "test_stop.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 3
 "test_stop.py#monkeypatch.setattr base.host.proc.hosting_exec_domain" = 1
 "test_stop.py#monkeypatch.setattr cli.commands._repo.preflight_probes" = 1
-"test_stop.py#monkeypatch.setattr cli.commands._repo.roles_or_none" = 1
 "test_stop.py#monkeypatch.setattr cli.commands.lifecycle._start_readiness_preflight.preflight_start_readiness" = 1
 "test_stop.py#monkeypatch.setattr cli.commands.lifecycle._stop_extras" = 2
 "test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.announce_stopping" = 3
@@ -74,6 +74,8 @@ exports = ["stop_support.py"]
 "test_stop_close_notices.py#monkeypatch.setattr base.sessions.pty.tests.pty_shells.screen" = 1
 "test_stop_close_notices.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.stop_data_plane" = 1
 "test_stop_close_notices.py#monkeypatch.setattr ops.pty_close_notices.write_notices" = 3
+"test_stop_explicit_choices.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop" = 1
+"test_stop_explicit_choices.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.stop_extras" = 1
 "test_stop_extras.py#monkeypatch.setattr base.native_process.os_platform.is_macos" = 2
 "test_stop_extras.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_stop_extras.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.unregister_helper" = 2

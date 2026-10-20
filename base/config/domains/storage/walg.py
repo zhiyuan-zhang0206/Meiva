@@ -18,7 +18,7 @@ class WalgSettings(EnvSettings):
             "WALG_PREVENT_WAL_OVERWRITE=true). Setting it turns WAL archiving on: Postgres "
             "is started with archive_mode=on and an archive_command that calls the pinned "
             "wal-g with this file. Postgres reads archive_mode only at launch, so a change "
-            "takes effect after `meiva stop` + `meiva start`; unset it and restart to turn "
+            "takes effect after stopping and starting this unit again; unset it and restart to turn "
             "archiving off. Unset (the default) disables everything WAL-G."
         ),
         json_schema_extra={
