@@ -25,6 +25,7 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe
 from base.daemon.tests.fakes import pin_endpoints
 from base.host.env.health_ports import DEFAULT_PORTS
+from base.native_process.stop_timing import HOST_STOP_CEILING_S, STOP_MARGIN_S
 from base.packages.plugin_config_admin import update_all_disk_images
 from services.supervision import roster
 from services.supervision.meiva_root_glue import manifests as gen
@@ -196,6 +197,15 @@ def test_the_roster_has_standard_daemons_and_each_one_has_a_port_slot() -> None:
         assert spec.health_name in DEFAULT_PORTS, spec.session
 
 
+# meiva:note
+# The one standard daemon with a declared stop window: the agent-host's graceful exit drains
+# running turns to their restart, which outlasts root's default TERM window, so its roster
+# entry declares `HOST_STOP_CEILING_S`. Its window must be exactly that ceiling plus the
+# margin; every other standard daemon declares none and renders none.
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+_DECLARED_STOP_CEILINGS = {"agent-host": HOST_STOP_CEILING_S}
+
+
 def test_every_standard_daemon_renders_as_exec_python_dash_m_its_module(unit_home: Path) -> None:
     """I4: the unit pid stays a direct child of root, and a declaration cannot smuggle
     undeclared environment, arguments, a stop window or sealed inputs into the rendered unit."""
@@ -209,7 +219,13 @@ def test_every_standard_daemon_renders_as_exec_python_dash_m_its_module(unit_hom
         ], spec.session
         inputs = cast("list[dict[str, str]]", unit["inputs"])
         assert [entry["path"] for entry in inputs] == [str(path) for path in spec.config_inputs]
-        assert "stop_timeout_s" not in unit, spec.session
+        if spec.session in _DECLARED_STOP_CEILINGS:
+            ceiling = _DECLARED_STOP_CEILINGS[spec.session]
+            assert spec.stop_ceiling_s == ceiling, spec.session
+            assert unit["stop_timeout_s"] == ceiling + STOP_MARGIN_S, spec.session
+        else:
+            assert spec.stop_ceiling_s is None, spec.session
+            assert "stop_timeout_s" not in unit, spec.session
         assert (unit["id"], unit["restart"], unit["attach"]) == (spec.session, "always", "root")
 
 
