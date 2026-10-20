@@ -1,9 +1,9 @@
-"""Native survivor diagnostics for terminal stop and maintenance waits.
-
-Reports retain the captured birth even when live facts cannot be read. The
-terminal boundary raises StopIncompleteError; its lifecycle journal stores the
-same structured inventory. Process groups are observation-only facts.
-"""
+# meiva:note
+# Native survivor diagnostics for shell-session stop and maintenance waits.
+#
+# Reports retain the captured birth even when live facts cannot be read. The
+# shell-session boundary raises StopIncompleteError; its lifecycle journal stores the
+# same structured inventory. Process groups are observation-only facts.
 
 from __future__ import annotations
 
@@ -39,14 +39,13 @@ def occupied_groups(groups: tuple[int, ...]) -> list[int]:
     return sorted(occupied)
 
 
+# meiva:note
+# A stop's deadline expired with owned processes still alive.
+#
+# The message carries the operator-readable inventory; `survivors` carries
+# the same entries as JSON-safe dicts for the durable journal, and `stage`
+# names the stop phase that hit the deadline (issue #2162).
 class StopIncompleteError(TimeoutError):
-    """A held stop's deadline expired with owned processes still alive.
-
-    The message carries the operator-readable inventory; `survivors` carries
-    the same entries as JSON-safe dicts for the durable journal, and `stage`
-    names the stop phase that hit the deadline (issue #2162).
-    """
-
     def __init__(
         self,
         message: str,

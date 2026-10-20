@@ -7,7 +7,7 @@ exports = ["stop_support.py"]
 "test_stop_close_notices.py" = ["stop_support.py"]
 "test_stop_escalation_report.py" = ["stop_support.py"]
 "test_stop_explicit_choices.py" = ["stop_support.py"]
-"test_stop_terminals.py" = ["stop_support.py"]
+"test_stop_shell_sessions.py" = ["stop_support.py"]
 
 [debt.env-patch]
 "stop_support.py#monkeypatch.setenv os.environ.HOME" = 2
@@ -15,8 +15,8 @@ exports = ["stop_support.py"]
 "stop_support.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 1
 "test_stop.py#monkeypatch.setenv os.environ.HOME" = 4
 "test_stop.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 4
-"test_stop_terminals.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 4
-"test_stop_terminals.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 2
+"test_stop_shell_sessions.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 4
+"test_stop_shell_sessions.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 2
 
 [debt.first-party-patch]
 "stop_support.py#monkeypatch.setattr base.sessions.hosting.hosting_supervised_session" = 1
@@ -50,7 +50,7 @@ exports = ["stop_support.py"]
 "test_stop.py#monkeypatch.setattr cli.commands.lifecycle._stop_extras" = 2
 "test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.announce_stopping" = 3
 "test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.begin" = 1
-"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.close_terminals" = 2
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.close_shell_sessions" = 2
 "test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.finish" = 1
 "test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.stop" = 1
 "test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.stop_browser" = 1
@@ -70,13 +70,13 @@ exports = ["stop_support.py"]
 "test_stop_extras.py#monkeypatch.setattr base.native_process.os_platform.is_macos" = 2
 "test_stop_extras.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_stop_extras.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.unregister_helper" = 2
-"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.close_terminals" = 1
-"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.TERMINAL_KILL_WAIT_S" = 1
-"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop._TERMINAL_STOP_GRACE_S" = 1
-"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.await_no_terminals" = 1
-"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.close_via_service" = 1
-"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.live_terminals" = 2
-"test_stop_terminals.py#monkeypatch.setattr services.agent_runner.pty_sessions.ledger.SWEEP_HANGUP_WAIT_S" = 1
+"test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.close_shell_sessions" = 1
+"test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.SHELL_SESSION_KILL_WAIT_S" = 1
+"test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle.service_stop._SHELL_SESSION_STOP_GRACE_S" = 1
+"test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.await_no_shell_sessions" = 1
+"test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.close_via_service" = 1
+"test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.live_shell_sessions" = 2
+"test_stop_shell_sessions.py#monkeypatch.setattr services.agent_runner.pty_sessions.ledger.SWEEP_HANGUP_WAIT_S" = 1
 
 [debt.restricted-python]
 "stop_support.py#python -c" = 1

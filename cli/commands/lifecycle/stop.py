@@ -2,7 +2,7 @@
 # Local stop and restart commands over the shared native stop boundary.
 #
 # Normal paths retain checkpoints and never escalate a service or data-plane
-# stop on timeout; a normal stop's terminal closure SIGKILLs what outlives its
+# stop on timeout; a normal stop's shell-session closure SIGKILLs what outlives its
 # bounded grace. Explicit force uses the separate legacy resource teardown.
 # Every keep-or-stop choice (shell sessions, browser, extras, data plane, other
 # services), the interruption mode and the budget are the caller's explicit
@@ -27,7 +27,7 @@ from cli.commands._repo import repo_root
 from cli.commands.data_plane.stop_waits import deadline_after, remaining
 from cli.commands.lifecycle import _temporary_stop, root_driver, root_readiness
 from cli.commands.lifecycle._exclusive_resources import exclusive_resources
-from cli.commands.lifecycle.service_stop import force_close_terminals
+from cli.commands.lifecycle.service_stop import force_close_shell_sessions
 from cli.database import OperatorDatabaseFactory
 from cli.database.lifecycle_audit import (
     operator_lifecycle_audit,
@@ -116,7 +116,7 @@ def _compute_stop_scope(*, keep_infra: bool | None, machine: MachineIdentity) ->
 def _print_stop_plan(
     service_sessions: list[str],
     *,
-    keep_terminals: bool,
+    keep_shell_sessions: bool,
     keep_browser: bool,
     runner_only: bool,
     keep_infra: bool,
@@ -126,7 +126,7 @@ def _print_stop_plan(
 
     print("\nThe following will be stopped:")
     print(f"  service sessions: {', '.join(service_sessions) if service_sessions else '(none)'}")
-    if not keep_terminals:
+    if not keep_shell_sessions:
         print("  shell sessions: closed")
     if keep_browser:
         print(f"  browser: kept up ({session_name(_BROWSER_SESSION)}, login session preserved)")
@@ -170,13 +170,12 @@ def force_stop(
     root_preserve = preserve_sessions | (
         frozenset({_BROWSER_SESSION}) if keep_browser else frozenset[str]()
     )
-    keep_terminals = keep_shell_sessions
-    if keep_terminals:
+    if keep_shell_sessions:
         root_preserve |= {SERVICE_UNIT}
     plan_sessions = _root_driver_commands.root_tree_plan(root_preserve)
     _print_stop_plan(
         plan_sessions,
-        keep_terminals=keep_terminals,
+        keep_shell_sessions=keep_shell_sessions,
         keep_browser=keep_browser,
         runner_only=runner_only,
         keep_infra=bool(keep_infra),
@@ -202,7 +201,7 @@ def force_stop(
     # Explicit force interrupts the host process. Agent metadata/checkpoints
     # remain untouched; the next host uses its existing owner recovery. This
     # path leaves no restart behind for the interrupted turns and remains usable offline. The
-    # pty-sessions service outlives this step: it closes the terminals below.
+    # pty-sessions service outlives this step: it closes the shell sessions below.
     _root_driver_commands.stop_root_service_tree(
         preserve=root_preserve | {SERVICE_UNIT},
         timeout_s=remaining(deadline),
@@ -220,10 +219,11 @@ def force_stop(
     if not keep_browser:
         reap_cluster_chrome()
 
-    # Persistent terminals are closed through the service that holds them (from its
+    # meiva:note
+    # Persistent shell sessions are closed through the service that holds them (from its
     # ledger when it is not running), then the service itself goes.
-    if not keep_terminals:
-        force_close_terminals()
+    if not keep_shell_sessions:
+        force_close_shell_sessions()
         _root_driver_commands.stop_root_service_tree(
             preserve=root_preserve, timeout_s=remaining(deadline), force=True, helper=helper
         )
@@ -402,7 +402,7 @@ def _cmd_restart_body(
     # An exec-domain restart is SIGKILLed by the execute_code call's own
     # teardown — the call's whole process group, as its turn ends (nohup/& do
     # not leave the group — 2026-09-12: macmini stranded mid-stop).
-    # Refuse before anything stops. The restart closes persistent terminals like a stop,
+    # Refuse before anything stops. The restart closes persistent shell sessions like a stop,
     # so no shell session can host it either: a plain login shell does.
     exec_domain = hosting_exec_domain()
     if exec_domain is not None:
@@ -524,7 +524,7 @@ def _cmd_restart_body(
         )
     if rc != 0:
         # meiva:note
-        # The stop leg's own journal phases (services / terminals / ...) remain readable.
+        # The stop leg's own journal phases (services / shell-sessions / ...) remain readable.
         if owns_journal:
             status_journal.finish(rc, error="stop leg failed")
         return rc

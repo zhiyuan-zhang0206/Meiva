@@ -74,7 +74,7 @@ window are unchanged.
 
 The initial-command metadata survives schedule-manager restarts while its PTY
 owner remains alive. PTY daemon restart is a process-loss boundary: it does not
-re-adopt terminals, and its durable exact-birth ledger sweeps old identities.
+re-adopt shell sessions, and its durable exact-birth ledger sweeps old identities.
 A live versioned session with unavailable metadata remains uncertain/queued;
 verified process loss does not authorize script replay. An operator must
 explicitly request a new revision to execute again.

@@ -93,14 +93,14 @@ def test_keeping_shell_sessions_preserves_unselected_process_and_real_pty(
 ) -> None:
     # meiva:note
     # `--keep-shell-sessions` leaves the pty-sessions service and its live session as they
-    # are: the root owner is asked to preserve it, and no terminals phase runs.
+    # are: the root owner is asked to preserve it, and no shell-sessions phase runs.
     dependencies(monkeypatch, machine=command_runtime.machine)
     root_stops = record_root_stops(monkeypatch)
 
     def closed(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("a kept service's terminals must not be closed")
+        raise AssertionError("a kept service's shell sessions must not be closed")
 
-    monkeypatch.setattr(command, "close_terminals", closed)
+    monkeypatch.setattr(command, "close_shell_sessions", closed)
     # meiva:note
     # Bootstrap and spawned interpreters consume the raw home before Settings.
     monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
@@ -160,13 +160,14 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     events: list[str] = []
 
     def record_root_stop(**kwargs: object) -> None:
+        # meiva:note
         # The browser is retained from the service tree and the services are replaced; the
-        # pty-sessions service stays until the terminals it holds are closed, then goes too.
+        # pty-sessions service stays until the shell sessions it holds are closed, then goes too.
         assert kwargs.get("force", False) is False
         preserve = cast("frozenset[str]", kwargs["preserve"])
         assert preserve - {SERVICE_UNIT} == frozenset({"browser"})
         events.append(
-            "services-stopped" if SERVICE_UNIT in preserve else "terminal-service-stopped"
+            "services-stopped" if SERVICE_UNIT in preserve else "shell-session-service-stopped"
         )
 
     def record(label: str) -> Callable[..., object]:
@@ -178,17 +179,17 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
         events.append("services-started")
         return 0
 
-    real_close = service_stop.close_terminals
+    real_close = service_stop.close_shell_sessions
 
-    def close_terminals(*args: Any, **kwargs: Any) -> None:
-        events.append("terminals-closed")
+    def close_shell_sessions(*args: Any, **kwargs: Any) -> None:
+        events.append("shell-sessions-closed")
         real_close(*args, **kwargs)
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", record_root_stop)
     monkeypatch.setattr(command, "stop_data_plane", record("data-plane-stopped"))
     monkeypatch.setattr(command, "stop_browser", record("browser-stopped"))
     monkeypatch.setattr(command, "stop_extras", record("extras-stopped"))
-    monkeypatch.setattr(command, "close_terminals", close_terminals)
+    monkeypatch.setattr(command, "close_shell_sessions", close_shell_sessions)
     monkeypatch.setattr(command, "announce_stopping", record("announced"))
     monkeypatch.setattr(stop_commands, "restart_runtime", MagicMock)
     monkeypatch.setattr(stop_commands, "require_restart_runtime", lambda _runtime: None)  # pyright: ignore[reportUnknownArgumentType]
@@ -227,8 +228,8 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
 
     assert events == [
         "services-stopped",
-        "terminals-closed",
-        "terminal-service-stopped",
+        "shell-sessions-closed",
+        "shell-session-service-stopped",
         "services-started",
     ]
     assert not client.has_session(name), "a restart closes the persistent shells"
@@ -268,9 +269,9 @@ def test_root_stop_refusal_is_reported_without_force(
 
 
 # meiva:note
-# The services phase keeps the pty-sessions service; the terminals phase closes
+# The services phase keeps the pty-sessions service; the shell-sessions phase closes
 # the session through it; only then is the service itself stopped.
-def test_full_stop_closes_real_idle_terminal_before_the_service_stops(
+def test_full_stop_closes_real_idle_shell_session_before_the_service_stops(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
@@ -330,7 +331,7 @@ def test_full_stop_closes_real_idle_terminal_before_the_service_stops(
     )
     assert not client.has_session(name)
     assert root_stops == [(True, [name]), (False, [])], (
-        "the service stops only after its terminals closed"
+        "the service stops only after its shell sessions closed"
     )
 
 
@@ -468,7 +469,7 @@ def test_resource_stop_excludes_concurrent_start(
 
 
 @pytest.mark.parametrize("how", ["stop", "restart", "keep-shell-sessions"])
-def test_explicit_force_stops_host_and_closes_terminals_unless_shell_sessions_are_kept(
+def test_explicit_force_stops_host_and_closes_shell_sessions_unless_kept(
     how: str,
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -482,7 +483,7 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_shell_sessions_ar
 ) -> None:
     # meiva:note
     # Force stops the services with the pty-sessions service kept, then closes the
-    # terminals through it and stops it, with no drain and no owner notices;
+    # shell sessions through it and stops it, with no drain and no owner notices;
     # keeping the shell sessions keeps the live session.
     command_runtime.machine.set(role="agent-runner")
     monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
@@ -612,6 +613,10 @@ def test_stop_reports_a_data_plane_failure_without_restarting_anything(
     assert len(finished) == 1 and "compensated" not in finished[0]
 
 
+# meiva:note
+# Issue #2331: an exec-domain stop is SIGKILLed mid-drain with the call's process
+# group, and a stop (a restart's stop leg too) closes this unit's persistent
+# shell sessions — the refusal points at a shell no meiva session hosts.
 @pytest.mark.parametrize("leg", ["stop", "restart"])
 def test_stop_refused_inside_an_exec_domain(
     monkeypatch: pytest.MonkeyPatch,
@@ -621,9 +626,6 @@ def test_stop_refused_inside_an_exec_domain(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Issue #2331: an exec-domain stop is SIGKILLed mid-drain with the call's process
-    group, and a stop (a restart's stop leg too) closes this unit's persistent
-    terminals — the refusal points at a shell no meiva session hosts."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     monkeypatch.setattr(proc, "hosting_exec_domain", lambda: "agent.execution.child")
 

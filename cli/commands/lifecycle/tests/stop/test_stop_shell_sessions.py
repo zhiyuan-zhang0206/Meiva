@@ -1,21 +1,21 @@
-"""Terminal closure at a normal stop (#2045): the stop's side of the pty-sessions service.
-
-The service holds every shell and runs the one terminal closure
-(`base.sessions.pty.closure`, covered by `services/agent_runner/pty_sessions/tests/test_close_all.py`).
-These tests lock what `meiva stop` does around it, with real shells where the service
-is the thing under test:
-
-- `close_terminals` asks the service to close everything within a grace capped by
-  the stop's deadline, writes one owner notice per closed busy session, and fails
-  the stop when a shell survives; known job leftovers are diagnostic;
-- a stop finding the service gone closes the leftovers its ledger names;
-- `live_terminals` reads the service while it listens and the ledger when it does not;
-- `--force` closes terminals with no grace and no notices.
-
-A stop whose closure is stubbed (`_outcome`) stands in for processes the closure may
-not signal (another user's, such as a root `sudo` on the pty), which no test can
-create for real.
-"""
+# meiva:note
+# Shell-session closure at a normal stop (#2045): the stop's side of the pty-sessions service.
+#
+# The service holds every shell and runs the one shell-session closure
+# (`base.sessions.pty.closure`, covered by `services/agent_runner/pty_sessions/tests/test_close_all.py`).
+# These tests lock what `meiva stop` does around it, with real shells where the service
+# is the thing under test:
+#
+# - `close_shell_sessions` asks the service to close everything within a grace capped by
+#   the stop's deadline, writes one owner notice per closed busy session, and fails
+#   the stop when a shell survives; known job leftovers are diagnostic;
+# - a stop finding the service gone closes the leftovers its ledger names;
+# - `live_shell_sessions` reads the service while it listens and the ledger when it does not;
+# - `--force` closes shell sessions with no grace and no notices.
+#
+# A stop whose closure is stubbed (`_outcome`) stands in for processes the closure may
+# not signal (another user's, such as a root `sudo` on the pty), which no test can
+# create for real.
 
 from __future__ import annotations
 
@@ -65,14 +65,18 @@ from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
+# meiva:note
 # The idle test's own prompt, set by its home's `.bash_profile`.
 _IDLE_PROMPT = "meiva-idle-shell>"
 
 pytestmark = pytest.mark.usefixtures("written")
 
 
+# meiva:note
+# A regular interruptible foreground job closes via a normal stop, through the
+# service, and its owner gets the closure notice.
 @pytest.mark.flaky
-def test_stop_closes_busy_terminal_job_with_real_signals(
+def test_stop_closes_busy_shell_session_job_with_real_signals(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
@@ -83,8 +87,6 @@ def test_stop_closes_busy_terminal_job_with_real_signals(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A regular interruptible foreground job closes via a normal stop, through the
-    service, and its owner gets the closure notice."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     name = "meiva-agent-987-shell-2045-job"
@@ -113,6 +115,10 @@ def test_stop_closes_busy_terminal_job_with_real_signals(
     assert [notice.name for notice in written] == [name]
 
 
+# meiva:note
+# A job that ignores TERM and HUP is SIGKILLed once the stop's grace ends: the
+# stop completes well inside its deadline, and the owner still gets the closure
+# notice for the work the kill cut short.
 @pytest.mark.flaky
 def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     home: Path,
@@ -125,12 +131,9 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A job that ignores TERM and HUP is SIGKILLed once the stop's grace ends: the
-    stop completes well inside its deadline, and the owner still gets the closure
-    notice for the work the kill cut short."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
-    monkeypatch.setattr(strict, "_TERMINAL_STOP_GRACE_S", 1.0)
+    monkeypatch.setattr(strict, "_SHELL_SESSION_STOP_GRACE_S", 1.0)
     name = "meiva-agent-987-shell-2045-stubborn"
     _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper, ready_line="stubborn-ready")
     assert running, "the stubborn job never started"
@@ -159,6 +162,14 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     assert len(written) == 1, "a killed busy session still leaves its notice"
 
 
+# meiva:note
+# An idle shell (no jobs) closed by stop is silent: the TTL reaper's quiet-empty
+# policy, never a blanket close notification (issue #2044 #3).
+#
+# The session has no initial command, so idle is the login shell at its first
+# prompt. The test owns that prompt: the login shell reads this home's
+# `.bash_profile` after the system's files, so the prompt is `_IDLE_PROMPT`
+# whatever the host's or the developer's shell configuration prints.
 def test_stop_records_nothing_for_idle_shell(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -170,14 +181,6 @@ def test_stop_records_nothing_for_idle_shell(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """An idle shell (no jobs) closed by stop is silent: the TTL reaper's quiet-empty
-    policy, never a blanket close notification (issue #2044 #3).
-
-    The session has no initial command, so idle is the login shell at its first
-    prompt. The test owns that prompt: the login shell reads this home's
-    `.bash_profile` after the system's files, so the prompt is `_IDLE_PROMPT`
-    whatever the host's or the developer's shell configuration prints.
-    """
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     (home / ".bash_profile").write_text(f"PS1='{_IDLE_PROMPT} '\n")
@@ -209,6 +212,9 @@ def test_stop_records_nothing_for_idle_shell(
     assert written == []
 
 
+# meiva:note
+# A session whose shell exited on its own before the stop is already gone from
+# the service: it must not fail the stop.
 @pytest.mark.flaky
 def test_stop_tolerates_naturally_exited_session(
     home: Path,
@@ -220,8 +226,6 @@ def test_stop_tolerates_naturally_exited_session(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A session whose shell exited on its own before the stop is already gone from
-    the service: it must not fail the stop."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     name = "meiva-agent-987-shell-2045-already-dead"
@@ -247,7 +251,11 @@ def test_stop_tolerates_naturally_exited_session(
     )
 
 
-def test_the_stop_services_phase_keeps_the_pty_sessions_service_until_its_terminalsclosed_session(
+# meiva:note
+# The service closes the shell sessions, so it is stopped only after them: the
+# services phase preserves its unit, and a separate phase stops it once no
+# session is left.
+def test_the_stop_services_phase_keeps_the_pty_sessions_service_until_shell_sessions_closed(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
@@ -257,20 +265,20 @@ def test_the_stop_services_phase_keeps_the_pty_sessions_service_until_its_termin
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """The service closes the terminals, so it is stopped only after them: the
-    services phase preserves its unit, and a separate phase stops it once no
-    session is left."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     root_stops = record_root_stops(monkeypatch)
     phases: list[str] = []
-    real_close = strict.close_terminals
+    real_close = strict.close_shell_sessions
 
     def close(*args: object, **kwargs: object) -> None:
-        phases.append(f"terminals:{len(root_stops)}")
+        phases.append(f"shell-sessions:{len(root_stops)}")
+        # meiva:note
+        # The wrapper forwards its untyped arguments to the real closure, so the call cannot
+        # satisfy the closure's typed signature statically.
         real_close(*args, **kwargs)  # pyright: ignore[reportArgumentType]
 
-    monkeypatch.setattr(command, "close_terminals", close)
+    monkeypatch.setattr(command, "close_shell_sessions", close)
     name = "meiva-agent-987-shell-2044-order"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
@@ -291,11 +299,17 @@ def test_the_stop_services_phase_keeps_the_pty_sessions_service_until_its_termin
         )
         == 0
     )
-    assert phases == ["terminals:1"], "terminals are closed after the services phase only"
+    assert phases == ["shell-sessions:1"], "shell sessions are closed after the services phase only"
     assert [SERVICE_UNIT in call["preserve"] for call in root_stops] == [True, False]
     assert client.list_sessions() == []
 
 
+# meiva:note
+# One session closes; in another the shell itself outlives the stop. The stop is
+# incomplete, yet the closed session's notice is recorded before it reports: the
+# service no longer lists it, so a retry could never record it. The session whose
+# shell still lives records nothing and is left to the retry, which records it:
+# each notice once.
 @pytest.mark.flaky
 def test_incomplete_stop_still_records_the_sessions_itclosed_session(
     home: Path,
@@ -308,11 +322,6 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """One session closes; in another the shell itself outlives the stop. The stop is
-    incomplete, yet the closed session's notice is recorded before it reports: the
-    service no longer lists it, so a retry could never record it. The session whose
-    shell still lives records nothing and is left to the retry, which records it:
-    each notice once."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     root_stops = record_root_stops(monkeypatch)
     stop_env(monkeypatch, home)
@@ -323,7 +332,7 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
         monkeypatch,
         closure.Outcome(
             closed=(closed_session(closed),),
-            survivors=(closure.Survivor(stuck, shell, "terminal"),),
+            survivors=(closure.Survivor(stuck, shell, "shell"),),
         ),
         closure.Outcome(closed=(closed_session(stuck),)),
     )
@@ -349,7 +358,7 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
     assert [notice.name for notice in written] == [closed], "the closed session's notice was lost"
     assert "survivors" not in written[0].as_dict(), "nothing of the closed session survived"
     assert [SERVICE_UNIT in call["preserve"] for call in root_stops] == [True], (
-        "the service that holds the terminals is not stopped while the closure is incomplete"
+        "the service that holds the shell sessions is not stopped while the closure is incomplete"
     )
 
     assert (
@@ -372,6 +381,9 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
     assert [notice.name for notice in written] == [closed, stuck]
 
 
+# meiva:note
+# A known job can survive closure: report it and notify its owner, but release
+# stop successfully once the shell session is closed.
 def test_known_job_leftover_is_reported_without_failing_stop(
     home: Path,
     launch: Launcher,
@@ -383,8 +395,6 @@ def test_known_job_leftover_is_reported_without_failing_stop(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A known job can survive closure: report it and notify its owner, but release
-    stop successfully once the shell and terminal are closed."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     name = "meiva-agent-987-shell-2044-stubborn"
@@ -443,6 +453,9 @@ def test_known_job_leftover_is_reported_without_failing_stop(
     assert len(written) == 1, "the retry recorded the closed session again"
 
 
+# meiva:note
+# The report names only survivors that are still their captured process: one that
+# exited after the closure's verdict is gone, and the stop completes.
 def test_a_survivor_that_died_before_the_report_does_not_fail_the_stop(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -452,17 +465,13 @@ def test_a_survivor_that_died_before_the_report_does_not_fail_the_stop(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """The report names only survivors that are still their captured process: one that
-    exited after the closure's verdict is gone, and the stop completes."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     proc = launch("private-gone", term="ignore", ignore_hangup=True)
     gone = identity_of(proc)
     proc.kill()
     proc.wait(timeout=5)
-    stub_closure(
-        monkeypatch, closure.Outcome(survivors=(closure.Survivor("gone", gone, "terminal"),))
-    )
+    stub_closure(monkeypatch, closure.Outcome(survivors=(closure.Survivor("gone", gone, "shell"),)))
     assert (
         entry.cmd_stop(
             require_confirmation=False,
@@ -482,9 +491,12 @@ def test_a_survivor_that_died_before_the_report_does_not_fail_the_stop(
     )
 
 
+# meiva:note
+# The grace never exceeds the stop's deadline or the ceiling; the SIGKILL leg runs
+# with its own bound even when the deadline is already spent.
 @pytest.mark.parametrize(
     ("remaining_s", "expected_grace"),
-    [(3.0, 3.0), (100.0, strict._TERMINAL_STOP_GRACE_S), (-1.0, 0.0)],
+    [(3.0, 3.0), (100.0, strict._SHELL_SESSION_STOP_GRACE_S), (-1.0, 0.0)],
 )
 def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
     remaining_s: float,
@@ -495,16 +507,15 @@ def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    """The grace never exceeds the stop's deadline or the ceiling; the SIGKILL leg runs
-    with its own bound even when the deadline is already spent."""
     monkeypatch.setenv("MEIVA_HOME", str(home))
     asked = stub_closure(monkeypatch, closure.Outcome())
 
-    def settled(_until: float, _stage: str) -> None:
-        """Stand-in for the closure evidence: nothing is left."""
+    # meiva:note
+    # Stand-in for the closure evidence: nothing is left.
+    def settled(_until: float, _stage: str) -> None: ...
 
-    monkeypatch.setattr(strict, "await_no_terminals", settled)
-    strict.close_terminals(
+    monkeypatch.setattr(strict, "await_no_shell_sessions", settled)
+    strict.close_shell_sessions(
         time.monotonic() + remaining_s,
         direct_db=False,
         database_factory=operator_database,
@@ -512,39 +523,41 @@ def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
     )
     ((grace, kill),) = asked
     assert expected_grace - 0.5 <= grace <= expected_grace
-    assert kill == strict.TERMINAL_KILL_WAIT_S
+    assert kill == strict.SHELL_SESSION_KILL_WAIT_S
 
 
-def test_a_terminal_left_after_the_closure_fails_the_stop_in_its_own_words(
+# meiva:note
+# A shell session still present once the closure ended every session it captured
+# fails the stop, naming it, and without maintenance's claim that nothing will be
+# killed: this stop has just killed its sessions.
+def test_a_shell_session_left_after_the_closure_fails_the_stop_in_its_own_words(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A terminal still present once the closure ended every session it captured
-    fails the stop, naming it, and without maintenance's claim that nothing will be
-    killed: this stop has just killed its sessions."""
     name = "meiva-agent-987-shell-2053-lingering"
     monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
-    monkeypatch.setattr(strict, "live_terminals", lambda: [name])
+    monkeypatch.setattr(strict, "live_shell_sessions", lambda: [name])
 
     with pytest.raises(StopIncompleteError) as excinfo:
-        strict.await_no_terminals(time.monotonic(), "terminals")
+        strict.await_no_shell_sessions(time.monotonic(), "shell-sessions")
     message = str(excinfo.value)
     assert name in message
     assert "will not kill" not in message
-    assert excinfo.value.stage == "terminals"
+    assert excinfo.value.stage == "shell-sessions"
 
 
-def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
+# meiva:note
+# The closure evidence waits until the stop's deadline, and at least the SIGKILL
+# leg's bound: a session still tearing down past that bound but gone from the
+# service before the deadline is a closed shell session, not a failed stop.
+def test_a_shell_session_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    """The closure evidence waits until the stop's deadline, and at least the SIGKILL
-    leg's bound: a session still tearing down past that bound but gone from the
-    service before the deadline is a closed terminal, not a failed stop."""
     monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
-    monkeypatch.setattr(strict, "TERMINAL_KILL_WAIT_S", 0.2)
+    monkeypatch.setattr(strict, "SHELL_SESSION_KILL_WAIT_S", 0.2)
     stub_closure(monkeypatch, closure.Outcome())
     cleared_at = time.monotonic() + 0.6
     name = "meiva-agent-987-shell-2053-tearing-down"
@@ -552,8 +565,8 @@ def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
     def tearing_down() -> list[str]:
         return [] if time.monotonic() >= cleared_at else [name]
 
-    monkeypatch.setattr(strict, "live_terminals", tearing_down)
-    strict.close_terminals(
+    monkeypatch.setattr(strict, "live_shell_sessions", tearing_down)
+    strict.close_shell_sessions(
         time.monotonic() + 10,
         direct_db=False,
         database_factory=operator_database,
@@ -562,36 +575,42 @@ def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
     assert time.monotonic() >= cleared_at
 
 
-def test_live_terminals_reads_the_service_while_it_listens(
+# meiva:note
+# With the service listening its listing is the truth, and any session in it
+# refuses maintenance.
+def test_live_shell_sessions_reads_the_service_while_it_listens(
     home: Path, pty_service: PtyServiceProcess
 ) -> None:
-    """With the service listening its listing is the truth, and any session in it
-    refuses maintenance."""
-    assert strict.live_terminals() == []
-    strict.require_no_terminals()
+    assert strict.live_shell_sessions() == []
+    strict.require_no_shell_sessions()
     name = "meiva-agent-987-shell-2053-listed"
     assert new(name, home, {"HOME": str(home)})
 
-    assert strict.live_terminals() == [name]
+    assert strict.live_shell_sessions() == [name]
     with pytest.raises(RuntimeError, match=name):
-        strict.require_no_terminals()
+        strict.require_no_shell_sessions()
 
 
-def test_live_terminals_without_the_service_is_what_its_ledger_still_runs(
+# meiva:note
+# A service that is not listening has no sessions; a crash's leftover is a process
+# its ledger names that is still its recorded process.
+def test_live_shell_sessions_without_the_service_is_what_its_ledger_still_runs(
     home: Path, launch: Launcher
 ) -> None:
-    """A service that is not listening has no sessions; a crash's leftover is a process
-    its ledger names that is still its recorded process."""
-    assert strict.live_terminals() == []
+    assert strict.live_shell_sessions() == []
     name = "meiva-agent-987-shell-2053-leftover"
     proc = launch(name, term="ignore", ignore_hangup=True)
     ledger.write(ledger_path(), [closure.Target(name, identity_of(proc))])
-    assert strict.live_terminals() == [name]
+    assert strict.live_shell_sessions() == [name]
     proc.kill()
     proc.wait(timeout=5)
-    assert strict.live_terminals() == []
+    assert strict.live_shell_sessions() == []
 
 
+# meiva:note
+# No service listens, so there is no one to ask: the stop closes from the ledger
+# the dead service left, the leftover hung up first and SIGKILLed when it ignores
+# the hangup, and the ledger is then empty.
 @pytest.mark.parametrize("ignores_hangup", [False, True])
 def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
     ignores_hangup: bool,
@@ -602,28 +621,28 @@ def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    """No service listens, so there is no one to ask: the stop closes from the ledger
-    the dead service left, the leftover hung up first and SIGKILLed when it ignores
-    the hangup, and the ledger is then empty."""
     monkeypatch.setattr(ledger, "SWEEP_HANGUP_WAIT_S", 0.3)
     name = "meiva-agent-987-shell-2054-orphaned"
     proc = launch(
         name, term="ignore" if ignores_hangup else "default", ignore_hangup=ignores_hangup
     )
     ledger.write(ledger_path(), [closure.Target(name, identity_of(proc))])
-    assert strict.live_terminals() == [name]
+    assert strict.live_shell_sessions() == [name]
 
-    strict.close_terminals(
+    strict.close_shell_sessions(
         time.monotonic() + 10,
         direct_db=False,
         database_factory=operator_database,
         local_machine=command_machine,
     )
     assert proc.wait(timeout=10) == (-signal.SIGKILL if ignores_hangup else -signal.SIGHUP)
-    assert strict.live_terminals() == []
+    assert strict.live_shell_sessions() == []
     assert ledger.read(ledger_path()) == []
 
 
+# meiva:note
+# `--force` closes shell sessions with no grace: a job that ignores TERM and HUP is
+# SIGKILLed at once, and no owner notice is written.
 @pytest.mark.flaky
 def test_force_close_closes_every_session_at_once_without_notices(
     home: Path,
@@ -632,15 +651,13 @@ def test_force_close_closes_every_session_at_once_without_notices(
     pty_service: PtyServiceProcess,
     written: list[pty_close_notices.ClosureNotice],
 ) -> None:
-    """`--force` closes terminals with no grace: a job that ignores TERM and HUP is
-    SIGKILLed at once, and no owner notice is written."""
     monkeypatch.setenv("MEIVA_HOME", str(home))
     name = "meiva-agent-987-shell-2055-force"
     _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper, ready_line="stubborn-ready")
     assert running, "the stubborn job never started"
 
     started = time.monotonic()
-    strict.force_close_terminals()
+    strict.force_close_shell_sessions()
     assert time.monotonic() - started < 8
     assert not client.has_session(name)
     assert jobs.wait_exit(running[0].pid, timeout=5), "the job outlived the forced close"
@@ -660,9 +677,9 @@ def test_force_close_reports_known_job_without_failing(
         monkeypatch,
         closure.Outcome(survivors=(closure.Survivor(name, identity_of(job), "job"),)),
     )
-    strict.force_close_terminals()
+    strict.force_close_shell_sessions()
     assert name in capsys.readouterr().err
-    assert asked == [(0.0, strict.TERMINAL_KILL_WAIT_S)]
+    assert asked == [(0.0, strict.SHELL_SESSION_KILL_WAIT_S)]
 
 
 def test_force_close_still_fails_when_known_shell_survives(
@@ -673,14 +690,14 @@ def test_force_close_still_fails_when_known_shell_survives(
     shell = launch(name, term="ignore", ignore_hangup=True)
     stub_closure(
         monkeypatch,
-        closure.Outcome(survivors=(closure.Survivor(name, identity_of(shell), "terminal"),)),
+        closure.Outcome(survivors=(closure.Survivor(name, identity_of(shell), "shell"),)),
     )
     with pytest.raises(RuntimeError, match=name):
-        strict.force_close_terminals()
+        strict.force_close_shell_sessions()
 
 
 @pytest.mark.parametrize("force", [False, True])
-def test_operational_terminal_close_failure_is_not_best_effort_success(
+def test_operational_shell_session_close_failure_is_not_best_effort_success(
     monkeypatch: pytest.MonkeyPatch,
     force: bool,
     operator_database: Callable[[], Any],
@@ -694,9 +711,9 @@ def test_operational_terminal_close_failure_is_not_best_effort_success(
     monkeypatch.setattr(strict, "close_via_service", failed_close)
     with pytest.raises(client.ServiceError, match="known group signal denied"):
         if force:
-            strict.force_close_terminals()
+            strict.force_close_shell_sessions()
         else:
-            strict.close_terminals(
+            strict.close_shell_sessions(
                 time.monotonic() + 1,
                 direct_db=False,
                 database_factory=operator_database,

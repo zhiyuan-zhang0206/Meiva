@@ -39,7 +39,7 @@ def partial_home(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             {"MEIVA_MACHINE_NAME": "partial"},
         )
     )
-    monkeypatch.setattr(service_stop, "require_no_terminals", lambda: None)
+    monkeypatch.setattr(service_stop, "require_no_shell_sessions", lambda: None)
     return unit_home
 
 
