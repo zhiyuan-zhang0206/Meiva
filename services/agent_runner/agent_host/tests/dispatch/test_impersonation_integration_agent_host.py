@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -209,3 +210,87 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
         local_machine=machine_identity.name(),
     )
     assert replacement["status"] == "requested"
+
+
+# meiva:note
+# Relay supervision ends the lease of a relay child this host watched exit, so the same
+# wake owes the same handoff — the second of the two ways a held wake ends a takeover.
+# meiva:link docs/conventions/agents/agent-impersonation.md
+async def test_held_controls_settle_the_handoff_of_a_dead_relays_lease(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    from base.agents.observation.relay_supervision import RelayChild
+    from services.agent_runner.agent_host.host import AgentHost
+
+    agent_id = create_agent(db_conn)
+    machine = machine_identity.name()
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'idling',%s)", (agent_id, machine)
+    )
+    db_conn.commit()
+    graph = _HandoffGraph()
+    host = AgentHost(
+        policy=configured_policy(),
+        pool=aops_pool,
+        checkpointer=MagicMock(),
+        graph=cast(Any, graph),
+        machine=configured_machine(name=machine),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(gate=database_gate),
+        catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
+    )
+    owner = await admit_hosted_runtime(aops_pool, agent_id, machine, host._owner, db=database)
+    assert owner is not None
+    lease = leases.request(
+        database,
+        event_bus,
+        agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex"),
+        process_metadata=recorded_tree(),
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+        authority=config_authority,
+        automatic=True,
+        name="session-0",
+        executor_name="codex",
+        local_machine=machine_identity.name(),
+    )
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=machine_identity.name(),
+    )
+    leases.activate(database, event_bus, lease["id"], owner)
+    exited = subprocess.Popen(["/usr/bin/true"])
+    exited.wait()
+    host.relays.children[agent_id] = RelayChild(
+        lease_id=lease["id"], process=exited, token=str(uuid4()), spawned_at=0.0
+    )
+
+    await host.run_turn(agent_id)
+
+    ended = leases.get(
+        database,
+        event_bus,
+        lease["id"],
+        local_machine=machine_identity.name(),
+    )
+    assert ended["status"] == "expired"
+    assert ended["rejection_reason"] == "aborted: the bound relay process exited (exit code 0)"
+    assert ended["handoff_applied_at"] is not None
+    assert Path(ended["handoff_path"]).is_file()
+    assert graph.values["impersonation_handoff_id"] == f"{agent_id}:0"
+    assert agent_id not in host.relays.children
