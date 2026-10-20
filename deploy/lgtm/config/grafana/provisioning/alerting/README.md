@@ -304,6 +304,8 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-root-unit-restart-failed` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind`, per machine and unit | 0m | error / critical | the root unit episode store and its posts; the breaker rule also routes to Telegram (a database outage takes the webhook's own ingest path down with it) |
 | `meiva-ops-root-unit-not-revivable` | `root_unit_not_revivable` >1 in 2m | 0m | error | `terminal_escalate_rounds` |
 | `meiva-ops-root-unit-stop-escalated` | `root_unit_stop_escalated` >0 in 10m | 0m | error | nothing: a stop that outlived its window gave up silently and left a half-dead unit (2026-10-18) |
+| `meiva-ops-root-unit-unowned-alive` | `root_unit_unowned_alive` per machine and unit | 0m | error | nothing: a unit could read "state stopped / probe alive" for a day with every rule green (2026-10-20) |
+| `meiva-ops-root-unit-left-behind-stuck` | `root_unit_left_behind_stuck` per machine and unit | 0m | error | nothing: a leftover that survives TERM and KILL blocks its own replacement |
 | `meiva-ops-root-diagnostic-venv` / `-brew-pin` / `-browser-reach` | `root_diagnostic` non-alive, >1 / >1 / >2 samples | 0m | warning | the per-probe consecutive-failure thresholds |
 
 Unhealthy-for-3-minutes and unhealthy-for-10-minutes are two coexisting rules per condition
