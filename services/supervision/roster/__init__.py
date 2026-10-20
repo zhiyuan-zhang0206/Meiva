@@ -14,6 +14,7 @@ from base.cluster import frontend_service_cmd
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.config import settings
 from base.daemon.health import DaemonProbe, probe_home
+from base.native_process.stop_timing import HOST_STOP_CEILING_S
 from base.paths import meiva_home, otel_collector_binary, otel_collector_config
 from services.supervision.roster import plugin_services
 from services.supervision.roster.healthz import (
@@ -317,6 +318,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             capabilities=AGENT_RUNNER,
             profile="agent",  # the host runs the agent kernel in-process; the runner-derived marker crashes it at import
             requires_db=True,  # assert_schema_current at boot; every turn reads/writes agents_meta
+            stop_ceiling_s=HOST_STOP_CEILING_S,
         ),
         # ops: inbound server. Binds 0.0.0.0:<ops_port>, serves POST /ops; the
         # gateway dials it directly (HTTP-uniform, even on a co-located single box).

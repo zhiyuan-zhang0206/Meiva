@@ -86,6 +86,11 @@ async def _dispatch_for_shutdown(events: list[str], failure: str) -> None:
         raise
 
 
+async def _sigterm_and_keep_serving() -> None:
+    signal.raise_signal(signal.SIGTERM)
+    await asyncio.Event().wait()
+
+
 def _shutdown_config() -> ConfigBoot:
     config = ConfigBoot()
     config.boot()
@@ -129,7 +134,7 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
     async def fail() -> None:
         await asyncio.sleep(0)
         if failure == "signal":
-            signal.raise_signal(signal.SIGTERM)
+            await _sigterm_and_keep_serving()
         raise ValueError("background failed")
 
     dispatch = partial(_dispatch_for_shutdown, events, failure)
@@ -254,18 +259,23 @@ def _shutdown_child(failure: str, home: Path) -> subprocess.CompletedProcess[str
     )
 
 
+# meiva:note
+# A SIGTERM while the dispatcher serves (the plugin watcher raises one at itself) runs the
+# graceful exit instead of a failure: `run` returns, with no exception, after the same drain
+# and release.
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 @pytest.mark.parametrize(
     "failure,exception",
     [
-        ("plugin", "KeyboardInterrupt"),
-        ("signal", "KeyboardInterrupt"),
+        ("plugin", None),
+        ("signal", None),
         ("exception", "ExceptionGroup[ValueError]"),
         ("dispatcher_returns", "ExceptionGroup[RuntimeError]"),
         ("heartbeat", "ExceptionGroup[RuntimeError]"),
     ],
 )
 def test_failed_background_still_drains_and_releases(
-    failure: str, exception: str, unit_home: Path
+    failure: str, exception: str | None, unit_home: Path
 ) -> None:
     result = _shutdown_child(failure, unit_home)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -281,7 +291,7 @@ def test_failed_background_still_drains_and_releases(
         "sampling_stopped",
         "pools_closed",
         "pidfile_removed",
-        exception,
+        *([] if exception is None else [exception]),
     ]
     assert [
         event

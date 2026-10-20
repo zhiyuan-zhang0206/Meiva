@@ -164,6 +164,7 @@ class TurnScheduler:
         self._reaped_successors: dict[int, asyncio.Task[None]] = {}
         self._pending: set[int] = set()
         self._closed = False
+        self._stopping = False
         self._restart_required = False
 
     @property
@@ -183,12 +184,22 @@ class TurnScheduler:
         """Pre-start reaper replacement for the same unconsumed wake, if any."""
         return self._reaped_successors.get(agent_id)
 
+    # meiva:note
+    # The graceful exit's first step: start no turn from now on and return the agents
+    # whose turn task still runs; those turns finish and do not loop again. A wake
+    # refused from here on loses nothing: its inbound stays pending in Postgres for the
+    # next host's scan.
+    # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+    def stop_admission(self) -> frozenset[int]:
+        self._stopping = True
+        return self.active_agents
+
     def wake(self, agent_id: int) -> asyncio.Task[None] | None:
         """Record a wake and return its turn task for caller accounting.
 
         During a turn, its pending flag makes that turn loop.
         """
-        if self._closed:
+        if self._closed or self._stopping:
             return None
         self._pending.add(agent_id)
         if agent_id not in self._tasks:
@@ -219,7 +230,7 @@ class TurnScheduler:
         if self._tasks.get(agent_id) is not task:
             return
         self._tasks.pop(agent_id)
-        if not self._closed and agent_id in self._pending:
+        if not self._closed and not self._stopping and agent_id in self._pending:
             self._start(agent_id)
             self._reaped_successors[agent_id] = self._tasks[agent_id]
 
@@ -277,7 +288,12 @@ class TurnScheduler:
         finally:
             if self._tasks.get(agent_id) is asyncio.current_task():
                 self._tasks.pop(agent_id)
-                if completed and not self._closed and agent_id in self._pending:
+                if (
+                    completed
+                    and not self._closed
+                    and not self._stopping
+                    and agent_id in self._pending
+                ):
                     self._start(agent_id)
 
     async def cancel_exact_force(

@@ -106,6 +106,7 @@ from .lifecycle.configuration import (
     load_installation,
     understanding_inputs,
 )
+from .lifecycle.graceful_exit import serve_until_exit, write_exit_restart
 from .pooled_checkpoint import PooledPostgresSaver
 from .pools import build_control_pool, build_shared_pool
 from .pools import close_host_pools as close_host_pools
@@ -170,14 +171,13 @@ def plugins_fingerprint() -> str:
     return "|".join(parts)
 
 
+# meiva:note
+# Exit the host when the plugin directory changes under it. Runs for the daemon's whole
+# life; on a fingerprint change it logs the names that changed and raises SIGTERM at
+# itself, which starts the graceful exit: running turns settle at their restart, the
+# drains run, then the supervisor restarts the host fresh.
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 async def watch_plugins_for_restart() -> None:
-    """Exit the host when the plugin directory changes under it.
-
-    Runs for the daemon's whole life; on a fingerprint change it logs the
-    names that changed and raises SIGTERM at itself, which `install_graceful_shutdown`
-    turns into the KeyboardInterrupt every daemon already unwinds through —
-    the drains run, then the supervisor restarts the host fresh.
-    """
     baseline = plugins_fingerprint()
     while True:
         await asyncio.sleep(PLUGINS_POLL_INTERVAL_S)
@@ -651,15 +651,24 @@ async def run(
         # raises cancels the dispatcher and its siblings, and the exception
         # leaves `run` so the process exits for `meiva-root` to restart it. The
         # group exits, every loop joined, before the runtime drains turns.
+        # meiva:note
+        # A SIGTERM cancels the group the same way, then drains turns at their
+        # restart before the runtime cancels whatever is left.
+        # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
         try:
-            await _dispatch_host(
-                host,
-                scheduler,
-                control_pool,
-                db,
-                bus,
-                catalog=installation.require_catalog(),
-                config=config,
+            await serve_until_exit(
+                _dispatch_host(
+                    host,
+                    scheduler,
+                    control_pool,
+                    db,
+                    bus,
+                    catalog=installation.require_catalog(),
+                    config=config,
+                ),
+                turns=scheduler,
+                progress=host.turn_progress,
+                write_restart=partial(write_exit_restart, db, bus),
             )
         finally:
             try:

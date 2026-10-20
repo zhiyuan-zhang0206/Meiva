@@ -198,6 +198,37 @@ EVENTS: dict[str, EventSpec] = {
         "the hosted agent-runner finished process-scope boot and its dispatcher is live",
         tier="noise",
     ),
+    "host_exit_draining": telemetry_event(
+        "host_exit_draining",
+        "a SIGTERMed agent-host closed admission and wrote one system:restart inbound per "
+        "running turn; carries how many restarts it wrote, the drain budget and how many "
+        "turns it now waits for",
+        tier="observation",
+    ),
+    "host_exit_drained": telemetry_event(
+        "host_exit_drained",
+        "every turn a SIGTERMed agent-host waited for settled within the drain budget",
+        tier="noise",
+    ),
+    "host_exit_drain_timeout": telemetry_event(
+        "host_exit_drain_timeout",
+        "a running turn did not settle within the SIGTERMed agent-host's drain budget and "
+        "is cancelled; carries the agent, its last turn activity and the restart inbound "
+        "through which the next host wakes it",
+        tier="anomaly",
+    ),
+    "host_exit_restart_failed": telemetry_event(
+        "host_exit_restart_failed",
+        "a SIGTERMed agent-host could not write the restart of a running turn; the turn is "
+        "still waited for, and without the restart a turn cut short is not woken again "
+        "until new input arrives",
+        tier="anomaly",
+    ),
+    "host_exit_repeated": telemetry_event(
+        "host_exit_repeated",
+        "a further SIGTERM reached an agent-host already draining; it is ignored",
+        tier="noise",
+    ),
     "host_stdout_log_rotated": telemetry_event(
         "host_stdout_log_rotated",
         "the hosted daemon rotated its raw stdout transcript at the size ceiling "

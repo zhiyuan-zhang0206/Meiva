@@ -709,3 +709,35 @@ def test_seed_wait_reports_a_keeper_that_stopped_restarting_root(
             {"MEIVA_HOME": str(tmp_path)},
             helper=serve(ScriptedHelper(seed_root=exited)),
         )
+
+
+# meiva:note
+# Root's `down` answers once the unit has exited; record each call and its return.
+class _RecordingRoot:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def down(self, unit_id: str) -> dict[str, Any]:
+        self._events.append(f"down {unit_id}")
+        self._events.append(f"exited {unit_id}")
+        return {"ok": True}
+
+    def force_down(self, unit_id: str) -> dict[str, Any]:
+        raise AssertionError(f"a graceful stop force-stopped {unit_id}")
+
+
+def test_the_agent_host_stops_and_exits_before_any_other_unit() -> None:
+    events: list[str] = []
+    units = {"alpha-sidecar", "gateway", "agent-host", "ops", "browser-mcp"}
+    driver.down_units(
+        units,
+        deadline=float("inf"),
+        force=False,
+        client_for=lambda _remaining_s: _RecordingRoot(events),
+    )
+    assert events[:2] == ["down agent-host", "exited agent-host"]
+    assert events[2::2] == [f"down {unit}" for unit in sorted(units - {"agent-host"})]
+
+
+def test_the_stop_order_needs_no_agent_host() -> None:
+    assert driver.unit_stop_order({"ops", "gateway"}) == ["gateway", "ops"]

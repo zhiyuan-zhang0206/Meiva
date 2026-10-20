@@ -25,8 +25,10 @@ restart and indexer failures stay dirty on disk.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import signal
 import types
+from collections.abc import Callable, Generator
 
 from base.log import logger
 
@@ -81,3 +83,31 @@ def install_graceful_shutdown(label: str) -> None:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, _handler)
+
+
+# meiva:note
+# A daemon with a bounded exit of its own takes SIGTERM over for the block: `request`
+# runs as a loop callback, never inside a signal frame, so it may schedule work, and it
+# must be idempotent because a second SIGTERM calls it again. Before the block and after
+# it the KeyboardInterrupt route of `install_graceful_shutdown` applies, except that a
+# SIGTERM received inside leaves the signal ignored: a retry cannot abort the exit the
+# first one started.
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+@contextlib.contextmanager
+def sigterm_requests_exit(label: str, request: Callable[[], None]) -> Generator[None]:
+    loop = asyncio.get_running_loop()
+    previous = signal.getsignal(signal.SIGTERM)
+    received = False
+
+    def _on_sigterm() -> None:
+        nonlocal received
+        received = True
+        logger.info("[{service}] received SIGTERM, exiting gracefully", service=label)
+        request()
+
+    loop.add_signal_handler(signal.SIGTERM, _on_sigterm)
+    try:
+        yield
+    finally:
+        loop.remove_signal_handler(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN if received else previous)

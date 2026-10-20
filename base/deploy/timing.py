@@ -172,6 +172,16 @@ CLOCKS: dict[str, Clock] = {
         lambda: stop.CLOCK_READ_TIMEOUT_S,
         "stuck-clock read: how long the cancel path may wait for one clock read",
     ),
+    "HOST_GRACEFUL_EXIT_DRAIN_S": Clock(
+        "stop",
+        lambda: stop.HOST_GRACEFUL_EXIT_DRAIN_S,
+        "graceful exit: how long a SIGTERMed agent-host waits for in-flight turns to settle",
+    ),
+    "HOST_STOP_CEILING_S": Clock(
+        "stop",
+        lambda: stop.HOST_STOP_CEILING_S,
+        "the agent-host's whole SIGTERM exit; root's TERM window for the unit derives from it",
+    ),
 }
 
 
@@ -227,6 +237,20 @@ CONSTRAINTS: list[Constraint] = [
         "10 * AGENT_LEASE_RENEW_INTERVAL_S",
         "the lease must outlive at least ten missed renewal beats, so a transient "
         "renewal blip never reads as death against the reaper cadence",
+    ),
+    Constraint(
+        "<",
+        "HOST_GRACEFUL_EXIT_DRAIN_S + CANCEL_UNWIND_TIMEOUT_S + CLOCK_READ_TIMEOUT_S",
+        "HOST_STOP_CEILING_S",
+        "a drain that times out still has its cancel unwind, clock read, resource join "
+        "and ownership release inside the host's stop ceiling",
+    ),
+    Constraint(
+        "<",
+        "HOST_STOP_CEILING_S",
+        "ROOT_HEALTH_INTERVAL_S",
+        "root's TERM window for the agent-host (ceiling plus margin) may not exceed "
+        "the health round a replacement stop runs inside",
     ),
     # --- wedged family ---
     Constraint(
