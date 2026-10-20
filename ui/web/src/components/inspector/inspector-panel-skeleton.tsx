@@ -4,15 +4,7 @@ import { useTranslations } from "next-intl";
 
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  BAR_DIVIDER_CLASS,
-  BAR_HEIGHT_CLASS,
-  FLEX,
-  FLEX_1,
-  FLEX_COL,
-  MIN_H_0,
-  MIN_W_0,
-} from "@/lib/layout/layout";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 export function SectionSkeleton({
@@ -44,6 +36,7 @@ export function LiveSectionsSkeleton() {
       <SectionSkeleton title={t("sectionShells")} rows={1} />
       <SectionSkeleton title={t("sectionLiveness")} rows={3} />
       <SectionSkeleton title={t("sectionConfigOverlay")} rows={1} />
+      <SectionSkeleton title={t("sectionContext")} rows={1} />
     </>
   );
 }
@@ -53,43 +46,28 @@ export function WindowedSectionsSkeleton() {
   return <SectionSkeleton title={t("sectionCostActivity")} rows={4} />;
 }
 
+// meiva:note
+// The placeholder stands in for the panel an inspector actually renders, so it
+// mirrors INSPECT_SECTION_ORDER (run link, page, shells, liveness, config
+// overlay, context, cost/activity) and draws no header: the embedded panel has
+// none, and a skeleton carrying the word "Inspector" over a different set of
+// blocks made the panel jump when the real content arrived (user report
+// 2026-10-20).
+// meiva:link ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md
 export function InspectorPanelSkeleton() {
   const t = useTranslations("inspector");
   const { isLarge } = useBreakpoint();
 
   const body = (
-    <>
-      <header
-        className={cn(
-          "relative items-center gap-2 px-4",
-          BAR_DIVIDER_CLASS,
-          BAR_HEIGHT_CLASS,
-          FLEX,
-        )}
-      >
-        <div className="size-5 shrink-0 -ml-1 rounded bg-muted-foreground/10" />
-        <span
-          className={cn(
-            "truncate font-mono text-xs tracking-wide text-muted-foreground",
-            MIN_W_0,
-            FLEX_1,
-          )}
-        >
-          {t("title")}
-        </span>
-        <div className="h-4 w-12 animate-pulse rounded bg-muted-foreground/10" />
-      </header>
-
-      <ScrollArea className={cn("text-xs", MIN_H_0, FLEX_1)}>
-        <div className="px-4 py-3">
-          <div className="space-y-4">
-            <LiveSectionsSkeleton />
-            <WindowedSectionsSkeleton />
-            <div className="h-3 w-28 animate-pulse rounded bg-muted-foreground/10" />
-          </div>
+    <ScrollArea className={cn("text-xs", MIN_H_0, FLEX_1)}>
+      <div className="px-4 py-3">
+        <div className="space-y-4">
+          <SectionSkeleton title={t("sectionPage")} rows={2} />
+          <LiveSectionsSkeleton />
+          <WindowedSectionsSkeleton />
         </div>
-      </ScrollArea>
-    </>
+      </div>
+    </ScrollArea>
   );
 
   if (isLarge) {
