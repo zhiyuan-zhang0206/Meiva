@@ -6,7 +6,7 @@
 // own test file); that also keeps the heavy per-section deps (api) out.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/control/guide/page", () => ({ default: () => <div>GUIDE_BODY</div> }));
@@ -66,8 +66,9 @@ describe("ControlPage shell", () => {
     }
   });
 
-  it("composes the section bodies in order", () => {
+  it("composes the section bodies in order", async () => {
     const { container } = wrap(<ControlPage />);
+    await waitFor(() => expect(container.innerHTML).toContain("SCHEDULES_BODY"));
     const markers = [
       "GUIDE_BODY",
       "CONFIG_BODY",
