@@ -124,10 +124,10 @@ from services.agent_runner.agent_host.stall_guard import (
 
 _HostGraph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
 
-# The host's whole stop must fit meiva-root's TERM window (`stop_timeout_s`, 10 s,
-# `services/supervision/meiva_root/supervisor.py`) or root retains custody of it. With Postgres
-# unreachable the release would otherwise wait out the control pool's acquire
-# timeout (30 s). A release that cannot land leaves the leases to expire by TTL.
+# meiva:note
+# The whole stop must fit `HOST_STOP_CEILING_S` (root's TERM window derives from it): with
+# Postgres unreachable the release would otherwise wait out the pool's 30 s acquire timeout.
+# A release that cannot land leaves the leases to expire by TTL.
 RELEASE_OWNER_TIMEOUT_S = 3.0
 
 
