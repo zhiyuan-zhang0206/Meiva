@@ -5824,6 +5824,66 @@
         }
       }
     },
+    "/api/stream": {
+      "get": {
+        "summary": "Get Merged Stream",
+        "operationId": "get_merged_stream_api_stream_get",
+        "parameters": [
+          {
+            "name": "agents",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agents"
+            }
+          },
+          {
+            "name": "channels",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Channels"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/run-timeline/messages": {
       "get": {
         "summary": "Get Run Timeline Messages",

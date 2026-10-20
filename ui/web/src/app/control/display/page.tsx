@@ -301,6 +301,16 @@ export default function DisplaySettingsPage() {
         <NotificationCategoryRows />
       </SettingsSection>
 
+      <SettingsSection id="display-realtime" title="Realtime connection">
+        <ToggleRow
+          icon={Activity}
+          label="Single realtime connection"
+          description="Carry the agent list, the open conversation and alerts over one stream instead of three. Off keeps one stream per channel, exactly as before; on frees connections for the page itself, which matters most on plain HTTP where a browser allows six per origin."
+          value={settings["web.sseSingleStream"] === true}
+          onChange={(v) => setSetting("web.sseSingleStream", v)}
+        />
+      </SettingsSection>
+
       <SettingsSection id="display-composer" title={t("composer")}>
         <ToggleRow
           icon={MessageSquareText}

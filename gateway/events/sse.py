@@ -26,7 +26,7 @@ gets the same ``{role, agent_id, content, ...}`` shape.
 import json
 import logging
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 import redis
@@ -50,8 +50,8 @@ _log = logging.getLogger(__name__)
 # crash 2026-08-04 — see base/redis_client._TransportAwareAsyncConnection).
 # The SSE stream is a per-request short-lived connection, so treat it as any
 # other IO failure: emit an error frame and let the frontend reconnect.
-_REDIS_IO_ERRORS = (redis.ConnectionError, redis.TimeoutError, OSError, TypeError)
-_REDIS_ACL_ERRORS = (AuthenticationError, NoPermissionError)
+REDIS_IO_ERRORS = (redis.ConnectionError, redis.TimeoutError, OSError, TypeError)
+REDIS_ACL_ERRORS = (AuthenticationError, NoPermissionError)
 
 # Heartbeat: after this much silence, emit a real `data:` event the browser
 # EventSource `onmessage` can see — so a client-side watchdog can detect a
@@ -59,7 +59,7 @@ _REDIS_ACL_ERRORS = (AuthenticationError, NoPermissionError)
 # but stops delivering data). The `: hb` comment keeps the TCP / proxy hop warm
 # but is invisible to `onmessage`, so it cannot drive the watchdog on its own.
 _HEARTBEAT_SECONDS = 15.0
-_HEARTBEAT_FRAME = b'data: {"role":"heartbeat"}\n\n'
+HEARTBEAT_FRAME = b'data: {"role":"heartbeat"}\n\n'
 
 # Keep-alive comment cadence: at most one `: hb` per second on paths that
 # yield nothing else. A busy events channel must not turn the wire silent
@@ -68,19 +68,18 @@ _HEARTBEAT_FRAME = b'data: {"role":"heartbeat"}\n\n'
 _KEEPALIVE_COMMENT_INTERVAL_S = 1.0
 
 
-def _warm_frame(
+# meiva:note
+# A frame that keeps the wire warm, or None: heartbeat when the last data frame is
+# older than `_HEARTBEAT_SECONDS` (the visible event drives client watchdogs),
+# otherwise a `: hb` comment at most once a second. Returns
+# `(frame, last_comment, last_data_frame)` — the caller stamps both clocks, so any
+# yielded frame counts as traffic. Shared with the merged stream.
+# meiva:link gateway/events/docs/sse.meiva.okf.md
+def warm_frame(
     now: float, last_comment: float, last_data_frame: float
 ) -> tuple[bytes | None, float, float]:
-    """A frame that keeps the wire warm, or None.
-
-    Heartbeat when the last data frame is older than ``_HEARTBEAT_SECONDS``
-    (the visible event drives client watchdogs); otherwise a ``: hb`` comment
-    at most once a second. Returns ``(frame, last_comment, last_data_frame)``
-    — the caller stamps both clocks, so any yielded frame counts as traffic.
-    """
-
     if now - last_data_frame >= _HEARTBEAT_SECONDS:
-        return _HEARTBEAT_FRAME, now, now
+        return HEARTBEAT_FRAME, now, now
     if now - last_comment >= _KEEPALIVE_COMMENT_INTERVAL_S:
         return b": hb\n\n", now, last_data_frame
     return None, now, last_data_frame
@@ -107,17 +106,22 @@ async def _subscribe_error_frame(
     """Return a wire-shaped error after a failed subscribe, else None."""
     try:
         await retry_auth_failures_async(lambda: pubsub.subscribe(channel))
-    except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
+    except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
         _log.warning("sse pubsub subscribe failed: %r agent_id=%s", exc, agent_id)
         payload = _error_payload(agent_id, exc)
         return sse_batch_frame([payload]) if batched else sse_frame(payload)
     return None
 
 
-async def _close_pubsub(pubsub: Any, client: Any, channel: str) -> None:
-    """Each cleanup step is independently suppressed + logged so one failure does not swallow another."""
+# meiva:note
+# Each cleanup step is independently suppressed + logged so one failure does not
+# swallow another; `channels` accepts the whole subscription set of one pubsub
+# connection, which the merged stream subscribes to both of its sources on.
+# meiva:link gateway/events/docs/sse.meiva.okf.md
+async def close_pubsub(pubsub: Any, client: Any, channels: str | Sequence[str]) -> None:
+    names = (channels,) if isinstance(channels, str) else tuple(channels)
     for step, coro_fn in (
-        ("unsubscribe", lambda: pubsub.unsubscribe(channel)),  # pyright: ignore[reportUnknownMemberType]
+        ("unsubscribe", lambda: pubsub.unsubscribe(*names)),  # pyright: ignore[reportUnknownMemberType]
         ("pubsub.aclose", pubsub.aclose),
         ("client.aclose", client.aclose),
     ):
@@ -216,7 +220,7 @@ async def event_stream(
                         timeout=settings.gateway.sse_disconnect_poll_seconds,
                     )
                 )
-            except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
+            except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
                 _log.warning("sse pubsub read failed: %r agent_id=%s", exc, agent_id)
                 yield sse_frame(_error_payload(agent_id, exc))
                 return
@@ -241,7 +245,7 @@ async def event_stream(
             # event, a non-str or unparseable payload): keep the wire warm —
             # heartbeat once the silence crosses _HEARTBEAT_SECONDS, otherwise
             # a throttled keep-alive comment.
-            frame, last_comment, last_data_frame = _warm_frame(now, last_comment, last_data_frame)
+            frame, last_comment, last_data_frame = warm_frame(now, last_comment, last_data_frame)
             if frame is not None:
                 yield frame
     finally:
@@ -253,7 +257,7 @@ async def event_stream(
             time.monotonic() - opened,
             data_frames,
         )
-        await _close_pubsub(pubsub, client, _channel)
+        await close_pubsub(pubsub, client, _channel)
 
 
 async def _drain_redis_messages(
@@ -377,7 +381,7 @@ async def throttled_event_stream(
                     flush_interval,
                     agent_filter=agent_filter,
                 )
-            except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
+            except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
                 _log.warning("sse throttle pubsub read failed: %r", exc)
                 yield sse_batch_frame([_error_payload(0, exc)])
                 return
@@ -392,7 +396,7 @@ async def throttled_event_stream(
                 total_events += len(buffer)
                 last_flush = now
             elif now - last_flush >= _HEARTBEAT_SECONDS:
-                yield _HEARTBEAT_FRAME
+                yield HEARTBEAT_FRAME
                 last_flush = now
             else:
                 yield b": hb\n\n"
@@ -473,4 +477,15 @@ def decode_frames_for_test(chunks: list[bytes]) -> list[dict]:
     return out
 
 
-__all__ = ["event_stream", "throttled_event_stream"]
+__all__ = [
+    "HEARTBEAT_FRAME",
+    "REDIS_ACL_ERRORS",
+    "REDIS_IO_ERRORS",
+    "close_pubsub",
+    "decode_frames_for_test",
+    "event_stream",
+    "sse_batch_frame",
+    "sse_frame",
+    "throttled_event_stream",
+    "warm_frame",
+]

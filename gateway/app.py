@@ -53,6 +53,7 @@ from gateway.cluster.server import main as _run_gateway
 from gateway.cluster.status import StatusCache
 from gateway.events import agent_events as agent_events_router
 from gateway.events import computer_traces as computer_traces_router
+from gateway.events import merged as merged_stream_router
 from gateway.events import metrics as metrics_router
 from gateway.events import notification_outbox
 from gateway.events import resolutions as event_resolutions_router
@@ -574,6 +575,7 @@ def create_app(
         packages_router.router,
         metrics_router.router,
         events_router.router,
+        merged_stream_router.router,
         insights_router.router,
         event_resolutions_router.router,
         ops_monitor_router.router,
