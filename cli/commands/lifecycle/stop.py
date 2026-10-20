@@ -20,7 +20,6 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster import session_name
 from base.cluster.machine import MachineIdentity
 from base.deploy.maintenance.state import MaintenancePhase
-from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 from base.events.live.bus import EventBus
 from base.host.permissions_helper.client import HelperFactory
 from base.sessions.hosting import hosting_supervised_session
@@ -131,7 +130,7 @@ def _print_stop_plan(
     print("\nThe following will be stopped:")
     print(f"  service sessions: {', '.join(service_sessions) if service_sessions else '(none)'}")
     if not keep_terminals:
-        print("  persistent terminals: closed")
+        print("  shell sessions: closed")
     if keep_browser:
         print(f"  browser: kept up ({session_name(_BROWSER_SESSION)}, login session preserved)")
     if runner_only:
@@ -421,6 +420,7 @@ def _cmd_restart_body(
     restart_extras: bool,
     force: bool,
     timeout: float,
+    start_timeout: float,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
@@ -483,7 +483,6 @@ def _cmd_restart_body(
     repo = runtime.code_root
     print(f"[meiva restart] cwd = {repo}")
     from base.deploy.lifecycle import status_journal
-    from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 
     # Only the journal's opener closes it — the same owns_journal contract
     # _temporary_stop keeps (task #2898). When an outer operation's journal is
@@ -492,7 +491,7 @@ def _cmd_restart_body(
     owns_journal = status_journal.begin("restart")
     print(
         f"[meiva restart] budget contract: stop up to {timeout:.0f}s + "
-        f"start readiness up to {SERVICE_READY_TIMEOUT_S:.0f}s + bounded preflight probes; "
+        f"start readiness up to {start_timeout:.0f}s + bounded preflight probes; "
         "an outer caller's timeout must exceed this total. Status journal: "
         f"{status_journal.status_path()} (phase progress and the final diagnosis "
         "stay readable there even if this process is cut off)",
@@ -597,6 +596,7 @@ def _cmd_restart_body(
             disabled_services=disabled_services,
             all_services=all_services,
             reconcile=False,
+            ready_timeout=start_timeout,
             runtime=runtime,
             retained_children=retained_children,
             producer=producer,
@@ -617,6 +617,7 @@ def cmd_restart(
     restart_extras: bool,
     force: bool,
     timeout: float,
+    start_timeout: float,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
@@ -634,6 +635,7 @@ def cmd_restart(
             restart_extras=restart_extras,
             force=force,
             timeout=timeout,
+            start_timeout=start_timeout,
             retained_children=retained_children,
             database_factory=database_factory,
             producer=producer,
@@ -706,11 +708,13 @@ def cmd_restart_agent_host(
     *,
     force: bool,
     timeout: float,
+    start_timeout: float,
     database_factory: OperatorDatabaseFactory,
     command: CommandRuntime,
 ) -> int:
     # meiva:note
-    # Stop agent-host within `timeout` (force-killing only with `force`), then bring it up.
+    # Stop agent-host within `timeout` (force-killing only with `force`), then bring it up and
+    # wait up to `start_timeout` for its readiness.
     with lifecycle_audit(operator_request_recorder(database_factory=database_factory)):
         try:
             _temporary_stop.refuse_hosted_stop()
@@ -723,7 +727,7 @@ def cmd_restart_agent_host(
                 ),
                 ready=lambda spec: (
                     not root_readiness.wait_for_service_tree(
-                        (spec,), timeout_s=SERVICE_READY_TIMEOUT_S, timers=command.timers
+                        (spec,), timeout_s=start_timeout, timers=command.timers
                     ).unready
                 ),
             )

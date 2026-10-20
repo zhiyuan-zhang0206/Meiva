@@ -94,6 +94,7 @@ def test_cmd_restart_succeeds_non_interactively(
         restart_extras=False,
         force=False,
         timeout=30.0,
+        start_timeout=30.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         command=command_runtime,
@@ -170,6 +171,7 @@ def test_cmd_restart_calls_stop_then_start(
             "units the stop kept are not reconciled to the selection"
         )
         assert isinstance(kwargs["runtime"], StartRuntime)
+        assert kwargs["ready_timeout"] == 30.0, "the start leg waits the operator's --start-timeout"
         order.append("start")
         return 0
 
@@ -190,6 +192,7 @@ def test_cmd_restart_calls_stop_then_start(
         restart_extras=True,
         force=True,
         timeout=42.0,
+        start_timeout=30.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         command=command_runtime,
@@ -262,6 +265,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
             restart_extras=False,
             force=False,
             timeout=30.0,
+            start_timeout=30.0,
             database_factory=operator_database,
             producer=operator_pipeline,
             command=command_runtime,
@@ -286,6 +290,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
             restart_extras=False,
             force=False,
             timeout=30.0,
+            start_timeout=30.0,
             database_factory=operator_database,
             producer=operator_pipeline,
             command=command_runtime,
@@ -323,6 +328,7 @@ def test_cmd_restart_short_circuits_on_stop_failure(
         restart_extras=False,
         force=False,
         timeout=30.0,
+        start_timeout=30.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         command=command_runtime,
@@ -379,6 +385,7 @@ def test_cmd_restart_aborts_when_preflight_fails(
         restart_extras=False,
         force=False,
         timeout=30.0,
+        start_timeout=30.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         command=command_runtime,
@@ -440,6 +447,7 @@ def test_cmd_restart_aborts_when_start_readiness_fails(
         restart_extras=False,
         force=False,
         timeout=30.0,
+        start_timeout=30.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         command=command_runtime,

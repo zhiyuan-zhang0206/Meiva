@@ -121,13 +121,13 @@ def test_import_defers_cli_logging_until_dispatch(tmp_path: Path) -> None:
 # Each top-level (and nested) meiva sub-command maps to a _h_* handler defined
 # in its owning settings-free parser module.
 _HANDLERS: tuple[tuple[list[str], object, str], ...] = (
-    (["stop"], _host, "_h_stop"),
-    (["restart"], _host, "_h_restart"),
+    (["stop"], _host, "h_stop"),
+    (["restart"], _host, "h_restart"),
     (["status"], _host, "_h_status"),
     (["pty", "freeze", "--holder", "operator", "--reason", "cleanup"], _pty, "_h_pty_freeze"),
     (["pty", "status"], _pty, "_h_pty_status"),
     (["pty", "resume", "generation"], _pty, "_h_pty_resume"),
-    (["converge"], _host, "_h_converge"),
+    (["converge", "--all-services"], _host, "_h_converge"),
     (["firewall", "status"], _host, "_h_firewall_status"),
     (["firewall", "sync"], _host, "_h_firewall_sync"),
     (["cluster", "status"], _cluster, "_h_cluster_status"),

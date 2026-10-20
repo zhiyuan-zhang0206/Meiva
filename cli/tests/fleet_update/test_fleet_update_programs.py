@@ -167,4 +167,6 @@ def test_smoke_program_spawns_executes_and_terminates_with_current_gateway_api(
 
 def test_gateway_transport_sends_the_executed_module_source() -> None:
     owner = Path(__file__).resolve().parents[2] / "commands" / "management" / "fleet_gateway.py"
-    assert owner.read_text(encoding="utf-8") == fleet_update.gateway_program()
+    assert owner.read_text(encoding="utf-8") == fleet_update.program_text(
+        fleet_update.VERIFY_SCRIPTS / "fleet_gateway.py"
+    )

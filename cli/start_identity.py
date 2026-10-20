@@ -228,7 +228,7 @@ def pending_claim(home: Path) -> dict[str, Any] | None:
     elif data["phase"] != "claiming":
         raise RuntimeError(
             f"home {home} is already initialized (phase {data['phase']}); `meiva init` runs "
-            "once per home. Use `meiva start`; to change this home's identity, run "
+            "once per home. Use `meiva start` (see `meiva start --help`); to change this home's identity, run "
             "`meiva cluster destroy` first"
         )
     return data

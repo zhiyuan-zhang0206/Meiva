@@ -174,7 +174,7 @@ Enumerate application services through `meiva status`; persistent shells through
 `meiva sessions list`. Idle and paused agent identities remain durable even when
 no active turn task is running; see [agent runtime](../../agent/docs/agent-runtime/agent-runtime.meiva.okf.md).
 
-PTY closure is best effort: known shells/terminals close with bounded signals;
+PTY closure is best effort: known shell sessions close with bounded signals;
 background or detached processes can remain. Known job leftovers are diagnostic.
 Inspect residual processes and OS stalls before explicit operational action;
 there is no automatic host-wide kill or reboot. See the

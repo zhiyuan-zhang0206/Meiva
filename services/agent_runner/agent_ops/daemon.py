@@ -501,7 +501,7 @@ async def serve_ops_daemon(
         assert_schema_current(config.view.data_plane.db_url)
     except Exception as exc:
         _log.error(
-            "schema version mismatch on ops-server startup: %s — run `git pull && uv sync && meiva start` to catch up",
+            "schema version mismatch on ops-server startup: %s — run `git pull && uv sync && meiva start --all-services` (or this unit's own service selection) to catch up",
             exc,
         )
         sys.exit(1)

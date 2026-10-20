@@ -172,9 +172,9 @@ def register_autostart(
     # meiva:note
     # Register the host's boot-time autostart job for exactly `services`.
     #
-    # Platform-aware: dispatches to the macOS plist or the Linux boot unit. A
-    # start that selected no service has nothing to bring up at boot, so its
-    # boot job is removed instead.
+    # Platform-aware: dispatches to the macOS plist or the Linux boot unit. An
+    # empty selection is refused: it would start nothing at boot, and an existing
+    # boot job is never removed implicitly (`meiva cluster destroy` retires it).
     # Idempotent. On macOS the plist is written but not loaded into the running
     # session (see module docstring); it takes effect on the next reboot.
     # A no-op when ``os_jobs_enabled()`` is off (the test suite) or when this
@@ -188,8 +188,10 @@ def register_autostart(
     if not owns_os_jobs("autostart"):
         return
     if not services:
-        unregister_autostart(host=host)
-        return
+        raise ValueError(
+            "refusing to register a boot job that starts no service; name a selection with "
+            "at least one service (the existing boot job is left as it is)"
+        )
     register_platform_job(
         "autostart",
         macos=lambda: register_macos(services=services, host=host),

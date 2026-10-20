@@ -257,6 +257,6 @@ def warn_archive_inactive(*, path_reader: Callable[[], Path | None]) -> None:
         print(
             "  ! WAL archiving is configured but this Postgres is not running with the "
             "configured archive settings (it kept its previous launch arguments): run "
-            "`meiva stop` and `meiva start` to activate it",
+            "`meiva stop` and `meiva start` (each with its explicit choices; see their `--help`) to activate it",
             file=sys.stderr,
         )

@@ -113,7 +113,7 @@ def main() -> None:
         print(  # noqa: T201 — pre-redirect, surfaces in the session log
             f"meiva-browser: CDP port {cdp_port} already served by another Chrome; "
             f"refusing to start a second instance on {profile_dir()}. "
-            "To clear it: `meiva stop` then `meiva start` — that sweeps any "
+            "To clear it: stop this unit with `meiva stop`, then start it again with `meiva start` — that sweeps any "
             "Chrome running on this cluster's profile, including one left behind by a "
             "SingletonLock handoff. If instead you started a Chrome of your own on this "
             "port, quit that one — the browser service owns this port.",

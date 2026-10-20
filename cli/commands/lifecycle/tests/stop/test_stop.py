@@ -233,6 +233,7 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
             restart_extras=False,
             force=False,
             timeout=30.0,
+            start_timeout=30.0,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -700,7 +701,10 @@ def test_stop_reports_a_data_plane_failure_without_restarting_anything(
     assert rc == 1
     err = capsys.readouterr().err
     assert "Stop incomplete" in err
-    assert "Retry the command, or use meiva start to resume." in err
+    assert (
+        "Retry the command, or use meiva start (with this unit's explicit service selection) to resume."
+        in err
+    )
     assert "compensating" not in err
     assert len(finished) == 1 and "compensated" not in finished[0]
 

@@ -71,7 +71,7 @@ def report_incomplete(
     print(
         f"Stop incomplete; services and the data plane were not force-killed: {exc}. "
         f"phases: {timing or 'before the first phase'}. "
-        "Retry the command, or use meiva start to resume. "
+        "Retry the command, or use meiva start (with this unit's explicit service selection) to resume. "
         f"Status journal: {status_path()}.",
         file=sys.stderr,
     )

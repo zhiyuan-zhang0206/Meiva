@@ -10,7 +10,7 @@ start the gateway and verify its dependencies before starting runners.
 
 | Command | Native agent execution | Persistent shells and schedules | Local infrastructure and extras |
 | --- | --- | --- | --- |
-| `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300` | Same normal drain | Close shells/terminals with bounded known-group signals; report known job leftovers | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
+| `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300` | Same normal drain | Close shell sessions with bounded known-group signals; report known job leftovers | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
 | the same with `--keep-infra` instead of `--stop-infra` | Same normal drain | Close | Keep the private data plane |
 | the same with `--keep-infra --keep-service gateway` | Same normal drain | Close | Also retain the named service; dependent services require `--keep-infra` |
 | `meiva stop --yes --keep-shell-sessions --keep-browser --keep-extras --keep-no-services --keep-infra --mode smooth --timeout 300` | Same normal drain | Retained | Stop only the roster services; keep everything else |
@@ -30,7 +30,7 @@ browser, the pty-sessions service and the extras have their own choices). It is
 an invocation's preservation choice, not a permanent disabled-service setting.
 `stop` asks for confirmation with `--prompt` and proceeds with `--yes`; `restart` never asks. Both
 require `--timeout SECONDS` (the examples use 300), and `restart`'s `--timeout` bounds its stop
-leg. A deadline is a failed stop, not permission to kill surviving services. Terminals and Postgres are the exceptions: Postgres' fast
+leg. A deadline is a failed stop, not permission to kill surviving services. Shell sessions and Postgres are the exceptions: Postgres' fast
 shutdown that has not finished by the end of its share of the budget (a hung
 archive command) is ended by an immediate shutdown and the leftover descendants
 are SIGKILLed, loudly and without failing the stop
@@ -129,10 +129,11 @@ the external effect but before its result becomes durable.
 ## Updating and moving the data plane
 
 `python -m cli.fleet_update run` executes the complete update. Its `down` half
-stops every unit with `meiva stop --yes`, keeping the
-stateful components whose code the window does not touch (`--keep-service`; the
-[keep decision](../../decisions/runtime/updates/release/2026-10-17-component-scoped-keep-on-update.md)),
-and `up` starts them again (the runbook's "Updating a networked cluster in source mode").
+stops every unit with `meiva stop --yes` and the operator's explicit stop choices
+(shell sessions, browser, extras, `--keep-service` or `--keep-no-services`, mode,
+timeout; the gateway also gets its data-plane choice), and `up` starts them with the
+operator's explicit service selection (the runbook's "Updating a networked cluster
+in source mode"). The fleet never decides what to keep.
 The separate halves remain available for manual release work and recovery.
 A stored-script upgrade blocked by held business admission uses the
 [script-only maintenance operator entry](../../../schedules/README.md#script-repair-during-maintenance)
@@ -145,10 +146,10 @@ terminals a bounded completed-work wait, then closes known shells/terminals
 best effort. This does not prove detached/background writers disappeared;
 inspect residual writers before treating it as an external-work barrier. Each
 busy owner receives the same closure notice as
-`meiva stop`. When the window does not restart the pty-sessions service (the keep decision
-above), terminal state survives the update and old-code shells keep running: the stop is
-not a writer barrier for them in that window. A window that does restart it closes
-terminals as above; schedules are re-armed after start.
+`meiva stop`. When the operator passes `--keep-shell-sessions`, the shell sessions survive
+the update and old-code shells keep running: the stop is not a writer barrier for them in
+that window. `--close-shell-sessions` closes them as above; schedules are re-armed after
+start.
 
 For a move, stop all participating runners, then stop the gateway last. Check
 each command's exit status before taking the final snapshots. PostgreSQL uses

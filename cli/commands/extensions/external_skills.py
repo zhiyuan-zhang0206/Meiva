@@ -426,7 +426,8 @@ def _converge_locked(
         raise ClientConflictError(
             "an earlier publication was interrupted and is not resumed; inspect the "
             f"Meiva stage/previous directories beside skills/{skill_name}, then remove "
-            f"{ledger_path} (and skills/{skill_name} if it is Meiva's copy) and run `meiva start`"
+            f"{ledger_path} (and skills/{skill_name} if it is Meiva's copy) and run "
+            f"`meiva start --all-services` (or this unit's own service selection)"
         )
     if _managed_target_current(ledger, target, source_digest):
         return

@@ -1,6 +1,7 @@
 [uses]
 "conftest.py" = ["fleet_update_cluster.py"]
 "test_fleet_update.py" = ["fleet_update_cluster.py"]
+"test_fleet_update_choices.py" = ["fleet_update_cluster.py"]
 "test_fleet_update_leases.py" = ["fleet_update_cluster.py"]
 "test_fleet_update_recovery.py" = ["fleet_update_cluster.py"]
 

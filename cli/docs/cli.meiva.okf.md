@@ -48,8 +48,8 @@ Agent lifecycle, context reads, local operations, and package-management command
 groups are enumerated in [[cli/docs/operator-surfaces.meiva.okf.md]].
 
 Ordinary `meiva start` resumes the existing local maintenance hold after readiness. Durable
-agent identity and work survive both stop and restart; live terminal processes
-survive neither. See [operator procedure](../../docs/conventions/operations/graceful-maintenance.md).
+agent identity and work survive both stop and restart; live shell sessions survive
+either only with `--keep-shell-sessions`. See [operator procedure](../../docs/conventions/operations/graceful-maintenance.md).
 
 ## Init and idempotent start
 

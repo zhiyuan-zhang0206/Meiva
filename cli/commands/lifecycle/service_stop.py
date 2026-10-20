@@ -230,11 +230,11 @@ def close_terminals(
 
 
 def force_close_terminals() -> None:
-    """Close this unit's terminals at `meiva stop --force`: no grace, no notices.
-
-    Force skips owner notices and drain guarantees. A surviving shell still
-    fails it; known job leftovers remain diagnostics.
-    """
+    # meiva:note
+    # Close this unit's terminals at `meiva stop --mode force`: no grace, no notices.
+    #
+    # Force skips owner notices and drain guarantees. A surviving shell still
+    # fails it; known job leftovers remain diagnostics.
     outcome, _reason = _close_terminals_now(0.0, TERMINAL_KILL_WAIT_S)
     _report_terminal_job_leftovers(outcome)
     if any(s.role == "terminal" and live_identities([s.process]) for s in outcome.survivors):

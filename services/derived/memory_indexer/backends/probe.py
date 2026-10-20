@@ -99,7 +99,7 @@ def _probe_pgvector(database: Database, uri_reader: Callable[[], str]) -> ProbeR
                 "runtime Postgres (~/.meiva/runtime/pg/<ver>) injects the pinned "
                 "pgvector files at converge time and `meiva start` pre-creates the "
                 "extension, so a missing extension means this Postgres is not the "
-                "converged vendored tree: re-run `meiva start` (converge + inject), or "
+                "converged vendored tree: re-run `meiva start` with this unit's explicit service selection (converge + inject), or "
                 "install the pgvector package into a brew/apt Postgres, or provision "
                 "pgvector on a remote-managed plane. pgvector stays fallback-only "
                 "(numpy is the default) — use MEIVA_MEMORY_SEARCH_BACKEND=numpy"

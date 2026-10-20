@@ -51,10 +51,10 @@ self-inflicted outage:
   WRONGPASS / NOPERM until it is re-created.
 
 So an auth error from inside your cluster is *the dropped ACL user*, not a
-rotated password. The repair is `meiva start` — it re-affirms the ACL user
+rotated password. The repair is `meiva start --all-services` (or this unit's own service selection) — it re-affirms the ACL user
 idempotently. **Never restart redis (or Postgres) at the OS level to "fix" a
 cluster auth error**: it drops the very ACL user that was failing, and on the
-prod box it is a production outage. If `meiva start` does not converge, escalate
+prod box it is a production outage. If that start does not converge, escalate
 instead of experimenting on the data plane.
 
 ## Start / Stop / Status

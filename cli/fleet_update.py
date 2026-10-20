@@ -11,6 +11,8 @@ import plistlib
 import re
 import shlex
 import subprocess
+import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,7 +21,7 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT
 from typing import Any, cast
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = REPO_CODE = Path(__file__).resolve().parents[1]
 HOME = 'H="$HOME/.meiva"; S="$H/source"; cd "$S" || exit 1'
 MEIVA = 'MEIVA_HOME="$H" "$S/.venv/bin/meiva"'
 _PYTHON = f'{HOME}; MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
@@ -66,34 +68,11 @@ _SECRETS = (
 )
 
 
-def gateway_program() -> str:
-    return (Path(__file__).parent / "commands" / "management" / "fleet_gateway.py").read_text(
-        encoding="utf-8"
-    )
-
-
 VERIFY_SCRIPTS = Path(__file__).parent / "commands" / "management"
 
 
-def read_rows_py() -> str:
-    return (VERIFY_SCRIPTS / "schedules_verify_read_rows.py").read_text(encoding="utf-8")
-
-
-def check_rows_py() -> str:
-    return (VERIFY_SCRIPTS / "schedules_verify_check_rows.py").read_text(encoding="utf-8")
-
-
-PRE_VERIFY = """{home}
-W="$H/pre-update-verify"; R="$W.rows"; T=""
-trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -f "$R"; [ -z "$T" ] || rm -rf "$T"' EXIT
-git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; git -C "$S" worktree prune
-git cat-file -e "{new}^{{commit}}" || {{ echo "SKIPPED: {new} is not fetched on this host (a dry run does not fetch)"; exit 0; }}
-(umask 077; MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c {read_rows} "$R") \\
-  || {{ echo "VERIFY_RC=2"; exit 0; }}
-git -C "$S" worktree add -q "$W" {new} || {{ echo "VERIFY_RC=2"; exit 0; }}
-T=$(mktemp -d) || {{ echo "VERIFY_RC=2"; exit 0; }}
-cd "$W" && MEIVA_HOME="$T" MEIVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c {check_rows} "$R"
-echo "VERIFY_RC=$?"; exit 0"""
+def program_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 class FailedError(RuntimeError):
@@ -238,11 +217,11 @@ def _preflight(
 def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     out = s.run(
         args.gateway,
-        PRE_VERIFY.format(
+        program_text(VERIFY_SCRIPTS / "fleet_pre_verify.sh").format(
             home=HOME,
             new=new,
-            read_rows=shlex.quote(read_rows_py()),
-            check_rows=shlex.quote(check_rows_py()),
+            read_rows=shlex.quote(program_text(VERIFY_SCRIPTS / "schedules_verify_read_rows.py")),
+            check_rows=shlex.quote(program_text(VERIFY_SCRIPTS / "schedules_verify_check_rows.py")),
         ),
         effect=False,
     )
@@ -266,22 +245,15 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     )
 
 
-def silence_program() -> str:
-    return Path(__file__).with_name("fleet_alert_silence.py").read_text()
-
-
-def leases_program() -> str:
-    return (Path(__file__).parent / "commands" / "management" / "fleet_leases.py").read_text()
-
-
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "") -> None:
-    tail = (
-        f" --hours {args.silence_hours:g} --comment {shlex.quote(comment)}"
-        if verb == "open"
-        else ""
+    hours = getattr(args, "silence_hours", None)
+    tail = f" --hours {hours:g} --comment {shlex.quote(comment)}" if verb == "open" else ""
+    out = s.run(
+        args.gateway,
+        f"{_PYTHON} - {verb}{tail}",
+        stdin=program_text(Path(__file__).with_name("fleet_alert_silence.py")),
     )
-    out = s.run(args.gateway, f"{_PYTHON} - {verb}{tail}", stdin=silence_program())
     for line in out.splitlines():
         if line.startswith(("SILENCE failed", "SILENCE skipped")):
             s.say(f"WARNING: alert silence not {verb}: {line.removeprefix('SILENCE ')}")
@@ -292,7 +264,12 @@ def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "")
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _announce_leases(s: Session, args: argparse.Namespace) -> None:
     try:
-        out = s.run(args.gateway, f"{_PYTHON} -", effect=False, stdin=leases_program())
+        out = s.run(
+            args.gateway,
+            f"{_PYTHON} -",
+            effect=False,
+            stdin=program_text(VERIFY_SCRIPTS / "fleet_leases.py"),
+        )
     except FailedError as exc:
         _lease_read_warning(s, str(exc))
         return
@@ -508,7 +485,12 @@ def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[di
     wanted = set(names.values())
     deadline = time.monotonic() + args.roster_timeout
     while True:
-        out = s.run(args.gateway, f"{program} roster", effect=False, stdin=gateway_program())
+        out = s.run(
+            args.gateway,
+            f"{program} roster",
+            effect=False,
+            stdin=program_text(VERIFY_SCRIPTS / "fleet_gateway.py"),
+        )
         rows = json.loads(out.splitlines()[-1])
         if missing := sorted(wanted - {row["name"] for row in rows}):
             raise FailedError(f"no roster row for {missing} (host aliases to names: {names})")
@@ -624,7 +606,7 @@ def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
     rows, commit = _roster(s, args, program)
     for name in [row["name"] for row in rows if row["serve_agent_runner"]]:
         smoke = f"{program} smoke {shlex.quote(name)} {args.smoke_timeout}"
-        s.run(args.gateway, smoke, stdin=gateway_program())
+        s.run(args.gateway, smoke, stdin=program_text(VERIFY_SCRIPTS / "fleet_gateway.py"))
     _refresh(s, args)
     _drift_checks(s, args)
     _silence(s, args, "close")
@@ -645,10 +627,25 @@ def _seconds(text: str) -> int:
 
 
 # meiva:note
-# Every lifecycle choice is an explicit flag with no default and no inference. One choice is a set of
-# flags of which exactly one is given (argparse's required mutually exclusive group would report
-# only the first missing one), so `_missing_choices` names every absent choice at once before any
-# host is touched.
+# Before any host: names must be in this checkout's roster; shells and browser have own choices.
+def _service_problems(args: argparse.Namespace) -> list[str]:
+    named = {n for flag in _NAMED for n in getattr(args, flag[2:].replace("-", "_"), None) or ()}
+    own = sorted(set(getattr(args, "keep_service", None) or ()) & {"pty-sessions", "browser"})
+    problems = [f"--keep-service {name}: it has its own keep/stop choice" for name in own]
+    if not named:
+        return problems
+    with tempfile.TemporaryDirectory() as home:
+        env = {**os.environ, "MEIVA_HOME": home, "MEIVA_CONFIG_FETCH": "skip"}
+        run, here = [sys.executable, "-m", "services.supervision.roster"], REPO_CODE
+        done = subprocess.run(run, cwd=here, env=env, capture_output=True, text=True, check=False)
+    known = set(done.stdout.split()) if done.returncode == 0 else set[str]()
+    unknown = sorted(named - known)
+    return problems + ([f"unknown service(s): {', '.join(unknown)}"] if unknown else [])
+
+
+# meiva:note
+# One choice is a set of flags of which exactly one is given, so every missing choice is named at
+# once, before any host is touched. A required mutually exclusive group would name only the first.
 _PAIRS: dict[str, tuple[str, ...]] = {
     "execution": ("--dry-run", "--execute"),
     "selection": ("--all-services", "--only-service", "--disable-service"),
@@ -661,8 +658,7 @@ _PAIRS: dict[str, tuple[str, ...]] = {
     "red": ("--allow-red-schedules", "--refuse-red-schedules"),
 }
 # meiva:note
-# Every half names the start selection and its deadline: `up` starts the hosts with them, and a
-# `down` whose stop fails brings back the hosts it took down with the same explicit start.
+# Every half names the start selection and deadline: `up` and a failed `down`'s recovery use them.
 _HALF_PAIRS: dict[str, list[str]] = {
     "both": ["execution", "selection"],
     "down": ["shell", "browser", "extras", "infra", "kept", "python", "red"],
@@ -679,18 +675,14 @@ _HALF_VALUES: dict[str, tuple[tuple[str, Callable[[str], object]], ...]] = {
     "up": (("--smoke-timeout", int), ("--roster-timeout", int)),
 }
 _NAMED = {"--only-service", "--disable-service", "--keep-service"}
-
-
-def _scopes(half: str) -> tuple[str, ...]:
-    return ("both", *(("down",) if half != "up" else ()), *(("up",) if half != "down" else ()))
+_SCOPES = {"run": ("both", "down", "up"), "down": ("both", "down"), "up": ("both", "up")}
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m cli.fleet_update",
         description="Update a networked source-mode cluster over SSH. Every choice is an explicit "
-        "flag: nothing defaults, nothing is inferred, and the stop/start choices are forwarded "
-        "unchanged to each host's `meiva stop` / `meiva start`.",
+        "flag, forwarded unchanged to each host's `meiva stop` / `meiva start`.",
     )
     halves = parser.add_subparsers(dest="half", required=True)
     for half, help_text in (
@@ -705,7 +697,7 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--log-dir", type=Path, required=True)
         if half != "up":
             p.add_argument("--new", required=True, help="commit to switch every host to")
-        for scope in _scopes(half):
+        for scope in _SCOPES[half]:
             for dest in _HALF_PAIRS[scope]:
                 for flag in _PAIRS[dest]:
                     if flag in _NAMED:
@@ -721,9 +713,17 @@ def _value(args: argparse.Namespace, flag: str) -> Any:
     return getattr(args, flag[2:].replace("-", "_"))
 
 
+def _value_problems(args: argparse.Namespace, scope: str) -> list[str]:
+    problems: list[str] = []
+    for flag, kind in _HALF_VALUES[scope]:
+        if (value := _value(args, flag)) is None or (kind in (int, float) and value <= 0):
+            problems.append(flag if value is None else f"{flag} {value}: not a number > 0")
+    return problems
+
+
 def _missing_choices(args: argparse.Namespace) -> list[str]:
     problems = [] if bool(args.runner) != args.no_runners else ["--runner ALIAS... | --no-runners"]
-    for scope in _scopes(args.half):
+    for scope in _SCOPES[args.half]:
         for dest in _HALF_PAIRS[scope]:
             given = [f for f in _PAIRS[dest] if f in _NAMED and _value(args, f)]
             given += getattr(args, dest, None) or []
@@ -731,10 +731,10 @@ def _missing_choices(args: argparse.Namespace) -> list[str]:
                 problems.append("exactly one of " + " | ".join(_PAIRS[dest]))
             else:
                 setattr(args, dest, given[0])
-        problems += [flag for flag, _kind in _HALF_VALUES[scope] if _value(args, flag) is None]
+        problems += _value_problems(args, scope)
     if args.half != "up" and args.mode not in (None, "smooth", "force"):
         problems.append("--mode smooth|force")
-    return problems
+    return problems + _service_problems(args)
 
 
 def _flags(args: argparse.Namespace, chosen: str) -> list[str]:

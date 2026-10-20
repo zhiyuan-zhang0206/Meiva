@@ -27,7 +27,7 @@ import pytest
 from base.host.system import autostart, cron
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, fake_host
 
 
 def _local_meiva(*, host: Host) -> str:
@@ -74,20 +74,18 @@ def test_plist_selects_every_service_by_name_sorted() -> None:
     ]
 
 
-def test_an_empty_selection_removes_the_boot_job_instead_of_registering_one(
+def test_an_empty_selection_is_refused_and_leaves_the_boot_job_in_place(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     plist = tmp_path / "Library" / "LaunchAgents" / "com.meiva.autostart.plist"
     plist.parent.mkdir(parents=True)
-    plist.write_text("stale")
+    plist.write_text("registered")
     commands = FakeCommands()
-    commands.on(("launchctl", "bootout"), Reply())
-    # meiva:note
-    # no longer loaded
-    commands.on(("launchctl", "print"), Reply(returncode=113))
     host = fake_host(commands, platform=DARWIN_ARM64)
-    autostart.register_autostart(services=frozenset(), enabled_reader=lambda: True, host=host)
-    assert not plist.exists()
+    with pytest.raises(ValueError, match="starts no service"):
+        autostart.register_autostart(services=frozenset(), enabled_reader=lambda: True, host=host)
+    assert plist.read_text() == "registered"
+    assert commands.argvs == []
 
 
 def test_plist_embeds_a_path_env(monkeypatch: pytest.MonkeyPatch) -> None:

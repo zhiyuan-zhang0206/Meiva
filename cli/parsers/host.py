@@ -109,7 +109,7 @@ def stop_problems(args: argparse.Namespace, roles: frozenset[str] | None) -> lis
     return problems
 
 
-def _h_stop(
+def h_stop(
     args: argparse.Namespace,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -149,6 +149,7 @@ _RESTART_TREE_CHOICES = (
 _RESTART_COMMON_CHOICES = (
     ("mode", "--mode smooth|force"),
     ("timeout", "--timeout SECONDS"),
+    ("start_timeout", "--start-timeout SECONDS"),
 )
 _RESTART_TREE_FORMS = "--all-services | --only-service NAME ... | --disable-service NAME ..."
 
@@ -172,7 +173,7 @@ def restart_problems(args: argparse.Namespace) -> list[str]:
     return problems + missing_choices(args, _RESTART_TREE_CHOICES)
 
 
-def _h_restart(
+def h_restart(
     args: argparse.Namespace,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -185,6 +186,7 @@ def _h_restart(
         return cmd_restart_agent_host(
             force=args.mode == "force",
             timeout=args.timeout,
+            start_timeout=args.start_timeout,
             database_factory=args.database_factory,
             command=args.runtime,
         )
@@ -201,6 +203,7 @@ def _h_restart(
         restart_extras=not args.keep_extras,
         force=args.mode == "force",
         timeout=args.timeout,
+        start_timeout=args.start_timeout,
         retained_children=retained_children,
         database_factory=args.database_factory,
         producer=args.producer,
@@ -227,7 +230,12 @@ def _h_converge(args: argparse.Namespace) -> int:
     from cli.commands.lifecycle.converge_host import cmd_converge
 
     return cmd_converge(
-        database_factory=args.database_factory, producer=args.producer, command=args.runtime
+        only_services=tuple(args.only_service or ()),
+        disabled_services=tuple(args.disable_service or ()),
+        all_services=args.all_services,
+        database_factory=args.database_factory,
+        producer=args.producer,
+        command=args.runtime,
     )
 
 
@@ -474,9 +482,9 @@ def add_stop_parser(
         stop_p, timeout_help="required: total drain/stop deadline in seconds; failure never forces"
     )
     stop_p.set_defaults(
-        func=_h_stop
+        func=h_stop
         if retained_children is None
-        else partial(_h_stop, retained_children=retained_children)
+        else partial(h_stop, retained_children=retained_children)
     )
 
 
@@ -489,8 +497,9 @@ def add_restart_parser(
         "restart",
         help="[host] stop then start, without a confirmation prompt; the data plane always "
         "stays up. Name the scope: `--only agent-host` (root brings agent-host back; only "
-        "--mode and --timeout apply) or a service selection (--all-services, --only-service, "
-        "--disable-service) that the start leg launches, with every keep-or-restart choice.",
+        "--mode, --timeout and --start-timeout apply) or a service selection (--all-services, "
+        "--only-service, --disable-service) that the start leg launches, with every "
+        "keep-or-restart choice.",
     )
     restart_p.add_argument(
         "--only",
@@ -524,10 +533,16 @@ def add_restart_parser(
         ),
     )
     _add_mode_and_timeout(restart_p, timeout_help="required: the stop leg's deadline in seconds")
+    restart_p.add_argument(
+        "--start-timeout",
+        type=_positive_seconds,
+        default=None,
+        help="required: how long the start leg waits for the restarted services' readiness",
+    )
     restart_p.set_defaults(
-        func=_h_restart
+        func=h_restart
         if retained_children is None
-        else partial(_h_restart, retained_children=retained_children)
+        else partial(h_restart, retained_children=retained_children)
     )
 
 
@@ -550,8 +565,10 @@ def add_converge_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     converge_p = sub.add_parser(
         "converge",
         help="[host] re-apply idempotent host wiring (symlink/PATH/dirs/plugin images/memory pool); "
-        "normally run automatically by meiva start",
+        "normally run automatically by meiva start. The service selection names the services "
+        "whose wiring (and boot job) it converges, exactly as `meiva start` takes it",
     )
+    add_service_selection(converge_p)
     converge_p.set_defaults(func=_h_converge)
 
 
@@ -579,18 +596,20 @@ def _h_lgtm(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
-    from cli.commands.lifecycle.lgtm_toggle import cmd_lgtm_off, cmd_lgtm_on
+    from cli.commands.lifecycle.lgtm_toggle import cmd_lgtm_off, cmd_lgtm_on, selection_problem
     from cli.commands.observability.lgtm import cmd_lgtm_status
 
-    if args.lgtm_cmd == "on":
-        return cmd_lgtm_on(
-            retained_children=retained_children,
-            database_factory=args.database_factory,
-            producer=args.producer,
-            command=args.runtime,
-        )
-    if args.lgtm_cmd == "off":
-        return cmd_lgtm_off(
+    if args.lgtm_cmd in ("on", "off"):
+        only = tuple(args.only_service or ())
+        disabled = tuple(args.disable_service or ())
+        enabled = args.lgtm_cmd == "on"
+        problem = selection_problem(enabled=enabled, only_services=only, disabled_services=disabled)
+        if problem is not None:
+            return refuse_usage(f"lgtm {args.lgtm_cmd}", [problem])
+        return (cmd_lgtm_on if enabled else cmd_lgtm_off)(
+            only_services=only,
+            disabled_services=disabled,
+            all_services=args.all_services,
             retained_children=retained_children,
             database_factory=args.database_factory,
             producer=args.producer,
@@ -621,11 +640,21 @@ def add_lgtm_parser(
     )
     lgtm_sub = lgtm_p.add_subparsers(dest="lgtm_cmd", required=True)
     for name, help_text in (
-        ("on", "designate this host as the LGTM host + bring the stack up (idempotent)"),
-        ("off", "take the stack down + stop being the LGTM host (volumes persist)"),
+        (
+            "on",
+            "designate this host as the LGTM host and start the named service selection, "
+            "which must include the LGTM backends (idempotent)",
+        ),
+        (
+            "off",
+            "stop being the LGTM host and start the named service selection without the "
+            "backends (volumes persist)",
+        ),
         ("status", "marker + containers + readiness probes"),
     ):
         p = lgtm_sub.add_parser(name, help=help_text)
+        if name != "status":
+            add_service_selection(p)
         p.set_defaults(
             func=_h_lgtm
             if retained_children is None or name == "status"

@@ -36,7 +36,7 @@ missing grant in the middle of a task.
   while anything is missing; `meiva permissions onboard` raises the dialogs a
   person can still answer and then re-probes; `meiva permissions defer` records
   "later"; `meiva permissions restart-helper` prints how to recreate the helper
-  under custody (`meiva stop`, then `meiva start`) so a fresh Screen Recording
+  under custody (stop this unit, then start it again; see `meiva stop --help` and `meiva start --help`) so a fresh Screen Recording
   grant is re-read -- it runs no process control of its own. The console renders the same rows at
   Control -> Permissions (`GET /api/host/permissions`) and keeps a banner up
   while `state` is restricted.
@@ -147,7 +147,7 @@ is answered, no matter how many AX-gated or capture operations run, and every la
 attempt -- `meiva permissions status`, a converge, a failed click -- reads the system
 state and reports the missing grant instead of asking again. Two conditions still show
 a dialog: the grant has never been answered and a *new* helper has been started since
-(`meiva stop`, then `meiva start` re-arms the one ask), or the operator asked for it
+(stopping and starting this unit again re-arms the one ask), or the operator asked for it
 explicitly from the console's Ask button / `meiva permissions onboard`, which spends the
 same single ask. A dismissed dialog is not re-raised by the process that raised it.
 

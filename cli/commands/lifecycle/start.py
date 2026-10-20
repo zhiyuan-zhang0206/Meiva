@@ -509,7 +509,7 @@ def _assert_archive_after_readiness(
     )
 
 
-def readiness_verdict(launch: Any, wait: Any) -> int | None:
+def readiness_verdict(launch: Any, wait: Any, *, ready_timeout: float) -> int | None:
     """Report all failures, but gate serving only on selected core services."""
     import cli.commands.probe as _probe_commands
 
@@ -520,7 +520,7 @@ def readiness_verdict(launch: Any, wait: Any) -> int | None:
             file=sys.stderr,
         )
     if wait.unready:
-        _probe_commands.print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
+        _probe_commands.print_unready_services(wait, ready_timeout)
     if wait.non_critical_unready:
         _probe_commands.print_non_critical_unready_services(wait.non_critical_unready)
         _probe_commands.report_non_critical_unready_services(wait.non_critical_unready)
@@ -538,6 +538,7 @@ def cmd_start_body(
     only_services: tuple[str, ...],
     all_services: bool,
     reconcile: bool,
+    ready_timeout: float,
     runtime: StartRuntime | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
@@ -628,7 +629,7 @@ def cmd_start_body(
     with start_trace.phase("readiness wait"):
         wait = root_readiness.wait_for_service_tree(
             tuple(started),
-            timeout_s=SERVICE_READY_TIMEOUT_S,
+            timeout_s=ready_timeout,
             timers=command.timers,
         )
 
@@ -637,7 +638,7 @@ def cmd_start_body(
     )
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
-    rc = readiness_verdict(launch, wait)
+    rc = readiness_verdict(launch, wait, ready_timeout=ready_timeout)
     if rc is not None:
         return rc
 
@@ -687,6 +688,7 @@ def cmd_start(
             only_services=only_services,
             all_services=all_services,
             reconcile=True,
+            ready_timeout=SERVICE_READY_TIMEOUT_S,
             runtime=runtime,
             retained_children=retained_children,
             producer=producer,

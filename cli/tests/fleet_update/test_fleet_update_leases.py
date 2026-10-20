@@ -178,7 +178,9 @@ def test_up_never_reads_the_lease_table(
 
 def test_the_gateway_runs_the_shipped_program_source() -> None:
     owner = Path(fleet_update.__file__).parent / "commands" / "management" / "fleet_leases.py"
-    assert owner.read_text(encoding="utf-8") == fleet_update.leases_program()
+    assert owner.read_text(encoding="utf-8") == fleet_update.program_text(
+        fleet_update.VERIFY_SCRIPTS / "fleet_leases.py"
+    )
 
 
 class _Cursor:

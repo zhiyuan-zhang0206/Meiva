@@ -108,6 +108,7 @@ def test_declined_restart_reports_its_own_exit_code(
             restart_extras=False,
             force=False,
             timeout=30.0,
+            start_timeout=30.0,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -163,6 +164,7 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
         restart_extras=False,
         force=False,
         timeout=30.0,
+        start_timeout=30.0,
         retained_children=[],
         database_factory=operator_database,
         producer=operator_pipeline,
@@ -373,6 +375,7 @@ async def test_a_drain_failure_in_restart_leaves_the_host_wakeable(
         restart_extras=False,
         force=False,
         timeout=30.0,
+        start_timeout=30.0,
         retained_children=[],
         database_factory=lambda: database,  # pyright: ignore[reportArgumentType] — a fake factory; the start leg is stubbed
         producer=operator_pipeline,

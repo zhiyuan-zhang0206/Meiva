@@ -19,47 +19,44 @@ from cli.database.runtime import CommandRuntime
 from services.supervision.healthchecks.lgtm import lgtm_host_marker
 
 
+def selection_problem(
+    *, enabled: bool, only_services: tuple[str, ...], disabled_services: tuple[str, ...]
+) -> str | None:
+    backends = set(BACKENDS)
+    if enabled and backends & set(disabled_services):
+        return "`lgtm on` cannot --disable-service an LGTM backend"
+    if enabled and only_services and not backends <= set(only_services):
+        return "`lgtm on` with --only-service must name every LGTM backend: " + ", ".join(
+            sorted(BACKENDS)
+        )
+    if not enabled and backends & set(only_services):
+        return "`lgtm off` cannot --only-service an LGTM backend"
+    return None
+
+
 def _reconcile(
     *,
     enabled: bool,
+    only_services: tuple[str, ...],
+    disabled_services: tuple[str, ...],
+    all_services: bool,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
     # meiva:note
-    # Change only the backends; every other launched service is named as it runs.
-    #
-    # The selection is the set the last start launched (the root's manifest) with
-    # the backends added or removed, passed to start as an explicit `only` list.
-    from base.paths import meiva_home, root_manifests_path
-    from services.supervision.meiva_root_glue.manifests import launched_services
-
-    launched = launched_services(root_manifests_path(meiva_home()))
-    if launched is None:
-        raise RuntimeError(
-            "no start has launched this unit yet; run `meiva start` with an explicit "
-            "service selection first"
-        )
-    names = set(launched) | set(BACKENDS) if enabled else set(launched) - set(BACKENDS)
-    if not names:
-        # meiva:note
-        # Turning off a tree of only LGTM leaves an explicit empty desired tree.
-        from services.supervision.roster import build_services
-
-        return start.cmd_start(
-            only_services=(),
-            disabled_services=tuple(s.session for s in build_services()),
-            all_services=False,
-            retained_children=retained_children,
-            database_factory=database_factory,
-            producer=producer,
-            command=command,
-        )
+    # The operator names the start selection on the command line; nothing is derived from an
+    # earlier start. The toggle refuses only a selection that contradicts it (backends disabled
+    # while turning LGTM on, or named while turning it off).
+    if problem := selection_problem(
+        enabled=enabled, only_services=only_services, disabled_services=disabled_services
+    ):
+        raise ValueError(problem)
     return start.cmd_start(
-        only_services=tuple(sorted(names)),
-        disabled_services=(),
-        all_services=False,
+        only_services=only_services,
+        disabled_services=disabled_services,
+        all_services=all_services,
         retained_children=retained_children,
         database_factory=database_factory,
         producer=producer,
@@ -69,19 +66,30 @@ def _reconcile(
 
 def cmd_lgtm_on(
     *,
+    only_services: tuple[str, ...],
+    disabled_services: tuple[str, ...],
+    all_services: bool,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
-    """Declare this home an observability station and reconcile normal start."""
+    # meiva:note
+    # Declare this home an observability station and start the named selection.
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
+    if problem := selection_problem(
+        enabled=True, only_services=only_services, disabled_services=disabled_services
+    ):
+        raise ValueError(problem)
     marker = lgtm_host_marker()
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch(exist_ok=True)
     return _reconcile(
         enabled=True,
+        only_services=only_services,
+        disabled_services=disabled_services,
+        all_services=all_services,
         retained_children=retained_children,
         database_factory=database_factory,
         producer=producer,
@@ -91,17 +99,28 @@ def cmd_lgtm_on(
 
 def cmd_lgtm_off(
     *,
+    only_services: tuple[str, ...],
+    disabled_services: tuple[str, ...],
+    all_services: bool,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
-    """Disable the backend units, preserving observation data and other services."""
+    # meiva:note
+    # Retract the station marker and start the named selection, preserving observation data.
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
+    if problem := selection_problem(
+        enabled=False, only_services=only_services, disabled_services=disabled_services
+    ):
+        raise ValueError(problem)
     lgtm_host_marker().unlink(missing_ok=True)
     return _reconcile(
         enabled=False,
+        only_services=only_services,
+        disabled_services=disabled_services,
+        all_services=all_services,
         retained_children=retained_children,
         database_factory=database_factory,
         producer=producer,

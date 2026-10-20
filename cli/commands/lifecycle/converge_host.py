@@ -535,7 +535,7 @@ def converge_host(
     *,
     meiva_home: Path | None = None,
     steps: tuple[ConvergeStep, ...] = CONVERGE_STEPS,
-    services: frozenset[str] | None = None,
+    services: frozenset[str],
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
@@ -549,11 +549,6 @@ def converge_host(
     both the gateway and agent-runner steps.
     """
     resolved_home = meiva_home if meiva_home is not None else resolve_meiva_home()
-    selected = (
-        _desired_service_names(roles, machine=command.machine, host=command.host)
-        if services is None
-        else services
-    )
     ctx = ConvergeCtx(
         repo=repo,
         meiva_home=resolved_home,
@@ -561,7 +556,7 @@ def converge_host(
         config=command.config,
         machine=command.machine,
         database_factory=database_factory,
-        services=selected,
+        services=services,
         producer=producer,
         helper=command.helper,
         timers=command.timers,
@@ -624,28 +619,43 @@ def _skip_reason(ctx: ConvergeCtx, step: ConvergeStep, *, is_prod_install: bool)
     return None
 
 
-def _desired_service_names(
-    roles: MachineRoles | None, *, machine: MachineIdentity, host: Host
+def selected_service_names(
+    roles: MachineRoles | None,
+    *,
+    only_services: tuple[str, ...],
+    disabled_services: tuple[str, ...],
+    all_services: bool,
+    machine: MachineIdentity,
+    host: Host,
 ) -> frozenset[str]:
-    from base.paths import meiva_home, root_manifests_path
-    from services.supervision.meiva_root_glue.manifests import launched_services
+    # meiva:note
+    # The services an explicit selection names on this host, resolved like `meiva start`'s
+    # roster: capability-gated services never count, and nothing is read from an earlier start.
+    from base.deploy.lifecycle.service_selection import resolve_selection
+    from services.supervision.roster import build_services
     from services.supervision.roster.spec import services_for_capabilities_annotated
 
-    if roles is None:
-        return frozenset()
-    # meiva:note
-    # Standalone converge serves the services the last start launched; before any
-    # launch nothing is selected, so per-service steps stay idle.
-    launched = launched_services(root_manifests_path(meiva_home())) or frozenset()
+    specs = (
+        tuple((spec, None) for spec in build_services())
+        if roles is None
+        else services_for_capabilities_annotated(roles, machine=machine, host=host)
+    )
+    skipped = resolve_selection(
+        {spec.session for spec, _gate in specs},
+        only=only_services,
+        excluded=disabled_services,
+        all_services=all_services,
+    )
     return frozenset(
-        spec.session
-        for spec, gate in services_for_capabilities_annotated(roles, machine=machine, host=host)
-        if gate is None and spec.session in launched
+        spec.session for spec, gate in specs if gate is None and spec.session not in skipped
     )
 
 
 def cmd_converge(
     *,
+    only_services: tuple[str, ...],
+    disabled_services: tuple[str, ...],
+    all_services: bool,
     operation: PauseOwnerSnapshot | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
@@ -664,8 +674,21 @@ def cmd_converge(
         f"[meiva converge] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}"
     )
 
+    services = selected_service_names(
+        roles,
+        only_services=only_services,
+        disabled_services=disabled_services,
+        all_services=all_services,
+        machine=command.machine,
+        host=command.host,
+    )
     converge_host(
-        repo, roles, database_factory=database_factory, producer=producer, command=command
+        repo,
+        roles,
+        services=services,
+        database_factory=database_factory,
+        producer=producer,
+        command=command,
     )
     # After the steps, not inside them: standalone converge runs against a
     # cluster that is already up, which is the precondition this needs and which
