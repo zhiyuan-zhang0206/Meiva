@@ -62,10 +62,26 @@ reading every unit's file. So the requester records that fact itself, as an
   hangs, is refused, or outlives its caller still names the caller;
 - `caller` carries the same block the wire carries — one fact, two readers;
 - `source` is `agent:<N>` when `MEIVA_AGENT_ID` is set and `user` otherwise. A
-  boot job's retried start is not an operator request and records nothing.
+  boot job's retried start is not an operator request and records nothing;
+- `head_sha` is the prod source's commit at the moment of the request — the
+  version the operator was looking at, so a stop and the start that ends it can
+  be compared without a checkout scan.
+
+## The result event
+
+A request alone cannot tell "stopped and came back on new code" from "stopped and
+never came back": both are a request followed by silence. The command therefore
+records a second row when it exits, `lifecycle_result`
+(`base/events/declarations/root.py`): the verb and units of its last request,
+`outcome` (`ok`/`failed`), how many `seconds` it held, the same `head_sha`, and
+the same caller. A missing result next to a request is now the signature of a
+command that died mid-flight, and a stop followed by a start whose `head_sha`
+equals it is a same-code restart — the two facts the 2026-10-14 outage could not
+be answered from once its logs had rotated (task #5464).
 
 `cli/database/lifecycle_audit.py` owns the writer; the operator command
-that holds the database scopes it with `lifecycle_audit(...)`. Recording goes
+that holds the database scopes it with `operator_lifecycle_audit(...)`, which
+also yields the `CommandAudit` the body calls `exited(code)` on. Recording goes
 through `record_audit_reported`, not a standalone write: `audit_events` is the
 system of record and the unified stream its projection, and a database that is
 already down is exactly the state `meiva start` repairs — the record must never

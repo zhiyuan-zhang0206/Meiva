@@ -337,6 +337,16 @@ class LifecycleRequest(TypedDict):
     units: list[str]
     operation_id: str | None
     caller: dict[str, object]
+    head_sha: str | None
+
+
+class LifecycleResult(TypedDict):
+    verb: str
+    units: list[str]
+    outcome: str
+    seconds: float
+    operation_id: str | None
+    head_sha: str | None
 
 
 EVENTS: dict[str, EventSpec] = {
@@ -595,6 +605,16 @@ EVENTS: dict[str, EventSpec] = {
         "when it succeeds, so an operator stop or start is attributable after the fact",
         payload=LifecycleRequest,
         site="cli/database/lifecycle_audit.py:_record record_audit_reported",
+    ),
+    "lifecycle_result": audit_event(
+        "lifecycle_result",
+        "the operator command that asked meiva-root to change unit state finished — the verb, "
+        "the units, its outcome and how long it held — recorded after the last "
+        "request settled, so a stop that nothing restarted is bracketed by facts (a request "
+        "with no clean result, or a result whose head_sha equals the next start's) instead of "
+        "being inferred from log absence (task #5464)",
+        payload=LifecycleResult,
+        site="cli/database/lifecycle_audit.py:_record_result record_audit_reported",
     ),
     "throwaway_pg_reap": telemetry_event(
         "throwaway_pg_reap",
