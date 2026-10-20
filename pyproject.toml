@@ -747,11 +747,6 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "base/deploy/maintenance/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "base/deploy/release/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -1118,11 +1113,6 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meizel/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/agent_pause/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

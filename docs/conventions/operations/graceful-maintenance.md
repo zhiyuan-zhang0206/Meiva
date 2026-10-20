@@ -8,15 +8,15 @@ start the gateway and verify its dependencies before starting runners.
 
 ## Choose the resource scope
 
-| Command | Native agent execution | Persistent shells and schedules | Local infrastructure and extras |
+| Command | Running agent turns | Persistent shells and schedules | Local infrastructure and extras |
 | --- | --- | --- | --- |
-| `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300` | Same normal drain | Close shell sessions with bounded known-group signals; report known job leftovers | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
-| the same with `--keep-infra` instead of `--stop-infra` | Same normal drain | Close | Keep the private data plane |
-| the same with `--keep-infra --keep-service gateway` | Same normal drain | Close | Also retain the named service; dependent services require `--keep-infra` |
-| `meiva stop --yes --keep-shell-sessions --keep-browser --keep-extras --keep-no-services --keep-infra --mode smooth --timeout 300` | Same normal drain | Retained | Stop only the roster services; keep everything else |
-| `meiva restart --all-services --keep-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300` | Same normal drain, then the start leg | Retained (`--close-shell-sessions` closes them) | Replace the native services; keep PostgreSQL, Redis, PgBouncer (always), browser, Gate, helper and native LGTM |
-| `meiva restart --only agent-host --mode smooth --timeout 300` | Same normal drain of agent-host alone | Untouched | Only agent-host is stopped; root relaunches it |
-| `meiva start --all-services` | Restore normal admission after readiness | Reuse retained sessions; closed sessions are not serialized | Bring up the named services from the existing home |
+| `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300` | Settled by the agent host's own exit | Close shell sessions with bounded known-group signals; report known job leftovers | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
+| the same with `--keep-infra` instead of `--stop-infra` | Same | Close | Keep the private data plane |
+| the same with `--keep-infra --keep-service gateway` | Same | Close | Also retain the named service; dependent services require `--keep-infra` |
+| `meiva stop --yes --keep-shell-sessions --keep-browser --keep-extras --keep-no-services --keep-infra --mode smooth --timeout 300` | Same | Retained | Stop only the roster services; keep everything else |
+| `meiva restart --all-services --keep-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300` | Same, then the start leg | Retained (`--close-shell-sessions` closes them) | Replace the native services; keep PostgreSQL, Redis, PgBouncer (always), browser, Gate, helper and native LGTM |
+| `meiva restart --only agent-host --mode smooth --timeout 300` | The agent host's exit, alone | Untouched | Only agent-host is stopped; root relaunches it |
+| `meiva start --all-services` | Wake every agent holding a continuation note once the host is ready | Reuse retained sessions; closed sessions are not serialized | Bring up the named services from the existing home |
 
 Every `stop` choice is an explicit argument; a missing one exits 2 and lists every
 missing argument at once. A host without gateway capability (a pure runner) takes no
@@ -34,19 +34,20 @@ leg. A deadline is a failed stop, not permission to kill surviving services. She
 shutdown that has not finished by the end of its share of the budget (a hung
 archive command) is ended by an immediate shutdown and the leftover descendants
 are SIGKILLed, loudly and without failing the stop
-([decision](../../decisions/data/database/2026-10-02-pg-stop-escalates-to-immediate.md)); for terminals, `stop` hangs up each shell's
+([decision](../../decisions/data/database/2026-10-02-pg-stop-escalates-to-immediate.md)); for shell sessions, `stop` hangs up each shell's
 known shell and signals known shell/foreground groups, escalating after a
 grace of at most 10 seconds. Shell survival fails closure; known job leftovers
 are diagnostic, and detached/background process disappearance is not certified. A busy
 session still leaves its owner the closure notice, written to the database
-in the `terminals` phase, before the data plane stops
+while the shell sessions are closed, before the data plane stops
 ([decision](../../decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md),
 [notice write](../../decisions/agents/messages/2026-10-02-close-notices-written-at-terminals.md)). `--mode force`
-explicitly selects force behavior when normal exit cannot complete. Force stops
-the selected service processes without fabricating a restart receipt. Later
-start uses agent-host crash recovery from persisted checkpoints.
-Force does not provide normal stop's seamless continuation or a checkpoint
-for interrupted arbitrary code; use normal stop for the planned data-plane move.
+explicitly selects force behavior when a normal stop cannot complete. Force stops
+the selected service processes without letting the agent host write the restarts
+a smooth stop leaves behind: a turn it interrupts is not resumed, and the next
+host recovers only from persisted checkpoints. Force does not provide a smooth
+stop's continuation or a checkpoint for interrupted arbitrary code; use a smooth
+stop for the planned data-plane move.
 
 A stop retains agent IDs, history, checkpoints, pending messages, workspaces,
 browser profiles and observability data. It does not terminate agent identities
@@ -58,25 +59,28 @@ Externally launched tools are not owned by one local home.
 Impersonation is a separate agent identity protocol. These commands do not
 request, acquire, renew or release external-agent control leases. Also,
 `meiva cluster pause NAME` is machine membership administration, not this
-local maintenance operation; it stops nothing on this home.
+local stop; it stops nothing on this home.
 
-## What normal drain waits for
+## What a smooth stop does
 
-The local maintenance journal is also the gateway's HTTP admission authority.
-Draining or locally drained units keep dependency APIs available to other hosts.
-The stop window (`stopping`, `stopped`) closes business
-requests until the same journal is atomically resumed. Completion has no posture
-cache expiry delay. Health and control-plane routes remain available even if the
-journal requires repair; an unreadable journal keeps business admission closed.
+A stop keeps no state of its own between commands: there is no pause to release and
+no phase to resume. It clears the home's serving gate first, then stops the services
+in root's declared order, one at a time, each only after the one before it has exited.
 
-The command holds new native admission, enqueues an ordinary `restart`, and
-lets native claim consume it. The graph returns normally, its checkpoint is
-flushed, and its original continuation and resources finish. A restart
-arriving just after claim can allow another iteration before the next claim;
-this is not an instruction-level freeze. SDK dependencies stay available
-through this drain. Service stopping then closes new ops work and waits for
-already-admitted handlers and executor work before signalling services. A
-signalled gateway drains its in-flight connections under a finite budget
+**The agent host goes first and settles the turns.** On SIGTERM it refuses new turns,
+writes one `restart` per running turn, lets each turn reach it (a model call or code
+run in flight is interrupted after the restart has waited its 10-second grace), and
+exits; the same transaction that applies a restart queues the note that continues an
+unfinished turn. Idle agents get nothing. A turn still running when the host's
+budget (30 seconds) is spent is named at ERROR, cancelled, and not resumed: the step
+it was in is lost, as after a crash. The next `meiva start` takes every restart and
+continuation note the stop left, through the host's pending scan. How the exit is
+built: [agent-host graceful exit](../../../services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md).
+
+**The other services follow.** The ops server stops taking connections on SIGTERM and
+lets the requests it already admitted, and the executor work they started, finish
+within 15 seconds before it cancels what is left and exits. A signalled gateway drains
+its in-flight connections under a finite budget
 (`gateway.gateway_graceful_shutdown_timeout_seconds`, default 30s — well inside
 this command's default 300s deadline); past the budget uvicorn cancels the
 remaining request and stream tasks and the lifespan cleanup runs, so an
@@ -84,43 +88,32 @@ unfinished streaming response cannot hold the process open. The SSE streams do
 not spend that budget: the gateway's server marks its shutdown as it begins and
 each stream ends itself within one poll tick, so its client reconnects at once.
 meiva-root waits for the gateway's stop longer than that budget plus the lifespan
-cleanup (`ServiceSpec.stop_ceiling_s`, derived from the same setting), so a
-gateway still draining is never reported as a failed stop. No remote
+cleanup (`ServiceSpec.stop_ceiling_s`, derived from the same setting), and for the
+ops server's stop longer than its drain (`OPS_STOP_CEILING_S`), so a service still
+draining is never reported as a failed stop. No remote
 dispatch holds that cleanup: the TTL reaper runs as its own service, whose stop
 cancels its in-flight dispatches, and rows left expired are re-selected by its
 next start.
 
-The existing home-local journal survives a CLI crash, host reboot and an
-offline database. An incomplete drain or stop retains the hold and reports
-failure. A drain that hits its deadline reports every unfinished agent — its
-restart command's delivery state, the row's owner, the
-agent's last activity and the live host's view. A rollout's own pause no longer defers the held
-continuation it requires, so the ordinary update drain consumes and certifies.
-For ordinary local maintenance, retry the command or run `meiva start` to restore
-services and release the hold after readiness succeeds. A failed start keeps
-admission closed.
-A recorded checkpoint/continuation failure keeps the hold and fails every
-other gate (the drain, the phase transitions, a bare resume); `meiva start` is its
-exit, and settles it as described under "Holds and their exits". A healthy
-service probe cannot prove that a failed checkpoint became durable: the agent
-continues from its last durable checkpoint, as after a crash.
-`GET /api/health` and ops `status_probe` remain available during this hold, so
-start can measure real readiness before opening business requests or native
-admission. Public health still verifies identity and database access; status
-and resume retain their existing authentication requirements.
-Resume is refused before readiness. Every selected
-service must pass readiness; normal start exposes no readiness waiver.
-Normal commands manage their own operation identity; there is no operation ID
-or timestamp to copy between machines.
+**Nothing fences the stopped home.** A gateway that is still up keeps accepting
+messages while a runner is down; they stay pending in the database and the runner
+works them after it starts. `meiva status` and `GET /api/cluster/status` report the
+host as `paused` with `paused_reason` `startup` from the moment the stop clears the
+serving gate until a start passes readiness. Services kept up with `--keep-service`
+keep working.
 
-Once stop has completed without recorded failures, repeating `meiva stop` can
-read the existing local journal and finish without fetching an offline
-gateway. An incomplete, corrupt or failed journal does not enable this
-exception; the first normal drain needs the actual cluster configuration.
+Persistent terminals and the data plane stop after the services, as the table above
+says. Once the root is no longer running, repeating `meiva stop` needs no cluster
+configuration and finishes without fetching an offline gateway; while the root runs,
+the first stop needs the actual cluster configuration.
+
+An incomplete stop reports its failing phase, the budget each phase spent and the
+surviving process inventory, and exits non-zero without killing anything that
+`--mode force` was not asked to. Retry the command, or run `meiva start`.
 
 Cold native admission consumes the saved checkpoints.
 Idle agents remain idle; pending work can continue; terminated agents remain
-terminated. Successful drain preserves completed tool results. No lifecycle
+terminated. A smooth stop preserves completed tool results. No lifecycle
 command can guarantee exactly-once external effects if a process crashes after
 the external effect but before its result becomes durable.
 
@@ -132,12 +125,17 @@ stops every unit with `meiva stop --yes` and the operator's explicit stop choice
 timeout; the gateway also gets its data-plane choice), and `up` starts them with the
 operator's explicit service selection (the runbook's "Updating a networked cluster
 in source mode"). The fleet never decides what to keep.
+It judges a host's stop by two facts, both required: `meiva stop` exited 0, and the
+host's `run/lifecycle-op.json` then records a stop that is complete with result rc 0.
+It judges a start by `meiva start`'s exit code, which is 0 only after readiness, then
+the roster and smoke checks. A host counts as already stopped (a rerun of `down`)
+only when that journal's last operation is such a stop and no meiva-root is running.
 The separate halves remain available for manual release work and recovery.
-A stored-script upgrade blocked by held business admission uses the
-[script-only maintenance operator entry](../../../schedules/README.md#script-repair-during-maintenance)
-with the existing installed runtime. It preserves the stopped hold and schedule
-activation state; it does not waive schedule verification or change HTTP pause
-exemptions.
+A stored-script upgrade uses the
+[script-only maintenance operator entry](../../../schedules/README.md#script-repair-while-the-agent-host-is-stopped)
+with the existing installed runtime. It refuses while an agent host holds the home's
+instance lock, preserves schedule activation state, and does not waive schedule
+verification.
 A running schedule or PTY can retain old code and DB access outside application
 root, so root exit alone is not a writer barrier: the stop gives persistent
 terminals a bounded completed-work wait, then closes known shells/terminals
@@ -154,7 +152,7 @@ each command's exit status before taking the final snapshots. PostgreSQL uses
 smart shutdown; open clients can prevent completion. Redis uses `SHUTDOWN SAVE`
 and its exact process exit is verified. Stop is not a backup: validate the
 separate database/Redis snapshots and required files before restoring them on
-the destination. Keep every unit's home-local pause journal with that home.
+the destination.
 
 Home-owned native LGTM stops after its producers. Its marker, unit definitions
 and data remain intact for start. Linux user units disable the supervisor's
@@ -166,137 +164,56 @@ admission fence. Unregistered detached jobs and OS watchdog/autostart or daily
 log-maintenance producers outside the service roster need their own scope check for a coordinated machine
 shutdown; do not equate local command success with every remote writer stopping.
 
-Every running daemon must already support the drain protocol. The command
-checks the actual hosted daemon's home, PID, protocol and boot owner. Updating
-source on disk does not update an imported running process. **The first
-deployment is not protected by the new protocol itself**: establish and verify
-the one-time cutover procedure against the actual running version before
-switching it to the new lifecycle.
+A running agent host exits gracefully only if the code it loaded has the graceful
+exit; updating source on disk does not update an imported running process. **The
+first deployment of a change to that exit is not protected by it**: the host being
+replaced still exits the way its loaded code does. Establish and verify the one-time
+cutover procedure against the actual running version before switching to it.
 
-Preparation consumes orphaned ordinary claims on parked agents (marks
-them done; they are never redelivered) and bounded-waits unfinished lifecycle
-commands. Maintenance-authored commands still refuse immediately. See the
-[preparation consumption and wait contract](../../../base/deploy/maintenance/docs/lifecycle-wait.meiva.okf.md)
-for eligibility and retry semantics.
+## If a stop fails or is cut off
 
-## Holds and their exits
+A stop keeps no journal that gates anything. What survives a CLI crash, a dropped SSH
+session or a host reboot is `$MEIVA_HOME/run/lifecycle-op.json`, the status journal:
 
-`meiva stop` and `meiva restart` take the hold and walk it through drain and stop;
-`meiva start` releases it after readiness. No command runs those steps one at a
-time, and no command reads or ends a hold except these: `meiva status` prints the
-hold (phase, operation, acquired-at), `meiva status --json` prints only it as one
-JSON object (`status`, `operation`, `acquired_at`, `maintenance`, `scope`; the
-fleet update's start-of-work refusal reads that; it probes nothing, so it
-answers with everything else down), and `meiva start` ends it. The hold records
-no process identity and says nothing about whether the `meiva stop` that took it
-is still running; see "Is a stop still running?" below.
+- it records the running or last stop/restart: its pid, the phase timeline and whether
+  it finished, with the result (`rc`, the failing stage and the surviving processes of
+  an incomplete stop). A pid that is gone without a completion means the command died
+  where the timeline stops;
+- it is diagnostic and gates nothing. Retry `meiva stop` with the same arguments, or
+  run `meiva start`; neither needs the journal to be cleared. A write to it can fail
+  without failing the stop, and it is not synced to disk, so a machine crash can lose
+  its last write.
 
-A restart that fails before any service stopped (its preflight, preparation or
-drain) releases the hold its own process took, so the idle agents on the
-machine stay wakeable. It does not run `meiva start` and retries nothing; the
-failure is reported and the operator decides. A failure after the services
-began stopping keeps the hold, as `meiva stop` does, until `meiva start` passes
-readiness.
+`meiva stop`, `meiva restart` and `meiva start` all run under one exclusive lock on
+the home (`resource_lock` over `deploy-state.lifecycle.lock`). When another of
+them holds it, `meiva start` waits up to 30 seconds and then fails naming the
+holder's pid and purpose. The lock belongs to the OS and goes away with its process,
+so a killed `meiva stop` never blocks `meiva start`.
 
-`meiva start` over a hold in any phase brings the unit's services up (a unit whose
-services are already running is left as it is), then releases the hold. It does
-not retract restarts already issued (durable per-agent intents): members not yet
-at their boundary still complete that restart, on
-admission.
+A failed stop retains its process inventory. Force remains an explicit
+owned-process escalation, not an inference from a timeout.
 
-A turn that fails while its continuation is still owed to the hold is logged at
-ERROR and raises the `agent_continuation_lost` alert once; it is not latched in
-the journal. The agent's unapplied restart command is ended (settled `done`,
-result `failed`/`continuation_failed`, pointer cleared) and no scan drives it
-again. The agent never drains, so `meiva stop` ends at its drain deadline with the
-stall report, the hold stays, and `meiva start` releases it; the ended restart is
-not carried out, and the alert tells the owner to look at the agent. A restart
-whose effect had already started is left as it is and reported. A failed wake of an agent with no
-continuation left in the hold raises nothing: one outside the captured cohort
-(another machine's: every runner receives every wake), or a drained or parked
-member once the hold reached `drained`.
+An ordinary `meiva start` brings the selected services up, waits for readiness,
+marks the home serving, and the agent host's pending scan wakes every agent that
+holds a continuation note. A successful service probe cannot make an unflushed
+checkpoint durable; that is why a turn the stop cut short continues from its last
+durable checkpoint.
 
-A failed continuation raised, so its final checkpoint may not be durable and the
-interrupted turn may be lost. The agent's restart pointer is durable: it survives
-in Postgres exactly as after a crash, and the agent continues from its last
-durable checkpoint (`meiva stop --mode force` and a host crash give the same guarantee,
-no more). `meiva start` does not settle or inspect the agent.
-
-## Recovering a stuck maintenance operation
-
-A maintenance hold survives a CLI crash, host reboot and offline database. It
-does not expire. There is no pause-controller or OS hold-watchdog recovery job.
-A failed or unreadable ownership observation never permits an independent
-restart or release of admission.
-
-A hold older than `MEIVA_MAINTENANCE_HOLD_ALERT_AFTER_S` (default 1800 seconds,
-counted from its `acquired_at`) raises one `maintenance_hold_overdue` event, and
-the `meiva-ops-maintenance-hold-overdue` Grafana rule alerts on it. The check is
-the `maintenance-hold` diagnostic of the running root, so it needs no CLI process
-to be alive; it only reads the journal and never releases or repairs anything. An
-unreadable journal counts as a hold too (the event reports `state: invalid`, with
-no holder or phase, aged from the file's modification time). The alert is raised
-once per hold, and a root restart re-raises it for a hold still in place. A
-machine that is being deliberately kept stopped also holds past the age, so the
-alert there is an expected operational signal, not a fault. Because a full `meiva
-stop` also stops the root, a hold left in the `stopped` phase of a full stop is
-not observed by this check; it covers holds left while the root is running (a
-stop that keeps a service, a restart that failed or was cut off, a stuck
-drain). The recovery it names is the one below: run `meiva start` on that machine.
-
-First identify what owns the home: `meiva status` names the operation and phase.
-Do not apply the table below over a `cli.fleet_update` half that is still
-running; rerun that half after its failure is fixed instead. A refused
-connection alone does not establish that the owner is absent.
-
-| Phase found | Recovery after confirming there is no competing owner |
-| --- | --- |
-| `preparing`, `draining`, `drained` | `meiva start` abandons the drain and releases the hold; or re-run `meiva stop`. |
-| `stopping` | Re-run `meiva stop` to verify and finish closure, then `meiva start`; or `meiva start` directly. |
-| `stopped` | `meiva start` brings services back, verifies readiness and releases the hold. |
-
-An unreadable journal, or a record with no maintenance hold, has no exact
-generation to match, and no command clears it. After confirming no `meiva stop`
-is in flight for this home (see "Is a stop still running?" below), remove
-`$MEIVA_HOME/run/deploy-pause-owner.json` by hand and run `meiva start`.
-
-### Is a stop still running?
-
-The hold does not say. Ask the lifecycle itself:
-
-- `$MEIVA_HOME/run/lifecycle-op.json` records the running or last stop/restart: its
-  pid, the phase timeline and whether it finished. A pid that is gone without a
-  completion means the command died where the timeline stops.
-- `meiva stop`, `meiva restart` and `meiva start` all run under one exclusive lock on
-  the home (`resource_lock` over `deploy-state.lifecycle.lock`). When another of
-  them holds it, `meiva start` waits up to 30 seconds and then fails naming the
-  holder's pid and purpose. When the lock is free, `meiva start` proceeds and
-  releases the hold as usual, so use it as the probe only when releasing is what
-  you want next.
-
-The lock belongs to the OS and goes away with its process, so a killed
-`meiva stop` never blocks `meiva start`.
-
-A failed stop retains its process inventory and hold. Force remains an explicit
-owned-process escalation, not an inference from a timeout or a way to
-manufacture a drain receipt.
-
-An ordinary `meiva start` completes stopped recovery and resumes after
-full readiness, settling recorded continuation failures as above. A successful
-service probe cannot make an unflushed checkpoint durable; that is why the
-agent continues from the last durable one.
+A stop that fails before any service has stopped (a `restart`'s preflight, for
+example) changes nothing on the host: it keeps serving, and no start is needed. A
+failure after services began stopping leaves the host stopped until `meiva start`.
 
 ## Supervision and recovery ownership
 
-Meiva root supervises the admitted application roster. Deliberate maintenance
-stops remove services from that roster before closing their captured processes;
+Meiva root supervises the admitted application roster. Deliberate stops
+remove services from that roster before closing their captured processes;
 service supervision cannot reinterpret a planned stop as an unexpected crash.
 The ordinary root boot unit owns replacement applications. Data-plane and persistent-terminal
 custody are separate and must be reconciled explicitly.
 
 Host startup settles its machine's `running` rows to `idling`
 (`agent.ownership.hosted.settle_running_rows_at_start`; one host per machine) and
-the next admission takes each agent under the new boot. Releasing a hold does not
+the next admission takes each agent under the new boot. Starting does not
 replay arbitrary external effects.
 
 For a drill that intentionally stops the message plane, keep its progress and
@@ -305,5 +222,5 @@ identities, current phase, intended resource scope and the actor responsible for
 recovery before the stop. A surviving actor may inspect native evidence and
 continue the recorded operation; it must not clear a live owner's locks or
 invent a second rollout. Preserve failed-phase evidence even after successful
-recovery, and verify business admission, selected services and native custody
+recovery, and verify the serving gate, selected services and native custody
 before declaring the operation complete.

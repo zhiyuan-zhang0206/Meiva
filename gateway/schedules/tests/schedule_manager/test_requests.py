@@ -30,11 +30,11 @@ def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
 class _Manager:
     def __init__(self) -> None:
         self.synced: list[int] = []
-        self.held = False
+        self.converges = True
         self.on_sync: dict[int, object] = {}
 
     def sync_one(self, schedule_id: int) -> bool:
-        if self.held:
+        if not self.converges:
             return False
         self.synced.append(schedule_id)
         hook = self.on_sync.get(schedule_id)
@@ -100,17 +100,17 @@ def test_a_newer_request_made_during_the_sync_survives(
     assert _queued(db_conn) == [5]
 
 
-def test_requests_stay_queued_while_a_maintenance_hold_is_up(
+def test_requests_stay_queued_while_a_sync_is_not_converging(
     db_conn: psycopg.Connection, pool: ConnectionPool
 ) -> None:
     manager = _Manager()
-    manager.held = True
+    manager.converges = False
     _queue(db_conn, 1, 2)
 
     assert requests.consume_requests(pool, cast(ScheduleManager, manager)) == 0
     assert _queued(db_conn) == [1, 2]
 
-    manager.held = False
+    manager.converges = True
     assert requests.consume_requests(pool, cast(ScheduleManager, manager)) == 2
     assert _queued(db_conn) == []
 

@@ -20,17 +20,15 @@ evidence, no predecessor proof and no refusal record.
 
 ## Admission
 
-`admit_hosted_runtime()` is the circuit breaker, the maintenance-hold check and one
+`admit_hosted_runtime()` is the circuit breaker and one
 `UPDATE` that claims this machine's `running` or `idling` row. It sets `running`,
 the host boot as `runtime_owner` and `last_admission_at`; the generation survives
 while the same boot admits again and is minted (`gen_random_uuid()`) otherwise, so
 a new boot, or a restart that cleared the identity, starts a new incarnation. The
-only refusals are a terminated agent, a row of another machine, an open breaker and
-a hold on an agent with no unfinished restart/terminate command. A held unit lets
-exactly a row with such a command through (an `EXISTS` inside the admission
-`UPDATE`), whichever boot owns it; an executed restart leaves the row unowned and
-unadmitted: a host that
-crashed during a drain restarts, admits the member again and runs the command.
+only refusals are a terminated agent, a row of another machine and an open breaker.
+An executed restart leaves the row unowned and unadmitted: a host that crashed
+mid-turn restarts, admits the agent again and runs any command still pending. A host
+that is exiting refuses new turns in process (`TurnScheduler.stop_admission`).
 
 The host settles its machine's `running` rows to `idling` once, when it starts
 (`settle_running_rows_at_start`): no turn survives the previous host. The beat
@@ -72,7 +70,7 @@ mid-turn, not idle; see [[agent/graph/docs/turn-interrupts.meiva.okf.md]]), and 
 restart's transaction then inserts one pending `system_note` with
 `note_tag='lifecycle_restart'` and the restart's own source, so a restart is never
 done without the note that wakes the agent through the pending scan. Idle agents,
-terminates and the held-control path (no graph ran) queue none.
+terminates and the lease-control path (no graph ran) queue none.
 
 Force terminate is not a command the host executes. The API writes
 `terminated` itself in one transaction and then asks the home host to cancel the

@@ -25,8 +25,5 @@
 "child_runtime_scenarios.py#assignment os.open" = 2
 
 [debt.unresolved-patch]
-"test_maintenance_failures.py#monkeypatch.setattr graph.ainvoke" = 1
-"test_maintenance_failures.py#monkeypatch.setattr host._run_held_controls" = 2
-"test_maintenance_failures.py#monkeypatch.setattr pool.connection" = 1
 "test_rejected_model_config.py#monkeypatch.setattr host._runtime_for" = 1
 "test_run_turn_task_owner.py#monkeypatch.setattr host._run_turn" = 2

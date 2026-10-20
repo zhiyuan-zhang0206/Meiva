@@ -65,8 +65,8 @@ remain unchanged throughout the update.
    table — a red or an unevaluable check refuses `down` before any stop.
 5. Open the window's Grafana silence on the gateway host.
 6. `meiva stop --yes` with the operator's flags on each runner, then the gateway
-   (which also gets `--keep-infra` or `--stop-infra`). A stop must leave the host
-   paused/stopped; a failure prints the retry step and brings back, with the
+   (which also gets `--keep-infra` or `--stop-infra`). A stop must exit 0 and leave
+   a completed stop in the host's journal; a failure prints the retry step and brings back, with the
    operator's start selection, the hosts this run already stopped
    ([[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]]).
 7. Switch every checkout: check out NEW detached, repair legacy read-only
@@ -78,7 +78,7 @@ remain unchanged throughout the update.
 ## The up half, in order
 
 1. `meiva start` with the operator's service selection on the gateway, then each runner; on macOS through a run-once
-   `gui/<uid>` LaunchAgent, because the helper's launchd job lives in `gui/<uid>`. Each start must release its maintenance hold.
+   `gui/<uid>` LaunchAgent, because the helper's launchd job lives in `gui/<uid>`. Each start must exit 0.
 2. The roster gate: every listed machine online with checkout and running code
    on one commit; unlisted machines are reported and never block.
 3. The gateway smoke-tests each listed agent-runner with a real agent.

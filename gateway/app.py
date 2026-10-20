@@ -69,7 +69,7 @@ from gateway.http.auth import router as auth_router
 from gateway.http.auth.request_principal import TRUSTED_NETWORK_FACT, SessionKeys
 from gateway.http.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
 from gateway.http.config import GatewayConfig, gateway_config_from_boot
-from gateway.http.middleware import latency, pause_policy, runtime_metrics
+from gateway.http.middleware import latency, runtime_metrics
 from gateway.http.middleware.cors import request_host
 from gateway.http.middleware.error_envelope import error_response, request_trace_middleware
 from gateway.http.middleware.error_handlers import (
@@ -285,7 +285,6 @@ async def lifespan(
                 app.state.db,
                 app.state.bus,
                 machine=process.machine,
-                home=process.home,
             )
             app.state.upload_recovery = upload_recovery
 
@@ -332,32 +331,6 @@ async def _background_lifetime(
                 await upload_recovery.close()
     finally:
         app.state.mcp_manager = None
-
-
-async def cluster_is_paused(request: Request) -> bool:
-
-    from base.deploy.maintenance.admission import business_paused
-
-    return await asyncio.to_thread(business_paused, request.app.state.gateway_process.home)
-
-
-async def cluster_pause_middleware(
-    request: Request,
-    call_next: Callable[[Request], Awaitable[Response]],
-) -> Response:
-
-    if not pause_policy.should_bypass_pause(
-        request.method, request.url.path
-    ) and await cluster_is_paused(request):
-        return error_response(
-            request,
-            code="cluster_updating",
-            status=503,
-            detail="cluster updating, retry shortly",
-            retryable=True,
-            headers={"Retry-After": "30"},
-        )
-    return await call_next(request)
 
 
 _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
@@ -517,7 +490,6 @@ def create_app(
     app.state.gateway_process = process
     machine_token_acceptance: AcceptanceCache = {}
     app.state.machine_token_acceptance = machine_token_acceptance
-    app.middleware("http")(cluster_pause_middleware)
     app.middleware("http")(cluster_auth_middleware)
 
     app.middleware("http")(latency.latency_middleware)

@@ -1,7 +1,6 @@
 exports = ["health_port_guard.py", "test_single_box.py"]
 
 [uses]
-"test_maintenance_recovery.py" = ["maintenance_cluster.py"]
 "test_unit_capability_commands.py" = ["test_single_box.py"]
 
 [debt.env-patch]
@@ -16,9 +15,6 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 
 [debt.first-party-patch]
 "health_port_guard.py#monkeypatch.setattr cli.commands.probe.occupied_health_ports" = 1
-"maintenance_cluster.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.is_serving" = 1
-"maintenance_cluster.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 1
-"maintenance_cluster.py#monkeypatch.setattr ops.agent_pause.publish_inbound_wake" = 1
 "test_commands_register.py#monkeypatch.setattr base.cluster.machines.register_self" = 5
 "test_commands_register.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
 "test_external_skills.py#monkeypatch.setattr cli.commands.extensions.external_skills.Path.home" = 1
@@ -27,8 +23,6 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 "test_frontend_deps.py#monkeypatch.setattr cli.commands._repo.subprocess.run" = 2
 "test_gateway_preflight_budget.py#monkeypatch.setattr cli.commands._repo.probe_gateway_once" = 1
 "test_gateway_preflight_budget.py#monkeypatch.setattr cli.commands._repo.time" = 1
-"test_maintenance_recovery.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.change_maintenance" = 3
-"test_maintenance_recovery.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 2
 "test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.plugins_dir" = 1
 "test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
@@ -56,10 +50,6 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 "test_single_box.py#monkeypatch.setattr socket.socket" = 1
 
 [debt.unresolved-patch]
-"test_maintenance_recovery.py#monkeypatch.setattr host._drive_turns" = 1
-"test_maintenance_recovery.py#monkeypatch.setattr host._runtime_for" = 1
-"test_maintenance_recovery.py#monkeypatch.setattr successor._drive_turns" = 1
-"test_maintenance_recovery.py#monkeypatch.setattr successor._runtime_for" = 1
 "test_single_box.py#monkeypatch.setattr dp.cluster_secret" = 1
 "test_single_box.py#monkeypatch.setattr dp.db_url" = 1
 "test_single_box.py#monkeypatch.setattr dp.events_channel" = 1

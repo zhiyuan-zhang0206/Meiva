@@ -21,9 +21,6 @@ from tests.components.gateway.test_cluster_endpoints import (
     fake_flag as fake_flag,
 )
 from tests.components.gateway.test_cluster_endpoints import (
-    pause_backend as pause_backend,
-)
-from tests.components.gateway.test_cluster_endpoints import (
     pinned_session_names as pinned_session_names,
 )
 from tests.components.gateway.test_cluster_endpoints import (

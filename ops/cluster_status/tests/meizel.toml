@@ -6,7 +6,6 @@
 "test_cluster_status_batch.py#monkeypatch.setattr base.db.connect" = 1
 "test_cluster_status_batch.py#monkeypatch.setattr base.deploy.git.cluster_drift.prod_source_head_sha" = 1
 "test_cluster_status_batch.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.is_serving" = 1
-"test_cluster_status_batch.py#monkeypatch.setattr base.deploy.maintenance.admission.held" = 1
 "test_cluster_status_batch.py#monkeypatch.setattr base.deploy.state.host_deploy_state.read" = 7
 "test_cluster_status_batch.py#monkeypatch.setattr base.host.resource_sample.resource_sample" = 7
 "test_cluster_status_batch.py#monkeypatch.setattr base.sessions.backend.get_backend" = 2

@@ -10,8 +10,8 @@ tags: [testing, schedules, operations]
 `test_update_schedule_script.py::test_external_file_uses_installed_runtime_and_real_writer`
 copies the maintenance script outside the checkout and runs it with the selected
 installation's real interpreter and writer. The temporary home and database
-remain test-owned. The assertions preserve enabled/stopped state and the pause
-journal, and check the stored script bytes without executing the script body.
+remain test-owned. The assertions preserve enabled/stopped state and check the
+stored script bytes without executing the script body.
 
 The default source is `Path(sys.prefix).parent`, the installation running pytest.
 Set `MEIVA_TEST_INSTALLED_SOURCE` to an isolated older checkout with its own real

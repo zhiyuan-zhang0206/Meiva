@@ -73,7 +73,7 @@ asserted, because the writer does not know it. Once the apply has committed, the
 wakes the agent through its own scheduler (`AgentHost.bind_wake`), so the next turn
 starts when this one ends; a host that is exiting refuses the wake, and the pending scan
 finds the note on the next host (it also covers a host that bound no scheduler). The
-claim renders the note and the model runs from the checkpoint. The held-control path (maintenance hold, impersonation lease) runs no
+claim renders the note and the model runs from the checkpoint. The lease-control path (an active impersonation lease) runs no
 graph and never queues the note; a hard kill or a cancelled drain leaves the
 checkpoint's turn abandoned, since each turn's first invocation starts halted.
 

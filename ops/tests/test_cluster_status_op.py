@@ -7,7 +7,6 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
-from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster import operations as cluster
 

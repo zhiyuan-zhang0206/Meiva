@@ -195,30 +195,6 @@ class GatewaySettings(EnvSettings):
         },
     )
 
-    pause_lifecycle_wait_seconds: float = Field(
-        default=300.0,
-        ge=0,
-        allow_inf_nan=False,
-        alias="MEIVA_PAUSE_LIFECYCLE_WAIT_SECONDS",
-        description=(
-            "Bounded wait when preparation meets in-flight work it did not author "
-            "(task #3591): an agent lifecycle command (restart / terminate), or "
-            "claimed ordinary work on a parked agent, is retried under the same "
-            "row locks until it resolves; preparation aborts only after the bound "
-            "is spent. The 300s default shares the drain/Phase-A envelope; an early "
-            "resolution exits the wait immediately, so the bound is only the "
-            "give-up point. Maintenance-authored commands never wait. 0 refuses "
-            "immediately (pre-#3591 behavior). Cluster-pinned; must be finite and "
-            "non-negative."
-        ),
-        json_schema_extra={
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     schedule_stall_timeout_seconds: float = Field(
         default=1200.0,
         alias="MEIVA_SCHEDULE_STALL_TIMEOUT_SECONDS",

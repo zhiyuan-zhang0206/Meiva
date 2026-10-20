@@ -15,7 +15,7 @@ def _stub(_db: Database, _bus: EventBus, *args: object, **kwargs: object) -> Non
 
 
 def test_alias_scan_does_not_probe_module_getattr(monkeypatch: pytest.MonkeyPatch) -> None:
-    import ops.cluster_status.pause
+    from base.agents.impersonation import wake
 
     touched: list[str] = []
 
@@ -27,7 +27,7 @@ def test_alias_scan_does_not_probe_module_getattr(monkeypatch: pytest.MonkeyPatc
     dynamic.__getattr__ = _dynamic
     monkeypatch.setitem(sys.modules, dynamic.__name__, dynamic)
 
-    stub_everywhere(monkeypatch, ops.cluster_status.pause, "unpause_local_cluster", _stub)
+    stub_everywhere(monkeypatch, wake, "publish_inbound_wake", _stub)
 
     assert touched == []
 
@@ -36,7 +36,7 @@ def test_alias_scan_does_not_trigger_the_mcps_servers_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import meiva.mcps
-    import ops.cluster_status.pause
+    from base.agents.impersonation import wake
 
     calls: list[str] = []
     real_servers = meiva.mcps.servers
@@ -46,19 +46,19 @@ def test_alias_scan_does_not_trigger_the_mcps_servers_probe(
         return real_servers()
 
     monkeypatch.setattr(meiva.mcps, "servers", _spy)
-    stub_everywhere(monkeypatch, ops.cluster_status.pause, "unpause_local_cluster", _stub)
+    stub_everywhere(monkeypatch, wake, "publish_inbound_wake", _stub)
 
     assert calls == []
 
 
 def test_alias_scan_still_rebinds_a_frozen_alias(monkeypatch: pytest.MonkeyPatch) -> None:
-    import ops.cluster_status.pause
+    from base.agents.impersonation import wake
 
-    real = ops.cluster_status.pause.unpause_local_cluster
+    real = wake.publish_inbound_wake
     holder = types.ModuleType("stub_everywhere_alias_scan_holder")
-    holder.__dict__["unpause_local_cluster"] = real
+    holder.__dict__["publish_inbound_wake"] = real
     monkeypatch.setitem(sys.modules, holder.__name__, holder)
 
-    stub_everywhere(monkeypatch, ops.cluster_status.pause, "unpause_local_cluster", _stub)
+    stub_everywhere(monkeypatch, wake, "publish_inbound_wake", _stub)
 
-    assert holder.__dict__["unpause_local_cluster"] is _stub
+    assert holder.__dict__["publish_inbound_wake"] is _stub

@@ -1,5 +1,5 @@
 # meiva:note
-# Route contracts are the common retry and pause policy owner. Unknown routes are non-idempotent. Keyed receipts establish acceptance, not downstream delivery or execution. Pause exemptions match both method and path: alert webhook writes remain available while ordinary alert reads pause. Bootstrap and control-plane routes remain available so operators can inspect or recover a paused cluster.
+# Route contracts are the retry policy owner. Unknown routes are non-idempotent. Keyed receipts establish acceptance, not downstream delivery or execution.
 from __future__ import annotations
 
 import re
@@ -13,15 +13,9 @@ class Idempotency(StrEnum):
     AT_LEAST_ONCE_WITH_KEY = "at_least_once_with_key"
 
 
-class PauseSemantics(StrEnum):
-    CONTROL_PLANE = "control-plane"
-    DATA_PLANE = "data-plane"
-
-
 @dataclass(frozen=True, slots=True)
 class RouteContract:
     idempotency: Idempotency = Idempotency.IDEMPOTENT
-    pause: PauseSemantics = PauseSemantics.DATA_PLANE
     note: str = ""
 
 
@@ -50,11 +44,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/to-user/resource"): RouteContract(),
     ("GET", "/api/alerts"): RouteContract(),
     ("GET", "/api/alerts/stream"): RouteContract(
-        note="SSE tail — subscribing mid-pause just idles; the UI's initial fetch covers the gap"
+        note="SSE tail — subscribing to an idle stream just waits; the UI's initial fetch covers the gap"
     ),
     ("POST", "/api/alerts"): RouteContract(
-        pause=PauseSemantics.CONTROL_PLANE,
-        note="Grafana Alertmanager webhook — upsert per (fingerprint, starts_at); a 503 exhausts Grafana retries and the alert is lost",
+        note="Grafana Alertmanager webhook — upsert per (fingerprint, starts_at)",
     ),
     ("POST", "/api/auth/login"): RouteContract(note="login — repeats just mint a fresh cookie"),
     ("POST", "/api/auth/login-ticket"): RouteContract(
@@ -70,13 +63,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="session revocation — guarded update; repeats cannot revoke twice"
     ),
     ("GET", "/api/bootstrap"): RouteContract(
-        pause=PauseSemantics.CONTROL_PLANE,
-        note="read-only config projection, still authenticated — a held unit's first start "
-        "and every runner process's config resolution read it before the hold is released",
+        note="read-only config projection, still authenticated — a remote unit's start "
+        "and every runner process's config resolution read it",
     ),
     ("POST", "/api/cluster/stopping"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
-        PauseSemantics.CONTROL_PLANE,
         note="control-plane op — host self-report during stop",
     ),
     ("GET", "/api/host/permissions"): RouteContract(
@@ -93,39 +84,35 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="record the user's 'later' — repeats write the same flag",
     ),
     ("GET", "/api/cluster/status"): RouteContract(
-        pause=PauseSemantics.CONTROL_PLANE, note="control-plane read — observability during rollout"
+        note="control-plane read — cluster observability"
     ),
     ("GET", "/api/cluster/roster"): RouteContract(
-        pause=PauseSemantics.CONTROL_PLANE, note="control-plane read — observability during rollout"
+        note="control-plane read — cluster observability"
     ),
     ("GET", "/api/cluster/admin/events"): RouteContract(
-        pause=PauseSemantics.CONTROL_PLANE, note="control-plane read — observability during rollout"
+        note="control-plane read — cluster observability"
     ),
     ("GET", "/api/cluster/machines"): RouteContract(
-        pause=PauseSemantics.CONTROL_PLANE, note="control-plane read — observability during rollout"
+        note="control-plane read — cluster observability"
     ),
     ("GET", "/api/cluster/machines/{name}/harnesses"): RouteContract(
         note="per-machine harness probe, cached 30s — a repeat reads the same install state"
     ),
     ("DELETE", "/api/cluster/machines/{name}"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
-        PauseSemantics.CONTROL_PLANE,
         note="control-plane op — deregisters a machine",
     ),
     ("POST", "/api/cluster/machines/{name}/staging"): RouteContract(
         Idempotency.IDEMPOTENT,
-        PauseSemantics.CONTROL_PLANE,
         note="control-plane op — operator sets/clears the staging flag",
     ),
     ("POST", "/api/cluster/machines/{name}/pause"): RouteContract(
         Idempotency.IDEMPOTENT,
-        PauseSemantics.CONTROL_PLANE,
         note="control-plane op — drains tasks, terminates the machine's agents, "
         "sets the pause latch (idempotent: re-pause is a safe no-op)",
     ),
     ("POST", "/api/cluster/machines/{name}/resume"): RouteContract(
         Idempotency.IDEMPOTENT,
-        PauseSemantics.CONTROL_PLANE,
         note="control-plane op — clears the pause latch (idempotent no-op when not paused)",
     ),
     ("GET", "/api/commands"): RouteContract(),
@@ -180,8 +167,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="raw draft identity and original immutable birth snapshot",
     ),
     ("GET", "/api/health"): RouteContract(
-        pause=PauseSemantics.CONTROL_PLANE,
-        note="gateway identity and database liveness — start must prove readiness before releasing its hold",
+        note="gateway identity and database liveness — start proves readiness from it",
     ),
     ("GET", "/api/agents/{agent_id}/inspect/statistics"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/inspect/live"): RouteContract(
@@ -449,11 +435,3 @@ def idempotency_for(method: str, path: str) -> Idempotency:
 
     c = contract_for(method, path)
     return c.idempotency if c is not None else Idempotency.NON_IDEMPOTENT
-
-
-def exempt_from_pause(method: str, path: str) -> bool:
-
-    return any(
-        c.pause is PauseSemantics.CONTROL_PLANE and match_path(tpl, path)
-        for tpl, c in _contract_candidates(method, path)
-    )

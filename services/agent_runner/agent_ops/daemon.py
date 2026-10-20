@@ -56,8 +56,7 @@ from base.telemetry.process_logging import init_gateway_process
 from ops import lifecycle
 from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpEnvelope, OpStatus, is_op_kind
-from services.agent_runner.agent_ops import boot, health
-from services.agent_runner.agent_ops import maintenance as maintenance_activity
+from services.agent_runner.agent_ops import boot, health, in_flight
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.agent_runner.agent_ops.to_user_resource import resource_route
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
@@ -82,7 +81,7 @@ async def run_arm(
     payload: dict[str, Any],
     *,
     active_ops: ActiveOps,
-    workers: maintenance_activity.WorkerFutures,
+    workers: in_flight.WorkerFutures,
     pool: ConnectionPool,
     executor: ThreadPoolExecutor,
     authority: ConfigAuthority,
@@ -110,7 +109,7 @@ async def run_arm(
                 host=host,
             ),
         )
-        maintenance_activity.track_worker(future, workers=workers)
+        in_flight.track_worker(future, workers=workers)
         return await asyncio.shield(future)
     finally:
         if active_ops.get(kind) == active:
@@ -146,7 +145,7 @@ async def _dispatch(
     payload: dict[str, Any],
     *,
     active_ops: ActiveOps,
-    workers: maintenance_activity.WorkerFutures,
+    workers: in_flight.WorkerFutures,
     pool: ConnectionPool,
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
@@ -233,7 +232,7 @@ async def dispatch_idempotent(
     pool: ConnectionPool,
     *,
     active_ops: ActiveOps,
-    workers: maintenance_activity.WorkerFutures,
+    workers: in_flight.WorkerFutures,
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
@@ -281,7 +280,7 @@ async def dispatch_idempotent_pass(
     pool: ConnectionPool,
     *,
     active_ops: ActiveOps,
-    workers: maintenance_activity.WorkerFutures,
+    workers: in_flight.WorkerFutures,
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
@@ -354,9 +353,9 @@ async def ops_route(
     body: bytes,
     *,
     active_ops: ActiveOps,
-    workers: maintenance_activity.WorkerFutures,
+    workers: in_flight.WorkerFutures,
     dispatch_sem: asyncio.Semaphore,
-    requests: maintenance_activity.RequestTokens,
+    requests: in_flight.RequestTokens,
     pool: ConnectionPool,
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
@@ -389,9 +388,12 @@ async def ops_route(
             "application/json",
         )
 
-    async with dispatch_sem:
-        try:
-            with maintenance_activity.admission(envelope.kind, requests=requests):
+    # meiva:note
+    # Counted from arrival, before the semaphore: a request still queued when SIGTERM drains
+    # the server is waited for and, past the budget, cancelled like one that is running.
+    with in_flight.admitted(requests=requests):
+        async with dispatch_sem:
+            try:
                 if envelope.idempotency_key is not None:
                     status, result = await dispatch_idempotent(
                         envelope.kind,
@@ -423,9 +425,9 @@ async def ops_route(
                         local_machine=local_machine,
                         host=host,
                     )
-        except Exception as exc:
-            _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
-            status, result = OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
+            except Exception as exc:
+                _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
+                status, result = OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
     status = OpStatus(status)
 
     return (
@@ -452,8 +454,8 @@ async def serve_ops_daemon(
     )
 
     active_ops: ActiveOps = {}
-    requests: maintenance_activity.RequestTokens = set()
-    workers: maintenance_activity.WorkerFutures = set()
+    requests: in_flight.RequestTokens = set()
+    workers: in_flight.WorkerFutures = set()
     runtime_dir = paths.run_dir(paths.meiva_home())
     if boot.is_running(config, runtime=runtime_dir):
         _log.info(
@@ -523,7 +525,6 @@ async def serve_ops_daemon(
             liveness=liveness,
             components=lambda: health.ops_components(active_ops),
             extra=lambda: {
-                "maintenance": maintenance_activity.progress(requests=requests, workers=workers),
                 "saturation": health.saturation(
                     active_ops, max(1, config.view.services.ops_concurrency)
                 ),
@@ -549,7 +550,7 @@ async def serve_ops_daemon(
             async with server, asyncio.TaskGroup() as background:
                 watcher = background.create_task(watch_to_user(paths.workspaces_root(), bus))
                 try:
-                    await server.serve_forever()
+                    await in_flight.serve_until_sigterm(server, requests=requests, workers=workers)
                 finally:
                     watcher.cancel()
         finally:

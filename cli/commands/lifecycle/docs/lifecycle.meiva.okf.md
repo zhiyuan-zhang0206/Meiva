@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Host lifecycle
-description: '`meiva start` / `stop` / `restart` / `maintenance` / `status` and the single application root they drive: one package, because every verb goes through the same root driver and drain boundary.'
+description: '`meiva start` / `stop` / `restart` / `status` and the single application root they drive: one package, because every verb goes through the same root driver and stop boundary.'
 tags:
 - cli
 - lifecycle
@@ -13,17 +13,16 @@ tags:
 
 `cli/commands/lifecycle/` holds the local host lifecycle verbs and the machinery
 they share. The verbs are `start.py` (`meiva start`), `stop.py` (`meiva stop`,
-`meiva restart`) and `status.py` (`meiva status`, with `hold_report.py` reading the
-maintenance hold for it). Every one of them reaches the single application
+`meiva restart`) and `status.py` (`meiva status`). Every one of them reaches the single application
 root through `root_driver.py`, and every stopping verb goes through the same
-native drain boundary (`_temporary_stop`, `service_stop`) — which is why they
+native stop boundary (`_temporary_stop`, `service_stop`) — which is why they
 form one package rather than one per verb.
 
 `root_driver.py`, `service_stop.py`, `start_generation.py`, `maintenance.py` and
 `migrations.py` are public: `data_plane/maintenance_stop` and the cutover
 scripts reach them. The `_`-prefixed modules are steps only this package calls.
 
-## Stop, restart and maintenance
+## Stop and restart
 
 `stop.py` exposes `stop` through `_temporary_stop`. Every keep-or-stop choice
 (shell sessions, browser, extras, data plane, other services), the mode and the
@@ -37,8 +36,10 @@ for a start that would fail ([[start-readiness-preflight.meiva.okf.md]]); its
 start leg launches the operator's explicit service selection.
 `meiva restart --only agent-host` (`stop.restart_agent_host`) stops agent-host
 through the root and brings it back, touching nothing else.
-`ops.agent_pause` and `ops.agent_pause.probe` own prepare/drain and runtime
-capability checks; `service_stop` and `data_plane/maintenance_stop` verify
+The stop does not drain agents itself: root stops agent-host first and waits for it,
+and its own SIGTERM exit settles the running turns
+([[services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md]]).
+`service_stop` and `data_plane/maintenance_stop` verify
 resource exits (`data_plane/maintenance_stop_report` names survivors).
 `data_plane/_pooler_stop.OwnedPooler` owns ordinary pooler stop
 admission for maintenance and startup recovery: exact native birth and listener
@@ -58,15 +59,15 @@ or run `meiva start`.
 `_stop_extras` uses the same exact-home helper retirement as destroy: native
 job, executable, socket and direct root-child ownership are checked before native
 helper exit and removal of its definition. Start recreates that definition.
-Root owns Gate and native LGTM application services. `_pause_resume` releases
-normal startup admission only after readiness.
+Root owns Gate and native LGTM application services. `_exclusive_resources`
+serializes whole local start and stop operations under the home lifecycle lock; a
+start that delegates to a child process (`StartDelegation`) runs the child after the
+lock is released.
 
-No command reads or ends a hold except `meiva status` (and `meiva status --json`, the
-hold alone as one JSON object, settings-lite) and `meiva start`: the holds are taken
-by `meiva stop` and `meiva restart` and released by `meiva start`. `_pause_resume`
-releases the hold once the unit serves; a continuation that failed during the
-drain was only logged and alerted by the agent host. These reuse the
-[durable maintenance journal](../../../../base/deploy/maintenance/docs/maintenance.meiva.okf.md).
+A stop keeps no state that gates anything: `stop` clears the home's serving gate
+(`base/deploy/lifecycle/start_serving.py`) before it stops anything, `start` marks it
+serving after readiness, and `run/lifecycle-op.json` records how a stop or restart
+ended for the fleet update and the operator.
 See [the coordinated operator procedure](../../../../docs/conventions/operations/graceful-maintenance.md).
 
 The native stop tests create fresh PTY sessions and wait for their requested

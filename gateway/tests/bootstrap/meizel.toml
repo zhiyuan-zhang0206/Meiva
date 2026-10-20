@@ -32,7 +32,6 @@
 "test_gateway_lifespan.py#monkeypatch.setattr gateway.app.latency.latency_flusher" = 1
 "test_gateway_lifespan.py#monkeypatch.setattr gateway.app.register_os_cron" = 1
 "test_gateway_lifespan.py#monkeypatch.setattr gateway.app.rejection_log.auth401_flusher" = 1
-"test_health_endpoint.py#monkeypatch.setattr gateway.app.cluster_is_paused" = 1
 "test_inspect_lifespan.py#monkeypatch.setattr gateway.app.register_os_cron" = 2
 "test_login_endpoint.py#monkeypatch.setattr base.cluster.rate_limit.time" = 4
 "test_login_endpoint.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1

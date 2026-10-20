@@ -11,7 +11,7 @@ from base.paths import run_dir
 
 _INSTANCE_LOCK = "agent_host.lock"
 
-__all__ = ["release_instance_lock", "take_instance_lock"]
+__all__ = ["host_serving", "release_instance_lock", "take_instance_lock"]
 
 
 # meiva:note
@@ -26,3 +26,15 @@ def take_instance_lock(home: Path) -> int:
             error=str(exc),
         )
         sys.exit(1)
+
+
+# meiva:note
+# Whether an agent host serves `home` right now: its instance lock is held. A free lock is
+# taken and released at once, so asking never delays the host that starts next.
+def host_serving(home: Path) -> bool:
+    try:
+        fd = acquire_instance_lock(run_dir(home), _INSTANCE_LOCK)
+    except AlreadyRunningError:
+        return True
+    release_instance_lock(fd)
+    return False

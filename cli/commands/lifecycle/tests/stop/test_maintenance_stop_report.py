@@ -16,7 +16,6 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.deploy.lifecycle import status_journal
-from base.deploy.tests.maintenance_factory import WHEN
 from base.native_process import ownership
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
@@ -67,8 +66,6 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
     with pytest.raises(report.StopIncompleteError) as caught:
         stop.close_terminals(
             time.monotonic() + 0.25,
-            "private-stop",
-            WHEN,
             direct_db=False,
             database_factory=operator_database,
             local_machine=command_machine,
@@ -120,8 +117,6 @@ def test_report_keeps_known_job_diagnostic_of_a_closed_session(
     )
     stop.close_terminals(
         time.monotonic() + 0.35,
-        "private-stop",
-        WHEN,
         direct_db=False,
         database_factory=operator_database,
         local_machine=command_machine,

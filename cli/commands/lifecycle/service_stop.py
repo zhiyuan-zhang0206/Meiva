@@ -1,16 +1,15 @@
-"""Stop a drained unit's recorded services and persistent terminals.
-
-The caller owns the maintenance journal and admission fence. These functions
-prove only local recorded process identities; they do not prove remote drain or
-stop OS-managed extras. Service stops never escalate to force.
-
-Persistent terminals use a bounded best-effort closure: close the known shell
-and terminal, signal known shell/foreground groups, and report known leftovers.
-A surviving shell fails the stop; a known job leftover is diagnostic. Closure
-never proves that every descendant or detached process disappeared. A stopped
-service's ledger supplies only recorded birth identities, never a global scan.
-See docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md.
-"""
+# meiva:note
+# Stop a unit's recorded services and persistent terminals.
+#
+# These functions prove only local recorded process identities; they do not prove
+# remote drain or stop OS-managed extras. Service stops never escalate to force.
+#
+# Persistent terminals use a bounded best-effort closure: close the known shell
+# and terminal, signal known shell/foreground groups, and report known leftovers.
+# A surviving shell fails the stop; a known job leftover is diagnostic. Closure
+# never proves that every descendant or detached process disappeared. A stopped
+# service's ledger supplies only recorded birth identities, never a global scan.
+# See docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md.
 
 from __future__ import annotations
 
@@ -18,8 +17,6 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
@@ -118,15 +115,6 @@ def _report_terminal_job_leftovers(outcome: closure.Outcome) -> None:
             )
 
 
-@dataclass(frozen=True)
-class _Notice:
-    """What a closure's owner notices name (issue #2044): its operation, hold and reason."""
-
-    operation: str
-    acquired_at: datetime
-    reason: str
-
-
 def await_no_terminals(until: float, stage: str) -> None:
     """The closure evidence: no terminal is live; raise at `until`.
 
@@ -149,7 +137,7 @@ def await_no_terminals(until: float, stage: str) -> None:
 
 def _record_close_notices(
     closed: tuple[closure.ClosedSession, ...],
-    notice: _Notice,
+    reason: str,
     *,
     direct_db: bool,
     database_factory: DatabaseFactory,
@@ -168,9 +156,7 @@ def _record_close_notices(
     """
     notices = pty_close_notices.notices_for(
         closed,
-        reason=notice.reason,
-        operation=notice.operation,
-        acquired_at=notice.acquired_at,
+        reason=reason,
         local_machine=machine_name,
     )
     for unwritten, exc in pty_close_notices.write_notices(
@@ -185,40 +171,38 @@ def _record_close_notices(
         )
 
 
+# meiva:note
+# Close this unit's terminals at `meiva stop`: HUP/TERM, a bounded grace, then SIGKILL.
+#
+# The grace is `_TERMINAL_STOP_GRACE_S`, capped by the stop's `deadline`;
+# the SIGKILL leg is bounded by `TERMINAL_KILL_WAIT_S` and runs even when
+# the grace spent the rest of the deadline — a stop that reached its
+# terminal phase closes its terminals
+# (docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md). A shell that
+# survives fails the stop. Known job
+# leftovers are reported without failing the stop. A
+# terminal still tearing down after that gets the rest of the deadline, and
+# at least `TERMINAL_KILL_WAIT_S`, to leave the service's table.
+#
+# Busy sessions whose shell is verified gone — a job the SIGKILL cut short
+# included — get a closure notice for their owner agent (issue #2044),
+# written to the database over one short connection here, before the data
+# plane stops (`direct_db`: this unit's own Postgres, bypassing its pooler,
+# rather than the gateway's database a runner-only unit dials). That holds
+# when a process outlived the SIGKILL too (the notice names it) and when
+# another session keeps the stop incomplete.
 def close_terminals(
     deadline: float,
-    operation: str,
-    acquired_at: datetime,
     *,
     direct_db: bool,
     database_factory: DatabaseFactory,
     local_machine: MachineIdentity,
 ) -> None:
-    """Close this unit's terminals at `meiva stop`: HUP/TERM, a bounded grace, then SIGKILL.
-
-    The grace is `_TERMINAL_STOP_GRACE_S`, capped by the stop's `deadline`;
-    the SIGKILL leg is bounded by `TERMINAL_KILL_WAIT_S` and runs even when
-    the grace spent the rest of the deadline — a stop that reached its
-    terminal phase closes its terminals
-    (docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md). A shell that
-    survives fails the stop, which keeps its maintenance hold. Known job
-    leftovers are reported without failing the stop. A
-    terminal still tearing down after that gets the rest of the deadline, and
-    at least `TERMINAL_KILL_WAIT_S`, to leave the service's table.
-
-    Busy sessions whose shell is verified gone — a job the SIGKILL cut short
-    included — get a closure notice for their owner agent (issue #2044),
-    written to the database over one short connection here, before the data
-    plane stops (`direct_db`: this unit's own Postgres, bypassing its pooler,
-    rather than the gateway's database a runner-only unit dials). That holds
-    when a process outlived the SIGKILL too (the notice names it) and when
-    another session keeps the stop incomplete.
-    """
     grace_s = max(0.0, min(deadline - time.monotonic(), _TERMINAL_STOP_GRACE_S))
     outcome, reason = _close_terminals_now(grace_s, TERMINAL_KILL_WAIT_S)
     _record_close_notices(
         outcome.closed,
-        _Notice(operation, acquired_at, reason),
+        reason,
         direct_db=direct_db,
         database_factory=database_factory,
         machine_name=local_machine.name(),

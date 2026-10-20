@@ -1,4 +1,4 @@
-exports = ["daemon.py", "host.py", "invocation", "runtime.py", "settlement.py", "tests"]
+exports = ["daemon.py", "host.py", "invocation", "lifecycle", "runtime.py", "settlement.py", "tests"]
 
 [uses]
 "daemon.py" = ["dispatcher.py", "exec_memory_guard.py", "health_routes.py", "host.py", "lifecycle", "pooled_checkpoint.py", "pools.py", "stdout_log.py"]

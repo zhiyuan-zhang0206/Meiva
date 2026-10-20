@@ -1,17 +1,14 @@
-exports = ["containers.py", "db_authority_tests.py", "maintenance_factory.py", "pgbouncer.py"]
+exports = ["containers.py", "db_authority_tests.py", "pgbouncer.py"]
 
 [uses]
 "authority" = ["db_authority_tests.py"]
 "pgbouncer.py" = ["containers.py"]
 "test_cluster_redis_acl.py" = ["containers.py"]
-"test_maintenance_parked.py" = ["maintenance_factory.py"]
 
 [debt.env-patch]
 "test_migration_authority.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
-"maintenance_factory.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
-"maintenance_factory.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
 "test_migration_authority.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 5
 "test_migrations.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 10
 "test_timing_topology.py#monkeypatch.setattr base.config.settings.daemon.wedged_agent_inbound_age_seconds" = 1

@@ -30,8 +30,9 @@ _RESOURCE_LOCK_TIMEOUT_S = 30.0
 _log = logging.getLogger("base.deploy.lifecycle.home_lifecycle_locks")
 
 
+# meiva:note
+# Stable mutex for long local resource transitions.
 def lifecycle_lock_path() -> Path:
-    """Stable mutex for long local resource transitions and the hold probe."""
     return base.paths.meiva_home() / "deploy-state.lifecycle.lock"
 
 

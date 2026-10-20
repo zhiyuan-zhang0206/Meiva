@@ -71,3 +71,7 @@ three verbs that were the hold's exits rather than slices of the stop/start kern
   journal-schema change.
 - An operator script that ran `meiva maintenance ...` fails at argument parsing. None exists in the
   repository.
+
+Forward link (2026-10-20): the hold this record keeps as the stop's drain, and the
+`meiva start` that released it, are deleted. See
+[delete the maintenance hold](../../runtime/processes/2026-10-20-delete-maintenance-hold.md).

@@ -20,24 +20,25 @@ The sole resident Meiva HTTP process on agent-runner (session `ops`) — Gateway
 - **Off the event loop**: agent launch and lifecycle operations run on the loop;
   synchronous arms run in the daemon's worker pool through
   `services/agent_runner/agent_ops/dispatch_sync.py:dispatch_sync`. Blocking filesystem work
-  leaves health and the generation-checked hold release reachable.
+  leaves health reachable.
   Configuration and inventory read-modify-write operations share a thread lock.
-- **Admission**: only the current `OpKind` vocabulary reaches maintenance
-  admission or idempotency storage. Retired updater RPCs fail without effects,
+- **Admission**: only the current `OpKind` vocabulary reaches
+  idempotency storage. Retired updater RPCs fail without effects,
   even when a caller presents an old successful idempotency key. The daemon
   accepts no bootstrap mode; unknown argv refuses before ordinary imports.
 - **work kinds**: `spawn-launch` / `lifecycle` / `status_probe` / `config_read|write` / `inventory_read|write` / `agent_skill_view`. The command-view read uses this runner's converged load dir plus the agent checkpoint's `meiva_code__cwd` project roots, and scopes skill-as-command entries through that agent's persisted `config_overlay > birth_config` narrowing; provider cleanup is unconditional so one request cannot leak project skills into the next. Its result also carries this runner's sorted enabled MCP server names as phase-2 groundwork, with no gateway or frontend consumer yet.
 - **Singleton**: pidfile ensures only one instance per agent-runner; before start, `assert_schema_current` (refuses service if DB is ahead).
 - **Boot self-registration**: the public `boot.register_boot` refreshes this unit's serving liveness after health starts. It retains its non-fatal registration behavior; see [[services/agent_runner/agent_ops/docs/process-composition.meiva.okf.md]].
 
-`ops.cluster_status.pause` uses `ops.agent_pause` for the shared native drain;
-`ops.agent_pause.probe` checks actual daemon identity and admitted work.
-Dependency APIs remain available until existing native actions finish.
-Local service teardown closes new API admission only after the drain; normal
-start resumes the existing hold after readiness. The dispatch pool runs
-`min_size=0`. Shell-closure notices are not an ops task: `meiva stop` writes
+**Stop.** The agent host stops first, so by the time ops is signalled its turns have
+settled. On SIGTERM the ops server stops taking connections and waits, for at most
+`OPS_DRAIN_S` (15 s), until the requests it admitted and the executor work they
+started have finished (`agent_ops/in_flight.py`: `serve_until_sigterm`, `drain`);
+what is left is named at ERROR and cancelled. The roster declares
+`OPS_STOP_CEILING_S` as the unit's `stop_ceiling_s`, so root waits for that window.
+The dispatch pool runs `min_size=0`. Shell-closure notices are not an ops task: `meiva stop` writes
 them itself (`ops/pty_close_notices.py`). A cluster update stops and starts each unit through
-`cli.fleet_update`, not through ops kinds. See [[base/deploy/maintenance/docs/maintenance.meiva.okf.md|Native pause and maintenance]].
+`cli.fleet_update`, not through ops kinds. See [[services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md|Agent-host graceful exit]].
 
 ## Strongly-Typed Wire Layer (`ops/rpc_schemas/__init__.py`)
 

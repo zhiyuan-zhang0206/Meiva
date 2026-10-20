@@ -135,7 +135,6 @@ def agent_population_failure_class(
     min_agents: int, *, database_factory: DatabaseFactory
 ) -> str | None:
     """Classify observed low population against DB availability and local intent."""
-    from base.deploy.maintenance import pause_owner
     from base.paths import meiva_home, root_manifests_path
     from services.supervision.meiva_root_glue.manifests import launched_services
 
@@ -152,13 +151,8 @@ def agent_population_failure_class(
         return "code"
     if row[0] >= min_agents:
         return None
-    current = pause_owner.read()
     launched = launched_services(root_manifests_path(meiva_home()))
-    if (
-        launched is None
-        or "agent-host" not in launched
-        or (current.status == "paused" and current.maintenance is not None)
-    ):
+    if launched is None or "agent-host" not in launched:
         return "maintenance"
     return "code"
 

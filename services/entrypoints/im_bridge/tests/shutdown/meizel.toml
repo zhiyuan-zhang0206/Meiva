@@ -1,4 +1,2 @@
 [uses]
 "test_daemon_shutdown.py" = ["child_shutdown.py"]
-
-[debt.first-party-patch]

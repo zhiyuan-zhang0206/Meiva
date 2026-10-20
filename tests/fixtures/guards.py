@@ -126,27 +126,28 @@ def _restore_metering(sdk_metering: None) -> None:
 # `MEIVA_OS_JOBS_ENABLED=false` setting covers both processes.
 
 
+# meiva:note
+# Replace `module.name` AND every already-imported alias of it.
+#
+# Patching only the definition site is a half-guard: `from mod import f` binds
+# the function object into the importing module at ITS import time, and that
+# alias is what gets called (a caller may hold one for
+# `publish_inbound_wake`, `services.supervision.healthchecks.frontend` one for
+# `respawn_service`). Nothing is imported to find them — only modules the run
+# already loaded are touched.
+#
+# **This is not a pattern for a new test.** A test does not patch what it wants to control:
+# the code under test takes it as a parameter (see "The one allowed form per kind of
+# dependency" and "Existing patches" in `docs/conventions/python-conventions.md`). This
+# helper serves two jobs that remain: the host guards below, which refuse a host effect
+# everywhere it could be reached, and the patches that are still recorded debt, where an
+# alias is already frozen because a third-party module or an existing direct import
+# retains a function object. The alias scan reads module `__dict__`s only —
+# it must not probe `__getattr__` (PEP 562), which can execute arbitrary
+# code with side effects (task #3950).
 def stub_everywhere(
     monkeypatch: pytest.MonkeyPatch, module: object, name: str, stub: object
 ) -> None:
-    """Replace `module.name` AND every already-imported alias of it.
-
-    Patching only the definition site is a half-guard: `from mod import f` binds
-    the function object into the importing module at ITS import time, and that
-    alias is what gets called (a caller may hold one for
-    `unpause_local_cluster`, `services.supervision.healthchecks.frontend` one for
-    `respawn_service`). Nothing is imported to find them — only modules the run
-    already loaded are touched.
-
-    **This is not a pattern for a new test.** A test does not patch what it wants to control:
-    the code under test takes it as a parameter (see "The one allowed form per kind of
-    dependency" and "Existing patches" in `docs/conventions/python-conventions.md`). This
-    helper serves two jobs that remain: the host guards below, which refuse a host effect
-    everywhere it could be reached, and the patches that are still recorded debt, where an
-    alias is already frozen because a third-party module or an existing direct import
-    retains a function object. The alias scan reads module `__dict__`s only —
-    it must not probe `__getattr__` (PEP 562), which can execute arbitrary
-    code with side effects (task #3950)."""
     real = getattr(module, name)
     monkeypatch.setattr(module, name, stub)
     for mod in list(sys.modules.values()):

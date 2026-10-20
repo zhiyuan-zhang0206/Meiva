@@ -37,7 +37,7 @@ maintenance.
 
 Service restart is requested through root and verified with the same readiness
 contract used by status and start. Unknown ownership never authorizes a kill or
-spawn. Update, pause-hold completion, package acquisition, and native data-plane
+spawn. Update, package acquisition, and native data-plane
 transitions remain explicit lifecycle operations outside the service observer.
 
 Hosted checkpoint and maintenance test premises: [[services/docs/agent_runner_side/checkpoint-test-evidence.meiva.okf.md]].

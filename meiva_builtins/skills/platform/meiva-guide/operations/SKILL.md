@@ -9,7 +9,7 @@ This skill is the cluster operator's day-to-day companion: how to review the
 alert stream, how to diagnose the recurring failure classes, and how to
 respond. It is **methodology** (how to find and judge), not a fix index —
 for symptom → fix recovery of a broken cluster see `docs/conventions/runbook.md`
-(a stranded maintenance hold: `docs/conventions/operations/graceful-maintenance.md`); for the CLI verbs see
+(a failed or cut-off stop: `docs/conventions/operations/graceful-maintenance.md`); for the CLI verbs see
 `meiva-guide/ops`; for rollout safety see `meiva-self-development`.
 
 ## Role

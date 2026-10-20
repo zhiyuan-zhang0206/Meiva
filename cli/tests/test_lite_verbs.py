@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import types
 from collections.abc import Callable
@@ -8,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.host.env import bootstrap
+from base.native_process.root_control import instance_lock
+from base.paths import root_run_dir
 from cli import main as cli_main
 from cli import parsers
 
@@ -32,56 +32,26 @@ def test_restart_is_not_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _dispatched_fetch_env(monkeypatch, ["restart"]) is None
 
 
-def test_normal_drain_requires_cluster_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _dispatched_fetch_env(monkeypatch, ["stop"]) is None
+def test_stop_of_a_running_root_requires_cluster_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(tmp_path))
+    lock = instance_lock.acquire_instance_lock(root_run_dir(tmp_path))
+    try:
+        assert _dispatched_fetch_env(monkeypatch, ["stop"]) is None
+    finally:
+        instance_lock.release_instance_lock(lock)
 
 
 def test_force_stop_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _dispatched_fetch_env(monkeypatch, ["stop", "--force"]) == "skip"
 
 
-@pytest.mark.parametrize(
-    ("state", "hold", "expected"),
-    [
-        ("paused", MaintenanceHold(MaintenancePhase.STOPPED), "skip"),
-        ("paused", MaintenanceHold(MaintenancePhase.DRAINED), None),
-        ("resumed", MaintenanceHold(MaintenancePhase.STOPPED), None),
-        ("paused", None, None),
-    ],
-)
-def test_only_completed_cold_stop_can_skip_gateway_fetch(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    state: str,
-    hold: MaintenanceHold | None,
-    expected: str | None,
-) -> None:
-    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(tmp_path))
-    journal = tmp_path / "run" / "deploy-pause-owner.json"
-    journal.parent.mkdir()
-    payload: dict[str, object] = {
-        "state": state,
-        "holder": "local-pause:test",
-        "acquired_at": "2026-09-07T00:00:00Z",
-    }
-    if hold is not None:
-        payload["maintenance"] = hold.encode()
-    journal.write_text(json.dumps(payload))
-    before = journal.read_bytes()
-    assert _dispatched_fetch_env(monkeypatch, ["stop"]) == expected
-    assert journal.read_bytes() == before
-
-
-def test_corrupt_stop_journal_is_not_offline_success(
+def test_stop_with_no_running_root_stays_settings_lite(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setitem(os.environ, "MEIVA_HOME", str(tmp_path))
-    journal = tmp_path / "run" / "deploy-pause-owner.json"
-    journal.parent.mkdir()
-    journal.write_text('{"state":"paused","maintenance":')
-    before = journal.read_bytes()
-    assert _dispatched_fetch_env(monkeypatch, ["stop"]) is None
-    assert journal.read_bytes() == before
+    assert _dispatched_fetch_env(monkeypatch, ["stop"]) == "skip"
 
 
 def test_pty_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,7 +60,6 @@ def test_pty_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_status_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _dispatched_fetch_env(monkeypatch, ["status"]) == "skip"
-    assert _dispatched_fetch_env(monkeypatch, ["status", "--json"]) == "skip"
 
 
 @pytest.mark.parametrize(

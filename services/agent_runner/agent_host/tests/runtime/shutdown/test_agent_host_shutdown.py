@@ -14,6 +14,7 @@ import json
 import signal
 import subprocess
 import sys
+from asyncio.constants import THREAD_JOIN_TIMEOUT
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -37,7 +38,6 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import process_name
-from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 
 
 def _note_pidfile_removed(events: list[str], _path: object) -> None:
@@ -311,9 +311,10 @@ def test_failed_background_still_drains_and_releases(
 
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
     """SIGTERM exits within the bound while a wedged default-executor job stands."""
-    # The exit bound only matters relative to the stop budget it protects:
+    # meiva:note
+    # The exit bound only matters relative to the stall it separates itself from:
     # assert the relationship, not just the number.
-    assert EXIT_BOUND_S + KILL_SLACK_S < PAUSE_TIMEOUT_SECONDS / 5
+    assert EXIT_BOUND_S + KILL_SLACK_S < THREAD_JOIN_TIMEOUT / 5
     child = spawn_child(
         tmp_path,
         command=[

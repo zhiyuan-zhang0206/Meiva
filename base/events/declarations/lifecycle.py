@@ -27,20 +27,6 @@ class AgentSpawned(TypedDict):
     forked_from: int | None
 
 
-class AgentContinuationLost(TypedDict):
-    """`agent_continuation_lost` payload — services/agent_runner/agent_host/lifecycle/maintenance.py.
-
-    One row per agent whose turn failed while its restart command was still owed
-    to a draining maintenance hold: the host ends an unapplied command and raises
-    this once. ``failure_category`` is the exception class, ``holder`` the
-    maintenance hold, ``reason`` what became of the restart command.
-    """
-
-    failure_category: str
-    holder: str | None
-    reason: str
-
-
 class NodeExitEntry(TypedDict):
     """One node's exit inside an aggregated per-turn `node_exit` event."""
 
@@ -89,13 +75,6 @@ class HarnessCloseResidue(TypedDict):
 
 
 EVENTS: dict[str, EventSpec] = {
-    "agent_continuation_lost": telemetry_event(
-        "agent_continuation_lost",
-        "an agent's turn failed while its continuation was owed to a draining maintenance hold; "
-        "its interrupted work may be lost",
-        payload=AgentContinuationLost,
-        tier="anomaly",
-    ),
     # node / process lifecycle
     "node_enter": telemetry_event(
         "node_enter",

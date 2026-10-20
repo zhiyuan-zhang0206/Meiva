@@ -37,9 +37,9 @@ for as long as it needs the native PID retained; root launch neither reaps nor
 terminates a child when a start phase returns.
 
 An eligible macOS GUI handover returns a `StartDelegation` from the locked start
-body. The lifecycle wrapper leaves its lock and maintenance authorization before
+body. The lifecycle wrapper leaves its lock before
 executing that handover. The GUI child runs ordinary locked start and owns
-readiness and resume. The observer cannot release the maintenance hold or start
+readiness. The observer cannot start
 services in its own non-GUI domain when delegation fails.
 
 After launch, `cli/commands/lifecycle/root_readiness.py` observes the roster through

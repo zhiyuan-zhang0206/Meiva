@@ -50,7 +50,7 @@ Generation startup grace remains.
 
 ALIVE or an observed operator stop resets the count, the pending delay and any
 unspent grant.
-UNKNOWN, foreign owners, NEVER policy, probe-only units and maintenance holds
+UNKNOWN, foreign owners, NEVER policy and probe-only units
 neither spend nor replenish it. A `CODE_BEHIND_MINIMUM_EXIT_CODE` exit requires
 updating the host; root warns without restarting it. The count is process-local
 and resets across root restarts. Explicit operator up/restart retains authority.

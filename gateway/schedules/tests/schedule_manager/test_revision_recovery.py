@@ -52,14 +52,12 @@ class Backend:
 def backend(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, serving_root: start_serving.RootBirth
 ) -> Backend:
-    from base.deploy.maintenance import admission
     from base.sessions.pty import allocation_freeze
 
     backend = Backend()
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation, runtime=serving_root.runtime)
-    monkeypatch.setattr(admission, "held", lambda: False)
     monkeypatch.setattr(manager, "get_shell_backend", lambda: backend)
     monkeypatch.setattr(allocation_freeze, "current_generation", lambda: None)
 

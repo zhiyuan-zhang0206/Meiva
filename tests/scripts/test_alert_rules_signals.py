@@ -42,12 +42,6 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-schedule-convergence-abandoned": Signal(
         "schedule_convergence_abandoned", "meiva-ops-slow", "0m", "warning"
     ),
-    "meiva-ops-maintenance-hold-overdue": Signal(
-        "maintenance_hold_overdue", "meiva-ops-slow", "0m", "warning"
-    ),
-    "meiva-ops-agent-continuation-lost": Signal(
-        "agent_continuation_lost", "meiva-ops", "0m", "error"
-    ),
     "meiva-ops-machine-offline-warning": Signal(
         "machine_probe_failed", "meiva-ops", "3m", "warning"
     ),

@@ -52,8 +52,8 @@ stays local; tiering and source drift stay with their `base.deploy` owners.
 
 `stop.py` exposes `stop` through `_temporary_stop`; restart calls the same stop
 kernel with the data plane and browser kept; terminals are closed like in any
-stop. `ops.agent_pause` and `ops.agent_pause.probe`
-own prepare/drain and runtime capability checks; `service_stop` and
+stop. The agent host settles running turns itself on SIGTERM, ahead of the other
+services in root's order; `service_stop` and
 `data_plane/maintenance_stop` verify resource exits.
 `data_plane/_pooler_stop.OwnedPooler` owns
 ordinary pooler stop admission for maintenance and startup recovery: exact native
@@ -71,10 +71,8 @@ it does not restart anything, and the operator decides whether to retry the stop
 or run `meiva start`. `_stop_extras` uses the same exact-home helper retirement as destroy:
 native job, executable, socket and stopped-root custody are checked before
 native helper exit and removal of its definition. Start recreates that definition.
-Root owns Gate and native LGTM application services. `_pause_resume`
-releases normal startup admission only after readiness.
-The hold journal is read through `meiva status` and ended by `meiva start`
-(`lifecycle/hold_report.py`). They reuse the [durable maintenance journal](../../../base/deploy/maintenance/docs/maintenance.meiva.okf.md).
+Root owns Gate and native LGTM application services. `_exclusive_resources`
+serializes whole local start and stop operations under the home lifecycle lock.
 See [the coordinated operator procedure](../../../docs/conventions/operations/graceful-maintenance.md).
 
 Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,

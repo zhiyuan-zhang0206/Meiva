@@ -26,7 +26,7 @@ Owners:
 | Method and route | Retry policy | Effect / evidence |
 |---|---|---|
 | `PATCH /api/agents/{agent_id}` | natural | label patch — CAS update |
-| `POST /api/alerts` | natural | Grafana Alertmanager webhook — upsert per (fingerprint, starts_at); a 503 exhausts Grafana retries and the alert is lost |
+| `POST /api/alerts` | natural | Grafana Alertmanager webhook — upsert per (fingerprint, starts_at) |
 | `POST /api/auth/login` | natural | login — repeats just mint a fresh cookie |
 | `POST /api/auth/logout` | natural | clear session cookie — idempotent |
 | `POST /api/auth/sessions/{session_id}/revoke` | natural | session revocation — guarded update; repeats cannot revoke twice |
