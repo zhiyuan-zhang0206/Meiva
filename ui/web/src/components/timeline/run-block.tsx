@@ -269,6 +269,21 @@ export const TurnBlock = memo(function TurnBlock({
   if (actionSummary) headerParts.push(actionSummary);
 
   const hasSdkCalls = summary.sdkCalls.length > 0;
+  // meiva:note
+  // The collapsed strip is one fixed-height line, so its chips are expanded-only:
+  // a collapsed block carrying two to four chips stood 50px tall (68px when its
+  // summary also wrapped) while a chip-free one stood 30px, and those strips sit
+  // between message cards, so the gap between two cards varied by up to 38px for
+  // no reason the reader can see (user report 2026-10-21: unify toward the narrow
+  // one).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+  const sdkChips = expanded && hasSdkCalls ? (
+    <span className={cn("flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 opacity-70", FLEX)}>
+      {summary.sdkCalls.map((c, i) => (
+        <TurnCallChip key={c.method} call={c} showDot={i > 0} />
+      ))}
+    </span>
+  ) : null;
 
   return (
     <div
@@ -314,16 +329,9 @@ export const TurnBlock = memo(function TurnBlock({
               width numerals keep the line from wobbling as digits change. */}
           <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
             <Layers className="size-3.5 shrink-0" />
-            <span className="break-all tabular-nums">{headerParts.join(" · ") || ""}</span>
+            <span className="truncate whitespace-nowrap tabular-nums">{headerParts.join(" · ") || ""}</span>
           </span>
-          {/* SDK calls — full list, natural word wrap */}
-          {hasSdkCalls ? (
-            <span className={cn("flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 opacity-70", FLEX)}>
-              {summary.sdkCalls.map((c, i) => (
-                <TurnCallChip key={c.method} call={c} showDot={i > 0} />
-              ))}
-            </span>
-          ) : null}
+          {sdkChips}
         </span>
       </button>
       {/* The collapse wrapper must clip (overflow-clip, not overflow-hidden):

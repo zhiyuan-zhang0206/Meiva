@@ -57,6 +57,12 @@ and the matching GitHub Releases.
   visibility) remain, unused by any pixel comparison.
 
 ### Fixed
+- The gap between timeline cards no longer depends on which kinds they are: the
+  timestamp and Copy took a line under the card, and only the kinds that stamp a
+  timestamp or offer Copy got that line, so two plain cards sat 12px apart and two
+  stamped ones 28px. The footer now floats in the card's own bottom-right corner
+  and takes no height, the stamp drops its brackets and renders one step smaller,
+  and Copy's icon shrinks with it (user report 2026-10-21).
 - Collapsing or expanding the sidebar no longer tears the conversation down and
   rebuilds it. The columns group used to be swapped for a bare div, so the main
   subtree unmounted on every toggle: the list's height flashed and the reader's

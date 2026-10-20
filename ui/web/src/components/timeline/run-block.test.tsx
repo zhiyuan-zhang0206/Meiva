@@ -374,27 +374,35 @@ describe("findClosestStuckHeaderId", () => {
 });
 
 describe("TurnBlock component", () => {
-  it("renders aggregate SDK chips in namespace and count order", () => {
+  it("renders aggregate SDK chips in namespace and count order once expanded", () => {
+    const summary = {
+      ...sampleSummary,
+      sdkCalls: [
+        { method: "agents.spawn", count: 1 },
+        { method: "files.read", count: 3 },
+        { method: "files.write", count: 2 },
+        { method: "shell.run", count: 10 },
+      ],
+    };
     render(
-      <TurnBlock
-        id="turn-1"
-        memberIds={["1.0", "1.1"]}
-        summary={{
-          ...sampleSummary,
-          sdkCalls: [
-            { method: "agents.spawn", count: 1 },
-            { method: "files.read", count: 3 },
-            { method: "files.write", count: 2 },
-            { method: "shell.run", count: 10 },
-          ],
-        }}
-        expanded={false}
-        onToggle={vi.fn()}
-      >
+      <TurnBlock id="turn-1" memberIds={["1.0", "1.1"]} summary={summary} expanded={false} onToggle={vi.fn()}>
         <div>detail rows</div>
       </TurnBlock>,
     );
-    const methods = Array.from(screen.getByTestId("turn-toggle")
+    // meiva:note
+    // The collapsed strip is one fixed-height line, so the chips belong to the
+    // expanded view; a collapsed block that carried them stood up to 38px taller
+    // than one without, which is what made the gap between message cards uneven.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+    expect(screen.getByTestId("turn-toggle").querySelectorAll('span[class="text-foreground/80"]').length).toBe(0);
+
+    render(
+      <TurnBlock id="turn-1" memberIds={["1.0", "1.1"]} summary={summary} expanded onToggle={vi.fn()}>
+        <div>detail rows</div>
+      </TurnBlock>,
+    );
+    const toggles = screen.getAllByTestId("turn-toggle");
+    const methods = Array.from(toggles[toggles.length - 1]
       .querySelectorAll('span[class="text-foreground/80"]'))
       .map((chip) => chip.textContent);
     expect(methods).toEqual(["agents.spawn", "files.read", "files.write", "shell.run"]);
@@ -486,7 +494,7 @@ describe("TurnBlock component", () => {
   it("skips re-rendering when a regroup rebuilds equal member ids and summary", () => {
     const onToggle = vi.fn();
     const block = (memberIds: string[], summary: typeof sampleSummary) => (
-      <TurnBlock id="turn-1" memberIds={memberIds} summary={summary} expanded={false} onToggle={onToggle} />
+      <TurnBlock id="turn-1" memberIds={memberIds} summary={summary} expanded onToggle={onToggle} />
     );
     callBadgeRenders.count = 0;
     const { rerender } = render(block(["1.0", "1.1"], sampleSummary));

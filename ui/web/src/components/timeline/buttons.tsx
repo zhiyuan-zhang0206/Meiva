@@ -12,7 +12,7 @@ import { cn } from "@/lib/format/utils";
 import { copyToClipboard } from "@/lib/format/clipboard";
 
 const ACTION_BTN_CLS = cn(
-  "inline-flex items-center p-1 rounded",
+  "inline-flex items-center p-0.5 rounded",
   "text-muted-foreground/60 hover:text-foreground transition-colors",
   "hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed",
 );
@@ -53,7 +53,7 @@ export function CopyButton({ text }: { text: string }) {
       className={cn(ACTION_BTN_CLS, copied && "text-emerald-500")}
       aria-label={copied ? t("copied") : t("copyMessage")}
     >
-      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
     </button>
   );
 }
