@@ -29,9 +29,9 @@ Meiva should have proper authentication like any normal web app:
 ## Starting point (superseded)
 
 ```
-Browser ──plain HTTP──▶ :8000 (gateway, unauthenticated)
+Browser ──plain HTTP──▶ :8000 (gateway, no authentication)
 Browser ──plain HTTP──▶ :3000 (frontend, Next.js)
-SDK/agents ──plain HTTP──▶ :8000 (gateway, unauthenticated)
+SDK/agents ──plain HTTP──▶ :8000 (gateway, no authentication)
 ```
 
 No authentication on any endpoint — the private network was the trust boundary. The
@@ -46,9 +46,9 @@ automatically.
 
 Two things changed versus the original Phase-1 draft:
 
-- **The empty-secret posture is explicit.** With a secret, authentication fails
-  closed; without one, a single-box gateway serves unauthenticated and binds
-  loopback only. `auth_middleware_enabled=false` remains a separate e2e/test knob.
+- **There is no secret-less posture.** Authentication fails closed and a blank
+  secret admits nothing; the one opt-out is the explicit `human_auth =
+  trusted_network` mode for human callers on a trusted private network.
 - **The bypass list is fixed**, not route-prefix based: `/api/health`,
   `/api/auth/{login,check,logout}`, and `/api/alerts` (which applies its own token
   or loopback policy).

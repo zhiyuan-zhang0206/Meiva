@@ -1,15 +1,3 @@
-"""Contract tests for cluster-secret + cookie session auth.
-
-The auth middleware gates every API route except /api/health, /api/auth/login,
-and /api/auth/check. Two auth methods are accepted:
-1. Session cookie (``meiva_session``) — for browser users.
-2. ``Authorization: Bearer <secret>`` — for SDK / agent callers.
-
-An empty cluster secret is the no-auth posture: the middleware passes every
-request through and the app starts without one (single-box clusters birth
-secret-less by default; the gateway then binds loopback only).
-"""
-
 from __future__ import annotations
 
 import base64
