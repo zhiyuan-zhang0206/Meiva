@@ -154,7 +154,12 @@ class Cluster:
     async def woken_by_a_new_host(self, agent_id: int) -> bool:
         return agent_id in await scan_rows(self.pool, self.machine.name())
 
-    async def host(self, *, drain_s: float = 30) -> Host:
+    # meiva:note
+    # `wakes` binds the host's scheduler as the daemon does, so a turn a restart resumed is
+    # started by that wake. Without it the host runs only the turns a test starts directly,
+    # and the resumed turn waits for the next host's scan. No dispatcher or scan loop runs in
+    # this cluster either way.
+    async def host(self, *, drain_s: float = 30, wakes: bool = False) -> Host:
         checkpointer = await build_checkpointer(self.pool, read_checkpoint_interval=lambda: 1)
         host = AgentHost(
             pool=self.pool,
@@ -175,6 +180,8 @@ class Cluster:
             ),
         )
         scheduler = TurnScheduler(host.run_turn)
+        if wakes:
+            host.bind_wake(scheduler.wake)
         graceful = GracefulExit(
             turns=scheduler,
             progress=host.turn_progress,

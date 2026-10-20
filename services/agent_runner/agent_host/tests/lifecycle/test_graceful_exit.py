@@ -42,7 +42,7 @@ async def _in_flight_turn(
     cluster: Cluster, *, drain_s: float, steps: list[Step] | None = None
 ) -> tuple[int, Script, Host]:
     agent_id, script = cluster.spawn(chat="hello", steps=steps)
-    served = await cluster.host(drain_s=drain_s)
+    served = await cluster.host(drain_s=drain_s, wakes=True)
     served.scheduler.wake(agent_id)
     await asyncio.wait_for(script.entered.wait(), 30)
     return agent_id, script, served

@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from functools import partial
 from uuid import UUID, uuid4
@@ -153,6 +153,7 @@ class AgentHost:
         )  # one optional interrupt peek on the control pool at a time
         self._machine_identity = machine
         self._machine = machine.name()
+        self._wake: Callable[[int], object] | None = None
         self._owner = uuid4()
         self._runtimes: OrderedDict[int, AgentRuntime] = OrderedDict()
         # meiva:note
@@ -483,6 +484,19 @@ class AgentHost:
         """Use the scheduling owner's durable work/maintenance scan."""
         return await scan_candidates(self._control_pool, self._machine)
 
+    # meiva:note
+    # The scheduler that runs this host's turns takes `run_turn`, so the host cannot take the
+    # scheduler at construction: the daemon binds its `wake` once, right after building it.
+    # A host without one (a test, a tool) leaves a resumed turn to the pending scan.
+    def bind_wake(self, wake: Callable[[int], object]) -> None:
+        if self._wake is not None:
+            raise RuntimeError("this host already has a wake bound")
+        self._wake = wake
+
+    def _wake_resumed(self, agent_id: int) -> None:
+        if self._wake is not None:
+            self._wake(agent_id)
+
     def drop_agent(self, agent_id: int) -> None:
         """Forget an agent's cached runtime — the hosted equivalent of the
         fresh-process half of `meiva.self.restart()`. The checkpointer thread, the
@@ -608,6 +622,7 @@ class AgentHost:
                         PendingWorkResult(prepared),
                         self.drop_agent,
                         kill_terminating_agent_shells,
+                        self._wake_resumed,
                         db=self._db,
                         bus=self._bus,
                         relays=self.relays,
