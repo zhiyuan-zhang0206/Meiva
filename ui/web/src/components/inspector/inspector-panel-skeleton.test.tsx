@@ -22,12 +22,14 @@ describe("InspectorPanelSkeleton", () => {
     isLargeMock.mockReturnValue(true);
   });
 
-  it("renders the skeleton header, live sections skeleton, and windowed sections skeleton on desktop", () => {
+  it("mirrors the real panel's sections and draws no header on desktop", () => {
     const { container } = render(<InspectorPanelSkeleton />);
 
     const aside = screen.getByTestId("inspector-panel-skeleton");
     expect(aside).toBeTruthy();
-    expect(screen.getByText("Inspector")).toBeTruthy();
+    expect(screen.queryByText("Inspector")).toBeNull();
+    expect(screen.getByLabelText("Page loading")).toBeTruthy();
+    expect(screen.getByLabelText("Context loading")).toBeTruthy();
     expect(screen.getByLabelText("Persistent shells loading")).toBeTruthy();
     expect(screen.getByLabelText("Liveness loading")).toBeTruthy();
     expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
@@ -57,11 +59,12 @@ describe("Individual Skeletons", () => {
     expect(rows.length).toBe(3);
   });
 
-  it("LiveSectionsSkeleton renders shells, liveness, and config overlay", () => {
+  it("LiveSectionsSkeleton renders shells, liveness, config overlay and context", () => {
     render(<LiveSectionsSkeleton />);
     expect(screen.getByLabelText("Persistent shells loading")).toBeTruthy();
     expect(screen.getByLabelText("Liveness loading")).toBeTruthy();
     expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
+    expect(screen.getByLabelText("Context loading")).toBeTruthy();
   });
 
   it("WindowedSectionsSkeleton renders the merged cost and activity section", () => {
