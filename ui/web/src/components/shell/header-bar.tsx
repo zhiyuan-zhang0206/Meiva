@@ -17,6 +17,12 @@ interface Props {
   onOpenSidebar: () => void;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+  // meiva:note
+  // A control that belongs to the viewport's right edge rather than to the
+  // centred conversation column: the home page passes the reopen control of a
+  // collapsed right panel here (user 2026-10-20).
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  pinnedRight?: ReactNode;
   children?: ReactNode;
   /** Timeline column cap — the bar floats above the timeline surface and
    *  its inner content aligns with the conversation column (user ruling
@@ -24,7 +30,7 @@ interface Props {
   maxWidthCss?: string;
 }
 
-export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSidebar, children, maxWidthCss }: Props) {
+export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSidebar, pinnedRight, children, maxWidthCss }: Props) {
   const t = useTranslations("nav");
   const sidebarT = useTranslations("sidebar");
 
@@ -59,6 +65,17 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
         >
           <PanelLeft className="size-4" />
         </button>
+      ) : null}
+      {pinnedRight ? (
+        // meiva:note
+        // Pinned to the bar, not to the conversation column: the column is capped
+        // and centred, so an in-flow control rode to the middle of the viewport
+        // and read as part of the timeline (same rule as the rail's restore
+        // button, user 2026-10-20).
+        // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+        <div className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 items-center">
+          {pinnedRight}
+        </div>
       ) : null}
       <div
         style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}

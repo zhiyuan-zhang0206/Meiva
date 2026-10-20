@@ -8,6 +8,15 @@ and the matching GitHub Releases.
 ## [Unreleased]
 
 ### Changed
+- The create popover is one table instead of three dropdowns: harness, then the models that
+  harness runs, then the efforts that model publishes — each column narrows the next and the
+  config the last spawn used is marked on entry. A click is only a pick until a spawn is issued,
+  so closing the form without spawning leaves `behavior.spawn_*` untouched, and the model row
+  keeps the input price visible with every rate and the vendor TPS record on hover
+  ([creation availability](ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md)).
+  A collapsed right panel's reopen control is pinned to the header bar's right edge instead of
+  riding to the middle of a wide viewport with the centred conversation column
+  ([home shell chrome](ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md)).
 - The gateway `/mcp` endpoint is a thin forwarder onto the HTTP API (user ruling 2026-10-20):
   it authenticates like any API route (cluster bearer, session or `trusted_network`), each
   tool is one in-process request to its API route, and an API error becomes the tool error.

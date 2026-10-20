@@ -14,6 +14,7 @@ import type { ModelsResponse } from "@/lib/contracts/types";
 import { providerLabel } from "@/lib/contracts/models";
 import { formatModelPrice } from "@/lib/format/format-price";
 import { cn } from "@/lib/format/utils";
+import { FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 import {
   harnessLabel,
   type Harness,
@@ -51,13 +52,42 @@ export function SpawnTable({
   onEffort,
 }: SpawnTableProps) {
   const t = useTranslations("spawn");
+  // meiva:note
+  // The model cell keeps the input rate visible, because comparing models is what
+  // the column is for; everything the old full-width row carried - every rate
+  // behind that price, and the vendor TPS record with its source - is one hover
+  // away. A 5rem column cannot hold four prices (user 2026-10-20).
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  function detailFor(candidate: string): string | undefined {
+    const info = models?.[candidate];
+    if (info === undefined) return undefined;
+    const price = info.pricing;
+    const tps = info.reference_tps;
+    return [
+      ...(price
+        ? [
+            t("priceBreakdown"),
+            t("pricingConditions"),
+            ...(price.cache_write_5m != null
+              ? [t("cacheWritePrice", { duration: "5m", price: formatModelPrice(price.cache_write_5m) })]
+              : []),
+            ...(price.cache_write_1h != null
+              ? [t("cacheWritePrice", { duration: "1h", price: formatModelPrice(price.cache_write_1h) })]
+              : []),
+          ]
+        : []),
+      tps
+        ? `${t("referenceTps")}: ${tps.display} — ${tps.note} (${tps.source_url} · ${tps.source_checked_at})`
+        : t("referenceTpsUnavailable"),
+    ].join("\n");
+  }
   return (
     <div className={COLUMNS} data-testid="spawn-table">
       <div className="border-b border-border px-2 py-1.5 font-medium text-muted-foreground">{t("harness")}</div>
       <div className="border-b border-border px-2 py-1.5 font-medium text-muted-foreground">{t("model")}</div>
       <div className="border-b border-border px-2 py-1.5 font-medium text-muted-foreground">{t("reasoningEffort")}</div>
 
-      <ul aria-label={t("harness")} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1">
+      <ul aria-label={t("harness")} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1 pb-2">
         {harnessRows.map((row) => {
           const selected = row.harness === harness;
           return (
@@ -77,7 +107,7 @@ export function SpawnTable({
         })}
       </ul>
 
-      <ul aria-label={t("model")} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1">
+      <ul aria-label={t("model")} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1 pb-2">
         {modelGroups.map(([provider, providerModels]) => (
           <li key={provider}>
             <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 first:pt-1">
@@ -93,15 +123,16 @@ export function SpawnTable({
                       type="button"
                       aria-pressed={selected}
                       onClick={() => onModel(candidate)}
+                      title={detailFor(candidate)}
                       className={cn(CELL, selected ? SELECTED : IDLE)}
                     >
-                      <span className="truncate" title={candidate}>{candidate}</span>
+                      <span className={cn(MIN_W_0, FLEX_1, "truncate")}>{candidate}</span>
                       {price !== undefined && (
-                        <span className="ml-auto shrink-0 pl-2 text-[10px] tabular-nums text-muted-foreground">
+                        <span className="shrink-0 pl-2 text-[10px] tabular-nums text-muted-foreground">
                           {formatModelPrice(price)}
                         </span>
                       )}
-                      {selected && <Check className="ml-auto size-3 shrink-0" />}
+                      {selected && <Check className="ml-1 size-3 shrink-0" />}
                     </button>
                   </li>
                 );
@@ -114,7 +145,7 @@ export function SpawnTable({
         )}
       </ul>
 
-      <ul aria-label={t("reasoningEffort")} className="max-h-[300px] overflow-y-auto py-1">
+      <ul aria-label={t("reasoningEffort")} className="max-h-[300px] overflow-y-auto py-1 pb-2">
         {efforts.map((level) => {
           const selected = level === effort;
           return (

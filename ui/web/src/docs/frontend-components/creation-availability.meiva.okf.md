@@ -17,22 +17,37 @@ runner, the button sends directly; with multiple eligible runners it opens a
 popover. The disabled trigger's tooltip sits on a wrapper so it still appears
 when the button itself cannot receive pointer events.
 
-Spawn model and reasoning-effort selections are DB-backed
-`behavior.spawn_*` settings. The effort select appears only when a resolved
-model's `/api/models` entry publishes a `reasoning_effort_options` ladder. Every
-spawnable catalog model publishes a concrete `reasoning_effort_default`; the
-control shows the ladder's concrete levels with that default selected, without
-a synthetic default option. Stored effort is re-derived against the current
-model's ladder, so an unavailable level is never sent. An explicit model pick
-is always sent as spawn config, even when it equals the cluster default.
+Creation is one table, not three dropdowns side by side: Harness, then the
+models that harness runs, then the efforts that model publishes. Each column
+narrows the next and marks exactly one row selected as soon as the form
+renders, so opening it answers "what will the next agent be born on" before it
+asks anything. The model column keeps only the providers the chosen harness can
+start — the built-in `meiva` runtime keeps every provider — grouped under a
+vendor heading, with hidden and superseded catalog entries excluded. The effort
+column shows the selected model's `reasoning_effort_options` ladder; a model
+that publishes none leaves the column empty rather than offering a synthetic
+default, and the model's concrete `reasoning_effort_default` is the row marked
+when nothing is stored. The column is titled "Effort": the header names the
+quantity, not the mechanism.
 
-The model picker has model name, USD per million input/cache-read/output tokens,
-and vendor reference output TPS columns. Standard and Fast service IDs have
-separate catalog entries and prices. `reference_tps` carries an official source,
-verification date and measurement qualifier shown in the tooltip; absent
-reliable absolute vendor figures display a dash. Relative speed multipliers
-and cluster measurements do not fill this column. The backend also rejects
+The table shows the **last spawn, not the last click**. `behavior.spawn_*`
+holds the config the previous spawn actually used, cascade included; a click
+while the form is open only lays a pick over it, written back when a spawn is
+issued and dropped when the form closes without one. Browsing therefore never
+edits the stored config, and reopening always answers "what did the last agent
+run on". Stored effort is re-derived against the current model's ladder, so an
+unavailable level is never sent; an explicit model pick is always sent as spawn
+config, even when it equals the cluster default. The backend rejects an
 unsupported explicit effort rather than translating it to another grade.
+
+The model row keeps the input rate visible — comparing models at a glance is
+what the column is for — and carries the rest on hover: every rate behind that
+price (input, cache read, output), the declared 5-minute and 1-hour cache-write
+rates, and the vendor reference TPS with its source and check date. Prices are
+USD per million tokens. Standard and Fast service IDs have separate catalog
+entries and prices. Absent reliable absolute vendor figures say so instead of
+showing a blank column; relative speed multipliers and cluster measurements
+never stand in for the vendor figure.
 
 Declared `fast_of` services appear directly after their visible Standard model.
 Families sort by the Standard input price; a service whose Standard model is

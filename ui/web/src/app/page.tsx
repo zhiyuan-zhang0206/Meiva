@@ -414,16 +414,18 @@ function HomeContent({
               else setSidebarCollapsed(!sidebarCollapsed);
             }}
             maxWidthCss={contentColumnMaxWidth}
+            pinnedRight={
+              isLarge && activeId != null && !contextPanelOpen ? (
+                <ContextPanelToggle
+                  open={false}
+                  iconClass="size-4"
+                  onToggle={openContextPanel}
+                />
+              ) : null
+            }
           >
             <AlertsBadge />
             {contextAvailable && <button onClick={openContext} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent">{contextText("openContext")}</button>}
-            {isLarge && activeId != null && !contextPanelOpen ? (
-              <ContextPanelToggle
-                open={false}
-                iconClass="size-4"
-                onToggle={openContextPanel}
-              />
-            ) : null}
           </HeaderBar>
           <div className="relative z-20 bg-background">
             <PendingStrip items={visiblePendingMessages} maxWidthCss={composerMaxWidth} />
