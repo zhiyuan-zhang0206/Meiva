@@ -64,6 +64,14 @@ A worktree is a checkout, not a deployment: it owns no cluster. Use its own real
 `.venv/bin/meiva` directly; the host's bare `meiva` runs the cluster `$MEIVA_HOME` names.
 Package acquisition and Git hooks are separate from starting a cluster.
 
+A symlinked `.venv` does not fail loudly. Pyright follows the environment's
+editable install back to the checkout that owns it, so a symbol the branch adds
+locally reads as `"<Name>" is unknown import symbol` and its arguments as
+partially unknown — a pre-push rejection naming the branch's own new code while
+`grep` finds the symbol and `.venv/bin/python -c 'import …'` imports it. The
+environment is the stale one, not the code; `uv sync --frozen` builds the
+worktree its own in seconds.
+
 `scripts/setup-worktree.sh <task>` is the one command that makes a worktree. It
 fetches `origin/main`, adds `.worktrees/<task>` on branch `meiva-<task>` (`--branch`
 and `--base` override), builds the worktree's own real `.venv`, runs the locked

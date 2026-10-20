@@ -1,33 +1,24 @@
 "use client";
 
 import {
-  ArrowUpDown,
-  Circle,
-  CircleDot,
-  Eye,
-  EyeOff,
-  ListTree,
   Loader2,
 } from "lucide-react";
-import * as Popover from "@radix-ui/react-popover";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 
 import { AgentRow as AgentRowItem } from "@/components/agents/agent-row";
+import { SpawnPopover } from "./spawn-popover";
 import { AgentArchive } from "./archive";
-import { SpawnButton } from "@/components/agents/spawn-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { buildAgentTree, type AgentNode } from "@/lib/agents/agent-tree";
-import { SORT_DEFAULT_DIR, useSidebarSort, type FlatSortKey, type SidebarSort } from "@/lib/agents/sidebar";
+import { useSidebarSort, type FlatSortKey, type SidebarSort } from "@/lib/agents/sidebar";
 import { useStore } from "@/lib/state/store";
 import type { AgentRow } from "@/lib/contracts/types";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { cn } from "@/lib/format/utils";
 
 import type { InnerProps } from "./types";
-import { fleetHref } from "./links";
-import { FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { FLEX, FLEX_1, MIN_H_0 } from "@/lib/layout/layout";
 
 // ── Expanded sidebar body ──
 
@@ -57,12 +48,9 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
   const t = useTranslations("sidebar");
   const {
     agents,
-    activeId,
     pendingSpawnCount,
     showTerminated,
-    onToggleTerminated,
     viewMode,
-    onToggleViewMode,
     onSpawn,
     isLoading,
   } = props;
@@ -70,11 +58,10 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
   // searchQuery (store) drives the list filter below; the search INPUT itself
   // lives in the floating SearchOverlay (#723), not inline in the sidebar.
   const searchQuery = useStore((s) => s.searchQuery);
-  const { sort, setSort } = useSidebarSort();
+  const { sort } = useSidebarSort();
   // Quiet defaults (RCS): both are opt-in (`=== true`, default off).
-  const { settings: userSettings, setSetting } = useUserSettings();
+  const { settings: userSettings } = useUserSettings();
   const showAgentStatus = userSettings["display.show_agent_status"] === true;
-  const notifyAwaitingReply = userSettings["notification.awaiting_reply"] === true;
 
 
   const visibleAgents = agents;
@@ -100,150 +87,9 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
     [agents, sort, props.ancestors],
   );
 
-  const waiting = agents.reduce((n, a) => n + a.awaiting_response_count, 0);
 
   return (
     <>
-      {/* Spawn bar — min-w-0 lets SpawnButton's own selects shrink/wrap
-          instead of pushing this row wider than the sidebar. */}
-      <div className={cn("items-center gap-2 border-b border-border px-3 py-2", FLEX, MIN_W_0)}>
-        <SpawnButton variant="sm" onSpawn={onSpawn} />
-      </div>
-
-      {/* 3. Toolbar: waiting indicator + view mode + status toggle + terminated toggle + sort.
-          flex-wrap so a narrow sidebar wraps controls onto a second line
-          instead of overflowing horizontally (none of these shrink). */}
-      <div className={cn("flex-wrap items-center gap-1.5 px-3 py-1.5 border-b border-border text-[11px] text-muted-foreground", FLEX)}>
-        {/* X waiting on you — a jumping count is a dynamic signal; only when
-            awaiting-reply notifications are opted in. */}
-        {notifyAwaitingReply && waiting > 0 && (
-          <Link
-            href={fleetHref(activeId)}
-            className={cn("items-center gap-1 shrink-0 hover:text-foreground transition-colors", FLEX)}
-          >
-            <span className="size-1.5 rounded-full bg-destructive" />
-            <span>{waiting}</span>
-          </Link>
-        )}
-
-        {/* View mode toggle */}
-        <button
-          onClick={onToggleViewMode}
-          className={cn(
-            "items-center gap-1 px-1.5 py-0.5 rounded hover:bg-sidebar-accent/40 transition-colors shrink-0",
-            "hover:text-foreground",
-            FLEX
-          )}
-          aria-label={viewMode === "tree" ? t("switchFlat") : t("switchTree")}
-        >
-          <ListTree className="size-3.5" />
-          <span>{viewMode === "tree" ? t("tree") : t("flat")}</span>
-        </button>
-
-        {/* Agent status quick toggle — reveals the per-row status colors
-            (display.show_agent_status, default off: quiet). */}
-        <button
-          onClick={() => setSetting("display.show_agent_status", !showAgentStatus)}
-          aria-label={showAgentStatus ? t("hideAgentStatus") : t("showAgentStatus")}
-          aria-pressed={showAgentStatus}
-          className={cn(
-            "items-center gap-1 px-1.5 py-0.5 rounded hover:bg-sidebar-accent/40 transition-colors shrink-0",
-            showAgentStatus && "text-foreground bg-sidebar-accent",
-            "hover:text-foreground",
-            FLEX
-          )}
-        >
-          {showAgentStatus ? (
-            <CircleDot className="size-3.5 shrink-0" />
-          ) : (
-            <Circle className="size-3.5 shrink-0" />
-          )}
-          <span>{t("status")}</span>
-        </button>
-
-        {/* History is reachable without fetching it or counting it first. */}
-        {(
-          <button
-            onClick={onToggleTerminated}
-            aria-label={showTerminated ? t("hideTerminatedAgents") : t("showTerminatedAgents")}
-            aria-pressed={showTerminated}
-            className={cn(
-              "items-center gap-1 px-1.5 py-0.5 rounded hover:bg-sidebar-accent/40 transition-colors shrink-0",
-              showTerminated && "text-foreground bg-sidebar-accent",
-              "hover:text-foreground",
-              FLEX
-            )}
-          >
-            {showTerminated ? (
-              <EyeOff className="size-3.5 shrink-0" />
-            ) : (
-              <Eye className="size-3.5 shrink-0" />
-            )}
-            <span>{showTerminated ? t("hideArchive") : t("showTerminated")}</span>
-          </button>
-        )}
-
-        {/* Spacer to push sort to the right */}
-        <span className={cn(FLEX_1)} />
-
-        {/* Sort controls — a single icon button so a narrow sidebar does not
-            wrap the row. Clicking the icon opens a small popover with the
-            three keys; clicking the active key again flips the direction. */}
-        <Popover.Root>
-          <Popover.Trigger asChild>
-            <button
-              type="button"
-              aria-label={t("sortByKey", { key: sort.key, dir: sort.dir === "asc" ? t("ascending") : t("descending") })}
-              className="p-1 rounded hover:bg-sidebar-accent/40 hover:text-foreground shrink-0 transition-colors"
-            >
-              <ArrowUpDown className="size-3.5" />
-            </button>
-          </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content
-              sideOffset={6}
-              align="end"
-              className="z-50 min-w-[150px] rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
-            >
-              <div className="px-3 py-2 border-b border-border text-xs font-medium text-muted-foreground">
-                {t("sortBy")}
-              </div>
-              <ul className="py-1">
-                {(["id", "last_active", "status"] as FlatSortKey[]).map((key) => {
-                  const active = sort.key === key;
-                  const label = key === "last_active" ? "active" : key;
-                  return (
-                    <li key={key}>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSort(
-                            active
-                              ? { key, dir: sort.dir === "asc" ? "desc" : "asc" }
-                              : { key, dir: SORT_DEFAULT_DIR[key] },
-                          )
-                        }
-                        aria-pressed={active}
-                        className={cn(
-                          "w-full text-left px-3 py-1.5 text-xs hover:bg-sidebar-accent/60 items-center justify-between gap-3",
-                          active && "text-foreground",
-                          FLEX
-                        )}
-                      >
-                        <span>{label}</span>
-                        {active ? (
-                          <span aria-hidden>{sort.dir === "asc" ? "↑" : "↓"}</span>
-                        ) : null}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
-      </div>
-
       {/* ── Agent list ── */}
       <ScrollArea className={cn(FLEX_1, MIN_H_0)}>
         {rosterPending ? (
@@ -252,8 +98,19 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
             {t("loadingAgents")}
           </div>
         ) : isEmpty ? (
-          <div className="px-4 py-3 text-xs text-muted-foreground">
-            {searchQuery ? t("noResults") : ""}
+          // meiva:note
+          // Zero agents is the one moment the create action needs words: a bare
+          // + does not explain itself to someone who has never spawned (the
+          // header keeps the icon for every other visit).
+          // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+          <div className="px-4 py-4 text-xs text-muted-foreground">
+            {searchQuery ? t("noResults") : null}
+            {!searchQuery && (
+              <div className="space-y-2">
+                <p>{t("emptyAgents")}</p>
+                <SpawnPopover variant="cta" onSpawn={onSpawn} />
+              </div>
+            )}
           </div>
         ) : viewMode === "flat" ? (
           <ul className="py-1">

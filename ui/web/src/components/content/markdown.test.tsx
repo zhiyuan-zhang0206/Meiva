@@ -370,6 +370,31 @@ describe("math through the lazy KaTeX surface", () => {
     expect(container.textContent).toContain("\u6839\u6761\u4ef6 $ \u5e95\u4e0b\u7684");
   });
 
+  it("turns a $$ pair glued to the line above into display math (2026-10-20 phone report)", async () => {
+    // meiva:note
+    // The reported shape: a prose line, then `$$` on its own line with no blank
+    // line between. remark-math parses that pair as *inline* math, so two
+    // formulas landed mid-paragraph and wrapped inside a 390px column.
+    // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+    const content = [
+      "\u6211\u4eec\u5b9e\u73b0\u4e86\u9010\u795e\u7ecf\u5143\u81ea\u9002\u5e94\u4e0a\u9650\uff1a",
+      "$$m_{0,l,j} = \\text{clip}\\!\\left(q_{35}(u_{l,j} > 0),\\; 0.05\\right), \\qquad \\tau_{e,l,j} = \\frac{m_{0,l,j}}{2}$$",
+      "$$\\phi(u_{l,j}) = \\frac{\\tau_{e,l,j}}{\\tau_{e,l}} \\cdot \\mathbb{I}(u_{l,j} > 0)$$",
+      "- \u5217\u8868\u9879 $x^2$ \u4ecd\u7136\u662f\u884c\u5185\u516c\u5f0f",
+    ].join("\n");
+    const { container } = render(<ChatMarkdown content={content} />);
+
+    await waitFor(() => expect(container.querySelectorAll(".katex").length).toBe(3), { timeout: 5000 });
+    expect(container.querySelectorAll(".katex-display").length).toBe(2);
+    // meiva:note
+    // The prose that preceded the pair stays its own paragraph.
+    // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+    const paragraphs = [...container.querySelectorAll("p")].map((node) => node.textContent);
+    expect(paragraphs.some((text) => text.includes("\u6211\u4eec\u5b9e\u73b0\u4e86\u9010\u795e\u7ecf\u5143\u81ea\u9002\u5e94\u4e0a\u9650"))).toBe(true);
+    expect(paragraphs.some((text) => text.includes("m_{0,l,j}") || text.includes("clip"))).toBe(false);
+    expect(container.querySelector(".katex-error")).toBeNull();
+  });
+
   it("renders inline and display math once the math chunk loads", async () => {
     const { container } = render(<ChatMarkdown content={`inline $x^2$ math
 

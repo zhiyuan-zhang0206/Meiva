@@ -21,5 +21,6 @@
   "harness": "运行时（harness）",
   "harnessStatus": {
     "unavailable": "不可用"
-  }
+  },
+  "newAgent": "新建 agent"
 }

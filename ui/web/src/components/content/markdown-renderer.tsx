@@ -33,7 +33,11 @@ const sanitizeSchema = {
   tagNames: [...(defaultSchema.tagNames ?? []), "figure", "figcaption", "mark"],
   attributes: {
     ...defaultSchema.attributes,
-    code: [...(defaultSchema.attributes?.code ?? []), ["className", "math-inline", "math-display"]],
+    // meiva:note
+    // `language-math` is what lets rehype-katex replace the wrapping <pre> with
+    // its display block; without it a display formula keeps code-block chrome.
+    // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+    code: [...(defaultSchema.attributes?.code ?? []), ["className", "language-math", "math-inline", "math-display"]],
   },
 };
 

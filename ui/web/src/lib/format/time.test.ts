@@ -215,7 +215,10 @@ describe("formatRelative sub-minute bucket", () => {
   it("capitalises 'Just now' only when the value starts its own cell", () => {
     expect(formatRelative(NOW.toISOString(), NOW, { capitalize: true })).toBe("Just now");
     expect(formatRelative(NOW.toISOString(), NOW)).toBe("just now");
-    // Above a minute the wording already starts with a digit, so the flag is a no-op.
+    // meiva:note
+    // Above a minute the wording already starts with a digit, so the flag is a
+    // no-op.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
     expect(formatRelative(new Date(NOW.getTime() - 300_000).toISOString(), NOW, { capitalize: true })).toBe("5m ago");
   });
 
