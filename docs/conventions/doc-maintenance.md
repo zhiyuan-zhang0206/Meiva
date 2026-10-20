@@ -123,6 +123,13 @@ directory holds only documents when the code it describes lives elsewhere
 layer would attach to the nearest ancestor overview (or ultimately the root),
 not to the node it was split from.
 
+That form applies only when the parent is **not already** the overview of the
+directory a child would land in. A package overview such as
+`base/lm/harness/codex/docs/codex.meiva.okf.md` already sits at that directory, so a
+sibling beside it resolves to it as the parent and no `git mv` is involved; creating
+`docs/<stem>/` there instead makes the overview itself misplaced, and lint reports
+`E009` ("this sibling must live at `docs/<stem>/<stem>.meiva.okf.md`").
+
 The **index layer** uses the same documentation placement: the apex is
 `docs/index.meiva.okf.md`, and the cross-domain plugin, skill and MCP concept
 systems live beneath `docs/`. They have no single code directory to own them.
