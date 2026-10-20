@@ -43,8 +43,11 @@ resident depends on where the GPU's memory lives:
   `MemAvailable`, an overflow is a CUDA OOM rather than a machine-level memory
   crisis, and the host budget must **not** include it — adding ~4 GiB of device
   memory to the host peak would under-schedule a job that fits. Declare the
-  host-side peak only; `nvidia-smi`'s `memory.used` and `memory.total` are
-  recorded in the event so the device side can be judged against its own card.
+  host-side peak only; `nvidia-smi`'s per-device `memory.used` and `memory.total`
+  are recorded in the event as `gpu_max_used_mib` and `gpu_total_mib` — the
+  **largest device**, never a sum across devices, because the field answers "does
+  one card hold this job". A job that spreads its memory across cards would need
+  a sum field, which is not added until a host actually does that.
 
 Either way a missing `nvidia-smi` is `null`, never a zero, and device memory
 never enters the formula.

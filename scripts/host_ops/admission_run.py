@@ -223,10 +223,12 @@ def read_psi(path: str = PSI_FILE) -> float | None:
 
 def read_gpu(command: Sequence[str] = NVIDIA_SMI) -> tuple[float, float] | None:
     # meiva:note
-    # (device memory in use, device capacity) in MiB, recorded in the event. On a discrete
-    # GPU this is separate memory: it never enters the host budget (overflowing it is a
-    # CUDA OOM, not a machine-memory crisis), it is judged against the card. None when the
-    # tool is absent, so a CPU-only host reports unknown instead of a fake zero.
+    # (largest per-device used, its capacity) in MiB, recorded in the event as
+    # `gpu_max_used_mib` / `gpu_total_mib` — the largest device, never a sum across devices,
+    # because the field answers "does one card hold this job". On a discrete GPU this is
+    # separate memory: it never enters the host budget (overflowing it is a CUDA OOM, not a
+    # machine-memory crisis), it is judged against the card. None when the tool is absent,
+    # so a CPU-only host reports unknown instead of a fake zero.
     done = subprocess.run(  # noqa: S603
         list(command), capture_output=True, text=True, check=False
     )
@@ -449,7 +451,7 @@ def _announce_gate(
         budget_gib=round(outcome.budget_gib, 2),
         pressure=pressure,
         psi_some_avg10=psi_reader(),
-        gpu_used_mib=gpu[0] if gpu else None,
+        gpu_max_used_mib=gpu[0] if gpu else None,
         gpu_total_mib=gpu[1] if gpu else None,
     )
     return outcome.jobs
