@@ -1,5 +1,6 @@
 import sys
 
+from base.cluster.machine import GatewayAccess
 from base.paths import meiva_home
 from cli.commands.management.schedules_verify import cmd_schedules_verify
 from cli.database import (
@@ -10,6 +11,10 @@ from cli.database import (
 from cli.database.runtime import CommandRuntime
 
 
+def _no_gateway() -> GatewayAccess:
+    raise AssertionError("the gateway must not be dialed")
+
+
 def _check_rows(rows_file: str) -> None:
     command = CommandRuntime.create()
     database = operator_database_factory(
@@ -18,7 +23,11 @@ def _check_rows(rows_file: str) -> None:
     )
     producer = operator_event_pipeline(database, machine=command.machine, home=meiva_home())
     try:
-        sys.exit(cmd_schedules_verify(notify=False, rows_file=rows_file, producer=producer))
+        sys.exit(
+            cmd_schedules_verify(
+                notify=False, rows_file=rows_file, producer=producer, access=_no_gateway
+            )
+        )
     finally:
         producer.close()
 

@@ -6,11 +6,17 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster.machine import GatewayAccess
 from base.telemetry import EventPipeline
 from cli.commands.management import schedules_verify as _verify
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
+
+
+def _no_gateway() -> GatewayAccess:
+    raise AssertionError("the gateway must not be dialed")
+
 
 _OLD_HIERARCHY = """\
 import time
@@ -107,7 +113,12 @@ def test_check_file_prints_the_call_signature_verdict(
 ) -> None:
     stale = tmp_path / "stale.py"
     stale.write_text(_OLD_HIERARCHY, encoding="utf-8")
-    assert _verify.cmd_schedules_verify(check_file=str(stale), producer=operator_pipeline) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(stale), producer=operator_pipeline, access=_no_gateway
+        )
+        == 1
+    )
     assert "CHECK-RED missing=call-signature:L16 fire_slot_once()" in capsys.readouterr().out
 
 
@@ -128,6 +139,7 @@ def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
             notify=False,
             ports=ports,
             producer=operator_pipeline,
+            access=_no_gateway,
         )
         == 1
     )
@@ -249,5 +261,10 @@ def test_check_file_prints_the_undefined_name_verdict(
 ) -> None:
     stale = tmp_path / "stale.py"
     stale.write_text("from base.config import settings\nroot = base.__file__\n", encoding="utf-8")
-    assert _verify.cmd_schedules_verify(check_file=str(stale), producer=operator_pipeline) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(stale), producer=operator_pipeline, access=_no_gateway
+        )
+        == 1
+    )
     assert "CHECK-RED missing=undefined-name:L2 base" in capsys.readouterr().out
