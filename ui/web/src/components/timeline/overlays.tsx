@@ -76,8 +76,13 @@ export function ColdLoadSpinner({ show }: { show: boolean }) {
   );
 }
 
-// Scroll-to-bottom arrow button — appears whenever the viewport is
-// measured away from the bottom; clicking smooth-scrolls back.
+// meiva:note
+// Scroll-to-bottom button: visible whenever the viewport is measured away from
+// the bottom, and clicking it smooth-scrolls back. While a refresh is in flight
+// it rests as the same ring the pull-to-load gesture uses; hovering (or
+// focusing it from the keyboard) swaps in the arrow, because a ring alone does
+// not read as something to click (user report 2026-10-19).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
 export function ScrollToBottomButton({
   atBottom,
   refreshing = false,
@@ -103,7 +108,7 @@ export function ScrollToBottomButton({
         // a known repaint-cost / blank-tile aggravator during streaming.
         "bg-background border border-border",
         "shadow-md hover:shadow-lg",
-        "items-center justify-center",
+        "group items-center justify-center",
         "text-muted-foreground hover:text-foreground",
         "transition-all duration-300 ease-out",
         atBottom && !refreshing
@@ -115,10 +120,11 @@ export function ScrollToBottomButton({
       {refreshing ? (
         <>
           <svg data-testid="latest-loading-ring" viewBox="0 0 36 36" aria-hidden="true"
-            className="absolute inset-0 size-full animate-spin motion-reduce:animate-none pointer-events-none">
+            className="absolute inset-0 size-full animate-spin motion-reduce:animate-none pointer-events-none group-hover:hidden group-focus-visible:hidden">
             <circle cx="18" cy="18" r="16.5" fill="none" stroke="currentColor" strokeWidth="1.5"
               strokeDasharray="38 66" strokeLinecap="round" />
           </svg>
+          <ArrowDown data-testid="scroll-to-bottom-arrow" className="hidden size-4 group-hover:block group-focus-visible:block" />
           <span role="status" className="sr-only">{t("loadingLatest")}</span>
         </>
       ) : (
