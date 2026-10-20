@@ -30,6 +30,7 @@ class CodexConfig:
     approval_decision: str = "accept"
     binary: str = DEFAULT_BINARY
     extra_args: tuple[str, ...] = ()
+    api_key_mode: bool = False
     startup_timeout_seconds: float = 120.0
     turn_timeout_seconds: float = 900.0
     cancel_settle_seconds: float = 5.0
