@@ -109,6 +109,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `heartbeat_backoff_raised` | no-op nudge backoff level raised | noise | level, interval_seconds | — | events | — |
 | `heartbeat_backoff_reset` | nudge backoff reset by real inbound or pause | noise | previous_level, reason | — | events | — |
 | `machine_probe_failed` | agent-runner machine unreachable — one event per failed liveness probe | anomaly | machine, consecutive_failures | — | events | — |
+| `machine_stopped_too_long` | host stopped longer than its maintenance window — one event per liveness pass | anomaly | machine, stopped_for_s | — | events | — |
 | `dangling_tool_pairing_repaired` | dangling tool pairing repaired | anomaly | — | — | events | — |
 | `delta_read_compat` | delta-written checkpoint messages reconstructed for a plain reader (task #3180 transition layer) | noise | — | — | events | — |
 | `sdk_call` | SDK call metering | noise | fn, duration, sample_rate, detail | — | events | — |

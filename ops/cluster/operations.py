@@ -41,7 +41,13 @@ from ops.rpc_schemas import (
 )
 
 
-def cluster_stopping_op(db: Database, machine: str, home: str) -> dict[str, str]:
+def cluster_stopping_op(
+    db: Database,
+    machine: str,
+    home: str,
+    maintenance_for_seconds: int | None = None,
+    maintenance_reason: str | None = None,
+) -> dict[str, str]:
     """Record an intentional shutdown announced by the (machine, home) unit.
 
     `meiva stop` calls this (best-effort) just before tearing the local stack
@@ -51,7 +57,13 @@ def cluster_stopping_op(db: Database, machine: str, home: str) -> dict[str, str]
     clears it. `home` is the stopping unit's $MEIVA_HOME, sent on the wire so a
     co-located peer's caps are not retracted along with this unit's.
     """
-    mark_stopping(db, machine, home)
+    mark_stopping(
+        db,
+        machine,
+        home,
+        maintenance_for_seconds=maintenance_for_seconds,
+        maintenance_reason=maintenance_reason,
+    )
     return {"machine": machine}
 
 

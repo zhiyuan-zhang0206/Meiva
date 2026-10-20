@@ -24,7 +24,6 @@ took over before a first refresh ran).
 
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import tarfile
@@ -61,17 +60,6 @@ _QUEUE_LOCK_TIMEOUT_S = 1.0
 _LOCAL_GIT_TIMEOUT_S = 30.0
 # Fallback check cadence when a channel-backed row resolves no interval.
 _DEFAULT_INTERVAL_S = 86400
-
-_DURATION_RE = re.compile(r"^\s*(\d+)\s*([smhd]?)\s*$")
-_DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-
-
-def parse_duration(text: str) -> int:
-    """Seconds from `30s` / `15m` / `24h` / `7d` (bare number = seconds)."""
-    match = _DURATION_RE.match(text)
-    if match is None:
-        raise ValueError(f"duration {text!r} must look like 30s / 15m / 24h / 7d")
-    return max(1, int(match.group(1)) * _DURATION_UNITS[match.group(2) or "s"])
 
 
 @dataclass(frozen=True)
