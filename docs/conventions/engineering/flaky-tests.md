@@ -285,6 +285,44 @@ its own teardown, and the CI annotation of the counts job lists what it found.
 changed is a runtime property; a static lint only sees an assignment that
 bypasses `monkeypatch`.
 
+## 9. Never assert a count on an unscoped process-global loguru sink
+
+**Rule.** `logger.add(...)` installs a sink for the whole worker process: it
+receives every record of that level from every thread and every module. Select
+the records the operation under test produced — by message, `event`, or
+`record["name"]` — and only then assert a count.
+
+**Signature.** `ValueError: too many values to unpack (expected 1)` from
+`(report,) = errors`, or `assert len(records) == 1` failing with a record nobody
+expected, in a shard where the worker is busy; the same test passes alone. The
+stray record usually comes from a background thread: telemetry loss reporting, a
+worker's own failure path, a shutdown hook.
+
+**Evidence.** 2026-10-20, PR #6502's Trunk run, backend shard 8/8: `meiva/tests/
+skills/test_skills_attribution.py::test_a_failed_write_is_reported_and_does_not_fail_the_read`
+unpacked two ERROR records — its own `skill_invoked could not be recorded`
+report, plus `base.telemetry.delivery.loss: Telemetry queue emitter full: lost 1
+event(s)` produced by the very emit the test provokes (the emitter's queue
+overflows under a loaded shard). The same window produced this in four other
+files that asserted an exact count or an empty list on a global sink
+(`cli/commands/lifecycle/tests/test_root_driver.py`,
+`services/backup/walg/tests/test_startup.py`,
+`base/agents/sdk/tests/test_call_policy.py`).
+
+**Correct form.** Keep the semantic ("exactly one report for this event") and
+narrow the selection:
+
+```python
+(report,) = [m for m in captured if "skill_invoked could not be recorded" in m]
+```
+
+When "nothing was logged" is the assertion, scope it to the module that would
+log: `message.record["name"] == "services.backup.walg.startup"`.
+
+**Lintability — not lintable (operational).** A lint could flag `logger.add(`
+in a test followed by an exact-count assertion, but which selection makes the
+count meaningful is semantic.
+
 ## Historical appendix: CI ruling adopted 2026-09-01 21:01
 
 **Provenance.** User ruling of 2026-09-01 21:01, adopted in full (items A-E).

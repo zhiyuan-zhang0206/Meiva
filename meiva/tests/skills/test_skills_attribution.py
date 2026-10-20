@@ -330,8 +330,8 @@ def test_a_failed_write_is_reported_and_does_not_fail_the_read(
 
     monkeypatch.setattr(audit_events, "record_audit_standalone", _boom)
 
-    errors: list[str] = []
-    sink = logger.add(lambda m: errors.append(str(m)), level="ERROR")
+    captured: list[str] = []
+    sink = logger.add(lambda m: captured.append(str(m)), level="ERROR")
     try:
         body = meiva.skills.alpha.__doc__
         assert body is not None
@@ -339,6 +339,10 @@ def test_a_failed_write_is_reported_and_does_not_fail_the_read(
     finally:
         logger.remove(sink)
 
-    (report,) = errors
+    # meiva:note
+    # loguru's sink is process-wide, so a concurrent producer (a telemetry queue
+    # full report, a background worker) lands here too; assert this event's own
+    # report exactly once rather than every ERROR the worker happened to emit.
+    (report,) = [m for m in captured if "skill_invoked could not be recorded" in m]
     assert "skill_invoked could not be recorded" in report
     assert "RuntimeError: database down" in report
