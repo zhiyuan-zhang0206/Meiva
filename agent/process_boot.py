@@ -1,4 +1,5 @@
 import os
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -8,7 +9,7 @@ from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.log import logger
-from base.paths import workspace_dir
+from base.paths import exec_run_dir, workspace_dir
 from meiva.sdk_surface import sdk_disable
 
 
@@ -42,6 +43,23 @@ def apply_per_agent_eval_isolation(*, default_reader: Callable[[str, str], Any])
 
 def _isolated_memory_search(_query: str, _k: int = 5) -> list[Any]:
     return []
+
+
+# meiva:note
+# Empty `<home>/run/exec` of every agent subdirectory and leftover file.
+#
+# Only an agent host that holds its instance lock calls this, before it serves:
+# every exec child of the previous host has killed its own process group by then,
+# so nothing in the tree belongs to a live run.
+def clear_exec_run_dir(home: Path) -> None:
+    exec_dir = exec_run_dir(home)
+    if not exec_dir.is_dir():
+        return
+    for entry in exec_dir.iterdir():
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
 
 
 def init_process_scope(*, machine: MachineIdentity, home: Path) -> None:

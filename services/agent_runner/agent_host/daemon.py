@@ -1,27 +1,29 @@
-"""Agent-host daemon — the supervised process that runs every local agent's turns.
-
-The service roster owns wake dispatch, turns, health, boot and shutdown through this process.
-
-Usage:
-    .venv/bin/python -m services.agent_runner.agent_host.daemon
-
-## Boot order, and why it is this one
-
-1. **Pidfile**, so a second instance cannot race the first for turns.
-2. **Process-scope boot** — trace export precedes models and skills materialize
-   once. Plugins load once (issue #170); new extensions require a host restart.
-3. **The shared data plane** — workload/control pools, checkpointer and graph.
-   Recover predecessor forces only with durable resource-free exec evidence.
-4. **Healthz**, after boot, so a green probe means the host can take a turn.
-5. **The dispatcher**, after serving is ready, so subscribed wakes are not lost.
-
-Shutdown joins dispatcher siblings and drains turns before collecting the
-installation's sampling refresh. Health and ownership callbacks still unwind;
-joined host pools close even if sampling reports an original failure.
-The host has no agent identity: process logs remain unattributed, agent events
-carry explicit identity, and the SDK entry rejects inherited child identity
-before boot work.
-"""
+# meiva:note
+# Agent-host daemon — the supervised process that runs every local agent's turns.
+#
+# The service roster owns wake dispatch, turns, health, boot and shutdown through this process.
+#
+# Usage:
+#     .venv/bin/python -m services.agent_runner.agent_host.daemon
+#
+# ## Boot order, and why it is this one
+#
+# 1. **Instance lock and pidfile**, so a second instance cannot race the first for
+#    turns. Holding the lock, the host empties `<home>/run/exec`: the exec children
+#    of the previous host have already killed their own process groups.
+# 2. **Process-scope boot** — trace export precedes models and skills materialize
+#    once. Plugins load once (issue #170); new extensions require a host restart.
+# 3. **The shared data plane** — workload/control pools, checkpointer and graph.
+#    Recover predecessor forces only with durable resource-free exec evidence.
+# 4. **Healthz**, after boot, so a green probe means the host can take a turn.
+# 5. **The dispatcher**, after serving is ready, so subscribed wakes are not lost.
+#
+# Shutdown joins dispatcher siblings and drains turns before collecting the
+# installation's sampling refresh. Health and ownership callbacks still unwind;
+# joined host pools close even if sampling reports an original failure.
+# The host has no agent identity: process logs remain unattributed, agent events
+# carry explicit identity, and the SDK entry rejects inherited child identity
+# before boot work.
 
 from __future__ import annotations
 
@@ -107,6 +109,7 @@ from .lifecycle.configuration import (
     understanding_inputs,
 )
 from .lifecycle.graceful_exit import serve_until_exit, write_exit_restart
+from .lifecycle.instance import release_instance_lock, take_instance_lock
 from .pooled_checkpoint import PooledPostgresSaver
 from .pools import build_control_pool, build_shared_pool
 from .pools import close_host_pools as close_host_pools
@@ -123,6 +126,15 @@ def _endpoint() -> ServiceEndpoint:
 
 def _pidfile() -> Path:
     return _endpoint().pidfile
+
+
+def _claim_pidfile() -> None:
+    if _is_running():
+        host_log.info("[agent-host] daemon already running (pidfile=%s), exiting", _pidfile())
+        sys.exit(1)
+    if not acquire_pidfile(_pidfile(), _MODULE):
+        host_log.info("[agent-host] could not acquire pidfile %s, exiting", _pidfile())
+        sys.exit(1)
 
 
 # A fixed timer proves liveness even when no agent has work. The same beat
@@ -460,11 +472,14 @@ async def close_process_owners(
     beat_tasks: asyncio.TaskGroup | None,
     *,
     clients: ClientSet | None = None,
+    instance_lock: int | None = None,
     primary: BaseException | None = None,
 ) -> None:
     """Collect process owners without replacing a failure from boot or turn drain."""
     try:
         async with contextlib.AsyncExitStack() as cleanup:
+            if instance_lock is not None:
+                cleanup.callback(release_instance_lock, instance_lock)
             cleanup.callback(remove_pidfile, _pidfile())
             cleanup.push_async_callback(close_joined_host_pools, host, workload_pool, control_pool)
             if host is None and clients is not None:
@@ -552,18 +567,17 @@ async def run(
 ) -> None:
     """Boot the host and serve wakes in the order documented by this module."""
     assert_clock_lattice()
-    if _is_running():
-        host_log.info("[agent-host] daemon already running (pidfile=%s), exiting", _pidfile())
-        sys.exit(1)
-    if not acquire_pidfile(_pidfile(), _MODULE):
-        host_log.info("[agent-host] could not acquire pidfile %s, exiting", _pidfile())
-        sys.exit(1)
+    instance_lock = take_instance_lock(home)
+    _claim_pidfile()
 
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
     from agent.process_boot import (
+        clear_exec_run_dir,
         init_process_scope,
         land_cluster_extensions,
     )
+
+    clear_exec_run_dir(home)
 
     workload_pool, control_pool, bus, db = boot_handles(database(), config, timers=timers)
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
@@ -686,6 +700,7 @@ async def run(
             beat,
             beat_tasks,
             clients=clients,
+            instance_lock=instance_lock,
             primary=sys.exception(),
         )
         host_log.info("[agent-host] daemon stopped")
