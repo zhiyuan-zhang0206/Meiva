@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.paths import gateway_memory_dir
-from gateway.http.middleware.cors import cors_allowed_origins
+from gateway.http.middleware.cors import cors_allowed_origins, trusted_request_hosts
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,8 @@ class GatewayConfig:
     browser_origin: str
     session_cookie_secure: bool
     memory_root: Path
+    human_auth: Literal["required", "trusted_network"] = "required"
+    trusted_hosts: frozenset[str] = frozenset()
 
 
 def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
@@ -30,25 +33,33 @@ def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
     gateway = config.view.gateway
     services = config.view.services
     gateway_url: str = gateway.gateway_url
+    machine = machine_from_boot(config)
     explicit_secure: bool | None = gateway.session_cookie_secure
+    allowed_origins = tuple(
+        cors_allowed_origins(
+            explicit=gateway.cors_allowed_origins,
+            frontend_healthcheck_url=services.frontend_healthcheck_url,
+            app_port=services.app_port,
+            browser_origin=gateway.browser_origin,
+            gateway_url=gateway_url,
+        )
+    )
     return GatewayConfig(
         cluster_secret=config.view.data_plane.cluster_secret,
         session_ttl_seconds=gateway.session_ttl_seconds,
         mcp_endpoint_enabled=gateway.mcp_endpoint_enabled,
-        allowed_origins=tuple(
-            cors_allowed_origins(
-                explicit=gateway.cors_allowed_origins,
-                frontend_healthcheck_url=services.frontend_healthcheck_url,
-                app_port=services.app_port,
-                browser_origin=gateway.browser_origin,
-                gateway_url=gateway_url,
-            )
-        ),
+        allowed_origins=allowed_origins,
         browser_origin=gateway.browser_origin,
         session_cookie_secure=(
             explicit_secure
             if explicit_secure is not None
             else urlsplit(gateway_url).scheme == "https"
         ),
-        memory_root=gateway_memory_dir(roles=machine_from_boot(config).role()),
+        memory_root=gateway_memory_dir(roles=machine.role()),
+        human_auth=gateway.human_auth,
+        trusted_hosts=trusted_request_hosts(
+            allowed_origins=allowed_origins,
+            machine_host=machine.host(),
+            gateway_url=gateway_url,
+        ),
     )

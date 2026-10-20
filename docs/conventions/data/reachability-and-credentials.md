@@ -70,14 +70,15 @@ guard correct.
 | Surface | Credential | Verifier |
 |---|---|---|
 | Gateway HTTP API, bootstrap, webhooks | `MEIVA_CLUSTER_SECRET` bearer (human/operator, gateway only) or the active write generation's machine API token (`MEIVA_API_TOKEN`) | `gateway.http.auth.request_principal.cluster_credential` (constant-time; a revoked generation's token never matches) |
+| Gateway HTTP API, human callers, `MEIVA_GATEWAY_HUMAN_AUTH=trusted_network` | none — a request with no cookie or bearer is the cluster administrator; browser `Origin` and `Host` are still checked | `gateway.app.cluster_auth_middleware`; decision `docs/decisions/data/security/2026-10-20-human-auth-trusted-network-switch.md` (machine tokens, `/ops`, telemetry, data plane and `/mcp` are unchanged) |
 | A unit's `/ops` | its write generation's gateway or runner API token | `base/host/net/auth.py` `verify_bearer_digest` over digests only |
 | Gateway and station OTLP ingress (remote receiver) | the telemetry token (`HMAC(MEIVA_CLUSTER_SECRET)`; remote units hold only the token, from their capability) | otel-collector `bearertokenauth/cluster` extension |
 | Data plane (Postgres/Redis) | split admin/runtime credentials, gateway-only admin | `docs/conventions/data/data-plane-secret-split.md` |
 | Loki/Prometheus backend APIs | none — loopback-only (`MEIVA_LGTM_LISTEN_HOST`) | n/a |
 | Grafana UI | gateway session auth through `/grafana/*` proxy | gateway middleware; Grafana runs anonymous read-only |
 
-Every gateway home has an `MEIVA_CLUSTER_SECRET`; the cluster API and `/ops`
-always authenticate. Reach is a separate fact: the zero-config single box
+Every gateway home has an `MEIVA_CLUSTER_SECRET`; `/ops` always authenticates and
+the cluster API does too, except for human callers when `MEIVA_GATEWAY_HUMAN_AUTH=trusted_network`. Reach is a separate fact: the zero-config single box
 declares no reachable address (`MEIVA_MACHINE_HOST` unset, `localhost`), so every
 listener, the data plane included, binds loopback only, and a unit that would
 have to expose a remote ingress without a telemetry token **fails closed**
