@@ -300,5 +300,5 @@ class TestLinuxReaders:
         event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
         assert event["budget_source"] == "memory"
         assert event["psi_some_avg10"] == 1.25
-        assert event["gpu_used_mib"] == 3712.0
+        assert event["gpu_max_used_mib"] == 3712.0
         assert event["gpu_total_mib"] == 8188.0
