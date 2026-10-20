@@ -629,6 +629,7 @@ async def run(
             activity_clock=host.last_active_at,
             config_fingerprint=host.turn_fingerprints.get,
         )
+        host.bind_wake(scheduler.wake)
         # The service owns the group across boot settle and turn drain. The
         # heartbeat's retained completion is raised only at the existing join.
         beat_tasks, beat = await _start_ownership_beat(

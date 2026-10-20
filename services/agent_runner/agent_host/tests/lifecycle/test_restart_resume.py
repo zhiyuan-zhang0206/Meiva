@@ -190,6 +190,55 @@ async def test_an_idle_agent_is_restarted_without_a_note_and_stays_idle(
 
 
 # meiva:note
+# The host that ran the turn starts the resumed one itself. No dispatcher or scan loop runs in
+# this cluster, so the only thing that can start the second turn is the wake the host makes
+# once the apply has committed the note; the pending scan would find the same note up to its
+# interval later.
+async def test_the_host_wakes_the_resumed_turn_without_waiting_for_a_scan(
+    cluster: Cluster,
+) -> None:
+    agent_id, script = cluster.spawn(
+        chat="go", steps=[Step(partial="half a sentence", holds=True), Step(text="resumed")]
+    )
+    host = await cluster.host(wakes=True)
+    host.scheduler.wake(agent_id)
+    await asyncio.wait_for(script.entered.wait(), 60)
+
+    restart = cluster.send(agent_id, "", kind="restart")
+    cluster.let_grace_pass(restart)
+    await _until(lambda: script.calls == 2, seconds=20)
+    await _until(lambda: host.scheduler.task_for(agent_id) is None, seconds=20)
+
+    assert [r.status for r in cluster.inbound(agent_id, "restart")] == ["done"]
+    assert [n.status for n in cluster.inbound(agent_id, "system_note")] == ["done"]
+    messages = await host.messages(agent_id)
+    assert str(messages[-1].content) == "resumed"
+    assert not any("half a sentence" in str(m.content) for m in messages)
+    assert sum("while your turn was unfinished" in str(m.content) for m in script.histories[1]) == 1
+    await host.close()
+
+
+# meiva:note
+# Only a turn the restart resumed is woken: an idle agent's restart ends with its own turn,
+# and no further turn starts for it.
+async def test_the_host_starts_no_turn_after_an_idle_agents_restart(cluster: Cluster) -> None:
+    agent_id, script = cluster.spawn(chat="hello", steps=[Step(text="hello back")])
+    host = await cluster.host(wakes=True)
+    host.scheduler.wake(agent_id)
+    await _until(lambda: host.scheduler.task_for(agent_id) is None, seconds=20)
+
+    cluster.send(agent_id, "", kind="restart")
+    host.scheduler.wake(agent_id)
+    await _until(lambda: host.scheduler.task_for(agent_id) is None, seconds=20)
+
+    assert [r.status for r in cluster.inbound(agent_id, "restart")] == ["done"]
+    assert cluster.inbound(agent_id, "system_note") == []
+    assert host.host.stats.turns_started == 2
+    assert script.calls == 1
+    await host.close()
+
+
+# meiva:note
 # A cancel halts a turn the user ended; the restart that follows must not resume it.
 async def test_a_paused_agent_is_restarted_as_idle_not_as_an_interrupted_turn(
     cluster: Cluster,

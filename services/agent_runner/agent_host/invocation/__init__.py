@@ -90,6 +90,7 @@ async def finish_completed_invocation(
     pending: PendingWorkResult,
     drop_agent: Callable[[int], None],
     kill_shell_sessions: Callable[[int, int], None],
+    wake_resumed: Callable[[int], object],
     *,
     db: Database,
     bus: EventBus,
@@ -128,6 +129,14 @@ async def finish_completed_invocation(
             generation=str(incarnation.generation),
             command_kind=kind,
         )
+        if kind == "restart" and resume_turn:
+            # meiva:note
+            # The apply committed the note that continues the turn. This host's scheduler
+            # starts that turn as soon as this one ends, instead of the pending scan finding
+            # it up to its interval later. A host that is exiting refuses the wake and the
+            # next host's scan takes the note.
+            # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+            wake_resumed(agent_id)
         return TurnOutcome(exited=kind == "terminate", crashed=False)
     if pending.result["turn_idle"]:
         async with database_phase():

@@ -48,11 +48,13 @@ signal ignored, so a retry cannot abort the exit it started.
    whatever is left, `close_host_resources` joins resources, pools close, and
    the process exits 0.
 
-The next host's pending scan (`scheduling/pending_wakes.py::scan_rows`) wakes
-every row with a pending inbound, which is where an interrupted or boundary-
-claimed turn's continuation note waits; the agent continues from its checkpoint
-with that note as the input that starts the next model step. Nothing new is
-written at boot.
+A host that is not exiting wakes the resumed agent itself as soon as the apply
+commits, through its scheduler. An exiting host has closed admission and refuses
+that wake, so the next host's pending scan
+(`scheduling/pending_wakes.py::scan_rows`) wakes every row with a pending inbound,
+which is where the continuation note waits; the agent continues from its
+checkpoint with that note as the input that starts the next model step. Nothing
+new is written at boot.
 
 ## Bounds
 

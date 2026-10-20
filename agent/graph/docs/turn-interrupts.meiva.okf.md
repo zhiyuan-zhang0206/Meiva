@@ -69,9 +69,11 @@ The host reads the verdict when it applies the restart
 one pending `system_note` (`lifecycle_restart`, the restart's own source) from
 `restart_resume_note`: who asked, that running code was terminated with its result in
 the matching tool message, that shell sessions may not have survived. Nothing else is
-asserted, because the writer does not know it. The pending scan wakes the agent on
-this host or the next, the claim renders the note, and the model runs from the
-checkpoint. The held-control path (maintenance hold, impersonation lease) runs no
+asserted, because the writer does not know it. Once the apply has committed, the host
+wakes the agent through its own scheduler (`AgentHost.bind_wake`), so the next turn
+starts when this one ends; a host that is exiting refuses the wake, and the pending scan
+finds the note on the next host (it also covers a host that bound no scheduler). The
+claim renders the note and the model runs from the checkpoint. The held-control path (maintenance hold, impersonation lease) runs no
 graph and never queues the note; a hard kill or a cancelled drain leaves the
 checkpoint's turn abandoned, since each turn's first invocation starts halted.
 

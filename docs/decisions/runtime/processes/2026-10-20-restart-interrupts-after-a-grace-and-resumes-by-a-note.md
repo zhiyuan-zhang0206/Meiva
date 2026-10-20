@@ -40,9 +40,11 @@ A restart that waits for the turn boundary also waits for the turn: a long
    a restart for an unfinished turn, `apply_hosted_lifecycle` inserts a pending
    `system_note` (`note_tag='lifecycle_restart'`, the restart's own source) saying who
    asked, that running code was terminated and where its result is, and that shell
-   sessions may not have survived. The pending scan wakes the agent on whichever host
-   runs next; the claim renders the note and the turn runs the model from its
-   checkpoint. The restart is never done without the note. External restarts (user,
+   sessions may not have survived. The host that applied the restart then wakes the agent
+   through its own scheduler (the agent's machine is fixed, so the resumed turn runs
+   here), so no scan interval is waited; an exiting host refuses the wake, and the pending
+   scan wakes the agent on the next host. The claim renders the note and the turn runs the
+   model from its checkpoint. The restart is never done without the note. External restarts (user,
    gateway, hold, graceful exit) and the agent's own `meiva.self.restart()` resume
    alike. The held-control path runs no graph and queues none.
 5. **The graceful exit loses its pointer dependence.** It still stops admission, writes a
