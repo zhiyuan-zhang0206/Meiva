@@ -17,12 +17,33 @@
 import { useTranslations } from "next-intl";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { useForceLayout, type Pos, type SimLink, type SimNode } from "@/lib/fleet/use-force-layout";
+import {
+  useForceLayout,
+  type ForceLayoutOptions,
+  type Pos,
+  type SimLink,
+  type SimNode,
+} from "@/lib/fleet/use-force-layout";
 import { useSvgZoomPan, type SvgViewport } from "@/lib/fleet/use-svg-zoom-pan";
 import { cn } from "@/lib/format/utils";
 
 import { ForceControls, FORCE_GROUPS, type ForceGroup, type ForceParams } from "./force-controls";
 import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+
+// meiva:note
+// A graph this size settles in manual, time-budgeted slices instead of one React
+// render per physics tick. Every tick used to commit a fresh position map, and
+// every commit repaints the whole SVG: the preview's 1,949-node graph spent
+// 4.4 s of main-thread time in the first six seconds at 4x CPU throttle, nearly
+// all of it style/layout rather than script. Below the threshold the live
+// settle stays - a small graph animating into place is the point of it.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+const PREWARM_NODE_THRESHOLD = 200;
+const PREWARM_TICKS = 240;
+
+export function layoutOptions(nodeCount: number): ForceLayoutOptions {
+  return nodeCount >= PREWARM_NODE_THRESHOLD ? { prewarmTicks: PREWARM_TICKS } : {};
+}
 
 // ── Shared node / edge model ──
 // Each view adapts its own data (FleetGraphNode / TaskRow) into this shape.
@@ -241,7 +262,7 @@ export const ForceGraph = memo(function ForceGraph({
     () => edges.map((e) => ({ source: e.from, target: e.to })),
     [edges],
   );
-  const { positions, layout } = useForceLayout(simNodes, simLinks, params);
+  const { positions, layout } = useForceLayout(simNodes, simLinks, params, layoutOptions(simNodes.length));
 
   // Hover anchor: the node id plus the node's on-screen box captured at
   // mouseenter. The card is pinned there for the whole hover — it never
