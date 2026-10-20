@@ -40,7 +40,7 @@ def test_idle_shell_closes_without_claiming_all_descendants_gone(
     target = _session(leaders)
 
     def no_scan(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("terminal closure must not enumerate the host")
+        raise AssertionError("shell-session closure must not enumerate the host")
 
     with monkeypatch.context() as patch:
         patch.setattr(psutil, "process_iter", no_scan)
@@ -85,7 +85,7 @@ def test_known_shell_survivor_is_reported_not_closed(
     monkeypatch.setattr(process_groups, "signal", no_signal)
     outcome = closure.close_sessions([target], grace_s=0, kill_s=0)
     assert outcome.closed == ()
-    assert outcome.survivors == (closure.Survivor(target.name, target.shell, "terminal"),)
+    assert outcome.survivors == (closure.Survivor(target.name, target.shell, "shell"),)
 
 
 def test_known_job_survivor_is_diagnostic_after_shell_closes(

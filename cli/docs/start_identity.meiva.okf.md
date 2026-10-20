@@ -64,7 +64,7 @@ in the intent and `.env`, excluding the caller's virtualenv. A resumed init
 reuses that declaration even when the caller PATH changes. Managed root children
 prepend the current runtime virtualenv, then the admitted host directories and
 provisioned tool defaults. The declared value wins over an inherited copy;
-interactive terminals retain their separate environment policy. PATH remains
+shell sessions keep their separate environment policy. PATH remains
 part of the live generation digest, so editing the declaration requires stop
 before another start. An existing home without this declaration requires an
 explicit cutover edit: `meiva start` refuses it and never silently recaptures its caller PATH.
@@ -91,7 +91,7 @@ steps without automatic production editable-install repair or reinstall.
 
 On macOS only, root must descend from the signed permissions helper. Linux root
 starts directly or under systemd. Ordinary application services have no named-session
-launcher or separate watchdog spawn owner. Terminal sessions and native data-plane
+launcher or separate watchdog spawn owner. Shell sessions and native data-plane
 custody remain distinct resources.
 
 The start intent records `claiming`, `configured`, `provisioned`, then `ready`:

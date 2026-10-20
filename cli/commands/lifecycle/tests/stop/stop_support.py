@@ -1,13 +1,13 @@
-"""Helpers of the stop tests: a private home, the processes a stop must leave alone, and the stop's collaborators stubbed.
-
-Terminals live in the pty-sessions service. A test that needs real shells takes
-the `pty_service` fixture (re-exported here) next to `home`: the service runs
-under the same private home, so the stop under test dials it exactly as it dials
-the unit's own. Without the fixture no service listens, which is the state of a
-unit whose service is down. `stub_closure` stands in for the service's closure where
-a test needs processes it may not signal (another user's), which no test can create
-for real.
-"""
+# meiva:note
+# Helpers of the stop tests: a private home, the processes a stop must leave alone, and the stop's collaborators stubbed.
+#
+# Shell sessions live in the pty-sessions service. A test that needs real shells takes
+# the `pty_service` fixture (re-exported here) next to `home`: the service runs
+# under the same private home, so the stop under test dials it exactly as it dials
+# the unit's own. Without the fixture no service listens, which is the state of a
+# unit whose service is down. `stub_closure` stands in for the service's closure where
+# a test needs processes it may not signal (another user's), which no test can create
+# for real.
 
 from __future__ import annotations
 

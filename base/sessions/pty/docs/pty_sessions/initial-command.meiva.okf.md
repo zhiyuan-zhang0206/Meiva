@@ -16,7 +16,7 @@ a boolean boundary (invalid values are refused).
 
 This metadata belongs to the live PTY owner, survives a schedule-manager restart,
 and is not a durable business-operation receipt or a lock. A PTY service restart
-loses terminals and sweeps exact identities through its durable ledger; it does
+loses shell sessions and sweeps exact identities through its durable ledger; it does
 not re-adopt their command state. Schedule convergence combines this evidence
 with a durable revision and PostgreSQL advisory ownership. See
 [[gateway/schedules/docs/schedule-convergence.meiva.okf.md]].

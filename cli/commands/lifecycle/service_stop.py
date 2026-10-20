@@ -1,11 +1,11 @@
 # meiva:note
-# Stop a unit's recorded services and persistent terminals.
+# Stop a unit's recorded services and persistent shell sessions.
 #
 # These functions prove only local recorded process identities; they do not prove
 # remote drain or stop OS-managed extras. Service stops never escalate to force.
 #
-# Persistent terminals use a bounded best-effort closure: close the known shell
-# and terminal, signal known shell/foreground groups, and report known leftovers.
+# Persistent shell sessions use a bounded best-effort closure: close the known shell,
+# signal known shell/foreground groups, and report known leftovers.
 # A surviving shell fails the stop; a known job leftover is diagnostic. Closure
 # never proves that every descendant or detached process disappeared. A stopped
 # service's ledger supplies only recorded birth identities, never a global scan.
@@ -37,27 +37,29 @@ from cli.commands.data_plane.stop_waits import (
 from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
 
-# The unit stop's terminal closure uses the shared stop bounds (`data_plane/stop_waits.py`).
-_TERMINAL_STOP_GRACE_S = PROCESS_CLEANUP_WAIT_S
-TERMINAL_KILL_WAIT_S = PROCESS_KILL_WAIT_S
+# meiva:note
+# The unit stop's shell-session closure uses the shared stop bounds (`data_plane/stop_waits.py`).
+_SHELL_SESSION_STOP_GRACE_S = PROCESS_CLEANUP_WAIT_S
+SHELL_SESSION_KILL_WAIT_S = PROCESS_KILL_WAIT_S
 
 
-def require_no_terminals() -> None:
-    """Refuse maintenance while any terminal is present (`live_terminals`)."""
-    terminals = live_terminals()
-    if terminals:
+# meiva:note
+# Refuse maintenance while any shell session is present (`live_shell_sessions`).
+def require_no_shell_sessions() -> None:
+    shell_sessions = live_shell_sessions()
+    if shell_sessions:
         raise RuntimeError(
-            "persistent terminals/schedules require their own completed-work boundary; "
-            f"maintenance will not kill or replay them: {terminals}"
+            "persistent shell sessions/schedules require their own completed-work boundary; "
+            f"maintenance will not kill or replay them: {shell_sessions}"
         )
 
 
-def live_terminals() -> list[str]:
-    """Every live terminal: the service's sessions, or a dead service's leftovers.
-
-    With the service listening its listing is the truth. Without it, what its ledger
-    names and still runs is a crash's leftover: a process that outlived the hangup.
-    """
+# meiva:note
+# Every live shell session: the service's sessions, or a dead service's leftovers.
+#
+# With the service listening its listing is the truth. Without it, what its ledger
+# names and still runs is a crash's leftover: a process that outlived the hangup.
+def live_shell_sessions() -> list[str]:
     try:
         return [row["name"] for row in client.request("list")["sessions"]]
     except client.ServiceDownError:
@@ -69,25 +71,26 @@ def close_via_service(grace_s: float, kill_s: float) -> closure.Outcome:
     return client.close_all(grace_s=grace_s, kill_s=kill_s)
 
 
-def _close_terminals_now(grace_s: float, kill_s: float) -> tuple[closure.Outcome, str]:
-    """Close every terminal in the service, else from its ledger; with the reason owners are told.
-
-    A service that is down died uncleanly before this stop (the stop never
-    leaves one behind): what its ledger still names was lost to that, not to
-    this stop, and its notices say so (`pty_close_notices.CRASH_REASON`).
-    """
+# meiva:note
+# Close every shell session in the service, else from its ledger; with the reason owners are told.
+#
+# A service that is down died uncleanly before this stop (the stop never
+# leaves one behind): what its ledger still names was lost to that, not to
+# this stop, and its notices say so (`pty_close_notices.CRASH_REASON`).
+def _close_shell_sessions_now(grace_s: float, kill_s: float) -> tuple[closure.Outcome, str]:
     try:
         return close_via_service(grace_s, kill_s), pty_close_notices.STOP_REASON
     except client.ServiceDownError:
         return ledger.sweep(ledger_path()), pty_close_notices.CRASH_REASON
 
 
-def _terminals_incomplete(outcome: closure.Outcome, stage: str) -> StopIncompleteError:
-    """Report known shells that remain alive after bounded closure."""
+# meiva:note
+# Report known shells that remain alive after bounded closure.
+def _shell_sessions_incomplete(outcome: closure.Outcome, stage: str) -> StopIncompleteError:
     live = {
         s.process: s
         for s in outcome.survivors
-        if s.role == "terminal" and live_identities([s.process])
+        if s.role == "shell" and live_identities([s.process])
     }
     report = [
         capture_survivor(identity, service=found.session, role=found.role)
@@ -96,7 +99,7 @@ def _terminals_incomplete(outcome: closure.Outcome, stage: str) -> StopIncomplet
     surviving = sorted({found.session for found in live.values()})
     inventory = SurvivorInventory(survivors=report, groups=[])
     return StopIncompleteError(
-        f"terminal closure incomplete — known shells remain alive: "
+        f"shell-session closure incomplete — known shells remain alive: "
         f"{[identity.pid for identity in live]} from sessions: {surviving}\n"
         f"{inventory.render(stage=stage, killed=True)}",
         stage=stage,
@@ -104,31 +107,32 @@ def _terminals_incomplete(outcome: closure.Outcome, stage: str) -> StopIncomplet
     )
 
 
-def _report_terminal_job_leftovers(outcome: closure.Outcome) -> None:
-    """Report known living jobs without turning best-effort closure into a stop gate."""
+# meiva:note
+# Report known living jobs without turning best-effort closure into a stop gate.
+def _report_shell_session_job_leftovers(outcome: closure.Outcome) -> None:
     for survivor in outcome.survivors:
-        if survivor.role != "terminal" and live_identities([survivor.process]):
+        if survivor.role != "shell" and live_identities([survivor.process]):
             print(
-                f"terminal closure {survivor.session!r}: known job still running: "
+                f"shell-session closure {survivor.session!r}: known job still running: "
                 f"pid={survivor.process.pid}; inspect the process before taking action",
                 file=sys.stderr,
             )
 
 
-def await_no_terminals(until: float, stage: str) -> None:
-    """The closure evidence: no terminal is live; raise at `until`.
-
-    The service drops a session from its table the moment its teardown is claimed,
-    so this only waits out one still tearing down; a terminal born during the
-    closure fails it.
-    """
+# meiva:note
+# The closure evidence: no shell session is live; raise at `until`.
+#
+# The service drops a session from its table the moment its teardown is claimed,
+# so this only waits out one still tearing down; a shell session born during the
+# closure fails it.
+def await_no_shell_sessions(until: float, stage: str) -> None:
     while True:
-        left = live_terminals()
+        left = live_shell_sessions()
         if not left:
             return
         if time.monotonic() >= until:
             raise StopIncompleteError(
-                f"terminal closure incomplete — terminals still present after the closure "
+                f"shell-session closure incomplete — shell sessions still present after the closure "
                 f"ended every session it captured: {left}",
                 stage=stage,
             )
@@ -172,17 +176,17 @@ def _record_close_notices(
 
 
 # meiva:note
-# Close this unit's terminals at `meiva stop`: HUP/TERM, a bounded grace, then SIGKILL.
+# Close this unit's shell sessions at `meiva stop`: HUP/TERM, a bounded grace, then SIGKILL.
 #
-# The grace is `_TERMINAL_STOP_GRACE_S`, capped by the stop's `deadline`;
-# the SIGKILL leg is bounded by `TERMINAL_KILL_WAIT_S` and runs even when
+# The grace is `_SHELL_SESSION_STOP_GRACE_S`, capped by the stop's `deadline`;
+# the SIGKILL leg is bounded by `SHELL_SESSION_KILL_WAIT_S` and runs even when
 # the grace spent the rest of the deadline — a stop that reached its
-# terminal phase closes its terminals
+# shell-sessions phase closes its shell sessions
 # (docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md). A shell that
 # survives fails the stop. Known job
 # leftovers are reported without failing the stop. A
-# terminal still tearing down after that gets the rest of the deadline, and
-# at least `TERMINAL_KILL_WAIT_S`, to leave the service's table.
+# shell session still tearing down after that gets the rest of the deadline, and
+# at least `SHELL_SESSION_KILL_WAIT_S`, to leave the service's table.
 #
 # Busy sessions whose shell is verified gone — a job the SIGKILL cut short
 # included — get a closure notice for their owner agent (issue #2044),
@@ -191,15 +195,15 @@ def _record_close_notices(
 # rather than the gateway's database a runner-only unit dials). That holds
 # when a process outlived the SIGKILL too (the notice names it) and when
 # another session keeps the stop incomplete.
-def close_terminals(
+def close_shell_sessions(
     deadline: float,
     *,
     direct_db: bool,
     database_factory: DatabaseFactory,
     local_machine: MachineIdentity,
 ) -> None:
-    grace_s = max(0.0, min(deadline - time.monotonic(), _TERMINAL_STOP_GRACE_S))
-    outcome, reason = _close_terminals_now(grace_s, TERMINAL_KILL_WAIT_S)
+    grace_s = max(0.0, min(deadline - time.monotonic(), _SHELL_SESSION_STOP_GRACE_S))
+    outcome, reason = _close_shell_sessions_now(grace_s, SHELL_SESSION_KILL_WAIT_S)
     _record_close_notices(
         outcome.closed,
         reason,
@@ -207,23 +211,25 @@ def close_terminals(
         database_factory=database_factory,
         machine_name=local_machine.name(),
     )
-    _report_terminal_job_leftovers(outcome)
-    if any(s.role == "terminal" and live_identities([s.process]) for s in outcome.survivors):
-        raise _terminals_incomplete(outcome, "terminals")
-    await_no_terminals(max(deadline, time.monotonic() + TERMINAL_KILL_WAIT_S), "terminals")
+    _report_shell_session_job_leftovers(outcome)
+    if any(s.role == "shell" and live_identities([s.process]) for s in outcome.survivors):
+        raise _shell_sessions_incomplete(outcome, "shell-sessions")
+    await_no_shell_sessions(
+        max(deadline, time.monotonic() + SHELL_SESSION_KILL_WAIT_S), "shell-sessions"
+    )
 
 
-def force_close_terminals() -> None:
+def force_close_shell_sessions() -> None:
     # meiva:note
-    # Close this unit's terminals at `meiva stop --mode force`: no grace, no notices.
+    # Close this unit's shell sessions at `meiva stop --mode force`: no grace, no notices.
     #
     # Force skips owner notices and drain guarantees. A surviving shell still
     # fails it; known job leftovers remain diagnostics.
-    outcome, _reason = _close_terminals_now(0.0, TERMINAL_KILL_WAIT_S)
-    _report_terminal_job_leftovers(outcome)
-    if any(s.role == "terminal" and live_identities([s.process]) for s in outcome.survivors):
+    outcome, _reason = _close_shell_sessions_now(0.0, SHELL_SESSION_KILL_WAIT_S)
+    _report_shell_session_job_leftovers(outcome)
+    if any(s.role == "shell" and live_identities([s.process]) for s in outcome.survivors):
         raise RuntimeError(
-            f"force stop did not close terminals: {sorted({s.session for s in outcome.survivors if s.role == 'terminal'})}"
+            f"force stop did not close shell sessions: {sorted({s.session for s in outcome.survivors if s.role == 'shell'})}"
         )
 
 

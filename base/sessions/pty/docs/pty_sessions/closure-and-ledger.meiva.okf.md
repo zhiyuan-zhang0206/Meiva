@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "PTY closure and the crash ledger"
-description: "The one terminal closure (bounded best-effort shell and known-group signaling) the pty-sessions service runs for a stop, a shutdown and a sweep, and the ledger that lets the next start close what a crashed service left running."
+description: "The one shell-session closure (bounded best-effort shell and known-group signaling) the pty-sessions service runs for a stop, a shutdown and a sweep, and the ledger that lets the next start close what a crashed service left running."
 tags:
 - base
 - pty
@@ -12,8 +12,8 @@ tags:
 
 ## Closure
 
-`close_all` runs `closure.py` inside the service. It closes known shells and
-terminals with bounded signaling to known shell/foreground groups. Shell birth
+`close_all` runs `closure.py` inside the service. It closes known shell sessions
+with bounded signaling to known shell/foreground groups. Shell birth
 identity is retained. Signal failures raise and surviving shells fail closure;
 known job leftovers are reported without themselves failing `meiva stop`.
 New allocations are refused during closure. No all-descendant disappearance
@@ -32,7 +32,7 @@ masters but can leave a shell or job running. The next service start, or a
 stop finding no service, applies bounded closure to recorded identities that
 still match; it never reconstructs an entire descendant tree. A surviving known
 shell remains recorded for a subsequent cleanup attempt; job-only leftovers do
-not keep a terminal-presence gate. Busy closure
+not keep a shell-session-presence gate. Busy closure
 notices describe known lost work, not absence of every background process.
 The instance lock prevents a second start from sweeping a live service's
 sessions. Decision:

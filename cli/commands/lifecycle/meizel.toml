@@ -14,4 +14,4 @@ exports = ["converge_host.py", "lgtm_toggle.py", "migrations.py", "root_driver.p
 
 [debt.private-name]
 "tests/converge_host/test_converge.py -> converge_host.py#_ensure_permissions_helper" = 1
-"tests/stop/test_stop_terminals.py -> service_stop.py#_TERMINAL_STOP_GRACE_S" = 2
+"tests/stop/test_stop_shell_sessions.py -> service_stop.py#_SHELL_SESSION_STOP_GRACE_S" = 2

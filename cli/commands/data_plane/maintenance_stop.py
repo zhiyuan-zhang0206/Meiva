@@ -136,15 +136,15 @@ async def _redis_command(client: Redis, deadline: float, *args: str) -> object:
     )
 
 
+# meiva:note
+# How long Postgres' fast shutdown may take: what is left of the stop's deadline minus
+# the legs that follow it, so a stuck fast shutdown cannot spend the whole shared budget.
+#
+# The reserve is the immediate shutdown's wait, the SIGKILL wait, and the same cleanup
+# wait for Redis' save. A stop whose remaining time is not larger than the reserve
+# gives the fast shutdown all of it; the escalation legs then overrun the deadline by
+# their own bounded waits, like the shell-session closure's SIGKILL leg.
 def postgres_fast_budget(deadline: float) -> float:
-    """How long Postgres' fast shutdown may take: what is left of the stop's deadline minus
-    the legs that follow it, so a stuck fast shutdown cannot spend the whole shared budget.
-
-    The reserve is the immediate shutdown's wait, the SIGKILL wait, and the same cleanup
-    wait for Redis' save. A stop whose remaining time is not larger than the reserve
-    gives the fast shutdown all of it; the escalation legs then overrun the deadline by
-    their own bounded waits, like the terminal closure's SIGKILL leg.
-    """
     left = remaining(deadline)
     reserve = PROCESS_CLEANUP_WAIT_S + PROCESS_KILL_WAIT_S + PROCESS_CLEANUP_WAIT_S
     return left - reserve if left > reserve else left

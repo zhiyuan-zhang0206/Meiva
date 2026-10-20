@@ -69,7 +69,7 @@ def _stop_effects(
 
         return effect
 
-    for name in ("close_terminals", "stop_browser", "stop_extras", "stop_data_plane"):
+    for name in ("close_shell_sessions", "stop_browser", "stop_extras", "stop_data_plane"):
         monkeypatch.setattr(command, name, recording(name))
     rc = command.stop(
         require_confirmation=False,
@@ -108,7 +108,7 @@ def test_shell_sessions_are_closed_exactly_when_the_operator_does_not_keep_them(
         keep_infra=None,
         keep_shell_sessions=keep_shell_sessions,
     )
-    assert ("close_terminals" in effects.done) is not keep_shell_sessions
+    assert ("close_shell_sessions" in effects.done) is not keep_shell_sessions
     assert effects.pty_sessions_stopped() is not keep_shell_sessions
 
 

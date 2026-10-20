@@ -20,7 +20,7 @@ Directory ownership includes descendant tests and their existing local fixtures.
 The tool contracts inspect ASTs, files, workflow definitions, synthetic reports
 and temporary Git repositories. Path contracts operate on their private home;
 the PTY screen model consumes byte/ANSI sequences through pyte without starting
-a terminal service. These owners do not require a native data plane. Native
+the shell-session service. These owners do not require a native data plane. Native
 PTY service, lifecycle and database integration tests remain in their own lane.
 New tests in an owned component inherit that
 execution requirement and fail if they attempt Postgres or Redis access.

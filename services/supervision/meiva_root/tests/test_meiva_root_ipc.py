@@ -79,9 +79,9 @@ class TestParseRequest:
             b'{"verb": "status", "name": null}',
             b'{"verb": "up", "name": "x", "extra": 1}',
             b'{"verb": "up", "name": "x", "payload": {}}',
-            b'{"verb": "resource", "name": "terminal.start"}',
+            b'{"verb": "resource", "name": "shell_session.start"}',
             b'{"verb": "resource", "name": "", "payload": {}}',
-            b'{"verb": "resource", "name": "terminal.start", "payload": []}',
+            b'{"verb": "resource", "name": "shell_session.start", "payload": []}',
         ],
     )
     def test_shape_violations_rejected(self, raw: bytes) -> None:
@@ -89,7 +89,7 @@ class TestParseRequest:
             parse_request(raw)
 
     def test_resource_requires_its_explicit_operation_and_payload(self) -> None:
-        request = {"verb": "resource", "name": "terminal.start", "payload": {"name": "shell"}}
+        request = {"verb": "resource", "name": "shell_session.start", "payload": {"name": "shell"}}
         assert parse_request(encode(request)) == request
 
 
