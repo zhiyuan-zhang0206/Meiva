@@ -241,6 +241,46 @@ def require_prerequisites(host: Host, harness: catalog.HarnessSpec) -> str:
     return f"{host}: {needed} is missing, so {harness.cli} cannot be installed (needs {which})"
 
 
+def npm_global_root_writable(host: Host) -> bool:
+    # meiva:note
+    # A distribution node on Linux installs its global packages under /usr/lib/node_modules,
+    # which needs root. Ask npm where it would write, then ask the shell whether this user can
+    # write there: a user-local prefix beats an install that dies on mkdir.
+    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+    root = host.run("npm root -g", timeout=60)
+    directory = root.stdout.strip()
+    return bool(directory) and host.run(f'test -w "{directory}"', timeout=60).ok
+
+
+def agent_sees(host: Host, binary: str) -> str:
+    # meiva:note
+    # The path a service or ssh command resolves for `binary`, empty when it resolves none.
+    # The probe preamble adds ~/.local/bin, which a service never has, so this asks the
+    # agent's own search path instead.
+    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+    found = host.run(f"command -v {binary}", timeout=60, agent_path=True)
+    return found.stdout.strip() if found.ok else ""
+
+
+def reach_agent_path(host: Host, harness: catalog.HarnessSpec) -> tuple[str, str]:
+    # meiva:note
+    # A user-local install is only useful where a service looks: link it into /usr/local/bin
+    # when that is writable, otherwise return the exact command an operator must run.
+    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+    if agent_sees(host, harness.cli):
+        return "", ""
+    link = f"/usr/local/bin/{harness.cli}"
+    if host.run(f"test -w {link.rsplit('/', 1)[0]}", timeout=60).ok:
+        linked = host.run(f'ln -sf "$HOME/.local/bin/{harness.cli}" "{link}"', timeout=60)
+        if linked.ok and agent_sees(host, harness.cli):
+            return f"linked {link} -> ~/.local/bin/{harness.cli}", ""
+    return "", (
+        f"{harness.cli} is installed under ~/.local/bin, which neither the agent search path "
+        f"({transport.AGENT_PATH}) nor a writable /usr/local/bin covers; link it as root: "
+        f"sudo ln -sf ~/.local/bin/{harness.cli} {link}"
+    )
+
+
 def hostfs_source() -> str:
     return Path(hostfs.__file__).read_text(encoding="utf-8")
 
@@ -264,6 +304,48 @@ def record_install(
     )
 
 
+def install_prefix(host: Host, harness: catalog.HarnessSpec) -> str:
+    # meiva:note
+    # The `--prefix` an install needs when the global npm root is out of reach, empty when
+    # npm can write there or the installer is not npm's.
+    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+    if harness.installer.kind != "npm" or npm_global_root_writable(host):
+        return ""
+    return '"$HOME/.local"'
+
+
+def install_on(host: Host, harness: catalog.HarnessSpec, wanted: str, prefix: str) -> bool:
+    # meiva:note
+    # One install on one host; True when a service on that host can then run the binary, so
+    # a user-local install that no agent search path reaches is a failure, not an "ok".
+    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+    command = catalog.install_command(harness, wanted, prefix=prefix)
+    print(
+        f"install {host}: {harness.cli} {wanted}"
+        + (" (user-local: the global npm root is not writable)" if prefix else "")
+    )
+    result = host.run(command, timeout=900)
+    if not result.ok:
+        print(
+            f"FAILED {host}: {harness.cli} install exited {result.exit_code}\n"
+            f"  {redact(result.stderr.strip())[-600:]}",
+            file=sys.stderr,
+        )
+        return False
+    installed = installed_version(host, harness)
+    record_install(host, harness, wanted, installed)
+    flag = "" if installed == wanted else f"  (asked {wanted}, got {installed or 'nothing'})"
+    if prefix:
+        note, problem = reach_agent_path(host, harness)
+        if problem:
+            print(f"FAILED {host}: {problem}", file=sys.stderr)
+            return False
+        if note:
+            print(f"  note {host}: {note}")
+    print(f"  ok   {host}: {harness.cli} {installed or 'unknown'}{flag}")
+    return True
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     hosts = transport.parse_hosts(args.hosts)
     pins = parse_pins(args.pin)
@@ -277,26 +359,13 @@ def cmd_install(args: argparse.Namespace) -> int:
                 failures += 1
                 print(f"skip  {problem}", file=sys.stderr)
                 continue
-            command = catalog.install_command(harness, wanted)
+            prefix = install_prefix(host, harness)
             if args.dry_run:
+                command = catalog.install_command(harness, wanted, prefix=prefix)
                 print(f"[dry-run] {host}: {command}")
                 continue
-            print(f"install {host}: {harness.cli} {wanted}")
-            result = host.run(command, timeout=900)
-            if not result.ok:
+            if not install_on(host, harness, wanted, prefix):
                 failures += 1
-                print(
-                    f"FAILED {host}: {harness.cli} install exited {result.exit_code}\n"
-                    f"  {redact(result.stderr.strip())[-600:]}",
-                    file=sys.stderr,
-                )
-                continue
-            installed = installed_version(host, harness)
-            record_install(host, harness, wanted, installed)
-            flag = (
-                "" if installed == wanted else f"  (asked {wanted}, got {installed or 'nothing'})"
-            )
-            print(f"  ok   {host}: {harness.cli} {installed or 'unknown'}{flag}")
     return 1 if failures else 0
 
 
