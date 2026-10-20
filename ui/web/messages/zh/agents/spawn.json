@@ -5,11 +5,11 @@
   "pricePerMillion": "USD / 百万 token",
   "referenceTps": "厂商公布的参考输出 token 数/秒",
   "referenceTpsUnavailable": "没有可靠的厂商官方输出 TPS",
-  "hiddenModels": "已隐藏 {count} 个 — 前往控制 > 显示管理",
   "effortDefault": "推理强度：默认",
   "spawnOn": "在以下机器创建",
   "spawn": "创建",
   "model": "模型",
+  "priceColumns": "输入 / 缓存 / 输出，USD 每百万 token",
   "reasoningEffort": "Effort",
   "spawnAgent": "创建 agent",
   "hostUnavailable": "Agent host 不可用",
@@ -19,6 +19,7 @@
   "pricingConditions": "当前基础档价格；长上下文和定时价格窗口可能采用不同费率。",
   "cacheWritePrice": "缓存写入（{duration}）：{price} / 百万 token",
   "harness": "运行时（harness）",
+  "machine": "机器",
   "harnessStatus": {
     "unavailable": "不可用"
   },

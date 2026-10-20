@@ -56,6 +56,32 @@ class Harness(StrEnum):
 
 
 # meiva:note
+# How a harness bills the work it runs, as the user states it (2026-10-20): a
+# subscription pays nothing per token, so a per-million-token price is not the
+# cost of choosing it; an API harness is metered, so its rates are the decision.
+# The frontend hides rates for `subscription` harnesses and shows them for `api`
+# ones. Per harness, not per model: the same model costs differently depending on
+# which loop runs it.
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+class HarnessBilling(StrEnum):
+    API = "api"
+    SUBSCRIPTION = "subscription"
+
+
+HARNESS_BILLING: dict[Harness, HarnessBilling] = {
+    Harness.MEIVA: HarnessBilling.API,
+    Harness.CLAUDE_CODE: HarnessBilling.SUBSCRIPTION,
+    Harness.CODEX: HarnessBilling.SUBSCRIPTION,
+    Harness.ANTIGRAVITY: HarnessBilling.SUBSCRIPTION,
+}
+if set(HARNESS_BILLING) != set(Harness):
+    raise RuntimeError(
+        "harnesses without a billing answer: "
+        f"{sorted(item.value for item in set(Harness) - set(HARNESS_BILLING))}"
+    )
+
+
+# meiva:note
 # What a local probe can prove about one harness on one machine: `available` is
 # installed and signed in, `unavailable` is missing or not signed in, and
 # `unknown` is installed with a sign-in state this process cannot read — reported

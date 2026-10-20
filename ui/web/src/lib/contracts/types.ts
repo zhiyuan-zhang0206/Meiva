@@ -921,6 +921,12 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // Model picker visibility: model names the user has hidden from the spawn
   // model select. An empty list means all models are visible.
   "models.hidden": [],
+  // meiva:note
+  // Provider-level switch for the same picker: a provider listed here contributes
+  // no models at all, and its per-model rows stop being editable in Control >
+  // Display. An empty list means every provider is on.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  "models.hidden_providers": [],
   // Force-directed layout knobs for the fleet Graph / Task Graph
   // (display.graph_force_params / display.task_force_params.v2) are DB-backed too,
   // but their default objects differ per view and live with those views — the
