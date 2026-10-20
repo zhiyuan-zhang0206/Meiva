@@ -89,3 +89,19 @@ def test_a_successful_down_starts_nothing(
     assert run("down") == 0
     assert _started(cluster) == []
     assert all(not host["up"] for host in cluster.hosts.values())
+
+
+def test_the_recovery_starts_with_the_operators_explicit_selection(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    cluster, run = env
+    cluster.stop_fails["lin"] = 1
+    assert run("down", "--only-service", "gateway", "--only-service", "agent-host") == 1
+    starts = [
+        command
+        for alias, command in cluster.commands
+        if alias in ("mac", "lin")
+        and ('meiva" start' in command or "launchctl bootstrap" in command)
+    ]
+    assert len(starts) == 2
+    assert all("--only-service gateway --only-service agent-host" in command for command in starts)

@@ -158,12 +158,15 @@ def cmd_cluster_resume(name: str) -> int:
         print(f"{name}: was not paused (no-op)")
     print(
         f"  machine-side checklist (run ON {name} when it is back online):\n"
-        "    1. `meiva start` on the machine — register_self refreshes its dial URL "
+        "    1. `meiva start --all-services` (or the machine's own explicit service selection) "
+        "on the machine — register_self refreshes its dial URL "
         "(the reachable address may have changed) and clears its stopped_at latch.\n"
         "    2. If its reachable address changed, the gateway's pg_hba must cover the new IP: "
         "add the machine's new IP/CIDR to the comma-separated MEIVA_TRUSTED_CIDRS with "
-        "`meiva config set MEIVA_TRUSTED_CIDRS=<ranges>`, then run `meiva restart` ON THE GATEWAY "
-        "HOST — its start leg rewrites pg_hba.conf and reloads the retained Postgres.\n"
+        "`meiva config set MEIVA_TRUSTED_CIDRS=<ranges>`, then run "
+        "`meiva restart --all-services --keep-shell-sessions --keep-browser --keep-extras "
+        "--mode smooth --timeout 300` ON THE GATEWAY HOST (its own service selection in place of "
+        "--all-services) — its start leg rewrites pg_hba.conf and reloads the retained Postgres.\n"
         "    3. Respawn the agents that lived on it (pause terminated them); "
         "`meiva cluster status` / `meiva.agents.list_machines()` shows it again."
     )

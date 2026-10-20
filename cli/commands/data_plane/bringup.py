@@ -215,7 +215,7 @@ def warn_orphaned_local_instance() -> None:
                 "running on this home's data dir and is no longer managed (the data "
                 "plane is remote). Tear it down by hand — `pg_ctl -D $MEIVA_HOME/pg "
                 "-m fast stop` and `redis-cli -p <port> shutdown nosave` — or switch "
-                "the URLs back to local and run `meiva stop`.",
+                "the URLs back to local and stop it with `meiva stop` (see `meiva stop --help`).",
                 file=sys.stderr,
             )
     except Exception:

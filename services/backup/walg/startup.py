@@ -59,7 +59,7 @@ def mismatch_message(machine: str, actual: ActualArchive, expected: ExpectedArch
         f"archive_mode={actual.mode} (expected {expected.mode}), "
         f"archive_timeout={actual.timeout_s}s (expected {expected.timeout_s}s), "
         f"archive_command={actual.command!r} (expected {expected.command!r}). "
-        "Run `meiva stop`, then `meiva start`."
+        "Stop this unit with `meiva stop`, then start it again with `meiva start` and its explicit service selection."
     )
 
 

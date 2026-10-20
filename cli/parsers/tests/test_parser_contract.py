@@ -14,7 +14,11 @@ from cli.parsers import build_parser, command_options, parse_args
 
 @pytest.mark.parametrize(
     "argv",
-    [["memory", "search", "text"], ["cluster", "destroy"], ["agents", "timeline", "7"]],
+    [
+        ["memory", "search", "text"],
+        ["cluster", "destroy", "--stop-mode", "smooth", "--stop-timeout", "300"],
+        ["agents", "timeline", "7"],
+    ],
 )
 def test_parsing_keeps_defaults_and_bound_handlers(argv: list[str]) -> None:
     assert vars(parse_args(argv)) == vars(build_parser().parse_args(argv))

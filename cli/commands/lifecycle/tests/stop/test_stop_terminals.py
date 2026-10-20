@@ -100,7 +100,12 @@ def test_stop_closes_busy_terminal_job_with_real_signals(
     assert (
         entry.cmd_stop(
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=False,
             timeout=15,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -140,7 +145,12 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     assert (
         entry.cmd_stop(
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=False,
             timeout=12,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -187,7 +197,12 @@ def test_stop_records_nothing_for_idle_shell(
     assert (
         entry.cmd_stop(
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=False,
             timeout=15,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -222,7 +237,12 @@ def test_stop_tolerates_naturally_exited_session(
     assert (
         entry.cmd_stop(
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=False,
             timeout=10,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -263,7 +283,12 @@ def test_the_stop_services_phase_keeps_the_pty_sessions_service_until_its_termin
     assert (
         entry.cmd_stop(
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=False,
             timeout=15,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -312,7 +337,12 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
     assert (
         entry.cmd_stop(
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=False,
             timeout=12,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -333,7 +363,12 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
     assert (
         entry.cmd_stop(
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=False,
             timeout=12,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -374,7 +409,12 @@ def test_known_job_leftover_is_reported_without_failing_stop(
     assert (
         entry.cmd_stop(
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=False,
             timeout=12,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -396,7 +436,12 @@ def test_known_job_leftover_is_reported_without_failing_stop(
     assert (
         entry.cmd_stop(
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=False,
             timeout=12,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -431,7 +476,12 @@ def test_a_survivor_that_died_before_the_report_does_not_fail_the_stop(
     assert (
         entry.cmd_stop(
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=False,
             timeout=12,
             database_factory=operator_database,
             producer=operator_pipeline,

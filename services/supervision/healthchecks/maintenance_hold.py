@@ -17,13 +17,13 @@ from base.daemon.health import DaemonProbe
 from base.deploy.maintenance import pause_owner
 
 _RECOVERY = (
-    "run `meiva start` on this machine: it brings the services up and releases the hold once "
+    "run `meiva start --all-services` (or this unit's own service selection) on this machine: it brings the services up and releases the hold once "
     "they are ready (a stop or restart still in progress is expected to hold it)"
 )
 # No command clears a journal without a readable hold; see graceful-maintenance.md.
 _RECOVERY_UNREADABLE = (
     "confirm no `meiva stop` is in flight, remove `run/deploy-pause-owner.json` under the "
-    "home by hand, then run `meiva start`"
+    "home by hand, then run `meiva start --all-services` (or this unit's own service selection)"
 )
 
 

@@ -74,7 +74,8 @@ comment-sensitive names and interpolation expressions fail before intent creatio
 The native ordering is storage, owned database and checkpoints, migrations and
 runner grants, then PgBouncer. `cli/commands/lifecycle/start.py` converges host prerequisites,
 launches the selected root tree and records serving only after complete readiness.
-Bare repeated start retains the desired service selection in `service-selection.json`.
+Every start names its service selection (`--all-services`, `--only-service` or
+`--disable-service`); bare `meiva start` is a usage error and no selection is persisted.
 A live root is admitted before preparation: changed source, environment, or roster
 requires prior stop; identical live generations skip configuration, dependency,
 and schema writes. Schema drift fails read-only. This development source digest

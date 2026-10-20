@@ -417,7 +417,7 @@ def _gateway_base_url() -> str:
             "config comes from the gateway at startup. Join it to its gateway first:\n"
             "    set MEIVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run:\n"
             "    meiva init --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> --machine-host "
-            "<this-host-addr> --db-capability <bundle from `meiva cluster db-authority issue-unit`>, then meiva start"
+            "<this-host-addr> --db-capability <bundle from `meiva cluster db-authority issue-unit`>, then meiva start with this unit's explicit service selection"
         )
     return base_url
 

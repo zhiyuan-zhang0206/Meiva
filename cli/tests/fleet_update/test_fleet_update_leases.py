@@ -93,7 +93,7 @@ def test_the_confirm_window_holds_the_stops_open(
     assert "leases: 30s left: release or renew them, or let the stop end them" in out
     assert "leases: 5s left: release or renew them, or let the stop end them" in out
     assert 2 <= out.count("s left: release or renew them") <= 30
-    assert out.index("leases: 5s left:") < out.index(" stop -y ")
+    assert out.index("leases: 5s left:") < out.index(" stop --yes ")
 
 
 def test_the_dry_run_names_the_leases_and_does_not_wait(
@@ -178,7 +178,9 @@ def test_up_never_reads_the_lease_table(
 
 def test_the_gateway_runs_the_shipped_program_source() -> None:
     owner = Path(fleet_update.__file__).parent / "commands" / "management" / "fleet_leases.py"
-    assert owner.read_text(encoding="utf-8") == fleet_update.leases_program()
+    assert owner.read_text(encoding="utf-8") == fleet_update.program_text(
+        fleet_update.VERIFY_SCRIPTS / "fleet_leases.py"
+    )
 
 
 class _Cursor:

@@ -297,6 +297,9 @@ def test_cmd_converge_unconfigured_returns_zero(
         pause_owner.begin_maintenance("converge", acquired_at)
         with pytest.raises(RuntimeError, match="cannot release"):
             converge_host.cmd_converge(
+                only_services=(),
+                disabled_services=(),
+                all_services=True,
                 database_factory=operator_database,
                 producer=operator_pipeline,
                 command=command_runtime,
@@ -305,6 +308,9 @@ def test_cmd_converge_unconfigured_returns_zero(
     # The real lazy boot delivers the scratch unit environment during WAL-G's gate.
     with patch.dict(os.environ):
         rc = converge_host.cmd_converge(
+            only_services=(),
+            disabled_services=(),
+            all_services=True,
             operation=operation,
             database_factory=operator_database,
             producer=operator_pipeline,

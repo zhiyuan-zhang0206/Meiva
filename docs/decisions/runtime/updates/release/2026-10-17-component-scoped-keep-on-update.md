@@ -109,3 +109,5 @@ its sessions with the owners' busy notice and no grace period.
   keeps persistent PTYs" line corrected), `graceful-maintenance.md` (the writer-barrier
   caveat for a kept pty-sessions), `services/desktop/browser/docs/operations.md`
   (browser lifetime), and forward links on the two decisions this one amends.
+
+Forward (2026-10-20): the user ruled that lifecycle CLIs take no default parameters and make no automatic judgement, so the keep decision and `--restart-all` are removed and the fleet update forwards the operator's explicit stop and start choices. See [2026-10-20-explicit-lifecycle-choices](2026-10-20-explicit-lifecycle-choices.md).

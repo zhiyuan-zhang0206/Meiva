@@ -64,7 +64,7 @@ DEEPSEEK_API_KEY=sk-your-key-here
 Then start the cluster:
 
 ```bash
-.venv/bin/meiva start
+.venv/bin/meiva start --all-services
 ```
 
 The first `meiva start` installs any missing host packages, creates the cluster's own
@@ -170,7 +170,7 @@ export PATH="$HOME/.local/bin:$PATH"
 Every gateway home needs a cluster secret, and `meiva init` mints one. A home whose `.env`
 has no `MEIVA_CLUSTER_SECRET` (hand-edited, or born before this rule) refuses to start. Set the
 line in `~/.meiva/.env` to a fresh URL-safe token, for example the output of
-`python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`, and run `meiva start` again.
+`python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`, and run `meiva start --all-services` again.
 
 ### `meiva start` says "host dependency preflight failed"
 
@@ -190,9 +190,9 @@ brew install postgresql@17 redis@8.2 pgbouncer pgvector node
 ```
 
 A headless gateway that does not serve the web UI can skip Node entirely:
-`meiva start --disable-service frontend`. A host that must run without OS jobs
+`meiva start --disable-service frontend`. (`meiva start` always needs a service selection: `--all-services`, `--only-service NAME` or `--disable-service NAME`; none is remembered.) A host that must run without OS jobs
 (no cron, no systemd — a container, typically) says so instead of faking them:
-`MEIVA_OS_JOBS_ENABLED=0 meiva start`.
+`MEIVA_OS_JOBS_ENABLED=0 meiva start --all-services`.
 
 ### Postgres connection failed
 
@@ -222,8 +222,11 @@ grep API_KEY ~/.meiva/.env
 ### How to stop
 
 ```bash
-meiva stop
+meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
 ```
+
+Every stop choice is explicit and a missing one exits 2 with the full list. Drop
+`--stop-infra` on a host that is only an agent runner; it has no data plane of its own.
 
 ### How to update
 

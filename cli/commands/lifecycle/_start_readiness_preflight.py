@@ -56,6 +56,9 @@ def preflight_start_readiness(
     *,
     check_launcher: bool = True,
     runtime: StartRuntime | None = None,
+    only_services: tuple[str, ...],
+    disabled_services: tuple[str, ...],
+    all_services: bool,
     machine: MachineIdentity,
     host: Host,
 ) -> int:
@@ -87,7 +90,14 @@ def preflight_start_readiness(
             "ahead of this one reports the same condition)"
         )
     else:
-        port_fatal, port_observations = _port_findings(roles, machine=machine, host=host)
+        port_fatal, port_observations = _port_findings(
+            roles,
+            only_services=only_services,
+            disabled_services=disabled_services,
+            all_services=all_services,
+            machine=machine,
+            host=host,
+        )
         fatal += port_fatal
         observations += port_observations
 
@@ -125,7 +135,13 @@ def _machine_roles(*, machine: MachineIdentity) -> MachineRoles | None:
 
 
 def _port_findings(
-    roles: MachineRoles, *, machine: MachineIdentity, host: Host
+    roles: MachineRoles,
+    *,
+    only_services: tuple[str, ...],
+    disabled_services: tuple[str, ...],
+    all_services: bool,
+    machine: MachineIdentity,
+    host: Host,
 ) -> tuple[list[str], list[str]]:
     """(fatal, observations) for the health-port gate, checked on the roster that
     the update's own `meiva start` will launch with.
@@ -146,7 +162,15 @@ def _port_findings(
     try:
         available = {s.session for s in _roster.build_services()}
         roster = root_tree_roster(
-            roles, resolve_selection(available, persist=False), machine=machine, host=host
+            roles,
+            resolve_selection(
+                available,
+                only=only_services,
+                excluded=disabled_services,
+                all_services=all_services,
+            ),
+            machine=machine,
+            host=host,
         )
         occupied = _probe_commands.occupied_health_ports(roster)
     except Exception as exc:  # a preflight must not fail the update

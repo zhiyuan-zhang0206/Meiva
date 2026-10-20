@@ -34,7 +34,7 @@ def print_hold_section() -> None:
         print(
             "maintenance hold: unreadable journal ($MEIVA_HOME/run/deploy-pause-owner.json); "
             "new work is refused until it is removed by hand (confirm no `meiva stop` is in "
-            "flight first), then `meiva start`"
+            "flight first), then `meiva start --all-services` (or this unit's own service selection)"
         )
         return
     hold = current.maintenance
@@ -43,7 +43,9 @@ def print_hold_section() -> None:
         return
     acquired_at = current.acquired_at.isoformat() if current.acquired_at else None
     print(f"maintenance hold: {hold.phase}  operation={current.holder}  acquired_at={acquired_at}")
-    print("  `meiva start` releases the hold.")
+    print(
+        "  `meiva start --all-services` (or this unit's own service selection) releases the hold."
+    )
 
 
 def cmd_status_json() -> int:
