@@ -347,6 +347,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/status"): RouteContract(),
     ("GET", "/api/system"): RouteContract(),
     ("GET", "/api/system/all"): RouteContract(),
+    ("GET", "/api/stream"): RouteContract(
+        note="merged SSE (global + active-agent + alerts) — one reconnect replaces three; subscribing mid-pause just idles and the frontend reconciles on open"
+    ),
     ("GET", "/api/tasks"): RouteContract(),
     ("GET", "/api/tasks/{task_id}"): RouteContract(
         note="read-only single task row with its results text — the hover card's read; 404 when no such task",
