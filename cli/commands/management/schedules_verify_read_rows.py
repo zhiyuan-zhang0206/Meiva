@@ -36,6 +36,11 @@ def read_rows(out: str) -> None:
             legacy_factory = operator_database_factory
             database_factory = legacy_factory(local_host=command.machine.host)
         rows = read_schedule_rows(database_factory=database_factory)
+    elif "access" in inspect.signature(read_schedule_rows).parameters:
+        from base.cluster.machine.boot import gateway_access_from_boot
+        from cli.database.runtime import CommandRuntime
+
+        rows = read_schedule_rows(gateway_access_from_boot(CommandRuntime.create().config))
     else:
         rows = read_schedule_rows()
     with Path(out).open("w") as handle:

@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 
 from base import telemetry
+from base.cluster.machine import GatewayAccess
 from base.telemetry import EventPipeline
 
 # One child's budget. task #3696 exception inventory: a self-imposed guard on a
@@ -78,32 +79,25 @@ _Get = Callable[..., httpx.Response]
 
 
 # meiva:note
-# The gateway's API base, its auth headers and the cluster-internal GET.
-def _gateway_dial() -> tuple[str, dict[str, str], _Get]:
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import get as dial_get
-
-    access = gateway_access_from_settings()  # ambient: C
-    return gateway_api_base(access.gateway_url), gateway_auth_headers(access), dial_get
-
-
-# meiva:note
 # All schedules as (id, name, script) — stopped rows included, ordered by id.
 #
 # Read through the gateway: the list route names every row, the per-id route carries
 # the script. The sweep needs a reachable gateway; a refused or failed call is the
 # tool-error path.
 def _read_schedule_rows(
-    dial: Callable[[], tuple[str, dict[str, str], _Get]] = _gateway_dial,
+    access: GatewayAccess, get: _Get | None = None
 ) -> list[tuple[int, str, str]]:
-    base, headers, get = dial()
-    schedules = f"{base}/api/schedules"
-    listing = get(schedules, timeout=_API_TIMEOUT_S, headers=headers)
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import get as dial_get
+
+    fetch = get or dial_get
+    headers = gateway_auth_headers(access)
+    schedules = f"{gateway_api_base(access.gateway_url)}/api/schedules"
+    listing = fetch(schedules, timeout=_API_TIMEOUT_S, headers=headers)
     listing.raise_for_status()
     rows: list[tuple[int, str, str]] = []
     for summary in sorted(listing.json(), key=lambda row: row["id"]):
-        resp = get(f"{schedules}/{summary['id']}", timeout=_API_TIMEOUT_S, headers=headers)
+        resp = fetch(f"{schedules}/{summary['id']}", timeout=_API_TIMEOUT_S, headers=headers)
         resp.raise_for_status()
         detail = resp.json()
         rows.append((detail["id"], detail["name"], detail["script"] or ""))
@@ -204,6 +198,7 @@ def cmd_schedules_verify(
     rows_file: str | None = None,
     notify: bool = True,
     ports: VerifyPorts | None = None,
+    access: Callable[[], GatewayAccess],
     producer: Callable[[], EventPipeline],
 ) -> int:
     if check_file is not None:
@@ -211,7 +206,9 @@ def cmd_schedules_verify(
     if rows_file is not None:
         notify = False
     ports = ports or VerifyPorts(
-        read_rows=partial(_read_rows_file, rows_file) if rows_file else _read_schedule_rows,
+        read_rows=partial(_read_rows_file, rows_file)
+        if rows_file
+        else lambda: _read_schedule_rows(access()),
         check_script=check_script,
         report=partial(_report_verify, producer=producer),
     )
@@ -252,9 +249,12 @@ def _report_verify(
 
 
 def h_schedules_verify(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
+
     return cmd_schedules_verify(
         check_file=args.check_file,
         rows_file=args.rows_file,
         notify=not args.no_notify,
         producer=args.producer,
+        access=lambda: gateway_access_from_boot(args.runtime.config),
     )

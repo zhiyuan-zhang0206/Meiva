@@ -15,6 +15,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from base.cluster.machine import GatewayAccess
+
 _TIMEOUT_S = 60.0
 
 
@@ -179,24 +181,18 @@ _Get = Callable[..., httpx.Response]
 
 
 # meiva:note
-# The gateway's API base, its auth headers and the cluster-internal GET.
-def _gateway_dial() -> tuple[str, dict[str, str], _Get]:
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import get as dial_get
-
-    access = gateway_access_from_settings()  # ambient: C
-    return gateway_api_base(access.gateway_url), gateway_auth_headers(access), dial_get
-
-
-# meiva:note
 # The gateway's audit report, or (None, why) when the gateway rejected the request.
 def _audit_report(
-    params: dict[str, Any], dial: Callable[[], tuple[str, dict[str, str], _Get]]
+    params: dict[str, Any], access: GatewayAccess, get: _Get | None
 ) -> tuple[dict[str, Any] | None, str | None]:
-    base, headers, get = dial()
-    resp = get(
-        f"{base}/api/notifications/audit", timeout=_TIMEOUT_S, headers=headers, params=params
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import get as dial_get
+
+    resp = (get or dial_get)(
+        f"{gateway_api_base(access.gateway_url)}/api/notifications/audit",
+        timeout=_TIMEOUT_S,
+        headers=gateway_auth_headers(access),
+        params=params,
     )
     if resp.status_code == 422:
         detail = resp.json().get("detail")
@@ -207,6 +203,7 @@ def _audit_report(
 
 def cmd_notices_audit(
     *,
+    access: GatewayAccess,
     days: int,
     category: str | None,
     tz_name: str | None,
@@ -214,7 +211,7 @@ def cmd_notices_audit(
     simulate: Sequence[str],
     out: str = "text",
     explain: bool = False,
-    dial: Callable[[], tuple[str, dict[str, str], _Get]] = _gateway_dial,
+    get: _Get | None = None,
 ) -> int:
     params: dict[str, Any] = {"days": days, "explain": explain, "simulate": list(simulate)}
     if category is not None:
@@ -223,7 +220,7 @@ def cmd_notices_audit(
         params["tz"] = tz_name
     if now is not None:
         params["now"] = now.isoformat()
-    report, rejected = _audit_report(params, dial)
+    report, rejected = _audit_report(params, access, get)
     if report is None:
         print(f"meiva: {rejected}", file=sys.stderr)
         return 2

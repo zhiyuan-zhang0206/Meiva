@@ -20,6 +20,7 @@ import psycopg
 import pytest
 
 from base.cluster import machine
+from base.cluster.machine import GatewayAccess
 from base.cluster.machine.tests.gateway_stubs import (
     gateway_api_base_stub,
     gateway_auth_headers_stub,
@@ -32,6 +33,13 @@ from cli.commands.management import schedules_verify as _verify
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
+
+_CLUSTER_AUTH = "verify-test-value"
+_ACCESS = GatewayAccess(gateway_url="http://gw", cluster_secret=_CLUSTER_AUTH, remote_plane=False)
+
+
+def _no_gateway() -> GatewayAccess:
+    raise AssertionError("the gateway must not be dialed")
 
 
 class _FakeResp:
@@ -411,7 +419,10 @@ def test_verify_green_prints_the_result_line_and_reports_nothing(
     """All scripts clean -> the RESULT counts, rc 0, and no failure report (the
     alert resolves once reds stop recurring)."""
     ports, alerts = _verify_ports([(1, "a", "print(1)\n"), (2, "b", "print(2)\n")], lambda _s: None)
-    assert _verify.cmd_schedules_verify(ports=ports, producer=operator_pipeline) == 0
+    assert (
+        _verify.cmd_schedules_verify(ports=ports, producer=operator_pipeline, access=_no_gateway)
+        == 0
+    )
     out = capsys.readouterr().out
     assert "RESULT ts=" in out
     assert "checked=2 green=2 red=0 rc=0" in out
@@ -433,7 +444,10 @@ def test_verify_red_lines_name_each_failure(
     ports, alerts = _verify_ports(
         rows, lambda s: "shared.watcher" if "shared.watcher" in s else None
     )
-    assert _verify.cmd_schedules_verify(ports=ports, producer=operator_pipeline) == 1
+    assert (
+        _verify.cmd_schedules_verify(ports=ports, producer=operator_pipeline, access=_no_gateway)
+        == 1
+    )
     out = capsys.readouterr().out
     assert "checked=3 green=2 red=1 rc=1" in out
     assert "RED id=7 name=drifted missing=shared.watcher" in out
@@ -454,7 +468,10 @@ def test_verify_tool_error_when_the_table_cannot_be_read(
     ports = _verify.VerifyPorts(
         read_rows=boom, check_script=ports.check_script, report=ports.report
     )
-    assert _verify.cmd_schedules_verify(ports=ports, producer=operator_pipeline) == 2
+    assert (
+        _verify.cmd_schedules_verify(ports=ports, producer=operator_pipeline, access=_no_gateway)
+        == 2
+    )
     out = capsys.readouterr().out
     assert "checked=0 green=0 red=0 rc=2" in out
     assert "TOOL-ERROR RuntimeError: db down" in out
@@ -472,6 +489,7 @@ def test_verify_no_notify_suppresses_the_report(
             notify=False,
             ports=ports,
             producer=operator_pipeline,
+            access=_no_gateway,
         )
         == 1
     )
@@ -493,7 +511,12 @@ def test_verify_rows_file_sweeps_the_dump_without_the_db_or_a_report(
     monkeypatch.setattr(_verify, "_report_verify", no_report)
     rows = tmp_path / "rows.json"
     rows.write_text(json.dumps([[3, "ok", "import os\n"], [4, "stale", "import zz_meiva_gone\n"]]))
-    assert _verify.cmd_schedules_verify(rows_file=str(rows), producer=operator_pipeline) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            rows_file=str(rows), producer=operator_pipeline, access=_no_gateway
+        )
+        == 1
+    )
     out = capsys.readouterr().out
     assert "checked=2 green=1 red=1 rc=1" in out
     assert "RED id=4 name=stale missing=zz_meiva_gone" in out
@@ -506,11 +529,17 @@ def test_verify_rows_file_unreadable_is_a_tool_error(
 ) -> None:
     broken = tmp_path / "rows.json"
     broken.write_text("not json")
-    assert _verify.cmd_schedules_verify(rows_file=str(broken), producer=operator_pipeline) == 2
+    assert (
+        _verify.cmd_schedules_verify(
+            rows_file=str(broken), producer=operator_pipeline, access=_no_gateway
+        )
+        == 2
+    )
     assert (
         _verify.cmd_schedules_verify(
             rows_file=str(tmp_path / "missing.json"),
             producer=operator_pipeline,
+            access=_no_gateway,
         )
         == 2
     )
@@ -528,17 +557,32 @@ def test_verify_check_file_ok_red_and_syntax_error(
     CHECK-OK; a module that no longer resolves / a syntax error are RED."""
     good = tmp_path / "good.py"
     good.write_text("import os\n", encoding="utf-8")
-    assert _verify.cmd_schedules_verify(check_file=str(good), producer=operator_pipeline) == 0
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(good), producer=operator_pipeline, access=_no_gateway
+        )
+        == 0
+    )
     assert "CHECK-OK" in capsys.readouterr().out
 
     bad = tmp_path / "bad.py"
     bad.write_text("import zz_meiva_verify_missing\n", encoding="utf-8")
-    assert _verify.cmd_schedules_verify(check_file=str(bad), producer=operator_pipeline) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(bad), producer=operator_pipeline, access=_no_gateway
+        )
+        == 1
+    )
     assert "CHECK-RED missing=zz_meiva_verify_missing" in capsys.readouterr().out
 
     broken = tmp_path / "broken.py"
     broken.write_text("def (:\n", encoding="utf-8")
-    assert _verify.cmd_schedules_verify(check_file=str(broken), producer=operator_pipeline) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(broken), producer=operator_pipeline, access=_no_gateway
+        )
+        == 1
+    )
     assert "CHECK-RED missing=compile-error:" in capsys.readouterr().out
 
 
@@ -551,6 +595,7 @@ def test_verify_check_file_unreadable_is_a_tool_error(
         _verify.cmd_schedules_verify(
             check_file=str(tmp_path / "missing.py"),
             producer=operator_pipeline,
+            access=_no_gateway,
         )
         == 2
     )
@@ -558,7 +603,12 @@ def test_verify_check_file_unreadable_is_a_tool_error(
 
     binary = tmp_path / "binary.py"
     binary.write_bytes(b"\xff\xfe\x00")
-    assert _verify.cmd_schedules_verify(check_file=str(binary), producer=operator_pipeline) == 2
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(binary), producer=operator_pipeline, access=_no_gateway
+        )
+        == 2
+    )
     assert "cannot read script file" in capsys.readouterr().err
 
 
@@ -601,32 +651,33 @@ def test_report_verify_tool_error_names_the_error(emitted_events: EmittedEvents)
 # The sweep input is the gateway's view: the list names every row (stopped ones
 # included), the per-id route carries each script; rows come back in id order.
 def test_verify_reads_every_schedule_through_the_gateway() -> None:
+    api = machine.gateway_api_base(_ACCESS.gateway_url)
     seen: list[str] = []
     bodies: dict[str, Any] = {
-        "http://gw/api/schedules": [{"id": 9, "name": "b"}, {"id": 2, "name": "a"}],
-        "http://gw/api/schedules/2": {"id": 2, "name": "a", "script": "print(1)\n"},
-        "http://gw/api/schedules/9": {"id": 9, "name": "b", "script": None},
+        f"{api}/api/schedules": [{"id": 9, "name": "b"}, {"id": 2, "name": "a"}],
+        f"{api}/api/schedules/2": {"id": 2, "name": "a", "script": "print(1)\n"},
+        f"{api}/api/schedules/9": {"id": 9, "name": "b", "script": None},
     }
 
     def get(url: str, **kwargs: Any) -> httpx.Response:
         seen.append(url)
-        assert kwargs["headers"] == {"Authorization": "Bearer t"}
+        assert kwargs["headers"] == machine.gateway_auth_headers(_ACCESS)
         return httpx.Response(200, json=bodies[url], request=httpx.Request("GET", url))
 
-    rows = _verify._read_schedule_rows(lambda: ("http://gw", {"Authorization": "Bearer t"}, get))
+    rows = _verify._read_schedule_rows(_ACCESS, get)
 
     assert rows == [(2, "a", "print(1)\n"), (9, "b", "")]
     assert seen == [
-        "http://gw/api/schedules",
-        "http://gw/api/schedules/2",
-        "http://gw/api/schedules/9",
+        f"{api}/api/schedules",
+        f"{api}/api/schedules/2",
+        f"{api}/api/schedules/9",
     ]
 
     def refuse(url: str, **_kwargs: Any) -> httpx.Response:
         return httpx.Response(401, json={}, request=httpx.Request("GET", url))
 
     with pytest.raises(httpx.HTTPStatusError):
-        _verify._read_schedule_rows(lambda: ("http://gw", {}, refuse))
+        _verify._read_schedule_rows(_ACCESS, refuse)
 
 
 # ── parser wiring ──

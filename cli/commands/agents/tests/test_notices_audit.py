@@ -9,7 +9,11 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
+from base.cluster.machine import GatewayAccess, gateway_auth_headers
 from cli.commands.agents.notices_audit import cmd_notices_audit, render_json, render_text
+
+_CLUSTER_AUTH = "audit-test-value"
+_ACCESS = GatewayAccess(gateway_url="http://gw", cluster_secret=_CLUSTER_AUTH, remote_plane=False)
 
 _LAST_DAY = (datetime(2026, 10, 2, tzinfo=UTC) - timedelta(days=1)).date().isoformat()
 
@@ -96,12 +100,9 @@ class _Gateway:
         self.requests: list[tuple[str, dict[str, Any], dict[str, str]]] = []
         self._response = response
 
-    def dial(self) -> tuple[str, dict[str, str], Callable[..., httpx.Response]]:
-        def get(url: str, **kwargs: Any) -> httpx.Response:
-            self.requests.append((url, kwargs["params"], kwargs["headers"]))
-            return self._response(url)
-
-        return "http://gw", {"Authorization": "Bearer t"}, get
+    def get(self, url: str, **kwargs: Any) -> httpx.Response:
+        self.requests.append((url, kwargs["params"], kwargs["headers"]))
+        return self._response(url)
 
 
 def _ok(report: dict[str, Any]) -> Callable[[str], httpx.Response]:
@@ -120,7 +121,8 @@ def test_the_command_asks_the_gateway_with_its_options_and_renders_the_report(
         now=datetime(2026, 10, 2, tzinfo=UTC),
         simulate=["requestion=off"],
         explain=True,
-        dial=gateway.dial,
+        access=_ACCESS,
+        get=gateway.get,
     )
 
     assert rc == 0
@@ -135,7 +137,7 @@ def test_the_command_asks_the_gateway_with_its_options_and_renders_the_report(
                 "tz": "Asia/Shanghai",
                 "now": "2026-10-02T00:00:00+00:00",
             },
-            {"Authorization": "Bearer t"},
+            gateway_auth_headers(_ACCESS),
         )
     ]
     assert "Notification audit" in capsys.readouterr().out
@@ -145,7 +147,14 @@ def test_the_json_output_is_the_gateway_report(capsys: pytest.CaptureFixture[str
     gateway = _Gateway(_ok(_REPORT))
 
     rc = cmd_notices_audit(
-        days=7, category=None, tz_name=None, now=None, simulate=[], out="json", dial=gateway.dial
+        days=7,
+        category=None,
+        tz_name=None,
+        now=None,
+        simulate=[],
+        out="json",
+        access=_ACCESS,
+        get=gateway.get,
     )
 
     assert rc == 0
@@ -165,7 +174,7 @@ def test_a_rejected_request_prints_the_reason_and_exits_two(
     )
 
     rc = cmd_notices_audit(
-        days=7, category="x.y", tz_name=None, now=None, simulate=[], dial=gateway.dial
+        days=7, category="x.y", tz_name=None, now=None, simulate=[], access=_ACCESS, get=gateway.get
     )
 
     assert rc == 2
@@ -177,5 +186,11 @@ def test_a_gateway_error_is_not_swallowed() -> None:
 
     with pytest.raises(httpx.HTTPStatusError):
         cmd_notices_audit(
-            days=7, category=None, tz_name=None, now=None, simulate=[], dial=gateway.dial
+            days=7,
+            category=None,
+            tz_name=None,
+            now=None,
+            simulate=[],
+            access=_ACCESS,
+            get=gateway.get,
         )

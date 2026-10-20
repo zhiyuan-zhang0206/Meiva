@@ -151,9 +151,11 @@ def _h_notices_clear(args: argparse.Namespace) -> int:
 
 
 def _h_notices_audit(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.notices_audit import cmd_notices_audit
 
     return cmd_notices_audit(
+        access=gateway_access_from_boot(args.runtime.config),
         days=args.days,
         category=args.category,
         tz_name=args.tz,
