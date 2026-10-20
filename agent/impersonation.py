@@ -252,6 +252,20 @@ async def _apply_plugin_deltas(
         await asyncio.to_thread(mark_plugin_applied, db, session["id"], version, incarnation)
 
 
+# meiva:note
+# Whether a terminal automatic lease still owes the native checkpoint its receipt: the
+# end-of-session note plus `handoff_applied_at`. Until it lands, the agent refuses every
+# new takeover as an unapplied state.
+# meiva:link docs/conventions/agents/agent-impersonation.md
+def handoff_owed(session: dict[str, Any] | None) -> bool:
+    return bool(
+        session is not None
+        and session["automatic"]
+        and session["status"] not in OPEN
+        and session["handoff_applied_at"] is None
+    )
+
+
 async def settle_checkpoint(
     graph: CompiledStateGraph[
         _state.BaseAgentState, MeivaContext, _state.BaseAgentState, _state.BaseAgentState
@@ -290,7 +304,7 @@ async def settle_checkpoint(
     if session["status"] == ImpersonationStatus.ACTIVE:
         return True
     await _apply_plugin_deltas(graph, db, session, agent_id, incarnation)
-    if session["automatic"] and session["handoff_applied_at"] is None:
+    if handoff_owed(session):
         from base.agents.impersonation import aborted_detail
 
         # A supervisor-aborted lease (task #3998) carries its death cause as
