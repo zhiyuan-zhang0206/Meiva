@@ -28,7 +28,7 @@ function idleQuery(data?: ToUserDocument) {
 }
 function show(
   value: ToUserDocument,
-  { mobile = false, linked, onInspect, onCollapse }: { mobile?: boolean; linked?: ToUserDocument; onInspect?: () => void; onCollapse?: () => void } = {},
+  { mobile = false, linked, onInspect, onCollapse, inspecting = false }: { mobile?: boolean; linked?: ToUserDocument; onInspect?: () => void; onCollapse?: () => void; inspecting?: boolean } = {},
 ) {
   linkedQuery.mockReturnValue(idleQuery(linked));
   return render(
@@ -39,6 +39,7 @@ function show(
       pending={false}
       refresh={vi.fn()}
       mobile={mobile}
+      inspecting={inspecting}
       onInspect={onInspect}
       onCollapse={onCollapse}
     />,
@@ -162,6 +163,20 @@ describe("To user document bar", () => {
     const trigger = screen.getByTestId("open-inspector");
     expect(trigger.parentElement?.className).toContain("ml-auto");
     expect(bar.lastElementChild).toBe(trigger.parentElement);
+  });
+
+  it("names the mode in the bar and turns the magnifier into its exit", () => {
+    // meiva:note
+    // Inspector is a mode: while it is on, the bar says what the panel is
+    // showing and the same button that entered it is the way out (user
+    // 2026-10-20), instead of a second close control inside the panel.
+    // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+    show(document("# Status"), { onInspect: vi.fn(), inspecting: true });
+    expect(screen.getByText("title")).toBeTruthy();
+    expect(screen.queryByText("sharedContext")).toBeNull();
+    const trigger = screen.getByTestId("open-inspector");
+    expect(trigger.getAttribute("aria-pressed")).toBe("true");
+    expect(trigger.getAttribute("aria-label")).toBe("closeInspector");
   });
 
   it("does not repeat the panel title in the mobile reading view", () => {

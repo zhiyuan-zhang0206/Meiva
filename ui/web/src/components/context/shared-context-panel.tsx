@@ -33,11 +33,16 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
   onCollapse?: () => void;
 }) {
   const t = useTranslations("toUser");
-  const tInspector = useTranslations("inspector");
   const { open: inspecting, toggle: toggleInspector } = useInspectorOpen();
   const queryClient = useQueryClient();
   const [noticeCollapsed, setNoticeCollapsed] = useState(false);
   const notice = notices.at(0);
+  // meiva:note
+  // Inspector is a mode, not a second surface: the document bar above already
+  // says which one is on and carries the pressed magnifier that turns it off,
+  // so the overlay below adds no header and no second exit (user 2026-10-20:
+  // the panel should read like a mode being on).
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   return (
     <aside className={cn("relative w-full bg-background", FLEX, MIN_H_0, FLEX_COL, mobile ? "fixed inset-0 z-50" : "h-full")} aria-label={t("sharedContext")}>
       {mobile && <header className={cn("h-11 shrink-0 items-center justify-between border-b px-4 text-sm", FLEX)}>
@@ -58,27 +63,25 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
             <OpenNoticeDetail key={notice.id} agentId={agentId} notice={notice} onResolved={() => dropOpenNotices(queryClient, [notice.id])} />
           </div>}
         </section>}
-        <ToUserDocumentView key={agentId} agentId={agentId} document={document.data} failed={document.isError} pending={document.isFetching} refresh={() => void document.refetch()} mobile={mobile} inspecting={inspecting} onInspect={toggleInspector} onCollapse={onCollapse} />
+        <ToUserDocumentView
+          key={agentId}
+          agentId={agentId}
+          document={document.data}
+          failed={document.isError}
+          pending={document.isFetching}
+          refresh={() => void document.refetch()}
+          mobile={mobile}
+          inspecting={inspecting}
+          bodyHidden={inspecting}
+          onInspect={toggleInspector}
+          onCollapse={onCollapse}
+        />
+        {inspecting && (
+          <div data-testid="shared-inspector" className={cn(MIN_H_0, FLEX_1, FLEX)}>
+            <Inspector agentId={agentId} embedded />
+          </div>
+        )}
       </div>
-      {inspecting && (
-        <div
-          data-testid="shared-inspector"
-          className={cn("absolute inset-0 z-30 bg-background", FLEX, FLEX_COL)}
-        >
-          <header className={cn("shrink-0 items-center gap-2 px-3 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_CLASS, FLEX)}>
-            <span className="truncate">{tInspector("title")}</span>
-            <button
-              type="button"
-              aria-label={tInspector("closeInspector")}
-              onClick={toggleInspector}
-              className="ml-auto rounded p-1 hover:bg-accent"
-            >
-              <X className="size-3.5" />
-            </button>
-          </header>
-          <div className={cn(MIN_H_0, FLEX_1, FLEX)}><Inspector agentId={agentId} embedded /></div>
-        </div>
-      )}
     </aside>
   );
 }

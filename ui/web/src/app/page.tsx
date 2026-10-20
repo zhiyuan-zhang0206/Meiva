@@ -122,8 +122,13 @@ function HomeShell({ showError }: HomeShellProps) {
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || b.created_at.localeCompare(a.created_at));
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   const [contextPanelOpen, setContextPanelOpen] = useContextPanelOpen();
+  // meiva:note
+  // The mode owns the panel: entering inspector while the shared-context column
+  // is closed still shows it, because otherwise the mode would be on with
+  // nothing to inspect. On mobile the inspector keeps its own sheet.
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   const showContext = isLarge
-    ? activeId != null && contextPanelOpen
+    ? activeId != null && (contextPanelOpen || inspectorOpen)
     : mobileContextOpen || inspectorOpen;
 
   const handleSpawn = useCallback(
@@ -250,6 +255,8 @@ function HomeContent({
   const { settings: userSettings, isLoading: userSettingsLoading } = useUserSettings();
   const { isNarrow, isLarge } = useBreakpoint();
   const { collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed } = useSidebarCollapsed();
+  const { open: inspectorOpen } = useInspectorOpen();
+  const inspectorText = useTranslations("inspector");
   const contentColumnMaxWidth = isNarrow
     ? undefined
     : timelineMaxWidthCss(userSettings["display.timeline_width_ratio"]);
@@ -345,9 +352,17 @@ function HomeContent({
     }
   }, [activeId, showError]);
 
-  const activeLabel = activeAgent
-    ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""}`
-    : "…";
+  // meiva:note
+  // Inspector is a mode over the whole shell, so the title bar says so: while it
+  // is on the bar names the view, not the agent behind it (user 2026-10-20). It
+  // returns to the agent label the moment the mode is off.
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  const activeLabel =
+    inspectorOpen && isLarge
+      ? inspectorText("title")
+      : activeAgent
+        ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""}`
+        : "…";
   const agentBusy = turnActive || activeAgent?.status === "running";
   const composerMode: "disabled" | "idle" | "busy" =
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";

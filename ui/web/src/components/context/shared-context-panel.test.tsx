@@ -14,7 +14,12 @@ vi.mock("@/lib/inspector/inspector-panel-store", () => ({
   useInspectorOpen: () => ({ open: snapshot.inspectorOpen, toggle: vi.fn() }),
 }));
 vi.mock("./to-user-document", () => ({
-  ToUserDocumentView: () => <div data-testid="document-view" />,
+  ToUserDocumentView: ({ bodyHidden }: { bodyHidden?: boolean }) => (
+    <div>
+      <div data-testid="document-bar" />
+      {bodyHidden ? null : <div data-testid="document-view" />}
+    </div>
+  ),
 }));
 vi.mock("@/components/inspector/inspector-panel", () => ({
   InspectorPanel: () => <div data-testid="inspector-view" />,
@@ -86,15 +91,19 @@ it("shows the document as the panel's body without a view switcher", () => {
   expect(screen.queryByRole("tablist")).toBeNull();
 });
 
-it("lays the inspector over the document instead of replacing it", async () => {
+it("swaps the body under a bar that stays, instead of laying a sheet over it", async () => {
+  // meiva:note
+  // The mode owns the panel: the document bar (which names the mode and carries
+  // the pressed magnifier that leaves it) stays as the one control surface, and
+  // the body below it is replaced. An overlay that covered the bar left the
+  // mode with no visible exit (user report 2026-10-20).
   snapshot.inspectorOpen = true;
   renderPanel();
   expect(await screen.findByTestId("inspector-view")).toBeTruthy();
-  const document = screen.getByTestId("shared-document");
-  expect(document.getAttribute("hidden")).toBeNull();
-  expect(screen.getByTestId("document-view")).toBeTruthy();
-  const sheet = screen.getByTestId("shared-inspector");
-  expect(sheet.className).toContain("absolute inset-0");
+  expect(screen.getByTestId("document-bar")).toBeTruthy();
+  expect(screen.getByTestId("shared-inspector")).toBeTruthy();
+  expect(screen.queryByTestId("document-view")).toBeNull();
+  expect(screen.queryByTestId("notice-bar")).toBeNull();
 });
 
 it("keeps the notice area inside the document body", () => {
