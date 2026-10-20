@@ -14,7 +14,7 @@ commands remain for intermediate manual work and recovery. The operator-facing p
 the runbook
 ([updating a networked cluster in source mode](../../docs/conventions/runbook.md#updating-a-networked-cluster-in-source-mode));
 this node owns the code-side order, and the window's guards are
-[[cli/docs/fleet-update-window.meiva.okf.md]].
+[[cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md]].
 The halves are idempotent: after a failure, fix the cause and rerun the failed
 half. `run` accepts both halves' options, requires `--new`, uses one log and
 stops at the first failure; a failed `down` never enters `up`. Its failure
@@ -34,18 +34,17 @@ and start choices are forwarded unchanged, never checked against the diff.
   `--keep-shell-sessions|--close-shell-sessions`, `--keep-browser|--stop-browser`,
   `--keep-extras|--stop-extras`, `--keep-service NAME` (repeatable) or
   `--keep-no-services`, `--mode smooth|force`, `--stop-timeout` (as `--timeout`).
-  `--keep-infra|--stop-infra` is forwarded to the gateway's stop only; a runner's
-  stop never carries it. `--yes` is always sent: the transport is non-interactive
-  SSH.
+  `--keep-infra|--stop-infra` goes to the gateway's stop only. `--yes` is always
+  sent (non-interactive SSH).
 - `down` / `run`, for the fleet itself: `--allow-python-change|--refuse-python-change`,
   `--allow-red-schedules|--refuse-red-schedules`, `--silence-hours`,
   `--lease-confirm-seconds` (0 reports the leases and never waits).
-- `up` / `run`, forwarded to every host's `meiva start` (directly over SSH, or in
-  the macOS one-shot LaunchAgent): `--all-services`, or `--only-service NAME`
-  (repeatable), or `--disable-service NAME` (repeatable); plus `--start-timeout`,
-  `--smoke-timeout`, `--roster-timeout`.
+- Every half, forwarded to every host's `meiva start` (over SSH, or in the macOS
+  one-shot LaunchAgent) by `up` and by a failed `down`'s recovery: `--all-services`,
+  `--only-service NAME` or `--disable-service NAME` (repeatable), and `--start-timeout`.
+- `up` / `run`: `--smoke-timeout`, `--roster-timeout`.
 
-One start selection applies to every host; hosts cannot be given different ones.
+One start selection applies to every host.
 
 All commands refuse an agent's inherited `MEIVA_AGENT_ID`. An authorized agent
 can submit an OS-owned job and return before drain; the submitting shell is not
@@ -55,9 +54,8 @@ remain unchanged throughout the update.
 
 ## The down half, in order
 
-1. Preflight each listed host. OLD, the one commit every host agrees on that is
-   not NEW, is read only to refuse an unacknowledged `.python-version` change; it
-   decides nothing about what stops.
+1. Preflight each listed host. OLD (the one commit every host shares that is not
+   NEW) only feeds the `.python-version` refusal.
 2. Read the gateway's active impersonation leases and name them: a stop ends
    every takeover in flight. `--lease-confirm-seconds` holds the stops open
    for that long first.
@@ -68,7 +66,9 @@ remain unchanged throughout the update.
 5. Open the window's Grafana silence on the gateway host.
 6. `meiva stop --yes` with the operator's flags on each runner, then the gateway
    (which also gets `--keep-infra` or `--stop-infra`). A stop must leave the host
-   paused/stopped; a failure prints the retry step.
+   paused/stopped; a failure prints the retry step and brings back, with the
+   operator's start selection, the hosts this run already stopped
+   ([[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]]).
 7. Switch every checkout: check out NEW detached, repair legacy read-only
    `.venv` directories (early converge passes left them 0555, which `uv sync`
    cannot write through), `uv sync --frozen`, then require a clean tree. The

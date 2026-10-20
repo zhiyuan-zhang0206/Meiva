@@ -459,9 +459,38 @@ class DataPlaneSettings(EnvSettings):
             "check as failed and retries against its own deadline. Neither timer "
             "reaches a backend wedged in uninterruptible I/O or a client/network "
             "wait — the 2026-10-18 event (check_ms 389 s, a host-level OOM freeze) "
-            "was that class. Every process that pools connections runs this "
+            "was that class; db_pool_restore_client_deadline_seconds is the client "
+            "timer for it. Every process that pools connections runs this "
             "restore, so the field lives in the data_plane domain, not in the "
             "agent-only one."
+        ),
+        gt=0,
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    db_pool_restore_client_deadline_seconds: float = Field(
+        default=8.0,
+        alias="MEIVA_DB_POOL_RESTORE_CLIENT_DEADLINE_SECONDS",
+        description=(
+            "Client-side deadline, in seconds, for one per-borrow session restore — "
+            "the wait the server's own timers cannot end. statement_timeout and "
+            "transaction_timeout are enforced by the backend at its own "
+            "CHECK_FOR_INTERRUPTS, so a backend that is stopped, black-holed or "
+            "wedged in I/O leaves the borrower waiting with no timer at all (the "
+            "2026-10-17 stall: 18-56 s per borrow). The async restore arms "
+            "asyncio.timeout() around the whole restore and abandons its connection "
+            "at this deadline, which the pool counts as a failed check and replaces. "
+            "It must stay strictly greater than db_pool_restore_timeout_seconds: at "
+            "the same value the client would preempt a server timer that was about "
+            "to fire cleanly, turning a cancelled statement into a discarded "
+            "connection and ended_by=statement_timeout into "
+            "ended_by=client_deadline. The margin is the time a cancel needs to "
+            "reach the backend and be run."
         ),
         gt=0,
         json_schema_extra={
@@ -525,6 +554,25 @@ class DataPlaneSettings(EnvSettings):
                 "'._~-') — it is used as a control-plane bearer"
             )
         return v
+
+    # meiva:note
+    # The client deadline must leave room for the server's own timer. The statement
+    # and transaction timers are enforced by the backend; the client deadline
+    # exists only for a backend that never runs them. Equal or smaller values
+    # invert that order: the client would abandon a connection whose cancel was
+    # about to complete, costing the connection, the transaction semantics and the
+    # `ended_by` attribution that tells the two cases apart. Refused at settings
+    # load rather than clamped silently, so a deployment that lowers one value is
+    # told to move the other.
+    @model_validator(mode="after")
+    def _client_deadline_outlives_the_server_budget(self) -> DataPlaneSettings:
+        if self.db_pool_restore_client_deadline_seconds <= self.db_pool_restore_timeout_seconds:
+            raise ValueError(
+                "db_pool_restore_client_deadline_seconds must be greater than "
+                "db_pool_restore_timeout_seconds: the client deadline exists for a "
+                "backend that is not running, not to preempt the server's own timers"
+            )
+        return self
 
     @model_validator(mode="after")
     def _dial_self_host_via_loopback(self) -> DataPlaneSettings:

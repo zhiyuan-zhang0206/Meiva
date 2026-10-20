@@ -73,7 +73,7 @@ def test_run_reports_up_failure_without_repeating_down(
 # A host whose converge aborted leaves the rest of the cluster running: the run
 # names that host's step and reason, keeps going, and exits 3 — distinct from a
 # refusal (2) and from a failure before any host started (1).
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def test_a_host_that_fails_to_start_does_not_stop_the_others(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -234,14 +234,19 @@ def test_missing_choices_are_all_listed_at_once_and_no_host_is_touched(
         fleet_update.main(argv)
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    expected = ["--dry-run | --execute", "--runner ALIAS (repeatable) | --no-runners"]
+    expected = [
+        "--dry-run | --execute",
+        "--runner ALIAS... | --no-runners",
+        "--all-services | --only-service | --disable-service",
+        "--start-timeout",
+    ]
     if half != "up":
         expected += [
             "--keep-shell-sessions | --close-shell-sessions",
             "--keep-browser | --stop-browser",
             "--keep-extras | --stop-extras",
             "--keep-infra | --stop-infra",
-            "--keep-service NAME (repeatable) | --keep-no-services",
+            "--keep-service | --keep-no-services",
             "--mode",
             "--stop-timeout",
             "--allow-python-change | --refuse-python-change",
@@ -250,12 +255,7 @@ def test_missing_choices_are_all_listed_at_once_and_no_host_is_touched(
             "--lease-confirm-seconds",
         ]
     if half != "down":
-        expected += [
-            "--all-services | --only-service NAME",
-            "--start-timeout",
-            "--smoke-timeout",
-            "--roster-timeout",
-        ]
+        expected += ["--smoke-timeout", "--roster-timeout"]
     assert all(item in err for item in expected), err
     assert cluster.commands == [] and cluster.effects == []
     assert not (tmp_path / "logs").exists()
@@ -269,7 +269,8 @@ def test_conflicting_choices_are_refused_before_any_host(
         run("down", "--keep-browser", "--stop-browser", "--no-runners", "--runner", "mac")
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert "--keep-browser and --stop-browser" in err and "--runner ALIAS | --no-runners" in err
+    assert "exactly one of --keep-browser | --stop-browser" in err
+    assert "--runner ALIAS... | --no-runners" in err
     assert cluster.commands == []
 
 

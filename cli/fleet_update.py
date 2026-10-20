@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import PIPE, STDOUT
-from typing import Any
+from typing import Any, cast
 
 REPO = Path(__file__).resolve().parents[1]
 HOME = 'H="$HOME/.meiva"; S="$H/source"; cd "$S" || exit 1'
@@ -47,6 +47,10 @@ printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
 test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
 test -e "$H/updates/active" && echo active=yes || echo active=no
 printf '%s\\n' "hold=$({MEIVA} status --json 2>/dev/null | grep '^{{' | tail -n 1)\""""
+_OP_EVIDENCE = """H="$HOME/.meiva"
+p=$(cat "$H/run/agent_host.pid" 2>/dev/null)
+if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo host=up; else echo host=down; fi
+cat "$H/run/lifecycle-op.json" 2>/dev/null || true"""
 _VENV_DIRS = (
     "find .venv/bin .venv/lib -maxdepth 3 -type d \\( -path .venv/bin "
     '-o -path ".venv/lib/python*/site-packages" '
@@ -172,33 +176,65 @@ def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
 
 
 # meiva:note
-# OLD (the one HEAD every host shares before the switch) exists only to diff `.python-version`
-# against NEW for the --allow-python-change refusal. It decides nothing about what stops or starts.
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
-def _preflight(s: Session, args: argparse.Namespace, new: str) -> list[str]:
-    reasons: list[str] = []
-    heads: dict[str, str] = {}
-    for alias in [args.gateway, *args.runner]:
-        probe = s.run(alias, PROBE, effect=False).splitlines()
-        facts = {key: value for key, _, value in (line.partition("=") for line in probe)}
-        heads[alias] = facts["head"]
-        reasons += _host_refusals(alias, facts)
-    old = {head for head in heads.values() if head != new}
-    if len(old) > 1:
-        return [*reasons, f"hosts disagree on HEAD: {heads}"]
-    resolved = next(iter(old)) if old else None
+# The hold a probe line reports; an unreadable record reads as a hold of its own, never as a
+# crash inside the gate that is deciding whether to refuse.
+def _hold(hold: str) -> tuple[str, str | None]:
+    try:
+        return split_hold_text(hold)
+    except (IndexError, ValueError):
+        return ("unreadable", None)
+
+
+# meiva:note
+# One host's probe facts, and whether it was serving when the window began: a completed stop is
+# the only quiet hold a window admits, so every other readable hold means the machine was up.
+def _probe(s: Session, alias: str) -> tuple[dict[str, str], bool]:
+    lines = s.run(alias, PROBE, effect=False).splitlines()
+    facts = {key: value for key, _, value in (line.partition("=") for line in lines)}
+    return facts, _hold(facts["hold"] or "") != ("paused", "stopped")
+
+
+# meiva:note
+# OLD is the one commit every host agrees on that is not NEW; hosts that disagree, or an OLD the
+# operator's checkout does not carry, refuse the window. OLD only feeds the `.python-version`
+# refusal: it decides nothing about what stops or starts.
+def _old_target(
+    s: Session, args: argparse.Namespace, heads: dict[str, str], new: str
+) -> tuple[list[str], str | None]:
+    older = {head for head in heads.values() if head != new}
+    if len(older) > 1:
+        return [f"hosts disagree on HEAD: {heads}"], None
+    resolved = next(iter(older)) if older else None
     if resolved and _git("cat-file", "-e", f"{resolved}^{{commit}}").returncode:
-        return [*reasons, f"OLD {resolved} is not in {REPO}: git fetch origin"]
+        return [f"OLD {resolved} is not in {REPO}: git fetch origin"], None
+    reasons: list[str] = []
     if resolved:
         stat = _git("diff", "--stat", resolved, new, "--", *_WATCHED).stdout.rstrip()
         s.say(stat or "no change under " + " ".join(_WATCHED))
         python = _git("diff", "--quiet", resolved, new, "--", ".python-version")
-        if python.returncode and args.python_change != "--allow-python-change":
+        if python.returncode and args.python != "--allow-python-change":
             reasons.append(".python-version changes (venvs rebuild): pass --allow-python-change")
-    return reasons
+    return reasons, resolved
 
 
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+def _preflight(
+    s: Session, args: argparse.Namespace, new: str
+) -> tuple[list[str], str | None, list[str]]:
+    reasons: list[str] = []
+    heads: dict[str, str] = {}
+    serving: list[str] = []
+    for alias in [args.gateway, *args.runner]:
+        facts, was_serving = _probe(s, alias)
+        heads[alias] = facts["head"]
+        reasons += _host_refusals(alias, facts)
+        if was_serving:
+            serving.append(alias)
+    more, resolved = _old_target(s, args, heads, new)
+    return [*reasons, *more], resolved, serving
+
+
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     out = s.run(
         args.gateway,
@@ -220,7 +256,7 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     reds = [line for line in lines if line.startswith(("RED ", "TOOL-ERROR"))]
     what = "red" if code == "1" else f"unevaluable (check exited {code})"
     detail = "\n  ".join(reds) or "no RED line: see the output above"
-    if args.red_schedules == "--allow-red-schedules":
+    if args.red == "--allow-red-schedules":
         s.say(f"WARNING: stored schedule scripts {what} under {new[:12]}, continuing:\n  {detail}")
         return
     raise FailedError(
@@ -238,7 +274,7 @@ def leases_program() -> str:
     return (Path(__file__).parent / "commands" / "management" / "fleet_leases.py").read_text()
 
 
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "") -> None:
     tail = (
         f" --hours {args.silence_hours:g} --comment {shlex.quote(comment)}"
@@ -253,7 +289,7 @@ def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "")
 
 # meiva:note
 # Name the takeovers the stops would end, before anything stops -- under --dry-run too.
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _announce_leases(s: Session, args: argparse.Namespace) -> None:
     try:
         out = s.run(args.gateway, f"{_PYTHON} -", effect=False, stdin=leases_program())
@@ -298,7 +334,7 @@ def _lease_read_warning(s: Session, detail: str) -> None:
 
 # meiva:note
 # Hold the stops open for as long as the operator asked; 0 reports the leases and returns at once.
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _lease_window(s: Session, args: argparse.Namespace) -> None:
     if not args.lease_confirm_seconds:
         return
@@ -311,12 +347,84 @@ def _lease_window(s: Session, args: argparse.Namespace) -> None:
         time.sleep(min(LEASE_TICK_S, left))
 
 
+# meiva:note
+# A failed stop must not leave the cluster half stopped: that hosts this run took down go back up,
+# on the OLD commit they still carry, so a failed window costs an aborted update instead of an
+# outage. Three facts decide one host, and none of them alone is enough: it was serving when the
+# window began (a host the operator had already stopped stays stopped), it is down now, and this
+# run is what took it down -- either its stop completed here, or the host's own stop journal
+# records a failed or unfinished stop. A host that is still running is never touched, and no code
+# is rolled back: the switch phase never started.
+# The start is `meiva start` with the operator's explicit selection, never `--boot`: a boot attempt spends the boot budget, and on
+# macOS the failing attempt that spends it exits 0 (launchd has no attempt limit), so a failed
+# recovery would read as success and never reach `needs manual:`.
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+def _recover_after_failed_stop(
+    s: Session,
+    args: argparse.Namespace,
+    serving: list[str],
+    stopped: list[str],
+    failed: str | None,
+) -> None:
+    recovered: list[str] = []
+    down: list[str] = []
+    for alias in [args.gateway, *args.runner]:
+        if alias not in serving:
+            continue
+        up, journal = _host_up_and_journal(s, alias)
+        if up:
+            continue
+        down.append(alias)
+        if alias not in stopped and not (alias == failed and _failed_stop(journal)):
+            continue
+        try:
+            flags = _start_flags(args)
+            start = (
+                gui_oneshot(alias, args.start_timeout, flags)
+                if s.os[alias] == "Darwin"
+                else f"{HOME}; {MEIVA} start {flags}"
+            )
+            s.run(alias, start)
+            if split_hold_text(s.run(alias, _STATUS, effect=False))[0] not in _FREE:
+                raise FailedError(f"{alias}: recovery start left the hold on")
+            recovered.append(alias)
+        except FailedError as exc:
+            s.say(f"recovery: {exc}")
+    s.say(f"recovered: {', '.join(recovered) or 'none'}")
+    s.say(f"needs manual: {', '.join(a for a in down if a not in recovered) or 'none'}")
+
+
+# meiva:note
+# The host's daemon state and its last lifecycle journal, in one read: the journal answers "was
+# this host's stop a failure" (a stop that reported a non-zero rc or never completed), which is
+# the half a running daemon cannot tell us.
+def _host_up_and_journal(s: Session, alias: str) -> tuple[bool, dict[str, Any] | None]:
+    lines = s.run(alias, _OP_EVIDENCE, effect=False).splitlines()
+    up = any(line.strip() == "host=up" for line in lines)
+    raw = next((line for line in lines if line.startswith("{")), None)
+    try:
+        parsed: Any = json.loads(raw) if raw is not None else None
+    except ValueError:
+        parsed = None
+    return up, cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else None
+
+
+# meiva:note
+# The host's own journal is the evidence that its stop failed, as opposed to ending in a state the
+# window did not expect.
+def _failed_stop(journal: dict[str, Any] | None) -> bool:
+    if journal is None or journal.get("operation") != "stop":
+        return False
+    result = cast("dict[str, Any]", journal["result"]) if "result" in journal else {}
+    return journal.get("complete") is not True or result.get("rc") != 0
+
+
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 def down(s: Session, args: argparse.Namespace) -> None:
     new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}").stdout.strip()
     if not new:
         raise FailedError(f"refused: {args.new} is not a commit in {REPO}; git fetch origin")
-    reasons = _preflight(s, args, new)
+    reasons, _old, serving = _preflight(s, args, new)
     if reasons:
         raise FailedError("refused: " + "; ".join(reasons))
     _announce_leases(s, args)
@@ -324,21 +432,27 @@ def down(s: Session, args: argparse.Namespace) -> None:
     for alias in everyone:
         s.run(alias, f'{HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
     _stored_schedules(s, args, new)
-    stop_flags = _stop_flags(args)
-    gateway_stop_flags = f"{stop_flags} {args.infra}"
+    chosen = [args.shell, args.browser, args.extras, *_flags(args, args.kept)]
+    stop_flags = " ".join([*chosen, f"--mode {args.mode}", f"--timeout {args.stop_timeout}"])
     _silence(
         s, args, "open", f"fleet update to {new[:12]}: planned outage; `up` expires this silence"
     )
-    for alias in [*args.runner, args.gateway]:
-        try:
-            flags = gateway_stop_flags if alias == args.gateway else stop_flags
+    stopped: list[str] = []
+    current = args.gateway
+    try:
+        for alias in [*args.runner, args.gateway]:
+            current = alias
+            flags = f"{stop_flags} {args.infra}" if alias == args.gateway else stop_flags
             s.run(alias, f"{HOME}; {MEIVA} stop --yes {flags}")
             if not s.dry_run:
                 status, phase = split_hold_text(s.run(alias, _STATUS, effect=False))
                 if (status, phase) != ("paused", "stopped"):
                     raise FailedError(f"{alias}: stop left {status}/{phase}")
-        except FailedError as exc:
-            raise FailedError(f"{exc}{_STOP_HINT}") from exc
+            stopped.append(alias)
+    except FailedError as exc:
+        if not s.dry_run:
+            _recover_after_failed_stop(s, args, serving, stopped, current)
+        raise FailedError(f"{exc}{_STOP_HINT}") from exc
     for alias in everyone:
         s.run(
             alias,
@@ -446,7 +560,7 @@ def _drift_checks(s: Session, args: argparse.Namespace) -> None:
 # Exit code 2 already means "refused before doing anything"; a run where some
 # hosts came up and others did not is its own outcome, so automation can tell
 # a partial up from a rejected one.
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 PARTIAL_FAILURE_EXIT = 3
 
 _INCOMPLETE = 'cat "$HOME/.meiva/state/converge-incomplete.json" 2>/dev/null'
@@ -475,7 +589,7 @@ def _host_failure(s: Session, alias: str, exc: FailedError) -> HostFailure:
 # the failures are collected with their step and reason, and the caller reports
 # them and exits 3. A half-up cluster is reported, never hidden behind a single
 # abort that leaves the remaining hosts untouched.
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
     failures: list[HostFailure] = []
     start_flags = _start_flags(args)
@@ -531,92 +645,44 @@ def _seconds(text: str) -> int:
 
 
 # meiva:note
-# Every lifecycle choice is an explicit flag with no default and no inference. A pair is two
-# store-const flags on one dest (argparse's required mutually exclusive group would report only the
-# first missing one), so `_missing` can name every absent choice at once before any host is touched.
-_PAIRS: dict[str, tuple[str, str]] = {
-    "shell_sessions": ("--keep-shell-sessions", "--close-shell-sessions"),
+# Every lifecycle choice is an explicit flag with no default and no inference. One choice is a set of
+# flags of which exactly one is given (argparse's required mutually exclusive group would report
+# only the first missing one), so `_missing_choices` names every absent choice at once before any
+# host is touched.
+_PAIRS: dict[str, tuple[str, ...]] = {
+    "execution": ("--dry-run", "--execute"),
+    "selection": ("--all-services", "--only-service", "--disable-service"),
+    "shell": ("--keep-shell-sessions", "--close-shell-sessions"),
     "browser": ("--keep-browser", "--stop-browser"),
     "extras": ("--keep-extras", "--stop-extras"),
     "infra": ("--keep-infra", "--stop-infra"),
-    "python_change": ("--allow-python-change", "--refuse-python-change"),
-    "red_schedules": ("--allow-red-schedules", "--refuse-red-schedules"),
-    "execution": ("--dry-run", "--execute"),
+    "kept": ("--keep-service", "--keep-no-services"),
+    "python": ("--allow-python-change", "--refuse-python-change"),
+    "red": ("--allow-red-schedules", "--refuse-red-schedules"),
 }
-_STOP_PAIRS = ("shell_sessions", "browser", "extras", "infra")
-_WINDOW_PAIRS = ("python_change", "red_schedules")
+# meiva:note
+# Every half names the start selection and its deadline: `up` starts the hosts with them, and a
+# `down` whose stop fails brings back the hosts it took down with the same explicit start.
+_HALF_PAIRS: dict[str, list[str]] = {
+    "both": ["execution", "selection"],
+    "down": ["shell", "browser", "extras", "infra", "kept", "python", "red"],
+    "up": [],
+}
+_HALF_VALUES: dict[str, tuple[tuple[str, Callable[[str], object]], ...]] = {
+    "both": (("--start-timeout", int),),
+    "down": (
+        ("--mode", str),
+        ("--stop-timeout", int),
+        ("--silence-hours", float),
+        ("--lease-confirm-seconds", _seconds),
+    ),
+    "up": (("--smoke-timeout", int), ("--roster-timeout", int)),
+}
+_NAMED = {"--only-service", "--disable-service", "--keep-service"}
 
 
-def _add_pair(p: argparse.ArgumentParser, dest: str) -> None:
-    for flag in _PAIRS[dest]:
-        p.add_argument(flag, dest=dest, action="append_const", const=flag, default=None)
-
-
-def _missing(args: argparse.Namespace, dests: tuple[str, ...]) -> list[str]:
-    problems: list[str] = []
-    for dest in dests:
-        given = getattr(args, dest)
-        if given is None:
-            problems.append("one of " + " | ".join(_PAIRS[dest]))
-        elif len(given) > 1:
-            problems.append(f"only one of {' | '.join(_PAIRS[dest])} (got {' and '.join(given)})")
-        else:
-            setattr(args, dest, given[0])
-    return problems
-
-
-def _missing_choices(args: argparse.Namespace) -> list[str]:
-    half = args.half
-    problems = _missing(args, ("execution",))
-    if args.runner and args.no_runners:
-        problems.append("only one of --runner ALIAS | --no-runners")
-    elif not args.runner and not args.no_runners:
-        problems.append("one of --runner ALIAS (repeatable) | --no-runners")
-    if half in ("run", "down"):
-        problems += _missing(args, (*_STOP_PAIRS, *_WINDOW_PAIRS))
-        if bool(args.keep_service) == args.keep_no_services:
-            problems.append("exactly one of --keep-service NAME (repeatable) | --keep-no-services")
-        for flag, dest in (
-            ("--mode", "mode"),
-            ("--stop-timeout", "stop_timeout"),
-            ("--silence-hours", "silence_hours"),
-            ("--lease-confirm-seconds", "lease_confirm_seconds"),
-        ):
-            if getattr(args, dest) is None:
-                problems.append(flag)
-    if half in ("run", "up"):
-        chosen = [bool(args.all_services), bool(args.only_service), bool(args.disable_service)]
-        if chosen.count(True) != 1:
-            problems.append(
-                "exactly one of --all-services | --only-service NAME (repeatable) | "
-                "--disable-service NAME (repeatable)"
-            )
-        for flag, dest in (
-            ("--start-timeout", "start_timeout"),
-            ("--smoke-timeout", "smoke_timeout"),
-            ("--roster-timeout", "roster_timeout"),
-        ):
-            if getattr(args, dest) is None:
-                problems.append(flag)
-    return problems
-
-
-def _stop_flags(args: argparse.Namespace) -> str:
-    keeps = (
-        ["--keep-no-services"]
-        if args.keep_no_services
-        else [f"--keep-service {shlex.quote(name)}" for name in args.keep_service]
-    )
-    chosen = [args.shell_sessions, args.browser, args.extras, *keeps]
-    return " ".join([*chosen, f"--mode {args.mode}", f"--timeout {args.stop_timeout}"])
-
-
-def _start_flags(args: argparse.Namespace) -> str:
-    if args.all_services:
-        return "--all-services"
-    if args.only_service:
-        return " ".join(f"--only-service {shlex.quote(name)}" for name in args.only_service)
-    return " ".join(f"--disable-service {shlex.quote(name)}" for name in args.disable_service)
+def _scopes(half: str) -> tuple[str, ...]:
+    return ("both", *(("down",) if half != "up" else ()), *(("up",) if half != "down" else ()))
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -637,60 +703,57 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--runner", action="append", default=None, metavar="SSH_ALIAS")
         p.add_argument("--no-runners", action="store_true", help="the cluster has no runner hosts")
         p.add_argument("--log-dir", type=Path, required=True)
-        _add_pair(p, "execution")
-        if half in ("run", "down"):
-            _add_down_arguments(p)
-        if half in ("run", "up"):
-            _add_up_arguments(p)
+        if half != "up":
+            p.add_argument("--new", required=True, help="commit to switch every host to")
+        for scope in _scopes(half):
+            for dest in _HALF_PAIRS[scope]:
+                for flag in _PAIRS[dest]:
+                    if flag in _NAMED:
+                        p.add_argument(flag, action="append", default=None, metavar="NAME")
+                    else:
+                        p.add_argument(flag, dest=dest, action="append_const", const=flag)
+            for flag, kind in _HALF_VALUES[scope]:
+                p.add_argument(flag, type=kind, default=None)
     return parser
 
 
-def _add_down_arguments(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--new", required=True, help="commit to switch every host to")
-    for dest in (*_STOP_PAIRS, *_WINDOW_PAIRS):
-        _add_pair(p, dest)
-    p.add_argument("--keep-service", action="append", default=None, metavar="NAME")
-    p.add_argument("--keep-no-services", action="store_true")
-    p.add_argument("--mode", choices=("smooth", "force"), default=None)
-    p.add_argument(
-        "--stop-timeout", type=int, default=None, help="forwarded as `meiva stop --timeout`"
-    )
-    p.add_argument(
-        "--lease-confirm-seconds",
-        type=_seconds,
-        default=None,
-        help="seconds to hold the stops open after naming the active impersonation "
-        "leases (0: report only, never wait)",
-    )
-    p.add_argument(
-        "--silence-hours",
-        type=float,
-        default=None,
-        help="expiry of the alert silence opened for the window (`up` expires it sooner)",
-    )
+def _value(args: argparse.Namespace, flag: str) -> Any:
+    return getattr(args, flag[2:].replace("-", "_"))
 
 
-def _add_up_arguments(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--all-services", action="store_true")
-    p.add_argument("--only-service", action="append", default=None, metavar="NAME")
-    p.add_argument("--disable-service", action="append", default=None, metavar="NAME")
-    p.add_argument("--start-timeout", type=int, default=None)
-    p.add_argument("--smoke-timeout", type=int, default=None)
-    p.add_argument("--roster-timeout", type=int, default=None)
+def _missing_choices(args: argparse.Namespace) -> list[str]:
+    problems = [] if bool(args.runner) != args.no_runners else ["--runner ALIAS... | --no-runners"]
+    for scope in _scopes(args.half):
+        for dest in _HALF_PAIRS[scope]:
+            given = [f for f in _PAIRS[dest] if f in _NAMED and _value(args, f)]
+            given += getattr(args, dest, None) or []
+            if len(given) != 1:
+                problems.append("exactly one of " + " | ".join(_PAIRS[dest]))
+            else:
+                setattr(args, dest, given[0])
+        problems += [flag for flag, _kind in _HALF_VALUES[scope] if _value(args, flag) is None]
+    if args.half != "up" and args.mode not in (None, "smooth", "force"):
+        problems.append("--mode smooth|force")
+    return problems
+
+
+def _flags(args: argparse.Namespace, chosen: str) -> list[str]:
+    if chosen in _NAMED:
+        return [f"{chosen} {shlex.quote(name)}" for name in _value(args, chosen)]
+    return [chosen]
+
+
+def _start_flags(args: argparse.Namespace) -> str:
+    return " ".join(_flags(args, args.selection))
 
 
 def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser = _parser()
     args = parser.parse_args(argv)
     if problems := _missing_choices(args):
-        parser.exit(
-            2,
-            "refused: every choice is explicit; missing or conflicting:\n  "
-            + "\n  ".join(problems)
-            + "\n",
-        )
-    runners: list[str] = args.runner or []
-    args.runner = runners
+        listed = "".join(f"\n  {problem}" for problem in problems)
+        parser.exit(2, f"refused: every choice is explicit; missing or conflicting:{listed}\n")
+    args.runner = args.runner or []
     args.dry_run = args.execution == "--dry-run"
     return args
 

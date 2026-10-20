@@ -10,6 +10,8 @@ tags: [cli, updates, operations]
 The promises `cli.fleet_update` makes around the stops themselves
 ([[cli/docs/fleet-update.meiva.okf.md]] owns the halves and their order): what
 refuses the window, what gates it, what it silences, and what must not leak.
+What stops and what starts is never decided here: every choice is the operator's
+explicit argument, forwarded unchanged.
 `run` executes both halves in one window, preserving these same gates and
 closing the silence only after `up` passes all verification.
 
@@ -19,30 +21,13 @@ Each listed host is probed in its own shell before anything is touched. The
 probe uses `printf` because zsh's and dash's `echo` reinterprets backslashes,
 which once mangled a hold record carrying a quoted `$HOME`.
 
-## The lease announcement
+## The leases and the failed stop
 
-The stops end every external takeover that is running: a host or native
-restart never adopts a relay across incarnations, so a lease that is active
-when the cluster stops is aborted mid-task and its executor loses control
-([agent impersonation hosts](../../docs/conventions/agents/agent-impersonation-hosts.md)). The rule
-therefore has a carrier, not only a sentence here: `down` reads
-`agent_impersonations` rows with `status='active'` on the gateway host before
-anything stops — under `--dry-run` too, in the same words — and names each
-lease's agent, session, executor and expiry, followed by one warning that the
-stop ends them. `cli/fleet_leases.py` is a real file whose text ships to the
-host, like the silence and roster programs, so its imports stay visible to the
-reader and the first update that carries it already has it. The filter is the
-status the table holds rather than the clock: a stopped cluster's reaper lags,
-and the row still marked active is exactly the one the stop would end. A table
-that cannot be read only warns — the shipped program exiting non-zero is the
-same warning, not a refusal — because an unreadable lease list must not strand
-a window.
-
-The required `--lease-confirm-seconds` then holds the stops open for that long
-with a printed countdown, so the operator can release or renew a lease first.
-0 waits for nobody: the operator chose the window and the leases are named
-before the first stop; a wave that must not end a takeover passes a longer
-window. `--dry-run` reports the window and does not sleep.
+Two facts are read over SSH before the window can hurt anything, and each has
+its own node: the active impersonation leases the stops would end
+([[cli/docs/fleet-update-window/lease-announcement.meiva.okf.md]]), and — only
+after a stop fails — which hosts the window took down and must bring back
+([[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]]).
 
 ## The stored-schedule gate
 
@@ -73,12 +58,11 @@ reporting its label and log path; its label is its own
 
 ## Contracts
 
-down refuses before touching anything — exit 2, no effects — when a listed host has uncommitted changes, a post-checkout hook, an active update marker or a maintenance hold that is neither free nor a completed stop, when the hosts disagree on HEAD, and when .python-version changes under --refuse-python-change; the probe reads its facts through the host's own shell.
+down refuses before touching anything — exit 2, no effects — when a listed host has uncommitted changes, a post-checkout hook, an active update marker or a maintenance hold that is neither free nor a completed stop, when the hosts disagree on HEAD, and when .python-version changes without --allow-python-change; the probe reads its facts through the host's own shell.
 
 Before anything stops — under --dry-run too — down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table refuses with the rows listed unless --allow-red-schedules.
 
-
-Before anything stops — under --dry-run too, in the same words — down reads the gateway's agent_impersonations rows with status='active' and names each lease by agent, session, executor and expiry, followed by one warning that the stops end them; a read that fails — an unreadable table or a program that exits non-zero — only warns and the window goes on; the required --lease-confirm-seconds (0 reports only) holds the stops open that long with a countdown, and dry-run prints that window without sleeping.
+Before anything stops — under --dry-run too — down names the active impersonation leases and, after a failed stop, recovers the hosts that stop took down: [[cli/docs/fleet-update-window/lease-announcement.meiva.okf.md]], [[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]].
 
 down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry the required --silence-hours; up expires it after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
 

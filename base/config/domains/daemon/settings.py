@@ -132,6 +132,21 @@ class DaemonSettings(
         },
     )
 
+    harness_skip_permissions: bool = Field(
+        default=True,
+        alias="MEIVA_HARNESS_SKIP_PERMISSIONS",
+        description="Hosted agent-runner: pass the external CLI its skip-approvals flag. Default true because a hosted turn has nobody at the terminal to answer an approval prompt, so a prompt is a hang rather than a decision; an operator who wants the CLI's own flow sets it false, per agent through config_overlay.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
     page_server_poll_interval_seconds: float = Field(
         default=2.0,
         alias="MEIVA_PAGE_SERVER_POLL_INTERVAL_SECONDS",

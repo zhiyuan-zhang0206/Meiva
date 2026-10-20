@@ -65,6 +65,15 @@ class RateLimitObserved:
     turn_id: str | None = None
 
 
+# meiva:note
+# `input_tokens` is the whole input a turn was billed for, cache reads and cache
+# writes included; the two cache fields are the subsets that priced differently.
+# That is the shape `base/lm/pricing.quote` requires, and it is the one LangChain
+# hands the built-in runtime. Providers disagree on the raw field — Anthropic
+# reports the uncached remainder, OpenAI already totals — so each adapter folds
+# its provider's numbers into this shape at its mapping boundary, and every
+# consumer downstream can add them up without asking which harness produced them.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
 @dataclass(frozen=True, slots=True)
 class Usage:
     input_tokens: int = 0

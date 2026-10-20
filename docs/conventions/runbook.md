@@ -281,7 +281,9 @@ systemd-run --user --scope -p MemoryMax=12G -- python heavy_job.py
   services out of session scopes) is the fix, not a tighter cap.
 - A backend-side timeout cannot rescue this shape: `statement_timeout` and
   `transaction_timeout` are checked by a backend that is not being scheduled.
-  The restore budget of task #5303 covers backend-visible waits only.
+  The restore budget of task #5303 covers backend-visible waits; when the backend
+  never answers at all, the async restore abandons the borrow at its client
+  deadline (`db_pool_restore_client_deadline_seconds`) instead of waiting it out.
 - `scripts/host_ops/host_memory_sample.py` samples the kernel pressure file, the
   slice's `memory.events` counters and the largest descendant units with their
   limits. On a host where it is installed as the operator unit
@@ -509,7 +511,8 @@ half, use the separate commands:
   --gateway GATEWAY --runner RUNNER --log-dir DIR --execute \
   --keep-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
   --mode smooth --stop-timeout 600 \
-  --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0
+  --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
+  --all-services --start-timeout 1800
 # manual release steps, if any
 .venv/bin/python -m cli.fleet_update up --gateway GATEWAY --runner RUNNER --log-dir DIR --execute \
   --all-services --start-timeout 1800 --smoke-timeout 300 --roster-timeout 90
@@ -550,8 +553,14 @@ half, use the separate commands:
   not fetch) is reported as not checked. Then, before the first stop, it opens the window's
   alert silence (below). Then it runs `meiva stop --yes` with your stop flags on each runner and
   then the gateway (each must leave phase `stopped` with no failures; the gateway's stop also
-  carries `--keep-infra`/`--stop-infra`), then on
-  every host checks out NEW detached, repairs legacy read-only venv
+  carries `--keep-infra`/`--stop-infra`). A stop that fails part-way does not leave the cluster
+  half stopped: `down` brings back every host it took down (a host that was serving
+  when the window began, is down now, and whose stop completed here or whose
+  `run/lifecycle-op.json` records a failed stop), on the OLD commit it still
+  carries, with your start selection and `--start-timeout`; the failure output names
+  `recovered:` and `needs manual:` and the half still exits non-zero. Then, when every stop
+  succeeded, it moves on to the switch: on
+  every host it checks out NEW detached, repairs legacy read-only venv
   directories, runs `uv sync --frozen` and requires a clean tree.
 - Runners fetch through the gateway's source clone (their checkout's `origin` is the gateway host's `~/.meiva/source`): the target commit is fetched by SHA before it is reachable from any of the clone's refs, so the clone carries `uploadpack.allowAnySHA1InWant=true` (repo-local; set 2026-09-30). A reclone of the clone must re-apply it.
 - A failed stop prints the next step: on that host retry

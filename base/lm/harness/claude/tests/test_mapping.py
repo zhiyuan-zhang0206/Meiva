@@ -112,13 +112,37 @@ def test_result_fields_carry_usage_cost_and_denials() -> None:
     )
     assert fields.session_id == "sess-1"
     assert fields.usage == Usage(
-        input_tokens=4,
+        input_tokens=4 + 2738,
         output_tokens=138,
         cache_creation_input_tokens=0,
         cache_read_input_tokens=2738,
     )
     assert fields.cost_usd == 0.0004
     assert fields.permission_denials == ("Write",)
+
+
+# meiva:note
+# The numbers are a real turn recorded on 2026-10-20: Anthropic billed 8 uncached
+# input tokens beside 17391 cache reads and 6621 cache writes. Reading the remainder
+# as the prompt priced a 24020-token turn as 8 tokens and raised in `quote`, which
+# deleted the reply the turn had already produced.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def test_usage_reports_the_whole_prompt_not_only_the_uncached_remainder() -> None:
+    fields = parse_result(
+        fake.ResultMessage(
+            subtype="success",
+            session_id="sess-2",
+            usage={
+                "input_tokens": 8,
+                "output_tokens": 371,
+                "cache_creation_input_tokens": 6621,
+                "cache_read_input_tokens": 17391,
+            },
+        )
+    )
+    assert fields.usage.input_tokens == 8 + 6621 + 17391
+    cached = fields.usage.cache_read_input_tokens + fields.usage.cache_creation_input_tokens
+    assert cached <= fields.usage.input_tokens, "the cache fields are subsets of the prompt"
 
 
 def test_unknown_messages_map_to_nothing() -> None:

@@ -3,7 +3,7 @@
 # and silence programs, so the first update carrying this change already has it. It reports the
 # takeovers a stop would abort; every failure prints one line and exits 0, because an unreadable
 # lease table must warn, never strand an update.
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 from __future__ import annotations
 
 import json

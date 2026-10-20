@@ -413,6 +413,7 @@ async def build_runtime(
             registrations=registrations,
             registration_ttl_seconds=registration_ttl_seconds,
             machine=machine,
+            skip_permissions=slices.harness_cli.harness_skip_permissions,
         ),
     )
 
@@ -425,6 +426,7 @@ def harness_bridge_for(
     registrations: RegistrationStore | None,
     registration_ttl_seconds: float,
     machine: str,
+    skip_permissions: bool = True,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
@@ -440,6 +442,7 @@ def harness_bridge_for(
         registry=registry,
         registrations=registrations,
         registration_ttl_seconds=registration_ttl_seconds,
+        skip_permissions=skip_permissions,
     )
 
 

@@ -212,6 +212,12 @@ EVENTS: dict[str, EventSpec] = {
         "external harness session closes raised while the agent host was running",
         tier="anomaly",
     ),
+    "harness_usage_log_failed": telemetry_event(
+        "harness_usage_log_failed",
+        "an external harness turn finished but its usage could not be priced; the reply stands "
+        "and the accounting row for that turn is missing",
+        tier="anomaly",
+    ),
     "harness_registration_unreadable": telemetry_event(
         "harness_registration_unreadable",
         "a harness registration row could not be read during the sweep and is left in place",

@@ -1,7 +1,7 @@
 # meiva:note
 # The window names every active impersonation lease before it stops the cluster, in the same words
 # under --dry-run.
-# meiva:link cli/docs/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 from __future__ import annotations
 
 from collections.abc import Callable

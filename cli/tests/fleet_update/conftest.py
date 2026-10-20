@@ -21,6 +21,8 @@ def _group(flags: str, *default: str) -> Group:
 _BOTH: tuple[Group, ...] = (
     _group("--runner --no-runners", "--runner", "mac", "--runner", "lin"),
     _group("--dry-run --execute", "--execute"),
+    _group("--all-services --only-service --disable-service", "--all-services"),
+    _group("--start-timeout", "--start-timeout", "1800"),
 )
 _STOP: tuple[Group, ...] = (
     _group("--keep-shell-sessions --close-shell-sessions", "--keep-shell-sessions"),
@@ -36,8 +38,6 @@ _STOP: tuple[Group, ...] = (
     _group("--lease-confirm-seconds", "--lease-confirm-seconds", "0"),
 )
 _START: tuple[Group, ...] = (
-    _group("--all-services --only-service --disable-service", "--all-services"),
-    _group("--start-timeout", "--start-timeout", "1800"),
     _group("--smoke-timeout", "--smoke-timeout", "300"),
     _group("--roster-timeout", "--roster-timeout", "90"),
 )

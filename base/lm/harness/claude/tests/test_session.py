@@ -61,7 +61,7 @@ async def test_totals_accumulate_across_turns(tmp_path: Path) -> None:
         second = await harness.session.submit("second").outcome()
         totals = harness.session.totals
         assert totals.turns == 2
-        assert totals.input_tokens == 8
+        assert totals.input_tokens == 8 + 5476, "the prompt totals its cache reads"
         assert totals.output_tokens == 276
         assert totals.cache_read_input_tokens == 5476
         assert totals.cost_usd == pytest.approx(0.0008)
