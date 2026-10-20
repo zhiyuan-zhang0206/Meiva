@@ -21,9 +21,14 @@ Creation is one table, not three dropdowns side by side: Harness, then the
 models that harness runs, then the efforts that model publishes. Each column
 narrows the next and marks exactly one row selected as soon as the form
 renders, so opening it answers "what will the next agent be born on" before it
-asks anything. The model column keeps only the providers the chosen harness can
-start — the built-in `meiva` runtime keeps every provider — grouped under a
-vendor heading, with hidden and superseded catalog entries excluded. The effort
+asks anything. The model column keeps only the models whose published
+`harnesses` name the chosen harness (`GET /api/models`, `ModelInfo.harnesses`;
+the built-in `meiva` runtime runs every spawnable model and is always listed
+first), grouped under a vendor heading, with hidden and superseded catalog
+entries excluded. Which harness runs which model is the registry's declaration,
+not a table in the frontend: assigning a model to another harness server-side
+reaches that harness's column with no frontend change, and a catalog entry read
+before the field existed names the built-in runtime alone. The effort
 column shows the selected model's `reasoning_effort_options` ladder; a model
 that publishes none leaves the column empty rather than offering a synthetic
 default, and the model's concrete `reasoning_effort_default` is the row marked

@@ -13,7 +13,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpawnForm } from "./spawn-form";
-import type { SystemStatus } from "@/lib/contracts/types";
+import type { ModelsResponse, SystemStatus } from "@/lib/contracts/types";
 
 vi.mock("@/lib/transport/api", () => ({
   api: {
@@ -87,23 +87,25 @@ const singleMachineStatus = () =>
     { name: "test-host", online: true },
   ]);
 
-const modelsDefault = () => ({
+const modelsDefault = (): ModelsResponse => ({
   providers: { deepseek: ["deepseek-v4-pro"], claude: ["claude-opus-4-8"] },
   models: {},
   default: "deepseek-v4-pro",
 });
 
-const modelsWithEffort = () => ({
+const modelsWithEffort = (): ModelsResponse => ({
   providers: { deepseek: ["deepseek-v4-pro"], claude: ["claude-opus-4-8"] },
   models: {
     "deepseek-v4-pro": {
       provider: "deepseek",
+      harnesses: ["meiva"],
       context_window: 128_000,
       reasoning_effort_options: ["high", "max"],
       reasoning_effort_default: "max",
     },
     "claude-opus-4-8": {
       provider: "claude",
+      harnesses: ["meiva", "claude_code"],
       context_window: 200_000,
       reasoning_effort_options: null,
       reasoning_effort_default: null,
@@ -112,17 +114,19 @@ const modelsWithEffort = () => ({
   default: "deepseek-v4-pro",
 });
 
-const modelsWithTwoLadders = () => ({
+const modelsWithTwoLadders = (): ModelsResponse => ({
   providers: { deepseek: ["deepseek-v4-pro"], gpt: ["gpt-5.6"] },
   models: {
     "deepseek-v4-pro": {
       provider: "deepseek",
+      harnesses: ["meiva"],
       context_window: 128_000,
       reasoning_effort_options: ["high", "max"],
       reasoning_effort_default: "max",
     },
     "gpt-5.6": {
       provider: "gpt",
+      harnesses: ["meiva", "codex"],
       context_window: 400_000,
       reasoning_effort_options: ["minimal", "low", "medium", "high"],
       reasoning_effort_default: "medium",
@@ -296,6 +300,35 @@ describe("spawn table", () => {
     });
   });
 
+  it("follows the registry: a model assigned to another harness shows up there", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    // meiva:note
+    // The registry - not this frontend - decides which harness runs which model: a
+    // model whose published harnesses name an external CLI appears in that CLI's
+    // column with no frontend change, and one that does not is absent from it. The
+    // DeepSeek model is deliberately not the CLI's own vendor.
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    vi.mocked(api.getModels).mockResolvedValue({
+      providers: { deepseek: ["deepseek-v4-pro"], gpt: ["gpt-5.6"] },
+      models: {
+        "deepseek-v4-pro": {
+          provider: "deepseek",
+          harnesses: ["meiva", "codex"],
+          context_window: 128_000,
+        },
+        "gpt-5.6": { provider: "gpt", harnesses: ["meiva"], context_window: 400_000 },
+      },
+      default: "deepseek-v4-pro",
+    });
+    wrap();
+    const form = await table();
+    expect(within(column(form, MODEL_COLUMN)).queryByText("gpt-5.6")).toBeTruthy();
+    pick(form, HARNESS_COLUMN, "Codex");
+    expect(within(column(form, MODEL_COLUMN)).queryByText("deepseek-v4-pro")).toBeTruthy();
+    expect(within(column(form, MODEL_COLUMN)).queryByText("gpt-5.6")).toBeNull();
+    expect(selected(form, MODEL_COLUMN, /deepseek-v4-pro/)).toBe(true);
+  });
+
   it("a harness the machine cannot start is disabled in its column", async () => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
     vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
@@ -350,9 +383,12 @@ describe("spawn table", () => {
     vi.mocked(api.getModels).mockResolvedValue({
       providers: { deepseek: ["deepseek-v4-pro", "deepseek-flash", "deepseek-legacy"] },
       models: {
-        "deepseek-v4-pro": { provider: "deepseek", context_window: 128_000, superseded_by: "deepseek-flash" },
-        "deepseek-flash": { provider: "deepseek", context_window: 128_000, superseded_by: null },
-        "deepseek-legacy": { provider: "deepseek", context_window: 1, superseded_by: null },
+        "deepseek-v4-pro": { provider: "deepseek",
+ harnesses: ["meiva"], context_window: 128_000, superseded_by: "deepseek-flash" },
+        "deepseek-flash": { provider: "deepseek",
+ harnesses: ["meiva"], context_window: 128_000, superseded_by: null },
+        "deepseek-legacy": { provider: "deepseek",
+ harnesses: ["meiva"], context_window: 1, superseded_by: null },
       },
       default: "deepseek-flash",
     });

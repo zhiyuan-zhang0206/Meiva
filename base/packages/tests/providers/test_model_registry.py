@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import fields as dataclass_fields
+from typing import cast
 
 import pytest
 
+from base.api_contracts.agent_contract import Harness
 from base.config import field_names, get_field
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import (
     DEFAULT_TUNING,
     ModelSpec,
     ModelTuning,
+    harnesses_for,
     resolve_available_model,
     resolve_setting,
 )
@@ -489,3 +492,32 @@ def test_sdk_help_fields_accept_a_dotted_path_and_a_style() -> None:
             )
         }
     )
+
+
+def test_harnesses_for_puts_the_builtin_runtime_first() -> None:
+    spec = ModelSpec(
+        provider="probe",
+        spawnable=True,
+        context_window=1,
+        knowledge_cutoff="2026-01",
+        effort_levels=("low",),
+        external_harnesses=frozenset({Harness.CODEX, Harness.CLAUDE_CODE}),
+    )
+    assert harnesses_for(spec) == (Harness.MEIVA, Harness.CLAUDE_CODE, Harness.CODEX)
+
+
+def test_unknown_harness_values_are_refused() -> None:
+    odd = cast("frozenset[Harness]", frozenset({"claude-code"}))
+    with pytest.raises(RuntimeError, match="external_harnesses"):
+        _validate_with(
+            {"probe": ModelSpec(provider="probe", spawnable=True, external_harnesses=odd)}
+        )
+
+
+def test_fast_service_inherits_the_standard_models_harnesses(
+    *, model_catalog: ModelCatalog
+) -> None:
+    standard = model_catalog.models["claude-opus-5-5"]
+    fast = model_catalog.models["claude-opus-5-5-fast"]
+    assert standard.external_harnesses == frozenset({Harness.CLAUDE_CODE})
+    assert fast.external_harnesses == standard.external_harnesses

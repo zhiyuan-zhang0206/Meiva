@@ -419,11 +419,13 @@ describe("DisplaySettingsPage", () => {
         "deepseek-v4-pro": {
           provider: "deepseek",
           context_window: 128_000,
+          harnesses: ["meiva"],
           superseded_by: "deepseek-flash",
         },
         "deepseek-flash": {
           provider: "deepseek",
           context_window: 128_000,
+          harnesses: ["meiva"],
           superseded_by: null,
         },
       },

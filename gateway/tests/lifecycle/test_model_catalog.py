@@ -1,3 +1,4 @@
+from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.schemas.models import ModelsResponse
@@ -49,3 +50,18 @@ def test_picker_exposes_served_service_cache_write_rates(
     assert standard is not None and fast is not None
     assert (standard.cache_write_5m, standard.cache_write_1h) == (5, 8)
     assert (fast.cache_write_5m, fast.cache_write_1h) == (10, 16)
+
+
+def test_picker_publishes_each_models_harnesses(
+    *, gateway_data_plane: None, machine_identity: MachineIdentity
+) -> None:
+    catalog = get_models(local_machine=machine_identity)
+    assert catalog.models["claude-sonnet-5-5"].harnesses == [Harness.MEIVA, Harness.CLAUDE_CODE]
+    assert catalog.models["gpt-5.6-sol"].harnesses == [Harness.MEIVA, Harness.CODEX]
+    assert catalog.models["gemini-3.8-flash"].harnesses == [
+        Harness.MEIVA,
+        Harness.ANTIGRAVITY,
+    ]
+    assert catalog.models["deepseek-flash"].harnesses == [Harness.MEIVA]
+    wire = catalog.model_dump(mode="json")
+    assert wire["models"]["claude-sonnet-5-5"]["harnesses"] == ["meiva", "claude_code"]
