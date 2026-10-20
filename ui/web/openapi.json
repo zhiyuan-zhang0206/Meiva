@@ -4716,6 +4716,125 @@
         }
       }
     },
+    "/api/notifications/audit": {
+      "get": {
+        "summary": "Get Notification Audit",
+        "operationId": "get_notification_audit_api_notifications_audit_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 7,
+              "title": "Days"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tz"
+            }
+          },
+          {
+            "name": "now",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Now"
+            }
+          },
+          {
+            "name": "simulate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Simulate"
+            }
+          },
+          {
+            "name": "explain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Explain"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationAuditResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/schedules": {
       "get": {
         "summary": "List Schedules",
@@ -10041,6 +10160,198 @@
         ],
         "title": "AssignmentTaskIn"
       },
+      "AuditCandidates": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "candidates": {
+            "type": "integer",
+            "title": "Candidates"
+          },
+          "delivered": {
+            "type": "integer",
+            "title": "Delivered"
+          },
+          "suppressed": {
+            "type": "integer",
+            "title": "Suppressed"
+          },
+          "repeat_deliveries": {
+            "type": "integer",
+            "title": "Repeat Deliveries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "candidates",
+          "delivered",
+          "suppressed",
+          "repeat_deliveries"
+        ],
+        "title": "AuditCandidates"
+      },
+      "AuditDay": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "title": "Day"
+          },
+          "by_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Category"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "by_category",
+          "total"
+        ],
+        "title": "AuditDay"
+      },
+      "AuditDelivered": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "per_day": {
+            "items": {
+              "$ref": "#/components/schemas/AuditDay"
+            },
+            "type": "array",
+            "title": "Per Day"
+          },
+          "per_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Per Category"
+          },
+          "per_hour": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Per Hour"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "per_day",
+          "per_category",
+          "per_hour"
+        ],
+        "title": "AuditDelivered"
+      },
+      "AuditExplained": {
+        "properties": {
+          "at": {
+            "type": "string",
+            "title": "At"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "dedupe_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe Key"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome"
+          }
+        },
+        "type": "object",
+        "required": [
+          "at",
+          "category",
+          "agent_id",
+          "dedupe_key",
+          "outcome"
+        ],
+        "title": "AuditExplained"
+      },
+      "AuditSimulation": {
+        "properties": {
+          "variant": {
+            "type": "string",
+            "title": "Variant"
+          },
+          "delivered": {
+            "type": "integer",
+            "title": "Delivered"
+          },
+          "delta": {
+            "type": "integer",
+            "title": "Delta"
+          },
+          "per_day": {
+            "type": "number",
+            "title": "Per Day"
+          }
+        },
+        "type": "object",
+        "required": [
+          "variant",
+          "delivered",
+          "delta",
+          "per_day"
+        ],
+        "title": "AuditSimulation"
+      },
+      "AuditWindow": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "title": "End"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "days",
+          "timezone"
+        ],
+        "title": "AuditWindow"
+      },
       "AvailabilityReason": {
         "type": "string",
         "enum": [
@@ -15050,6 +15361,76 @@
         ],
         "title": "NoticesFeed",
         "description": "GET /api/notices — the unified inbox feed (Task #1024, R4 layer 2,\ndecision Q1=A). One request carries the whole Inbox panel: the OPEN\nqueue split by kind (open = FYI notices that need no response, awaiting\n= require_response notices that ride the agent snapshot today) plus one\nkeyset page of the RESOLVED history.\n\nThe contract shape was chosen so a panel = one request = one hook:\nthe client no longer merges three independent pipes (agent snapshot +\n/api/notices/open + the resolved history). `next_cursor` is None when\n`resolved_page` is the last page (short page or exhausted); pass it back\nas before_at/before_id for the next strictly-older page."
+      },
+      "NotificationAuditResponse": {
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/AuditWindow"
+          },
+          "switches": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Switches"
+          },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Categories"
+          },
+          "sources": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Sources"
+          },
+          "delivered": {
+            "$ref": "#/components/schemas/AuditDelivered"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/AuditCandidates"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "simulations": {
+            "items": {
+              "$ref": "#/components/schemas/AuditSimulation"
+            },
+            "type": "array",
+            "title": "Simulations"
+          },
+          "explain": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AuditExplained"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window",
+          "switches",
+          "categories",
+          "sources",
+          "delivered",
+          "candidates",
+          "simulations"
+        ],
+        "title": "NotificationAuditResponse"
       },
       "NotificationCategoriesResponse": {
         "properties": {

@@ -15,7 +15,10 @@ import os
 import shlex
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -344,3 +347,97 @@ def test_a_host_that_has_not_fetched_new_is_reported_not_checked(host: tuple[Pat
     proc = _run_script(home, "0" * 40, red=False)
     assert proc.returncode == 0
     assert proc.stdout.startswith("SKIPPED") and "VERIFY_RC" not in proc.stdout
+
+
+_ACCESS_CHECKOUT = {
+    **_packages("cli", "cli/commands", "cli/commands/management", "cli/database"),
+    "cli/commands/management/schedules_verify.py": (
+        "def _read_schedule_rows(access, get=None):\n"
+        "    return [(1, 'digest', access.gateway_url + ' remote=' + str(access.remote_plane))]\n"
+    ),
+    "cli/database/__init__.py": "",
+    "cli/database/runtime.py": (
+        "from types import SimpleNamespace\n\n\n"
+        "class CommandRuntime:\n"
+        "    config = SimpleNamespace(view=SimpleNamespace(\n"
+        "        gateway=SimpleNamespace(gateway_url='http://gateway:8000'),\n"
+        "        data_plane=SimpleNamespace(cluster_secret='unused', is_remote=False),\n"
+        "    ))\n\n"
+        "    @classmethod\n    def create(cls):\n        return cls()\n"
+    ),
+}
+
+
+def test_the_read_step_builds_the_gateway_access_when_the_old_read_takes_one(
+    tmp_path: Path,
+) -> None:
+    _tree(tmp_path / "old", _ACCESS_CHECKOUT)
+    out = tmp_path / "rows.json"
+    proc = _read_rows(tmp_path / "old", out)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(out.read_text()) == [[1, "digest", "http://gateway:8000 remote=False"]]
+
+
+class _Schedules(BaseHTTPRequestHandler):
+    seen: ClassVar[list[str | None]] = []
+
+    def do_GET(self) -> None:
+        self.seen.append(self.headers.get("Authorization"))
+        scripts = {2: "print(2)\n", 1: None}
+        if self.path == "/api/schedules":
+            body: object = [{"id": 2, "name": "b"}, {"id": 1, "name": "a"}]
+        else:
+            row_id = int(self.path.rsplit("/", 1)[1])
+            body = {"id": row_id, "name": "ab"[row_id - 1], "script": scripts[row_id]}
+        payload = json.dumps(body).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, format: str, *args: object) -> None:
+        return None
+
+
+# meiva:note
+# The real current code end to end: the home's configuration yields the access and the
+# rows come over HTTP with the delivered credential.
+def test_the_read_step_reads_the_rows_through_a_gateway_from_the_hosts_own_config(
+    tmp_path: Path,
+) -> None:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Schedules)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    out = tmp_path / "rows.json"
+    env = {
+        "PATH": os.environ["PATH"],
+        "PYTHONPATH": str(repo_root()),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "MEIVA_HOME": str(home),
+        "MEIVA_CONFIG_FETCH": "skip",
+        "MEIVA_GATEWAY_URL": f"http://127.0.0.1:{server.server_address[1]}",
+        "MEIVA_API_TOKEN": "pre-verify-test-value",
+    }
+    try:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parents[1] / "schedules_verify_read_rows.py"),
+                str(out),
+            ],
+            cwd=repo_root(),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(out.read_text()) == [[1, "a", ""], [2, "b", "print(2)\n"]]
+    assert set(_Schedules.seen) == {"Bearer pre-verify-test-value"}

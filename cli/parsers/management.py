@@ -201,14 +201,14 @@ def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
         "--check-file",
         default=None,
         metavar="PATH",
-        help="check one script file off-DB instead of the table (falsification hook; no signal)",
+        help="check one script file instead of the table (falsification hook; no signal)",
     )
     schedules_verify_p.add_argument(
         "--rows-file",
         default=None,
         metavar="PATH",
-        help="sweep a JSON dump of the table ([[id, name, script], ...]) instead of reading the "
-        "database (no DB access, no signal)",
+        help="sweep a JSON dump of the table ([[id, name, script], ...]) instead of reading "
+        "them from the gateway (no gateway access, no signal)",
     )
     schedules_verify_p.add_argument(
         "--no-notify",
