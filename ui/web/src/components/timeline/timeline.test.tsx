@@ -3588,8 +3588,8 @@ describe("LifecycleChip payload render", () => {
     expect(screen.getByText(payload)).toBeTruthy();
   });
 
-  it("restart_completed chip fully renders payload string", () => {
-    const payload = "[ts] You have been restarted by yourself";
+  it("restart chip fully renders payload string", () => {
+    const payload = "[ts] Restart was accepted from yourself";
     render(
       <TimelineView
         items={[makeItem({ kind: "system_marker", source: "lifecycle_restart", payload })]}

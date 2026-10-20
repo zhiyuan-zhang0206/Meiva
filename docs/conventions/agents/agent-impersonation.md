@@ -199,7 +199,7 @@ and visible again for the native agent.
 | --- | --- | --- |
 | chat | pending -> claimed -> done (a compact batch may fall a claim back to pending) | read -> ACK (receipt) -> done; unacknowledged, uncaptured rows stay pending for the native claim |
 | cancel / terminate / restart | claimed -> done (control path; the host fulfils the intent) | delivered + ACK |
-| restart_completed / resurrect / fork | first claim consumes it -> done | delivered + ACK |
+| resurrect / fork | first claim consumes it -> done | delivered + ACK |
 | compact_request / compact_summary | claimed -> done | delivered + ACK |
 | heartbeat | claimed -> done | not delivered during takeover; the native claim consumes it after |
 | system_note / reminder | claimed -> done | delivered + ACK (a reminder also expires/dismisses) |

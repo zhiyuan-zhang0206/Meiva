@@ -190,20 +190,19 @@ class ResurrectAgentRequest(BaseModel):
         return v
 
 
+# meiva:note
+# POST /api/agents/{id}/restart request body — fully optional.
+#
+# `source` default "user" — frontend restart button does not need to
+# pass it; SDK paths pass f"agent:{my_id}". Written into the lifecycle
+# 'restart' inbound's source; the claim-side dispatch composes it into
+# the marker `[system ts] Restart was accepted from {source}` so the
+# agent knows who restarted it.
+#
+# `config_overlay`, when nonempty, is validated before it reaches either
+# gateway or runner writes, merged into the persistent agent overlay, and
+# carried in the restart inbound payload.
 class RestartAgentRequest(BaseModel):
-    """POST /api/agents/{id}/restart request body — fully optional.
-
-    `source` default "user" — frontend restart button does not need to
-    pass it; SDK paths pass f"agent:{my_id}". Written into the lifecycle
-    'restart' inbound's source; the claim-side dispatch composes it into
-    the marker `[system ts] You have been restarted by {source}` so the
-    agent knows who restarted it.
-
-    `config_overlay`, when nonempty, is validated before it reaches either
-    gateway or runner writes, merged into the persistent agent overlay, and
-    carried in the restart inbound payload for the completion marker.
-    """
-
     source: str = Field(default="user", min_length=1, max_length=64)
     config_overlay: dict[str, object] | None = None
 

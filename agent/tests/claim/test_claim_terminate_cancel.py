@@ -663,41 +663,6 @@ async def test_claim_restart_before_terminate_preserves_serial_order(
     ).fetchone() == ("pending",)
 
 
-async def test_claim_terminate_before_restart_completed_still_exits(
-    running_agent: Callable[[], int],
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-):
-    """terminate arrives first in the agent downtime window (smaller id, ordered earlier in batch),
-    boot batch [terminate, restart_completed] → goto must be END. Lock down 'boot marker must not
-    override the stronger END back to wake' — the marker arm once unconditionally set
-    next_goto=BEFORE_LLM; this ordering would consume the terminate but the agent wakes up alive
-    (ordering-dependent bug)."""
-    tid = running_agent()
-    insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
-    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
-    )
-
-    assert cmd.goto == END
-    # The accepted command does not consume an unrelated completion marker.
-    contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
-    assert any("Termination was accepted from user" in c for c in contents)
-    assert not any("You have been restarted" in c for c in contents)
-    assert db_conn.execute(
-        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='restart_completed'", (tid,)
-    ).fetchone() == ("pending",)
-
-
 @pytest.mark.flaky  # poll await_status for claim_node status transition
 async def test_claim_cancel_batched_with_restart_idle_restart_silent(
     running_agent: Callable[[], int],

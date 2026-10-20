@@ -43,7 +43,6 @@ class InboundKind(StrEnum):
     CANCEL = "cancel"
     TERMINATE = "terminate"
     RESTART = "restart"
-    RESTART_COMPLETED = "restart_completed"
     RESURRECT = "resurrect"
     FORK = "fork"
     HEARTBEAT = "heartbeat"

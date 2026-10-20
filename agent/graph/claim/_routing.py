@@ -1,36 +1,36 @@
-"""Lifecycle routing for the claim node: where a pass may go + who wins.
-
-Holds the ClaimGoto vocabulary (the four targets claim itself routes to), the
-routing-gated kinds (ROUTING_KINDS), and the single batch-winner resolution
-(Routing / resolve_routing). Extracted from agent/graph/claim/node.py (Task
-#1006 split — the lifecycle-routing axis).
-
-Routing semantics (preserved verbatim from the original claim module):
-
-- Lifecycle routing within one batch is decided by the most RECENT genuine
-  intent, by row id (terminate / restart = exit; resurrect = revive) — not a
-  fixed kind precedence. A batch holding several of these only happens after
-  the agent was stuck / down long enough for commands to pile up: it is a
-  replay log of user intents, so the latest one wins. This is what lets a
-  resurrect bring back an agent whose prior-life terminate still sits in the
-  same batch (the terminate predates the death; the resurrect is newer). The
-  winner is resolved up front by id, so the dispatch loop's arm order cannot
-  decide it (per-arm pairwise guards is how order-dependent holes happen).
-- cancel is a pause, not a routing intent — it always yields to a co-batched
-  exit/revive (a stuck agent gets Stop-then-Terminate; the kill must not be
-  paused away). One deliberate exception to "chat never decides routing": a
-  terminate yields to a chat the terminating decision did not see — a chat
-  co-batched with a self-initiated terminate (it arrived during the very turn
-  the agent terminated in), or a chat newer than an external terminate (the
-  latest intent), or any pending inbound newer than the whole claimed batch
-  (the world moved before the process could die). The vetoed terminate is a
-  consumed no-op — the agent stays alive and processes the message (see the
-  veto handling in decide / _claim_node_impl).
-- restart_completed / fork / compact never decide routing: their markers are
-  appended and content carried regardless of who wins. Under an exit winner
-  compact_request is dropped (its LLM call could raise before the exit arm
-  runs); compact_summary still applies (agent-authored, zero cost).
-"""
+# meiva:note
+# Lifecycle routing for the claim node: where a pass may go + who wins.
+#
+# Holds the ClaimGoto vocabulary (the four targets claim itself routes to), the
+# routing-gated kinds (ROUTING_KINDS), and the single batch-winner resolution
+# (Routing / resolve_routing). Extracted from agent/graph/claim/node.py (Task
+# #1006 split — the lifecycle-routing axis).
+#
+# Routing semantics (preserved verbatim from the original claim module):
+#
+# - Lifecycle routing within one batch is decided by the most RECENT genuine
+#   intent, by row id (terminate / restart = exit; resurrect = revive) — not a
+#   fixed kind precedence. A batch holding several of these only happens after
+#   the agent was stuck / down long enough for commands to pile up: it is a
+#   replay log of user intents, so the latest one wins. This is what lets a
+#   resurrect bring back an agent whose prior-life terminate still sits in the
+#   same batch (the terminate predates the death; the resurrect is newer). The
+#   winner is resolved up front by id, so the dispatch loop's arm order cannot
+#   decide it (per-arm pairwise guards is how order-dependent holes happen).
+# - cancel is a pause, not a routing intent — it always yields to a co-batched
+#   exit/revive (a stuck agent gets Stop-then-Terminate; the kill must not be
+#   paused away). One deliberate exception to "chat never decides routing": a
+#   terminate yields to a chat the terminating decision did not see — a chat
+#   co-batched with a self-initiated terminate (it arrived during the very turn
+#   the agent terminated in), or a chat newer than an external terminate (the
+#   latest intent), or any pending inbound newer than the whole claimed batch
+#   (the world moved before the process could die). The vetoed terminate is a
+#   consumed no-op — the agent stays alive and processes the message (see the
+#   veto handling in decide / _claim_node_impl).
+# - fork / compact never decide routing: their markers are
+#   appended and content carried regardless of who wins. Under an exit winner
+#   compact_request is dropped (its LLM call could raise before the exit arm
+#   runs); compact_summary still applies (agent-authored, zero cost).
 
 from __future__ import annotations
 

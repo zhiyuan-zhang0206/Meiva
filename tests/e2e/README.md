@@ -182,7 +182,7 @@ model call fails. It also checks the unchanged AI-message count across a bounded
 post-restart observation window; it does not prove indefinite quiescence.
 
 **Two-segment SCRIPT pattern for lifecycle scenarios**: for `lifecycle_restart` / `lifecycle_resurrect`,
-the fake `build()` checks `inbound_messages` for rows with `kind='restart_completed'` /
+the fake `build()` checks `inbound_messages` for rows with `kind='restart'` /
 `kind='resurrect'` to distinguish first / post-restart-or-resurrect process; the first
 process follows the lifecycle trigger SCRIPT, and the later segment follows an idle SCRIPT
 (defensive, actually not consumed). Checking `inbound_messages` rather than `messages`:
