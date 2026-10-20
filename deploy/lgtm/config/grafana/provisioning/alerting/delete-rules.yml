@@ -21,6 +21,11 @@ deleteRules:
   # The stuck-lifecycle-pointer scan and its event left with the pointer.
   - orgId: 1
     uid: meiva-ops-lifecycle-pointer-stuck
+  # The maintenance hold raised both events these rules read; it is gone.
+  - orgId: 1
+    uid: meiva-ops-agent-continuation-lost
+  - orgId: 1
+    uid: meiva-ops-maintenance-hold-overdue
 
 # Every rule below was re-provisioned under its meiva-* uid on 2026-10-17; the old
 # uid stayed orphaned and kept evaluating beside the new one.

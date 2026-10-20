@@ -10,9 +10,11 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
+from base.native_process.root_control import instance_lock
 from cli import fleet_update
 from cli.tests.fleet_update.fleet_update_cluster import Cluster, git
 
@@ -429,7 +431,7 @@ def test_a_dirty_tree_is_shown_not_cleaned(tmp_path: Path) -> None:
 _UNSAFE: list[tuple[str, object]] = [("hook", "yes"), ("active", "yes"), ("dirty", 3)]
 
 
-@pytest.mark.parametrize(("key", "value"), [*_UNSAFE, ("hold", ("paused", "draining"))])
+@pytest.mark.parametrize(("key", "value"), _UNSAFE)
 def test_preflight_refuses(
     env: tuple[Cluster, Callable[..., int]], key: str, value: object
 ) -> None:
@@ -489,39 +491,107 @@ def test_the_log_carries_no_secret(
     assert all(path.stat().st_mode & 0o077 == 0 for path in logs)
 
 
-_HOLD_WITH_BACKSLASHES = (
-    '{"hold": {"status": "paused", "operation": "[\\"sh\\", \\"-c\\", \\"\\\\$HOME\\\\n\\"]", '
-    '"maintenance": {"phase": "stopped"}}}'
+_ERROR_WITH_BACKSLASHES = r'["sh", "-c", "\$HOME\n"]'
+_JOURNAL_WITH_BACKSLASHES = json.dumps(
+    {"operation": "stop", "complete": True, "result": {"rc": 0, "error": _ERROR_WITH_BACKSLASHES}}
 )
 
 
+# meiva:note
+# A host home the real PROBE script can read: a checkout with a venv python and a journal.
+def _host_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, journal: str | None) -> Path:
+    source = tmp_path / ".meiva" / "source"
+    (source / ".venv" / "bin").mkdir(parents=True)
+    (source / ".venv" / "bin" / "python").symlink_to(sys.executable)
+    git(source, "init", "-q", "--initial-branch=main")
+    git(source, "commit", "-q", "--allow-empty", "-m", "base")
+    (source / ".git" / "info" / "exclude").write_text(".venv/\n")
+    if journal is not None:
+        run = tmp_path / ".meiva" / "run"
+        run.mkdir(parents=True)
+        (run / "lifecycle-op.json").write_text(journal)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    return tmp_path / ".meiva" / "run" / "meiva-root" / "meiva-root.lock"
+
+
+def _probed(shell: str) -> dict[str, str]:
+    result = subprocess.run(
+        [shell, "-c", fleet_update.PROBE], capture_output=True, text=True, check=True
+    )
+    return {
+        key: value for key, _, value in (line.partition("=") for line in result.stdout.splitlines())
+    }
+
+
 @pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])
-def test_the_probe_carries_backslashes_in_the_hold_record_unchanged(
+def test_the_probe_carries_backslashes_in_the_journal_unchanged(
     shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     if not Path(shell).exists():
         pytest.skip(f"{shell} is not installed")
-    source = tmp_path / ".meiva" / "source"
-    (source / ".venv" / "bin").mkdir(parents=True)
-    git(source, "init", "-q", "--initial-branch=main")
-    git(source, "commit", "-q", "--allow-empty", "-m", "base")
-    (source / ".git" / "info" / "exclude").write_text(".venv/\n")
-    fake = source / ".venv" / "bin" / "meiva"
-    fake.write_text(f"#!/bin/sh\ncat <<'EOF'\nnoise line\n{_HOLD_WITH_BACKSLASHES}\nEOF\n")
-    fake.chmod(0o755)
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _host_home(tmp_path, monkeypatch, _JOURNAL_WITH_BACKSLASHES)
 
-    result = subprocess.run(
-        [shell, "-c", fleet_update.PROBE], capture_output=True, text=True, check=True
-    )
+    facts = _probed(shell)
 
-    facts = {
-        key: value for key, _, value in (line.partition("=") for line in result.stdout.splitlines())
-    }
-    assert facts["head"] == git(source, "rev-parse", "HEAD")
+    assert facts["head"] == git(tmp_path / ".meiva" / "source", "rev-parse", "HEAD")
     assert facts["dirty"] == "0"
-    assert fleet_update.split_hold_text(facts["hold"]) == ("paused", "stopped")
-    assert json.loads(facts["hold"])["hold"]["operation"] == '["sh", "-c", "\\$HOME\\n"]'
+    assert facts["op"] == _JOURNAL_WITH_BACKSLASHES
+    assert json.loads(facts["op"])["result"]["error"] == _ERROR_WITH_BACKSLASHES
+
+
+@pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])
+def test_the_probe_reads_whether_a_meiva_root_holds_its_instance_lock(
+    shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if not Path(shell).exists():
+        pytest.skip(f"{shell} is not installed")
+    lock = _host_home(tmp_path, monkeypatch, None)
+    assert _probed(shell)["root"] == "down", "no lock file: no root has ever run"
+    lock.parent.mkdir(parents=True)
+    held = instance_lock.acquire_instance_lock(lock.parent)
+    try:
+        assert _probed(shell)["root"] == "up"
+    finally:
+        instance_lock.release_instance_lock(held)
+    assert _probed(shell)["root"] == "down"
+    assert _probed(shell)["op"] == "", "no journal reads as an empty record"
+
+
+# meiva:note
+# A Session stand-in that answers every read with one probe output.
+class _Reads:
+    def __init__(self, probe: str) -> None:
+        self.probe = probe
+
+    def run(self, alias: str, script: str, *, effect: bool = True, stdin: str | None = None) -> str:
+        del alias, script, effect, stdin
+        return self.probe
+
+
+_STOP_OK = '{"operation": "stop", "complete": true, "result": {"rc": 0}}'
+
+
+@pytest.mark.parametrize(
+    ("journal", "root", "stopped"),
+    [
+        (_STOP_OK, "down", True),
+        (_STOP_OK, "up", False),
+        ('{"operation": "stop", "complete": true, "result": {"rc": 1}}', "down", False),
+        ('{"operation": "stop", "complete": false}', "down", False),
+        ('{"operation": "restart", "complete": true, "result": {"rc": 0}}', "down", False),
+        ("", "down", False),
+        ("{not json", "down", False),
+        (_STOP_OK, "", False),
+    ],
+)
+def test_a_host_is_already_stopped_only_when_its_last_operation_is_a_completed_stop_and_no_root_runs(
+    journal: str, root: str, stopped: bool
+) -> None:
+    probe = f"head=abc\nop={journal}\n" + (f"root={root}\n" if root else "")
+
+    _facts, was_serving = fleet_update.probe_host(cast(fleet_update.Session, _Reads(probe)), "host")
+
+    assert was_serving is not stopped
 
 
 @pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])
@@ -626,3 +696,49 @@ def test_the_dry_run_lists_the_silence_without_opening_it(
     assert " - open --hours 4 --comment " in capsys.readouterr().out
     assert not cluster.silence_open
     assert [k for k, _ in cluster.effects if k.startswith("silence-")] == []
+
+
+@pytest.mark.parametrize(
+    "journal",
+    [
+        {"operation": "stop", "complete": False},
+        {"operation": "stop", "complete": True, "result": {"rc": 1}},
+        {"operation": "restart", "complete": True, "result": {"rc": 0}},
+        None,
+    ],
+)
+def test_down_judges_a_stop_by_the_hosts_journal_as_well_as_the_exit_code(
+    env: tuple[Cluster, Callable[..., int]],
+    capsys: pytest.CaptureFixture[str],
+    journal: dict[str, Any] | None,
+) -> None:
+    cluster, run = env
+    cluster.journal_after_stop["lin"] = journal
+
+    assert run("down") == 1
+
+    assert "stop exited 0 but its journal records no completed stop" in capsys.readouterr().out
+    assert [alias for kind, alias in cluster.effects if kind == "switch"] == []
+
+
+def test_down_and_up_never_read_a_hold(env: tuple[Cluster, Callable[..., int]]) -> None:
+    cluster, run = env
+
+    assert run("down") == 0
+    assert run("up") == 0
+
+    assert any("lifecycle-op.json" in command for _alias, command in cluster.commands)
+    assert not any("status --json" in command for _alias, command in cluster.commands)
+
+
+def test_up_judges_a_start_by_its_exit_code(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.fail[("start", "lin")] = 1
+
+    assert run("up") == fleet_update.PARTIAL_FAILURE_EXIT
+
+    assert "PARTIAL: lin failed" in capsys.readouterr().out
+    assert all(cluster.hosts[alias]["up"] for alias in ("gw", "mac"))

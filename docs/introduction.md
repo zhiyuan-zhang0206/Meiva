@@ -214,7 +214,7 @@ it goes red"*, *"what is agent 42 doing?"*, *"tell it to skip the flaky test"*.
 | `get_agent` | one agent's full state, including questions it is blocked on |
 | `get_messages` | its transcript — what it said and the code it ran |
 | `terminate_agent` | end an agent (destructive: it stops working) |
-| `cluster_status` | is the cluster up, and is it paused for maintenance |
+| `cluster_status` | is the cluster up, and has it finished starting |
 
 Which cluster it drives is not a flag: the endpoint belongs to the gateway it is
 served from, and every call authenticates with that cluster's own credential.

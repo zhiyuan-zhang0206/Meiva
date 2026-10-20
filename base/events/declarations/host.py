@@ -7,29 +7,6 @@ from typing import Literal, TypedDict
 from base.events.vocabulary import EventSpec, telemetry_event
 
 
-class PauseLifecycleWait(TypedDict):
-    """`pause_lifecycle_wait` payload — ops/agent_pause/__init__.py::prepare.
-
-    One row per preparation episode that met in-flight work it did not author
-    (task #3591). ``waited_s`` is the bounded retry time before the outcome:
-    ``resolved`` (the work finished and preparation proceeded), ``exceeded``
-    (the bound was spent — abort), or ``refused`` (maintenance-authored work —
-    no wait by design).
-    """
-
-    waited_s: float
-    outcome: Literal["resolved", "exceeded", "refused"]
-    agents: list[int]
-
-
-class PauseOrphanClaimSettled(TypedDict):
-    """`pause_orphan_claim_settled` payload — base/deploy/maintenance/cohort.py."""
-
-    agent: int
-    message_id: int
-    age_s: float
-
-
 class HostDispatcherScanFailed(TypedDict):
     """`host_dispatcher_scan_failed` payload — agent-host durable backstop."""
 
@@ -340,21 +317,6 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "inbound_reconcile": telemetry_event(
         "inbound_reconcile", "claimed inbounds consumed after interruption", tier="noise"
-    ),
-    # pause / rollout lifecycle
-    "pause_lifecycle_wait": telemetry_event(
-        "pause_lifecycle_wait",
-        "preparation bounded-waited in-flight work it did not author",
-        payload=PauseLifecycleWait,
-        tier="anomaly",
-        site="ops/agent_pause/__init__.py:_emit_lifecycle_wait (positional emit)",
-    ),
-    "pause_orphan_claim_settled": telemetry_event(
-        "pause_orphan_claim_settled",
-        "preparation consumed (marked done, never redelivered) an ordinary claim whose runtime is gone",
-        payload=PauseOrphanClaimSettled,
-        tier="anomaly",
-        site="base/deploy/maintenance/cohort.py:_emit_orphan_settlements",
     ),
     "brew_pin": telemetry_event(
         "brew_pin",

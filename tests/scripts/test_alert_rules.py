@@ -76,7 +76,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["meiva-ops", "meiva-ops-slow"]
     assert [group["folder"] for group in groups] == ["Meiva", "Meiva"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [54, 14]
+    assert [len(group["rules"]) for group in groups] == [53, 13]
     return groups
 
 

@@ -2,11 +2,4 @@
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "meiva.tests.fixtures.sdk" = [
     "test_walg_cmd.py",
-    "test_hold_report.py",
-]
-"base.host.db_authority.tests.generation" = [
-    "test_hold_report.py",
-]
-"base.paths.tests.homes" = [
-    "test_hold_report.py",
 ]

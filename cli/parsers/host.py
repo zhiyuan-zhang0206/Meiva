@@ -222,10 +222,6 @@ def h_restart(
 
 
 def _h_status(args: argparse.Namespace) -> int:
-    if args.json:
-        from cli.commands.lifecycle.hold_report import cmd_status_json
-
-        return cmd_status_json()
     from cli.commands.lifecycle.status import cmd_status
 
     return cmd_status(
@@ -574,12 +570,6 @@ def add_status_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "status",
         help="[host] one-screen view of sessions / pidfile / curl / infra / cron "
         "+ the gateway's own cluster-status snapshot",
-    )
-    status_p.add_argument(
-        "--json",
-        action="store_true",
-        help="print only this unit's maintenance hold as one JSON object "
-        "(reads the local journal; probes nothing)",
     )
     status_p.set_defaults(func=_h_status)
 

@@ -19,7 +19,6 @@ _IDLE: dict[str, Any] = {
     "dirty": 0,
     "hook": "no",
     "active": "no",
-    "hold": ("resumed", None),
     "up": True,
 }
 _ROW = ("name", "online", "identity_mismatch", "head_sha", "running_sha", "serve_agent_runner")
@@ -64,6 +63,11 @@ class Cluster:
         self.host_up: dict[str, bool] = dict.fromkeys(self.hosts, True)
         self.journal: dict[str, dict[str, Any] | None] = dict.fromkeys(self.hosts)
         self.stop_fails: dict[str, int] = {}
+        # meiva:note
+        # A host whose `meiva stop` exits 0 while its journal records no completed stop (the
+        # fleet judges a stop by both): the journal the host shows after the stop, in place of
+        # the one the stop wrote.
+        self.journal_after_stop: dict[str, dict[str, Any] | None] = {}
         self.stop_fails_leaves_up: set[str] = set()
         self.recover_fails: set[str] = set()
         # meiva:note
@@ -88,13 +92,15 @@ class Cluster:
         assert not (alias == "gw" and self._runners_up()), "gateway stopped before a runner"
         rc = self.stop_fails.get(alias, 0)
         if not rc or alias not in self.stop_fails_leaves_up:
-            host["up"], host["hold"] = False, ("paused", "stopped")
+            host["up"] = False
             self.host_up[alias] = False
         self.journal[alias] = {
             "operation": "stop",
             "complete": True,
             "result": {"rc": rc, "error": None if not rc else "RuntimeError: helper busy"},
         }
+        if alias in self.journal_after_stop:
+            self.journal[alias] = self.journal_after_stop[alias]
         return rc
 
     def _effect(self, kind: str, alias: str, host: dict[str, Any], command: str) -> int:
@@ -113,7 +119,7 @@ class Cluster:
             assert self.hosts["gw"]["up"] if alias != "gw" else not self._runners_up()
             if alias in self.recover_fails:
                 return 1
-            host["up"], host["hold"] = True, ("resumed", None)
+            host["up"] = True
             self.host_up[alias] = True
         elif kind == "smoke":
             self.smoked.append(command.partition(" - smoke ")[2].split()[0].strip("'"))
@@ -121,17 +127,12 @@ class Cluster:
             assert "--force" not in command
         return 0
 
-    def _hold_json(self, host: dict[str, Any]) -> str:
-        status, phase = host["hold"]
-        return json.dumps({"hold": {"status": status, "maintenance": phase and {"phase": phase}}})
-
-    def _reported(self, host: dict[str, Any], probing: bool, emit: Callable[[str], None]) -> int:
-        if not probing:
-            emit(self._hold_json(host))
-            return 0
+    def _reported(self, alias: str, host: dict[str, Any], emit: Callable[[str], None]) -> int:
         for key in ("head", "dirty", "hook", "active"):
             emit(f"{key}={host[key]}")
-        emit(f"hold={self._hold_json(host)}")
+        journal = self.journal.get(alias)
+        emit(f"op={'' if journal is None else json.dumps(journal)}")
+        emit(f"root={'up' if host['up'] else 'down'}")
         return 0
 
     def _roster_json(self) -> str:
@@ -160,9 +161,8 @@ class Cluster:
         if command == "uname -s":
             emit(str(host["os"]))
             return 0
-        probing = '"head=$(git rev-parse HEAD)"' in command
-        if probing or command.endswith("status --json'"):
-            return self._reported(host, probing, emit)
+        if '"head=$(git rev-parse HEAD)"' in command:
+            return self._reported(alias, host, emit)
         if "machine_from_boot(ConfigBoot()).name()" in command:
             emit(self.names[alias])
             return 0

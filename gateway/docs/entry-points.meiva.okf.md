@@ -51,8 +51,7 @@ See [[gateway/routers/docs/memory.meiva.okf.md|memory route contracts]].
 Every owner the process builds reads that value — the event writer and the bus
 (`event_bus_config_from_config`), the config authority's `<home>/.env`, the insights
 socket, the skills load dir, a deleted schedule's work dir, the health identity, the
-generation ledger and session key behind `cluster_credential` / `session_mints`, and the
-pause journal `business_paused(home)` reads on every request. Request paths read
+generation ledger and session key behind `cluster_credential` / `session_mints`. Request paths read
 `app.state.gateway_process.home`; none resolves the process default again, so a second
 app in one process reads none of the first root's files. `GatewayProcess.home` keeps the
 entry's unresolved string, so `/api/health` still reports the exact `$MEIVA_HOME` that

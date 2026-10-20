@@ -19,7 +19,6 @@ exports = ["test_pgbouncer_wire.py"]
 "test_converge_redis_bridge.py#monkeypatch.setattr cli.commands.converge.redis_bridge.launchd_plist_path" = 2
 "test_converge_redis_bridge.py#monkeypatch.setattr cli.commands.converge.redis_bridge.redis_bridge_endpoint" = 2
 "test_converge_redis_bridge.py#monkeypatch.setattr cli.commands.converge.redis_bridge.sys.platform" = 5
-"test_maintenance_readiness.py#monkeypatch.setattr cli.commands.probe.probe_service" = 1
 "test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.db_pool_max_size" = 1
 "test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 3
 "test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.pgbouncer_enabled" = 2

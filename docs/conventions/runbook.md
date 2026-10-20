@@ -348,7 +348,7 @@ It checks data-volume usage before gateway liveness so a full disk that prevents
 gateway startup is reported as disk pressure. The schema
 check is enabled by default; `--no-schema-check` disables it.
 Gateway and population failures retain their code, environment, or local-maintenance
-classification. A disabled agent-host or native maintenance hold cannot hide a low
+classification. A disabled agent-host cannot hide a low
 global population: the probe still exits 1 and grades that outage.
 
 The probe does not alert. Every run emits `health_probe_ran` (INFO, healthy or not),
@@ -438,11 +438,11 @@ Restart retains infrastructure and the shared browser, but closes persistent PTY
 exactly as a stop does; default stop closes those local resources too. Durable
 agent identity and work remain on disk.
 A stop timeout is a failure; force escalation requires an explicit option.
-Normal `meiva start` resumes only after readiness. See the
+Normal `meiva start` marks the host serving only after readiness. See the
 [stop procedure](operations/graceful-maintenance.md) for partial stop, coordinated
 multi-machine ordering, failure recovery and the first-deployment limitation.
 
-Stop-class drills and operations: see the executor-cancellation insurance and hold handover section of [graceful maintenance](operations/graceful-maintenance.md).
+Stop-class drills and operations: see [graceful maintenance](operations/graceful-maintenance.md).
 
 Merging a PR does not deploy it. `meiva stop` asks for confirmation with `--prompt` and skips it with `--yes`.
 
@@ -512,8 +512,7 @@ half, use the separate commands:
   only warns and the window goes on.
 - `down` refuses (exit 2, nothing changed) when a checkout has a
   `post-checkout` hook, uncommitted changes or `$HOME/.meiva/updates/active`,
-  when a host holds maintenance other than a completed stop, when the hosts
-  disagree on HEAD, when `.python-version` changes under
+  when the hosts disagree on HEAD, when `.python-version` changes under
   `--refuse-python-change`, or when it runs inside an Meiva agent's shell. It
   prints `git diff --stat OLD..NEW` over migrations, helper sources and locks,
   fetches NEW on every host, then — still before anything stops, and also under
@@ -547,8 +546,8 @@ half, use the separate commands:
   directories, runs `uv sync --frozen` and requires a clean tree.
 - Runners fetch through the gateway's source clone (their checkout's `origin` is the gateway host's `~/.meiva/source`): the target commit is fetched by SHA before it is reachable from any of the clone's refs, so the clone carries `uploadpack.allowAnySHA1InWant=true` (repo-local; set 2026-09-30). A reclone of the clone must re-apply it.
 - A failed stop prints the next step: on that host retry
-  `meiva stop` with the same arguments `down` gave it, confirm `meiva status` shows
-  paused/stopped, then rerun `down`. A tree that is not clean after the switch
+  `meiva stop` with the same arguments `down` gave it, confirm `run/lifecycle-op.json`
+  records a completed stop (operation `stop`, complete, rc 0), then rerun `down`. A tree that is not clean after the switch
   prints its `git status --porcelain` (first 20 lines). Untracked files are not
   caused by the update (a changed `.gitignore` can reveal them): check them and
   move them away, never delete, then rerun `down`. Nothing is moved, deleted or
@@ -556,7 +555,7 @@ half, use the separate commands:
 - `up` runs `meiva start` with your service selection on the gateway (its cold start applies migrations),
   then on each runner; on macOS as a one-time LaunchAgent in `gui/<uid>`,
   because the helper's launchd job lives in `gui/<uid>` (the user must be
-  logged in to the GUI). Each start must release its hold; every machine
+  logged in to the GUI). Each start must exit 0 (ready); every machine
   listed by `--gateway`/`--runner` must be online on the roster with checkout and
   running code on one commit (`online` follows the heartbeat, so the roster is
   re-read every 5 seconds for up to `--roster-timeout`, and a failure
@@ -1079,7 +1078,7 @@ image (`python3 scripts/verify/tart_run.py --ref <ref>`, same flow, plus the hel
   is a `schedule_launch_refused` event). `meiva start` is idempotent — it skips
   every running unit and takes seconds.
 - **`paused yes` in the roster is not always an operator pause.** It is the first
-  true clause of `no_state` / `business_pause` / `maintenance` / `startup`; the
+  true clause of `no_state` / `startup`; the
   operator latch that fences spawns is `machines.paused_at` (see
   `meiva cluster pause`), and a `startup` verdict leaves it empty. Read
   `paused_reason` from `GET /api/cluster/status` before treating it as a pause.

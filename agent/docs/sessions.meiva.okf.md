@@ -48,4 +48,4 @@ the creator, such as `SSH_AUTH_SOCK`, are not carried over.
 - [[lifecycle.meiva.okf.md]] — agent control
 - [[env-vars.meiva.okf.md]] — environment surface
 - [[base/sessions/pty/docs/pty_sessions/pty_sessions.meiva.okf.md]] — PTY resource owner
-- [[base/deploy/maintenance/docs/maintenance.meiva.okf.md]] — cluster resource scopes
+- [[services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md]] — what a stop does to each resource

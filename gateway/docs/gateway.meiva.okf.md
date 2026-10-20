@@ -19,13 +19,10 @@ Authoritative vocabulary: [[gateway/docs/terminology.meiva.okf.md|Gateway termin
 `agents/history/`; the OKF graph viewer lives in `inspect/` and upload intake in
 `routers/upload/`. Wire endpoints and lifecycle ownership are unchanged.
 
-HTTP admission reads the home's durable maintenance journal on each business
-request. `stopping` and `stopped` block it; drain phases
-keep SDK dependencies available to the remaining fleet. Atomic resume releases
-this same authority immediately, without a cached database posture delaying it.
-Unreadable or incomplete paused records block business requests. Control-plane
-routes bypass the admission read so health and repair remain reachable. The
-database posture is a status projection, not this gate's authority.
+No HTTP middleware gates business requests on a stop or update: a gateway that
+is up serves them, and a message sent while a runner is stopped stays pending in the
+database until the runner starts. A gateway that is stopping drains its in-flight
+connections under a finite budget and ends its SSE streams at once.
 
 - **Agent lifecycle management**: unified handling of spawn, send_message, terminate, resurrect, restart via `/api/agents/*`
 - **Eval result boundary**: artifact-read endpoints reject eval-isolated callers from their stored per-agent configuration, so bypassing the SDK cannot expose another run's transcript, activity, events, memory search, or task results

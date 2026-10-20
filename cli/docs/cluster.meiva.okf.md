@@ -54,8 +54,8 @@ describes only itself (`base/cluster/record.py`).
 - `status`'s `code` column is a live per-host probe reading: the commit the
   answering process froze at, marked when it differs from the host's checkout
   HEAD. There is no cluster pin or known-good column.
-- There is no `cluster` verb for a stranded maintenance hold: read it with
-  `meiva status` and end it with `meiva start`
+- There is no `cluster` verb for a stopped host: read it with `meiva status` (it reports
+  `paused` with reason `startup`) and bring it back with `meiva start`
   ([graceful maintenance](../../docs/conventions/operations/graceful-maintenance.md)).
 
 ## Key dependencies

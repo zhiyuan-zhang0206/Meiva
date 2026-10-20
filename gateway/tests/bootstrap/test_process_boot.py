@@ -5,7 +5,6 @@ import json
 import os
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +21,6 @@ from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
-from base.deploy.maintenance import pause_owner
-from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.host import proc
 from base.host.net.auth import bearer_header, cookie_name
 from base.host.system.tests.fake_commands import fake_host
@@ -231,7 +228,6 @@ def test_create_app_from_environment_assembles_gateway_config(
 
 
 _ROOT_READS = frozenset({"meiva_home", "resolve_meiva_home"})
-_WHEN = datetime(2026, 10, 17, tzinfo=UTC)
 
 
 def _rooted_app(home: Path) -> Any:
@@ -252,18 +248,6 @@ def _second_root(first: Path) -> Path:
     home = first / "second-root"
     home.mkdir(mode=0o700)
     return home
-
-
-def _hold(home: Path, phase: MaintenancePhase) -> None:
-    pause_owner.write_atomic(
-        pause_owner.state_path_for(home),
-        {
-            "state": "paused",
-            "holder": "process-boot-test",
-            "acquired_at": _WHEN.isoformat(),
-            "maintenance": MaintenanceHold(phase).encode(),
-        },
-    )
 
 
 def test_a_second_root_reads_none_of_the_first_roots_credentials_or_session(
@@ -288,20 +272,6 @@ def test_a_second_root_reads_none_of_the_first_roots_credentials_or_session(
         assert other.get("/api/agents").status_code == 200
 
 
-def test_a_paused_root_does_not_fence_an_app_serving_another_root(
-    config_authority: ConfigAuthority,
-) -> None:
-    first = config_authority.env_path.parent
-    second = _second_root(first)
-    _hold(first, MaintenancePhase.STOPPED)
-
-    with gateway_test_client(_rooted_app(first)) as stopped:
-        assert stopped.get("/api/agents").status_code == 503
-        assert stopped.get("/api/health").status_code == 200
-    with gateway_test_client(_rooted_app(second)) as client:
-        assert client.get("/api/agents").status_code == 200
-
-
 def test_an_app_serves_the_config_file_of_the_root_it_serves(
     config_authority: ConfigAuthority,
 ) -> None:
@@ -318,16 +288,6 @@ def test_an_app_serves_the_config_file_of_the_root_it_serves(
         assert "10.9.9.1" in client.get("/api/bootstrap").json()["MEIVA_DB_URL"]
     with gateway_test_client(_rooted_app(second)) as other:
         assert "10.9.9.2" in other.get("/api/bootstrap").json()["MEIVA_DB_URL"]
-
-
-def test_requests_read_the_pause_journal_as_it_changes(config_authority: ConfigAuthority) -> None:
-    first = config_authority.env_path.parent
-    with gateway_test_client(_rooted_app(first)) as client:
-        assert client.get("/api/agents").status_code == 200
-        _hold(first, MaintenancePhase.STOPPED)
-        assert client.get("/api/agents").status_code == 503
-        _hold(first, MaintenancePhase.DRAINING)
-        assert client.get("/api/agents").status_code == 200
 
 
 def test_serving_an_app_adds_no_environment_slot(config_authority: ConfigAuthority) -> None:

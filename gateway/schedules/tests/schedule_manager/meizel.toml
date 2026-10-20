@@ -7,7 +7,6 @@
 "test_requests.py#monkeypatch.setattr gateway.schedules.session_control.CONSUME_WAIT_S" = 1
 "test_requests.py#monkeypatch.setattr gateway.schedules.session_control.wait_consumed" = 2
 "test_revision_recovery.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1
-"test_revision_recovery.py#monkeypatch.setattr base.deploy.maintenance.admission.held" = 1
 "test_revision_recovery.py#monkeypatch.setattr base.sessions.pty.allocation_freeze.current_generation" = 1
 "test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.manager.get_shell_backend" = 1
 "test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.manager.time.monotonic" = 1

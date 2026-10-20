@@ -540,7 +540,7 @@ it serves the debt that remains and is not a pattern for a new test.
 
 ## A function-local `import base.x` makes `base` local to the whole function
 
-A function that reaches a module as `base.deploy.state.host_deploy_state.read()` through
+A function that reaches a module as `base.deploy.lifecycle.start_serving.state_path()` through
 a module-level `import base.deploy` breaks if the same function also contains
 `import base.db`. The statement binds `base` as a *local* for the entire body, because
 the binding is decided statically, so a module-level import does not rescue it, and
@@ -549,8 +549,8 @@ every `base.…` above that line raises `UnboundLocalError`:
 ```python
 import base.paths          # module scope: irrelevant to the function below
 
-def is_paused():
-    state = base.deploy.state.host_deploy_state.read()     # UnboundLocalError
+def is_serving():
+    path = base.deploy.lifecycle.start_serving.state_path()     # UnboundLocalError
     import base.db                            # <- makes `base` local for the whole body
 ```
 

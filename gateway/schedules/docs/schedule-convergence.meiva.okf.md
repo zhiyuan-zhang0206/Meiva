@@ -47,8 +47,7 @@ bounded window: after ten minutes of one failure streak the manager records the
 schedule as an error, emits `schedule_convergence_abandoned`, consumes the request
 and leaves the process alone until a new desired revision (start, stop, restart,
 edit, delete) authorizes another attempt; the give-up is in memory, so a
-restarted service starts one new bounded streak. A maintenance hold is not a
-failure and does not count. Before creating a process, the manager commits
+restarted service starts one new bounded streak. Before creating a process, the manager commits
 `launch_count=1`, `applied_revision=desired_revision`, and an inspectable unknown-outcome
 error. A failed or uncertain launch consumes that revision; it is acknowledged
 without automatic replay. One failed schedule does not

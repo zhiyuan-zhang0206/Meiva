@@ -270,8 +270,8 @@ prompts in its PTY. dsh resolves its own model credential (environment,
 
 Relay failure only degrades delivery; executor authority is bounded by explicit
 release, native runtime replacement, or original TTL.
-The accepting runtime re-checks relay liveness on the held-controls pass, which
-the dispatcher's database-backed pending scan triggers for held rows every ~30
+The accepting runtime re-checks relay liveness on the lease-controls pass, which
+the dispatcher's database-backed pending scan triggers for leased rows every ~30
 seconds — the check is pull-based and never depends on wake delivery.
 
 - **Relay transport.** A relay is never replaced; the lease keeps its first

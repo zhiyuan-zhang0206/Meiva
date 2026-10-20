@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from asyncio.constants import THREAD_JOIN_TIMEOUT
 from pathlib import Path
 
 from base.host.tests.daemon_shutdown import (
@@ -8,11 +9,10 @@ from base.host.tests.daemon_shutdown import (
     KILL_SLACK_S,
     spawn_child,
 )
-from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 
 
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
-    assert EXIT_BOUND_S + KILL_SLACK_S < PAUSE_TIMEOUT_SECONDS / 5
+    assert EXIT_BOUND_S + KILL_SLACK_S < THREAD_JOIN_TIMEOUT / 5
     child = spawn_child(
         tmp_path,
         command=[

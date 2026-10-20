@@ -7,7 +7,6 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from datetime import datetime
 
 import psutil
 
@@ -16,17 +15,12 @@ from base.cluster import session_name
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.status_journal import begin, finish, phase, status_path
-from base.deploy.maintenance import admission
-from base.deploy.maintenance.state import MaintenancePhase
-from base.events.live.bus import EventBus
 from base.host.permissions_helper.client import HelperFactory
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.stop_waits import deadline_after, remaining, wait_for_exit
 from cli.commands.lifecycle.service_stop import close_terminals, stop_data_plane
-from ops.agent_pause import pause_agents
-from ops.agent_pause.probe import ops_quiescent
 from services.supervision.roster import build_services
 
 
@@ -84,13 +78,6 @@ def report_incomplete(
         if survivors:
             extra["survivors"] = survivors
         finish(1, error=f"{type(exc).__name__}: {exc}", extra=extra)
-
-
-def _mark_stopped(holder: str, acquired_at: datetime) -> None:
-    """Move the held maintenance generation to stopped (re-validating it)."""
-    current = admission.require_operation(holder, acquired_at)
-    if current.maintenance is not None and current.maintenance.phase == MaintenancePhase.STOPPING:
-        admission.set_phase(holder, acquired_at, MaintenancePhase.STOPPED)
 
 
 def _timed_phase(phases: list[tuple[str, float]], label: str, step: Callable[[], object]) -> None:
@@ -264,7 +251,14 @@ def refuse_hosted_stop() -> None:
         raise RuntimeError("stop must run outside the work it drains; use a login shell")
 
 
-def _drain_and_stop(
+# meiva:note
+# Stop the selected resources; each phase is timed into `phases`.
+#
+# Serving is revoked first, so nothing that reads the gate sees a stopping unit as ready.
+# The services phase is where the agents settle: root stops agent-host first and waits for
+# it, and its own SIGTERM exit gives every in-flight turn a restart the next host resumes
+# (`services/agent_runner/agent_host/lifecycle/graceful_exit.py`).
+def _stop_selected(
     phases: list[tuple[str, float]],
     deadline: float,
     *,
@@ -285,17 +279,6 @@ def _drain_and_stop(
     machine: MachineIdentity,
     helper: HelperFactory | None,
 ) -> None:
-    """Drain the agents, then stop the selected resources; each phase is timed into `phases`."""
-    _timed_phase(
-        phases,
-        "drain",
-        lambda: pause_agents(
-            database_factory(),
-            EventBus.from_settings(),
-            remaining(deadline),
-            local_machine=machine,
-        ),
-    )
     start_serving.clear_serving()
     if announce:
         announce_stopping(
@@ -303,18 +286,6 @@ def _drain_and_stop(
             maintenance_for_seconds=maintenance_for_seconds,
             maintenance_reason=maintenance_reason,
         )
-    current = admission.snapshot()
-    assert current is not None and current.maintenance is not None  # noqa: S101
-    assert current.holder is not None and current.acquired_at is not None  # noqa: S101
-    holder, acquired_at = current.holder, current.acquired_at
-    if current.maintenance.phase == MaintenancePhase.DRAINED:
-        from base.deploy.state.host_deploy_state import set_posture
-
-        # A failed posture write leaves the drained phase retryable. The
-        # stopped phase never dials a data plane that is already offline.
-        set_posture(database_factory(), "paused", machine=machine.name())
-        admission.set_phase(current.holder, current.acquired_at, MaintenancePhase.STOPPING)
-    _timed_phase(phases, "quiesce", lambda: ops_quiescent(remaining(deadline)))
     # meiva:note
     # The pty-sessions service outlives the services phase: it closes the terminals
     # below. `--keep-shell-sessions` keeps the service and the shells it holds.
@@ -334,13 +305,12 @@ def _drain_and_stop(
             "terminals",
             lambda: close_terminals(
                 deadline,
-                holder,
-                acquired_at,
                 direct_db="gateway" in roles,
                 database_factory=database_factory,
                 local_machine=machine,
             ),
         )
+        # meiva:note
         # Nothing is left in the service: stop it, and the root with it when nothing else is kept.
         _timed_phase(
             phases,
@@ -362,7 +332,6 @@ def _drain_and_stop(
                 producer=producer,
             ),
         )
-    _mark_stopped(current.holder, current.acquired_at)
 
 
 def stop(
@@ -384,7 +353,7 @@ def stop(
     helper: HelperFactory | None,
 ) -> int:
     # meiva:note
-    # Drain via normal restart, then stop selected resources.
+    # Stop the selected resources; agent-host settles the in-flight turns on its own SIGTERM.
     #
     # Services and the data plane are never forced. Closing terminals (skipped
     # only with `keep_shell_sessions`) SIGKILLs what outlives its bounded grace
@@ -407,9 +376,10 @@ def stop(
         return 0
     deadline = deadline_after(timeout)
     owns_journal = begin("stop", deadline=deadline)
+    # meiva:note
     # Per-phase accounting: a failed stop names each phase and how much of the
     # shared budget it consumed, so the operator sees WHERE the budget went
-    # (agent drain vs services vs terminals) — never a bare timeout (#2045).
+    # (services vs terminals vs data plane) — never a bare timeout (#2045).
     phases: list[tuple[str, float]] = []
     notes: list[str] = []  # what the report must say: a Postgres shutdown that was escalated
     clients: list[str] = []  # the pooler's clients still connected at its stop (reported only)
@@ -429,7 +399,7 @@ def stop(
                 helper=helper,
             )
             return finish_stop(owns_journal=owns_journal, notes=notes, clients=clients)
-        _drain_and_stop(
+        _stop_selected(
             phases,
             deadline,
             roles=roles,

@@ -12,7 +12,7 @@ from base.agents.to_user import read_document
 from base.daemon.http_transport import start_daemon_http
 from base.db import Database, create_agent
 from ops.to_user import read_to_user
-from services.agent_runner.agent_ops.maintenance import WorkerFutures
+from services.agent_runner.agent_ops.in_flight import RequestTokens, WorkerFutures
 from services.agent_runner.agent_ops.to_user_resource import resource_route
 
 
@@ -34,7 +34,7 @@ async def test_authenticated_home_machine_file_roundtrip(
     (workspace / "to_user.md").write_text(f"[report]({outside})")
     resource = next(iter(read_document(workspace).resources.values()))
     payload = {"agent_id": agent_id, "references": [resource.id]}
-    requests: set[object] = set()
+    requests: RequestTokens = set()
     workers: WorkerFutures = set()
     with database.pool() as pool:
         assert read_to_user(pool, agent_id, "source-host", references=[]).content

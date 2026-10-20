@@ -2,7 +2,6 @@
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "agent.tests.agent_tests" = [
     "test_circuit_breaker.py",
-    "test_maintenance_prior_failure.py",
 ]
 "meiva.tests.fixtures.meiva_tests" = [
 ]
@@ -14,7 +13,6 @@
     "test_agent_host.py",
     "test_circuit_breaker.py",
     "test_circuit_breaker_audit.py",
-    "test_maintenance_prior_failure.py",
 ]
 "base.config.tests.config_authority" = [
     "test_circuit_breaker.py",

@@ -70,3 +70,6 @@ read a `failures` field that holds no longer carry.
   maintenance)` never included it.
 - The process-identity primitives that kill or adopt processes (`stable_create_time`,
   `pid_starttime_ticks`, `OwnedProcess`) are unrelated and stay.
+
+Forward link (2026-10-20): the hold itself is deleted, so its journal fields and exits are gone. See
+[delete the maintenance hold](../2026-10-20-delete-maintenance-hold.md).

@@ -1,10 +1,7 @@
-"""Shared fixtures for the CLI tests (registered by `tests/fixtures/path_scopes.py`).
-
-Orchestration tests record the local hold/resume seam while updating the
-actual host posture. Without that posture effect, a fake recovery would leave
-later gateway requests behind a stale 503 gate. Production service and OS job
-boundaries remain guarded by the root fixtures.
-"""
+# meiva:note
+# Shared fixtures for the CLI tests (registered by `tests/fixtures/path_scopes.py`).
+#
+# Production service and OS job boundaries remain guarded by the root fixtures.
 
 from __future__ import annotations
 
@@ -91,15 +88,6 @@ def as_machine(
             yield machine
 
     return _enter
-
-
-@pytest.fixture(autouse=True)
-def _isolate_local_pause_journal(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A failed stop intentionally retains its hold; it must not hold the next test."""
-    from base.deploy.maintenance import pause_owner
-
-    monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause-owner.json")
-    monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause-owner.lock")
 
 
 @pytest.fixture(autouse=True)

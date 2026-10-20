@@ -1,28 +1,28 @@
-"""Real child-process regressions: nine daemons exit within a small bound of
-SIGTERM even with a default-executor job in flight.
-
-2026-09-18 (task #3940): a daemon's smooth stop SIGTERM'd it while a routine
-multi-minute ``asyncio.to_thread`` scan was in flight.
-``asyncio.run``'s close awaits ``shutdown_default_executor``, capped by CPython
-at ``THREAD_JOIN_TIMEOUT`` (300 s) — the stop flow's entire budget
-(`PAUSE_TIMEOUT_SECONDS`) — and interpreter teardown then joins a still-running
-worker with no bound at all (measured: a ``shutdown(wait=False)`` worker is
-still joined at exit). The exit lost that race by ~2 s and the unit stood
-half-stopped until the watchdog respawned it. Task #4222's sweep-A migrated
-this daemon family — watchdog, memory_indexer, heartbeat, page_server,
-events_maintenance, memory_search — to the sibling daemons' established shape
-(``asyncio.Runner`` + an explicit cancellation drain + a hard exit that skips
-teardown; see ``services/agent_runner/agent_ops/daemon.py``, ``services/backup/scheduler/daemon.py``),
-and these regressions lock the property in per daemon.
-
-Each child runs the production ``main()`` — signal wiring included — with
-``run()`` swapped for a wedge-shaped surrogate: one default-executor job that
-never finishes (that daemon's in-flight check / reconcile / scan, which is what
-holds the loop's executor at SIGTERM) plus a cancellable main task whose
-``finally`` records that the explicit drain ran. The parent asserts the bounded
-exit and the cleanup marker, with its own kill deadline so the old unbounded
-shape fails the test instead of hanging the suite.
-"""
+# meiva:note
+# Real child-process regressions: nine daemons exit within a small bound of
+# SIGTERM even with a default-executor job in flight.
+#
+# 2026-09-18 (task #3940): a daemon's smooth stop SIGTERM'd it while a routine
+# multi-minute ``asyncio.to_thread`` scan was in flight.
+# ``asyncio.run``'s close awaits ``shutdown_default_executor``, capped by CPython
+# at ``THREAD_JOIN_TIMEOUT`` (300 s) — thirty times root's 10 s TERM window
+# for a daemon — and interpreter teardown then joins a still-running
+# worker with no bound at all (measured: a ``shutdown(wait=False)`` worker is
+# still joined at exit). The exit lost that race by ~2 s and the unit stood
+# half-stopped until the watchdog respawned it. Task #4222's sweep-A migrated
+# this daemon family — watchdog, memory_indexer, heartbeat, page_server,
+# events_maintenance, memory_search — to the sibling daemons' established shape
+# (``asyncio.Runner`` + an explicit cancellation drain + a hard exit that skips
+# teardown; see ``services/agent_runner/agent_ops/daemon.py``, ``services/backup/scheduler/daemon.py``),
+# and these regressions lock the property in per daemon.
+#
+# Each child runs the production ``main()`` — signal wiring included — with
+# ``run()`` swapped for a wedge-shaped surrogate: one default-executor job that
+# never finishes (that daemon's in-flight check / reconcile / scan, which is what
+# holds the loop's executor at SIGTERM) plus a cancellable main task whose
+# ``finally`` records that the explicit drain ran. The parent asserts the bounded
+# exit and the cleanup marker, with its own kill deadline so the old unbounded
+# shape fails the test instead of hanging the suite.
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ import signal
 import subprocess
 import sys
 import time
+from asyncio.constants import THREAD_JOIN_TIMEOUT
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,8 +40,6 @@ from types import ModuleType
 from typing import IO, Any
 
 import pytest
-
-from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -271,9 +270,10 @@ def _spawn_child(tmp_path: Path, slug: str) -> _Child:
 @pytest.mark.parametrize("slug", sorted(_CASES))
 def test_sigterm_bounded_exit_with_wedged_executor(db_url: str, tmp_path: Path, slug: str) -> None:
     """SIGTERM exits within the bound while a wedged executor job is in flight."""
-    # The exit bound only matters relative to the stop budget it protects:
+    # meiva:note
+    # The exit bound only matters relative to the stall it separates itself from:
     # assert the relationship, not just the number.
-    assert _EXIT_BOUND_S + _KILL_SLACK_S < PAUSE_TIMEOUT_SECONDS / 5
+    assert _EXIT_BOUND_S + _KILL_SLACK_S < THREAD_JOIN_TIMEOUT / 5
     case = _CASES[slug]
     child = _spawn_child(tmp_path, slug)
     try:

@@ -17,7 +17,6 @@ from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.db import Database
 from base.native_process.os_platform import is_macos
-from services.supervision.healthchecks.maintenance_hold import MaintenanceHoldWatch
 from services.supervision.meiva_root_glue.diagnostics import Diagnostic
 
 
@@ -235,10 +234,6 @@ def build_diagnostics(
     if is_macos():
         checks.append(Diagnostic("brew-pin", brew_pins))
     checks.append(Diagnostic("venv", venv))
-    hold_watch = MaintenanceHoldWatch(
-        alert_after_s=settings.services.maintenance_hold_alert_after_s
-    )
-    checks.append(Diagnostic("maintenance-hold", hold_watch.probe, report=hold_watch.report))
     if is_macos():
         from services.supervision.healthchecks.permissions_helper import episode_reporter, probe
 

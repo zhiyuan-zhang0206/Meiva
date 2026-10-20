@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
 import json
 import os
 import sys
@@ -13,68 +12,55 @@ import pytest
 
 from base.db import Database
 from base.deploy.lifecycle import home_lifecycle_locks
-from base.deploy.maintenance import pause_owner
-from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import LockTimeoutError
+from base.native_process.root_control.instance_lock import (
+    acquire_instance_lock,
+    release_instance_lock,
+)
+from base.paths import run_dir
 from gateway.schedules import router, session_control
 from scripts.host_ops import update_schedule_script as repair
 
 
-@pytest.fixture(autouse=True)
-def private_journal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
-    monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
+# meiva:note
+# Hold the agent host's instance lock the way a running host does.
+def host_lock_held(home: Path) -> int:
+    return acquire_instance_lock(run_dir(home), "agent_host.lock")
 
 
-def publish(phase: MaintenancePhase) -> None:
-    stamp = dt.datetime(2026, 10, 10, tzinfo=dt.UTC)
-    before = pause_owner.begin_maintenance("test:script-repair", stamp).snapshot
-    assert before.maintenance is not None
-    assert before.holder is not None
-    hold = MaintenanceHold(phase, {})
-    pause_owner.change_maintenance(before.holder, stamp, before.maintenance, hold)
-
-
-@pytest.mark.parametrize("phase", [p for p in MaintenancePhase if p != MaintenancePhase.STOPPED])
-def test_only_certified_stopped_phase_is_accepted(phase: MaintenancePhase) -> None:
-    publish(phase)
-    with pytest.raises(RuntimeError, match="requires a stopped"):
-        repair.require_stopped_hold()
-
-
-def test_retained_root_is_not_a_refusal() -> None:
-    publish(MaintenancePhase.STOPPED)
-    before = pause_owner.state_path().read_bytes()
-    assert repair.require_stopped_hold().maintenance.phase == MaintenancePhase.STOPPED
-    assert pause_owner.state_path().read_bytes() == before
-
-
-@pytest.mark.parametrize("corrupt", [False, True])
-def test_missing_or_corrupt_journal_refuses_before_database(
-    corrupt: bool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_a_running_agent_host_refuses_the_repair_before_the_database(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    if corrupt:
-        pause_owner.state_path().write_text("broken")
-
     def installed(_home: Path, _source: Path) -> None:
         pass
 
     monkeypatch.setattr(repair, "load_installed_runtime", installed)
 
     def unexpected_database() -> None:
-        pytest.fail("a refused hold must not build a database handle")
+        pytest.fail("a refused repair must not build a database handle")
 
     monkeypatch.setattr(Database, "from_settings", unexpected_database)
-    with pytest.raises(RuntimeError):
-        repair.repair_script(
-            home=tmp_path,
-            source=tmp_path,
-            schedule_id=1,
-            script="pass\n",
-            expected_sha256="0" * 64,
-        )
+    lock = host_lock_held(tmp_path)
+    try:
+        with pytest.raises(RuntimeError, match="requires the agent host to be stopped"):
+            repair.repair_script(
+                home=tmp_path,
+                source=tmp_path,
+                schedule_id=1,
+                script="pass\n",
+                expected_sha256="0" * 64,
+            )
+    finally:
+        release_instance_lock(lock)
+
+
+def test_a_stopped_agent_host_leaves_its_lock_free_for_the_next_host(tmp_path: Path) -> None:
+    repair.require_agent_host_stopped(tmp_path)
+    # meiva:note
+    # The check took the lock and released it at once: a host starting now can take it.
+    release_instance_lock(host_lock_held(tmp_path))
 
 
 def test_wrong_interpreter_is_refused(tmp_path: Path) -> None:
@@ -143,7 +129,6 @@ def test_copied_adapter_binds_the_installed_source_image(
         return "updated"
 
     monkeypatch.setattr(repair, "replace_script", replace_script)
-    publish(MaintenancePhase.STOPPED)
     assert (
         repair.repair_script(
             home=tmp_path,
@@ -273,7 +258,7 @@ def test_utf8_digest_preserves_newlines() -> None:
 
 
 # meiva:note
-# The external maintenance script uses the selected installation's interpreter and real writer while preserving schedule enabled/stopped state and the pause journal; it stores the new body without executing it.
+# The external maintenance script uses the selected installation's interpreter and real writer while preserving schedule enabled/stopped state; it stores the new body without executing it.
 # meiva:link scripts/host_ops/tests/docs/schedule-maintenance.meiva.okf.md
 def test_external_file_uses_installed_runtime_and_real_writer(
     db_conn: psycopg.Connection,
@@ -289,9 +274,6 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     (home / "start-intent.json").write_text(
         json.dumps({"home": str(home), "checkout": str(source)})
     )
-    publish(MaintenancePhase.STOPPED)
-    journal = pause_owner.state_path().read_bytes()
-    (home / "run" / "deploy-pause-owner.json").write_bytes(journal)
     (home / ".env").write_text(
         f"MEIVA_DB_URL={db_url}\nMEIVA_SERVE_GATEWAY=true\n"
         "MEIVA_SERVE_AGENT_RUNNER=false\nMEIVA_MACHINE_NAME=external-script-test\n"
@@ -326,7 +308,6 @@ def test_external_file_uses_installed_runtime_and_real_writer(
         )
     assert result.ret == 0, result.stderr.str()
     assert "updated script_sha256=" in result.stdout.str()
-    assert (home / "run" / "deploy-pause-owner.json").read_bytes() == journal
     assert db_conn.execute(
         "SELECT enabled,status,script FROM schedules WHERE id=%s", (row[0],)
     ).fetchone() == (True, "stopped", script_file.read_bytes().decode())

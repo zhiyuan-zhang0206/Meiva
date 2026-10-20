@@ -68,3 +68,6 @@ Forward link (2026-10-20): the lifecycle pointer this decision relies on was rem
 host's self-fencing. A restart now interrupts what its turn is doing after a grace and resumes an
 unfinished turn from a queued note; see
 [the restart that interrupts and resumes](2026-10-20-restart-interrupts-after-a-grace-and-resumes-by-a-note.md).
+
+Forward link (2026-10-20): the hold that stayed beside this exit is deleted. See
+[delete the maintenance hold](2026-10-20-delete-maintenance-hold.md).

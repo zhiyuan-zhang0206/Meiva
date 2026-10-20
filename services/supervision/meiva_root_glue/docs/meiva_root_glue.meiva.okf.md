@@ -61,7 +61,7 @@ tree. On Linux the Meiva tree starts at root; no helper diagnostic is registered
 Postgres, Redis, and PgBouncer have separate native data-plane custody so they can
 remain available during application maintenance.
 
-Durable update and hold completion belongs to the external transition executor,
+Durable update completion belongs to the external transition executor,
 outside the subtree it stops. Root diagnostics does not invoke the pin, schema,
 code-update, or pause-recovery controllers. The old controller graph and hold
 watchdog eligibility/attempt state have been removed. No OS watchdog-probe or

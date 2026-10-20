@@ -86,8 +86,7 @@ that loaded the code, its working directory and the interpreter that loaded it.
 It is captured once, rechecked before each lifecycle phase, and grants no
 migration, writer-closure or other operation right. Restart captures the same
 runtime before recording lifecycle progress or stopping services and passes it
-into startup. The exact maintenance hold remains closed until complete readiness
-and authorized resume. Source convergence preserves host setup and scaffold
+into startup. Source convergence preserves host setup and scaffold
 steps without automatic production editable-install repair or reinstall.
 
 On macOS only, root must descend from the signed permissions helper. Linux root

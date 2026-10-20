@@ -27,7 +27,7 @@ their slot and reject ordinary active-session wakes before runtime preparation.
 The legacy consent version and accept/reject calls remain available only for
 requests already created by older clients during an upgrade.
 
-Relay recovery uses existing claim and held-control supervision opportunities;
+Relay recovery uses existing claim and lease-control supervision opportunities;
 see [[agent/docs/impersonation/relay-supervision.meiva.okf.md]] for exit evidence,
 transport replacement and delivery boundaries.
 

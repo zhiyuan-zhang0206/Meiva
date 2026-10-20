@@ -242,12 +242,10 @@ def test_permissions_helper_step_still_aborts_on_a_real_build_defect(
         converge_host._ensure_permissions_helper(ctx)
 
 
-@pytest.mark.parametrize("maintenance_held", [False, True])
 def test_cmd_converge_unconfigured_returns_zero(
     home: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    maintenance_held: bool,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -287,31 +285,12 @@ def test_cmd_converge_unconfigured_returns_zero(
         helper_calls.append("helper")
 
     monkeypatch.setattr(permissions_helper, "converge", record_helper)
-    operation = None
-    if maintenance_held:
-        from datetime import UTC, datetime
-
-        from base.deploy.maintenance import admission, pause_owner
-
-        acquired_at = datetime(2026, 10, 8, tzinfo=UTC)
-        pause_owner.begin_maintenance("converge", acquired_at)
-        with pytest.raises(RuntimeError, match="cannot release"):
-            converge_host.cmd_converge(
-                only_services=(),
-                disabled_services=(),
-                all_services=True,
-                database_factory=operator_database,
-                producer=operator_pipeline,
-                command=command_runtime,
-            )
-        operation = admission.authorized_start("converge", acquired_at)
     # The real lazy boot delivers the scratch unit environment during WAL-G's gate.
     with patch.dict(os.environ):
         rc = converge_host.cmd_converge(
             only_services=(),
             disabled_services=(),
             all_services=True,
-            operation=operation,
             database_factory=operator_database,
             producer=operator_pipeline,
             command=command_runtime,

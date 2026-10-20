@@ -188,15 +188,13 @@ meiva schedules start <name>
 The running copy on each host lives in `~/.meiva/schedules/<id>/`; this directory
 is the version-controlled source of truth — never edit only the running copy.
 
-## Script repair during maintenance
+## Script repair while the agent host is stopped
 
-Normal schedule edits use `meiva schedules update`. Business HTTP admission is
-closed during the stop/start window, so that command returns `cluster_updating`
-while the gateway is held. A stopped cluster can instead use the reviewed
-operator tool `scripts/host_ops/update_schedule_script.py`. It accepts only a
-schedule ID and script text, requires a failure-free `stopped` maintenance hold,
-and holds the same home lifecycle mutex as start/stop. A retained live root does
-not invalidate a certified stop. The tool does not advance or release the hold.
+Normal schedule edits use `meiva schedules update`. When the stored script must be
+replaced while the cluster is stopped, use the reviewed operator tool
+`scripts/host_ops/update_schedule_script.py`. It accepts only a schedule ID and
+script text, refuses while an agent host holds the home's instance lock, and holds
+the same home lifecycle mutex as start/stop.
 
 For first-generation recovery, copy this one file from a fixed reviewed tool
 commit to a private operator directory outside the installed checkout. Run it
@@ -228,15 +226,15 @@ Prepared text already present is a no-op; any text matching neither the expected
 old hash nor the prepared hash is refused. Each invocation commits one row;
 a failed batch is partial, and a retry skips completed rows without adding
 versions. The old-hash read/write interval is protected by the lifecycle mutex
-and stopped admission, not an independent concurrent-writer protocol.
+and the stopped agent host, not an independent concurrent-writer protocol.
 
 Archive the original rows and versions, validate all prepared scripts against
 the fixed application target, and compare the complete stored table after the
 edits. Verification includes disabled schedules and the callbacks' argument
 contracts; the current static verifier does not prove callback arity by checking
-only the outer call. Do not release the hold or launch old schedule code after
+only the outer call. Do not start the agent host or launch old schedule code after
 installing scripts that require the new callback contract. Finish the normal
-whole-cluster update to the approved target before admission resumes.
+whole-cluster update to the approved target before the cluster starts again.
 
 Runner-hosted templates receive immutable `ScheduleInputs` through `runpy.init_globals`:
 one loaded image, the entry's database/pipeline builders and its `MachineIdentity`.

@@ -1,8 +1,7 @@
-"""A real low-population query cannot turn explicit maintenance into a rollback."""
+# meiva:note
+# A real low-population query cannot turn an explicitly disabled agent host into a rollback.
 
-import json
 import subprocess
-from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
@@ -11,7 +10,6 @@ import pytest
 from base import paths
 from base.agents.context.clients import DatabaseFactory
 from base.db.tests.fakes import patch_database
-from base.deploy.maintenance import pause_owner
 from base.telemetry.tests.capture.event_capture import EmittedEvents, FollowedAttributes
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster.tests.health_probe_inputs import (
@@ -100,22 +98,16 @@ def alerts(emitted_events: EmittedEvents) -> FollowedAttributes:
     return emitted_events.following("health_probe_failing")
 
 
-@pytest.mark.parametrize("intent", ["disabled", "maintenance"])
 def test_expected_low_population_does_not_rollback_or_promote(
     probe: Probe,
     operator_database: DatabaseFactory,
     probe_home: Path,
     rollbacks: list[list[str]],
     alerts: FollowedAttributes,
-    intent: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    if intent == "disabled":
-        _launched_without({"agent-host"})
-        marker = paths.root_manifests_path(probe_home)
-    else:
-        pause_owner.begin_maintenance("test-maintenance", datetime.now(UTC))
-        marker = pause_owner.state_path()
+    _launched_without({"agent-host"})
+    marker = paths.root_manifests_path(probe_home)
     intent_before = marker.read_bytes()
     assert cluster_health.agent_population(1, database_factory=operator_database) is False
     assert probe() == 1
@@ -130,9 +122,7 @@ def test_expected_low_population_does_not_rollback_or_promote(
     assert "maintenance" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize(
-    "intent", ["absent", "other-service", "holdless-pause", "resumed", "invalid"]
-)
+@pytest.mark.parametrize("intent", ["absent", "other-service"])
 def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
     probe: Probe,
     probe_home: Path,
@@ -140,28 +130,8 @@ def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
     alerts: FollowedAttributes,
     intent: str,
 ) -> None:
-    holder, acquired_at = "test-maintenance", datetime.now(UTC)
     if intent == "other-service":
         _launched_without({"frontend"})
-    elif intent == "holdless-pause":
-        # A record without a maintenance hold reads as invalid.
-        marker = pause_owner.state_path()
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(
-            json.dumps(
-                {"state": "paused", "holder": holder, "acquired_at": acquired_at.isoformat()}
-            )
-        )
-    elif intent == "resumed":
-        current = pause_owner.begin_maintenance(holder, acquired_at).snapshot
-        assert current.maintenance is not None
-        pause_owner.change_maintenance(
-            holder, acquired_at, current.maintenance, current.maintenance, resumed=True
-        )
-    elif intent == "invalid":
-        marker = pause_owner.state_path()
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text("invalid journal")
 
     assert probe() == 1
     assert rollbacks == []
