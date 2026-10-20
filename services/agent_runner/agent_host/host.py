@@ -27,7 +27,9 @@ from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.graph.node_log import flush_node_exit_aggregate
 from agent.impersonation import (
     active_lease,
+    handoff_owed,
     native_status,
+    settle_checkpoint,
     supervise_relay,
 )
 from agent.impersonation_handoff import flush_checkpoint
@@ -348,9 +350,12 @@ class AgentHost:
                     outcome,
                 )
 
+    # meiva:note
+    # Held controls keep ownership and apply admin intent without a graph turn. The one
+    # graph write they owe is a takeover this wake ends itself: its checkpoint handoff
+    # must land before the agent idles (#5467).
+    # meiva:link docs/conventions/agents/agent-impersonation.md
     async def _run_held_controls(self, agent_id: int) -> None:
-        """Maintain ownership and apply admin intent without touching the graph."""
-
         incarnation = await admit_hosted_runtime(
             self._control_pool,
             agent_id,
@@ -400,6 +405,28 @@ class AgentHost:
             kill_shell_sessions=kill_terminating_agent_shells,
         )
         if kind is None:
+            # meiva:note
+            # This wake can be the one that ends a takeover: the admission above closes a
+            # predecessor's lease as expired, and relay supervision closes one whose relay
+            # died. An ended automatic lease owes the native checkpoint the end-of-session
+            # note and the receipt that releases the agent's next request; settling to idle
+            # without it refused every new takeover until an unrelated message happened to
+            # run a turn (#5467). Supervision runs first, so this read is the lease this
+            # wake actually leaves behind.
+            # meiva:link docs/conventions/agents/agent-impersonation.md
+            ended = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
+            if handoff_owed(ended):
+                await settle_checkpoint(
+                    self._graph,
+                    self._db,
+                    self._bus,
+                    agent_id,
+                    self.relays,
+                    activate_accepted=False,
+                    incarnation=incarnation,
+                    notes=self._policy.handoff_notes,
+                    read_local_machine=lambda: self._machine,
+                )
             await settle_hosted_runtime(
                 self._control_pool,
                 incarnation,
