@@ -44,5 +44,5 @@ def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
     parser = build_parser()
     for command in commands:
         parser.parse_args(command.split()[1:])  # SystemExit(2) fails the test
-    assert "`meiva restart`" in out
+    assert "`meiva restart --all-services" in out
     assert "--restart-only" not in out

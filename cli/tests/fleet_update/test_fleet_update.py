@@ -109,7 +109,7 @@ def test_run_dry_run_plans_both_halves_without_mutation(
     assert all(h["up"] and h["head"] == cluster.old for h in cluster.hosts.values())
     output = capsys.readouterr().out
     assert "phase: down" in output and "phase: up" in output
-    assert "stop -y" in output and "launchctl bootstrap" in output
+    assert "stop --yes" in output and "launchctl bootstrap" in output
     assert "smoke MACHINE" in output and "plugins verify" in output
 
 
@@ -128,7 +128,6 @@ def test_run_uses_one_log_and_accepts_both_halves_options(
             "45",
             "--roster-timeout",
             "15",
-            "--restart-all",
             "--silence-hours",
             "2",
         )
@@ -137,8 +136,8 @@ def test_run_uses_one_log_and_accepts_both_halves_options(
     logs = list((tmp_path / "logs").glob("*.log"))
     assert len(logs) == 1 and logs[0].name.endswith("-run.log")
     output = logs[0].read_text()
-    assert "stop -y --timeout 30" in output and " -ge 12 " in output
-    assert "smoke gw 45" in output and "every service stops" in output
+    assert "--mode smooth --timeout 30" in output and " -ge 12 " in output
+    assert "smoke gw 45" in output
     assert "down complete" in output and "up complete" in output
     assert "run `up` when ready" not in output
     assert cluster.silence_hours == 2
@@ -151,6 +150,126 @@ def test_run_requires_a_target_before_contacting_hosts(
     with pytest.raises(SystemExit) as exc:
         fleet_update.main(["run", "--gateway", "gw", "--log-dir", str(tmp_path / "logs")])
     assert exc.value.code == 2
+    assert cluster.commands == []
+
+
+_STOP_CHOICES = [
+    "--close-shell-sessions",
+    "--stop-browser",
+    "--stop-extras",
+    "--keep-service",
+    "pty-sessions",
+    "--keep-service",
+    "tunnel",
+    "--mode",
+    "force",
+    "--stop-timeout",
+    "77",
+]
+
+
+def test_the_operators_arguments_are_spliced_verbatim_into_each_hosts_stop_and_start(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    cluster, run = env
+    assert (
+        run(
+            "run",
+            *_STOP_CHOICES,
+            "--stop-infra",
+            "--only-service",
+            "gateway",
+            "--only-service",
+            "pty-sessions",
+        )
+        == 0
+    )
+    stops = {a: c for a, c in cluster.commands if 'meiva" stop' in c}
+    verbatim = (
+        'meiva" stop --yes --close-shell-sessions --stop-browser --stop-extras '
+        "--keep-service pty-sessions --keep-service tunnel --mode force --timeout 77"
+    )
+    assert set(stops) == {"gw", "mac", "lin"}
+    assert all(verbatim in command for command in stops.values())
+    assert "--stop-infra" in stops["gw"] and not any(
+        "-infra" in stops[alias] for alias in ("mac", "lin")
+    )
+    starts = {
+        a: c for a, c in cluster.commands if 'meiva" start' in c or "launchctl bootstrap" in c
+    }
+    only = "--only-service gateway --only-service pty-sessions"
+    assert set(starts) == {"gw", "mac", "lin"}
+    assert all(only in command for command in starts.values())
+    assert "launchctl bootstrap" in starts["mac"] and "--all-services" not in starts["mac"]
+
+
+def test_disabled_services_and_keeping_infra_are_forwarded_too(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    cluster, run = env
+    assert run("run", "--keep-infra", "--disable-service", "browser") == 0
+    gateway_stop = next(c for a, c in cluster.commands if a == "gw" and 'meiva" stop' in c)
+    assert "--keep-infra" in gateway_stop and "--keep-no-services" in gateway_stop
+    starts = [c for _, c in cluster.commands if 'meiva" start' in c or "launchctl bootstrap" in c]
+    assert len(starts) == 3 and all("--disable-service browser" in c for c in starts)
+
+
+_EVERY_CHOICE = {
+    "down": ["--new", "HEAD"],
+    "up": [],
+    "run": ["--new", "HEAD"],
+}
+
+
+@pytest.mark.parametrize("half", ["down", "up", "run"])
+def test_missing_choices_are_all_listed_at_once_and_no_host_is_touched(
+    env: tuple[Cluster, Callable[..., int]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    half: str,
+) -> None:
+    cluster, _ = env
+    argv = [half, "--gateway", "gw", "--log-dir", str(tmp_path / "logs"), *_EVERY_CHOICE[half]]
+    with pytest.raises(SystemExit) as exc:
+        fleet_update.main(argv)
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    expected = ["--dry-run | --execute", "--runner ALIAS (repeatable) | --no-runners"]
+    if half != "up":
+        expected += [
+            "--keep-shell-sessions | --close-shell-sessions",
+            "--keep-browser | --stop-browser",
+            "--keep-extras | --stop-extras",
+            "--keep-infra | --stop-infra",
+            "--keep-service NAME (repeatable) | --keep-no-services",
+            "--mode",
+            "--stop-timeout",
+            "--allow-python-change | --refuse-python-change",
+            "--allow-red-schedules | --refuse-red-schedules",
+            "--silence-hours",
+            "--lease-confirm-seconds",
+        ]
+    if half != "down":
+        expected += [
+            "--all-services | --only-service NAME",
+            "--start-timeout",
+            "--smoke-timeout",
+            "--roster-timeout",
+        ]
+    assert all(item in err for item in expected), err
+    assert cluster.commands == [] and cluster.effects == []
+    assert not (tmp_path / "logs").exists()
+
+
+def test_conflicting_choices_are_refused_before_any_host(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    with pytest.raises(SystemExit) as exc:
+        run("down", "--keep-browser", "--stop-browser", "--no-runners", "--runner", "mac")
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--keep-browser and --stop-browser" in err and "--runner ALIAS | --no-runners" in err
     assert cluster.commands == []
 
 
@@ -268,7 +387,7 @@ def test_the_dry_run_of_down_reports_a_red_without_changing_anything(
 
 
 def test_macos_start_is_a_gui_one_shot() -> None:
-    script = fleet_update.gui_oneshot("mac", 60)
+    script = fleet_update.gui_oneshot("mac", 60, "--all-services")
     job = plistlib.loads(
         script.split("<<'MEIVA_FLEET_PLIST'\n")[1].split("\nMEIVA_FLEET_PLIST")[0].encode()
     )
@@ -276,7 +395,7 @@ def test_macos_start_is_a_gui_one_shot() -> None:
     assert f'launchctl bootout "gui/$(id -u)/{job["Label"]}"' in script
     assert job["RunAtLoad"] is True and job["KeepAlive"] is False
     assert job["ProgramArguments"][:2] == ["/bin/zsh", "-lc"]
-    assert 'MEIVA_HOME="$H" "$S/.venv/bin/meiva" start' in job["ProgramArguments"][2]
+    assert 'MEIVA_HOME="$H" "$S/.venv/bin/meiva" start --all-services' in job["ProgramArguments"][2]
     assert shlex.split(f"zsh -lc {shlex.quote(script)}")[2] == script and 'rm -rf "$D"' in script
 
 
@@ -286,7 +405,7 @@ def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(
     from base.host.system import cron
     from cli.preflight import require_own_checkout
 
-    script = fleet_update.gui_oneshot("mac", 60)
+    script = fleet_update.gui_oneshot("mac", 60, "--all-services")
     job = plistlib.loads(
         script.split("<<'MEIVA_FLEET_PLIST'\n")[1].split("\nMEIVA_FLEET_PLIST")[0].encode()
     )
@@ -309,7 +428,7 @@ def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(
     assert not {"base", "cli", "gateway", "services", "agent", "meiva"} & imported
 
 
-_STOP_RETRY = 'retry "meiva stop -y --timeout 600"'
+_STOP_RETRY = "retry `meiva stop` with the same arguments this `down` gave it"
 
 
 def test_the_first_failure_stops_the_half(

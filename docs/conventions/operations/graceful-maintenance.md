@@ -10,17 +10,27 @@ start the gateway and verify its dependencies before starting runners.
 
 | Command | Native agent execution | Persistent shells and schedules | Local infrastructure and extras |
 | --- | --- | --- | --- |
-| `meiva stop -y` | Same normal drain | Close shells/terminals with bounded known-group signals; report known job leftovers | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
-| `meiva stop -y --keep-infra` | Same normal drain | Close | Keep the private data plane |
-| `meiva stop -y --keep-infra --keep-service gateway` | Same normal drain | Close | Also retain the named service; dependent services require `--keep-infra` |
-| `meiva restart` | Same normal drain, then `meiva start` | Retained | Replace the native services; keep PostgreSQL, Redis, PgBouncer, browser, Gate, helper and native LGTM |
-| `meiva start` | Restore normal admission after readiness | Reuse retained sessions; closed sessions are not serialized | Bring up enabled services from the existing home |
+| `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300` | Same normal drain | Close shells/terminals with bounded known-group signals; report known job leftovers | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
+| the same with `--keep-infra` instead of `--stop-infra` | Same normal drain | Close | Keep the private data plane |
+| the same with `--keep-infra --keep-service gateway` | Same normal drain | Close | Also retain the named service; dependent services require `--keep-infra` |
+| `meiva stop --yes --keep-shell-sessions --keep-browser --keep-extras --keep-no-services --keep-infra --mode smooth --timeout 300` | Same normal drain | Retained | Stop only the roster services; keep everything else |
+| `meiva restart --all-services --keep-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300` | Same normal drain, then the start leg | Retained (`--close-shell-sessions` closes them) | Replace the native services; keep PostgreSQL, Redis, PgBouncer (always), browser, Gate, helper and native LGTM |
+| `meiva restart --only agent-host --mode smooth --timeout 300` | Same normal drain of agent-host alone | Untouched | Only agent-host is stopped; root relaunches it |
+| `meiva start --all-services` | Restore normal admission after readiness | Reuse retained sessions; closed sessions are not serialized | Bring up the named services from the existing home |
 
-`--keep-service` is repeatable and accepts the bare service-roster name. It is
+Every `stop` choice is an explicit argument; a missing one exits 2 and lists every
+missing argument at once. A host without gateway capability (a pure runner) takes no
+`--keep-infra|--stop-infra` and refuses it if given. `restart` takes either `--only
+agent-host` or a start selection plus its own keep-or-restart choices, and `start`
+takes exactly one of `--all-services`, `--only-service NAME…` and `--disable-service NAME…`;
+nothing about the selection is remembered between runs.
+
+`--keep-service` is repeatable and accepts the bare service-roster name (the shared
+browser, the pty-sessions service and the extras have their own choices). It is
 an invocation's preservation choice, not a permanent disabled-service setting.
-`stop` asks for confirmation unless `-y` is passed; `restart` never asks. `stop`
-uses `--timeout 300` by default, and restart's drain has the same budget. A
-deadline is a failed stop, not permission to kill surviving services. Terminals and Postgres are the exceptions: Postgres' fast
+`stop` asks for confirmation with `--prompt` and proceeds with `--yes`; `restart` never asks. Both
+require `--timeout SECONDS` (the examples use 300), and `restart`'s `--timeout` bounds its stop
+leg. A deadline is a failed stop, not permission to kill surviving services. Terminals and Postgres are the exceptions: Postgres' fast
 shutdown that has not finished by the end of its share of the budget (a hung
 archive command) is ended by an immediate shutdown and the leftover descendants
 are SIGKILLed, loudly and without failing the stop
@@ -31,7 +41,7 @@ are diagnostic, and detached/background process disappearance is not certified. 
 session still leaves its owner the closure notice, written to the database
 in the `terminals` phase, before the data plane stops
 ([decision](../../decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md),
-[notice write](../../decisions/agents/messages/2026-10-02-close-notices-written-at-terminals.md)). `--force`
+[notice write](../../decisions/agents/messages/2026-10-02-close-notices-written-at-terminals.md)). `--mode force`
 explicitly selects force behavior when normal exit cannot complete. Force stops
 the selected service processes without fabricating a restart receipt. Later
 start uses agent-host crash recovery from persisted checkpoints.
@@ -40,9 +50,9 @@ for interrupted arbitrary code; use normal stop for the planned data-plane move.
 
 A stop retains agent IDs, history, checkpoints, pending messages, workspaces,
 browser profiles and observability data. It does not terminate agent identities
-or destroy the cluster. A full stop closes persistent shells; their running
-processes and shell variables cannot be restored by `start`. No `meiva stop` option
-keeps them; only `meiva restart` does.
+or destroy the cluster. A stop with `--close-shell-sessions` closes persistent shells; their running
+processes and shell variables cannot be restored by `start`. `--keep-shell-sessions` on `stop`
+or `restart` keeps them instead.
 Externally launched tools are not owned by one local home.
 
 Impersonation is a separate agent identity protocol. These commands do not
@@ -119,7 +129,7 @@ the external effect but before its result becomes durable.
 ## Updating and moving the data plane
 
 `python -m cli.fleet_update run` executes the complete update. Its `down` half
-stops every unit with `meiva stop -y`, keeping the
+stops every unit with `meiva stop --yes`, keeping the
 stateful components whose code the window does not touch (`--keep-service`; the
 [keep decision](../../decisions/runtime/updates/release/2026-10-17-component-scoped-keep-on-update.md)),
 and `up` starts them again (the runbook's "Updating a networked cluster in source mode").
@@ -216,7 +226,7 @@ member once the hold reached `drained`.
 A failed continuation raised, so its final checkpoint may not be durable and the
 interrupted turn may be lost. The agent's restart pointer is durable: it survives
 in Postgres exactly as after a crash, and the agent continues from its last
-durable checkpoint (`meiva stop --force` and a host crash give the same guarantee,
+durable checkpoint (`meiva stop --mode force` and a host crash give the same guarantee,
 no more). `meiva start` does not settle or inspect the agent.
 
 ## Recovering a stuck maintenance operation

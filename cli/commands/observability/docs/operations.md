@@ -24,7 +24,7 @@ check those consumers before choosing an outage window.
 changing this startup-applied setting requires restarting the affected processes.
 The collector's own infrastructure scrapes have an independent role gate. To
 stop that service, use `meiva start --disable-service otel-collector` through normal
-service-selection lifecycle, rather than treating the producer switch as a
+explicit start selection, rather than treating the producer switch as a
 collector stop.
 
 ## Verify indexed event labels

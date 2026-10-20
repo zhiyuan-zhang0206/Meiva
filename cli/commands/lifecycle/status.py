@@ -20,9 +20,8 @@ from base.cluster import session_name
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
-from base.deploy.lifecycle import service_selection
 from base.host.system.hostport import Host
-from base.paths import meiva_home
+from base.paths import meiva_home, root_manifests_path
 from cli.commands._repo import repo_root
 from cli.commands.converge import incomplete
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
@@ -59,7 +58,8 @@ def root_tree_units() -> dict[str, dict[str, object]]:
 def _status_roster(
     roles: MachineRoles | None, *, machine: MachineIdentity, host: Host
 ) -> tuple[tuple[ServiceSpec, str | None], ...]:
-    """Explain every service excluded by capabilities or the durable desired set."""
+    # meiva:note
+    # Explain every service excluded by capabilities or not launched by the last start.
     # Show this host's role roster WITH each gated-out service's reason, so a
     # service the start path drops (meiva-browser with no display) is visible +
     # explained rather than silently missing — `meiva status` is
@@ -70,9 +70,16 @@ def _status_roster(
         services_to_show = tuple((spec, None) for spec in build_services())
     else:
         services_to_show = services_for_capabilities_annotated(roles, machine=machine, host=host)
-    selection = service_selection.read_selection()
+    from services.supervision.meiva_root_glue.manifests import launched_services
+
+    launched = launched_services(root_manifests_path(meiva_home()))
     return tuple(
-        (spec, reason if selection.enabled(spec.session) else "disabled by desired service set")
+        (
+            spec,
+            reason
+            if reason is not None or (launched is not None and spec.session in launched)
+            else "not launched by the last meiva start",
+        )
         for spec, reason in services_to_show
     )
 

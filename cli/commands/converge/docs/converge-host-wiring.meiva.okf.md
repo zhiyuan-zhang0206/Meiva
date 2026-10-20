@@ -11,7 +11,7 @@ tags:
 Cold start passes its admitted service roster into preparation before publishing
 the desired service file. Service-specific steps require a selected consumer;
 host wiring and private data-plane preparation remain shared dependencies.
-Standalone converge resolves the persisted selection and capability gates.
+Standalone converge serves the services the last start launched (read from the root manifest; nothing is selected before any launch) and applies the capability gates.
 Each converge operation creates one lazy `ConfigBoot` and passes it through the
 required `ConvergeCtx.config` field. Its required `producer` borrows the entry's
 same lazy event-pipeline owner; LGTM render failures use that writer without

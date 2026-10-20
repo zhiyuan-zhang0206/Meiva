@@ -141,3 +141,12 @@ def exit_code_after_budget(failed_code: int) -> int:
     in the `failed` state.
     """
     return 0 if is_macos() else failed_code
+
+
+def boot_start_arguments(services: frozenset[str]) -> tuple[str, ...]:
+    # meiva:note
+    # `start --boot` plus the explicit selection: one `--only-service` per service.
+    if not services:
+        raise ValueError("a boot start needs at least one selected service")
+    selection = tuple(arg for name in sorted(services) for arg in ("--only-service", name))
+    return ("start", "--boot", *selection)

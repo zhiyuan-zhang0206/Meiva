@@ -44,10 +44,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from loguru import logger
 
-from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
+from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S, boot_start_arguments
 from base.host.system.boot_unit import install, uninstall
 from base.host.system.cron import (
     LAUNCHD_LABEL_PREFIX,
@@ -73,7 +74,7 @@ def _autostart_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 
 
-def autostart_plist_content(*, host: Host) -> str:
+def autostart_plist_content(*, services: frozenset[str], host: Host) -> str:
     """The LaunchAgent plist: run `meiva start --boot` at load, and keep re-running
     it while it fails, up to the boot attempt budget.
 
@@ -93,6 +94,10 @@ def autostart_plist_content(*, host: Host) -> str:
     label = _LABEL
     meiva = meiva_binary_path(host=host)
     log_file = meiva_home() / "logs" / "autostart.log"
+    arguments = "\n".join(
+        f"        <string>{escape(arg)}</string>"
+        for arg in (meiva, *boot_start_arguments(services))
+    )
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -102,9 +107,7 @@ def autostart_plist_content(*, host: Host) -> str:
     <string>{label}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{meiva}</string>
-        <string>start</string>
-        <string>--boot</string>
+{arguments}
     </array>
 {launchd_env_block(host=host)}
     <key>RunAtLoad</key>
@@ -125,12 +128,12 @@ def autostart_plist_content(*, host: Host) -> str:
 """
 
 
-def register_macos(*, host: Host) -> int:
+def register_macos(*, services: frozenset[str], host: Host) -> int:
     """Write (or update) the autostart LaunchAgent plist. Idempotent: rewrites
     only when the content changed, and never bootstraps (see module docstring)."""
     plist_path = _autostart_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
-    content = autostart_plist_content(host=host)
+    content = autostart_plist_content(services=services, host=host)
     if plist_path.exists() and plist_path.read_text() == content:
         return 0  # already current -- nothing to do, no reload
     plist_path.write_text(content)
@@ -153,8 +156,8 @@ def _unregister_macos(*, host: Host) -> int:
     return 0 if retired else 1
 
 
-def register_linux(*, host: Host) -> int:
-    install(host=host)
+def register_linux(*, services: frozenset[str], host: Host) -> int:
+    install(services=services, host=host)
     return 0
 
 
@@ -163,27 +166,34 @@ def unregister_linux(*, host: Host) -> int:
     return 0
 
 
-def register_autostart(*, enabled_reader: Callable[[], bool], host: Host) -> None:
-    """Register the host's boot-time autostart job.
-
-    Platform-aware: dispatches to the macOS plist or the Linux boot unit.
-    Idempotent. On macOS the plist is written but not loaded into the running
-    session (see module docstring); it takes effect on the next reboot.
-    A no-op when ``os_jobs_enabled()`` is off (the test suite) or when this
-    process's home is not the default home (``owns_os_jobs``).
-
-    Raises:
-        RuntimeError: on registration failure.
-    """
+def register_autostart(
+    *, services: frozenset[str], enabled_reader: Callable[[], bool], host: Host
+) -> None:
+    # meiva:note
+    # Register the host's boot-time autostart job for exactly `services`.
+    #
+    # Platform-aware: dispatches to the macOS plist or the Linux boot unit. A
+    # start that selected no service has nothing to bring up at boot, so its
+    # boot job is removed instead.
+    # Idempotent. On macOS the plist is written but not loaded into the running
+    # session (see module docstring); it takes effect on the next reboot.
+    # A no-op when ``os_jobs_enabled()`` is off (the test suite) or when this
+    # process's home is not the default home (``owns_os_jobs``).
+    #
+    # Raises:
+    #     RuntimeError: on registration failure.
     if not os_jobs_enabled(enabled_reader=enabled_reader):
         skip_os_job("autostart")
         return
     if not owns_os_jobs("autostart"):
         return
+    if not services:
+        unregister_autostart(host=host)
+        return
     register_platform_job(
         "autostart",
-        macos=lambda: register_macos(host=host),
-        linux=lambda: register_linux(host=host),
+        macos=lambda: register_macos(services=services, host=host),
+        linux=lambda: register_linux(services=services, host=host),
         host=host,
     )
 

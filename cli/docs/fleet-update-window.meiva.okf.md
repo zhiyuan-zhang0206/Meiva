@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Fleet update window guarantees
-description: What refuses, gates and surrounds the cli.fleet_update stops — preflight, the lease announcement, stored schedules, the keep decision, the silence and the log.
+description: What refuses, gates and surrounds the cli.fleet_update stops — preflight, the lease announcement, stored schedules, the silence and the log.
 tags: [cli, updates, operations]
 ---
 
@@ -10,8 +10,6 @@ tags: [cli, updates, operations]
 The promises `cli.fleet_update` makes around the stops themselves
 ([[cli/docs/fleet-update.meiva.okf.md]] owns the halves and their order): what
 refuses the window, what gates it, what it silences, and what must not leak.
-The keep decision itself is
-[[scripts/host_ops/docs/fleet-update-keep.meiva.okf.md]].
 `run` executes both halves in one window, preserving these same gates and
 closing the silence only after `up` passes all verification.
 
@@ -40,12 +38,11 @@ that cannot be read only warns — the shipped program exiting non-zero is the
 same warning, not a refusal — because an unreadable lease list must not strand
 a window.
 
-`--lease-confirm-seconds` (default 0) then holds the stops open for that long
+The required `--lease-confirm-seconds` then holds the stops open for that long
 with a printed countdown, so the operator can release or renew a lease first.
-The default waits for nobody: the operator chose the window and the leases are
-named before the first stop, so an ordinary update never pays a pause; a wave
-that must not end a takeover passes the window explicitly. `--dry-run` reports
-the window and does not sleep.
+0 waits for nobody: the operator chose the window and the leases are named
+before the first stop; a wave that must not end a takeover passes a longer
+window. `--dry-run` reports the window and does not sleep.
 
 ## The stored-schedule gate
 
@@ -57,18 +54,10 @@ own OLD checkout, and the check being NEW's, offline, under a throwaway home;
 both steps are real files whose text ships to the host, so their imports stay
 visible.
 
-## The keep decision
-
-The decision runs as a subprocess of the operator's interpreter with a
-`--keep-timeout` budget (default 300 seconds: two scratch worktrees, two
-whole-repo analyses). Every
-failure returns no keeps with one WARNING, and the stops then restart
-everything — never a guess.
-
 ## The silence
 
 `down` opens one Grafana silence on the gateway host before the first stop
-(comment naming NEW, expiry `--silence-hours`, default 4) and `up` expires it
+(comment naming NEW, expiry the required `--silence-hours`) and `up` expires it
 after the drift checks. A silence that cannot open only warns; a failed `up`
 leaves the silence to its expiry. `--dry-run` prints the command without
 opening.
@@ -84,15 +73,14 @@ reporting its label and log path; its label is its own
 
 ## Contracts
 
-down refuses before touching anything — exit 2, no effects — when a listed host has uncommitted changes, a post-checkout hook, an active update marker or a maintenance hold that is neither free nor a completed stop, when the hosts disagree on HEAD, and when .python-version changes without --allow-python-change; the probe reads its facts through the host's own shell.
+down refuses before touching anything — exit 2, no effects — when a listed host has uncommitted changes, a post-checkout hook, an active update marker or a maintenance hold that is neither free nor a completed stop, when the hosts disagree on HEAD, and when .python-version changes under --refuse-python-change; the probe reads its facts through the host's own shell.
 
 Before anything stops — under --dry-run too — down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table refuses with the rows listed unless --allow-red-schedules.
 
-down runs the keep decision as a subprocess of scripts/host_ops/fleet_update_keep.py on this interpreter; every failure — missing script, timeout, non-zero exit, unusable output — returns no keeps with one WARNING and the stops restart everything; the verdicts ride every stop as --keep-service flags; --restart-all skips the decision; a rerun over hosts already on NEW passes NEW as both revisions.
 
-Before anything stops — under --dry-run too, in the same words — down reads the gateway's agent_impersonations rows with status='active' and names each lease by agent, session, executor and expiry, followed by one warning that the stops end them; a read that fails — an unreadable table or a program that exits non-zero — only warns and the window goes on; --lease-confirm-seconds (default 0, report only) holds the stops open that long with a countdown, and dry-run prints that window without sleeping.
+Before anything stops — under --dry-run too, in the same words — down reads the gateway's agent_impersonations rows with status='active' and names each lease by agent, session, executor and expiry, followed by one warning that the stops end them; a read that fails — an unreadable table or a program that exits non-zero — only warns and the window goes on; the required --lease-confirm-seconds (0 reports only) holds the stops open that long with a countdown, and dry-run prints that window without sleeping.
 
-down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry --silence-hours (default 4); up expires it after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
+down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry the required --silence-hours; up expires it after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
 
 up starts every listed host even when one fails: a host whose start or converge aborts is reported with the step and reason recorded by that host's incomplete-converge marker ([[cli/commands/converge/docs/converge-incomplete.meiva.okf.md]]), the remaining hosts still start, and the run exits 3 (partial) after listing each failure — distinct from 2 (refused before any effect) and 1 (a failure before any host started). Roster, smoke and drift checks are skipped on a partial up; the silence still expires.
 

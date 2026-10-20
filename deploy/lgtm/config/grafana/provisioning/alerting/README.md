@@ -247,8 +247,9 @@ a new provider is covered by adding its string there, with no edit to
 ## Sync to the live Grafana
 
 Converge renders the provisioning tree into this home's native configuration.
-Alert-rule changes require a new root generation. Use normal `meiva stop -y` then
-`meiva start`; readiness alone cannot prove that a running Grafana reloaded a file.
+Alert-rule changes require a new root generation. Use a full `meiva stop` (every choice explicit,
+e.g. `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300`) then
+`meiva start --all-services`; readiness alone cannot prove that a running Grafana reloaded a file.
 There is no independent launchd or systemd Grafana restart path.
 
 ## How to add a rule

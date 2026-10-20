@@ -324,7 +324,7 @@ def phase_node(container: str, *, docker: list[str]) -> None:
     # needs a stop first (the same rule an operator meets by hand).
     sh_ok(
         container,
-        "cd /home/verify/.meiva/source && MEIVA_OS_JOBS_ENABLED=0 .venv/bin/meiva stop -y",
+        "cd /home/verify/.meiva/source && MEIVA_OS_JOBS_ENABLED=0 .venv/bin/meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 600",
         docker=docker,
         timeout=900,
     )

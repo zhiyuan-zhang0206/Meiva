@@ -17,7 +17,7 @@ exports = ["fake_commands.py", "fake_crontab.py"]
 "test_walg_job.py" = ["fake_commands.py", "fake_crontab.py"]
 
 [debt.env-patch]
-"test_autostart.py#monkeypatch.setenv os.environ.HOME" = 2
+"test_autostart.py#monkeypatch.setenv os.environ.HOME" = 1
 "test_autostart.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_cron.py#monkeypatch.setenv os.environ.HOME" = 2
 "test_cron.py#monkeypatch.setenv os.environ.XPC_SERVICE_NAME" = 4

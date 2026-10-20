@@ -627,16 +627,20 @@ def _skip_reason(ctx: ConvergeCtx, step: ConvergeStep, *, is_prod_install: bool)
 def _desired_service_names(
     roles: MachineRoles | None, *, machine: MachineIdentity, host: Host
 ) -> frozenset[str]:
-    from base.deploy.lifecycle.service_selection import read_selection
+    from base.paths import meiva_home, root_manifests_path
+    from services.supervision.meiva_root_glue.manifests import launched_services
     from services.supervision.roster.spec import services_for_capabilities_annotated
 
     if roles is None:
         return frozenset()
-    selection = read_selection()
+    # meiva:note
+    # Standalone converge serves the services the last start launched; before any
+    # launch nothing is selected, so per-service steps stay idle.
+    launched = launched_services(root_manifests_path(meiva_home())) or frozenset()
     return frozenset(
         spec.session
         for spec, gate in services_for_capabilities_annotated(roles, machine=machine, host=host)
-        if gate is None and selection.enabled(spec.session)
+        if gate is None and spec.session in launched
     )
 
 

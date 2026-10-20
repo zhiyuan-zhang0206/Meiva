@@ -22,7 +22,11 @@ from pathlib import Path
 from loguru import logger
 
 from base.host.atomic_io import write_text_atomic
-from base.host.system.boot_policy import BOOT_MAX_ATTEMPTS, BOOT_RETRY_INTERVAL_S
+from base.host.system.boot_policy import (
+    BOOT_MAX_ATTEMPTS,
+    BOOT_RETRY_INTERVAL_S,
+    boot_start_arguments,
+)
 from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
 
@@ -45,6 +49,9 @@ class BootUnitContext:
     user: str
     group: str
     home_dir: Path  # the user's $HOME
+    # meiva:note
+    # the explicit selection the boot start launches
+    services: frozenset[str]
 
 
 # --- paths and names --------------------------------------------------------
@@ -63,7 +70,7 @@ def root_pid_path(home: Path) -> Path:
     return home / "run" / "meiva-root" / "systemd.pid"
 
 
-def _default_context(*, host: Host) -> BootUnitContext:
+def _default_context(*, services: frozenset[str], host: Host) -> BootUnitContext:
     import grp
     import pwd
 
@@ -77,6 +84,7 @@ def _default_context(*, host: Host) -> BootUnitContext:
         user=entry.pw_name,
         group=group,
         home_dir=Path(entry.pw_dir),
+        services=services,
     )
 
 
@@ -132,7 +140,12 @@ def _path_value(value: str, what: str) -> str:
 def render_unit(ctx: BootUnitContext) -> str:
     """Start normally, then let systemd own the verified application root."""
     # The ordinary source checkout invocation of the root boot owner.
-    argv = (str(ctx.repo / ".venv/bin/python"), "-m", "cli.main", "start", "--boot")
+    argv = (
+        str(ctx.repo / ".venv/bin/python"),
+        "-m",
+        "cli.main",
+        *boot_start_arguments(ctx.services),
+    )
     environment = (
         ("HOME", str(ctx.home_dir)),
         ("MEIVA_HOME", str(ctx.home)),
@@ -282,13 +295,15 @@ def _read_text(path: Path) -> str | None:
 # --- native registration / retirement -------------------------------------------
 
 
-def install(*, context: BootUnitContext | None = None, host: Host) -> list[str]:
+def install(
+    *, services: frozenset[str], context: BootUnitContext | None = None, host: Host
+) -> list[str]:
     """Register and enable the sole Linux boot route without recursive startup."""
     if not systemd_running(host=host):
         raise RuntimeError(
             "the boot unit needs a Linux host running systemd as its service manager"
         )
-    ctx = context if context is not None else _default_context(host=host)
+    ctx = context if context is not None else _default_context(services=services, host=host)
     steps: list[str] = []
 
     destination = unit_path()

@@ -93,7 +93,9 @@ def _start(
     producer = operator_event_pipeline(
         operator_database, machine=command_runtime.machine, home=resolve_meiva_home()
     )
-    args = build_parser().parse_args(["start", *flags])
+    # meiva:note
+    # Every start names its selection; these gate tests are indifferent to which.
+    args = build_parser().parse_args(["start", *(flags or ("--all-services",))])
     args.runtime = command_runtime
     return start_intent.run_start(
         args,

@@ -17,10 +17,10 @@ configuration digest bound into the root generation. Configuration or roster
 changes require a normal stop before a new generation; repeated unchanged start
 keeps the existing root. Observation data is retained across stops.
 
-`meiva lgtm on` records station intent and enables these three services through
-normal start. `meiva lgtm off` excludes them from the durable service selection,
-preserving other choices and data. A running root refuses a changed generation;
-stop it normally before applying the changed selection. The marker or the
+`meiva lgtm on` records station intent and starts with the services the last start
+launched plus these three, passed as an explicit selection. `meiva lgtm off` starts
+without them, preserving the other launched services and data. A running root refuses a
+changed generation; stop it normally before applying the changed selection. The marker or the
 `observability-station` capability permits the services, while explicit service
 selection can still exclude them.
 

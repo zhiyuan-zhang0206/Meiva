@@ -61,15 +61,25 @@ def _restart_stop(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     command_runtime: CommandRuntime,
-    **kwargs: Any,
+    timeout: float,
+    force: bool = False,
+    keep_shell_sessions: bool = False,
 ) -> int:
-    """The stop leg of `meiva restart`: no prompt; the data plane and browser stay."""
+    # meiva:note
+    # The stop leg of `meiva restart`: no prompt; the data plane (when this host has
+    # one) and the browser stay, and no extras are torn down.
+    machine = command_runtime.machine
     return entry.do_stop(
         Path("/unused"),
         require_confirmation=False,
-        keep_infra=True,
+        keep_infra=True if "gateway" in machine.role() else None,
         keep_browser=True,
-        **kwargs,
+        keep_shell_sessions=keep_shell_sessions,
+        preserve_sessions=frozenset(),
+        announce=False,
+        teardown_extras=False,
+        force=force,
+        timeout=timeout,
         database_factory=database_factory,
         producer=producer,
         machine=command_runtime.machine,
@@ -77,7 +87,7 @@ def _restart_stop(
     )
 
 
-def test_keeping_the_pty_sessions_service_preserves_unselected_process_and_real_pty(
+def test_keeping_shell_sessions_preserves_unselected_process_and_real_pty(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
@@ -88,8 +98,9 @@ def test_keeping_the_pty_sessions_service_preserves_unselected_process_and_real_
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """`--keep-service pty-sessions` leaves the service and its live session as they are:
-    the root owner is asked to preserve it, and no terminals phase runs."""
+    # meiva:note
+    # `--keep-shell-sessions` leaves the pty-sessions service and its live session as they
+    # are: the root owner is asked to preserve it, and no terminals phase runs.
     dependencies(monkeypatch, machine=command_runtime.machine)
     root_stops = record_root_stops(monkeypatch)
 
@@ -97,6 +108,7 @@ def test_keeping_the_pty_sessions_service_preserves_unselected_process_and_real_
         raise AssertionError("a kept service's terminals must not be closed")
 
     monkeypatch.setattr(command, "close_terminals", closed)
+    # meiva:note
     # Bootstrap and spawned interpreters consume the raw home before Settings.
     monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
@@ -110,7 +122,7 @@ def test_keeping_the_pty_sessions_service_preserves_unselected_process_and_real_
         time.sleep(0.05)
     assert (
         _restart_stop(
-            preserve_sessions=frozenset({SERVICE_UNIT}),
+            keep_shell_sessions=True,
             timeout=5,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -178,7 +190,8 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     ) -> int:
         assert machine is command_runtime.machine
         assert operation is None
-        assert kwargs["persist_services"] is False
+        assert (kwargs["only_services"], kwargs["disabled_services"]) == ((), ())
+        assert (kwargs["all_services"], kwargs["reconcile"]) == (True, False)
         events.append("services-started")
         return 0
 
@@ -194,8 +207,7 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     monkeypatch.setattr(command, "stop_extras", record("extras-stopped"))
     monkeypatch.setattr(command, "close_terminals", close_terminals)
     monkeypatch.setattr(command, "announce_stopping", record("announced"))
-    runtime = MagicMock()
-    monkeypatch.setattr(stop_commands, "restart_runtime", lambda: runtime)
+    monkeypatch.setattr(stop_commands, "restart_runtime", MagicMock)
     monkeypatch.setattr(stop_commands, "require_restart_runtime", lambda _runtime: None)  # pyright: ignore[reportUnknownArgumentType]
 
     def preflight(_db: object, *, command: CommandRuntime) -> int:
@@ -213,7 +225,14 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
 
     assert (
         entry.cmd_restart(
-            mode="smooth",
+            only_services=(),
+            disabled_services=(),
+            all_services=True,
+            keep_shell_sessions=False,
+            keep_browser=True,
+            restart_extras=False,
+            force=False,
+            timeout=30.0,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -308,7 +327,12 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     assert (
         entry.cmd_stop(
             require_confirmation=False,
-            keep_infra=True,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=False,
             timeout=5,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -393,6 +417,15 @@ def test_only_explicit_force_enters_legacy_force_stop(
     assert (
         entry.do_stop(
             Path("/unused"),
+            require_confirmation=False,
+            keep_infra=None,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            preserve_sessions=frozenset(),
+            announce=False,
+            teardown_extras=False,
+            force=False,
+            timeout=5.0,
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
@@ -404,8 +437,14 @@ def test_only_explicit_force_enters_legacy_force_stop(
     force.assert_not_called()
     assert (
         entry.cmd_stop(
-            force=True,
+            keep_infra=None,
             require_confirmation=False,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=True,
+            timeout=5.0,
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
@@ -523,8 +562,8 @@ def test_resource_stop_excludes_concurrent_start(
     start.assert_called_once()
 
 
-@pytest.mark.parametrize("how", ["stop", "restart", "keep-service"])
-def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_kept(
+@pytest.mark.parametrize("how", ["stop", "restart", "keep-shell-sessions"])
+def test_explicit_force_stops_host_and_closes_terminals_unless_shell_sessions_are_kept(
     how: str,
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -536,17 +575,13 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Force stops the services with the pty-sessions service kept, then closes the
-    terminals through it and stops it, with no drain and no owner notices;
-    keeping the service keeps its live session."""
-
-    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
-        del machine
-        return frozenset({"agent-runner"})
-
+    # meiva:note
+    # Force stops the services with the pty-sessions service kept, then closes the
+    # terminals through it and stops it, with no drain and no owner notices;
+    # keeping the shell sessions keeps the live session.
+    command_runtime.machine.set(role="agent-runner")
     monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def announce(*, machine: MachineIdentity) -> None:
         assert machine is command_runtime.machine
@@ -562,9 +597,14 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
     if how == "stop":
         rc = entry.cmd_stop(
-            force=True,
+            keep_infra=None,
             require_confirmation=False,
-            stop_browser=False,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            force=True,
+            timeout=15.0,
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
@@ -573,6 +613,7 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
     elif how == "restart":
         rc = _restart_stop(
             force=True,
+            timeout=15.0,
             database_factory=operator_database,
             producer=operator_pipeline,
             command_runtime=command_runtime,
@@ -580,12 +621,13 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
     else:
         rc = _restart_stop(
             force=True,
-            preserve_sessions=frozenset({SERVICE_UNIT}),
+            keep_shell_sessions=True,
+            timeout=15.0,
             database_factory=operator_database,
             producer=operator_pipeline,
             command_runtime=command_runtime,
         )
-    kept = how == "keep-service"
+    kept = how == "keep-shell-sessions"
     assert rc == 0
     assert all(call["force"] is True for call in root_calls)
     assert [SERVICE_UNIT in call["preserve"] for call in root_calls] == (
@@ -645,6 +687,7 @@ def test_stop_reports_a_data_plane_failure_without_restarting_anything(
         keep_infra=False,
         preserve_sessions=frozenset({"worker"}),
         keep_browser=True,
+        keep_shell_sessions=False,
         announce=False,
         teardown_extras=False,
         timeout=1,
@@ -680,7 +723,13 @@ def test_stop_refused_inside_an_exec_domain(
     with pytest.raises(RuntimeError, match="login shell"):
         if leg == "stop":
             entry.cmd_stop(
+                keep_infra=None,
                 require_confirmation=False,
+                keep_browser=True,
+                keep_shell_sessions=False,
+                teardown_extras=False,
+                preserve_sessions=frozenset(),
+                force=False,
                 timeout=1,
                 database_factory=operator_database,
                 producer=operator_pipeline,

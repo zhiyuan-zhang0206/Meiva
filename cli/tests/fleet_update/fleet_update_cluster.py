@@ -156,7 +156,7 @@ class Cluster:
     ) -> int:
         kinds = {
             "git fetch": "fetch",
-            "stop -y": "stop",
+            'meiva" stop': "stop",
             "--detach": "switch",
             "launchctl bootstrap": "oneshot",
             'meiva" start': "start",
@@ -231,19 +231,3 @@ class Cluster:
         if rc := self.fail.get((kind, alias), 0):
             emit(f"RED the {kind} detail from {alias}")
         return rc
-
-
-# meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
-def stub_decision(repo: Path, payload: dict[str, Any]) -> Path:
-    path = repo / "scripts" / "host_ops" / "fleet_update_keep.py"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "import json, sys\n"
-        f"print(json.dumps({payload!r}))\n"
-        "open(__file__ + '.argv', 'a').write(' '.join(sys.argv) + chr(10))\n"
-    )
-    return path
-
-
-def decision_argvs(stub: Path) -> list[str]:
-    return Path(str(stub) + ".argv").read_text().splitlines()

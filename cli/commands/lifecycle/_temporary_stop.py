@@ -25,7 +25,7 @@ from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.stop_waits import deadline_after, remaining, wait_for_exit
 from cli.commands.lifecycle.service_stop import close_terminals, stop_data_plane
-from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
+from ops.agent_pause import pause_agents
 from ops.agent_pause.probe import ops_quiescent
 from services.supervision.roster import build_services
 
@@ -111,20 +111,53 @@ def _timed_phase(phases: list[tuple[str, float]], label: str, step: Callable[[],
         phases.append((label, time.monotonic() - started))
 
 
+def require_infra_choice(roles: MachineRoles, *, keep_infra: bool | None) -> None:
+    # meiva:note
+    # The data-plane choice must match this host: a machine fact only refuses.
+    #
+    # A host with the gateway capability owns a local data plane and requires an
+    # explicit keep-or-stop answer; any other host has none and accepts no answer.
+    if "gateway" in roles and keep_infra is None:
+        raise ValueError("this host serves the gateway: choose --keep-infra or --stop-infra")
+    if "gateway" not in roles and keep_infra is not None:
+        raise ValueError(
+            "this host has no local data plane: --keep-infra/--stop-infra do not apply"
+        )
+
+
+def require_dedicated_choices(preserve_sessions: frozenset[str]) -> None:
+    # meiva:note
+    # Shell sessions and the browser have their own choices, never `--keep-service`.
+    dedicated = preserve_sessions & {SERVICE_UNIT, "browser"}
+    if dedicated:
+        raise ValueError(
+            f"--keep-service {sorted(dedicated)}: choose --keep-shell-sessions/"
+            "--close-shell-sessions and --keep-browser/--stop-browser instead"
+        )
+
+
 def stop_plan(
     *,
     preserve_sessions: frozenset[str],
     keep_browser: bool,
-    keep_infra: bool,
+    keep_shell_sessions: bool,
+    keep_infra: bool | None,
     machine: MachineIdentity,
 ) -> tuple[MachineRoles, frozenset[str], frozenset[str]]:
-    """Resolve this stop's service selection from the roster and roles.
-
-    Refuses unknown preserved sessions and preserved services that need the data
-    plane while it is being stopped.
-    """
+    # meiva:note
+    # Resolve this stop's service selection from the roster and roles.
+    #
+    # Refuses a data-plane choice that does not match this host, unknown preserved
+    # sessions and preserved services that need the data plane while it is being
+    # stopped.
     roles = machine.role()
-    preserved = preserve_sessions | (frozenset({"browser"}) if keep_browser else frozenset[str]())
+    require_infra_choice(roles, keep_infra=keep_infra)
+    require_dedicated_choices(preserve_sessions)
+    preserved = (
+        preserve_sessions
+        | (frozenset({"browser"}) if keep_browser else frozenset[str]())
+        | (frozenset({SERVICE_UNIT}) if keep_shell_sessions else frozenset[str]())
+    )
     specs = build_services()
     known = {spec.session for spec in specs}
     unknown = preserved - known
@@ -176,7 +209,7 @@ def _stop_initialization(
     phases: list[tuple[str, float]],
     deadline: float,
     *,
-    keep_infra: bool,
+    keep_infra: bool | None,
     keep_browser: bool,
     teardown_extras: bool,
     notes: list[str],
@@ -195,7 +228,7 @@ def _stop_initialization(
         _timed_phase(phases, "browser", lambda: stop_browser(deadline))
     if teardown_extras:
         _timed_phase(phases, "extras", lambda: stop_extras(deadline))
-    if not keep_infra:
+    if keep_infra is False:
         _timed_phase(
             phases,
             "data-plane",
@@ -210,11 +243,13 @@ def _stop_initialization(
         )
 
 
-def _refuse_hosted_stop() -> None:
-    """A stop run from inside the work it drains strands itself mid-drain."""
+def refuse_hosted_stop() -> None:
+    # meiva:note
+    # A stop run from inside the work it drains strands itself mid-drain.
     from base.host.proc import hosting_exec_domain
     from base.sessions.hosting import hosting_supervised_session
 
+    # meiva:note
     # An exec-domain leg is SIGKILLed with the call's process group as the tool
     # call returns, mid-drain (the 2026-09-12 stranding shape). A stop closes this
     # unit's persistent terminals too, so no terminal can host it either.
@@ -235,8 +270,9 @@ def _drain_and_stop(
     *,
     roles: MachineRoles,
     preserved: frozenset[str],
-    keep_infra: bool,
+    keep_infra: bool | None,
     keep_browser: bool,
+    keep_shell_sessions: bool,
     announce: bool,
     teardown_extras: bool,
     notes: list[str],
@@ -273,9 +309,10 @@ def _drain_and_stop(
         set_posture(database_factory(), "paused", machine=machine.name())
         admission.set_phase(current.holder, current.acquired_at, MaintenancePhase.STOPPING)
     _timed_phase(phases, "quiesce", lambda: ops_quiescent(remaining(deadline)))
+    # meiva:note
     # The pty-sessions service outlives the services phase: it closes the terminals
-    # below. Keeping it (`--keep-service pty-sessions`) keeps the terminals it holds.
-    keep_terminals = SERVICE_UNIT in preserved
+    # below. `--keep-shell-sessions` keeps the service and the shells it holds.
+    keep_terminals = keep_shell_sessions
     _timed_phase(
         phases,
         "services",
@@ -306,7 +343,7 @@ def _drain_and_stop(
         )
     if teardown_extras:
         _timed_phase(phases, "extras", lambda: stop_extras(deadline))
-    if "gateway" in roles and not keep_infra:
+    if "gateway" in roles and keep_infra is False:
         _timed_phase(
             phases,
             "data-plane",
@@ -325,35 +362,38 @@ def _drain_and_stop(
 def stop(
     *,
     require_confirmation: bool,
-    keep_infra: bool,
+    keep_infra: bool | None,
     preserve_sessions: frozenset[str],
     keep_browser: bool,
+    keep_shell_sessions: bool,
     announce: bool,
     teardown_extras: bool,
-    timeout: float = PAUSE_TIMEOUT_SECONDS,
+    timeout: float,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
     helper: HelperFactory | None,
 ) -> int:
-    """Drain via normal restart, then stop selected resources.
-
-    Services and the data plane are never forced. Closing terminals (skipped
-    only when the pty-sessions service itself is kept) SIGKILLs what outlives
-    its bounded grace (`service_stop.close_terminals`).
-    """
-    _refuse_hosted_stop()
+    # meiva:note
+    # Drain via normal restart, then stop selected resources.
+    #
+    # Services and the data plane are never forced. Closing terminals (skipped
+    # only with `keep_shell_sessions`) SIGKILLs what outlives its bounded grace
+    # (`service_stop.close_terminals`).
+    refuse_hosted_stop()
     roles, _selected, preserved = stop_plan(
         preserve_sessions=preserve_sessions,
         keep_browser=keep_browser,
+        keep_shell_sessions=keep_shell_sessions,
         keep_infra=keep_infra,
         machine=machine,
     )
+    data_plane = {None: "none on this host", True: "retained", False: "stopped"}[keep_infra]
     print(
         "[meiva stop] local services; "
-        f"terminals={'retained' if SERVICE_UNIT in preserved else 'closed'}; "
-        f"data plane={'retained' if keep_infra else 'stopped on gateway'}"
+        f"terminals={'retained' if keep_shell_sessions else 'closed'}; "
+        f"data plane={data_plane}"
     )
     if not confirm_stop(require_confirmation=require_confirmation):
         return 0
@@ -388,6 +428,7 @@ def stop(
             preserved=preserved,
             keep_infra=keep_infra,
             keep_browser=keep_browser,
+            keep_shell_sessions=keep_shell_sessions,
             announce=announce,
             teardown_extras=teardown_extras,
             notes=notes,

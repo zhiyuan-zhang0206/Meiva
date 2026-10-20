@@ -63,7 +63,6 @@ exports = ["test_start_readiness_gate.py"]
 "test_start_partial_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.stop_plan" = 1
 "test_start_partial_stop.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.require_no_terminals" = 1
 "test_start_readiness_gate.py#monkeypatch.setattr base.cluster.assert_checkpoint_schema_current" = 2
-"test_start_readiness_gate.py#monkeypatch.setattr base.deploy.lifecycle.service_selection.selection_path" = 1
 "test_start_readiness_gate.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.mark_serving" = 1
 "test_start_readiness_gate.py#monkeypatch.setattr cli.commands._repo.assert_schema_current_or_die" = 2
 "test_start_readiness_gate.py#monkeypatch.setattr cli.commands._repo.probe_gateway_or_die" = 1

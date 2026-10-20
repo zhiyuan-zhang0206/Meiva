@@ -194,6 +194,18 @@ def write_manifest(path: Path, manifest: Mapping[str, object]) -> Path:
     return path
 
 
+def launched_services(path: Path) -> frozenset[str] | None:
+    # meiva:note
+    # The services the last root-driven `meiva start` launched, or None before any launch.
+    #
+    # Every start names its service selection explicitly and persists none; the
+    # manifest that start wrote for the root is the record of what it launched
+    # (a live root is reused only for identical inputs, so it never drifts).
+    if not path.exists():
+        return None
+    return frozenset(unit.id for unit in load_manifests(path).units)
+
+
 def generate(
     path: Path,
     *,

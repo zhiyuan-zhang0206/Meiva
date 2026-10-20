@@ -27,38 +27,39 @@ def _reconcile(
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
-    """Change only backend intent; use the same lifecycle as every service."""
-    from base.deploy.lifecycle.service_selection import read_selection
+    # meiva:note
+    # Change only the backends; every other launched service is named as it runs.
+    #
+    # The selection is the set the last start launched (the root's manifest) with
+    # the backends added or removed, passed to start as an explicit `only` list.
+    from base.paths import meiva_home, root_manifests_path
+    from services.supervision.meiva_root_glue.manifests import launched_services
 
-    selection = read_selection()
-    names = set(selection.names)
-    if (selection.mode == "only") == enabled:
-        names.update(BACKENDS)
-    else:
-        names.difference_update(BACKENDS)
-    if selection.mode == "only":
-        # Turning off an allowlist containing only LGTM leaves an explicit
-        # empty desired tree, not the default all-services selection.
-        if not names:
-            from services.supervision.roster import build_services
+    launched = launched_services(root_manifests_path(meiva_home()))
+    if launched is None:
+        raise RuntimeError(
+            "no start has launched this unit yet; run `meiva start` with an explicit "
+            "service selection first"
+        )
+    names = set(launched) | set(BACKENDS) if enabled else set(launched) - set(BACKENDS)
+    if not names:
+        # meiva:note
+        # Turning off a tree of only LGTM leaves an explicit empty desired tree.
+        from services.supervision.roster import build_services
 
-            return start.cmd_start(
-                disabled_services=tuple(s.session for s in build_services()),
-                retained_children=retained_children,
-                database_factory=database_factory,
-                producer=producer,
-                command=command,
-            )
         return start.cmd_start(
-            only_services=tuple(sorted(names)),
+            only_services=(),
+            disabled_services=tuple(s.session for s in build_services()),
+            all_services=False,
             retained_children=retained_children,
             database_factory=database_factory,
             producer=producer,
             command=command,
         )
     return start.cmd_start(
-        disabled_services=tuple(sorted(names)),
-        all_services=not names,
+        only_services=tuple(sorted(names)),
+        disabled_services=(),
+        all_services=False,
         retained_children=retained_children,
         database_factory=database_factory,
         producer=producer,

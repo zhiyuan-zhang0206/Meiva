@@ -42,7 +42,7 @@ bearer: its capability bundle authenticates it):
   --gateway-url http://<gateway-host>:8000 \
   --machine-name <new-name> --machine-host <this-host-addr> \
   --db-capability <bundle>
-.venv/bin/meiva start
+.venv/bin/meiva start --all-services
 ```
 
 The bundle comes from `meiva cluster db-authority issue-unit --machine <new-name>

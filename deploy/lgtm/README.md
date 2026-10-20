@@ -210,10 +210,11 @@ the window before changing anything.
 ## Start, stop, and rollback
 
 ```bash
-meiva stop -y                  # planned shutdown before changing the root generation
-meiva lgtm on                  # enable backend intent and invoke normal start
+meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
+                               # planned shutdown before changing the root generation
+meiva lgtm on                  # add the backends to the launched set and start with that explicit selection
 meiva lgtm status              # root-owned protocol readiness
-meiva stop -y
+meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
 meiva lgtm off                 # disable backend intent; preserve data and other choices
 ```
 

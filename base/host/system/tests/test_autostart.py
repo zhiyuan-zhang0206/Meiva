@@ -19,6 +19,7 @@ raced the VPN interface at boot, and each platform states the same policy
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,7 @@ import pytest
 from base.host.system import autostart, cron
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, fake_host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
 
 
 def _local_meiva(*, host: Host) -> str:
@@ -39,12 +40,18 @@ def _brew_path(*, host: Host) -> str:
 
 @pytest.fixture(autouse=True)
 def _stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    # meiva:note
+    # The default home (`~/.meiva`) of an isolated HOME: the home that owns the boot job.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / ".meiva"))
     monkeypatch.setattr(autostart, "meiva_binary_path", _local_meiva)
 
 
+_SERVICES = frozenset({"gateway", "frontend"})
+
+
 def test_plist_runs_meiva_start_at_load() -> None:
-    xml = autostart.autostart_plist_content(host=fake_host())
+    xml = autostart.autostart_plist_content(services=_SERVICES, host=fake_host())
     assert "<string>com.meiva.autostart</string>" in xml
     assert "<key>RunAtLoad</key>" in xml and "<true/>" in xml
     # ProgramArguments == `meiva start --boot` — no name flag exists (path-only).
@@ -53,13 +60,43 @@ def test_plist_runs_meiva_start_at_load() -> None:
     assert "--cluster" not in xml
 
 
+def test_plist_selects_every_service_by_name_sorted() -> None:
+    xml = autostart.autostart_plist_content(services=_SERVICES, host=fake_host())
+    arguments = xml.split("<key>ProgramArguments</key>", 1)[1].split("</array>", 1)[0]
+    assert re.findall(r"<string>(.*?)</string>", arguments) == [
+        "/Users/x/.local/bin/meiva",
+        "start",
+        "--boot",
+        "--only-service",
+        "frontend",
+        "--only-service",
+        "gateway",
+    ]
+
+
+def test_an_empty_selection_removes_the_boot_job_instead_of_registering_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.meiva.autostart.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("stale")
+    commands = FakeCommands()
+    commands.on(("launchctl", "bootout"), Reply())
+    # meiva:note
+    # no longer loaded
+    commands.on(("launchctl", "print"), Reply(returncode=113))
+    host = fake_host(commands, platform=DARWIN_ARM64)
+    autostart.register_autostart(services=frozenset(), enabled_reader=lambda: True, host=host)
+    assert not plist.exists()
+
+
 def test_plist_embeds_a_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """The plist must carry an explicit PATH — launchd's minimal PATH omits
     Homebrew's bin, which is what made a bare `meiva start` fail to find its tools at
     boot. The PATH composition itself is `base.host.system.cron.launchd_path_env`
     (shared with the watchdog probe's plist) and is unit-tested there."""
     monkeypatch.setattr(cron, "launchd_path_env", _brew_path)
-    xml = autostart.autostart_plist_content(host=fake_host())
+    xml = autostart.autostart_plist_content(services=_SERVICES, host=fake_host())
     assert "<key>PATH</key>" in xml
     assert "/opt/homebrew/bin" in xml
 
@@ -67,9 +104,10 @@ def test_plist_embeds_a_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_register_macos_writes_plist_but_never_bootstraps(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
     commands = FakeCommands()  # no command scripted: any launchctl call fails the test
-    rc = autostart.register_macos(host=fake_host(commands, platform=DARWIN_ARM64))
+    rc = autostart.register_macos(
+        services=_SERVICES, host=fake_host(commands, platform=DARWIN_ARM64)
+    )
     assert rc == 0
     plist = tmp_path / "Library" / "LaunchAgents" / "com.meiva.autostart.plist"
     assert plist.exists()
@@ -83,11 +121,10 @@ def test_register_macos_idempotent_no_rewrite(
     tmp_path: Path,
     capsys,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
     host = fake_host(platform=DARWIN_ARM64)
-    autostart.register_macos(host=host)
+    autostart.register_macos(services=_SERVICES, host=host)
     capsys.readouterr()  # drop first-write output  # pyright: ignore[reportUnknownMemberType]
-    rc = autostart.register_macos(host=host)  # second call, identical content
+    rc = autostart.register_macos(services=_SERVICES, host=host)  # second call, identical content
     assert rc == 0
     assert (
         "wrote" not in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -108,7 +145,7 @@ def test_the_job_retries_on_macos_only_while_it_fails() -> None:
     once it succeeds. Getting this key backwards (or passing a bare
     `KeepAlive: true`) would respawn `meiva start` forever, including after a
     deliberate `meiva stop`."""
-    xml = autostart.autostart_plist_content(host=fake_host())
+    xml = autostart.autostart_plist_content(services=_SERVICES, host=fake_host())
     assert "<key>KeepAlive</key>" in xml
     keep_alive = xml.split("<key>KeepAlive</key>", 1)[1].split("</dict>", 1)[0]
     assert "<key>SuccessfulExit</key>" in keep_alive
@@ -119,6 +156,6 @@ def test_the_job_retries_on_macos_only_while_it_fails() -> None:
 def test_the_job_retries_on_macos_at_the_shared_interval() -> None:
     """ThrottleInterval overrides launchd's 10s respawn floor; without it a
     failing start would be retried six times a minute."""
-    xml = autostart.autostart_plist_content(host=fake_host())
+    xml = autostart.autostart_plist_content(services=_SERVICES, host=fake_host())
     assert "<key>ThrottleInterval</key>" in xml
     assert f"<integer>{BOOT_RETRY_INTERVAL_S}</integer>" in xml

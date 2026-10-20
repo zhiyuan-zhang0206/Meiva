@@ -1,7 +1,6 @@
 [uses]
 "conftest.py" = ["fleet_update_cluster.py"]
 "test_fleet_update.py" = ["fleet_update_cluster.py"]
-"test_fleet_update_keep.py" = ["fleet_update_cluster.py"]
 "test_fleet_update_leases.py" = ["fleet_update_cluster.py"]
 
 [debt.env-patch]

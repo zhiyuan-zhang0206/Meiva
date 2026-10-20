@@ -34,6 +34,16 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
+def _launched(names: frozenset[str] | None) -> Callable[[Path], frozenset[str] | None]:
+    # meiva:note
+    # A `launched_services` reader that reports `names` for any manifest path.
+
+    def read(_path: Path) -> frozenset[str] | None:
+        return names
+
+    return read
+
+
 @pytest.fixture(autouse=True)
 def _local_status_boundary(
     monkeypatch: pytest.MonkeyPatch, operator_database: DatabaseFactory
@@ -78,13 +88,9 @@ def test_status_explains_persistently_unselected_services(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    from base.deploy.lifecycle import service_selection
+    import services.supervision.meiva_root_glue.manifests as root_manifests
 
-    monkeypatch.setattr(
-        service_selection,
-        "read_selection",
-        lambda: service_selection.ServiceSelection("only", frozenset({"gateway"})),
-    )
+    monkeypatch.setattr(root_manifests, "launched_services", _launched(frozenset({"gateway"})))
     assert (
         _status_commands.cmd_status(
             database_factory=operator_database,
@@ -95,7 +101,7 @@ def test_status_explains_persistently_unselected_services(
         == 0
     )
     frontend = next(line for line in capsys.readouterr().out.splitlines() if "frontend" in line)
-    assert "disabled by desired service set" in frontend
+    assert "not launched by the last meiva start" in frontend
 
 
 def test_fetch_gateway_cluster_status_sends_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -287,6 +293,9 @@ def test_status_shows_the_gate_entry_row(
 
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     monkeypatch.setattr(status_module, "root_tree_units", lambda: {"gate": {"state": "running"}})
+    import services.supervision.meiva_root_glue.manifests as root_manifests
+
+    monkeypatch.setattr(root_manifests, "launched_services", _launched(frozenset({"gate"})))
     monkeypatch.setattr(
         probe_module,
         "probe_service",

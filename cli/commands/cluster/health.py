@@ -133,8 +133,9 @@ def agent_population_failure_class(
     min_agents: int, *, database_factory: DatabaseFactory
 ) -> str | None:
     """Classify observed low population against DB availability and local intent."""
-    from base.deploy.lifecycle import service_selection
     from base.deploy.maintenance import pause_owner
+    from base.paths import meiva_home, root_manifests_path
+    from services.supervision.meiva_root_glue.manifests import launched_services
 
     try:
         with database_factory().connect(autocommit=True) as conn, conn.cursor() as cur:
@@ -150,8 +151,11 @@ def agent_population_failure_class(
     if row[0] >= min_agents:
         return None
     current = pause_owner.read()
-    if not service_selection.read_selection().enabled("agent-host") or (
-        current.status == "paused" and current.maintenance is not None
+    launched = launched_services(root_manifests_path(meiva_home()))
+    if (
+        launched is None
+        or "agent-host" not in launched
+        or (current.status == "paused" and current.maintenance is not None)
     ):
         return "maintenance"
     return "code"
@@ -252,19 +256,22 @@ def service_probes(*, machine: MachineIdentity, host: Host) -> list[str]:
     means another unit holds this unit's port and no amount of waiting fixes it."""
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
-    from base.deploy.lifecycle.service_selection import read_selection
+    from base.paths import meiva_home, root_manifests_path
+    from services.supervision.meiva_root_glue.manifests import launched_services
     from services.supervision.roster.spec import services_for_capabilities_annotated
 
     roles = _repo_commands.roles_or_none(machine=machine)
     if roles is None:
         return ["service roster unavailable"]
     try:
-        selection = read_selection()
-    except (OSError, ValueError, RuntimeError, TypeError) as exc:
-        return [f"service selection unavailable ({exc})"]
+        launched = launched_services(root_manifests_path(meiva_home()))
+    except (OSError, ValueError) as exc:
+        return [f"launched services unavailable ({exc})"]
+    if launched is None:
+        return ["launched services unavailable (no start has launched this unit)"]
     failing: list[str] = []
     for spec, gate_reason in services_for_capabilities_annotated(roles, machine=machine, host=host):
-        if gate_reason is not None or not selection.enabled(spec.session):
+        if gate_reason is not None or spec.session not in launched:
             continue
         probe = _probe_commands.probe_service(spec)
         if probe.alive is not True:

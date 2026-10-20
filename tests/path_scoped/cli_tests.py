@@ -17,7 +17,6 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
-from base.deploy.lifecycle import service_selection as ds
 from base.paths import meiva_home
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
 from base.telemetry import EventPipeline, process_logging
@@ -92,26 +91,6 @@ def as_machine(
             yield machine
 
     return _enter
-
-
-@pytest.fixture(autouse=True)
-def _isolate_disabled_services_marker(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
-) -> None:
-    """Every CLI test's durable `--disable-service` marker lives in a per-test tmp
-    file, never in the worker's shared session home.
-
-    An operator `meiva start --disable-service X` persists X to
-    `$MEIVA_HOME/disabled_services` (`persist_services=True` — the real, intended
-    behavior the start tests exercise). The suite's session home is shared by
-    every test in a worker, so an un-isolated marker outlives the test that wrote
-    it: a `cmd_start(disabled_services=("restarter",))` left "restarter durably
-    disabled" behind, and a later `unpause_local_cluster` test in the same worker
-    early-returned — neither respawning the restarter nor raising (CI #1172/#1173
-    shard-5 flake, task #2177). Same redirection `tests/components/base/test_disabled_services.py`
-    uses: the marker is per-unit durable state, so each test gets a fresh one.
-    """
-    monkeypatch.setattr(ds, "selection_path", lambda: tmp_path / "service-selection.json")
 
 
 @pytest.fixture(autouse=True)

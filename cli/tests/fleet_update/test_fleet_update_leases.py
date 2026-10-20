@@ -93,7 +93,7 @@ def test_the_confirm_window_holds_the_stops_open(
     assert "leases: 30s left: release or renew them, or let the stop end them" in out
     assert "leases: 5s left: release or renew them, or let the stop end them" in out
     assert 2 <= out.count("s left: release or renew them") <= 30
-    assert out.index("leases: 5s left:") < out.index(" stop -y ")
+    assert out.index("leases: 5s left:") < out.index(" stop --yes ")
 
 
 def test_the_dry_run_names_the_leases_and_does_not_wait(

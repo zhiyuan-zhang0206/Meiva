@@ -61,12 +61,21 @@ instead of experimenting on the data plane.
 
 ```bash
 meiva init ...  # once per home: record its identity (see `meiva init --help`); starts nothing
-meiva start     # provision owned storage on the first start, and wait for the selected
-              # root services to become ready.
-meiva stop      # normal drain, then full local stop; durable data and agent IDs survive
-              # --keep-infra / --keep-service retain resources; --force is explicit
-meiva start     # after a stop, restore services and resume after readiness
-meiva restart   # stop then start in one command; keeps private pg+redis and the browser, closes terminals
+meiva start --all-services   # provision owned storage on the first start, and wait for the
+              # selected root services to become ready (or --only-service NAME… /
+              # --disable-service NAME…; the selection is never remembered)
+meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
+              # normal drain, then a full local stop; durable data and agent IDs survive.
+              # Every choice is explicit (a missing one exits 2, all listed): keep or close
+              # shell sessions, keep or stop the browser and extras, --keep-service NAME…
+              # or --keep-no-services, --mode smooth|force, --timeout, --yes|--prompt.
+              # --keep-infra instead of --stop-infra retains pg/redis; a pure runner takes
+              # neither (drop it there)
+meiva start --all-services   # after a stop, restore services and resume after readiness
+meiva restart --all-services --close-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300
+              # stop then start in one command; pg+redis always stay up; the keep/restart
+              # choices for shell sessions, browser and extras are explicit.
+              # `meiva restart --only agent-host --mode smooth --timeout 300` bounces agent-host alone
 meiva status    # check status (includes the pg/redis view)
 ```
 
@@ -83,7 +92,7 @@ gateway is up has nowhere to land.
 
 ```bash
 meiva cluster status                    # full multi-machine roster
-meiva cluster destroy                   # decommission this host's cluster: stop + deregister its
+meiva cluster destroy --stop-mode smooth --stop-timeout 300   # decommission this host's cluster: stop + deregister its
                                       # OS-scheduled jobs + mark the home detached. Needs a
                                       # terminal; you type the home path (no flag skips it)
                                       # add --drop-db to also remove its pg/redis data dirs
@@ -106,7 +115,7 @@ export MEIVA_DB_CAPABILITY_KEY
 meiva init --serve-agent-runner --no-serve-gateway --gateway-url <URL> \
   --machine-name <NAME> --machine-host <HOST> --db-capability <NAME>.bundle
 unset MEIVA_DB_CAPABILITY_KEY
-meiva start
+meiva start --all-services
 ```
 
 The sealed bundle carries the active write generation's runner login (it
@@ -142,7 +151,7 @@ the fleet command still refuses direct execution inside an agent's shell.
 
 Related local commands:
 
-- `meiva restart` restarts this home's application through its ordinary lifecycle.
+- `meiva restart` restarts this home's application through its ordinary lifecycle; name its scope (`--only agent-host` or a start selection) and every keep-or-restart choice.
 - `meiva converge` applies development host wiring.
 - `meiva status` and `meiva cluster status` provide observations, not permission to
   update the cluster.

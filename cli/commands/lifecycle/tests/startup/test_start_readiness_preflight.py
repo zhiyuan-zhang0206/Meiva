@@ -98,7 +98,13 @@ def repo(tmp_path: Path) -> Path:
 
 def _run(repo: Path, *, check_launcher: bool = True, command_runtime: CommandRuntime) -> int:
     return preflight.preflight_start_readiness(
-        repo, check_launcher=check_launcher, machine=command_runtime.machine, host=fake_host()
+        repo,
+        check_launcher=check_launcher,
+        only_services=(),
+        disabled_services=(),
+        all_services=True,
+        machine=command_runtime.machine,
+        host=fake_host(),
     )
 
 
