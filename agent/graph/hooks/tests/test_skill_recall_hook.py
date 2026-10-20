@@ -230,7 +230,7 @@ async def test_fires_on_a_person_or_a_schedule(
     assert read_meiva_kwargs(note).get("meiva_note_tag") == NoteTag.SKILL_RECALL.value
 
 
-@pytest.mark.parametrize("source", ["agent:402", "system", "system:update", "watcher:3", "shell:9"])
+@pytest.mark.parametrize("source", ["agent:42", "system", "system:restart", "watcher:3", "shell:9"])
 async def test_never_fires_on_other_inbound_sources(
     three_skills: Path, source: str, database: Database
 ) -> None:

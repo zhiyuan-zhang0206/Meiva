@@ -605,18 +605,6 @@ class TestRestartCompletedMarker:
         assert "restarted by yourself" in msg
         assert "with config {auto_compact_fraction=0.7}" in msg
 
-    def test_marker_system_update_with_overlay(self) -> None:
-        """system:update source + overlay simultaneously — marker has updated wording + overlay diff."""
-        from agent.graph.claim.node import render_restart_completed_marker
-
-        msg = render_restart_completed_marker(
-            "system:update",
-            {"config_overlay": {"auto_compact_fraction": 0.5}},
-            timestamp_prefix=lambda: "",
-        )
-        assert "updated and restarted" in msg
-        assert "with config {auto_compact_fraction=0.5}" in msg
-
     def test_marker_redacts_credential_like_overlay_keys(self) -> None:
         """Credential-like overlay keys render as <redacted> — the marker lands in
         the checkpoint / timeline / LLM context, so it must not carry a second

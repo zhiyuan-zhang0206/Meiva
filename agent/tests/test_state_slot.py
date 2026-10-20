@@ -233,7 +233,6 @@ def test_handle_update_add_messages_plain_appends_unchanged():
     "bad_field",
     [
         "halted",
-        "update_initiated",
         "compact",
         "memory",
         "context_reset",
@@ -587,14 +586,11 @@ async def test_plugin_cannot_overwrite_base_field_via_meiva_state(
 # ── Integration: state_update key validation fail-fast ───────────────────────────
 
 
-@pytest.mark.parametrize(
-    "base_field",
-    # `_BASE_STATE_FIELDS` is derived from BaseAgentState.model_fields (I-8), so
-    # the guard covers every base field — not just the original messages/halted
-    # but also update_initiated and the nested compact / memory sub-states. A
-    # plugin writing any of these via state_update without declaring it raises.
-    ["messages", "halted", "update_initiated", "compact", "memory"],
-)
+# meiva:note
+# `_BASE_STATE_FIELDS` is derived from BaseAgentState.model_fields, so the guard covers every
+# base field, including the nested compact / memory sub-states. A plugin writing any of these
+# via state_update without declaring it raises.
+@pytest.mark.parametrize("base_field", ["messages", "halted", "compact", "memory"])
 async def test_state_update_base_field_key_raises(
     fake_cancel_event, base_field, database_gate: ProcessDbGate
 ):
@@ -744,3 +740,37 @@ def messages_plugin_state_cls() -> type[BaseAgentState]:
         messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
 
     return build_agent_state(_registry(delta_test=_MessagesPluginState))
+
+
+# meiva:note
+# Production checkpoints written before `update_initiated` was dropped still carry that key in
+# `channel_values`; the retired key is ignored on load, not an error.
+async def test_checkpoint_with_retired_core_key_still_loads():
+    from langgraph.checkpoint.base.id import uuid6
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+
+    async def node(state: BaseAgentState) -> dict[str, Any]:
+        return {"halted": True}
+
+    builder: Any = StateGraph(build_agent_state(_registry()))
+    builder.add_node("node", node)
+    builder.add_edge(START, "node")
+    builder.add_edge("node", END)
+    saver = InMemorySaver()
+    graph: Any = builder.compile(checkpointer=saver)
+    config: RunnableConfig = {"configurable": {"thread_id": "retired-key"}}
+    await graph.ainvoke({"messages": [HumanMessage(content="first")]}, config)
+
+    saved = await saver.aget_tuple(config)
+    assert saved is not None
+    checkpoint: Any = dict(saved.checkpoint)
+    checkpoint["id"] = str(uuid6())
+    checkpoint["channel_values"] = {**checkpoint["channel_values"], "update_initiated": True}
+    await saver.aput(saved.config, checkpoint, saved.metadata, {})
+
+    result = await graph.ainvoke({"messages": [HumanMessage(content="second")]}, config)
+
+    assert result["halted"] is True
+    assert "update_initiated" not in result
+    assert [m.content for m in result["messages"]] == ["first", "second"]

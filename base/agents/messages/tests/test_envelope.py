@@ -99,7 +99,7 @@ class TestSystemSource:
 
     @pytest.mark.parametrize(
         "source",
-        ["system:rollback", "system:update", "system:compact", "system:health_check"],
+        ["system:rollback", "system:restart", "system:compact", "system:health_check"],
     )
     def test_system_subtype_wrapped_in_note_tags(self, source: str) -> None:
         assert wrap_inbound("raw msg", source, inputs=_ENVELOPE_INPUTS) == _note("raw msg")
@@ -140,7 +140,7 @@ class TestSystemSource:
 
     @pytest.mark.parametrize(
         "source",
-        ["system:rollback", "system:update", "system:compact", "system:health_check"],
+        ["system:rollback", "system:restart", "system:compact", "system:health_check"],
     )
     def test_system_subtype_validates(self, source: str) -> None:
         """validate_source accepts system:<subtype>."""

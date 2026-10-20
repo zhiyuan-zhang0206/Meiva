@@ -280,7 +280,7 @@ def test_stall_report_names_the_predecessor_owner_fence(
     agent = create_agent(db_conn)
     predecessor, successor, generation = uuid4(), uuid4(), uuid4()
     command = insert_inbound_message(
-        db_conn, agent, "", "system:maintenance", kind="restart", bus=event_bus, database=database
+        db_conn, agent, "", "system:restart", kind="restart", bus=event_bus, database=database
     )
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine,runtime_kind,runtime_owner,"
