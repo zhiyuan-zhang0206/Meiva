@@ -120,20 +120,15 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # machine_units register_self (INSERT + UPDATE + SELECT)
         conn.execute("INSERT INTO machine_units (machine_name, home) VALUES ('m1', '/h1')")
         conn.execute("UPDATE machine_units SET url = 'http://m1' WHERE machine_name = 'm1'")
-        # the runner service chain (prod-deploy finding, #2599 follow-up):
-        # `meiva start` register_self recomputes the machines row (INSERT ON
-        # CONFLICT DO UPDATE) and writes the deploy posture ...
+        # meiva:note
+        # The runner service chain (prod-deploy finding, #2599 follow-up): `meiva start`
+        # register_self recomputes the machines row (INSERT ON CONFLICT DO UPDATE), and
+        # the ops server dedupes inbound /ops calls.
         conn.execute(
             "INSERT INTO machines (name, gateway_url, role, up_since_at)"
             " VALUES ('m1', 'http://gw', ARRAY['agent-runner'], now())"
             " ON CONFLICT (name) DO UPDATE SET up_since_at = EXCLUDED.up_since_at"
         )
-        conn.execute(
-            "INSERT INTO host_deploy_state (machine, posture, updated_at)"
-            " VALUES ('m1', 'idle', now())"
-            " ON CONFLICT (machine) DO UPDATE SET posture = EXCLUDED.posture"
-        )
-        # ... and the ops server dedupes inbound /ops calls
         conn.execute(
             "INSERT INTO api_idempotency (key, method, path, response_body)"
             " VALUES ('k1', 'ops', '/p', '{}'::jsonb)"

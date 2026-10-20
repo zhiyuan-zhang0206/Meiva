@@ -606,10 +606,6 @@ def cmd_start_body(
 
     launch_failures.record(list(_critical_launch_failures(launch)))
 
-    from base.deploy.state.host_deploy_state import set_posture
-
-    set_posture(database_factory(), "idle", machine=command.machine.name())
-
     # Success requires real readiness for every launched service, frontend included.
     print("\n→ waiting for services to come up")
     with start_trace.phase("readiness wait"):

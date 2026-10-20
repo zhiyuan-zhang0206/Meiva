@@ -83,14 +83,6 @@ def test_schema_sql_has_birth_config_column() -> None:
     )
 
 
-def test_schema_sql_has_r1_deploy_state_tables() -> None:
-    """Terminal-state pin (the pre-reset r1 deploy-state backfill contract):
-    the baseline carries both deploy-state tables the rollout machinery reads."""
-    schema = SCHEMA_SQL.read_text()
-    for table in ("host_deploy_state",):
-        assert f"CREATE TABLE {table}" in schema, f"{table} missing from baseline"
-
-
 # ── Contraction of the retired deploy and watcher storage ──
 #
 # `20261001T055030_drop-retired-deploy-and-watcher-storage` drops the objects whose
@@ -99,10 +91,12 @@ def test_schema_sql_has_r1_deploy_state_tables() -> None:
 # tightens two `agents_meta` CHECKs (folded into the baseline).
 
 
-def test_the_version_gate_and_posture_paths_survive_the_contraction(
+# meiva:note
+# What a live process still does against the surviving `deployment_state` row and the
+# tightened `agents_meta` status CHECK.
+def test_the_version_gate_and_the_agent_status_check_survive_the_contraction(
     machine_identity: MachineIdentity,
 ) -> None:
-    """Everything a live process still does against the two surviving tables."""
     with throwaway_database("retire_paths") as url, psycopg.connect(url) as conn:
         conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
         conn.commit()
@@ -115,23 +109,41 @@ def test_the_version_gate_and_posture_paths_survive_the_contraction(
         assert conn.execute(
             "SELECT COALESCE((SELECT min_code_version FROM public.deployment_state WHERE id = 1), 0)"
         ).fetchone() == (2700,)
-        for posture in ("paused", "idle"):
-            conn.execute(
-                "INSERT INTO host_deploy_state (machine, posture, updated_at) "
-                "VALUES ('m1', %s, now()) ON CONFLICT (machine) DO UPDATE "
-                "SET posture = EXCLUDED.posture, updated_at = EXCLUDED.updated_at",
-                (posture,),
-            )
-        assert conn.execute("SELECT posture FROM host_deploy_state").fetchone() == ("idle",)
-        with pytest.raises(psycopg.errors.CheckViolation):
-            conn.execute("UPDATE host_deploy_state SET posture = 'converging'")
-        conn.rollback()
         conn.execute("INSERT INTO agents (id, label) VALUES (1, 'a')")
         with pytest.raises(psycopg.errors.CheckViolation):
             conn.execute(
                 "INSERT INTO agents_meta (id, status, machine) VALUES (1, 'restarting', 'm')"
             )
         conn.rollback()
+
+
+_POSTURE_STATE = "20261020T151143_drop-host-deploy-state"
+
+
+# meiva:note
+# An older cluster still carries the per-host posture table; the migration removes it
+# and replays as a no-op.
+def test_the_migration_drops_the_posture_table_of_an_upgraded_cluster(
+    machine_identity: MachineIdentity,
+) -> None:
+    with throwaway_database("posture_upgrade") as url:
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+            conn.execute(
+                "CREATE TABLE host_deploy_state (machine TEXT PRIMARY KEY, "
+                "posture TEXT NOT NULL DEFAULT 'idle', "
+                "updated_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+            )
+            conn.execute("INSERT INTO host_deploy_state (machine) VALUES ('m1')")
+
+        with psycopg.connect(url) as conn:
+            applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
+            assert _POSTURE_STATE in applied
+            row = conn.execute("SELECT to_regclass('public.host_deploy_state')").fetchone()
+            assert row == (None,)
+
+        with psycopg.connect(url) as conn:
+            assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
 
 
 # ── Contraction of the delivery watchdog's durable retry state ──

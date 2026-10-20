@@ -10496,7 +10496,6 @@
                 "type": "string",
                 "enum": [
                   "no_state",
-                  "business_pause",
                   "startup"
                 ]
               },
@@ -13090,7 +13089,6 @@
                 "type": "string",
                 "enum": [
                   "no_state",
-                  "business_pause",
                   "startup"
                 ]
               },

@@ -1078,7 +1078,7 @@ image (`python3 scripts/verify/tart_run.py --ref <ref>`, same flow, plus the hel
   is a `schedule_launch_refused` event). `meiva start` is idempotent — it skips
   every running unit and takes seconds.
 - **`paused yes` in the roster is not always an operator pause.** It is the first
-  true clause of `no_state` / `business_pause` / `startup`; the
+  true clause of `no_state` / `startup`; the
   operator latch that fences spawns is `machines.paused_at` (see
   `meiva cluster pause`), and a `startup` verdict leaves it empty. Read
   `paused_reason` from `GET /api/cluster/status` before treating it as a pause.

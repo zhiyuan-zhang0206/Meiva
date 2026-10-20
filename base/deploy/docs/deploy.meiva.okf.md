@@ -19,4 +19,3 @@ Its component nodes describe the current contracts and implementation.
 - [[base/deploy/schema/docs/reset-generations.meiva.okf.md]] — Schema reset generations.
 - [[base/deploy/schema/docs/rollback_snapshot.meiva.okf.md]] — Recovery Snapshot Convention.
 - [[base/deploy/docs/start-trace.meiva.okf.md]] — Start phase timings (on-demand `meiva start` attribution).
-- [[base/deploy/state/docs/state.meiva.okf.md]] — Base — deploy state & liveness (R1).

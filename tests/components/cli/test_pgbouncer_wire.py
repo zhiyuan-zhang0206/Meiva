@@ -97,20 +97,21 @@ def test_write_transaction_overrides_a_read_only_default_on_connect(
     throwaway_config: ThrowawayConfig,
 ) -> None:
     from base import config
-    from base.deploy.state import host_deploy_state
 
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         _read_only_default_pooler(pg_url, pool_size=1) as pooled,
     ):
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        host_deploy_state.set_posture(
-            Database.from_settings(gate=database_gate), "paused", machine=machine_identity.name()
-        )
+        with Database.from_settings(gate=database_gate).write_transaction() as conn:
+            conn.execute(
+                "INSERT INTO machine_units (machine_name, home) VALUES (%s, '/h1')",
+                (machine_identity.name(),),
+            )
 
         with psycopg.connect(pg_url) as verify:
-            row = verify.execute("SELECT posture FROM host_deploy_state").fetchone()
-        assert row is not None and row[0] == "paused"
+            row = verify.execute("SELECT home FROM machine_units").fetchone()
+        assert row is not None and row[0] == "/h1"
 
 
 def test_schedule_provision_overrides_a_read_only_default(

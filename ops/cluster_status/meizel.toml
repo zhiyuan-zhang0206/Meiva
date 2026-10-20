@@ -1,5 +1,5 @@
-exports = ["pause.py", "schema_mismatch.py"]
+exports = ["schema_mismatch.py"]
 
 [uses]
-"__init__.py" = ["pause.py", "schema_mismatch.py"]
+"__init__.py" = ["schema_mismatch.py"]
 "tests" = ["__init__.py", "schema_mismatch.py"]

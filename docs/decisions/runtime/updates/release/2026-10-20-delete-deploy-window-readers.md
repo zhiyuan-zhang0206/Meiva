@@ -44,3 +44,5 @@ they are removed with the maintenance hold in a later change.
 
 - Keep `deploy_window` for WAL-G alone: it needs the exclusion list and a table
   read to answer a question Postgres answers directly.
+
+Forward link (2026-10-20): the `host_deploy_state` table is dropped with its owner module; see [delete the host deploy state](2026-10-20-delete-host-deploy-state.md).

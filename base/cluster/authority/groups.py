@@ -28,7 +28,7 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("INSERT, UPDATE", ("upload_delivery_copies",)),
     ("INSERT", ("inbound_messages",)),
     ("INSERT, UPDATE, SELECT", ("machine_units",)),
-    ("INSERT, UPDATE", ("machines", "host_deploy_state")),
+    ("INSERT, UPDATE", ("machines",)),
     ("INSERT, UPDATE, DELETE", ("api_idempotency",)),
     ("INSERT, UPDATE", ("agent_tasks", "agent_impersonation_messages")),
     ("INSERT", ("task_creation_receipts", "task_update_receipts")),
