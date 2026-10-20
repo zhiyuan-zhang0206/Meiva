@@ -33,6 +33,9 @@ from psycopg_pool import PoolTimeout
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.notice_question import parse_question, question_instructions
 from base.db.transaction import write_transaction
+from base.events.notifications.catalog import core_catalog
+from base.events.notifications.policy import enabled_for
+from base.events.notifications.store import read_overrides_sync
 from base.paths import meiva_home
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.config import ImBridgeConfig
@@ -52,6 +55,13 @@ _CB_DISMISS = "notice:dismiss:"
 _CB_LIST = "notice:list"
 
 _PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+
+# meiva:note
+# The category a pushed notice belongs to. Only a notice that needs an answer is a
+# notification (`core.needs_input`); a pushed FYI is this bridge's older ambient feed
+# and carries no category, so the user's switch never silences it silently.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+_NEEDS_INPUT = core_catalog()["core.needs_input"]
 
 
 def state_dir() -> Path:
@@ -160,16 +170,27 @@ class NoticeBridge:
         try:
             await asyncio.to_thread(self.initialize_poll)
             notices = await asyncio.to_thread(self._unaccepted_notices)
+            switches = await asyncio.to_thread(read_overrides_sync, self.db_pool)
         except (ConnectionDoesNotExist, ConnectionFailure, PoolTimeout) as exc:
             _log.warning("notice acceptance read held class=%s", type(exc).__name__)
             return
         for notice in notices:
-            if not await self._accept_normal_notice(notice):
+            if not await self._accept_normal_notice(notice, switches=switches):
                 self._warn_push_held(notice)
                 break
 
-    async def _accept_normal_notice(self, notice: dict[str, Any]) -> bool:
-        filtered = not self._passes_filter(notice)
+    async def _accept_normal_notice(
+        self, notice: dict[str, Any], *, switches: dict[str, bool]
+    ) -> bool:
+        # meiva:note
+        # Two independent reasons to accept without pushing: this bridge's own
+        # `/notice filter` scope, and the user's category switch — which every other
+        # transport already honors, so a decision notice the user switched off must
+        # not reach Telegram either. Acceptance still advances the poll cursor either
+        # way; only the push is withheld.
+        # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+        category_off = bool(notice["require_response"]) and not enabled_for(_NEEDS_INPUT, switches)
+        filtered = not self._passes_filter(notice) or category_off
         snapshot = {
             key: notice[key]
             for key in (
@@ -183,6 +204,7 @@ class NoticeBridge:
             )
         }
         snapshot["filters"] = dict(self._filters)
+        snapshot["switches"] = dict(switches)
         intent = None
         if not filtered:
             adapter = self.core.adapters.get("telegram")

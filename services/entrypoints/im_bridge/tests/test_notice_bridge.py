@@ -212,6 +212,59 @@ async def test_poll_pushes_new_notices_and_accepts_each(
         assert _accepted_ids() == [1, 2, 3, 4]
 
 
+# meiva:note
+# The user's category switch decides a notification everywhere. A decision notice the
+# user switched off must not reach Telegram either — the bridge is a transport, not a
+# second policy — while acceptance still advances the poll cursor so the notice is not
+# re-examined on every round.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+async def test_switched_off_decisions_are_accepted_but_not_pushed(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with owned_tasks() as _owned_tasks:
+        with test_im_bridge_core.TEST_POOL.connection() as conn:
+            conn.execute(
+                "INSERT INTO user_settings (key, value) VALUES (%s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                ("notifications.categories", '{"core.needs_input": false}'),
+            )
+        gateway = FakeGateway()
+        gateway.notices = [_notice(1, "decide", require_response=True)]
+        bridge, adapter = _bridge(tmp_path, gateway, monkeypatch, tasks=_owned_tasks)
+
+        await bridge.poll_once()
+        await bridge.core.outbound_worker.run_once()
+
+        assert adapter.sent == []
+        assert _accepted_ids() == [1]
+        with test_im_bridge_core.TEST_POOL.connection() as conn:
+            decision = conn.execute(
+                "SELECT decision FROM im_bridge_notice_acceptances WHERE notice_id = 1"
+            ).fetchone()
+        assert decision == ("filtered",)
+
+
+async def test_the_switch_leaves_the_ambient_fyi_feed_alone(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with owned_tasks() as _owned_tasks:
+        with test_im_bridge_core.TEST_POOL.connection() as conn:
+            conn.execute(
+                "INSERT INTO user_settings (key, value) VALUES (%s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                ("notifications.categories", '{"core.needs_input": false}'),
+            )
+        gateway = FakeGateway()
+        gateway.notices = [_notice(1, "just an fyi")]
+        bridge, adapter = _bridge(tmp_path, gateway, monkeypatch, tasks=_owned_tasks)
+
+        await bridge.poll_once()
+        await bridge.core.outbound_worker.run_once()
+
+        assert len(adapter.sent) == 1
+        assert "just an fyi" in adapter.sent[0][0]
+
+
 async def test_filter_agent_restricts_pushes(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -223,8 +276,8 @@ async def test_filter_agent_restricts_pushes(
 
         await bridge.poll_once()
         await bridge.core.outbound_worker.run_once()
-        assert len(adapter.sent) == 1  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        assert "from 2" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
+        assert len(adapter.sent) == 1
+        assert "from 2" in adapter.sent[0][0]
 
 
 async def test_reply_mode_window_resolves_notice(
@@ -384,11 +437,11 @@ async def test_list_queue_pushes_each_open_notice(
 
         hint = await bridge.list_queue()
         assert hint is not None and "2 notices open" in hint
-        assert len(adapter.sent) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        assert "Queue 1/2" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
+        assert len(adapter.sent) == 2
+        assert "Queue 1/2" in adapter.sent[0][0]
         # each row carries an action button
-        b0 = adapter.sent[0][2]  # pyright: ignore[reportUnknownMemberType]
-        b1 = adapter.sent[1][2]  # pyright: ignore[reportUnknownMemberType]
+        b0 = adapter.sent[0][2]
+        b1 = adapter.sent[1][2]
         assert b0 is not None and b0[0][0] == "✏️ Reply"  # emoji-ok: button label
         assert (
             b1 is not None and b1[0][0] == "✏️ Reply"  # emoji-ok: button label
@@ -406,7 +459,7 @@ async def test_list_queue_empty(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) 
 
         hint = await bridge.list_queue()
         assert hint is not None and "No notices queued" in hint
-        assert adapter.sent == []  # pyright: ignore[reportUnknownMemberType]
+        assert adapter.sent == []
 
 
 async def test_list_queue_callback(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -418,7 +471,7 @@ async def test_list_queue_callback(tmp_path: Any, monkeypatch: pytest.MonkeyPatc
 
         hint = await bridge.handle_callback("1", "notice:list")
         assert hint is not None
-        assert len(adapter.sent) == 1  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        assert len(adapter.sent) == 1
 
 
 async def test_cmd_notice_filter_updates_and_persists(
@@ -507,8 +560,8 @@ def test_poll_reads_directly_from_db(
     try:
         asyncio.run(bridge.poll_once())
         asyncio.run(bridge.core.outbound_worker.run_once())
-        assert len(adapter.sent) == 1  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        assert "direct db notice" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
+        assert len(adapter.sent) == 1
+        assert "direct db notice" in adapter.sent[0][0]
         assert _accepted_ids() == [nid]
 
         # Resolved notices stop being returned.
@@ -519,7 +572,7 @@ def test_poll_reads_directly_from_db(
             )
         db_conn.commit()
         asyncio.run(bridge.poll_once())
-        assert len(adapter.sent) == 1, "no re-delivery of resolved notices"  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        assert len(adapter.sent) == 1, "no re-delivery of resolved notices"
     finally:
         pool.close()
 
@@ -550,7 +603,7 @@ def test_list_queue_reads_directly_from_db(
     try:
         hint = asyncio.run(bridge.list_queue())
         assert hint is not None and "1 notices open" in hint
-        assert any("queue item" in s[0] for s in adapter.sent)  # pyright: ignore[reportUnknownMemberType]
+        assert any("queue item" in s[0] for s in adapter.sent)
     finally:
         pool.close()
 
@@ -584,7 +637,7 @@ def test_list_queue_limit_follows_config(
     try:
         hint = asyncio.run(bridge.list_queue())
         assert hint is not None and "2 notices open" in hint
-        assert len(adapter.sent) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        assert len(adapter.sent) == 2
     finally:
         pool.close()
 
@@ -641,7 +694,7 @@ class _FlakyAdapter(FakeAdapter):
         if self._failures_left > 0:
             self._failures_left -= 1
             raise self.failure
-        await super().send_to_owner(text, markdown=markdown, buttons=buttons)  # pyright: ignore[reportUnknownMemberType]
+        await super().send_to_owner(text, markdown=markdown, buttons=buttons)
 
 
 async def test_poll_accepts_before_uncertain_send_and_never_retries(
