@@ -2159,6 +2159,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_task_api_tasks__task_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["patch_task_api_tasks__task_id__patch"];
+        trace?: never;
+    };
     "/api/tasks": {
         parameters: {
             query?: never;
@@ -2173,22 +2189,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{task_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch: operations["patch_task_api_tasks__task_id__patch"];
         trace?: never;
     };
     "/api/keyed/v1/task-assignments": {
@@ -4019,8 +4019,25 @@ export interface components {
             task: components["schemas"]["AssignmentTaskIn"];
             agent: components["schemas"]["AssignmentAgentIn"];
         };
+        TaskGraphRow: {
+            id: number;
+            parent_id: number | null;
+            title: string;
+            status: components["schemas"]["TaskStatus"];
+            owner: number | null;
+            owner_label?: string | null;
+            created_by: string;
+            created_at: string;
+            updated_at: string;
+            remind_interval_seconds?: number | null;
+            last_reminded_at?: string | null;
+            reminder_count: number;
+            priority: components["schemas"]["Priority"];
+            ghost: boolean;
+            description: string;
+        };
         TaskListResponse: {
-            tasks: (components["schemas"]["TaskRow"] | components["schemas"]["TaskSummaryRow"])[];
+            tasks: (components["schemas"]["TaskRow"] | components["schemas"]["TaskSummaryRow"] | components["schemas"]["TaskGraphRow"])[];
         };
         TaskRow: {
             id: number;
@@ -8594,14 +8611,13 @@ export interface operations {
             };
         };
     };
-    get_tasks_api_tasks_get: {
+    get_task_api_tasks__task_id__get: {
         parameters: {
-            query?: {
-                window?: string;
-                fields?: "full" | "summary";
-            };
+            query?: never;
             header?: never;
-            path?: never;
+            path: {
+                task_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -8611,7 +8627,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskListResponse"];
+                    "application/json": components["schemas"]["TaskRow"];
                 };
             };
             422: {
@@ -8647,6 +8663,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskRow"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tasks_api_tasks_get: {
+        parameters: {
+            query?: {
+                window?: string;
+                fields?: "full" | "summary" | "graph";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskListResponse"];
                 };
             };
             422: {

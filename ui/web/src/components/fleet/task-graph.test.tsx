@@ -6,8 +6,9 @@
 //
 // useTasks is mocked so the view is fed a fixed task list.
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TaskRow } from "@/lib/contracts/types";
@@ -19,11 +20,30 @@ import { STATUS_TO_LANE } from "./task-kanban";
 import { STATUS_FILL, TASK_FORCE_KEY, TASK_LEGEND_ENTRIES } from "./task-graph";
 import { TaskGraph } from "./task-graph";
 
+// meiva:note
+// The hover card reads its one row through TanStack Query, so the hover tests
+// wrap their render in a client; the other tests never mount the card.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+// meiva:note
+// Lower-case helper (not a component): the hover tests need the Query client the
+// card's one-row read runs in; the rest never mount the card.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+const wrapGraph = (ui: ReactElement) => (
+  <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+);
+
 vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
+
+const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
+vi.mock("@/lib/transport/api", async (importOriginal) => {
+  const original = await importOriginal<{ api: Record<string, unknown> }>();
+  return { ...original, api: { ...original.api, getTask: (id: number) => getTask(id) } };
+});
 
 const useTasks = vi.fn<(...args: string[]) => TasksResult>();
 vi.mock("@/lib/notifications/use-tasks", () => ({
@@ -63,9 +83,14 @@ function ok(tasks: TaskRow[]): TasksResult {
 }
 
 beforeEach(() => {
+  queryClient.clear();
   useTasks.mockReset();
+  getTask.mockReset();
+  getTask.mockResolvedValue(task(0));
+  // meiva:note
   // Reset persisted graph/kanban mode + toggle state (now DB-backed user
   // settings) so a previous test's mode switch or toggle doesn't leak.
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
   resetMockSettings();
 });
 
@@ -82,7 +107,7 @@ describe("TaskGraph (graph mode)", () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
 
-    expect(useTasks).toHaveBeenCalledWith("24h", "full");
+    expect(useTasks.mock.calls[0]?.slice(0, 2)).toEqual(["24h", "graph"]);
   });
 
   it("legend lists only the categories the canvas renders", () => {
@@ -881,8 +906,9 @@ describe("TaskGraph hover detail card", () => {
       fullTask,
     ];
     useTasks.mockReturnValue(ok(tasks));
+    getTask.mockResolvedValue(fullTask);
     const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
 
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
@@ -906,12 +932,32 @@ describe("TaskGraph hover detail card", () => {
     expect(text).toContain("root (#1)"); // parent
     expect(text).toContain("every 2h"); // remind interval
     expect(text).toContain("3 reminders");
-    expect(text).toContain("A longer description");
+    // meiva:note
+    // The list projection carries no text columns; the card fetches them.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    await waitFor(() => expect(screen.getByRole("tooltip").textContent).toContain("A longer description"));
+    const fetched = screen.getByRole("tooltip");
+    expect(fetched.textContent).toContain("Shipped in #1");
     // Task description / results are Markdown-authored: rendered, not raw.
-    expect(text).not.toContain("**");
+    expect(fetched.textContent).not.toContain("**");
     expect(card.querySelector("strong")?.textContent).toBe("description");
-    expect(text).toContain("Shipped in #1");
+    expect(getTask).toHaveBeenCalledWith(2);
     expect(text).toContain("Double-click the node to open the owner");
+  });
+
+  it("says so in one line when the full row cannot be read", async () => {
+    const tasks: TaskRow[] = [task(1, { title: "root" }), task(2, { title: "no-detail", parent_id: 1 })];
+    useTasks.mockReturnValue(ok(tasks));
+    getTask.mockRejectedValue(new Error("offline"));
+    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+    fireEvent.mouseEnter(texts[0].closest("g")!);
+    await waitFor(() => expect(screen.getByTestId("task-detail-failed")).toBeTruthy());
+    expect(screen.getByTestId("task-detail-failed").textContent).toContain("Could not load the full task");
+    // meiva:note
+    // The registry fields still render; only the text sections are missing.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    expect(screen.getByRole("tooltip").textContent).toContain("no-detail");
   });
 
   it("hides the card on mouseleave (non-capped card hides immediately)", async () => {
@@ -921,7 +967,7 @@ describe("TaskGraph hover detail card", () => {
     // scroll stays reachable; covered by its own test below).
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
@@ -949,7 +995,7 @@ describe("TaskGraph hover detail card", () => {
     // the node's on-screen box; a mousemove over the node leaves it put.
     useTasks.mockReturnValue(ok(sampleTasks()));
     render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
@@ -973,7 +1019,7 @@ describe("TaskGraph hover detail card", () => {
     // the card ON the hovered node (~70% overlap on right-edge nodes).
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
@@ -1008,7 +1054,7 @@ describe("TaskGraph hover detail card", () => {
   it("places the card vertically above a mid-band node when no horizontal side fits (QA #990: 320x390)", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
@@ -1040,7 +1086,7 @@ describe("TaskGraph hover detail card", () => {
   it("caps the card height when it is taller than both vertical sides (long card, short canvas)", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
@@ -1078,7 +1124,7 @@ describe("TaskGraph hover detail card", () => {
     // the card.
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
@@ -1111,7 +1157,7 @@ describe("TaskGraph hover detail card", () => {
     // card's own mouseenter cancels the pending hide.
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
@@ -1147,7 +1193,7 @@ describe("TaskGraph hover detail card", () => {
   it("hides the capped card when the grace window expires without reaching it", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
     const group = texts[0].closest("g")!;
@@ -1181,7 +1227,7 @@ describe("TaskGraph hover detail card", () => {
     ];
     useTasks.mockReturnValue(ok(tasks));
     render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     const texts = await waitFor(() => { const r = screen.getAllByText(/orphan/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
 
@@ -1203,7 +1249,7 @@ describe("TaskGraph hover detail card", () => {
     ];
     useTasks.mockReturnValue(ok(tasks));
     render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     // "agent-made" wraps at its hyphen into two tspans; match the first line.
     const texts = await waitFor(() => { const r = screen.getAllByText(/^agent-$/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
@@ -1264,7 +1310,7 @@ describe("TaskGraph layout controls", () => {
     // graph's OWN key (display.task_force_params.v2), not the agent graph's.
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const rect = container.querySelector("svg[role='img'] rect")!;
@@ -1276,7 +1322,7 @@ describe("TaskGraph layout controls", () => {
     });
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container: c2 } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const rect2 = c2.querySelector("svg[role='img'] rect")!;
@@ -1289,7 +1335,7 @@ describe("TaskGraph layout controls", () => {
     // task node must be the same size — all sit at the minimum radius.
     useTasks.mockReturnValue(ok(sampleTasks())); // root #1 has 4 children
     const { container } = render(
-      <TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />,
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
     );
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const rects = [...container.querySelectorAll("svg[role='img'] rect")];
@@ -1304,7 +1350,7 @@ describe("TaskGraph layout controls", () => {
 
   it("insets the layout gear from the canvas edge", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const wrapper = screen.getByLabelText("Graph layout settings").parentElement!;
     expect([...wrapper.classList]).toEqual(expect.arrayContaining(["absolute", "left-3", "top-3"]));
@@ -1319,7 +1365,7 @@ describe("TaskGraph time filter (Task #1969)", () => {
 
   it("defaults to the 24h window", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     const sel = screen.getByLabelText<HTMLSelectElement>("Time window");
     expect(sel.value).toBe("24h");
@@ -1328,7 +1374,7 @@ describe("TaskGraph time filter (Task #1969)", () => {
 
   it("persists the window choice as a user setting", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     fireEvent.change(screen.getByLabelText("Time window"), { target: { value: "30d" } });
     expect(mockSetSettingCalls()).toContainEqual({ key: "display.task_window", value: "30d" });
@@ -1337,7 +1383,7 @@ describe("TaskGraph time filter (Task #1969)", () => {
   it("falls back to 24h when the stored window is garbage", async () => {
     resetMockSettings({ "display.task_window": "banana" });
     useTasks.mockReturnValue(ok(sampleTasks()));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.getByLabelText<HTMLSelectElement>("Time window").value).toBe("24h");
   });
@@ -1349,7 +1395,7 @@ describe("TaskGraph time filter (Task #1969)", () => {
       task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
     ];
     useTasks.mockReturnValue(ok(tasks));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
     await waitFor(() => expect(screen.getAllByText(/#1848/).length).toBeGreaterThan(0), { timeout: 4000 });
     // The ghost ancestor renders dimmed even though it is not a
     // toggle-hidden parent (the server flagged it).
@@ -1366,7 +1412,7 @@ describe("TaskGraph time filter (Task #1969)", () => {
       task(1848, { title: "child", status: "in_progress", parent_id: 1815 }),
     ];
     useTasks.mockReturnValue(ok(tasks));
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+    render(wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />));
     await waitFor(() => expect(screen.getAllByText(/#1848/).length).toBeGreaterThan(0), { timeout: 4000 });
     fireEvent.click(screen.getByText("Kanban"));
     await screen.findByText(/child/);
