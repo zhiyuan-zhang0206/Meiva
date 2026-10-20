@@ -1,51 +1,44 @@
-"""Agent liveness pass — gateway-owned derivation of `agents_meta.liveness_state`.
-
-The heartbeat daemon (gateway, one per cluster) runs this pass on a slow cadence.
-It combines machine reachability with the process lease so a host that drops
-offline cannot leave an agent displayed as online solely because its durable
-`agents_meta.status` still reads 'idling' or 'running'.
-
-Two signals, merged per agent:
-
-- **Machine reachability** — each agent-runner is probed via the `status_probe`
-  op at its machines-table ops URL (the uniform-RPC path; the local machine is
-  dialed at its localhost URL like any other). A machine is judged offline only
-  after two *consecutive* failed probes (`OFFLINE_AFTER_FAILURES`), so one
-  dropped packet never flips the fleet; one success resets the count. Results
-  land in `machine_probe` (deliberately a separate table — the machines row is
-  a recomputed composition of machine_units and any column there would be
-  clobbered by register_self).
-- **Process lease** — `agents_meta.lease_expires_at` (R1, Task #1021): the
-  agent process renews it every 60s while alive, so expiry with the machine up
-  means a dead/wedged process. An unclaimed `idling` row has no process yet, so
-  it stays
-  `unknown` until its atomic claim writes `started_at`.
-
-Per-agent merge (`liveness_state`):
-
-- unclaimed idling -> 'unknown' (no process ownership yet)
-- machine offline  -> 'offline' (whole host unreachable)
-- running/idling with an expired (or never granted) lease -> 'offline'
-- everything else on a reachable machine -> 'online'
-- 'terminated' rows are never judged; rows whose machine is not in the
-  machines table (or that the gateway has not judged yet) stay 'unknown',
-  with no invented successful observation timestamp. The frontend exposes
-  observation freshness separately from lifecycle intent.
-
-`status` stays lifecycle intent — the pass never transitions it (R1 invariant
-#1). A machine coming back is self-healing: its host resumes pending work
-and the next pass re-marks the identities online.
-
-Every pass in which an unpaused rollout-target machine fails its probe emits
-one `machine_probe_failed` event (machine + `consecutive_failures`); the
-Grafana rules over that stream own the grace window and the WARNING -> ERROR
-grading. A paused machine is not in the target list (`list_agent_runners`
-excludes the pause latch), so it emits nothing: an expected absence is silent
-at the source.
-
-The probe path is injectable (`probe` argument) so tests can run the full
-DB merge without dialing real ops servers.
-"""
+# meiva:note
+# Agent liveness pass — gateway-owned derivation of `agents_meta.liveness_state`.
+#
+# The heartbeat daemon (gateway, one per cluster) runs this pass on a slow cadence.
+# It derives liveness from machine reachability so a host that drops offline
+# cannot leave an agent displayed as online solely because its durable
+# `agents_meta.status` still reads 'idling' or 'running'.
+#
+# The one signal:
+#
+# - **Machine reachability** — each agent-runner is probed via the `status_probe`
+#   op at its machines-table ops URL (the uniform-RPC path; the local machine is
+#   dialed at its localhost URL like any other). A machine is judged offline only
+#   after two *consecutive* failed probes (`OFFLINE_AFTER_FAILURES`), so one
+#   dropped packet never flips the fleet; one success resets the count. Results
+#   land in `machine_probe` (deliberately a separate table — the machines row is
+#   a recomputed composition of machine_units and any column there would be
+#   clobbered by register_self).
+#
+# Per-agent merge (`liveness_state`):
+#
+# - machine offline  -> 'offline' (whole host unreachable)
+# - everything else on a reachable machine -> 'online'
+# - 'terminated' rows are never judged; rows whose machine is not in the
+#   machines table (or that the gateway has not judged yet) stay 'unknown',
+#   with no invented successful observation timestamp. The frontend exposes
+#   observation freshness separately from lifecycle intent.
+#
+# `status` stays lifecycle intent — the pass never transitions it (R1 invariant
+# #1). A machine coming back is self-healing: its host resumes pending work
+# and the next pass re-marks the identities online.
+#
+# Every pass in which an unpaused rollout-target machine fails its probe emits
+# one `machine_probe_failed` event (machine + `consecutive_failures`); the
+# Grafana rules over that stream own the grace window and the WARNING -> ERROR
+# grading. A paused machine is not in the target list (`list_agent_runners`
+# excludes the pause latch), so it emits nothing: an expected absence is silent
+# at the source.
+#
+# The probe path is injectable (`probe` argument) so tests can run the full
+# DB merge without dialing real ops servers.
 
 import asyncio
 import functools
@@ -169,17 +162,17 @@ async def _record_probe(
         )
 
 
+# meiva:note
+# Recompute `liveness_state` for every non-terminated row whose machine is
+# registered, from the current machine_probe rows. Return the
+# ids whose user-visible liveness crossed into or out of `offline`.
+#
+# Pure SQL so the merge is one statement, atomic and O(agents) — the same
+# shape the reaper's passes use. A machine with no probe row yet (never
+# probed) reads as reachable (`cf = 0`), which matches the fresh-cluster
+# behaviour: rows start 'unknown' and only ever flip to offline on real
+# probe failures.
 def merge_liveness(pool: ConnectionPool) -> list[int]:
-    """Recompute `liveness_state` for every non-terminated row whose machine is
-    registered, from the current machine_probe rows and lease state. Return the
-    ids whose user-visible liveness crossed into or out of `offline`.
-
-    Pure SQL so the merge is one statement, atomic and O(agents) — the same
-    shape the reaper's passes use. A machine with no probe row yet (never
-    probed) reads as reachable (`cf = 0`), which matches the fresh-cluster
-    behaviour: rows start 'unknown' and only ever flip to offline on real
-    probe failures / lease expiry.
-    """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "WITH probe AS ("
@@ -191,11 +184,7 @@ def merge_liveness(pool: ConnectionPool) -> list[int]:
             "  SELECT a.id, a.liveness_state AS old_liveness_state,"
             "    CASE "
             "      WHEN p.observed_at IS NULL THEN 'unknown' "
-            "      WHEN a.status = 'idling' AND a.started_at IS NULL THEN 'unknown' "
             "      WHEN p.cf >= %s THEN 'offline' "
-            "      WHEN a.status IN ('running', 'idling') AND a.started_at IS NOT NULL "
-            "           AND (a.lease_expires_at IS NULL OR a.lease_expires_at <= now()) "
-            "        THEN 'offline' "
             "      ELSE 'online' "
             "    END AS new_liveness_state, p.observed_at "
             "  FROM agents_meta a "

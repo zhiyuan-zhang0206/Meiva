@@ -155,7 +155,7 @@ def test_existing_lease_still_serializes_native_reconciliation(
     assert native_status(owner, database_gate=database_gate)["status"] == "accepted"
 
 
-@pytest.mark.parametrize("invalid", ["owner", "ttl", "status"])
+@pytest.mark.parametrize("invalid", ["owner", "status"])
 def test_native_without_lease_still_requires_current_ownership(
     db_conn: psycopg.Connection,
     invalid: str,
@@ -168,12 +168,6 @@ def test_native_without_lease_still_requires_current_ownership(
     owner = create_native_owner(db_conn, local_machine=local_machine)
     if invalid == "owner":
         owner = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
-    elif invalid == "ttl":
-        db_conn.execute(
-            "UPDATE agents_meta SET lease_expires_at=clock_timestamp()-interval '1 second' "
-            "WHERE id=%s",
-            (owner.agent_id,),
-        )
     else:
         db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()

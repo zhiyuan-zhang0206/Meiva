@@ -125,7 +125,6 @@ def test_inspect_live_returns_only_window_independent_fields(
         "observation",
         "shells_available",
         "spawned_at",
-        "started_at",
         "shells",
         "config_overlay",
         "notice",

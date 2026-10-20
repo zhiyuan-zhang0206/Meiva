@@ -236,22 +236,6 @@ class AgentNotFound(ResurrectError, MeivaAgentError):  # noqa: N818 — style co
 class ResurrectAlreadyAlive(ResurrectError): ...  # noqa: N818
 
 
-class ResurrectRefused(ResurrectError):  # noqa: N818 — style consistent with ResurrectAlreadyAlive
-    """Resurrection refused a runtime or billing recovery guard.
-
-    Historical process/unknown runtime kinds, an incomplete hosted identity or
-    resources the current model cannot decode require explicit cutover
-    reconciliation (`runtime_cutover_required`). Billing
-    recovery additionally refuses `not_billing_halted` rows. The
-    billing op returns these as structured per-agent outcomes; this exception is
-    not wire-encoded (no ErrorReason entry).
-    """
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
-
-
 class ForkSourceEmpty(ForkError, MeivaAgentError):  # noqa: N818 — style consistent with ENOENT
     """Source agent has no checkpoint — cannot fork.
 

@@ -7881,16 +7881,6 @@
         "title": "Acceptance",
         "description": "Historical source acceptance; not copy readiness or agent execution."
       },
-      "AdmissionOutcome": {
-        "type": "string",
-        "enum": [
-          "admitted",
-          "maintenance_hold",
-          "resource_fence",
-          "admission_guard_refused"
-        ],
-        "title": "AdmissionOutcome"
-      },
       "AgentActivity": {
         "properties": {
           "active_seconds": {
@@ -7959,16 +7949,6 @@
               }
             ],
             "title": "Evidence At"
-          },
-          "admission_outcome": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AdmissionOutcome"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "type": "object",
@@ -8003,33 +7983,10 @@
           "status": {
             "$ref": "#/components/schemas/AgentStatus"
           },
-          "pid": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pid"
-          },
           "spawned_at": {
             "type": "string",
             "format": "date-time",
             "title": "Spawned At"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
           },
           "last_active_at": {
             "type": "string",
@@ -8147,9 +8104,7 @@
           "spawner",
           "fork_source_agent_id",
           "status",
-          "pid",
           "spawned_at",
-          "started_at",
           "last_active_at",
           "last_inbound_at",
           "label",
@@ -8385,18 +8340,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Spawned At"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
           },
           "shells": {
             "items": {
@@ -8843,18 +8786,6 @@
             ],
             "title": "Machine Probe Valid Until"
           },
-          "runtime_lease_expires_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Runtime Lease Expires At"
-          },
           "runtime_owner": {
             "type": "string",
             "const": "unknown",
@@ -8863,8 +8794,7 @@
           }
         },
         "type": "object",
-        "title": "AgentObservation",
-        "description": "Machine reachability is not proof of runtime ownership.\n\nThis compatibility slice has no generation/owner binding. A fresh lease\nalone, or a PID, must not invent one. UI uses absolute deadlines."
+        "title": "AgentObservation"
       },
       "AgentRoster": {
         "properties": {
@@ -8926,33 +8856,10 @@
           "status": {
             "$ref": "#/components/schemas/AgentStatus"
           },
-          "pid": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pid"
-          },
           "spawned_at": {
             "type": "string",
             "format": "date-time",
             "title": "Spawned At"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
           },
           "last_active_at": {
             "type": "string",
@@ -9068,9 +8975,7 @@
           "fork_source_agent_id",
           "fork_source_checkpoint_id",
           "status",
-          "pid",
           "spawned_at",
-          "started_at",
           "last_active_at",
           "last_inbound_at",
           "label",
@@ -9969,7 +9874,6 @@
           "unknown",
           "host_unavailable",
           "awaiting_admission",
-          "admission_refused",
           "admitted",
           "launch_unreachable",
           "launch_rejected",

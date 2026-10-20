@@ -52,10 +52,8 @@ def _row(agent_id: int, label: str | None) -> agents.AgentRow:
         fork_source_agent_id=None,
         machine="ubuntu",
         spawned_at=NOW,
-        started_at=None,
         last_active_at=NOW,
         last_inbound_at=NOW,
-        pid=None,
         heartbeat_paused_until=None,
     )
 

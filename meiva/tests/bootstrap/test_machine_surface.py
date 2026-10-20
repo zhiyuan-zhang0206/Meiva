@@ -68,10 +68,8 @@ def test_agent_row_str_includes_machine() -> None:
         fork_source_agent_id=None,
         machine="m1",
         spawned_at=now,
-        started_at=now,
         last_active_at=now,
         last_inbound_at=now,
-        pid=42,
         heartbeat_paused_until=None,
     )
     assert row.machine == "m1"

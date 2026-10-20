@@ -91,14 +91,6 @@ class TestResolveOverride:
         assert isinstance(bound, FakeLLM)
         assert binding is None
         assert owners == [8, None]
-        with pytest.raises(ValueError, match="single-attempt"):
-            build_chat_model_bound(
-                "claude-opus-4-7",
-                single_attempt=True,
-                catalog=model_catalog,
-                llm_override="tests._llm_override_e2e:build",
-                overrides=model_overrides(),
-            )
 
     def test_build_chat_model_override_failure_propagates(
         self, *, model_catalog: ModelCatalog

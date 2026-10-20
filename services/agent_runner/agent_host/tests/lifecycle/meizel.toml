@@ -1,7 +1,6 @@
-exports = ["recovery_admission.py", "resurrection", "test_hosted_lifecycle.py", "test_predecessor_closure.py"]
+exports = ["recovery_admission.py", "resurrection", "test_hosted_lifecycle.py"]
 
 [uses]
-"resurrection" = ["test_predecessor_closure.py"]
 "test_graceful_exit.py" = ["blocking_model.py", "child_graceful_exit.py"]
 "test_hosted_backlog_recovery.py" = ["recovery_admission.py"]
 "test_hosted_idle_recovery.py" = ["recovery_admission.py"]
@@ -14,11 +13,6 @@ exports = ["recovery_admission.py", "resurrection", "test_hosted_lifecycle.py", 
 "test_hosted_ownership_agent_host.py#monkeypatch.setattr agent.ownership.hosted.publish_agent_updated" = 1
 "test_hosted_ownership_agent_host.py#monkeypatch.setattr services.agent_runner.agent_host.host.publish_agent_updated" = 1
 "test_hosted_ownership_agent_host.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 1
-"test_predecessor_closure.py#monkeypatch.setattr base.deploy.maintenance.admission.pending_command" = 1
-"test_predecessor_closure.py#monkeypatch.setattr base.deploy.maintenance.admission.record_drained" = 1
-
-[debt.restricted-python]
-"test_hosted_backlog_recovery.py#python -c" = 1
 
 [debt.third-party-patch]
 "test_hosted_dispatcher_cancellation.py#monkeypatch.setattr psycopg_pool.AsyncConnectionPool._check_connection" = 1

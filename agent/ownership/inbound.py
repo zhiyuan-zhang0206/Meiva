@@ -9,37 +9,32 @@ class RuntimeOwnershipLostError(RuntimeError):
     """The caller must stop without changing a replacement runtime's state."""
 
 
+# meiva:note
+# Lock agents_meta before inbound rows in the caller's write transaction.
+#
+# An unowned row (no generation and no owner) accepts the missing token, and an
+# owned row never does: the caller must hold the row's exact generation and
+# owner. The lock serializes admission with claiming.
 async def lock_inbound_owner(
     conn: psycopg.AsyncConnection, agent_id: int, *, incarnation: RuntimeIncarnation | None
 ) -> None:
-    """Lock agents_meta before inbound rows in the caller's write transaction.
-
-    Unknown legacy rows remain compatible, but an owned row never accepts a
-    missing token. The lock serializes admission/replacement with claiming;
-    clock_timestamp checks freshness after any lock wait, not at BEGIN time.
-    This does not fence old binaries that still issue unconditional writes.
-    """
     if incarnation is not None:
         incarnation.require_agent(agent_id)
     cursor = await conn.execute(
-        "SELECT runtime_generation, runtime_owner, runtime_kind, status, "
-        "lease_expires_at FROM agents_meta WHERE id = %s FOR UPDATE",
+        "SELECT runtime_generation, runtime_owner, status FROM agents_meta "
+        "WHERE id = %s FOR UPDATE",
         (agent_id,),
     )
     row = await cursor.fetchone()
     if row is not None:
-        generation, owner, kind, status, lease = row
+        generation, owner, status = row
         if incarnation is None:
-            if generation is None and owner is None and kind is None:
+            if generation is None and owner is None:
                 return
         elif (
             generation == incarnation.generation
             and owner == incarnation.owner
-            and kind == "hosted"
             and status in ("running", "idling")
-            and lease is not None
         ):
-            clock = await conn.execute("SELECT %s > clock_timestamp()", (lease,))
-            if await clock.fetchone() == (True,):
-                return
-    raise RuntimeOwnershipLostError(f"agent {agent_id} no longer owns a fresh runtime lease")
+            return
+    raise RuntimeOwnershipLostError(f"agent {agent_id} no longer owns its runtime row")

@@ -131,8 +131,7 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
     async def _admit_then_fail(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE agents_meta SET last_admission_outcome='admitted', "
-                "last_admission_at=clock_timestamp() WHERE id=%s",
+                "UPDATE agents_meta SET last_admission_at=clock_timestamp() WHERE id=%s",
                 (body.agent_id,),
             )
         db_conn.commit()

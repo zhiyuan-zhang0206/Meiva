@@ -82,10 +82,9 @@ async def test_apply_restart_releases_the_runtime_and_closes_the_command_togethe
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus) == "restart"
     assert db_conn.execute(
-        "SELECT status,runtime_generation,runtime_owner,runtime_kind,lease_expires_at "
-        "FROM agents_meta WHERE id=%s",
+        "SELECT status,runtime_generation,runtime_owner FROM agents_meta WHERE id=%s",
         (agent_id,),
-    ).fetchone() == ("idling", None, None, None, None)
+    ).fetchone() == ("idling", None, None)
     assert db_conn.execute(
         "SELECT status,payload->'lifecycle_release' FROM inbound_messages WHERE id=%s", (command,)
     ).fetchone() == ("done", True)

@@ -40,6 +40,6 @@ inbox-claim frequency; ordinary serving/recovery checks only read the marker
 and authenticate current native root status.
 
 This is local evidence, not a fleet barrier, resource-predecessor closure or a
-protocol-version grant. Hosted admission keeps its own row and resource fences.
+protocol-version grant. Hosted admission is its own single UPDATE of the agent row.
 Direct-process E2E fixtures inject their own test-only serving
 gate through `tests.e2e.process_support`; those business tests exclude root custody proof.

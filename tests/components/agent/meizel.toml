@@ -3,8 +3,6 @@ exports = ["test_maintenance.py"]
 [debt.first-party-patch]
 "test_claim_auto_resurrect.py#assignment meiva.context" = 1
 "test_corpse_reap.py#monkeypatch.setattr agent.ownership.hosted.stamp_turn_fatal" = 1
-"test_hosted_resurrection_fences.py#monkeypatch.setattr base.agents.incarnation.resources.process_ended" = 1
-"test_maintenance_legacy_cold.py#monkeypatch.setattr base.deploy.maintenance.cold.require_persisted_end" = 1
 "test_maintenance_lifecycle_wait.py#monkeypatch.setattr base.config.settings.gateway.pause_lifecycle_wait_seconds" = 4
 "test_maintenance_lifecycle_wait.py#monkeypatch.setattr base.deploy.maintenance.cohort.orphaned_claims" = 1
 "test_maintenance_lifecycle_wait.py#monkeypatch.setattr base.deploy.maintenance.cohort.prepare" = 1

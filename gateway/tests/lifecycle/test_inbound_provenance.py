@@ -24,8 +24,7 @@ _SECRET = "inbound-provenance-secret"  # noqa: S105 -- isolated test credential
 def _seed_live_agent(conn: psycopg.Connection) -> int:
     agent_id = create_agent(conn)
     conn.execute(
-        "INSERT INTO agents_meta (id, status, lease_expires_at) "
-        "VALUES (%s, 'idling', now() + interval '5 minutes')",
+        "INSERT INTO agents_meta (id, status) VALUES (%s, 'idling')",
         (agent_id,),
     )
     conn.commit()

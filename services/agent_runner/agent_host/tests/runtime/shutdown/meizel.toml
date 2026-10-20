@@ -4,7 +4,6 @@ exports = ["test_agent_host_shutdown.py"]
 "test_agent_host_shutdown.py" = ["child_shutdown.py"]
 
 [debt.first-party-patch]
-"test_agent_host_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.host.RELEASE_OWNER_TIMEOUT_S" = 1
 "test_agent_host_shutdown.py#patch.multiple agent.process_boot.init_process_scope" = 1
 "test_agent_host_shutdown.py#patch.multiple agent.process_boot.land_cluster_extensions" = 1
 "test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.AgentHost" = 1
@@ -22,7 +21,7 @@ exports = ["test_agent_host_shutdown.py"]
 "test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.plugins_fingerprint" = 1
 "test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.remove_pidfile" = 1
 "test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.rotate_stdout_log_forever" = 1
-"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.settle_stale_running_rows" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.settle_running_rows_at_start" = 1
 "test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.start_health_server" = 1
 "test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.stop_health_server" = 1
 "test_agent_host_shutdown.py#patch.object agent.graph.build_graph" = 1

@@ -177,8 +177,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     )
     with db_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agents_meta SET spawner = 'user', status = 'idling', "
-            "lease_expires_at = now() + interval '10 minutes' WHERE id = %s",
+            "UPDATE agents_meta SET spawner = 'user', status = 'idling' WHERE id = %s",
             (ancestor_id,),
         )
         cur.execute(
@@ -267,8 +266,7 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
     )
     with db_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agents_meta SET status = 'idling', "
-            "lease_expires_at = now() + interval '10 minutes' WHERE id = %s",
+            "UPDATE agents_meta SET status = 'idling' WHERE id = %s",
             (ancestor_id,),
         )
     db_conn.commit()

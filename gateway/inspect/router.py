@@ -181,7 +181,6 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
         liveness_state=db.liveness_state,
         last_probe_at=db.last_probe_at,
         spawned_at=db.spawned_at,
-        started_at=db.started_at,
         shells=shells[0],
         shells_available=shells[1],
         observation=db.observation,

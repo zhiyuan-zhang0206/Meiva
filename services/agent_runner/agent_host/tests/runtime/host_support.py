@@ -288,9 +288,9 @@ def stub_host_transitions(
     stamps: list[int] = []
 
     async def admit(
-        pool: object, agent_id: int, _machine: str, owner: UUID, *, expected_from: str, db: object
+        pool: object, agent_id: int, _machine: str, owner: UUID, *, db: object
     ) -> RuntimeIncarnation | None:
-        if not await flip(pool, agent_id, "running", expected_from=expected_from):
+        if not await flip(pool, agent_id, "running", expected_from="idling"):
             return None
         return RuntimeIncarnation(agent_id, uuid4(), owner)
 
@@ -328,9 +328,9 @@ def wired(
     `boot_agent_scope` is replaced by a build that returns a model named as the
     host asked, so a test can tell which model the host prepared.
     """
-    # This suite's agents/ownership live exclusively in FakePool. Real lease
-    # SQL is covered by takeover integration tests, so its no-lease baseline
-    # must be fake too instead of querying a second, empty database.
+    # meiva:note
+    # This suite's agents/ownership live exclusively in FakePool, so the impersonation
+    # lease baseline must be fake too instead of querying a second, empty database.
     monkeypatch.setattr(agent_host_host, "active_lease", AsyncMock(return_value=False))
     monkeypatch.setattr(
         invocation,
@@ -374,8 +374,6 @@ def wired(
         return True
 
     stub_host_transitions(monkeypatch, _flip_hosted_status)
-
-    monkeypatch.setattr(agent_host_host, "release_hosted_owner", _noop_reconcile)
 
     async def _apply_lifecycle(_pool: object, _incarnation: object, **_kwargs: object) -> str:
         """Host orchestration fake; real durable effects use the PG contract tests."""

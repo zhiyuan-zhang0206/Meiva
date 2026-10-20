@@ -178,9 +178,8 @@ def _seed_lease_agent(conn: psycopg.Connection) -> tuple[int, RuntimeIncarnation
     incarnation = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     conn.execute(
         "INSERT INTO agents_meta (id, spawner, status, machine, runtime_generation,"
-        " runtime_owner, runtime_kind, lease_expires_at)"
-        " VALUES (%s, 'user', 'idling', %s, %s, %s, 'process',"
-        " clock_timestamp() + interval '10 minutes')",
+        " runtime_owner)"
+        " VALUES (%s, 'user', 'idling', %s, %s, %s)",
         (agent_id, _LOCAL_MACHINE, incarnation.generation, incarnation.owner),
     )
     return agent_id, incarnation

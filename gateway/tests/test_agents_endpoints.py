@@ -53,7 +53,7 @@ def inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, 
 
 def terminate_hosted(db: psycopg.Connection, agent_id: int) -> None:
     db.execute(
-        "UPDATE agents_meta SET status = 'terminated', runtime_kind = 'hosted', "
+        "UPDATE agents_meta SET status = 'terminated', "
         "runtime_generation = gen_random_uuid(), runtime_owner = gen_random_uuid() WHERE id = %s",
         (agent_id,),
     )
@@ -410,7 +410,7 @@ class TestTerminate:
             agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE agents_meta SET status = 'terminated', pid = 424242 WHERE id = %s",
+                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s",
                     (agent_id,),
                 )
             db_conn.commit()
@@ -424,14 +424,12 @@ class TestTerminate:
         assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
         with db_conn.cursor() as cur:
             cur.execute(
-                "SELECT status_changed_at, last_force_terminate_inbound_id "
-                "FROM agents_meta WHERE id = %s",
+                "SELECT status_changed_at FROM agents_meta WHERE id = %s",
                 (agent_id,),
             )
             after = cur.fetchone()
         assert before is not None and after is not None
         assert after[0] == before[0]
-        assert after[1] is not None
         assert inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
 
     def test_terminate_force_nonexistent_404(

@@ -82,9 +82,7 @@ async def _admit(
     )
     machine = conn.execute("SELECT machine FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     assert machine is not None
-    incarnation = await admit_hosted_runtime(
-        pool, agent_id, machine[0], uuid4(), db=database, expected_from="idling"
-    )
+    incarnation = await admit_hosted_runtime(pool, agent_id, machine[0], uuid4(), db=database)
     assert incarnation is not None
     return incarnation
 

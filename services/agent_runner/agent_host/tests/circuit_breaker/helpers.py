@@ -122,8 +122,7 @@ def spawn_child_under_idling_ancestor(
     )
     with db_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agents_meta SET status = 'idling', "
-            "lease_expires_at = now() + interval '10 minutes' WHERE id = %s",
+            "UPDATE agents_meta SET status = 'idling' WHERE id = %s",
             (ancestor_id,),
         )
     db_conn.commit()

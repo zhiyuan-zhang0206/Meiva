@@ -391,7 +391,6 @@ async def test_a_drain_failure_in_restart_leaves_the_host_wakeable(
         agent,
         command_runtime.machine.name(),
         uuid4(),
-        expected_from="idling",
         db=database,
     )
     assert incarnation is not None

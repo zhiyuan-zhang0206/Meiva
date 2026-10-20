@@ -49,14 +49,12 @@ class OwedRestart(NamedTuple):
 # meiva:note
 # An agent that already has an unfinished restart or terminate gets no second one: the
 # next host would apply both, and a leftover pending restart collides with the maintenance
-# hold's own command. Unapplied commands older than the agent's latest resurrection do not
-# count, because acceptance settles them as superseded instead of applying them. The row
-# lock is the one a gateway restart or terminate takes before it queues its command.
+# hold's own command. The row lock is the one a gateway restart or terminate takes before
+# it queues its command.
 _OPEN_LIFECYCLE = (
-    "SELECT i.id FROM agents_meta m JOIN inbound_messages i ON i.agent_id=m.id "
-    "WHERE m.id=%s AND i.kind IN ('restart','terminate') AND i.status IN ('pending','claimed') "
-    "AND (i.applied_at IS NOT NULL OR i.id > COALESCE(m.last_resurrect_inbound_id, 0)) "
-    "ORDER BY i.id LIMIT 1"
+    "SELECT id FROM inbound_messages "
+    "WHERE agent_id=%s AND kind IN ('restart','terminate') AND status IN ('pending','claimed') "
+    "ORDER BY id LIMIT 1"
 )
 
 

@@ -3,116 +3,22 @@
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Literal, Never
-from uuid import UUID, uuid4
+from typing import Literal
+from uuid import UUID
 
-import psutil
-import psycopg
 from psycopg_pool import AsyncConnectionPool
 
-from agent.ownership.hosted_claim import claim_admission_row
 from agent.ownership.hosted_cleanup import finish_termination
 from base import telemetry
 from base.agents.impersonation.replacement import end_for_replacement
-from base.agents.incarnation.resource_admission import admit_resources_async
-from base.agents.incarnation.resources import (
-    IncarnationResources,
-    ResourceClosureError,
-    ResourceEvidenceError,
-    ResourceFenceError,
-    ResourceProcess,
-    decode_resources,
-)
-from base.agents.observation.evidence import AdmissionOutcome, AdmissionRefusalReason
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.deploy.maintenance import admission
-from base.deploy.progress_timeout import AGENT_LEASE_TTL_S
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
-
-
-class _HostedAdmissionRefusedError(Exception):
-    """Roll back speculative resource transfer before returning a refusal."""
-
-    def __init__(
-        self,
-        outcome: AdmissionOutcome,
-        detail: str | None = None,
-        reason: AdmissionRefusalReason | None = None,
-    ) -> None:
-        self.outcome = outcome
-        self.detail = detail
-        self.reason = reason
-
-
-def _refuse_hosted_admission(
-    outcome: AdmissionOutcome = AdmissionOutcome.ADMISSION_GUARD_REFUSED,
-    detail: str | None = None,
-    reason: AdmissionRefusalReason | None = None,
-) -> Never:
-    raise _HostedAdmissionRefusedError(outcome, detail, reason)
-
-
-def _evidence_refusal_reason(exc: ResourceEvidenceError) -> AdmissionRefusalReason:
-    """Classify one resource-evidence refusal for the complete record (#5049)."""
-    if isinstance(exc, ResourceClosureError):
-        return (
-            AdmissionRefusalReason.RECEIPT_LESS
-            if exc.receipt_less
-            else AdmissionRefusalReason.SUCCESSOR_CLOSURE
-        )
-    if isinstance(exc, ResourceFenceError):
-        return AdmissionRefusalReason.FENCES
-    return AdmissionRefusalReason.OTHER
-
-
-async def _record_admission_refusal(
-    pool: AsyncConnectionPool,
-    agent_id: int,
-    machine: str,
-    expected_from: str,
-    attempt_at: datetime,
-    outcome: AdmissionOutcome,
-    detail: str | None = None,
-    reason: AdmissionRefusalReason | None = None,
-) -> None:
-    """Keep an older, delayed refusal from replacing a later successful claim; a
-    detail is durable row state an operator must resolve, so it is logged loudly.
-    A classified evidence refusal additionally lands on the event stream as
-    `host_admission_refused`, so a persistent wedge is visible without reading
-    host logs; the alerting layer picks the pathological shapes (#5049)."""
-    if reason is not None:
-        logger.warning(
-            "agent {agent_id} admission refused ({outcome}, {reason}): {detail}",
-            event="host_admission_refused",
-            agent_id=agent_id,
-            outcome=outcome.value,
-            reason=reason.value,
-            detail=detail or "",
-        )
-    elif detail is not None:
-        logger.warning("agent {} admission refused ({}): {}", agent_id, outcome.value, detail)
-    async with async_write_transaction(pool) as conn:
-        await conn.execute(
-            "UPDATE agents_meta SET last_admission_outcome=%s, "
-            "last_admission_at=clock_timestamp(), "
-            "last_launch_failure_reason=NULL, last_launch_failure_at=NULL "
-            "WHERE id=%s AND machine=%s AND status=%s "
-            "AND (last_admission_at IS NULL OR last_admission_at <= %s)",
-            (outcome.value, agent_id, machine, expected_from, attempt_at),
-        )
-
-
-async def _admission_attempt_at(pool: AsyncConnectionPool) -> datetime:
-    async with pool.connection() as conn:
-        row = await (await conn.execute("SELECT clock_timestamp()")).fetchone()
-    assert row is not None  # noqa: S101 — scalar SELECT always returns one row
-    return row[0]
 
 
 # meiva:note
@@ -143,7 +49,7 @@ async def apply_hosted_lifecycle(
     async with async_write_transaction(pool) as conn:
         cursor = await conn.execute(
             "SELECT session_index FROM agents_meta WHERE id=%s "
-            "AND runtime_generation=%s AND runtime_owner=%s AND runtime_kind='hosted' "
+            "AND runtime_generation=%s AND runtime_owner=%s "
             "AND status IN ('running','idling') FOR UPDATE",
             (incarnation.agent_id, incarnation.generation, incarnation.owner),
         )
@@ -163,12 +69,12 @@ async def apply_hosted_lifecycle(
         if lifecycle_kind == "restart":
             await conn.execute(
                 "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
-                "runtime_owner=NULL,runtime_kind=NULL,lease_expires_at=NULL WHERE id=%s",
+                "runtime_owner=NULL WHERE id=%s",
                 (incarnation.agent_id,),
             )
             # meiva:note
-            # The release marker lets resurrection recognize this unowned row as
-            # this runtime's own lifecycle state.
+            # The release marker is the maintenance drain's proof that this restart
+            # executed, as opposed to being closed as failed or superseded.
             await conn.execute(
                 "UPDATE inbound_messages SET status='done',"
                 "payload=COALESCE(payload,'{}'::jsonb)||jsonb_build_object('lifecycle_release',true) "
@@ -187,8 +93,7 @@ async def apply_hosted_lifecycle(
                     raise RuntimeError("shell-session kill requested but no killer is bound")
                 shell_cutoff = row[0]
             await conn.execute(
-                "UPDATE agents_meta SET status='terminated',termination_source='user',"
-                "lease_expires_at=NULL WHERE id=%s",
+                "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
                 (incarnation.agent_id,),
             )
         else:
@@ -198,94 +103,14 @@ async def apply_hosted_lifecycle(
     return lifecycle_kind
 
 
-async def _held_owner_matches(pool: AsyncConnectionPool, agent_id: int, owner: UUID) -> bool:
-    """A held unit may continue only the row this exact boot already owns.
-
-    The pending-command check keeps non-cohort wakes out; the owner check is
-    the successor fence — a crash that replaced the boot retains the hold and
-    requires explicit cancellation or repair, never a fake ACK.
-    """
-    if admission.pending_command(agent_id) is None:
-        return False
-    async with pool.connection() as conn:
-        held_owner = await (
-            await conn.execute(
-                "SELECT runtime_owner,runtime_kind FROM agents_meta WHERE id=%s", (agent_id,)
-            )
-        ).fetchone()
-    return held_owner == (owner, "hosted")
-
-
-async def _dead_predecessor_evidence(
-    previous: tuple[Any, ...],
-    *,
-    owner: UUID,
-    machine: str,
-    host: psutil.Process,
-) -> ResourceProcess | None:
-    """The exited predecessor host process that licenses replacing this local row, if any.
-
-    Runs inside the caller's metadata-lock transaction, so the exact-process
-    observation is bound to the locked row state. A live exact host raises the
-    refusal that rolls the transaction back. A row without stored host-process
-    evidence (``incarnation_resources IS NULL``) offers no such proof: it keeps
-    waiting for its lease to expire.
-    """
-    # Resolved at call time: the exact-exit probe is monkeypatched at its
-    # source module in the resident tests.
-    from base.agents.incarnation.resources import process_ended
-
-    if previous[1] in (None, owner) or previous[3] != machine or previous[4] is None:
-        return None
-    prior_resources = decode_resources(previous[4])
-    if (
-        isinstance(prior_resources, IncarnationResources)
-        and not prior_resources.requests
-        and prior_resources.host_process is not None
-    ):
-        # The row lock binds this monotonic exact-process observation to the
-        # resource transfer in the same transaction.
-        current_host = ResourceProcess.capture(host)
-        if not prior_resources.host_process.same_birth(current_host):
-            if not await asyncio.to_thread(process_ended, prior_resources.host_process):
-                _refuse_hosted_admission(reason=AdmissionRefusalReason.DEAD_OWNER)
-            return prior_resources.host_process
-        # A different owner in this still-live host has not released the row.
-    return None
-
-
-async def _lock_previous(conn: psycopg.AsyncConnection[Any], agent_id: int, owner: UUID) -> Any:
-    """Lock and return the agent's runtime row; refuses an unknown row, a held cohort or
-    stored evidence the current model cannot decode."""
-    previous = await (
-        await conn.execute(
-            "SELECT runtime_generation,runtime_owner,runtime_kind,machine,"
-            "incarnation_resources,lease_expires_at FROM agents_meta "
-            "WHERE id=%s FOR UPDATE",
-            (agent_id,),
-        )
-    ).fetchone()
-    if previous is None:
-        _refuse_hosted_admission()
-    if admission.held() and (
-        admission.pending_command(agent_id) is None or previous[1:3] != (owner, "hosted")
-    ):
-        # A successor cannot certify that its predecessor flushed.
-        # A host crash during drain therefore retains the hold and
-        # requires explicit cancellation/recovery, never a fake ACK.
-        _refuse_hosted_admission()
-    if previous[4] is not None:
-        # A stored value the current model cannot decode (a retired
-        # writer's shape) refuses under every admission.
-        try:
-            decode_resources(previous[4])
-        except ResourceEvidenceError as exc:
-            _refuse_hosted_admission(
-                AdmissionOutcome.RESOURCE_FENCE, str(exc), reason=AdmissionRefusalReason.OTHER
-            )
-    return previous
-
-
+# meiva:note
+# Admit one turn: the circuit breaker, the maintenance hold, then one UPDATE.
+#
+#     Only this machine's running or idling row is claimed; a terminated or foreign
+#     row yields None. The generation survives while the same host boot keeps the
+#     row and is minted fresh when the owner differs, so a new boot, or a restart
+#     that cleared the identity, starts a new incarnation. A held unit admits only
+#     a cohort member's pending command (the host runs it and nothing else).
 async def admit_hosted_runtime(
     pool: AsyncConnectionPool,
     agent_id: int,
@@ -293,94 +118,49 @@ async def admit_hosted_runtime(
     owner: UUID,
     *,
     db: Database,
-    expected_from: str,
 ) -> RuntimeIncarnation | None:
-    """Keep this owner's logical incarnation across turns; reject live others.
-
-    A row owned by another host is replaced only after its lease expires, or
-    earlier when its stored host process provably exited.
-
-    Admission reads and locks no deployment-wide state.
-    """
     from base.agents.recovery.breaker import admit_pending_wake
 
     if not await admit_pending_wake(pool, agent_id):
         return None
-    attempt_at = await _admission_attempt_at(pool)
-    if admission.held() and not await _held_owner_matches(pool, agent_id, owner):
-        await _record_admission_refusal(
-            pool, agent_id, machine, expected_from, attempt_at, AdmissionOutcome.MAINTENANCE_HOLD
-        )
-        return None
-
-    native = psutil.Process()
-    host_identity = ResourceProcess.capture(native)
+    held = admission.held()
     recorded: list[telemetry.Event] = []
-    try:
-        async with async_write_transaction(pool) as conn:
-            previous = await _lock_previous(conn, agent_id, owner)
-            generation = (
-                previous[0]
-                if previous[1:3] == (owner, "hosted") and previous[0] is not None
-                else uuid4()
+    async with async_write_transaction(pool) as conn:
+        claimed = await (
+            await conn.execute(
+                "UPDATE agents_meta m SET status='running', runtime_owner=%s, "
+                "runtime_generation = CASE WHEN m.runtime_owner = %s "
+                "AND m.runtime_generation IS NOT NULL "
+                "THEN m.runtime_generation ELSE gen_random_uuid() END, "
+                "last_admission_at = clock_timestamp(), "
+                "last_launch_failure_reason = NULL, last_launch_failure_at = NULL "
+                "FROM (SELECT id, status FROM agents_meta WHERE id = %s AND machine = %s "
+                "AND status IN ('running','idling') "
+                "AND (NOT %s OR EXISTS (SELECT 1 FROM inbound_messages i "
+                "WHERE i.agent_id = agents_meta.id AND i.kind IN ('restart','terminate') "
+                "AND i.status IN ('pending','claimed'))) FOR UPDATE) before "
+                "WHERE m.id = before.id RETURNING m.runtime_generation, before.status",
+                (owner, owner, agent_id, machine, held),
             )
-            exited_predecessor = await _dead_predecessor_evidence(
-                previous, owner=owner, machine=machine, host=native
-            )
-
-            try:
-                await admit_resources_async(
-                    conn,
-                    RuntimeIncarnation(agent_id, generation, owner),
-                    host_identity,
-                    exited_predecessor=exited_predecessor,
-                )
-            except ResourceEvidenceError as exc:
-                _refuse_hosted_admission(
-                    AdmissionOutcome.RESOURCE_FENCE, str(exc), reason=_evidence_refusal_reason(exc)
-                )
-            # Exact local host death and resource closure are stronger than
-            # its remaining lease; the same row lock protects both proofs.
-            row = await claim_admission_row(
-                conn,
+        ).fetchone()
+        if claimed is None:
+            return None
+        generation, previous_status = claimed
+        incarnation = RuntimeIncarnation(agent_id, generation, owner)
+        ended_lease = await end_for_replacement(conn, agent_id, incarnation)
+        if ended_lease is not None:
+            logger.info(
+                "impersonation lease closed by the replacement runtime's admission",
                 agent_id=agent_id,
-                machine=machine,
-                owner=owner,
-                generation=generation,
-                expected_from=expected_from,
-                takeover=exited_predecessor is not None,
+                lease_id=ended_lease,
             )
-            if row is None:
-                # Resource transfer and ordinary admission are one transaction.
-                _refuse_hosted_admission()
-            ended_lease = await end_for_replacement(
-                conn, agent_id, RuntimeIncarnation(agent_id, row[0], owner)
-            )
-            if ended_lease is not None:
-                logger.info(
-                    "impersonation lease closed by the replacement runtime's admission",
-                    agent_id=agent_id,
-                    lease_id=ended_lease,
-                )
-            admitted_event = prepare_event_log(
-                event_type="status_change",
-                agent_id=agent_id,
-                source="system",
-                payload={"from": expected_from, "to": "running"},
-            )
-            recorded.append(await record_audit_async(conn, admitted_event))
-    except _HostedAdmissionRefusedError as exc:
-        await _record_admission_refusal(
-            pool,
-            agent_id,
-            machine,
-            expected_from,
-            attempt_at,
-            exc.outcome,
-            exc.detail,
-            exc.reason,
+        admitted_event = prepare_event_log(
+            event_type="status_change",
+            agent_id=agent_id,
+            source="system",
+            payload={"from": previous_status, "to": "running"},
         )
-        return None
+        recorded.append(await record_audit_async(conn, admitted_event))
     for event in recorded:
         telemetry.emit_prepared(event)
     if ended_lease is not None:
@@ -393,31 +173,29 @@ async def admit_hosted_runtime(
         from base.agents.impersonation.terminal_notices import deliver_ended_notice
 
         await asyncio.to_thread(deliver_ended_notice, db, agent_id, ended_lease)
-    logger.info(
-        "hosted runtime admitted", agent_id=agent_id, generation=str(row[0]), owner=str(owner)
-    )
-    return RuntimeIncarnation(agent_id, row[0], owner)
+    logger.info("hosted runtime admitted", agent_id=agent_id, generation=str(generation))
+    return incarnation
 
 
+# meiva:note
+# Settle an ordinary turn; only durable lifecycle apply releases ownership.
+#
+# The corpse marker `last_turn_fatal_at` is deliberately untouched here:
+# a completed LLM turn already cleared it atomically (`_persist_last_active`
+# writes `last_active_at` and clears the marker in one UPDATE — the only
+# `last_active_at` writer), while a no-work park (crash-fresh halted claim
+# or an open circuit breaker) leaves it for the reaper. Writing it here would
+# only relabel a crash-dead row healthy.
 async def settle_hosted_runtime(
     pool: AsyncConnectionPool,
     incarnation: RuntimeIncarnation,
     *,
     bus: EventBus,
 ) -> bool:
-    """Settle an ordinary turn; only durable lifecycle apply releases ownership.
-
-    The corpse marker `last_turn_fatal_at` is deliberately untouched here:
-    a completed LLM turn already cleared it atomically (`_persist_last_active`
-    writes `last_active_at` and clears the marker in one UPDATE — the only
-    `last_active_at` writer), while a no-work park (crash-fresh halted claim
-    or an open circuit breaker) leaves it for the reaper. Writing it here would
-    only relabel a crash-dead row healthy and resume its lease renewal forever.
-    """
     async with async_write_transaction(pool) as conn:
         cur = await conn.execute(
             "UPDATE agents_meta SET status = 'idling' "
-            "WHERE id = %s AND status = 'running' AND runtime_kind = 'hosted' "
+            "WHERE id = %s AND status = 'running' "
             "AND runtime_generation = %s AND runtime_owner = %s",
             (
                 incarnation.agent_id,
@@ -444,39 +222,6 @@ async def settle_hosted_runtime(
     if changed:
         await publish_agent_updated(bus, incarnation.agent_id)
     return changed
-
-
-async def release_hosted_owner(
-    pool: AsyncConnectionPool,
-    machine: str,
-    owner: UUID,
-    in_flight: set[int],
-) -> None:
-    """Only settled tasks can release responsibility before host process exit."""
-    async with async_write_transaction(pool) as conn:
-        await conn.execute(
-            "UPDATE agents_meta SET lease_expires_at = NULL "
-            "WHERE machine = %s AND runtime_kind = 'hosted' AND runtime_owner = %s "
-            "AND NOT (id = ANY(%s))",
-            (machine, owner, list(in_flight)),
-        )
-
-
-async def renew_hosted_owner(pool: AsyncConnectionPool, machine: str, owner: UUID) -> None:
-    """Renew idle and busy responsibility from the existing host liveness beat.
-
-    Crash-marked rows (`last_turn_fatal_at` set) are corpses awaiting the
-    reaper — their lease must NOT be renewed, so liveness decays offline and
-    the frontend stops rendering them alive while the grace window runs.
-    """
-    async with async_write_transaction(pool) as conn:
-        await conn.execute(
-            "UPDATE agents_meta SET lease_expires_at = now() + make_interval(secs => %s) "
-            "WHERE machine = %s AND runtime_kind = 'hosted' AND runtime_owner = %s "
-            "AND runtime_generation IS NOT NULL AND status IN ('running', 'idling') "
-            "AND last_turn_fatal_at IS NULL",
-            (AGENT_LEASE_TTL_S, machine, owner),
-        )
 
 
 @dataclass(frozen=True)
@@ -506,7 +251,7 @@ async def stamp_turn_fatal(
         cur = await conn.execute(
             "UPDATE agents_meta SET last_turn_fatal_at = "
             "COALESCE(last_turn_fatal_at, clock_timestamp()) "
-            "WHERE id = %s AND status = 'running' AND runtime_kind = 'hosted' "
+            "WHERE id = %s AND status = 'running' "
             "AND runtime_generation = %s AND runtime_owner = %s RETURNING id",
             (incarnation.agent_id, incarnation.generation, incarnation.owner),
         )
@@ -570,28 +315,23 @@ async def settle_and_stamp_turn(
     return TurnSettlement(stamp=stamp, settled=settled)
 
 
-async def settle_stale_running_rows(
-    pool: AsyncConnectionPool,
-    machine: str,
-    *,
-    exclude_owner: UUID | None = None,
-) -> list[int]:
+# meiva:note
+# Host start: this machine's `running` rows belong to a host that no longer exists
+# (one host per machine and home), so each becomes idling. The next wake admits
+# it under the new boot. This is the only place a stale row is settled.
+async def settle_running_rows_at_start(pool: AsyncConnectionPool, machine: str) -> list[int]:
     async with async_write_transaction(pool) as conn:
         rows = await (
             await conn.execute(
                 "UPDATE agents_meta SET status = 'idling' "
-                "WHERE status = 'running' AND pid IS NULL AND machine = %s "
-                "AND (runtime_kind IS NULL OR runtime_kind = 'hosted') "
-                "AND (lease_expires_at IS NULL OR lease_expires_at <= now()) "
-                "AND (%s::uuid IS NULL OR runtime_owner IS NULL OR runtime_owner <> %s) "
-                "RETURNING id",
-                (machine, exclude_owner, exclude_owner),
+                "WHERE status = 'running' AND machine = %s RETURNING id",
+                (machine,),
             )
         ).fetchall()
     settled = [row[0] for row in rows]
     if settled:
         logger.info(
-            "hosted stale-running settle: settled {n} row(s) {ids}",
+            "hosted start: settled {n} running row(s) {ids}",
             event="host_stale_running_settled",
             n=len(settled),
             ids=settled,

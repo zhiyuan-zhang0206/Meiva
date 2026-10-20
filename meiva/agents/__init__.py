@@ -145,14 +145,12 @@ class AgentRow:
     fork_source_agent_id: int | None
     machine: str
     spawned_at: datetime
-    started_at: datetime | None
     # The agent's real-activity clock (every completed LLM turn) — the value
     # triage surfaces should use for "is it alive". The API also carries
     # `last_inbound_at` ("when did anyone last talk to it") since the two
     # diverge during long single turns (issue #183).
     last_active_at: datetime
     last_inbound_at: datetime
-    pid: int | None
     heartbeat_paused_until: datetime | None
 
     def __str__(self) -> str:
@@ -422,10 +420,8 @@ def _row_from_dict(data: dict) -> AgentRow:
         fork_source_agent_id=data["fork_source_agent_id"],
         machine=data["machine"],
         spawned_at=datetime.fromisoformat(data["spawned_at"]),
-        started_at=datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
         last_active_at=datetime.fromisoformat(data["last_active_at"]),
         last_inbound_at=datetime.fromisoformat(data["last_inbound_at"]),
-        pid=data.get("pid"),
         heartbeat_paused_until=(
             datetime.fromisoformat(data["heartbeat_paused_until"])
             if data.get("heartbeat_paused_until")

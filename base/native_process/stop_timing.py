@@ -26,16 +26,9 @@ CLOCK_READ_TIMEOUT_S = 2.0
 HOST_GRACEFUL_EXIT_DRAIN_S = 30.0
 
 # meiva:note
-# How long the host's stop waits for its ownership release (services/agent_runner/
-# agent_host/host.py). With Postgres unreachable the release would otherwise wait out the
-# control pool's 30 s acquire timeout; a release that cannot land leaves the leases to
-# expire by TTL.
-RELEASE_OWNER_TIMEOUT_S = 3.0
-
-# meiva:note
 # The longest an agent-host's whole SIGTERM exit may run: the drain, then the scheduler's
-# cancel unwind and clock read, the resource join (one more unwind bound), the ownership
-# release, and the unbounded rest (runtimes, pools, health server) in what is left. The
+# cancel unwind and clock read, the resource join (one more unwind bound), and the
+# unbounded rest (runtimes, pools, health server) in what is left. The
 # roster declares it as the unit's stop ceiling, so root's TERM window derives from it.
 HOST_STOP_CEILING_S = 50.0
 

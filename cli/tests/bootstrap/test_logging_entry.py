@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from base.native_process.tests.host_pipe import live_host_control
+
 _ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -19,14 +21,19 @@ _CHILD = Path(__file__).with_name("_logging_entry_child.py")
 def run_probe(scenario: str, home: Path, *extra: str) -> dict[str, object]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env["MEIVA_HOME"] = str(home)
-    child = subprocess.run(  # noqa: S603 — this interpreter, fixed child script, private home
-        [sys.executable, "-I", "-B", str(_CHILD), scenario, str(_ROOT), *extra],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
+    # meiva:note
+    # The no-agent-child scenario enters the exec child, which treats an end-of-file
+    # control pipe as a dead host and kills its process group; a live pipe stands in for the host.
+    with live_host_control() as stdin:
+        child = subprocess.run(  # noqa: S603 — this interpreter, fixed child script, private home
+            [sys.executable, "-I", "-B", str(_CHILD), scenario, str(_ROOT), *extra],
+            env=env,
+            stdin=stdin,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
     assert child.returncode == 0, child.stderr
     return json.loads(child.stdout.splitlines()[-1])
 

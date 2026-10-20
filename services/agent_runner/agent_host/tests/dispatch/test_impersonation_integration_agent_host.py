@@ -42,9 +42,7 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
         "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'idling',%s)", (agent_id, machine)
     )
     db_conn.commit()
-    owner = await admit_hosted_runtime(
-        aops_pool, agent_id, machine, uuid4(), expected_from="idling", db=database
-    )
+    owner = await admit_hosted_runtime(aops_pool, agent_id, machine, uuid4(), db=database)
     assert owner is not None
     lease = leases.request(
         database,
@@ -81,11 +79,6 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
         catalog=model_catalog,
         commands=CommandCatalog(skills=list),
     )
-    db_conn.execute(
-        "UPDATE agents_meta SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=%s",
-        (agent_id,),
-    )
-    db_conn.commit()
     await host.run_turn(agent_id)
     assert db_conn.execute(
         "SELECT runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)

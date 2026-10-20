@@ -22,12 +22,10 @@ from base.lm.catalog import ModelCatalog
 
 
 @pytest.mark.parametrize("probe_age", [None, 0, 600])
-@pytest.mark.parametrize("lease_offset", [None, -60, 60])
-def test_snapshot_retains_independent_probe_and_lease_clocks(
+def test_snapshot_retains_the_machine_probe_clock(
     redis_url: str,
     db_conn: psycopg.Connection,
     probe_age: int | None,
-    lease_offset: int | None,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -43,11 +41,10 @@ def test_snapshot_retains_independent_probe_and_lease_clocks(
     )
     now = datetime.now(UTC)
     probe = None if probe_age is None else now - timedelta(seconds=probe_age)
-    lease = None if lease_offset is None else now + timedelta(seconds=lease_offset)
     with db_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agents_meta SET machine=%s, lease_expires_at=%s WHERE id=%s",
-            ("observation-test", lease, aid),
+            "UPDATE agents_meta SET machine=%s WHERE id=%s",
+            ("observation-test", aid),
         )
         if probe is not None:
             cur.execute(
@@ -62,7 +59,6 @@ def test_snapshot_retains_independent_probe_and_lease_clocks(
     assert full is not None and full.observation is not None
     evidence = full.observation
     assert evidence.runtime_owner == "unknown"
-    assert evidence.runtime_lease_expires_at == lease
     assert evidence.machine_probe_at == probe
     assert evidence.machine_probe_valid_until == (
         None
@@ -87,14 +83,12 @@ def _reason(
     *,
     host_online: bool | None,
     probe_age: timedelta | None = timedelta(0),
-    admission_outcome: str | None = None,
     admission_age: timedelta | None = None,
 ) -> AvailabilityReason:
     observed = availability(
         status="idling",
         host_online=host_online,
         probe_at=NOW - probe_age if probe_age is not None else None,
-        admission_outcome=admission_outcome,
         admission_at=NOW - admission_age if admission_age is not None else None,
         now=NOW,
     )
@@ -102,33 +96,17 @@ def _reason(
     return observed.reason
 
 
-def test_host_down_precedes_recent_admission_refusal() -> None:
+def test_host_down_precedes_recent_admission() -> None:
     assert (
-        _reason(
-            host_online=False,
-            admission_outcome="maintenance_hold",
-            admission_age=timedelta(seconds=10),
-        )
+        _reason(host_online=False, admission_age=timedelta(seconds=10))
         == AvailabilityReason.HOST_UNAVAILABLE
     )
 
 
-def test_host_up_distinguishes_no_attempt_refusal_and_admission() -> None:
+def test_host_up_distinguishes_no_attempt_and_admission() -> None:
     assert _reason(host_online=True) == AvailabilityReason.AWAITING_ADMISSION
     assert (
-        _reason(
-            host_online=True,
-            admission_outcome="resource_fence",
-            admission_age=timedelta(seconds=10),
-        )
-        == AvailabilityReason.ADMISSION_REFUSED
-    )
-    assert (
-        _reason(
-            host_online=True,
-            admission_outcome="admitted",
-            admission_age=timedelta(seconds=10),
-        )
+        _reason(host_online=True, admission_age=timedelta(seconds=10))
         == AvailabilityReason.ADMITTED
     )
 
@@ -142,14 +120,9 @@ def test_stale_or_missing_probe_never_looks_ready() -> None:
     assert _reason(host_online=True, probe_age=None) == AvailabilityReason.UNKNOWN
 
 
-def test_stale_admission_outcome_is_unknown_even_with_live_host() -> None:
+def test_stale_admission_is_unknown_even_with_live_host() -> None:
     assert (
-        _reason(
-            host_online=True,
-            admission_outcome="maintenance_hold",
-            admission_age=timedelta(minutes=6),
-        )
-        == AvailabilityReason.UNKNOWN
+        _reason(host_online=True, admission_age=timedelta(minutes=6)) == AvailabilityReason.UNKNOWN
     )
 
 
@@ -159,7 +132,6 @@ def test_launch_failure_remains_visible_without_a_fresh_host_probe() -> None:
         status="idling",
         host_online=None,
         probe_at=None,
-        admission_outcome=None,
         admission_at=None,
         launch_failure_reason="launch_unreachable",
         launch_failure_at=failed_at,

@@ -9,7 +9,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
-from psycopg.types.json import Jsonb
 
 from base import telemetry
 from base.agents.birth.creation_identity import record_creation_snapshot, recover_birth
@@ -17,7 +16,6 @@ from base.agents.birth.harness import resolve_birth_harness
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 from base.agents.impersonation.manifest import record_central_event
 from base.agents.inbox.insert import insert_spawn_prompt_in_transaction
-from base.agents.incarnation.resources import ResourceBirth
 from base.agents.labels import spawn_prompt_with_label
 from base.agents.model.birth_config import resolve_birth_config
 from base.config import settings
@@ -275,17 +273,11 @@ def insert_agent_birth(
     # fork stays traceable via the fork event's `source` and the fork
     # prompt inbound's source; it is not what the spawner column means.
     lineage_spawner = f"agent:{fork_from}" if fork_from is not None else spawner
-    # meiva:note
-    # The first life's epoch fence is 0: nothing predates it, so it
-    # supersedes nothing (every reader treats it like NULL). No retired
-    # runtime stamped a birth epoch, so it is also this runtime's proof of
-    # the row's origin: an unadmitted row it later ends by force stays
-    # resurrectable (`base.agents.incarnation.lifecycle_commands.record_unowned_termination`).
     cur.execute(
         "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
         "fork_source_checkpoint_id, status, machine, harness, config_overlay, birth_config, "
-        "last_launch_attempt_id, last_resurrect_inbound_id, incarnation_resources) "
-        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s, %s::jsonb, %s::jsonb, %s, 0, %s)",
+        "last_launch_attempt_id) "
+        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s, %s::jsonb, %s::jsonb, %s)",
         (
             new_id,
             lineage_spawner,
@@ -297,7 +289,6 @@ def insert_agent_birth(
             json.dumps(config) if config else None,
             json.dumps(birth_config, sort_keys=True),
             launch_attempt_id,
-            Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")),
         ),
     )
     _insert_fork_history(cur, new_id, fork_from, fork_checkpoint, fork_tail_skills)

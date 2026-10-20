@@ -46,10 +46,10 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import AddModels
 
 
-def _agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str, int | None] | None:
+def _agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str] | None:
     with db.cursor() as cur:
         cur.execute(
-            "SELECT id, spawner, status, pid FROM agents_meta WHERE id = %s",
+            "SELECT id, spawner, status FROM agents_meta WHERE id = %s",
             (agent_id,),
         )
         return cur.fetchone()
@@ -128,7 +128,7 @@ class TestSpawnAgent:
             local_machine=machine_identity,
         )
 
-        assert _agents_row(db_conn, new_id) == (new_id, "user", "idling", None)
+        assert _agents_row(db_conn, new_id) == (new_id, "user", "idling")
         assert inbound_count(db_conn, new_id) == 0
 
     def test_spawner_recorded(

@@ -20,8 +20,6 @@ Its component nodes describe the current contracts and implementation.
 - [[base/agents/history/docs/message-tokens.meiva.okf.md]] — Per-message true tokens.
 - [[base/agents/impersonation/docs/impersonation.meiva.okf.md]] — Named agent impersonation sessions.
 - [[base/agents/inbox/docs/inbox.meiva.okf.md]] — Agent inbox.
-- [[base/agents/incarnation/docs/closed-predecessor.meiva.okf.md]] — Closed predecessor.
-- [[base/agents/incarnation/docs/incarnation-resources.meiva.okf.md]] — Incarnation resource evidence.
 - [[base/agents/messages/docs/external_caller.meiva.okf.md]] — External Caller Profiles.
 - [[base/agents/messages/docs/inbound-provenance.meiva.okf.md]] — Inbound Provenance Facts.
 - [[base/agents/messages/docs/kwargs.meiva.okf.md]] — Message Metadata Contract.

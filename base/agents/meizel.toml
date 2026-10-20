@@ -1,10 +1,10 @@
 exports = ["birth", "context", "history", "impersonation", "inbox", "incarnation", "labels.py", "lifecycle.py", "messages", "model", "observation", "recovery", "sdk", "tasks", "tests", "to_user", "upload_delivery"]
 
 [uses]
-"birth" = ["history", "impersonation", "inbox", "incarnation", "labels.py", "model"]
+"birth" = ["history", "impersonation", "inbox", "labels.py", "model"]
 "context" = ["messages", "observation", "sdk"]
 "history" = ["impersonation", "incarnation", "messages", "model", "observation", "sdk"]
-"impersonation" = ["incarnation", "messages"]
+"impersonation" = ["messages"]
 "inbox" = ["impersonation", "messages"]
 "observation" = ["impersonation", "tasks"]
 "sdk" = ["impersonation", "messages"]

@@ -74,7 +74,6 @@ async def test_successor_records_the_drain_of_a_restart_the_original_host_execut
         agent,
         machine_identity.name(),
         old._owner,
-        expected_from="idling",
         db=database,
     )
     assert incarnation is not None
@@ -131,9 +130,7 @@ async def test_journal_write_failure_before_or_after_commit_keeps_same_restart(
 ) -> None:
     agent, owner = _agent(db_conn, machine_name=machine_identity.name()), uuid4()
     assert (
-        await admit_hosted_runtime(
-            aops_pool, agent, machine_identity.name(), owner, expected_from="idling", db=database
-        )
+        await admit_hosted_runtime(aops_pool, agent, machine_identity.name(), owner, db=database)
         is not None
     )
     pause_owner.begin_maintenance("retry", WHEN)
@@ -252,7 +249,6 @@ async def test_cold_idle_resume_makes_no_model_call(
             agent,
             machine_identity.name(),
             original._owner,
-            expected_from="idling",
             db=database,
         )
         is not None
@@ -349,7 +345,6 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
         agent,
         machine_identity.name(),
         host._owner,
-        expected_from="idling",
         db=database,
     )
     assert incarnation is not None

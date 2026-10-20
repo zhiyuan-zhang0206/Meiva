@@ -7,11 +7,12 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
+from base.agents.messages.inbound import InboundKind
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS, Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from ops.agents.wake import resurrect_agent
+from ops.agents.wake import ResurrectTriggerStaleError, resurrect_agent
 from ops.lifecycle.termination import force_terminate_transaction
 
 
@@ -46,9 +47,7 @@ def _die(conn: psycopg.Connection, agent_id: int) -> None:
 
 
 async def _admit(pool: AsyncConnectionPool, agent_id: int, *, db: Database) -> RuntimeIncarnation:
-    owner = await admit_hosted_runtime(
-        pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=db
-    )
+    owner = await admit_hosted_runtime(pool, agent_id, "claim-test", uuid4(), db=db)
     assert owner is not None
     return owner
 
@@ -175,32 +174,55 @@ async def test_a_claimed_but_unapplied_command_is_superseded_not_deferred(
     )
 
 
-async def test_force_on_unadmitted_row_cannot_create_a_hosted_successor(
+async def test_force_on_unadmitted_row_can_be_resurrected_and_admitted(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    from base.api_contracts.agent_contract import ResurrectRefused
-
     agent_id = _agent(db_conn)
     with ConnectionPool[psycopg.Connection](
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
     ) as pool:
-        _, _, _, force, _cutoff = await asyncio.to_thread(
+        _, _, force, _cutoff = await asyncio.to_thread(
             force_terminate_transaction, agent_id, pool, source="user"
         )
-    with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
+    resurrect_agent(database, event_bus, agent_id, resurrected_by="user")
+    assert _command_row(db_conn, force) == ("done", None)
+    assert db_conn.execute(
+        "SELECT status,runtime_generation,runtime_owner FROM agents_meta WHERE id=%s",
+        (agent_id,),
+    ).fetchone() == ("idling", None, None)
+    assert await _admit(aops_pool, agent_id, db=database) is not None
+
+
+async def test_a_trigger_older_than_a_terminate_cannot_reverse_it(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
+    agent_id = _agent(db_conn)
+    _die(db_conn, agent_id)
+    # meiva:note
+    # A force on an already terminated agent changes no status, so only the id order
+    # tells that the terminate came after the queued chat.
+    chat = db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) "
+        "VALUES (%s,'hello','chat','user') RETURNING id",
+        (agent_id,),
+    ).fetchone()
+    assert chat is not None
+    _command(db_conn, agent_id, "terminate")
+    with pytest.raises(ResurrectTriggerStaleError):
         resurrect_agent(
             database,
             event_bus,
             agent_id,
             resurrected_by="user",
+            trigger_inbound_id=chat[0],
+            trigger_inbound_kind=InboundKind.CHAT,
         )
-    assert _command_row(db_conn, force) == ("done", None)
     assert db_conn.execute(
-        "SELECT status,runtime_kind FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == ("terminated", None)
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("terminated",)
 
 
 async def test_reclaiming_after_a_resurrect_preserves_command_history(

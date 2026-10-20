@@ -1,5 +1,3 @@
-exports = ["lifecycle_commands.py", "resource_admission.py", "resources.py", "tests"]
+exports = ["lifecycle_commands.py", "tests"]
 
 [uses]
-"resource_admission.py" = ["resources.py"]
-"tests" = ["resource_admission.py", "resources.py"]

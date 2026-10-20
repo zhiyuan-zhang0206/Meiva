@@ -57,9 +57,7 @@ def _make_agent(
     db: psycopg.Connection,
     *,
     status: str = "idling",
-    lease_s_ahead: float | None = 600.0,
     machine: str = MACHINE,
-    claimed: bool = True,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
@@ -74,12 +72,8 @@ def _make_agent(
     )
     with db.cursor() as cur:
         cur.execute(
-            "UPDATE agents_meta SET status = %s, machine = %s, "
-            "started_at = CASE WHEN %s THEN now() ELSE NULL END, "
-            "lease_expires_at = CASE WHEN %s::float IS NULL THEN NULL "
-            "  ELSE now() + make_interval(secs => %s::float) END "
-            "WHERE id = %s",
-            (status, machine, claimed, lease_s_ahead, lease_s_ahead, aid),
+            "UPDATE agents_meta SET status = %s, machine = %s WHERE id = %s",
+            (status, machine, aid),
         )
     db.commit()
     return aid
@@ -212,7 +206,6 @@ class TestLivenessPass:
         aid = _make_agent(
             db_conn,
             status="idling",
-            lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
@@ -239,41 +232,6 @@ class TestLivenessPass:
         assert _state(db_conn, aid)[0] == "online"
 
     @pytest.mark.usefixtures(pool.__name__)
-    def test_lease_expired_idling_goes_offline(
-        self,
-        redis_url: str,
-        pool: ConnectionPool,
-        db_conn: psycopg.Connection,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        register_machine(db_conn)
-        aid = _make_agent(
-            db_conn,
-            status="idling",
-            lease_s_ahead=-10,
-            model_catalog=model_catalog,
-            config_authority=config_authority,
-            database_gate=database_gate,
-            local_machine=machine_identity,
-        )
-
-        asyncio.run(
-            run_liveness_pass(
-                Database.from_settings(gate=database_gate),
-                pool,
-                EventBus.from_settings(),
-                probe=FakeProbe({MACHINE: True}),
-            )
-        )
-        state, probed_at = _state(db_conn, aid)
-        assert state == "offline"
-        assert probed_at is not None
-
-    @pytest.mark.usefixtures(pool.__name__)
     def test_live_idling_stays_online(
         self,
         redis_url: str,
@@ -289,7 +247,6 @@ class TestLivenessPass:
         aid = _make_agent(
             db_conn,
             status="idling",
-            lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
@@ -323,7 +280,6 @@ class TestLivenessPass:
         aid = _make_agent(
             db_conn,
             status="idling",
-            lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
@@ -332,7 +288,6 @@ class TestLivenessPass:
         aid2 = _make_agent(
             db_conn,
             status="running",
-            lease_s_ahead=None,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
@@ -359,7 +314,6 @@ class TestLivenessPass:
         aid = _make_agent(
             db_conn,
             status="idling",
-            lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
@@ -384,7 +338,6 @@ class TestLivenessPass:
         aid = _make_agent(
             db_conn,
             status="idling",
-            lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
@@ -544,7 +497,7 @@ class TestLivenessPass:
         assert announced == [aid]
 
     @pytest.mark.usefixtures(pool.__name__)
-    def test_preclaim_idling_stays_unknown(
+    def test_never_admitted_idling_follows_the_machine_probe(
         self,
         redis_url: str,
         pool: ConnectionPool,
@@ -559,8 +512,6 @@ class TestLivenessPass:
         aid = _make_agent(
             db_conn,
             status="idling",
-            lease_s_ahead=None,
-            claimed=False,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
@@ -575,7 +526,7 @@ class TestLivenessPass:
                 probe=FakeProbe({MACHINE: True}),
             )
         )
-        assert _state(db_conn, aid)[0] == "unknown"
+        assert _state(db_conn, aid)[0] == "online"
 
     @pytest.mark.usefixtures(pool.__name__)
     def test_terminated_rows_are_never_judged(
@@ -593,7 +544,6 @@ class TestLivenessPass:
         aid = _make_agent(
             db_conn,
             status="terminated",
-            lease_s_ahead=None,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
@@ -631,7 +581,6 @@ class TestLivenessPass:
         aid = _make_agent(
             db_conn,
             status="idling",
-            lease_s_ahead=-10,
             machine="ghost-host",
             model_catalog=model_catalog,
             config_authority=config_authority,
@@ -665,7 +614,6 @@ class TestLivenessPass:
         aid = _make_agent(
             db_conn,
             status="idling",
-            lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,

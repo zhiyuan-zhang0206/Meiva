@@ -47,10 +47,10 @@ from base.log import logger
 # so the whole snapshot is O(agents), not O(agents x inbound rows).
 _FULL_COLS = (
     "a.id, a.spawner, a.fork_source_agent_id, "
-    "a.fork_source_checkpoint_id, a.status, a.pid, "
-    "a.spawned_at, a.started_at, "
-    "COALESCE(a.last_active_at, a.started_at, a.spawned_at) AS last_active_at, "
-    "COALESCE(im.last_inbound_at, a.started_at, a.spawned_at) AS last_inbound_at, "
+    "a.fork_source_checkpoint_id, a.status, "
+    "a.spawned_at, "
+    "COALESCE(a.last_active_at, a.spawned_at) AS last_active_at, "
+    "COALESCE(im.last_inbound_at, a.spawned_at) AS last_inbound_at, "
     "t.label, a.machine, "
     "a.heartbeat_paused_until, "
     "a.liveness_state, a.last_probe_at, "
@@ -70,8 +70,8 @@ _FULL_COLS = (
     # no-interpolation preference); keep the '30' in sync with
     # base.agents.inbox.rows.NOTICE_FYI_TTL_DAYS — the C1 tests lock the coupling.
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
-    ", a.config_overlay, mp.last_probe_at, a.lease_expires_at, "
-    "mp.agent_host_online, a.last_admission_outcome, a.last_admission_at, "
+    ", a.config_overlay, mp.last_probe_at, "
+    "mp.agent_host_online, a.last_admission_at, "
     "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config, a.last_launch_attempt_id"
 )
 _FROM = (
@@ -123,51 +123,48 @@ class OpenNotice(BaseModel):
     task_id: int | None = None
 
 
+# meiva:note
+# Full lifecycle state of one agent.
+#
+# `status` values: running / idling / terminated.
+#
+# `spawner` shape: "user" / "agent:<id>" / arbitrary external name — the
+# frontend builds a spawn tree from this.
+#
+# `label` is None when not set; the frontend falls back to `#N`.
+#
+# `last_active_at` is the agent's real-activity clock (agents_meta column,
+# written on every completed LLM turn); `last_inbound_at` is the most
+# recent inbound of any kind. They differ exactly for an agent working
+# through a long single turn — last_active_at stays current while
+# last_inbound_at goes stale (issue #183). Both fall back to
+# spawned_at before any activity/inbound. The frontend sorts
+# within status groups by last_active_at desc.
+#
+# `notices_awaiting_response` is the agent's open require_response notices,
+# oldest first — empty when it is not waiting on the user.
+#
+# `supports_vision` describes the effective model, resolved as the agent host
+# resolves it (`_effective_model`: overlay over birth stamp over the live
+# default).
+# It uses `base.lm.factory.model_supports_vision`, the same capability
+# lookup as the message API's image-content gate.
 class AgentSnapshot(BaseModel):
-    """Full lifecycle state of one agent.
-
-    `status` values: running / idling / terminated.
-
-    `spawner` shape: "user" / "agent:<id>" / arbitrary external name — the
-    frontend builds a spawn tree from this.
-
-    `label` is None when not set; the frontend falls back to `#N`.
-
-    `last_active_at` is the agent's real-activity clock (agents_meta column,
-    written on every completed LLM turn); `last_inbound_at` is the most
-    recent inbound of any kind. They differ exactly for an agent working
-    through a long single turn — last_active_at stays current while
-    last_inbound_at goes stale (issue #183). Both fall back to
-    started_at / spawned_at before any activity/inbound. The frontend sorts
-    within status groups by last_active_at desc.
-
-    `notices_awaiting_response` is the agent's open require_response notices,
-    oldest first — empty when it is not waiting on the user.
-
-    `supports_vision` describes the effective model, resolved as the agent host
-    resolves it (`_effective_model`: overlay over birth stamp over the live
-    default).
-    It uses `base.lm.factory.model_supports_vision`, the same capability
-    lookup as the message API's image-content gate.
-    """
-
     agent_id: int
     spawner: str
     fork_source_agent_id: int | None
     fork_source_checkpoint_id: str | None
     status: AgentStatus
-    pid: int | None
     spawned_at: datetime
-    started_at: datetime | None
     last_active_at: datetime
     last_inbound_at: datetime
     label: str | None
     machine: str
     supports_vision: bool | None
     # Gateway-owned liveness projection (Task #1174): 'online' = the machine is
-    # reachable AND (for running/idling) the process lease is alive; 'offline'
-    # = machine unreachable (2 consecutive failed status_probe) or lease
-    # expired; 'unknown' = the gateway has not judged this row (fresh row /
+    # meiva:note
+    # reachable; 'offline' = machine unreachable (2 consecutive failed
+    # status_probe); 'unknown' = the gateway has not judged this row (fresh row /
     # unregistered machine), never evidence of a healthy owner. Written only
     # by the gateway heartbeat daemon's liveness pass; `status` stays lifecycle
     # intent. `last_probe_at` preserves the actual machine observation time.
@@ -221,38 +218,35 @@ def _row_to_snapshot(
     row: tuple[Any, ...], *, catalog: ModelCatalog | None, default_model_reader: Callable[[], str]
 ) -> AgentSnapshot:
     supports_vision = agent_supports_vision(
-        row[17], row[25], catalog=catalog, default_model_reader=default_model_reader
+        row[15], row[21], catalog=catalog, default_model_reader=default_model_reader
     )
     return AgentSnapshot.model_validate(
         {
             "agent_id": row[0],
-            "last_launch_attempt_id": row[26],
+            "last_launch_attempt_id": row[22],
             "spawner": row[1],
             "fork_source_agent_id": row[2],
             "fork_source_checkpoint_id": row[3],
             "status": AgentStatus(row[4]),
-            "pid": row[5],
-            "spawned_at": row[6],
-            "started_at": row[7],
-            "last_active_at": row[8],
-            "last_inbound_at": row[9],
-            "label": row[10],
-            "machine": row[11],
-            "heartbeat_paused_until": row[12],
-            "liveness_state": row[13],
-            "last_probe_at": row[14],
-            "notices_awaiting_response": row[15],
-            "unread_notice_count": row[16],
+            "spawned_at": row[5],
+            "last_active_at": row[6],
+            "last_inbound_at": row[7],
+            "label": row[8],
+            "machine": row[9],
+            "heartbeat_paused_until": row[10],
+            "liveness_state": row[11],
+            "last_probe_at": row[12],
+            "notices_awaiting_response": row[13],
+            "unread_notice_count": row[14],
             "supports_vision": supports_vision,
-            "observation": observation(row[18], row[19]),
+            "observation": observation(row[16]),
             "availability": availability(
                 status=row[4],
-                host_online=row[20],
-                probe_at=row[18],
-                admission_outcome=row[21],
-                admission_at=row[22],
-                launch_failure_reason=row[23],
-                launch_failure_at=row[24],
+                host_online=row[17],
+                probe_at=row[16],
+                admission_at=row[18],
+                launch_failure_reason=row[19],
+                launch_failure_at=row[20],
             ),
         }
     )

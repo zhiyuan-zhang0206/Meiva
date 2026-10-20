@@ -181,17 +181,11 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
     pending = deliver_peers_and_ack_first(
         db_conn, database, event_bus, requested, owner.agent_id, machine_identity=machine_identity
     )
-    db_conn.execute(
-        "UPDATE agents_meta SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=%s",
-        (owner.agent_id,),
-    )
-    db_conn.commit()
     successor = await admit_hosted_runtime(
         aops_pool,
         owner.agent_id,
         machine_identity.name(),
         uuid4(),
-        expected_from="running",
         db=database,
     )
     assert successor is not None and successor.generation != owner.generation

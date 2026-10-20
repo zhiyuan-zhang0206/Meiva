@@ -13,6 +13,7 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host import runtime
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
@@ -104,8 +105,12 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
     assert agent_id not in host._in_flight
 
 
+class _StopAtRuntimeError(Exception):
+    pass
+
+
 @pytest.mark.parametrize("status", ["running", "idling"])
-async def test_host_refuses_a_turn_owned_by_another_live_instance(
+async def test_host_takes_over_a_row_last_owned_by_another_instance(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -119,9 +124,7 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
     from services.agent_runner.agent_host.host import AgentHost
 
     agent_id = _agent(db_conn)
-    original = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", uuid4(), expected_from="idling", db=database
-    )
+    original = await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), db=database)
     assert original is not None
     if status == "idling":
         assert await settle_hosted_runtime(
@@ -141,8 +144,23 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
         commands=CommandCatalog(skills=list),
     )
 
-    async def forbidden_runtime(_agent_id: int, _fingerprint: str, _model: str) -> None:
-        raise AssertionError("a live other owner must prevent all runtime work")
+    admitted: list[RuntimeIncarnation] = []
 
-    monkeypatch.setattr(host, "_runtime_for", forbidden_runtime)
-    await host.run_turn(agent_id)
+    async def stop_at_runtime(
+        _agent_id: int,
+        _fingerprint: str,
+        _slices: object,
+        *,
+        incarnation: RuntimeIncarnation,
+        **_: object,
+    ) -> None:
+        admitted.append(incarnation)
+        raise _StopAtRuntimeError
+
+    monkeypatch.setattr(host, "_runtime_for", stop_at_runtime)
+    with pytest.raises(_StopAtRuntimeError):
+        await host.run_turn(agent_id)
+
+    [taken] = admitted
+    assert taken.owner == host._owner != original.owner
+    assert taken.generation != original.generation

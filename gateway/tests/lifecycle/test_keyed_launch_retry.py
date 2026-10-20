@@ -105,7 +105,7 @@ def test_replay_survives_mutable_config_admission_and_target_deletion(
         "SELECT config_overlay, birth_config FROM agent_launch_retry_receipts"
     ).fetchone()
     db_conn.execute(
-        "UPDATE agents_meta SET config_overlay='{\"llm_model\":\"changed\"}', last_admission_at=now(), last_admission_outcome='admitted' WHERE id=%s",
+        'UPDATE agents_meta SET config_overlay=\'{"llm_model":"changed"}\', last_admission_at=now() WHERE id=%s',
         (agent_id,),
     )
     db_conn.commit()
@@ -225,7 +225,7 @@ def test_native_repeat_rejects_superseded_target(
     ).wake_published
     if changed == "admitted":
         db_conn.execute(
-            "UPDATE agents_meta SET last_admission_at=now(),last_admission_outcome='admitted' WHERE id=%s",
+            "UPDATE agents_meta SET last_admission_at=now() WHERE id=%s",
             (agent_id,),
         )
     elif changed == "terminated":

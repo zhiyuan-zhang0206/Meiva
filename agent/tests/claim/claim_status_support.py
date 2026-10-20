@@ -113,7 +113,6 @@ async def running_agent(
         agent_id,
         machine_identity.name(),
         uuid4(),
-        expected_from="idling",
         db=database,
     )
     assert incarnation is not None

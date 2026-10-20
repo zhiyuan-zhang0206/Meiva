@@ -48,33 +48,6 @@ class TestSelectIdleAgents:
         assert aid in selected
         assert float(selected[aid]) == pytest.approx(400 / 60.0, abs=0.5)
 
-    def test_idling_without_a_lease_is_selected(
-        self,
-        redis_url: str,
-        pool: ConnectionPool,
-        db_conn: psycopg.Connection,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        aid = make_idle(
-            db_conn,
-            status_changed_s_ago=THRESHOLD_S + 60,
-            model_catalog=model_catalog,
-            config_authority=config_authority,
-            database_gate=database_gate,
-            local_machine=machine_identity,
-        )
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET lease_expires_at = NULL, pid = NULL WHERE id = %s",
-                (aid,),
-            )
-        db_conn.commit()
-        assert aid in _selected(pool)
-
     def test_idle_under_threshold_unpaused_excluded(
         self,
         redis_url: str,

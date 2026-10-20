@@ -77,7 +77,6 @@ async def test_host_persists_provider_failure_before_releasing_turn(
             row[0],
             uuid4(),
             db=Database.from_settings(gate=database_gate),
-            expected_from="idling",
         )
         assert incarnation is not None
         calls = 0

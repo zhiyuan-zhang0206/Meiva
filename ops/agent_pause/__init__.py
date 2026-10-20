@@ -17,7 +17,6 @@ from typing import NamedTuple
 from uuid import UUID, uuid4
 
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance import admission, cohort, pause_owner
@@ -160,7 +159,6 @@ def _prepare_cohort(
                     host_owner=identity.owner if identity is not None else None,
                     holder=holder,
                     acquired_at=at,
-                    host_absent=identity is None,
                 )
         except cohort.LifecycleCollisionError as collision:
             if started is None:
@@ -224,25 +222,23 @@ def drain(
         time.sleep(min(0.2, remaining))
 
 
+# meiva:note
+# One line per unfinished agent: delivery state, row owner and host view.
+#
+# A bare agent list leaves a consuming agent indistinguishable from one
+# the host will never admit — issue #2159 spent its whole 300s timeout on
+# exactly that ambiguity. The report names the facts an operator routes on: the
+# restart command's delivery state, the row's owner, the agent's last
+# activity, and whether the live host still sees the agent's turn running.
 def stall_report(
     db: Database, hold: MaintenanceHold, pending: list[int], *, local_machine: MachineIdentity
 ) -> str:
-    """One line per unfinished agent: delivery state, row fences and host view.
-
-    A bare agent list leaves a consuming agent indistinguishable from one
-    the host will never admit — issue #2159 spent its whole 300s timeout on
-    exactly that ambiguity. The report names the facts an operator routes on: the
-    restart command's delivery state, the row's owner/lease/resource facts,
-    the agent's last activity, and whether the live host still sees the
-    agent's turn running.
-    """
-    host_owner: UUID | None = None
     host_active: frozenset[int] = frozenset()
     notes: list[str] = []
     try:
         if "agent-runner" in local_machine.role() and host_running():
             identity = host_identity()
-            host_owner, host_active = identity.owner, identity.active
+            host_active = identity.active
         else:
             notes.append("live agent-host not observed; row facts only")
     except Exception as exc:  # diagnostics never mask the timeout
@@ -251,9 +247,7 @@ def stall_report(
     try:
         with db.connect() as conn:
             raw_rows = conn.execute(
-                "SELECT m.status, m.runtime_kind, m.runtime_owner, "  # noqa: S608 -- constant SQL fragment
-                "m.lease_expires_at IS NOT NULL AND m.lease_expires_at > clock_timestamp(), "
-                f"{DRAINED_RESOURCES}, m.last_active_at, "
+                "SELECT m.status, m.runtime_owner, m.last_active_at, "
                 "i.status "
                 "FROM unnest(%s::int[], %s::bigint[]) AS cohort(agent_id, command_id) "
                 "LEFT JOIN agents_meta m ON m.id = cohort.agent_id "
@@ -266,7 +260,7 @@ def stall_report(
         return "".join(f"  {note}\n" for note in notes).rstrip("\n")
     rows = [_StallRow(*row) for row in raw_rows]
     lines = [
-        _stall_line(agent, command, row, host_owner, host_active)
+        _stall_line(agent, command, row, host_active)
         for (agent, command), row in zip(commands.items(), rows, strict=True)
     ]
     lines.extend(notes)
@@ -277,10 +271,7 @@ class _StallRow(NamedTuple):
     """One unfinished cohort agent's row facts and command delivery state."""
 
     status: str | None
-    kind: str | None
     runtime_owner: UUID | None
-    lease_fresh: bool | None
-    resources_settled: bool | None
     last_active: datetime | None
     delivery: str | None
 
@@ -289,29 +280,18 @@ def _stall_line(
     agent: int,
     command: int,
     row: _StallRow,
-    host_owner: UUID | None,
     host_active: frozenset[int],
 ) -> str:
     status = row.status
     if status is None:
         return f"agent {agent}: row missing; its restart command {command} is unreachable"
     seen = "yes" if agent in host_active else "no"
-    line = (
+    return (
         f"agent {agent}: command {command} {row.delivery}; "
-        f"row {status} kind={row.kind} owner={row.runtime_owner} "
-        f"lease_fresh={'yes' if row.lease_fresh else 'no'} "
-        f"resources_settled={'yes' if row.resources_settled else 'no'} "
+        f"row {status} owner={row.runtime_owner} "
         f"last_active={row.last_active.isoformat() if row.last_active is not None else 'never'}; "
         f"host active={seen}"
     )
-    if host_owner is not None and row.runtime_owner is not None and row.runtime_owner != host_owner:
-        line += (
-            f"\n  fence: runtime owned by {row.runtime_owner}, not the live boot {host_owner} — "
-            "a successor host cannot certify its predecessor flushed, so re-running "
-            "`meiva stop` cannot clear it; `meiva start` (with this unit's explicit service selection) releases the hold and cold "
-            "admission resumes the agent from its checkpoint"
-        )
-    return line
 
 
 def pause_agents(

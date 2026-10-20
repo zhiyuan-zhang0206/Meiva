@@ -25,12 +25,6 @@ def test_checker_catches_derived_violation(monkeypatch: pytest.MonkeyPatch) -> N
     assert any("WEDGED_AGE_SEC >= EXEC_NODE_TIMEOUT_S" in f for f in failures)
 
 
-def test_checker_catches_scaled_violation(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(deploy, "AGENT_LEASE_TTL_S", 9 * deploy.AGENT_LEASE_RENEW_INTERVAL_S)
-    failures = validate_clock_lattice()
-    assert any("AGENT_LEASE_TTL_S >= 10 * AGENT_LEASE_RENEW_INTERVAL_S" in f for f in failures)
-
-
 def test_a_default_bundle_lifetime_past_the_cap_is_reported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -39,7 +39,7 @@ tags:
 
 ### Data Types
 - `AgentDirectoryPage`: agents (`list[AgentRow]`), next_cursor (exclusive ID cursor, or None at the end)
-- `AgentRow`: agent_id, label, status, spawner, fork_source_agent_id, machine, spawned_at, started_at, last_active_at, last_inbound_at, pid, heartbeat_paused_until
+- `AgentRow`: agent_id, label, status, spawner, fork_source_agent_id, machine, spawned_at, last_active_at, last_inbound_at, heartbeat_paused_until
 - `AgentStatus`: RUNNING / IDLING / TERMINATED — three states, no ops-only states to project away.
 - `Neighbor`: agent_id, label, status, depth (hops from the queried agent — out for neighbors, up for ancestors), score (connection strength)
 - `Machine`: name, description, live (detected at call time, not cached)

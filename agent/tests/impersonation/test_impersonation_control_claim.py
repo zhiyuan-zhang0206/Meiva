@@ -85,7 +85,6 @@ async def test_control_claim_reclaims_a_predecessors_claimed_command(
         agent_id,
         machine_identity.name(),
         uuid4(),
-        expected_from="idling",
         db=database,
     )
     assert owner is not None

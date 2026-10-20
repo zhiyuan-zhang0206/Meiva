@@ -211,7 +211,7 @@ def test_post_message_terminated_agent_allows_insert(
 ) -> None:
     tid = _seed_agent(db_conn, status="terminated", local_machine=machine_identity)
     db_conn.execute(
-        "UPDATE agents_meta SET runtime_kind = 'hosted', runtime_generation = gen_random_uuid(), "
+        "UPDATE agents_meta SET runtime_generation = gen_random_uuid(), "
         "runtime_owner = gen_random_uuid() WHERE id = %s",
         (tid,),
     )

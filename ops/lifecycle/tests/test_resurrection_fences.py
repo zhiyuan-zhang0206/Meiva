@@ -60,7 +60,8 @@ class TestResurrectAgent:
             force_mark_terminated(database, event_bus, agent_id, pool)
             with db_conn.cursor() as cur:
                 cur.execute(
-                    "SELECT status_changed_at, last_force_terminate_inbound_id "
+                    "SELECT status_changed_at, (SELECT max(id) FROM inbound_messages "
+                    "WHERE agent_id = agents_meta.id AND kind = 'terminate') "
                     "FROM agents_meta WHERE id = %s",
                     (agent_id,),
                 )
@@ -77,7 +78,8 @@ class TestResurrectAgent:
 
         with db_conn.cursor() as cur:
             cur.execute(
-                "SELECT status_changed_at, last_force_terminate_inbound_id "
+                "SELECT status_changed_at, (SELECT max(id) FROM inbound_messages "
+                "WHERE agent_id = agents_meta.id AND kind = 'terminate') "
                 "FROM agents_meta WHERE id = %s",
                 (agent_id,),
             )

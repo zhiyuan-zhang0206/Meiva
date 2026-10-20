@@ -31,9 +31,8 @@ def owner(
     agent_id = create_agent(db_conn)
     incarnation = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
-        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
-        "clock_timestamp()+interval '10 minutes')",
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner) "
+        "VALUES(%s,'idling',%s,%s,%s)",
         (agent_id, local_machine, incarnation.generation, incarnation.owner),
     )
     db_conn.commit()
@@ -133,9 +132,8 @@ def test_numbers_are_agent_scoped_and_permanent(
     other_agent = create_agent(db_conn)
     other_owner = RuntimeIncarnation(other_agent, uuid4(), uuid4())
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
-        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
-        "clock_timestamp()+interval '10 minutes')",
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner) "
+        "VALUES(%s,'idling',%s,%s,%s)",
         (other_agent, local_machine, other_owner.generation, other_owner.owner),
     )
     db_conn.commit()

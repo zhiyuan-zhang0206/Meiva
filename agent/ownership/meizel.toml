@@ -2,5 +2,5 @@ exports = ["corpse_reap.py", "hosted.py", "hosted_cleanup.py", "inbound.py", "te
 
 [uses]
 "corpse_reap.py" = ["hosted_cleanup.py"]
-"hosted.py" = ["hosted_claim.py", "hosted_cleanup.py"]
+"hosted.py" = ["hosted_cleanup.py"]
 "tests" = ["corpse_reap.py", "hosted.py", "hosted_cleanup.py"]

@@ -122,19 +122,15 @@ CLOCKS: dict[str, Clock] = {
         lambda: unit.UNIT_BUNDLE_MAX_TTL_S,
         "the longest lifetime `issue-unit` seals into a unit capability bundle",
     ),
-    # --- agent-lease family (values in base/deploy/progress_timeout.py) ---
-    "AGENT_LEASE_TTL_S": Clock(
-        "agent-lease",
-        lambda: deploy.AGENT_LEASE_TTL_S,
-        "agents_meta.lease_expires_at TTL (crash-reclaim bound)",
-    ),
-    "AGENT_LEASE_RENEW_INTERVAL_S": Clock(
-        "agent-lease",
-        lambda: deploy.AGENT_LEASE_RENEW_INTERVAL_S,
-        "the agent host's ownership beat: how often it renews hosted agent leases",
+    # meiva:note
+    # --- agent-host beat family (values in base/deploy/progress_timeout.py) ---
+    "AGENT_HOST_BEAT_INTERVAL_S": Clock(
+        "agent-host-beat",
+        lambda: deploy.AGENT_HOST_BEAT_INTERVAL_S,
+        "the agent host's ownership beat: how often it reports liveness and reaps corpses",
     ),
     "CORPSE_REAP_GRACE_S": Clock(
-        "agent-lease",
+        "agent-host-beat",
         lambda: deploy.CORPSE_REAP_GRACE_S,
         "how long a crash-marked idling row may sit dead before the corpse "
         "reaper stamps it terminated ('reaper')",
@@ -182,11 +178,6 @@ CLOCKS: dict[str, Clock] = {
         lambda: stop.HOST_STOP_CEILING_S,
         "the agent-host's whole SIGTERM exit; root's TERM window for the unit derives from it",
     ),
-    "RELEASE_OWNER_TIMEOUT_S": Clock(
-        "stop",
-        lambda: stop.RELEASE_OWNER_TIMEOUT_S,
-        "how long the agent-host's stop waits for its hosted ownership release",
-    ),
     "STOP_MARGIN_S": Clock(
         "stop",
         lambda: stop.STOP_MARGIN_S,
@@ -196,15 +187,8 @@ CLOCKS: dict[str, Clock] = {
 
 
 CONSTRAINTS: list[Constraint] = [
-    # --- deploy family and agent-lease family ---
-    Constraint(
-        "<",
-        "AGENT_LEASE_TTL_S",
-        "CORPSE_REAP_GRACE_S",
-        "a crash-marked corpse must first decay offline (its lease stops being "
-        "renewed) before the reaper terminates it — the grace window sits "
-        "outside the lease TTL so the visible sequence stays offline-then-dead",
-    ),
+    # meiva:note
+    # --- deploy family ---
     Constraint(
         "<",
         "GATEWAY_PREFLIGHT_BUDGET_S",
@@ -240,22 +224,13 @@ CONSTRAINTS: list[Constraint] = [
         "the schedule-silence alert must outlive a legitimate rollout's "
         "no-progress window, so normal stop-the-world service churn stays quiet",
     ),
-    # --- agent-lease family ---
-    Constraint(
-        ">=",
-        "AGENT_LEASE_TTL_S",
-        "10 * AGENT_LEASE_RENEW_INTERVAL_S",
-        "the lease must outlive at least ten missed renewal beats, so a transient "
-        "renewal blip never reads as death against the reaper cadence",
-    ),
     Constraint(
         "<",
-        "HOST_GRACEFUL_EXIT_DRAIN_S + 2 * CANCEL_UNWIND_TIMEOUT_S + CLOCK_READ_TIMEOUT_S "
-        "+ RELEASE_OWNER_TIMEOUT_S",
+        "HOST_GRACEFUL_EXIT_DRAIN_S + 2 * CANCEL_UNWIND_TIMEOUT_S + CLOCK_READ_TIMEOUT_S",
         "HOST_STOP_CEILING_S",
-        "a drain that times out still has the scheduler's cancel unwind and clock read, the "
-        "resource join and the ownership release inside the host's stop ceiling, with room "
-        "left for the runtime, pool and health-server closes that carry no bound of their own",
+        "a drain that times out still has the scheduler's cancel unwind and clock read and the "
+        "resource join inside the host's stop ceiling, with room left for the runtime, pool "
+        "and health-server closes that carry no bound of their own",
     ),
     Constraint(
         "<",

@@ -37,9 +37,7 @@ _AGENT = {
     "spawner": "user",
     "fork_source_agent_id": None,
     "status": "idling",
-    "pid": 100,
     "spawned_at": "2026-08-07T00:00:00Z",
-    "started_at": "2026-08-07T00:00:00Z",
     "last_active_at": "2026-08-07T00:00:00Z",
     "last_inbound_at": "2026-08-07T00:00:00Z",
     "label": "layout-test",
@@ -49,7 +47,6 @@ _AGENT = {
     "observation": {
         "machine_probe_at": None,
         "machine_probe_valid_until": None,
-        "runtime_lease_expires_at": None,
         "runtime_owner": "unknown",
     },
     "heartbeat_paused_until": None,
@@ -184,7 +181,6 @@ API_STUBS: dict[str, object] = {
         },
         "notice": None,
         "spawned_at": "2026-09-17T00:00:00Z",
-        "started_at": "2026-09-17T00:00:05Z",
     },
     "/api/agents/1/inspect/statistics": {
         "agent_id": 1,

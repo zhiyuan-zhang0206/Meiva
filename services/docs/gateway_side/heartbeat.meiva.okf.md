@@ -50,7 +50,7 @@ Gateway's idle agent check scheduler — every `MEIVA_HEARTBEAT_INTERVAL_SECONDS
 - Idle-minute observations keep the PostgreSQL clock and cross the SQL boundary as double precision, matching the float slack used by next-cycle check-in reconciliation.
 - heartbeat message tag = `NoteTag.HEARTBEAT`, agents can distinguish heartbeats from other wake-ups by this
 
-The liveness pass retains machine reachability and agent lease observation.
+The liveness pass derives each agent's state from machine reachability.
 It runs once at start, then every `LIVENESS_PASS_INTERVAL_S`, and it also records
 one `machine_status_snapshot` row for every unpaused agent-runner (rollout targets
 and staging/stopped hosts alike); judging and the failure signal stay with the rollout targets.

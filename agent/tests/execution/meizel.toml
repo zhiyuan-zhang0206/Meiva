@@ -16,7 +16,6 @@
 "test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_EXEC_REQUEST_FILE" = 1
 "test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_EXEC_RESULT_FILE" = 1
 "test_exec_child.py#patch.dict os.environ" = 1
-"test_resource_admission.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
 "child_external_cli.py#assignment agent.extensions.plugin_state_codec.load_snapshot" = 1

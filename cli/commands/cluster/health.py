@@ -105,17 +105,19 @@ def data_plane_abnormal(*, database_factory: DatabaseFactory) -> bool:
     return False
 
 
+# meiva:note
+# Check that at least `min_agents` agents are in running/idling status on machines
+# not judged offline.
+#
+# Queries the central DB directly — the probe runs on the gateway machine
+# and has DB access. A cluster with zero live agents is effectively dead.
 def agent_population(min_agents: int, *, database_factory: DatabaseFactory) -> bool:
-    """Check that at least `min_agents` agents are in running/idling status.
-
-    Queries the central DB directly — the probe runs on the gateway machine
-    and has DB access. A cluster with zero live agents is effectively dead."""
 
     try:
         with database_factory().connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
-                "AND lease_expires_at > now()"
+                "AND liveness_state <> 'offline'"
             )
             row = cur.fetchone()
             if row is None:
@@ -141,7 +143,7 @@ def agent_population_failure_class(
         with database_factory().connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
-                "AND lease_expires_at > now()"
+                "AND liveness_state <> 'offline'"
             )
             row = cur.fetchone()
     except (psycopg.Error, OSError):

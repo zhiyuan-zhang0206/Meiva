@@ -9,5 +9,4 @@
     "test_lazy_child_telemetry.py",
 ]
 "meiva.tests.fixtures.sdk" = [
-    "test_resource_admission.py",
 ]

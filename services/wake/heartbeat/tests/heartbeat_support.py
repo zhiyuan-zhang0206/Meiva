@@ -49,8 +49,7 @@ def make_idle(
     )
     with db.cursor() as cur:
         cur.execute(
-            "UPDATE agents_meta SET status = %s, "
-            "lease_expires_at = now() + make_interval(secs => 600) WHERE id = %s",
+            "UPDATE agents_meta SET status = %s WHERE id = %s",
             (status, aid),
         )
         cur.execute(

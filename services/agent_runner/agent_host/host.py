@@ -19,7 +19,7 @@ import psycopg
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from pydantic import BaseModel
 
 from agent.graph.hooks.compact import CompactionFailedError
@@ -31,12 +31,10 @@ from agent.impersonation import (
     supervise_relay,
 )
 from agent.impersonation_handoff import flush_checkpoint
-from agent.ownership import hosted
 from agent.ownership.corpse_reap import reap_crash_corpses
 from agent.ownership.hosted import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
-    release_hosted_owner,
     settle_hosted_runtime,
 )
 from agent.startup import consume_claimed_inbounds
@@ -66,7 +64,6 @@ from base.lm.harness.registration import RegistrationStore
 from base.lm.harness.registry import FileSessionRegistry
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.stop_timing import RELEASE_OWNER_TIMEOUT_S
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
@@ -231,22 +228,13 @@ class AgentHost:
             return
         self.turn_fingerprints[agent_id] = stored.fingerprint
 
-        if await maintenance_receipts.run_held(
-            agent_id,
-            stored.status,
-            partial(
-                self._run_held_controls,
-            ),
-        ):
+        if await maintenance_receipts.run_held(agent_id, self._run_held_controls):
             return
 
         # An active external lease owns decisions; no native graph or plugin
         # initialization may start on a dispatcher wake or a host restart.
         if await active_lease(self._control_pool, agent_id):
-            await self._run_held_controls(
-                agent_id,
-                stored.status,
-            )
+            await self._run_held_controls(agent_id)
             return
 
         async with self.admission.admit(agent_id):
@@ -277,12 +265,11 @@ class AgentHost:
                 self._machine,
                 self._owner,
                 db=self._db,
-                expected_from=stored.status,
             )
             if incarnation is None:
                 logger.info(
                     "hosted turn for agent {agent_id} not started — row left {status} "
-                    "(no admission granted: refused, held or superseded); skipping",
+                    "(no admission granted: terminated, held or placed elsewhere); skipping",
                     agent_id=agent_id,
                     status=stored.status,
                 )
@@ -360,7 +347,7 @@ class AgentHost:
                     outcome,
                 )
 
-    async def _run_held_controls(self, agent_id: int, status: str) -> None:
+    async def _run_held_controls(self, agent_id: int) -> None:
         """Maintain ownership and apply admin intent without touching the graph."""
 
         incarnation = await admit_hosted_runtime(
@@ -369,7 +356,6 @@ class AgentHost:
             self._machine,
             self._owner,
             db=self._db,
-            expected_from=status,
         )
         if incarnation is None:
             return
@@ -685,33 +671,23 @@ class AgentHost:
         await close_host_resources(
             self._resource_service,
             self._clients,
-            lambda: release_hosted_owner(
-                self._control_pool, self._machine, self._owner, self._in_flight
-            ),
             close_runtimes=self._close_runtimes,
             resource_deadline=resource_deadline,
-            release_timeout=RELEASE_OWNER_TIMEOUT_S,
         )
 
-    async def renew_ownership(self) -> None:
-        """Renew healthy leases before reporting and reaping crash corpses."""
-        await hosted.renew_hosted_owner(self._control_pool, self._machine, self._owner)
-        try:
-            await hosted.settle_stale_running_rows(
-                self._control_pool, self._machine, exclude_owner=self._owner
-            )
-        except Exception:
-            logger.exception(
-                "stale-running settle failed — retrying next beat",
-                event="host_stale_running_settle_failed",
-            )
+    # meiva:note
+    # Terminate this machine's crash corpses whose grace window has elapsed.
+    async def reap_corpses(self) -> None:
         try:
             await reap_crash_corpses(
                 self._control_pool,
                 self._machine,
-                self._owner,
                 bus=self._bus,
             )
+        except (psycopg.OperationalError, PoolTimeout):
+            # meiva:note
+            # The beat counts a database that stays unreachable and exits the host.
+            raise
         except Exception:
             logger.exception(
                 "corpse reap failed — retrying next beat",

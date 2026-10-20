@@ -135,7 +135,6 @@ async def prepare_graph(
         agent_id,
         machine,
         uuid4(),
-        expected_from="idling",
         db=Database.from_settings(gate=database_gate),
     )
     assert owner is not None

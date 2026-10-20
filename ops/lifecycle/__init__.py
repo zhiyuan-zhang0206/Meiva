@@ -37,10 +37,7 @@ from ops.agents import (
     get_agent_status,
     resurrect_agent,
 )
-from ops.agents.resurrection_retry import (
-    report_auto_resurrect_failure,
-    resurrect_refusal_reason,
-)
+from ops.agents.resurrection_retry import report_auto_resurrect_failure
 from ops.agents.wake import ResurrectTriggerStaleError
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import kill_agent_shells
@@ -125,7 +122,7 @@ async def terminate_agent_op(
     db_pool: ConnectionPool,
 ) -> TerminateAgentResponse:
     if body.force:
-        _old_status, pid, killed_page_names, _command_id, cutoff = await asyncio.to_thread(
+        _old_status, killed_page_names, _command_id, cutoff = await asyncio.to_thread(
             terminate_force_blocking, db, bus, agent_id, body, db_pool
         )
         await cancel_hosted_turn_best_effort(agent_id)
@@ -133,10 +130,9 @@ async def terminate_agent_op(
         for page_name in killed_page_names:
             await publish_page_closed(bus, agent_id, page_name)
         _log.info(
-            "[gateway] agent %s force requested by %s (pid=%s)",
+            "[gateway] agent %s force requested by %s",
             agent_id,
             body.source,
-            pid,
         )
         # meiva:note
         # The row is terminated; cancelling the running turn is best effort.
@@ -255,9 +251,9 @@ def terminate_force_blocking(
     agent_id: int,
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
-) -> tuple[AgentStatus, int | None, list[str], int, int]:
+) -> tuple[AgentStatus, list[str], int, int]:
     """Commit the force fence before publishing its wake and lifecycle hint."""
-    old_status, pid, killed_page_names, inbound_id, cutoff = force_terminate_transaction(
+    old_status, killed_page_names, inbound_id, cutoff = force_terminate_transaction(
         agent_id,
         db_pool,
         source=body.source,
@@ -266,7 +262,7 @@ def terminate_force_blocking(
     )
     publish_force_terminate_inbound(db, bus, agent_id, inbound_id, body.source)
     publish_agent_updated_sync(bus, agent_id)
-    return old_status, pid, killed_page_names, inbound_id, cutoff
+    return old_status, killed_page_names, inbound_id, cutoff
 
 
 def _terminate_graceful_blocking(
@@ -405,10 +401,6 @@ async def resurrect_if_terminated(
             exc,
         )
     except (ResurrectError, MachinePaused) as exc:
-        report_auto_resurrect_failure(agent_id, exc)
-    except cluster_rpc.ClusterOpFailed as exc:
-        if resurrect_refusal_reason(exc) is None:
-            raise
         report_auto_resurrect_failure(agent_id, exc)
     return status
 
