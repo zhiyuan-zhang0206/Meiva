@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from base.agents.birth.harness import LAUNCHABLE_HARNESSES
-from base.api_contracts.agent_contract import Harness
+from base.api_contracts.agent_contract import HARNESS_BILLING, Harness
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.db import Database
@@ -74,6 +74,7 @@ def availability_rows(probed: HarnessProbeResult) -> list[HarnessAvailability]:
             status=row.status,
             reason=row.reason,
             launchable=launchable(row),
+            billing=HARNESS_BILLING[row.harness],
         )
         for row in probed.harnesses
     ]

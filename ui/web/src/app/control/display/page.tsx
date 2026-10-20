@@ -23,6 +23,7 @@ import {
   Globe,
   History,
   Languages,
+  Layers,
   MessageSquareText,
   MoveHorizontal,
   Palette,
@@ -105,7 +106,20 @@ export default function DisplaySettingsPage() {
       : 1;
 
   const hiddenModels: string[] = (settings["models.hidden"] as string[] | undefined) ?? [];
-  const modelGroups = groupedModels(modelsData);
+  // meiva:note
+  // A provider switch turns its whole family off without touching the per-model
+  // rows: the models keep the state the user gave them, and while the provider is
+  // off those rows are not editable (user 2026-10-20). The spawn picker reads the
+  // same two lists, so an off provider contributes no models there either.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  const hiddenProviders: string[] = (settings["models.hidden_providers"] as string[] | undefined) ?? [];
+  // meiva:note
+  // A superseded model is not a toggle: the spawn picker already refuses it, so a
+  // switch here would change nothing a spawn would read (user 2026-10-20: entries
+  // that occupy space and do nothing). It is dropped from the list rather than
+  // shown disabled with an explanation.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  const modelGroups = groupedModels(modelsData, (m) => !isSuperseded(modelsData, m));
 
   return (
     <div className="space-y-6">
@@ -336,36 +350,41 @@ export default function DisplaySettingsPage() {
       </SettingsSection>
 
       <SettingsSection id="display-model-picker" title="Model picker">
-        {modelGroups.map(([provider, models]) => (
+        {modelGroups.map(([provider, models]) => {
+          const providerOff = hiddenProviders.includes(provider);
+          return (
           <Fragment key={provider}>
-            <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70 bg-muted/30">
-              {providerLabel(provider)}
-            </div>
+            <ToggleRow
+              icon={Layers}
+              label={providerLabel(provider)}
+              description={`All ${models.length} model${models.length === 1 ? "" : "s"} come from this provider — switch it off to take the family out of the spawn picker at once`}
+              value={!providerOff}
+              onChange={(on) =>
+                setSetting(
+                  "models.hidden_providers",
+                  on
+                    ? hiddenProviders.filter((p) => p !== provider)
+                    : [...hiddenProviders, provider],
+                )
+              }
+            />
             {models.map((modelName) => {
               const hidden = hiddenModels.includes(modelName);
-              const info = modelsData?.models[modelName];
-              const supersededBy = info?.superseded_by ?? null;
-              const superseded = isSuperseded(modelsData, modelName);
-              const p = info?.pricing;
+              const p = modelsData?.models[modelName]?.pricing;
               return (
                 <ToggleRow
                   key={modelName}
                   icon={Eye}
                   label={modelName}
                   description={
-                    supersededBy ? (
-                      <span className="italic">
-                        superseded by {supersededBy} — kept out of the spawn picker; agents
-                        can still be switched to it through settings/config
-                      </span>
-                    ) : p ? (
+                    p ? (
                       <span className="tabular-nums">
                         ${p.input.toFixed(2)} / ${p.cache_read.toFixed(2)} / ${p.output.toFixed(2)}
                       </span>
                     ) : null
                   }
                   value={!hidden}
-                  disabled={superseded}
+                  disabled={providerOff}
                   onChange={(v) => {
                     const next = v
                       ? hiddenModels.filter((m) => m !== modelName)
@@ -376,7 +395,8 @@ export default function DisplaySettingsPage() {
               );
             })}
           </Fragment>
-        ))}
+          );
+        })}
       </SettingsSection>
     </div>
   );

@@ -20,6 +20,14 @@ four legal values: `meiva` (the built-in runtime), `claude_code`, `codex` and
 `tests/contracts/test_db_check_enum_sync.py`; adding a harness means editing the
 enum, the column and its CHECK together.
 
+## How a harness bills
+
+`HarnessBilling` (`api` / `subscription`) sits beside the enum; `HARNESS_BILLING`
+maps every harness to one and raises at import on a gap. The built-in runtime is
+metered, the external CLIs are subscriptions. The harnesses route carries it per
+row, and the spawn picker shows rates only for `api`: a subscription pays nothing
+per token, and one model costs differently per loop (2026-10-20).
+
 `agents_meta.harness` is `NOT NULL DEFAULT 'meiva'`. Every row that predates the
 column was born on the built-in runtime, which is exactly what the default and
 migration `20261019T092549_agents-meta-harness.sql` record.

@@ -412,7 +412,7 @@ describe("DisplaySettingsPage", () => {
     expect(screen.getByText("claude-haiku-4-5-20251001")).toBeTruthy();
   });
 
-  it("explains and locks superseded model visibility while normal models stay enabled", async () => {
+  it("drops a superseded model instead of showing a switch that changes nothing", async () => {
     vi.mocked(api.getModels).mockResolvedValue({
       providers: { deepseek: ["deepseek-v4-pro", "deepseek-flash"] },
       models: {
@@ -433,9 +433,14 @@ describe("DisplaySettingsPage", () => {
     });
     renderPage();
 
-    const supersededToggle = await screen.findByLabelText<HTMLButtonElement>("deepseek-v4-pro");
-    expect(screen.getByText(/superseded by deepseek-flash/)).toBeTruthy();
-    expect(supersededToggle.disabled).toBe(true);
+    // meiva:note
+    // A superseded model has no toggle to offer: the spawn picker refuses it, so
+    // the switch would change nothing a spawn reads (user 2026-10-20). The row is
+    // absent, not disabled-with-an-explanation, and the live model keeps working.
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    await screen.findByLabelText<HTMLButtonElement>("deepseek-flash");
+    expect(screen.queryByLabelText("deepseek-v4-pro")).toBeNull();
+    expect(screen.queryByText(/superseded by/)).toBeNull();
     expect(screen.getByLabelText<HTMLButtonElement>("deepseek-flash").disabled).toBe(false);
   });
 

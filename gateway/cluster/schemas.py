@@ -29,7 +29,7 @@ from pydantic import (
     PositiveInt,
 )
 
-from base.api_contracts.agent_contract import Harness, HarnessStatus
+from base.api_contracts.agent_contract import Harness, HarnessBilling, HarnessStatus
 from base.api_contracts.status import MachineStatus
 from gateway.schemas.stats import StatsWindowHours
 
@@ -46,6 +46,11 @@ class HarnessAvailability(BaseModel):
     status: HarnessStatus
     reason: str
     launchable: bool
+    # meiva:note
+    # How this harness bills: `api` is metered per token and its rates are worth
+    # showing while a model is chosen, `subscription` is not (user 2026-10-20).
+    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
+    billing: HarnessBilling
 
 
 class ServiceItem(BaseModel):
