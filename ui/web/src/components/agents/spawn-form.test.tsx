@@ -102,6 +102,7 @@ const modelsWithEffort = (): ModelsResponse => ({
       context_window: 128_000,
       reasoning_effort_options: ["high", "max"],
       reasoning_effort_default: "max",
+      pricing: { input: 1.65, cache_read: 0.14, output: 6.6 },
     },
     "claude-opus-4-8": {
       provider: "claude",
@@ -141,8 +142,10 @@ const harnessAllAvailable = () =>
     status: "available" as const,
     reason: "",
     launchable: true,
+    billing: harness === "meiva" ? ("api" as const) : ("subscription" as const),
   }));
 
+const MACHINE_COLUMN = "Machine";
 const HARNESS_COLUMN = "Harness";
 const MODEL_COLUMN = "Model";
 const EFFORT_COLUMN = "Effort";
@@ -333,14 +336,68 @@ describe("spawn table", () => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
     vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
     vi.mocked(api.getHarnessAvailability).mockResolvedValue([
-      { harness: "meiva", status: "available", reason: "", launchable: true },
-      { harness: "claude_code", status: "unavailable", reason: "not signed in", launchable: false },
+      { harness: "meiva", status: "available", reason: "", launchable: true, billing: "api" },
+      { harness: "claude_code", status: "unavailable", reason: "not signed in", launchable: false, billing: "subscription" },
     ]);
     wrap();
     const form = await table();
     await waitFor(() => {
       expect(row(form, HARNESS_COLUMN, "Claude Code").hasAttribute("disabled")).toBe(true);
     });
+  });
+
+  it("switching to a machine that cannot start the chosen harness falls back to one it can", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(
+      statusWith([
+        { name: "cloud", online: true },
+        { name: "a-host", online: true },
+        { name: "c-host", online: true },
+      ]),
+    );
+    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
+    vi.mocked(api.getHarnessAvailability).mockImplementation((machine: string) =>
+      Promise.resolve(
+        machine === "c-host"
+          ? [{ harness: "meiva", status: "available", reason: "", launchable: true, billing: "api" },
+             { harness: "claude_code", status: "unavailable", reason: "missing", launchable: false, billing: "subscription" }]
+          : harnessAllAvailable(),
+      ),
+    );
+    const { onSpawn } = wrap();
+    const form = await table();
+    pick(form, HARNESS_COLUMN, "Claude Code");
+    pick(form, MACHINE_COLUMN, "c-host");
+    await waitFor(() => expect(selected(form, HARNESS_COLUMN, "Meiva")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    expect(onSpawn).toHaveBeenCalledWith(expect.objectContaining({ machine: "c-host" }));
+    const opts = onSpawn.mock.calls[0][0] as { harness?: string };
+    expect(opts.harness).toBeUndefined();
+  });
+
+  it("a metered harness shows three rates per model, a subscription one shows none", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
+    wrap();
+    let form = await table();
+    // meiva:note
+    // Rates are the decision only when the harness meters them (user 2026-10-20):
+    // input / cache read / output for the built-in runtime, nothing for a
+    // subscription harness.
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    expect(within(column(form, MODEL_COLUMN)).getByText(/\$[\d.]+ \/ \$[\d.]+ \/ \$[\d.]+/)).toBeTruthy();
+    pick(form, HARNESS_COLUMN, "Claude Code");
+    form = await table();
+    expect(within(column(form, MODEL_COLUMN)).queryByText(/\$[\d.]+ \/ \$[\d.]+ \/ \$[\d.]+/)).toBeNull();
+  });
+
+  it("a provider switched off in Control contributes no models", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
+    setMockSetting("models.hidden_providers", ["claude"]);
+    wrap();
+    const form = await table();
+    expect(within(column(form, MODEL_COLUMN)).queryByText("claude-opus-4-8")).toBeNull();
+    expect(within(column(form, MODEL_COLUMN)).getByText("deepseek-v4-pro")).toBeTruthy();
   });
 
   it("selecting an effort sends it", async () => {
@@ -401,7 +458,7 @@ describe("spawn table", () => {
     expect(within(models).queryByText("deepseek-legacy")).toBeNull();
   });
 
-  it("several spawnable hosts are listed in the footer, a down one disabled", async () => {
+  it("lists every agent-runner machine, a down host disabled, and spawns on the chosen one", async () => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(
       statusWith([
         { name: "cloud", online: true },
@@ -412,8 +469,15 @@ describe("spawn table", () => {
     vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
     const { onSpawn } = wrap();
     const form = await table();
-    expect(within(form).queryByRole("button", { name: "Spawn on a-host" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /^a-host/ }));
+    // meiva:note
+    // The machine is the first column, so several hosts are rows rather than a
+    // footer list; the down host keeps its row, disabled and titled with the
+    // reason (user 2026-10-20).
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    expect(selected(form, MACHINE_COLUMN, "a-host")).toBe(true);
+    expect(row(form, MACHINE_COLUMN, /b-host/).hasAttribute("disabled")).toBe(true);
+    pick(form, MACHINE_COLUMN, "a-host");
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     expect(onSpawn).toHaveBeenCalledWith(expect.objectContaining({ machine: "a-host" }));
   });
 });

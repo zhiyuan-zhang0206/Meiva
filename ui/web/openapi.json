@@ -11982,6 +11982,9 @@
           "launchable": {
             "type": "boolean",
             "title": "Launchable"
+          },
+          "billing": {
+            "$ref": "#/components/schemas/HarnessBilling"
           }
         },
         "type": "object",
@@ -11989,9 +11992,18 @@
           "harness",
           "status",
           "reason",
-          "launchable"
+          "launchable",
+          "billing"
         ],
         "title": "HarnessAvailability"
+      },
+      "HarnessBilling": {
+        "type": "string",
+        "enum": [
+          "api",
+          "subscription"
+        ],
+        "title": "HarnessBilling"
       },
       "HeartbeatInfo": {
         "properties": {

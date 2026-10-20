@@ -18,7 +18,7 @@ function row(
   launchable: boolean,
   reason = "",
 ): HarnessAvailability {
-  return { harness, status, reason, launchable };
+  return { harness, status, reason, launchable, billing: harness === "meiva" ? "api" : "subscription" };
 }
 
 describe("harnessRows", () => {

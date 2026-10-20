@@ -93,6 +93,7 @@ export interface UseTimelineResult {
   /** The authoritative read failed; retained rows remain available. */
   error: Error | null;
   isFetching: boolean;
+  loadingNewer: boolean;
   retryTimeline: () => void;
   /** Whether older items exist before the oldest loaded one — the timeline
    *   shows a scroll-up affordance only when true. */
@@ -494,6 +495,7 @@ export function useTimeline(
     isRefetching: timelineQuery.isRefetching || isReconciling,
     error: timelineQuery.error,
     isFetching: timelineQuery.isFetching || isReconciling,
+    loadingNewer: selected && isReconciling,
     retryTimeline,
     hasMoreOlder: selected ? hasMoreOlder : retained?.hasMoreOlder ?? timelineQuery.data?.has_more ?? false,
     loadingOlder: selected && loadingOlder,

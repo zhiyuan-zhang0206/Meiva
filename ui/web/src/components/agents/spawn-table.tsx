@@ -1,10 +1,12 @@
 "use client";
 
 // meiva:note
-// The spawn form is one table: harness, then the models that harness runs, then
-// the efforts that model offers. Each column narrows the next, and the row the
-// user last chose is marked on entry, so opening the form answers "what will the
-// next agent be born on" before it asks anything (user 2026-10-20).
+// The spawn form is one table, read left to right: the machine, then the
+// harnesses that machine can start, then the models that harness runs, then the
+// efforts that model offers. Each column narrows the next, and the row the user
+// last chose is marked on entry, so opening the form answers "what will the next
+// agent be born on, and where" before it asks anything (user 2026-10-20: the
+// machine comes first — a harness is only available *on* a machine).
 // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
 
 import { Check } from "lucide-react";
@@ -21,12 +23,25 @@ import {
   type HarnessAvailability,
 } from "@/lib/harness/harness";
 
-const COLUMNS = "grid grid-cols-[8.5rem_minmax(0,1fr)_5rem] text-xs";
+const COLUMNS = "grid grid-cols-[7rem_7.5rem_minmax(0,1fr)_4.5rem] border-b border-border text-xs";
+const HEADER = "border-b border-r border-border px-2 py-1.5 font-medium text-muted-foreground";
 const CELL = "flex w-full items-center gap-1 rounded-sm px-2 py-1 text-left";
 const SELECTED = "bg-foreground/10 font-medium text-foreground";
 const IDLE = "text-muted-foreground hover:bg-accent hover:text-foreground";
 
+// meiva:note
+// One machine row: the host the agent would be born on, and why it cannot be
+// picked when it cannot.
+// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+export interface SpawnMachine {
+  name: string;
+  reason?: string;
+}
+
 export interface SpawnTableProps {
+  machines: SpawnMachine[];
+  machine: string | undefined;
+  onMachine: (machine: string) => void;
   harnessRows: HarnessAvailability[];
   harness: Harness;
   onHarness: (harness: Harness) => void;
@@ -37,9 +52,17 @@ export interface SpawnTableProps {
   efforts: string[];
   effort: string | undefined;
   onEffort: (effort: string) => void;
+  // meiva:note
+  // Whether this harness bills per token: a subscription pays nothing per token,
+  // so its rates are noise beside the model name (user 2026-10-20).
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  prices: boolean;
 }
 
 export function SpawnTable({
+  machines,
+  machine,
+  onMachine,
   harnessRows,
   harness,
   onHarness,
@@ -50,6 +73,7 @@ export function SpawnTable({
   efforts,
   effort,
   onEffort,
+  prices,
 }: SpawnTableProps) {
   const t = useTranslations("spawn");
   // meiva:note
@@ -83,9 +107,32 @@ export function SpawnTable({
   }
   return (
     <div className={COLUMNS} data-testid="spawn-table">
-      <div className="border-b border-border px-2 py-1.5 font-medium text-muted-foreground">{t("harness")}</div>
-      <div className="border-b border-border px-2 py-1.5 font-medium text-muted-foreground">{t("model")}</div>
-      <div className="border-b border-border px-2 py-1.5 font-medium text-muted-foreground">{t("reasoningEffort")}</div>
+      <div className={HEADER}>{t("machine")}</div>
+      <div className={HEADER}>{t("harness")}</div>
+      <div className={HEADER}>{t("model")}</div>
+      <div className={cn(HEADER, "border-r-0")}>{t("reasoningEffort")}</div>
+
+      <ul aria-label={t("machine")} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1 pb-2">
+        {machines.map((row) => {
+          const selected = row.name === machine;
+          const blocked = row.reason !== undefined;
+          return (
+            <li key={row.name}>
+              <button
+                type="button"
+                disabled={blocked}
+                aria-pressed={selected}
+                title={row.reason ?? row.name}
+                onClick={() => onMachine(row.name)}
+                className={cn(CELL, selected ? SELECTED : IDLE, "disabled:opacity-50 disabled:hover:bg-transparent")}
+              >
+                <span className={cn(MIN_W_0, FLEX_1, "truncate")}>{row.name}</span>
+                {selected && <Check className="ml-1 size-3 shrink-0" />}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
 
       <ul aria-label={t("harness")} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1 pb-2">
         {harnessRows.map((row) => {
@@ -116,7 +163,7 @@ export function SpawnTable({
             <ul>
               {providerModels.map((candidate) => {
                 const selected = candidate === model;
-                const price = models?.[candidate]?.pricing?.input;
+                const price = models?.[candidate]?.pricing;
                 return (
                   <li key={candidate}>
                     <button
@@ -127,9 +174,9 @@ export function SpawnTable({
                       className={cn(CELL, selected ? SELECTED : IDLE)}
                     >
                       <span className={cn(MIN_W_0, FLEX_1, "truncate")}>{candidate}</span>
-                      {price !== undefined && (
+                      {prices && price != null && (
                         <span className="shrink-0 pl-2 text-[10px] tabular-nums text-muted-foreground">
-                          {formatModelPrice(price)}
+                          {formatModelPrice(price.input)} / {formatModelPrice(price.cache_read)} / {formatModelPrice(price.output)}
                         </span>
                       )}
                       {selected && <Check className="ml-1 size-3 shrink-0" />}

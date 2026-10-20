@@ -65,9 +65,10 @@ and the matching GitHub Releases.
   six seconds at 4x CPU throttle (profile: native layout/style/paint, not JavaScript). Smaller
   graphs keep the live settle
   ([Fleet view](ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md)).
-- One loading ring is ever on screen in the conversation, and it is whole: a
-  background refetch no longer spins the scroll-to-bottom button while the pull
-  strip is already spinning for an older-history load, and the pull ring scales
+- The scroll-to-bottom button's ring is the tail read that follows a switch or a
+  reconnect (`loadingNewer`), not any in-flight fetch: a background refetch no
+  longer spins it for nothing, and it can no longer overlap the pull strip's ring
+  for an older-history load. The pull ring scales
   with the revealed strip instead of being sliced into a bar by its clipping.
   The create popover's footer says "Spawn" when there is a single spawnable
   host — the machine name is a deployment detail, not a label

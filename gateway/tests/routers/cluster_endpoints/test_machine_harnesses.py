@@ -119,6 +119,17 @@ def test_rows_carry_status_and_reason_through() -> None:
     )
     assert [row.status for row in probed] == ["available", "available", "unknown", "unavailable"]
     assert [row.reason for row in probed] == [row["reason"] for row in _WIRE["harnesses"]]
+    # meiva:note
+    # Billing travels with the harness, not with the model or the route: the
+    # built-in runtime is metered, the external CLIs run on subscriptions, and the
+    # spawn picker shows rates only for the metered one (user 2026-10-20).
+    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
+    assert [row.billing for row in probed] == [
+        "api",
+        "subscription",
+        "subscription",
+        "subscription",
+    ]
 
 
 @pytest.mark.asyncio
@@ -184,7 +195,13 @@ def test_route_serves_the_cached_rows(set_machine_identity: MachineIdentitySette
         resp = client.get("/api/cluster/machines/gw-only/harnesses")
     assert resp.status_code == 200, resp.text
     assert resp.json() == [
-        {"harness": "meiva", "status": "available", "reason": "seeded", "launchable": True}
+        {
+            "harness": "meiva",
+            "status": "available",
+            "reason": "seeded",
+            "launchable": True,
+            "billing": "api",
+        }
     ]
 
 

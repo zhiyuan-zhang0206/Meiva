@@ -43,5 +43,11 @@ export function harnessRows(rows: HarnessAvailability[]): HarnessAvailability[] 
     status: harness === DEFAULT_HARNESS ? "available" : "unknown",
     reason: harness === DEFAULT_HARNESS ? "" : "this gateway cannot report harness availability yet",
     launchable: harness === DEFAULT_HARNESS,
+    // meiva:note
+    // A row the gateway did not answer for is never launchable, so its billing
+    // never reaches the price column; the built-in runtime is the one row this
+    // fallback can leave selectable, and it is metered.
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    billing: "api",
   });
 }
