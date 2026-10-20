@@ -117,7 +117,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
               aria-label={inspecting ? tInspector("closeInspector") : tInspector("openInspector")}
               aria-pressed={inspecting}
               onClick={onInspect}
-              className={cn("rounded p-1 hover:bg-accent", inspecting && "bg-foreground/25 text-foreground")}
+              className={cn("rounded p-1 hover:bg-accent", inspecting && "bg-foreground/20 text-foreground")}
             >
               <ScanSearch className="size-3.5" />
             </button>
