@@ -7423,35 +7423,18 @@
         }
       }
     },
-    "/api/tasks": {
+    "/api/tasks/{task_id}": {
       "get": {
-        "summary": "Get Tasks",
-        "description": "Return the task registry, newest first.\n\n`fields=full` (the default) returns the compatibility projection. `fields=summary`\nreturns metadata only, selecting neither task text column. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity\n(updated_at) on the backend, so the task graph's default 24-hour view never\npulls the full registry. A windowed list still carries every kept task's\nout-of-window ancestors flagged ghost=True (see _windowed_tasks); without\na window the full table is returned unchanged.\n\nNo pagination — the task registry is bounded (tasks are created by agents;\nclosed tasks are kept). Order by created_at DESC so the newest tasks\nsurface first in the Task Graph view.",
-        "operationId": "get_tasks_api_tasks_get",
+        "summary": "Get Task",
+        "operationId": "get_task_api_tasks__task_id__get",
         "parameters": [
           {
-            "name": "window",
-            "in": "query",
-            "required": false,
+            "name": "task_id",
+            "in": "path",
+            "required": true,
             "schema": {
-              "type": "string",
-              "pattern": "^(24h|7d|30d|all)$",
-              "default": "all",
-              "title": "Window"
-            }
-          },
-          {
-            "name": "fields",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "enum": [
-                "full",
-                "summary"
-              ],
-              "type": "string",
-              "default": "full",
-              "title": "Fields"
+              "type": "integer",
+              "title": "Task Id"
             }
           }
         ],
@@ -7461,7 +7444,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskListResponse"
+                  "$ref": "#/components/schemas/TaskRow"
                 }
               }
             }
@@ -7477,9 +7460,7 @@
             }
           }
         }
-      }
-    },
-    "/api/tasks/{task_id}": {
+      },
       "patch": {
         "summary": "Patch Task",
         "description": "Partially update a task; omitted fields stay unchanged.\n\nstatus, priority, title, description, and results are taken when non-null\n(status must be one of in_progress/done/cancelled and priority one of\nP0..P3 — both are shared enums, so pydantic 422s anything else; a title\ncolliding with another in_progress task's is rejected). owner reassigns to\nanother agent (an explicit null is rejected — a task cannot be released).\nremind_interval_seconds must be a positive number of seconds <= 24h (an explicit\nnull is rejected — reminders cannot be disabled). Any write resets the\nreminder counters, same as the SDK update path. An owner reassignment sends\nthe SDK-equivalent task system notes in the same database transaction.\n\nThe system root task is immutable: any PATCH targeting it is rejected with\n422 (mirrors the SDK update() guard), so the task-tree anchor can never be\nreassigned, completed, cancelled, or otherwise edited.\n\nA required Idempotency-Key commits an immutable response with the write.\nReusing that key with different fields returns 409; replay returns the original\ntask snapshot without another update or wake, even if the task later changes.\n\nA status change to done or cancelled is rejected with 422 while any direct\nchild remains in progress. Close or cancel those children first.",
@@ -7523,6 +7504,62 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TaskRow"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "summary": "Get Tasks",
+        "operationId": "get_tasks_api_tasks_get",
+        "parameters": [
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(24h|7d|30d|all)$",
+              "default": "all",
+              "title": "Window"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "full",
+                "summary",
+                "graph"
+              ],
+              "type": "string",
+              "default": "full",
+              "title": "Fields"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskListResponse"
                 }
               }
             }
@@ -18807,6 +18844,119 @@
         ],
         "title": "TaskAssignmentIn"
       },
+      "TaskGraphRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "owner_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Label"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "remind_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remind Interval Seconds"
+          },
+          "last_reminded_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reminded At"
+          },
+          "reminder_count": {
+            "type": "integer",
+            "title": "Reminder Count",
+            "default": 0
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "ghost": {
+            "type": "boolean",
+            "title": "Ghost",
+            "default": false
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "title",
+          "status",
+          "owner",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "priority",
+          "description"
+        ],
+        "title": "TaskGraphRow"
+      },
       "TaskListResponse": {
         "properties": {
           "tasks": {
@@ -18817,6 +18967,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/TaskSummaryRow"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskGraphRow"
                 }
               ]
             },
