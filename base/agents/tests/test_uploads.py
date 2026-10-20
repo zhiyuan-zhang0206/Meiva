@@ -109,6 +109,8 @@ class TestFetchUploadB64:
         monkeypatch.setattr(
             machine, "gateway_api_base", gateway_api_base_stub("http://gw.test:8000")
         )
+        from base.cluster.machine import gateway_auth_headers
+        from base.cluster.machine.ambient import gateway_access_from_settings
         from base.config import settings
 
         monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
@@ -116,7 +118,11 @@ class TestFetchUploadB64:
         assert mime == "image/png"
         assert base64.standard_b64decode(b64) == raw
         assert seen["url"] == "http://gw.test:8000/api/agents/7/uploads/shot.png"
-        assert seen["headers"] == {"Authorization": "Bearer test-secret"}  # cluster-secret bearer
+        # meiva:note
+        # The fetch authenticates exactly as this process does, so the expectation is what
+        # this process resolves; which credential wins is base.cluster.machine's contract.
+        # meiva:link base/agents/upload_delivery/docs/storage.meiva.okf.md
+        assert seen["headers"] == gateway_auth_headers(gateway_access_from_settings())
 
     def test_non_image_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from base.host.net import http_dial

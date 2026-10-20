@@ -15,7 +15,10 @@ resolved `MEIVA_HOME` identify the receiver, not the physical uploads quota owne
 
 `paths` owns the shared upload URL, path, image MIME, limits and safe-serving
 helpers used by gateway, Ops and inbound image consumers. `agent_upload_dir`
-lives under `Path.home()/Downloads`, independent of `MEIVA_HOME`.
+lives under `Path.home()/Downloads`, independent of `MEIVA_HOME`. Its image fetch
+dials the gateway with the same auth headers as every other agent -> gateway call
+(`base.cluster.machine.gateway_auth_headers`): the delivered machine API token
+when the process carries one, the cluster secret otherwise.
 `storage` uses the shared agent xact gate and counts flat files, legal nested final
 objects and receiving reservations for actual machine/resolved directory. Source
 and copy manifests sharing a physical root count each batch path once. Existing
