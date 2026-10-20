@@ -24,7 +24,7 @@ function pushedEntry(): boolean {
 // The inspector trigger is optional: `onInspect` decides whether the bar renders
 // it at all, and `inspecting` drives its pressed state.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, onInspect, onCollapse }: {
+export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse }: {
   agentId: number;
   document: ToUserDocument | undefined;
   failed: boolean;
@@ -32,6 +32,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   refresh: () => void;
   mobile: boolean;
   inspecting?: boolean;
+  bodyHidden?: boolean;
   onInspect?: () => void;
   onCollapse?: () => void;
 }) {
@@ -74,8 +75,17 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
     return [href, { ...resource, url: `${API_BASE}/api/agents/${agentId}/to-user/resource?${query}${fragment}` }];
   }));
   const byUrl = new Map([...resources.values()].map((resource) => [resource.url, resource]));
+  // meiva:note
+  // `bodyHidden` is inspector mode: the caller renders the inspector below this
+  // bar itself, so this component returns only the bar.
+  // In inspector mode this component renders only its bar and the panel puts the
+  // inspector below it, outside this keyed subtree: the bar is the mode's one
+  // control surface (it names the mode and carries the pressed magnifier that
+  // leaves it), and the inspector must survive an agent switch without a remount
+  // (task #3894).
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   return (
-    <section className={cn(FLEX, MIN_H_0, FLEX_1, FLEX_COL)} aria-label={t("title")}>
+    <section className={cn(FLEX, MIN_H_0, bodyHidden ? "shrink-0" : FLEX_1, FLEX_COL)} aria-label={t("title")}>
       <div data-testid="document-bar" className={cn("shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_WRAP_CLASS, FLEX)}>
         <button title={t("home")} aria-label={t("home")} className="rounded p-1 hover:bg-accent" onClick={() => { if (references.length) show([], "push"); }}>
           <House className="size-3.5" />
@@ -83,7 +93,9 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
         {references.length > 0 && <button title={t("back")} aria-label={t("back")} className="rounded p-1 hover:bg-accent" onClick={goBack}>
           <ArrowLeft className="size-3.5" />
         </button>}
-        {!mobile && <span className="shrink-0 whitespace-nowrap">{t("sharedContext")}</span>}
+        {!mobile && (
+          <span className="shrink-0 whitespace-nowrap">{inspecting ? tInspector("title") : t("sharedContext")}</span>
+        )}
         <div data-testid="document-status" className={cn("shrink-0 items-center gap-1.5", FLEX)}>
           {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at) })}</span>}
           <button title={t("refresh")} aria-label={t("refresh")} onClick={() => { if (references.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
@@ -95,8 +107,8 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
             <button
               type="button"
               data-testid="open-inspector"
-              title={tInspector("openInspector")}
-              aria-label={tInspector("openInspector")}
+              title={inspecting ? tInspector("closeInspector") : tInspector("openInspector")}
+              aria-label={inspecting ? tInspector("closeInspector") : tInspector("openInspector")}
               aria-pressed={inspecting}
               onClick={onInspect}
               className={cn("rounded p-1 hover:bg-accent", inspecting && "bg-accent text-foreground")}
@@ -118,12 +130,14 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
           ) : null}
         </div>
       </div>
-      {error && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}
-      {!content ? (
-        <div className={cn("items-center justify-center px-8 text-center text-sm text-muted-foreground", FLEX, FLEX_1)}>
-          {loading ? t("loading") : error ? t("unavailable") : current?.legacy_html ? t("legacyHtml") : t("empty")}
-        </div>
-      ) : (
+      {bodyHidden ? null : (
+        <>
+          {error && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}
+          {!content ? (
+            <div className={cn("items-center justify-center px-8 text-center text-sm text-muted-foreground", FLEX, FLEX_1)}>
+              {loading ? t("loading") : error ? t("unavailable") : current?.legacy_html ? t("legacyHtml") : t("empty")}
+            </div>
+          ) : (
         <div key={references.join("/")} className={cn("overflow-auto p-5 text-[13px] leading-relaxed", MIN_H_0, FLEX_1)}>
           <ChatMarkdown content={content} resolveUrl={(href) => {
             const resource = resources.get(href);
@@ -145,6 +159,8 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
             },
           }} />
         </div>
+      )}
+        </>
       )}
     </section>
   );

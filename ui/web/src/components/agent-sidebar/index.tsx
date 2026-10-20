@@ -13,6 +13,7 @@ import { api } from "@/lib/transport/api";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { errMsg } from "@/lib/contracts/errors";
 import { useSidebarCollapsed, useSidebarViewMode } from "@/lib/agents/sidebar";
+import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { useStore } from "@/lib/state/store";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 
@@ -36,7 +37,14 @@ export function AgentSidebar(props: Props) {
   // one with CSS media queries). Switch point preserved from the old CSS
   // `md` rule: the rail shows at >= 768px, the drawer below it.
   const { isNarrow } = useBreakpoint();
-  const { collapsed, setCollapsed } = useSidebarCollapsed();
+  const { collapsed: collapsedSetting, setCollapsed } = useSidebarCollapsed();
+  // meiva:note
+  // Inspector mode hides the rail without writing `display.sidebar_collapsed`:
+  // the hide is the mode's, not the user's preference, so leaving the mode must
+  // bring back exactly what was there (user 2026-10-20).
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  const { open: inspectorMode } = useInspectorOpen();
+  const collapsed = collapsedSetting || inspectorMode;
   const { viewMode, setViewMode } = useSidebarViewMode();
   // Show-terminated is a DB-backed user setting (display.show_terminated), the
   // single source of truth shared with the Display settings page — toggling
@@ -105,7 +113,7 @@ export function AgentSidebar(props: Props) {
         showTerminated={showTerminated}
         onToggleTerminated={() => setShowTerminated(!showTerminated)}
         collapsed={collapsed}
-        onToggleCollapsed={() => setCollapsed(!collapsed)}
+        onToggleCollapsed={() => setCollapsed(!collapsedSetting)}
         onSearchOpen={openSearch}
         setCollapsed={setCollapsed}
         viewMode={viewMode}

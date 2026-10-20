@@ -28,6 +28,13 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
   const t = useTranslations("nav");
   const sidebarT = useTranslations("sidebar");
 
+  // meiva:note
+  // While the sidebar is collapsed its restore button belongs to the viewport's
+  // left edge, not to the centred conversation column: the column is capped and
+  // centred, so an in-flow button rode to x=320 of a 1440 viewport and read as
+  // if it belonged to the text (user 2026-10-20). It is pinned to the bar and
+  // the label keeps a matching inset, so the two never collide at narrow widths.
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
   return (
     <header
       className={cn(
@@ -42,11 +49,22 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
         BAR_HEIGHT_CLASS,
       )}
     >
+      {sidebarCollapsed ? (
+        <button
+          onClick={onToggleSidebar}
+          className="hidden md:inline-flex absolute left-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-sidebar-accent shrink-0"
+          aria-label={sidebarT("showSidebar")}
+          aria-pressed={false}
+          data-testid="sidebar-toggle"
+        >
+          <PanelLeft className="size-4" />
+        </button>
+      ) : null}
       <div
         style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
         className={cn("mx-auto h-full w-full items-center justify-between gap-2", FLEX)}
       >
-        <div className={cn("items-center gap-2", FLEX, MIN_W_0, FLEX_1)}>
+        <div className={cn("items-center gap-2", FLEX, MIN_W_0, FLEX_1, sidebarCollapsed && "md:pl-8")}>
           <button
             onClick={onOpenSidebar}
             className="md:hidden p-1 -ml-1 rounded hover:bg-sidebar-accent shrink-0"
@@ -54,17 +72,6 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
           >
             <Menu className="size-5" />
           </button>
-          {sidebarCollapsed ? (
-            <button
-              onClick={onToggleSidebar}
-              className="hidden md:inline-flex p-1 -ml-1 rounded hover:bg-sidebar-accent shrink-0"
-              aria-label={sidebarT("showSidebar")}
-              aria-pressed={false}
-              data-testid="sidebar-toggle"
-            >
-              <PanelLeft className="size-4" />
-            </button>
-          ) : null}
           <span className="truncate">{label}</span>
         </div>
         <div className={cn("items-center gap-2", FLEX)}>{children}</div>

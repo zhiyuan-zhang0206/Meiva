@@ -21,6 +21,10 @@ const SETITEM_ALLOWLIST = new Set<string>([
   "app/control/config/page.tsx", // control.config.collapsedGroups — per-device group disclosure state
   "components/fleet/fleet-view.tsx", // meiva.fleet.mobileTab — current mobile tab
   "lib/agents/use-agents.ts", // meiva.active.agent_id — last-viewed agent
+  // meiva:note
+  // meiva.home.contextPanelOpen: shared-context panel open/closed on this device.
+  // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+  "lib/context/context-panel-open.ts",
 ]);
 
 // Files permitted to configure a react-resizable-panels split layout through
@@ -36,6 +40,7 @@ const AUTOSAVE_ALLOWLIST = new Set<string>([
 const ALLOWED_KEYS = new Set<string>([
   "meiva.fleet.mobileTab",
   "meiva.active.agent_id",
+  "meiva.home.contextPanelOpen",
   "meiva.fleet.split",
   "meiva.memory.graph.split",
   "meiva.run-timeline.split",

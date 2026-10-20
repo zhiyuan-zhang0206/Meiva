@@ -30,6 +30,7 @@ import { api, MessageDeliveryUnknownError } from "@/lib/transport/api";
 import { errMsg } from "@/lib/contracts/errors";
 import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
+import { useContextPanelOpen } from "@/lib/context/context-panel-open";
 import { useSidebarCollapsed } from "@/lib/agents/sidebar";
 import { useStore } from "@/lib/state/store";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
@@ -87,7 +88,6 @@ function HomeShell({ showError }: HomeShellProps) {
     isLoading: sidebarSettingsLoading,
   } = useSidebarCollapsed();
   const sidebarEntryResetDone = useRef(false);
-  const { settings: userSettings, setSetting } = useUserSettings();
 
   useEffect(() => {
     if (sidebarSettingsLoading || sidebarEntryResetDone.current) return;
@@ -121,9 +121,14 @@ function HomeShell({ showError }: HomeShellProps) {
     .filter((notice) => notice.agent_id === activeId)
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || b.created_at.localeCompare(a.created_at));
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
-  const contextPanelOpen = userSettings["display.context_panel_open"] !== false;
+  const [contextPanelOpen, setContextPanelOpen] = useContextPanelOpen();
+  // meiva:note
+  // The mode owns the panel: entering inspector while the shared-context column
+  // is closed still shows it, because otherwise the mode would be on with
+  // nothing to inspect. On mobile the inspector keeps its own sheet.
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   const showContext = isLarge
-    ? activeId != null && contextPanelOpen
+    ? activeId != null && (contextPanelOpen || inspectorOpen)
     : mobileContextOpen || inspectorOpen;
 
   const handleSpawn = useCallback(
@@ -188,6 +193,8 @@ function HomeShell({ showError }: HomeShellProps) {
         handleFork={handleFork}
         contextAvailable={!isLarge && activeId != null}
         openContext={() => { setMobileContextOpen(true); if (inspectorOpen) toggleInspector(); }}
+        contextPanelOpen={contextPanelOpen}
+        openContextPanel={() => setContextPanelOpen(true)}
       />
     </AgentEventStreamProvider>
   );
@@ -201,7 +208,7 @@ function HomeShell({ showError }: HomeShellProps) {
           noticesFailed={noticeFeed.error}
           mobile={!isLarge}
           onClose={() => { setMobileContextOpen(false); if (inspectorOpen) toggleInspector(); }}
-          onCollapse={isLarge ? () => setSetting("display.context_panel_open", false) : undefined}
+          onCollapse={isLarge ? () => setContextPanelOpen(false) : undefined}
         />
       </ErrorBoundary>
     ) : null;
@@ -226,6 +233,8 @@ interface HomeContentProps {
   handleFork: () => void;
   contextAvailable: boolean;
   openContext: () => void;
+  contextPanelOpen: boolean;
+  openContextPanel: () => void;
 }
 
 function HomeContent({
@@ -236,14 +245,18 @@ function HomeContent({
   handleFork,
   contextAvailable,
   openContext,
+  contextPanelOpen,
+  openContextPanel,
 }: HomeContentProps) {
   const t = useTranslations("common");
   const timelineText = useTranslations("timeline");
   const contextText = useTranslations("toUser");
   const composerFocusToken = useStore((s) => s.composerFocusToken);
-  const { settings: userSettings, setSetting, isLoading: userSettingsLoading } = useUserSettings();
+  const { settings: userSettings, isLoading: userSettingsLoading } = useUserSettings();
   const { isNarrow, isLarge } = useBreakpoint();
   const { collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed } = useSidebarCollapsed();
+  const { open: inspectorOpen } = useInspectorOpen();
+  const inspectorText = useTranslations("inspector");
   const contentColumnMaxWidth = isNarrow
     ? undefined
     : timelineMaxWidthCss(userSettings["display.timeline_width_ratio"]);
@@ -339,9 +352,17 @@ function HomeContent({
     }
   }, [activeId, showError]);
 
-  const activeLabel = activeAgent
-    ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""}`
-    : "…";
+  // meiva:note
+  // Inspector is a mode over the whole shell, so the title bar says so: while it
+  // is on the bar names the view, not the agent behind it (user 2026-10-20). It
+  // returns to the agent label the moment the mode is off.
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  const activeLabel =
+    inspectorOpen && isLarge
+      ? inspectorText("title")
+      : activeAgent
+        ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""}`
+        : "…";
   const agentBusy = turnActive || activeAgent?.status === "running";
   const composerMode: "disabled" | "idle" | "busy" =
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";
@@ -396,11 +417,11 @@ function HomeContent({
           >
             <AlertsBadge />
             {contextAvailable && <button onClick={openContext} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent">{contextText("openContext")}</button>}
-            {isLarge && activeId != null && userSettings["display.context_panel_open"] === false ? (
+            {isLarge && activeId != null && !contextPanelOpen ? (
               <ContextPanelToggle
                 open={false}
                 iconClass="size-4"
-                onToggle={() => setSetting("display.context_panel_open", true)}
+                onToggle={openContextPanel}
               />
             ) : null}
           </HeaderBar>

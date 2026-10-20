@@ -85,4 +85,26 @@ describe("HeaderBar", () => {
     fireEvent.click(button);
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
+
+  it("pins the restore button to the bar's edge so it does not ride with the centred column", () => {
+    // meiva:note
+    // The conversation column is capped and centred; an in-flow button sat at
+    // x=320 of a 1440 viewport (user 2026-10-20), so the button is pinned to the
+    // bar and the label keeps a matching inset.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    render(
+      <HeaderBar
+        label="x"
+        onOpenSidebar={vi.fn()}
+        sidebarCollapsed
+        onToggleSidebar={vi.fn()}
+        maxWidthCss="792px"
+      />,
+    );
+    const button = screen.getByTestId("sidebar-toggle");
+    expect(button.className.split(" ")).toContain("absolute");
+    expect(button.className.split(" ")).toContain("left-2");
+    const label = screen.getByText("x");
+    expect(label.parentElement?.className).toContain("md:pl-8");
+  });
 });
