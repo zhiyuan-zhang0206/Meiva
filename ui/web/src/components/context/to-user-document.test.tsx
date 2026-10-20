@@ -204,7 +204,7 @@ describe("To user document bar", () => {
     // meiva:link ui/web/src/components/context/to-user-document.tsx
     show(document("hello"), { onInspect: vi.fn(), inspecting: true });
     const classes = screen.getByTestId("open-inspector").className.split(/\s+/);
-    expect(classes).toContain("bg-foreground/25");
+    expect(classes).toContain("bg-foreground/20");
     expect(classes).not.toContain("bg-accent");
   });
 
