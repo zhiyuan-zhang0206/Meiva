@@ -265,8 +265,11 @@ class UnitRegistry:
         """`unit_id`'s subtree, children before parents (reverse of startup)."""
         return tuple(reversed(self.subtree(unit_id)))
 
+    # meiva:note
+    # Every unit, children before parents, the top-level units in declaration order: root's
+    # whole-tree stop, so the unit a manifest declares first is stopped first.
+    # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
     def all_stop_order(self) -> tuple[str, ...]:
-        """Every unit, children before parents; the whole-tree stop order."""
         out: list[str] = []
         for top in self.children_of(ROOT_ID):
             out.extend(self.stop_order(top))

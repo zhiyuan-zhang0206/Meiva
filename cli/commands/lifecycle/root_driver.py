@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
@@ -688,6 +689,30 @@ def stop_dormant_helper_root(deadline: float, *, helper: HelperFactory | None) -
     require_root_absent()
 
 
+# meiva:note
+# Units go down one at a time in root's declaration order, the order root's own
+# whole-tree stop uses, so the agent-host the manifest declares first is stopped first.
+# Root answers `down` only once the unit has exited (or been killed at the end of its
+# TERM window), so nothing else is stopped while the agent-host drains.
+# `client_for(remaining_s)` returns a root client bounded by the time left.
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+def down_units(
+    unit_ids: Iterable[str],
+    *,
+    deadline: float,
+    force: bool,
+    client_for: Callable[[float], Any],
+) -> None:
+    for unit_id in unit_ids:
+        remaining_s = deadline - time.monotonic()
+        if remaining_s <= 0:
+            raise RootDriverError("service stop deadline expired; custody retained")
+        client = client_for(remaining_s)
+        response = client.force_down(unit_id) if force else client.down(unit_id)
+        _call_ok(response, f"down {unit_id}")
+        print(f"  ✓ meiva-root unit {session_name(unit_id)} stopped")
+
+
 def stop_root_service_tree(
     *,
     preserve: frozenset[str],
@@ -715,19 +740,17 @@ def stop_root_service_tree(
     units = root_units(status)
     require_root_owner(status, helper=helper)
     preserved = set(units) & preserve
-    stop_ids = sorted(set(units) - preserved)
+    stop_ids = [unit_id for unit_id in units if unit_id not in preserved]
     if not stop_ids and preserved:
         print("  meiva-root: every unit is preserved — tree left running")
         return
     record_lifecycle_request("force-down" if force else "down", stop_ids)
-    for unit_id in stop_ids:
-        remaining_s = deadline - time.monotonic()
-        if remaining_s <= 0:
-            raise RootDriverError("service stop deadline expired; custody retained")
-        client = root_client(timeout=remaining_s)
-        response = client.force_down(unit_id) if force else client.down(unit_id)
-        _call_ok(response, f"down {unit_id}")
-        print(f"  ✓ meiva-root unit {session_name(unit_id)} stopped")
+    down_units(
+        stop_ids,
+        deadline=deadline,
+        force=force,
+        client_for=lambda remaining_s: root_client(timeout=remaining_s),
+    )
     if preserved:
         return
     print(f"  meiva-root: stopping the whole tree ({len(stop_ids)} unit(s)) and the root")

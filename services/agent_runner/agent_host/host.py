@@ -67,6 +67,7 @@ from base.lm.harness.registration import RegistrationStore
 from base.lm.harness.registry import FileSessionRegistry
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.stop_timing import RELEASE_OWNER_TIMEOUT_S
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
@@ -123,12 +124,6 @@ from services.agent_runner.agent_host.stall_guard import (
 )
 
 _HostGraph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
-
-# The host's whole stop must fit meiva-root's TERM window (`stop_timeout_s`, 10 s,
-# `services/supervision/meiva_root/supervisor.py`) or root retains custody of it. With Postgres
-# unreachable the release would otherwise wait out the control pool's acquire
-# timeout (30 s). A release that cannot land leaves the leases to expire by TTL.
-RELEASE_OWNER_TIMEOUT_S = 3.0
 
 
 class AgentHost:

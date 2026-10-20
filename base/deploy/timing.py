@@ -172,6 +172,26 @@ CLOCKS: dict[str, Clock] = {
         lambda: stop.CLOCK_READ_TIMEOUT_S,
         "stuck-clock read: how long the cancel path may wait for one clock read",
     ),
+    "HOST_GRACEFUL_EXIT_DRAIN_S": Clock(
+        "stop",
+        lambda: stop.HOST_GRACEFUL_EXIT_DRAIN_S,
+        "graceful exit: how long a SIGTERMed agent-host waits for in-flight turns to settle",
+    ),
+    "HOST_STOP_CEILING_S": Clock(
+        "stop",
+        lambda: stop.HOST_STOP_CEILING_S,
+        "the agent-host's whole SIGTERM exit; root's TERM window for the unit derives from it",
+    ),
+    "RELEASE_OWNER_TIMEOUT_S": Clock(
+        "stop",
+        lambda: stop.RELEASE_OWNER_TIMEOUT_S,
+        "how long the agent-host's stop waits for its hosted ownership release",
+    ),
+    "STOP_MARGIN_S": Clock(
+        "stop",
+        lambda: stop.STOP_MARGIN_S,
+        "root's TERM window for a unit with a declared shutdown ceiling: ceiling plus this margin",
+    ),
 }
 
 
@@ -227,6 +247,22 @@ CONSTRAINTS: list[Constraint] = [
         "10 * AGENT_LEASE_RENEW_INTERVAL_S",
         "the lease must outlive at least ten missed renewal beats, so a transient "
         "renewal blip never reads as death against the reaper cadence",
+    ),
+    Constraint(
+        "<",
+        "HOST_GRACEFUL_EXIT_DRAIN_S + 2 * CANCEL_UNWIND_TIMEOUT_S + CLOCK_READ_TIMEOUT_S "
+        "+ RELEASE_OWNER_TIMEOUT_S",
+        "HOST_STOP_CEILING_S",
+        "a drain that times out still has the scheduler's cancel unwind and clock read, the "
+        "resource join and the ownership release inside the host's stop ceiling, with room "
+        "left for the runtime, pool and health-server closes that carry no bound of their own",
+    ),
+    Constraint(
+        "<",
+        "HOST_STOP_CEILING_S + STOP_MARGIN_S",
+        "ROOT_HEALTH_INTERVAL_S",
+        "root's TERM window for the agent-host (its ceiling plus the margin) stays inside "
+        "the health round a replacement stop runs inside, with slack rather than equality",
     ),
     # --- wedged family ---
     Constraint(

@@ -198,6 +198,40 @@ EVENTS: dict[str, EventSpec] = {
         "the hosted agent-runner finished process-scope boot and its dispatcher is live",
         tier="noise",
     ),
+    "host_exit_draining": telemetry_event(
+        "host_exit_draining",
+        "a SIGTERMed agent-host closed admission and gave every running turn a lifecycle "
+        "command: a system:restart inbound it wrote, or the unfinished restart/terminate the "
+        "agent already had; carries both counts, the drain budget and how many turns it now "
+        "waits for",
+        tier="observation",
+    ),
+    "host_exit_drained": telemetry_event(
+        "host_exit_drained",
+        "every turn a SIGTERMed agent-host waited for ended within the drain budget — at "
+        "its restart, or before reaching it, in which case the restart stays pending for "
+        "the next host",
+        tier="noise",
+    ),
+    "host_exit_drain_timeout": telemetry_event(
+        "host_exit_drain_timeout",
+        "a running turn did not settle within the SIGTERMed agent-host's drain budget and "
+        "is cancelled; carries the agent, its last turn activity and the restart inbound "
+        "through which the next host wakes it",
+        tier="anomaly",
+    ),
+    "host_exit_restart_failed": telemetry_event(
+        "host_exit_restart_failed",
+        "a SIGTERMed agent-host wrote no restart for a running turn: the write failed, or "
+        "the drain deadline passed first; the turn is still waited for, and without the "
+        "restart a turn cut short is not woken again until new input arrives",
+        tier="anomaly",
+    ),
+    "host_exit_repeated": telemetry_event(
+        "host_exit_repeated",
+        "a further SIGTERM reached an agent-host already draining; it is ignored",
+        tier="noise",
+    ),
     "host_stdout_log_rotated": telemetry_event(
         "host_stdout_log_rotated",
         "the hosted daemon rotated its raw stdout transcript at the size ceiling "
