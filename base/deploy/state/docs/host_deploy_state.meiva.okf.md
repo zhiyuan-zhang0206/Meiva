@@ -25,10 +25,6 @@ The table carries only `machine`, `posture` and `updated_at`: the updater lease,
 - `ops/cluster_status/pause.py` — service shutdown sets paused posture and `unpause_local_cluster` restores idle posture; under a held journal it refuses stopped services until `meiva start` passes readiness. `is_paused()` reads the row (a read failure reads as NOT paused — the conservative direction). The gateway 503 middleware and the `status`/`cluster` endpoints go through it.
 - `cli/commands/lifecycle/start.py` tail — `set_posture('idle')` after a successful `meiva start`.
 
-### Observers (readers)
-
-- `ops/deploy_window.py:_posture_signal` — the deploy-window signal (any machine mid-deploy) reads `read_all()` instead of probing each host's ops server: the old probe died with the daemon it observed mid self-update; the row is written outside the restarted services and survives the window. A non-idle row keeps the signal active until that host's `meiva start` returns it to `idle` — the conservative direction, except on an operator-excluded machine, whose row is ignored and logged: nothing returns that posture to `idle` while the exclusion lasts (issue #2160).
-
 ## Key Dependencies
 
 - [[base.meiva.okf.md|Base Library]] — layering: `base` must not import `cli`/`gateway`; identity from `base.cluster.machine`, DB from `base.db`

@@ -15,8 +15,8 @@ verified or pruned either hides a broken chain or fills the bucket. It is one co
 
 ## Core Responsibilities
 - **Gates are not failures** (`tick.py`): key unset, another tick holding the per-home
-  `run.lock`, an open deploy window and a Postgres that does not answer all end the run
-  with exit 0. The last two are recorded as a skip that leaves the last real run's
+  `run.lock`, and a Postgres that does not answer all end the run
+  with exit 0. The last is recorded as a skip that leaves the last real run's
   outcome alone, so a failure stays visible until a run succeeds.
 - **Steps** (`tick.py`): preflight (pinned binary, configuration and key pin, one
   `backup-list`), `backup-push` with `WALG_DELTA_MAX_STEPS=6` (WAL-G itself makes a

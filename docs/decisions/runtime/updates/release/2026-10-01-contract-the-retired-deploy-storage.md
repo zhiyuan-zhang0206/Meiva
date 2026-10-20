@@ -125,3 +125,5 @@ stands.
 Forward link (2026-10-03): `meiva pause` was deleted; a stop with a different keep set replaces it. See [delete meiva pause](../../../agents/graph/2026-10-03-delete-meiva-pause.md).
 
 Forward link (2026-10-04): `meiva maintenance` is deleted entirely; the exits are now `meiva status` (read) and `meiva start`. See [delete meiva maintenance](../../../agents/graph/2026-10-04-delete-meiva-maintenance.md).
+
+Forward link (2026-10-20): `ops/deploy_window.py` and `base/cluster/machine_exclusions.py` are deleted; the WAL-G tick gates on Postgres connectivity only. See [delete the deploy-window readers](2026-10-20-delete-deploy-window-readers.md).

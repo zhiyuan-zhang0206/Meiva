@@ -96,7 +96,6 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     box.put("delete-confirm.log", _confirm_log())
     monkeypatch.setattr(tick, "pg_target", lambda: tick.PgTarget(ADMIN_URL, PG_DATA, DATABASE))
     monkeypatch.setattr(tick, "postgres_accepts_connections", _accepts)
-    monkeypatch.setattr(tick, "deploy_window_reason", lambda _db: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(tick.drill, "drill_due", _never_due)  # the drill has its own tests below
     return box
 
@@ -111,7 +110,6 @@ def _run(clock: Clock | None = None) -> tuple[int, list[str]]:
     lines: list[str] = []
     database_for_url = _database_factory()
     code = tick.run_tick(
-        database_for_url(settings.data_plane.db_url),
         lines.append,
         now=clock or Clock(),
         path_reader=lambda: settings.walg.walg_config_file,
@@ -381,49 +379,23 @@ def test_off_does_nothing_and_writes_nothing(
     assert "nothing to do" in lines[0]
 
 
-def test_an_open_deploy_window_skips_without_calling_wal_g(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(tick, "deploy_window_reason", lambda _db: "machine 'a' is mid-deploy")  # pyright: ignore[reportUnknownArgumentType]
-
-    code, lines = _run()
-
-    assert (code, sandbox.calls()) == (0, [])
-    recorded = state.read_state()
-    assert recorded.tick == state.TickRecord(
-        started_at=T0, skipped="a deploy window is open (machine 'a' is mid-deploy)"
-    )
-    assert recorded.run is None
-    assert lines == ["skipped: a deploy window is open (machine 'a' is mid-deploy)"]
-
-
 def test_postgres_not_accepting_connections_skips(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(tick, "postgres_accepts_connections", _refuses)
-
-    code, _ = _run()
-
-    assert (code, sandbox.calls()) == (0, [])
-    assert state.read_state().tick == state.TickRecord(
-        started_at=T0, skipped="postgres is not accepting connections"
-    )
-
-
-def test_a_skip_leaves_the_last_real_runs_failure_visible(
     sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sandbox.fail("backup-push")
     _run()
     failed = state.read_state().run
-    monkeypatch.setattr(tick, "deploy_window_reason", lambda _db: "a window")  # pyright: ignore[reportUnknownArgumentType]
+    calls_before = sandbox.calls()
+    monkeypatch.setattr(tick, "postgres_accepts_connections", _refuses)
 
     code, _ = _run()
 
-    assert code == 0
+    assert (code, sandbox.calls()) == (0, calls_before)
     after = state.read_state()
+    assert after.tick == state.TickRecord(
+        started_at=T0, skipped="postgres is not accepting connections"
+    )
     assert after.run == failed
-    assert after.tick is not None and after.tick.skipped is not None
 
 
 def test_a_tick_that_holds_the_lock_makes_a_second_one_stand_down(sandbox: Sandbox) -> None:

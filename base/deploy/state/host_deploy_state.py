@@ -1,16 +1,15 @@
-"""Host-level deploy posture (R1, Task #1021).
-
-One row per machine in `host_deploy_state` records that machine's **posture** —
-`idle` or `paused`. `paused` is the window in which this host is stopped or held
-by maintenance (`meiva stop`, `meiva restart`); `meiva start` returns
-it to `idle`. The gateway's 503 middleware and `meiva status` read this host's
-posture, and `ops.deploy_window` reads every machine's row to tell a health-probe
-alert that a transition is under way.
-
-Layering: `base` must not import `cli`/`gateway`, and this module is read by
-the gateway middleware, maintenance and the deploy-window signal — the machine
-identity comes from `base.cluster.machine`, the DB from `base.db`.
-"""
+# meiva:note
+# Host-level deploy posture (R1, Task #1021).
+#
+# One row per machine in `host_deploy_state` records that machine's **posture** —
+# `idle` or `paused`. `paused` is the window in which this host is stopped or held
+# by maintenance (`meiva stop`, `meiva restart`); `meiva start` returns
+# it to `idle`. The gateway's 503 middleware and `meiva status` read this host's
+# posture.
+#
+# Layering: `base` must not import `cli`/`gateway`, and this module is read by
+# the gateway middleware and maintenance — the machine
+# identity comes from `base.cluster.machine`, the DB from `base.db`.
 
 from __future__ import annotations
 
