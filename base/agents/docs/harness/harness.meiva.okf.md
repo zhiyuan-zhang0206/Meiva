@@ -105,6 +105,13 @@ Recording and validating the harness is one slice: the launchers that actually
 start a session on an external harness are separate, and they read this column
 rather than re-deriving the choice.
 
+## Which models a harness runs
+
+The model registry owns that matrix: a model declares the external harnesses that
+can run it, and `GET /api/models` publishes the answer per model. The spawn form
+filters its model column by it.
+[[base/agents/docs/harness/harness-models.meiva.okf.md|Which models a harness runs]].
+
 ## Choosing a harness for a new agent
 
 The spawn form asks the machine that would run the agent, not the gateway:

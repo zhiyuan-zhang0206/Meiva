@@ -13833,12 +13833,20 @@
               }
             ],
             "title": "Superseded By"
+          },
+          "harnesses": {
+            "items": {
+              "$ref": "#/components/schemas/Harness"
+            },
+            "type": "array",
+            "title": "Harnesses"
           }
         },
         "type": "object",
         "required": [
           "provider",
-          "context_window"
+          "context_window",
+          "harnesses"
         ],
         "title": "ModelInfo",
         "description": "Per-model metadata surfaced in the spawn picker."

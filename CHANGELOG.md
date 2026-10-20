@@ -39,6 +39,13 @@ and the matching GitHub Releases.
   ([timeline view](ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md)).
 
 ### Changed
+- Which harness runs which models is the model registry's declaration, not a frontend table
+  (user ruling 2026-10-20): `ModelSpec.external_harnesses` names the external harnesses that can
+  run a model, `GET /api/models` publishes it per model as `harnesses` (built-in runtime first,
+  always present), and the spawn form filters its model column by that field instead of the
+  deleted `HARNESS_PROVIDERS` map. `claude-*` declares `claude_code`, `gpt-*` `codex`,
+  `gemini-*` `antigravity`; a value outside the `Harness` enum is refused at catalog build
+  ([harness identity](base/agents/docs/harness/harness.meiva.okf.md)).
 - Opening Control no longer freezes the page: the section bodies, and the config
   form's seventeen groups inside them, queue up and mount one per idle slice
   instead of all in one commit. The page still lands fully populated (7874 nodes,

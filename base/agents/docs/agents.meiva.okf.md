@@ -15,7 +15,8 @@ Its component nodes describe the current contracts and implementation.
 ## Documented components
 
 - [[harness/harness.meiva.okf.md]] — Immutable harness identity and its local availability probe
-  ([[harness/launchable-and-birth.meiva.okf.md|launchable set and the birth gate]]).
+  ([[harness/launchable-and-birth.meiva.okf.md|launchable set and the birth gate]],
+  [[harness/harness-models.meiva.okf.md|which models a harness runs]]).
 - [[base/agents/history/hierarchy/docs/hierarchy.meiva.okf.md]] — Hierarchical Understanding.
 - [[base/agents/history/docs/message-tokens.meiva.okf.md]] — Per-message true tokens.
 - [[base/agents/impersonation/docs/impersonation.meiva.okf.md]] — Named agent impersonation sessions.

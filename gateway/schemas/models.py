@@ -10,6 +10,7 @@ from pydantic import (
 )
 
 from base.agents.model.birth_config import DefaultModelSource
+from base.api_contracts.agent_contract import Harness
 from base.lm.registry import ReferenceTps
 
 
@@ -41,6 +42,12 @@ class ModelInfo(BaseModel):
     # model still shows. Display-only: a superseded model remains spawnable and
     # config-valid; the frontend filters it from the picker by this field.
     superseded_by: str | None = None
+    # meiva:note
+    # Every harness that can run this model, the built-in runtime first: the spawn form
+    # keeps a model in its column only while the chosen harness appears here, so the
+    # registry's per-model declaration is the single authority for that cascade.
+    # meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
+    harnesses: list[Harness]
 
 
 class ModelsResponse(BaseModel):

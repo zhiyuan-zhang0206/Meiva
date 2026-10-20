@@ -15,11 +15,11 @@ import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { DEFAULT_HARNESS, harnessRows, harnessRunsProvider, type Harness } from "@/lib/harness/harness";
+import { DEFAULT_HARNESS, harnessRows, type Harness } from "@/lib/harness/harness";
 import { useHarnessAvailabilityByMachine } from "@/lib/harness/use-harness-availability";
 import { api } from "@/lib/transport/api";
 import { SpawnTable } from "./spawn-table";
-import { groupedModels, isSuperseded } from "@/lib/contracts/models";
+import { groupedModels, isSuperseded, runsOnHarness } from "@/lib/contracts/models";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
@@ -117,8 +117,8 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
 
   // meiva:note
   // Models the chosen harness can run: user-hidden models (setting models.hidden)
-  // and registry-superseded models are excluded, and an external harness keeps
-  // only its own vendor's providers.
+  // and registry-superseded models are excluded, and the model's published
+  // `harnesses` decides which harnesses offer it.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
   const hiddenModels: string[] = (settings["models.hidden"] as string[] | undefined) ?? [];
   const rosterModels = new Set(Object.values(modelsData?.providers ?? {}).flat());
@@ -130,7 +130,7 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
     (m) =>
       !hiddenModels.includes(m) &&
       !isSuperseded(modelsData, m) &&
-      harnessRunsProvider(selectedHarness, modelsData?.models[m]?.provider ?? ""),
+      runsOnHarness(modelsData, m, selectedHarness),
   );
   const defaultModel = modelsData?.default;
 
