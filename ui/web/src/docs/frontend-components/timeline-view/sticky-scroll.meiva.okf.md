@@ -37,8 +37,8 @@ counts as the tail. The scroll-to-bottom button reads the measured distance to
 the bottom rather than the follow flag (a height change with no scroll event
 would otherwise leave it hidden). While the tail read that follows a switch or
 a reconnect (`loadingNewer`, the composed reconcile) is in flight it rests on
-the same ring the pull-to-load gesture uses and swaps to the arrow on hover or
-keyboard focus, so waiting never hides that the control is still a button
+the same ring the pull-to-load gesture draws — one component, so the two
+cannot drift in size — and swaps to the arrow on hover or keyboard focus, so waiting never hides that the control is still a button
 (user report 2026-10-19). That ring is not driven by `isFetching`: a
 background refetch of a settled thread would then spin it for no arrival, and
 one could overlap an older-history load and put two rings on screen at once

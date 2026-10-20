@@ -15,6 +15,28 @@ import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 const RING_SIZE = 20;
 
 // meiva:note
+// One ring, one geometry. The pull strip and the scroll-to-bottom button both
+// draw this, so its size cannot land on one of them and miss the other: the
+// button used to carry its own circle drawn to the button's edges, r=16.5 in a
+// 36-unit box, which read as a dial rather than a loader (user report
+// 2026-10-20). An arc fraction of 1 is a whole circle; the pull strip's grows
+// with the pull, the button's is fixed.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+function LoadingRing({ arc = 0.72, scale = 1, testId, className }: {
+  arc?: number; scale?: number; testId?: string; className?: string;
+}) {
+  const circumference = 2 * Math.PI * 8;
+  return (
+    <svg data-testid={testId} viewBox="0 0 24 24" style={{ transform: `scale(${scale})` }} aria-hidden="true"
+      className={cn("size-5 shrink-0 animate-spin motion-reduce:animate-none pointer-events-none", className)}>
+      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" opacity="0.15" />
+      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"
+        strokeDasharray={`${circumference * arc} ${circumference * (1 - arc)}`} />
+    </svg>
+  );
+}
+
+// meiva:note
 // The circle sits inside the revealed native scroll space and scales with it.
 // No visible instructions compete with the conversation; the label remains
 // accessible.
@@ -33,7 +55,6 @@ export function LoadOlderSpinner({ loadingOlder, pullProgress = 0, pullOffset = 
   // strip keeps the whole ring on screen at every pull distance.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
   const ringScale = height > 0 ? Math.min(1, height / RING_SIZE) : 1;
-  const circumference = 2 * Math.PI * 8;
   const arc = loadingOlder ? 0.72 : 0.18 + 0.54 * pullProgress;
   return (
     <div
@@ -51,12 +72,7 @@ export function LoadOlderSpinner({ loadingOlder, pullProgress = 0, pullOffset = 
       )}
     >
       {visible ? (
-        <svg viewBox="0 0 24 24" style={{ transform: `scale(${ringScale})` }}
-          className="size-5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true">
-          <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" opacity="0.15" />
-          <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"
-            strokeDasharray={`${circumference * arc} ${circumference * (1 - arc)}`} />
-        </svg>
+        <LoadingRing arc={arc} scale={ringScale} />
       ) : null}
       <span className="sr-only">{t("loadingEarlier")}</span>
     </div>
@@ -136,11 +152,8 @@ export function ScrollToBottomButton({
     >
       {refreshing ? (
         <>
-          <svg data-testid="latest-loading-ring" viewBox="0 0 36 36" aria-hidden="true"
-            className="absolute inset-0 size-full animate-spin motion-reduce:animate-none pointer-events-none group-hover:hidden group-focus-visible:hidden">
-            <circle cx="18" cy="18" r="16.5" fill="none" stroke="currentColor" strokeWidth="1.5"
-              strokeDasharray="38 66" strokeLinecap="round" />
-          </svg>
+          <LoadingRing testId="latest-loading-ring" arc={0.37}
+            className="group-hover:hidden group-focus-visible:hidden" />
           <ArrowDown data-testid="scroll-to-bottom-arrow" className="hidden size-4 group-hover:block group-focus-visible:block" />
           <span role="status" className="sr-only">{t("loadingLatest")}</span>
         </>
