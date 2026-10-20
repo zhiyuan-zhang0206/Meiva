@@ -14,6 +14,7 @@ import { AuthProvider, notifySessionInvalid } from "@/lib/auth/auth-context";
 import { ApiError } from "@/lib/transport/api";
 import { NonceProvider } from "@/lib/auth/nonce-context";
 import { EventStreamProvider } from "@/lib/transport/useEventStream";
+import { useNavTimingReport } from "@/lib/telemetry/nav-timing";
 import { AlertsProvider } from "@/lib/notifications/use-alerts";
 
 // The inline script next-themes injects toggles .dark on <html> before
@@ -42,6 +43,11 @@ import { AlertsProvider } from "@/lib/notifications/use-alerts";
 //
 // AppConnectionBanner also rides that connection here at the root, so
 // disconnect/recovery chrome protects every page, not just the home view.
+function NavTimingReporter() {
+  useNavTimingReport();
+  return null;
+}
+
 export function createQueryClient(): QueryClient {
   return new QueryClient({
     queryCache: new QueryCache({
@@ -110,6 +116,7 @@ export function Providers({ children, nonce }: { children: React.ReactNode; nonc
                       light/dark palette; renders nothing. */}
                   <ThemePackTokens />
                   <ThemeColorSync />
+                  <NavTimingReporter />
                   <AppConnectionBanner />
                   {children}
                   {/* The toast renderer is root-level so error toasts reach the

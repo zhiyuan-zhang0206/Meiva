@@ -34,6 +34,8 @@ import type { StatsDashboard } from "@/lib/contracts/types";
 import { FLEX, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
+import { markNavIntent } from "@/lib/telemetry/nav-timing";
+
 import { fleetHref } from "./links";
 import { SidebarIconButton } from "./icon-button";
 
@@ -376,7 +378,14 @@ function SidebarNavButton({
   children: React.ReactNode;
 }) {
   return (
-    <SidebarIconButton label={label} title={label} onClick={onClick}>
+    <SidebarIconButton
+      label={label}
+      title={label}
+      onClick={() => {
+        markNavIntent();
+        onClick();
+      }}
+    >
       {children}
     </SidebarIconButton>
   );
