@@ -135,4 +135,5 @@ def test_sse_metrics_initialize_idle_modes_at_zero(
     assert [event.attributes for event in emitted_events] == [
         {"mode": "filtered", "active_connections": 0},
         {"mode": "throttled", "active_connections": 0},
+        {"mode": "merged", "active_connections": 0},
     ]

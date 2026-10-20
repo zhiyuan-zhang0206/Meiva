@@ -13,7 +13,8 @@ import { notifySessionInvalid, useAuth } from "../auth/auth-context";
 import { useFoldOwner } from "../fold/owner";
 import { useDocumentVisible } from "../layout/use-document-visible";
 import { createSseLifecycle } from "@/lib/transport/sse-lifecycle";
-import { reportSseTransportMode, sharedSseSupported, sharedSseTransport, type SseChannel } from "./sse-share";
+import { reportSseTransportMode, sseTransport, type SseChannel } from "./sse-share";
+import { useMergedSseChannels } from "../state/sse-merge";
 import { useStore } from "../state/store";
 import type { SystemEvent } from "../contracts/types";
 
@@ -87,10 +88,10 @@ function useSseConnection(
   const [retryNonce, setRetryNonce] = useState(0);
   const failCountRef = useRef(0);
   const lastReconnectNonce = useRef(reconnectNonce);
-  const shared = sharedSseSupported();
+  const transport = sseTransport(useMergedSseChannels());
 
   useEffect(() => {
-    if (authStatus !== "authenticated" || !isVisible || (!shared && url === null)) {
+    if (authStatus !== "authenticated" || !isVisible || (!transport && url === null)) {
       // Not authenticated: keep the connection closed. EventSource cannot set an
       // Authorization header, so an unauthenticated SSE GET 401s at the gateway —
       // opening it would just feed the retry storm (Task #1635). When auth flips
@@ -106,7 +107,6 @@ function useSseConnection(
     // repeated parse errors mean the transport is corrupting frames — count
     // and force a reconnect at 3 (Task #951).
     let parseFailures = 0;
-    const transport = shared ? sharedSseTransport() : null;
     let es: EventSource | null = null;
     if (!transport) {
       if (url === null) throw new Error("legacy SSE URL missing");
@@ -228,6 +228,7 @@ function useSseConnection(
     if (transport) {
       const unsubscribe = transport.subscribe(channel, {
         onFrame: handleFrame,
+        onGap: () => handleOpen(),
         onState: (state) => {
           if (lifecycle.isDisposed()) return;
           if (state === "open") {
@@ -262,7 +263,7 @@ function useSseConnection(
     // url + authStatus + reconnectNonce + retryNonce are the levers (retryNonce is
     // the local connect-failure backoff). subscribersRef / onOpenChange /
     // bumpReconnect are stable identities included only to satisfy the lint.
-  }, [url, channel, activeId, isVisible, shared, authStatus, reconnectNonce, retryNonce,
+  }, [url, channel, activeId, isVisible, transport, authStatus, reconnectNonce, retryNonce,
     bumpReconnect, subscribersRef, onOpenChange]);
 }
 

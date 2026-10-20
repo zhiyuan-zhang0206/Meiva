@@ -39,11 +39,13 @@ event-loop sample is emitted before the process read, so a denied or vanished
 
 ## SSE lifecycle
 
-Both SSE generator modes bracket successful Redis subscriptions with
-`sse_opened` / `sse_closed`. The emitted `sse` event maps to
-`meiva_sse_active_connections` (absolute gauge by mode) and monotonic
-`meiva_sse_opened_total` / `meiva_sse_closed_total` counters. Startup publishes a
-zero depth for both modes so an idle gateway exposes the gauge before its first
-connection.
+Every SSE generator mode (`filtered`, `throttled`, `merged`) brackets a
+successful Redis subscription with `sse_opened` / `sse_closed`. The emitted `sse`
+event maps to `meiva_sse_active_connections` (absolute gauge by mode) and
+monotonic `meiva_sse_opened_total` / `meiva_sse_closed_total` counters. Startup
+publishes a zero depth for all three modes so an idle gateway exposes the gauge
+before its first connection. `mode="merged"` is the `/api/stream` connection the
+Web UI uses, so the number of sockets a browser holds after the transport switch
+turns on is `meiva_sse_active_connections{mode="merged"}`.
 
 Parent node: [[gateway.meiva.okf.md|Gateway]].

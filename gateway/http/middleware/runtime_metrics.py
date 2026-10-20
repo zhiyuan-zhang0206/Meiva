@@ -26,8 +26,8 @@ TICK_INTERVAL_S = 1.0
 EMIT_INTERVAL_S = 60.0
 SLOW_TICK_THRESHOLD_MS = 100.0
 
-SseMode = Literal["filtered", "throttled"]
-_SSE_MODES: tuple[SseMode, ...] = ("filtered", "throttled")
+SseMode = Literal["filtered", "throttled", "merged"]
+_SSE_MODES: tuple[SseMode, ...] = ("filtered", "throttled", "merged")
 sse_active_connections: dict[SseMode, int] = dict.fromkeys(_SSE_MODES, 0)
 
 

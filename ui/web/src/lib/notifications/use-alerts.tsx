@@ -33,7 +33,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { API_BASE, api } from "../transport/api";
 import { notifySessionInvalid, useAuth } from "../auth/auth-context";
 import { createSseLifecycle } from "@/lib/transport/sse-lifecycle";
-import { sharedSseSupported, sharedSseTransport } from "../transport/sse-share";
+import { sseTransport } from "../transport/sse-share";
+import { useMergedSseChannels } from "../state/sse-merge";
 import type { Alert, AlertsResponse } from "../contracts/types";
 import { useDocumentVisible } from "../layout/use-document-visible";
 
@@ -92,7 +93,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
   // Stable reconnect callback (mirrors useEventStream's bumpReconnect).
   const bumpReconnect = useCallback(() => setReconnectNonce((n) => n + 1), []);
   const isVisible = useDocumentVisible();
-  const shared = sharedSseSupported();
+  const transport = sseTransport(useMergedSseChannels());
 
   useEffect(() => {
     if (authStatus !== "authenticated" || !isVisible) {
@@ -105,7 +106,6 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     }
 
     let parseFailures = 0;
-    const transport = shared ? sharedSseTransport() : null;
     const lifecycle = createSseLifecycle({
       failCount: failCountRef,
       watchdogMs: WATCHDOG_MS,
@@ -158,6 +158,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     if (transport) {
       const unsubscribe = transport.subscribe("alerts", {
         onFrame: handleFrame,
+        onGap: () => handleOpen(),
         onState: (state) => {
           if (lifecycle.isDisposed()) return;
           if (state === "open") handleOpen();
@@ -186,7 +187,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     // reconnectNonce + retryNonce are the reopen levers; isVisible gates the
     // stream on tab visibility; the cache folders are stable identities
     // included only to satisfy the lint.
-  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect, authStatus, isVisible, shared]);
+  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect, authStatus, isVisible, transport]);
 
   return children;
 }
