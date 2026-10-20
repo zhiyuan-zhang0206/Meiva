@@ -17,23 +17,30 @@ runner, the button sends directly; with multiple eligible runners it opens a
 popover. The disabled trigger's tooltip sits on a wrapper so it still appears
 when the button itself cannot receive pointer events.
 
-Creation is one table, not three dropdowns side by side: Harness, then the
-models that harness runs, then the efforts that model publishes. Each column
-narrows the next and marks exactly one row selected as soon as the form
-renders, so opening it answers "what will the next agent be born on" before it
-asks anything. The model column keeps only the models whose published
+Creation is one table, read left to right: **Machine, Harness, Model, Effort**.
+The machine is the first column because it is the first fact — a harness is only
+available *on* a machine.
+Every agent-runner machine is a row; a host that is down keeps its row, disabled
+and titled with the reason.
+Each column narrows the next and marks exactly one row selected as soon as the
+form renders, so opening it answers "what will the next agent be born on, and
+where" before it asks anything. The harness column speaks for the selected
+machine, and a stored or picked harness that machine cannot start falls through
+to the first one it can (the pick itself is left alone, so switching back
+restores it). The model column keeps only the models whose published
 `harnesses` name the chosen harness (`GET /api/models`, `ModelInfo.harnesses`;
 the built-in `meiva` runtime runs every spawnable model and is always listed
 first), grouped under a vendor heading, with hidden and superseded catalog
-entries excluded. Which harness runs which model is the registry's declaration,
-not a table in the frontend: assigning a model to another harness server-side
-reaches that harness's column with no frontend change, and a catalog entry read
-before the field existed names the built-in runtime alone. The effort
-column shows the selected model's `reasoning_effort_options` ladder; a model
-that publishes none leaves the column empty rather than offering a synthetic
-default, and the model's concrete `reasoning_effort_default` is the row marked
-when nothing is stored. The column is titled "Effort": the header names the
-quantity, not the mechanism.
+entries excluded and a provider switched off in Control contributing nothing.
+Which harness runs which model is the registry's declaration, not a frontend
+table. The effort column shows
+the selected model's `reasoning_effort_options` ladder; a model that publishes
+none leaves the column empty rather than offering a synthetic default, and the
+model's concrete `reasoning_effort_default` is the row marked when nothing is
+stored. The column is titled "Effort": the header names the quantity, not the
+mechanism. The footer states the action only — one `Spawn` button, disabled with
+the first refusal that applies (a down host, then a harness the machine cannot
+start).
 
 The table shows the **last spawn, not the last click**. `behavior.spawn_*`
 holds the config the previous spawn actually used, cascade included; a click
@@ -45,12 +52,17 @@ unavailable level is never sent; an explicit model pick is always sent as spawn
 config, even when it equals the cluster default. The backend rejects an
 unsupported explicit effort rather than translating it to another grade.
 
-The model row keeps the input rate visible — comparing models at a glance is
-what the column is for — and carries the rest on hover: every rate behind that
-price (input, cache read, output), the declared 5-minute and 1-hour cache-write
-rates, and the vendor reference TPS with its source and check date. Prices are
-USD per million tokens. Standard and Fast service IDs have separate catalog
-entries and prices. Absent reliable absolute vendor figures say so instead of
+Rates appear only for a **metered** harness. Billing travels with the harness
+(`HarnessAvailability.billing`: `api` for the built-in runtime, `subscription`
+for the external CLIs), because the same model costs differently depending on
+which loop runs it: a subscription pays nothing per token, so a per-million-token
+price beside the model name would describe a cost the user is not incurring. For
+a metered harness the model row carries the three numbers that decide it —
+non-cached input, cached input (cache read), output — as `in / cache / out` in
+USD per million tokens under the column header, with the declared 5-minute and
+1-hour cache-write rates and the vendor reference TPS (with its source and check
+date) on hover. Standard and Fast service IDs have separate catalog entries and
+prices. Absent reliable absolute vendor figures say so instead of
 showing a blank column; relative speed multipliers and cluster measurements
 never stand in for the vendor figure.
 
@@ -58,6 +70,13 @@ Declared `fast_of` services appear directly after their visible Standard model.
 Families sort by the Standard input price; a service whose Standard model is
 hidden remains an independent row sorted by its own price. Names do not imply
 family membership, and grouping never restores hidden or superseded entries.
+
+Control > Display lists a switch per provider above its models: switching a
+provider off takes its whole family out of the spawn picker at once and leaves
+the per-model switches non-editable, while each model keeps the state the user
+gave it, so switching the provider back on restores that state. A superseded
+model is not listed at all — the picker refuses it, so a switch there would
+change nothing a spawn reads — instead of appearing disabled with an explanation.
 
 The published default uses the same database/config resolution as a new
 agent's birth stamp. Saving the cluster default invalidates both default-model

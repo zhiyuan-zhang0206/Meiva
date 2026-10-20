@@ -18,7 +18,7 @@ import { useState } from "react";
 import { DEFAULT_HARNESS, harnessRows, type Harness } from "@/lib/harness/harness";
 import { useHarnessAvailabilityByMachine } from "@/lib/harness/use-harness-availability";
 import { api } from "@/lib/transport/api";
-import { SpawnTable } from "./spawn-table";
+import { SpawnTable, type SpawnMachine } from "./spawn-table";
 import { groupedModels, isSuperseded, runsOnHarness } from "@/lib/contracts/models";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { FLEX } from "@/lib/layout/layout";
@@ -36,6 +36,7 @@ interface SpawnOpts {
 // empty object means "show the last spawn".
 // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
 interface SpawnPicks {
+  machine?: string;
   harness?: Harness;
   model?: string;
   effort?: string;
@@ -79,7 +80,6 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
   const storedModel = (settings["behavior.spawn_model"] as string | null) ?? undefined;
   const storedEffort = (settings["behavior.spawn_reasoning_effort"] as string | null) ?? undefined;
   const [picks, setPicks] = useState<SpawnPicks>({});
-  const selectedHarness = picks.harness ?? storedHarness;
   const selectedModel = picks.model ?? storedModel;
   const selectedReasoningEffort = picks.effort ?? storedEffort;
   const pickHarness = (v: Harness) => setPicks((p) => ({ ...p, harness: v }));
@@ -96,24 +96,50 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
   );
   const spawnable = eligible.filter((m) => m.agent_host_online === true);
   // meiva:note
-  // A harness a machine cannot start is not offered as a working spawn there: the
-  // row is disabled and says only that it is unavailable, because an agent born on
-  // a harness the machine cannot launch would sit inert while looking created.
-  // Every candidate machine answers for itself - the spawn list names its target
-  // only at click time, so one machine's probe says nothing about another's.
+  // The machine is the first column because it is the first fact: a harness is
+  // only available *on* a machine, and one machine's probe says nothing about
+  // another's. Every agent-runner machine is a row; a host that is down keeps its
+  // row and is disabled with the reason, so the picker says what exists instead
+  // of hiding it (user 2026-10-20).
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-  const harnessByMachine = useHarnessAvailabilityByMachine(spawnable.map((m) => m.name));
+  const machines: SpawnMachine[] = [...eligible]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((m) => ({
+      name: m.name,
+      reason:
+        m.agent_host_online === true
+          ? undefined
+          : m.agent_host_online === false
+            ? t("hostUnavailable")
+            : t("hostUnknown"),
+    }));
   // meiva:note
-  // The table's harness column speaks for the host the next click would use: the
-  // only spawnable machine, or the first of several before one is chosen.
+  // A pick survives a status refresh only while that machine is still offered;
+  // otherwise the form falls back to the first machine whose host is up, so a
+  // vanished host never leaves the form targeting a machine that is not on screen.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-  const tableMachine = spawnable.at(0)?.name;
-  const tableHarnessRows = harnessRows(tableMachine === undefined ? [] : harnessByMachine.get(tableMachine) ?? []);
-  const harnessBlocked = (machine: string): boolean => {
-    const row = harnessRows(harnessByMachine.get(machine) ?? [])
-      .find((candidate) => candidate.harness === selectedHarness);
-    return row !== undefined && !row.launchable;
-  };
+  const pickedMachine =
+    picks.machine !== undefined && machines.some((row) => row.name === picks.machine)
+      ? picks.machine
+      : undefined;
+  const selectedMachine = pickedMachine ?? spawnable.at(0)?.name;
+  const pickMachine = (v: string) => setPicks((p) => ({ ...p, machine: v }));
+  const harnessByMachine = useHarnessAvailabilityByMachine(machines.map((row) => row.name));
+  // meiva:note
+  // This machine's harnesses: a harness the machine cannot start keeps its row,
+  // disabled and titled "unavailable", because an agent born on it would sit
+  // inert while looking created. A stored or picked harness that this machine
+  // cannot start falls through to the first one it can, so switching machine
+  // never lands on a dead end - the pick itself is left alone, so switching back
+  // restores it.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  const tableHarnessRows = harnessRows(harnessByMachine.get(selectedMachine ?? "") ?? []);
+  const pickedHarness = picks.harness ?? storedHarness;
+  const selectedHarness: Harness =
+    tableHarnessRows.find((row) => row.harness === pickedHarness)?.launchable
+      ? pickedHarness
+      : (tableHarnessRows.find((row) => row.launchable)?.harness ?? pickedHarness);
+  const harnessBlocked = !tableHarnessRows.find((row) => row.harness === selectedHarness)?.launchable;
 
   // meiva:note
   // Models the chosen harness can run: user-hidden models (setting models.hidden)
@@ -121,15 +147,18 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
   // `harnesses` decides which harnesses offer it.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
   const hiddenModels: string[] = (settings["models.hidden"] as string[] | undefined) ?? [];
-  const rosterModels = new Set(Object.values(modelsData?.providers ?? {}).flat());
-  const hiddenModelCount = new Set(
-    hiddenModels.filter((model) => rosterModels.has(model)),
-  ).size;
+  // meiva:note
+  // A provider switched off in Control > Display contributes no models here
+  // either: the per-model list is not consulted for it, so one switch takes the
+  // whole family out of the spawn picker (user 2026-10-20).
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  const hiddenProviders: string[] = (settings["models.hidden_providers"] as string[] | undefined) ?? [];
   const modelGroups = groupedModels(
     modelsData,
     (m) =>
       !hiddenModels.includes(m) &&
       !isSuperseded(modelsData, m) &&
+      !hiddenProviders.includes(modelsData?.models[m]?.provider ?? "") &&
       runsOnHarness(modelsData, m, selectedHarness),
   );
   const defaultModel = modelsData?.default;
@@ -228,39 +257,15 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
     return <div role="status" className="px-3 py-2 text-xs text-muted-foreground">{reason}</div>;
   }
 
-  // meiva:note
-  // One row offers one machine: a host that is down and a harness that machine
-  // cannot start are both refusals, and the row shows the first that applies so
-  // the button never explains one while blocking for the other.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-  const sorted = [...eligible].sort((a, b) => a.name.localeCompare(b.name));
-  const machineRow = (m: (typeof sorted)[number]) => {
-    const hostReason = m.agent_host_online === true
-      ? undefined
-      : m.agent_host_online === false ? t("hostUnavailable") : t("hostUnknown");
-    const harnessReason = harnessBlocked(m.name) ? t("harnessStatus.unavailable") : undefined;
-    const reason = hostReason ?? harnessReason;
-    return (
-      <li key={m.name}>
-        <button
-          type="button"
-          disabled={reason !== undefined}
-          title={reason}
-          onClick={() => spawnOn(m.name)}
-          className={cn("w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent disabled:opacity-50 items-center justify-between gap-3", FLEX)}
-        >
-          <span className="truncate">{m.name}</span>
-          {reason !== undefined && <span className="text-xs">{reason}</span>}
-        </button>
-      </li>
-    );
-  };
-
-  const single = spawnable.length === 1 && eligible.length === 1 ? spawnable[0] : undefined;
+  const target = machines.find((row) => row.name === selectedMachine);
+  const spawnReason = target?.reason ?? (harnessBlocked ? t("harnessStatus.unavailable") : undefined);
 
   return (
     <div className="rounded-md border border-border bg-popover text-popover-foreground">
       <SpawnTable
+        machines={machines}
+        machine={selectedMachine}
+        onMachine={pickMachine}
         harnessRows={tableHarnessRows}
         harness={selectedHarness}
         onHarness={pickHarness}
@@ -271,33 +276,27 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
         efforts={effortLevels}
         effort={effectiveReasoningEffort}
         onEffort={pickEffort}
+        // meiva:note
+        // Rates are the decision only when the harness meters them. A subscription
+        // harness pays nothing per token, so the price column stays empty there
+        // (user 2026-10-20); the harness row is the authority on which it is.
+        // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+        prices={tableHarnessRows.find((row) => row.harness === selectedHarness)?.billing === "api"}
       />
-      {hiddenModelCount > 0 && (
-        <div className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
-          {t("hiddenModels", { count: hiddenModelCount })}
-        </div>
-      )}
       <div className="border-t border-border">
-        {single !== undefined ? (
-          <button
-            type="button"
-            disabled={harnessBlocked(single.name)}
-            title={harnessBlocked(single.name) ? t("harnessStatus.unavailable") : undefined}
-            onClick={() => spawnOn(single.name)}
-            className={cn(
-              "w-full items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium hover:bg-sidebar-accent disabled:opacity-50",
-              FLEX,
-            )}
-          >
-            <Plus className="size-3.5" />
-            <span>{t("spawn")}</span>
-          </button>
-        ) : (
-          <>
-            <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">{t("spawnOn")}</div>
-            <ul className="max-h-[180px] overflow-y-auto py-1">{sorted.map(machineRow)}</ul>
-          </>
-        )}
+        <button
+          type="button"
+          disabled={spawnReason !== undefined || selectedMachine === undefined}
+          title={spawnReason}
+          onClick={() => { if (selectedMachine !== undefined) spawnOn(selectedMachine); }}
+          className={cn(
+            "w-full items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium hover:bg-sidebar-accent disabled:opacity-50",
+            FLEX,
+          )}
+        >
+          <Plus className="size-3.5" />
+          <span>{t("spawn")}</span>
+        </button>
       </div>
     </div>
   );

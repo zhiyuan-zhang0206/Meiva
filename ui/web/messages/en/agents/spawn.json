@@ -5,11 +5,11 @@
   "pricePerMillion": "USD / 1M",
   "referenceTps": "Vendor reference output tokens per second",
   "referenceTpsUnavailable": "No reliable vendor-published output TPS",
-  "hiddenModels": "{count} hidden — manage in Control > Display",
   "effortDefault": "Effort: default",
   "spawnOn": "Spawn on",
   "spawn": "Spawn",
   "model": "Model",
+  "priceColumns": "in / cache / out, USD per 1M",
   "reasoningEffort": "Effort",
   "spawnAgent": "Spawn agent",
   "hostUnavailable": "Agent host unavailable",
@@ -19,6 +19,7 @@
   "pricingConditions": "Current base-tier rates. Longer contexts and scheduled rate windows may change pricing.",
   "cacheWritePrice": "Cache write ({duration}): {price} / 1M",
   "harness": "Harness",
+  "machine": "Machine",
   "harnessStatus": {
     "unavailable": "unavailable"
   },
