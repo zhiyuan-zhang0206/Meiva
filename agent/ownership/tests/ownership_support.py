@@ -53,7 +53,6 @@ async def admit_owner(
         agent_id,
         "claim-test",
         uuid4(),
-        expected_from="idling",
         db=Database.from_settings(gate=database_gate),
     )
     assert owner is not None

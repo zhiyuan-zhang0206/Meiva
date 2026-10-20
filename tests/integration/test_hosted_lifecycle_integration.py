@@ -41,7 +41,7 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
     with ConnectionPool[psycopg.Connection](
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
     ) as pool:
-        _, _, _, force, _cutoff = await asyncio.to_thread(
+        _, _, force, _cutoff = await asyncio.to_thread(
             force_terminate_transaction, agent_id, pool, source="user"
         )
     later = insert_lifecycle_command(db_conn, agent_id, "restart")
@@ -54,10 +54,7 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
         is None
     )
     assert (
-        await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=database
-        )
-        is None
+        await admit_hosted_runtime(aops_pool, agent_id, "claim-test", uuid4(), db=database) is None
     )
     assert db_conn.execute(
         "SELECT status,payload->'lifecycle_result'->>'reason' FROM inbound_messages WHERE id=%s",

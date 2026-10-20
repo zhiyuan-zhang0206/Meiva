@@ -50,16 +50,15 @@ def _wait_idle_intent(agent_id: int) -> None:
     def idle() -> tuple[bool, object]:
         with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT status, runtime_kind, runtime_owner, runtime_generation "
-                "FROM agents_meta WHERE id = %s",
+                "SELECT status, runtime_owner, runtime_generation FROM agents_meta WHERE id = %s",
                 (agent_id,),
             )
             row = cur.fetchone()
         if row is None:
             return False, row
-        status, kind, owner, generation = row
-        unadmitted = kind is None and owner is None and generation is None
-        hosted = kind == "hosted" and owner is not None and generation is not None
+        status, owner, generation = row
+        unadmitted = owner is None and generation is None
+        hosted = owner is not None and generation is not None
         return status == AgentStatus.IDLING.value and (unadmitted or hosted), row
 
     poll_until(

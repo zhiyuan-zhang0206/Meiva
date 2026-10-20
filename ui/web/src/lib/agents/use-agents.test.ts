@@ -16,7 +16,7 @@ vi.mock("../transport/api", async (importOriginal) => ({
 }));
 function row(agent_id: number, status: AgentRow["status"] = "idling"): AgentRow {
   return { agent_id, status, label: `Test #${agent_id}`, spawner: "user", fork_source_agent_id: null,
-    pid: agent_id + 100, spawned_at: "2026-05-10T00:00:00Z", started_at: "2026-05-10T00:00:01Z",
+    spawned_at: "2026-05-10T00:00:00Z",
     last_active_at: "2026-05-10T00:00:00Z", last_inbound_at: "2026-05-10T00:00:00Z",
     machine: agent_id === 1 ? "test-host" : "runner-a", supports_vision: true, awaiting_response_count: 0,
     highest_notice_priority: null, unread_notice_count: 0, heartbeat_paused_until: null, liveness_state: "online" };

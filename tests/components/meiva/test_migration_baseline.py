@@ -13,7 +13,6 @@ from psycopg import sql
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.deploy.schema.migrations import (
-    MigrationFailed,
     apply_pending_migrations,
     required_migration_set,
 )
@@ -73,58 +72,6 @@ def test_fresh_schema_sql_bootstrap_is_baselined(machine_identity: MachineIdenti
             cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
 
 
-def test_lifecycle_pointer_done_guard_blocks_torn_commit_and_allows_settle() -> None:
-    """The commit-time fence rejects pointer -> done and passes the same-transaction settle.
-
-    Every legitimate writer clears the pointer in the same transaction, so the
-    deferred fence is invisible to them; only a torn write — e.g. a manual
-    "cleanup" UPDATE that flips a command to done without settling it — crosses
-    a commit and fails.
-    """
-    with throwaway_database("lifecycle_guard") as url:
-        with psycopg.connect(url, autocommit=True) as setup, setup.cursor() as cur:
-            cur.execute(sql.SQL(cast(LiteralString, SCHEMA_SQL.read_text())), prepare=False)
-            cur.execute("INSERT INTO agents (id) SELECT generate_series(1, 2)")
-            cur.execute(
-                "INSERT INTO agents_meta (id, status) VALUES (1, 'terminated'), (2, 'terminated')"
-            )
-            claimed: list[int] = []
-            for agent_id in (1, 2):
-                cur.execute(
-                    "INSERT INTO inbound_messages "
-                    "(agent_id, content, kind, source, status, applied_at, claimed_at, "
-                    " target_generation, target_owner) "
-                    "VALUES (%s, '', 'terminate', 'user', 'claimed', now(), now(), "
-                    "gen_random_uuid(), gen_random_uuid()) RETURNING id",
-                    (agent_id,),
-                )
-                row = cur.fetchone()
-                assert row is not None
-                claimed.append(row[0])
-                cur.execute(
-                    "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s",
-                    (row[0], agent_id),
-                )
-
-        # Positive: the documented settle shape — done + pointer cleared in ONE
-        # transaction — commits cleanly under the deferred guard.
-        with psycopg.connect(url) as conn, conn.cursor() as cur:
-            cur.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (claimed[0],))
-            cur.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=1")
-        # (`with` exit committed.)
-
-        # Negative: the pointer left alive across the commit — rejected at commit.
-        conn = psycopg.connect(url)
-        try:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (claimed[1],))
-            with pytest.raises(psycopg.errors.RaiseException, match="cannot reach done"):
-                conn.commit()
-            conn.rollback()
-        finally:
-            conn.close()
-
-
 def test_schema_sql_has_birth_config_column() -> None:
     """Terminal-state pin (the pre-reset birth-config backfill contract, now
     folded into the baseline): agents_meta carries birth_config, and the
@@ -148,19 +95,8 @@ def test_schema_sql_has_r1_deploy_state_tables() -> None:
 #
 # `20261001T055030_drop-retired-deploy-and-watcher-storage` drops the objects whose
 # readers and writers are gone, and `20261001T055130_retire-restarting-and-publication-deferred`
-# tightens two `agents_meta` CHECKs; the retirement refuses a stuck row.
-
-_DROP = "20261001T055030_drop-retired-deploy-and-watcher-storage"
-_RETIRE = "20261001T055130_retire-restarting-and-publication-deferred"
-
-
-def _widen_retired_checks(conn: psycopg.Connection) -> None:
-    """The two `agents_meta` CHECKs as they stood before the retirement migration."""
-    conn.execute("ALTER TABLE agents_meta DROP CONSTRAINT agents_meta_status_check")
-    conn.execute(
-        "ALTER TABLE agents_meta ADD CONSTRAINT agents_meta_status_check "
-        "CHECK (status IN ('running', 'idling', 'restarting', 'terminated'))"
-    )
+# meiva:note
+# tightens two `agents_meta` CHECKs (folded into the baseline).
 
 
 def test_the_version_gate_and_posture_paths_survive_the_contraction(
@@ -196,61 +132,6 @@ def test_the_version_gate_and_posture_paths_survive_the_contraction(
                 "INSERT INTO agents_meta (id, status, machine) VALUES (1, 'restarting', 'm')"
             )
         conn.rollback()
-        conn.execute("INSERT INTO agents (id, label) VALUES (2, 'b')")
-        with pytest.raises(psycopg.errors.CheckViolation):
-            conn.execute(
-                "INSERT INTO agents_meta (id, status, machine, last_admission_outcome, "
-                "last_admission_at) VALUES (2, 'idling', 'm', 'publication_deferred', now())"
-            )
-
-
-def test_restarting_row_refuses_the_retirement_and_leaves_the_schema_alone(
-    machine_identity: MachineIdentity,
-) -> None:
-    with throwaway_database("retire_guard") as url:
-        with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
-            _widen_retired_checks(conn)
-            conn.execute("INSERT INTO agents (id, label) VALUES (7, 'stuck'), (8, 'ok')")
-            conn.execute(
-                "INSERT INTO agents_meta (id, status, machine) VALUES "
-                "(7, 'restarting', 'm'), (8, 'idling', 'm')"
-            )
-
-        with psycopg.connect(url) as conn, pytest.raises(MigrationFailed) as refusal:
-            apply_pending_migrations(conn, machine_name=machine_identity.name)
-        assert isinstance(refusal.value.__cause__, psycopg.errors.RaiseException)
-        assert "rows 7 are still in it" in str(refusal.value.__cause__)
-
-        with psycopg.connect(url, autocommit=True) as conn:
-            names = {
-                row[0] for row in conn.execute("SELECT name FROM schema_migrations").fetchall()
-            }
-            assert _RETIRE not in names
-            assert conn.execute("SELECT status FROM agents_meta WHERE id = 7").fetchone() == (
-                "restarting",
-            )
-            # The drop migration ran first and committed on its own; only the
-            # retirement refused, so the status CHECK still admits the value.
-            assert _DROP in names
-            definition = conn.execute(
-                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
-                "WHERE conname = 'agents_meta_status_check'"
-            ).fetchone()
-            assert definition is not None and "restarting" in definition[0]
-
-        with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute("UPDATE agents_meta SET status = 'idling' WHERE id = 7")
-        with psycopg.connect(url) as conn:
-            # Migrations newer than the retirement apply after it; only the
-            # retirement was held back by the refusal.
-            applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
-            assert [name for name in applied if name <= _RETIRE] == [_RETIRE]
-        with (
-            psycopg.connect(url, autocommit=True) as conn,
-            pytest.raises(psycopg.errors.CheckViolation),
-        ):
-            conn.execute("UPDATE agents_meta SET status = 'restarting' WHERE id = 8")
 
 
 # ── Contraction of the delivery watchdog's durable retry state ──
@@ -351,3 +232,114 @@ def test_the_contraction_drops_the_state_of_an_upgraded_cluster_and_keeps_its_ro
             ).read_text()
             conn.execute(cast(LiteralString, migration))  # replay: every statement is IF EXISTS
             assert _watchdog_state_present(conn) == ([], [])
+
+
+# meiva:note
+# ── Retirement of the host fencing storage ──
+
+_FENCING = "20261020T073712_retire-host-fencing-storage"
+_FENCING_AGENT_COLUMNS = (
+    "incarnation_resources",
+    "last_admission_outcome",
+    "lease_expires_at",
+    "lifecycle_command_id",
+    "native_work_id",
+    "pid",
+    "runtime_kind",
+    "started_at",
+)
+_FENCING_INBOUND_COLUMNS = ("applied_at", "target_generation", "target_owner")
+
+
+def _fencing_state_present(conn: psycopg.Connection) -> tuple[list[str], list[str], list[str]]:
+    def names(query: str, wanted: tuple[str, ...]) -> list[str]:
+        return [
+            row[0] for row in conn.execute(cast(LiteralString, query), (list(wanted),)).fetchall()
+        ]
+
+    columns = (
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' "
+        "AND table_name = '{}' AND column_name = ANY(%s) ORDER BY 1"
+    )
+    return (
+        names(columns.format("agents_meta"), _FENCING_AGENT_COLUMNS),
+        names(columns.format("inbound_messages"), _FENCING_INBOUND_COLUMNS),
+        names(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' "
+            "AND table_name = ANY(%s) ORDER BY 1",
+            ("native_restart_commands",),
+        ),
+    )
+
+
+# meiva:note
+# An older cluster carries the fencing columns, receipt table and done guard; the
+# migration removes them, keeps `last_admission_at` and every row, and replays as a no-op.
+def test_the_fencing_retirement_drops_an_upgraded_clusters_storage_and_keeps_its_rows(
+    machine_identity: MachineIdentity,
+) -> None:
+    with throwaway_database("fencing_upgrade") as url:
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+            conn.execute(
+                "ALTER TABLE agents_meta "
+                "ADD COLUMN incarnation_resources JSONB, "
+                "ADD COLUMN last_admission_outcome TEXT, "
+                "ADD COLUMN lease_expires_at TIMESTAMPTZ, "
+                "ADD COLUMN lifecycle_command_id BIGINT, "
+                "ADD COLUMN native_work_id BIGINT, "
+                "ADD COLUMN pid INT, "
+                "ADD COLUMN runtime_kind TEXT, "
+                "ADD COLUMN started_at TIMESTAMPTZ"
+            )
+            conn.execute(
+                "ALTER TABLE inbound_messages ADD COLUMN applied_at TIMESTAMPTZ, "
+                "ADD COLUMN target_generation UUID, ADD COLUMN target_owner UUID"
+            )
+            conn.execute("CREATE TABLE native_restart_commands (id BIGINT PRIMARY KEY)")
+            conn.execute(
+                "CREATE FUNCTION reject_inbound_done_with_lifecycle_pointer() RETURNS trigger "
+                "LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$"
+            )
+            conn.execute(
+                "CREATE TRIGGER inbound_messages_lifecycle_pointer_done_guard "
+                "AFTER UPDATE ON inbound_messages FOR EACH ROW "
+                "EXECUTE FUNCTION reject_inbound_done_with_lifecycle_pointer()"
+            )
+            conn.execute("INSERT INTO agents (id, label) VALUES (1, 'a')")
+            conn.execute(
+                "INSERT INTO agents_meta (id, status, machine, last_admission_at, "
+                "runtime_kind, lease_expires_at) "
+                "VALUES (1, 'idling', 'm', '2026-10-01T00:00:00Z', 'hosted', now())"
+            )
+            conn.execute(
+                "INSERT INTO inbound_messages (id, agent_id, kind, content) "
+                "VALUES (10, 1, 'chat', 'hello')"
+            )
+            assert _fencing_state_present(conn) == (
+                sorted(_FENCING_AGENT_COLUMNS),
+                sorted(_FENCING_INBOUND_COLUMNS),
+                ["native_restart_commands"],
+            )
+            conn.execute("DELETE FROM schema_migrations WHERE name = %s", (_FENCING,))
+
+        with psycopg.connect(url) as conn:
+            applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
+            assert _FENCING in applied
+            assert _fencing_state_present(conn) == ([], [], [])
+            assert conn.execute(
+                "SELECT count(*) FROM pg_trigger "
+                "WHERE tgname = 'inbound_messages_lifecycle_pointer_done_guard'"
+            ).fetchone() == (0,)
+            assert conn.execute(
+                "SELECT last_admission_at IS NOT NULL FROM agents_meta WHERE id = 1"
+            ).fetchone() == (True,)
+            assert conn.execute(
+                "SELECT content FROM inbound_messages WHERE id = 10"
+            ).fetchone() == ("hello",)
+
+        with psycopg.connect(url) as conn:
+            assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
+            migration = next(path for path in _MIGRATIONS.rglob(f"{_FENCING}.sql")).read_text()
+            conn.execute(cast(LiteralString, migration))
+            assert _fencing_state_present(conn) == ([], [], [])

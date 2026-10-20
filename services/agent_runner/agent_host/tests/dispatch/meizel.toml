@@ -1,8 +1,8 @@
 [debt.first-party-patch]
 "test_failure_report_cutoff.py#monkeypatch.setattr services.agent_runner.agent_host.settlement.settle_and_stamp_turn" = 2
 "test_host_turn_progress_publish.py#monkeypatch.setattr base.agents.observation.turn_progress.time.monotonic" = 1
+"test_host_turn_progress_publish.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.BEAT_DB_TIMEOUT_S" = 2
 "test_host_turn_progress_publish.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.LIVENESS_BEAT_STEP_S" = 4
-"test_host_turn_progress_publish.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.OWNERSHIP_RENEW_TIMEOUT_S" = 2
 "test_host_turn_progress_publish.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.TURN_PROGRESS_PUBLISH_TIMEOUT_S" = 2
 "test_host_turn_progress_publish.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.asyncio.sleep" = 2
 "test_host_turn_progress_publish.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.publish_turn_progress_heartbeat" = 5

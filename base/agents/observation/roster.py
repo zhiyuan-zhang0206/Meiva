@@ -42,9 +42,7 @@ class AgentCard(AgentLineage):
     """Scalar list state; selected-agent details and notice bodies are separate reads."""
 
     status: AgentStatus
-    pid: int | None
     spawned_at: datetime
-    started_at: datetime | None
     last_active_at: datetime
     last_inbound_at: datetime
     label: str | None
@@ -81,14 +79,14 @@ class AgentRoster(BaseModel):
 
 
 _CARD_COLUMNS = """
-    a.id AS agent_id, a.spawner, a.fork_source_agent_id, a.status, a.pid,
-    a.spawned_at, a.started_at,
-    COALESCE(a.last_active_at, a.started_at, a.spawned_at) AS last_active_at,
-    COALESCE(im.last_inbound_at, a.started_at, a.spawned_at) AS last_inbound_at,
+    a.id AS agent_id, a.spawner, a.fork_source_agent_id, a.status,
+    a.spawned_at,
+    COALESCE(a.last_active_at, a.spawned_at) AS last_active_at,
+    COALESCE(im.last_inbound_at, a.spawned_at) AS last_inbound_at,
     t.label, a.machine, a.heartbeat_paused_until, a.liveness_state,
     a.config_overlay, a.birth_config,
-    mp.last_probe_at AS machine_probe_at, mp.agent_host_online, a.lease_expires_at,
-    a.last_admission_outcome, a.last_admission_at,
+    mp.last_probe_at AS machine_probe_at, mp.agent_host_online,
+    a.last_admission_at,
     a.last_launch_failure_reason, a.last_launch_failure_at,
     attention.awaiting_response_count, attention.highest_notice_priority,
     fyi.unread_notice_count,
@@ -160,21 +158,15 @@ def _card(
     )
     probe = data.pop("machine_probe_at")
     host_online = data.pop("agent_host_online")
-    lease = data.pop("lease_expires_at")
-    admission_outcome = data.pop("last_admission_outcome")
     admission_at = data.pop("last_admission_at")
     launch_failure_reason = data.pop("last_launch_failure_reason")
     launch_failure_at = data.pop("last_launch_failure_at")
     probe_at = datetime.fromisoformat(probe) if probe else None
-    data["observation"] = observation(
-        probe_at,
-        datetime.fromisoformat(lease) if lease else None,
-    )
+    data["observation"] = observation(probe_at)
     data["availability"] = availability(
         status=data["status"],
         host_online=host_online,
         probe_at=probe_at,
-        admission_outcome=admission_outcome,
         admission_at=datetime.fromisoformat(admission_at) if admission_at else None,
         launch_failure_reason=launch_failure_reason,
         launch_failure_at=datetime.fromisoformat(launch_failure_at) if launch_failure_at else None,

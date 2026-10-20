@@ -33,6 +33,16 @@ and the matching GitHub Releases.
   `spawn_agent_guarded_v1` a `prompt_source` and `spawner` that the API validates; `get_messages` returns
   the API's raw message window
   ([decision](docs/decisions/data/security/2026-10-20-mcp-is-a-thin-api-forwarder.md)).
+- The agent host no longer fences itself: one host per machine and home is the protection. A turn
+  is admitted by breaker, maintenance hold and one `UPDATE` of the machine's own row; the host
+  settles its `running` rows once at start. Removed: the per-agent lease and its renewal, exec
+  resource evidence and closed-predecessor admission, admission refusal records and their event,
+  the resurrection epoch, the legacy cutover gates, cold maintenance preparation, and the columns
+  and tables behind them (`pid`, `started_at`, `lease_expires_at`, `runtime_kind`,
+  `incarnation_resources`, `last_admission_outcome`, the lifecycle pointer and the keyed receipt
+  tables). `pid`, `started_at` and `runtime_lease_expires_at` leave the agent API and
+  `meiva.agents.AgentRow`; liveness follows machine reachability only. A held maintenance drain is
+  continued by a restarted host without manual cancellation.
 - Restart and terminate commands are claimed at the turn boundary and executed and closed in
   one transaction; a force terminate writes `terminated` in the API's own transaction and then
   asks the home host to cancel the running turn. The pointer, target, applied and observed

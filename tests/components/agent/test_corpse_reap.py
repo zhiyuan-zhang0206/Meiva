@@ -47,7 +47,6 @@ async def test_corpse_stamp_failure_keeps_its_traceback(
         agent_id,
         "host-test",
         owner,
-        expected_from="idling",
         db=Database.from_settings(gate=database_gate),
     )
     assert incarnation is not None

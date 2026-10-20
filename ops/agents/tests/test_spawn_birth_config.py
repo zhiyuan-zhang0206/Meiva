@@ -199,7 +199,7 @@ class TestReplayOnWake:
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET status = 'terminated', termination_source = 'exit', "
-                "runtime_kind='hosted', runtime_generation=gen_random_uuid(), "
+                "runtime_generation=gen_random_uuid(), "
                 "runtime_owner=gen_random_uuid() "
                 "WHERE id = %s",
                 (agent_id,),

@@ -97,9 +97,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     spawner: "user",
     fork_source_agent_id: null,
     status: "running",
-    pid: null,
     spawned_at: "2026-05-07T00:00:00.000000Z",
-    started_at: null,
     last_active_at: "2026-05-07T00:00:00.000000Z", last_inbound_at: "2026-05-07T00:00:00.000000Z",
     label: null,
     machine: "test-machine",
@@ -152,7 +150,6 @@ describe("AgentRow tree-guide rendering", () => {
     render(<AgentRow {...baseProps} agent={ag(1, { observation: {
       machine_probe_at: new Date(Date.now() - 180_000).toISOString(),
       machine_probe_valid_until: new Date(Date.now() - 60_000).toISOString(),
-      runtime_lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
       runtime_owner: "unknown",
     } })} depth={0} ancestorsIsLast={[]} />);
     expect(screen.queryByText("probe stale")).toBeNull();

@@ -63,7 +63,7 @@ from redis.exceptions import NoPermissionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from agent.llm import execute_code
-from agent.ownership.hosted import settle_stale_running_rows
+from agent.ownership.hosted import settle_running_rows_at_start
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
 from base.agents.observation.turn_progress import TurnProgress
@@ -80,7 +80,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
+from base.deploy.progress_timeout import AGENT_HOST_BEAT_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus, EventBusConfig
 from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
@@ -138,10 +138,11 @@ def _claim_pidfile() -> None:
 
 
 # A fixed timer proves liveness even when no agent has work. The same beat
-# renews hosted agent leases, so its step IS the lattice's renewal interval.
+# meiva:note
+# reaps crash corpses, so its step IS the lattice's beat interval.
 _LIVENESS_TIMEOUT_S = 60.0
-LIVENESS_BEAT_STEP_S = AGENT_LEASE_RENEW_INTERVAL_S
-OWNERSHIP_RENEW_TIMEOUT_S = 10.0
+LIVENESS_BEAT_STEP_S = AGENT_HOST_BEAT_INTERVAL_S
+BEAT_DB_TIMEOUT_S = 10.0
 # Gateway key presence proves the 15s host loop runs; four missed beats expire it.
 _TURN_PROGRESS_HEARTBEAT_TTL_S = 60
 TURN_PROGRESS_PUBLISH_TIMEOUT_S = 3.0
@@ -265,6 +266,9 @@ def _report_long_admission_waits(
         )
 
 
+# meiva:note
+# Liveness and the corpse reaper, independent of the idle dispatcher.
+# beat() precedes DB work — process health must not depend on the DB.
 async def beat_forever(
     liveness: Liveness,
     host: AgentHost,
@@ -274,22 +278,20 @@ async def beat_forever(
     *,
     read_alert_seconds: Callable[[], float],
 ) -> None:
-    """Liveness and ownership renewal, independent of the idle dispatcher.
-    beat() precedes DB renewal — process health must not depend on the DB."""
     heartbeat_ok = True
-    renewal_failures = 0
+    beat_failures = 0
     while True:
         require_helper_parent_chain()
         liveness.beat()
         try:
-            await asyncio.wait_for(host.renew_ownership(), timeout=OWNERSHIP_RENEW_TIMEOUT_S)
+            await asyncio.wait_for(host.reap_corpses(), timeout=BEAT_DB_TIMEOUT_S)
         except (TimeoutError, psycopg.OperationalError, PoolTimeout):
-            renewal_failures += 1
-            host_log.exception("[agent-host] database renewal failed (%s/3)", renewal_failures)
-            if renewal_failures >= 3:
+            beat_failures += 1
+            host_log.exception("[agent-host] database beat failed (%s/3)", beat_failures)
+            if beat_failures >= 3:
                 raise
         else:
-            renewal_failures = 0
+            beat_failures = 0
         published = await publish_turn_progress_heartbeat(
             bus, machine, scheduler.active_agents, host.turn_progress
         )
@@ -300,6 +302,8 @@ async def beat_forever(
         await asyncio.sleep(LIVENESS_BEAT_STEP_S)
 
 
+# meiva:note
+# Propagate exhausted beat failures to the service task group.
 async def ownership_beat_completion(
     liveness: Liveness,
     host: AgentHost,
@@ -309,7 +313,6 @@ async def ownership_beat_completion(
     *,
     read_alert_seconds: Callable[[], float],
 ) -> Exception | None:
-    """Propagate exhausted renewal failures to the service task group."""
     await beat_forever(
         liveness, host, scheduler, machine, bus, read_alert_seconds=read_alert_seconds
     )
@@ -636,9 +639,7 @@ async def run(
             bus,
             read_alert_seconds=lambda: config.view.daemon.host_admission_wait_alert_seconds,
         )
-        settled = await settle_stale_running_rows(
-            control_pool, local_machine, exclude_owner=host.runtime_owner
-        )
+        settled = await settle_running_rows_at_start(control_pool, local_machine)
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
 
         endpoint = _endpoint()

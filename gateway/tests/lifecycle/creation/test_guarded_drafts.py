@@ -75,7 +75,7 @@ def test_historical_snapshot_never_wakes_later_work(
         )
     elif mutation == "admitted":
         db_conn.execute(
-            "UPDATE agents_meta SET last_admission_at=now(), last_admission_outcome='admitted' WHERE id=%s",
+            "UPDATE agents_meta SET last_admission_at=now() WHERE id=%s",
             (agent_id,),
         )
     elif mutation == "terminated":

@@ -9,10 +9,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.incarnation.lifecycle_commands import (
-    KILL_ALL_SHELL_SESSIONS,
-    record_unowned_termination,
-)
+from base.agents.incarnation.lifecycle_commands import KILL_ALL_SHELL_SESSIONS
 from base.agents.messages.envelope import validate_source
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
 from base.db import Database
@@ -223,9 +220,10 @@ def enqueue_termination_inbounds(
 #     older sessions. A force kills sessions only when asked itself, so any open
 #     graceful terminate, with its own shell-session request, is closed unserved.
 #
-#     `last_force_terminate_inbound_id` fences automatic resurrection: input that
-#     was queued before the latest explicit force cannot revive the agent, even
-#     when the force found it already terminated and changed no status.
+#     The force's own terminate command fences automatic resurrection: input that
+#     was queued before the latest explicit force carries a smaller inbound id and
+#     cannot revive the agent, even when the force found it already terminated and
+#     changed no status.
 def force_terminate_transaction(
     agent_id: int,
     db_pool: ConnectionPool,
@@ -233,18 +231,17 @@ def force_terminate_transaction(
     source: str,
     message: str | None = None,
     kill_all_shell_sessions: bool = False,
-) -> tuple[AgentStatus, int | None, list[str], int, int]:
+) -> tuple[AgentStatus, list[str], int, int]:
     with db_pool.connection() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         cur.execute(
-            "SELECT status, pid,session_index FROM agents_meta WHERE id = %s FOR UPDATE",
+            "SELECT status, session_index FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
         )
         row = cur.fetchone()
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
         old_status = AgentStatus(row[0])
-        pid = row[1]
         page_names = list_open_page_names(conn, agent_id)
         _, terminate_inbound_id = _insert_termination_inbounds(
             conn,
@@ -253,9 +250,6 @@ def force_terminate_transaction(
             message=message,
             kill_all_shell_sessions=kill_all_shell_sessions,
         )
-        # Judged on the row as it is before this force ends it: no incarnation
-        # to settle leaves a receipt resurrection accepts.
-        record_unowned_termination(conn, agent_id, terminate_inbound_id)
         # meiva:note
         # Older commands are closed visibly, never silently dropped; the force's
         # own command is simply done, since this transaction executed it.
@@ -274,13 +268,13 @@ def force_terminate_transaction(
             "UPDATE inbound_messages SET status='done' WHERE id=%s", (terminate_inbound_id,)
         )
         cur.execute(
-            # termination_source='user': force-kill / a terminate that found the
-            # pid already dead. Both are the user's will to end the agent, so it
-            # is NOT crash-auto-resurrect-eligible even with a queued inbound.
+            # meiva:note
+            # termination_source='user': a force-kill is the user's will to end the
+            # agent, so it is NOT crash-auto-resurrect-eligible even with a queued
+            # inbound.
             "UPDATE agents_meta SET status='terminated', termination_source='user', "
-            "heartbeat_paused_until = NULL, last_force_terminate_inbound_id = %s "
-            "WHERE id = %s",
-            (terminate_inbound_id, agent_id),
+            "heartbeat_paused_until = NULL WHERE id = %s",
+            (agent_id,),
         )
         prepared_event = _stage_termination_event(
             conn,
@@ -290,7 +284,7 @@ def force_terminate_transaction(
             kill_all_shell_sessions=kill_all_shell_sessions,
         )
     telemetry.emit_prepared(prepared_event)
-    return old_status, pid, page_names, terminate_inbound_id, row[2]
+    return old_status, page_names, terminate_inbound_id, row[1]
 
 
 # meiva:note
@@ -312,7 +306,7 @@ def force_mark_terminated(
     source: str = "user",
     message: str | None = None,
 ) -> list[str]:
-    _, _, page_names, inbound_id, _cutoff = force_terminate_transaction(
+    _, page_names, inbound_id, _cutoff = force_terminate_transaction(
         agent_id,
         db_pool,
         source=source,

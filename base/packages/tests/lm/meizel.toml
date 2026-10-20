@@ -23,9 +23,6 @@ exports = ["providers"]
 "test_lm_factory.py#monkeypatch.setenv os.environ.DEEPSEEK_API_KEY" = 1
 "test_per_agent_overrides.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 1
 "test_per_agent_overrides.py#monkeypatch.setenv os.environ.DEEPSEEK_API_KEY" = 1
-"test_single_attempt.py#monkeypatch.delenv os.environ.GEMINI_API_KEY" = 1
-"test_single_attempt.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 1
-"test_single_attempt.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 1
 
 [debt.first-party-patch]
 "test_llm_factory.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 1
@@ -44,7 +41,6 @@ exports = ["providers"]
 "test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.zhipu_api_key" = 1
 "test_lm_factory.py#monkeypatch.setattr base.host.env.dotenv_file.env_file_path" = 1
 "test_lm_factory.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 8
-"test_single_attempt.py#monkeypatch.setattr base.lm.factory.resolve_available_model" = 1
 
 [debt.stdlib-patch]
 "test_lm_call.py#monkeypatch.setattr time.sleep" = 7

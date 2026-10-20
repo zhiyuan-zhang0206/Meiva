@@ -8,7 +8,6 @@ from uuid import uuid4
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 import base.agents.impersonation as agents_impersonation
@@ -16,7 +15,6 @@ from agent import impersonation
 from agent.tests.impersonation.test_impersonation import _notes
 from base.agents.context import MeivaContext
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
-from base.agents.incarnation.resources import ResourceProcess
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -89,7 +87,6 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
     event_bus: EventBus,
-    exited_host: ResourceProcess,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -108,7 +105,7 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
         machine=machine_identity,
     )
     first = await admit_hosted_runtime(
-        aops_pool, agent_id, machine_identity.name(), uuid4(), expected_from="idling", db=database
+        aops_pool, agent_id, machine_identity.name(), uuid4(), db=database
     )
     assert first is not None
     lease = leases.request(
@@ -133,15 +130,8 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
         "Handoff brief",
         local_machine=machine_identity.name(),
     )
-    db_conn.execute(
-        "UPDATE agents_meta SET lease_expires_at = clock_timestamp() - interval '1 second', "
-        "incarnation_resources=jsonb_set(incarnation_resources,'{host_process}',%s) "
-        "WHERE id=%s",
-        (Jsonb(exited_host.model_dump(mode="json")), agent_id),
-    )
-    db_conn.commit()
     successor = await admit_hosted_runtime(
-        aops_pool, agent_id, machine_identity.name(), uuid4(), expected_from="running", db=database
+        aops_pool, agent_id, machine_identity.name(), uuid4(), db=database
     )
     assert successor is not None
     assert db_conn.execute(

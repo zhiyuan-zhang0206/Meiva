@@ -127,13 +127,6 @@ EVENTS: dict[str, EventSpec] = {
         persist=True,
     ),
     "agent_resurrected": telemetry_event("agent_resurrected", "agent resurrected", persist=True),
-    "auto_resurrect_refused": telemetry_event(
-        "auto_resurrect_refused",
-        "an automatic resurrect of a terminated agent was refused (e.g. "
-        "runtime_cutover_required); the triggering inbound stays queued until an "
-        "operator resolves the named reason",
-        tier="anomaly",
-    ),
     "auto_resurrect_failed": telemetry_event(
         "auto_resurrect_failed",
         "an automatic resurrect failed for a possibly transient reason; the "

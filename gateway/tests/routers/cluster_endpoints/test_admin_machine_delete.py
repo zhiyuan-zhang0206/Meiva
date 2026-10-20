@@ -463,13 +463,10 @@ class TestMachinePauseResume:
         assert body["terminated_agents"] == 0
         assert body["force_marked_agents"] == 1
         with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT status, termination_source, last_force_terminate_inbound_id "
-                "FROM agents_meta WHERE machine = 'away'"
-            )
+            cur.execute("SELECT status, termination_source FROM agents_meta WHERE machine = 'away'")
             status_row = cur.fetchone()
             assert status_row is not None
-            status, source, fence_id = status_row
+            status, source = status_row
             cur.execute(
                 "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='terminate' "
                 "ORDER BY id DESC LIMIT 1",
@@ -480,7 +477,7 @@ class TestMachinePauseResume:
             terminate_id = terminate_row[0]
         assert status == "terminated"
         assert source == "user"
-        assert old_chat_id < fence_id == terminate_id
+        assert old_chat_id < terminate_id
 
     def test_pause_unknown_machine_404(
         self, db_conn, set_machine_identity: MachineIdentitySetter

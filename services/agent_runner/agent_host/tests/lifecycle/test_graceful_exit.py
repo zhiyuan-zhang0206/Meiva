@@ -13,21 +13,14 @@ import sys
 from functools import partial
 from typing import Any
 
-import psutil
 import psycopg
 import pytest
 from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import build_graph
 from base.agents.inbox.insert import insert_inbound_message
-from base.agents.incarnation.resources import (
-    IncarnationResources,
-    ResourceProcess,
-    decode_resources,
-)
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -49,25 +42,8 @@ from services.agent_runner.agent_host.lifecycle.graceful_exit import (
     OwedRestart,
     write_exit_restart,
 )
-from services.agent_runner.agent_host.scheduling.pending_wakes import scan_rows
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.lifecycle import blocking_model
-
-_ACCEPTED = f"Restart was accepted from {RESTART_SOURCE}"
-
-
-def _exited_process() -> ResourceProcess:
-    process = subprocess.Popen(
-        ["/bin/sleep", "60"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        identity = ResourceProcess.capture(psutil.Process(process.pid))
-    finally:
-        process.kill()
-        process.wait(timeout=5)
-    return identity
 
 
 async def _dispatch_forever() -> None:
@@ -122,56 +98,18 @@ class _Cluster:
     def restarts(self, agent_id: int) -> list[tuple[Any, ...]]:
         self.conn.commit()
         return self.conn.execute(
-            "SELECT id,status,applied_at IS NOT NULL,observed_at IS NOT NULL "
-            "FROM inbound_messages WHERE agent_id=%s AND kind='restart' AND source=%s ORDER BY id",
+            "SELECT id,status FROM inbound_messages "
+            "WHERE agent_id=%s AND kind='restart' AND source=%s ORDER BY id",
             (agent_id, RESTART_SOURCE),
         ).fetchall()
-
-    def lifecycle_commands(self, agent_id: int) -> list[tuple[Any, ...]]:
-        self.conn.commit()
-        return self.conn.execute(
-            "SELECT id,kind,source,status,applied_at IS NOT NULL FROM inbound_messages "
-            "WHERE agent_id=%s AND kind IN ('restart','terminate') ORDER BY id",
-            (agent_id,),
-        ).fetchall()
-
-    # meiva:note
-    # Record, as a SIGKILLed host leaves it, host-process evidence of a process that exited.
-    def host_was_killed(self, agent_id: int) -> None:
-        self.conn.commit()
-        row = self.conn.execute(
-            "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent_id,)
-        ).fetchone()
-        assert row is not None
-        resources = decode_resources(row[0])
-        assert isinstance(resources, IncarnationResources)
-        assert resources.host_process is not None and not resources.requests
-        dead = resources.model_copy(update={"host_process": _exited_process()})
-        self.conn.execute(
-            "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
-            (Jsonb(dead.model_dump(mode="json")), agent_id),
-        )
-        self.conn.commit()
 
     def row(self, agent_id: int) -> tuple[Any, ...]:
         self.conn.commit()
         row = self.conn.execute(
-            "SELECT status,runtime_owner,lifecycle_command_id FROM agents_meta WHERE id=%s",
-            (agent_id,),
+            "SELECT status,runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)
         ).fetchone()
         assert row is not None
         return row
-
-    def lease_released(self, agent_id: int) -> bool:
-        self.conn.commit()
-        row = self.conn.execute(
-            "SELECT lease_expires_at IS NULL FROM agents_meta WHERE id=%s", (agent_id,)
-        ).fetchone()
-        return row == (True,)
-
-    async def woken_by_a_new_host(self, agent_id: int) -> bool:
-        owner = (await self.host(drain_s=30)).host.runtime_owner
-        return agent_id in await scan_rows(self.pool, owner, self.machine.name())
 
     async def host(self, *, drain_s: float) -> _Host:
         checkpointer = await build_checkpointer(self.pool, read_checkpoint_interval=lambda: 1)
@@ -226,114 +164,6 @@ def cluster(
         database_gate,
         machine_identity,
     )
-
-
-async def test_sigterm_settles_an_in_flight_turn_at_its_restart_and_the_next_host_continues(
-    cluster: _Cluster,
-) -> None:
-    agent_id, gate, first = await cluster.in_flight_turn(drain_s=30)
-    serving = first.serve()
-    # meiva:note
-    # A wake that lands mid-turn would loop the agent into another turn; the exit must not
-    # start one, or its admission would observe the new pointer.
-    first.scheduler.wake(agent_id)
-
-    first.graceful.request()
-    async with asyncio.timeout(10):
-        while not cluster.restarts(agent_id):
-            await asyncio.sleep(0.05)
-    gate.release.set()
-    await asyncio.wait_for(serving, 30)
-    assert first.scheduler.active_agents == frozenset()
-    await first.close()
-
-    # meiva:note
-    # The step finished, the claim took the restart, the host applied it and let go.
-    [(restart, status, applied, observed)] = cluster.restarts(agent_id)
-    assert (status, applied, observed) == ("claimed", True, False)
-    assert cluster.row(agent_id) == ("idling", None, restart)
-    before = await first.messages(agent_id)
-    assert any(_ACCEPTED in str(message.content) for message in before)
-    assert gate.calls == 1
-
-    # meiva:note
-    # The pointer wakes the agent on the next host, which observes the restart and continues
-    # from the same checkpoint.
-    assert await cluster.woken_by_a_new_host(agent_id)
-    second = await cluster.host(drain_s=30)
-    await asyncio.wait_for(second.host.run_turn(agent_id), 30)
-    assert cluster.restarts(agent_id) == [(restart, "done", True, True)]
-    assert cluster.row(agent_id)[2] is None
-    after = await second.messages(agent_id)
-    assert [m.content for m in after[: len(before)]] == [m.content for m in before]
-    assert sum(_ACCEPTED in str(message.content) for message in after) == 1
-    await second.close()
-
-
-async def test_a_turn_past_the_drain_budget_is_named_and_still_continued_by_the_next_host(
-    cluster: _Cluster, loguru_records: LogRecords
-) -> None:
-    agent_id, gate, first = await cluster.in_flight_turn(drain_s=0.5)
-    serving = first.serve()
-    first.graceful.request()
-    await asyncio.wait_for(serving, 30)
-
-    # meiva:note
-    # The moment root's SIGKILL would land: the step is still running, but its restart is
-    # already durable and a new host's scan wakes the agent.
-    [timeout] = loguru_records.events("host_exit_drain_timeout")
-    assert timeout["level"].name == "ERROR"
-    assert timeout["extra"]["agent_id"] == agent_id
-    [(restart, status, _applied, _observed)] = cluster.restarts(agent_id)
-    assert status == "pending" and timeout["extra"]["restart"] == restart
-    assert await cluster.woken_by_a_new_host(agent_id)
-
-    # meiva:note
-    # A killed host never releases its lease. Its stored host-process evidence names a
-    # process that has exited, so the successor admits at once, as after a real SIGKILL
-    # with no exec request open. Its first claim takes the restart before any model step,
-    # applies it, and leaves the pointer for the host after.
-    cluster.host_was_killed(agent_id)
-    second = await cluster.host(drain_s=30)
-    await asyncio.wait_for(second.host.run_turn(agent_id), 30)
-    assert cluster.restarts(agent_id) == [(restart, "claimed", True, False)]
-    assert cluster.row(agent_id) == ("idling", None, restart)
-    assert gate.calls == 1
-    assert any(_ACCEPTED in str(m.content) for m in await second.messages(agent_id))
-
-    # meiva:note
-    # The killed host's own cleanup, run here only to end the test, is fenced off the row.
-    await first.close()
-    assert cluster.row(agent_id) == ("idling", None, restart)
-    await second.close()
-
-
-async def test_an_unfinished_lifecycle_command_is_kept_instead_of_adding_a_restart(
-    cluster: _Cluster, loguru_records: LogRecords
-) -> None:
-    agent_id, gate, first = await cluster.in_flight_turn(drain_s=30)
-    operator = insert_inbound_message(
-        cluster.conn,
-        agent_id,
-        "",
-        source="user",
-        kind="restart",
-        database=cluster.database,
-        bus=cluster.bus,
-    )
-    serving = first.serve()
-    first.graceful.request()
-    async with asyncio.timeout(10):
-        while not loguru_records.events("host_exit_draining"):
-            await asyncio.sleep(0.05)
-    gate.release.set()
-    await asyncio.wait_for(serving, 30)
-    await first.close()
-
-    [draining] = loguru_records.events("host_exit_draining")
-    assert (draining["extra"]["written"], draining["extra"]["reused"]) == (0, 1)
-    assert cluster.lifecycle_commands(agent_id) == [(operator, "restart", "user", "claimed", True)]
-    assert cluster.row(agent_id) == ("idling", None, operator)
 
 
 class _Turns:
@@ -409,7 +239,7 @@ async def test_an_idle_agent_gets_no_restart(cluster: _Cluster, loguru_records: 
 
     assert cluster.restarts(agent_id) == []
     assert gate.calls == 0
-    assert cluster.row(agent_id) == ("idling", None, None)
+    assert cluster.row(agent_id) == ("idling", None)
     assert [r["extra"]["written"] for r in loguru_records.events("host_exit_draining")] == [0]
     assert len(loguru_records.events("host_exit_drained")) == 1
 

@@ -195,7 +195,7 @@ def test_force_termination_retries_command_before_message(
         return result
 
     monkeypatch.setattr(termination, "insert_termination_pair", _fail_after_pair)
-    old_status, _, _, terminate_id, _cutoff = termination.force_terminate_transaction(
+    old_status, _, terminate_id, _cutoff = termination.force_terminate_transaction(
         running_agent_id,
         db_pool,
         source="user",
@@ -213,9 +213,8 @@ def test_force_termination_retries_command_before_message(
         (rows[1][0], "final force note", "chat", "pending"),
     ]
     assert db_conn.execute(
-        "SELECT status,last_force_terminate_inbound_id FROM agents_meta WHERE id=%s",
-        (running_agent_id,),
-    ).fetchone() == ("terminated", terminate_id)
+        "SELECT status FROM agents_meta WHERE id=%s", (running_agent_id,)
+    ).fetchone() == ("terminated",)
 
 
 def _terminate_payloads(db_conn: psycopg.Connection, agent_id: int) -> list[object]:

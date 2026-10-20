@@ -176,9 +176,9 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
         "SELECT status FROM inbound_messages WHERE id=%s", (hold.commands[agent],)
     ).fetchone() == ("done",)
     assert db_conn.execute(
-        "SELECT runtime_owner,runtime_generation,incarnation_resources FROM agents_meta WHERE id=%s",
+        "SELECT runtime_owner,runtime_generation FROM agents_meta WHERE id=%s",
         (agent,),
-    ).fetchone() == (None, None, None)
+    ).fetchone() == (None, None)
 
 
 async def _assert_tail_still_durable(

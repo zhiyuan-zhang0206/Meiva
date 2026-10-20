@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.deploy.maintenance import admission
 from base.log import logger
 
@@ -83,11 +82,10 @@ async def record_drained(pool: AsyncConnectionPool, agent_id: int) -> None:
         async with pool.connection() as conn:
             row = await (
                 await conn.execute(
-                    "SELECT 1 FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant SQL fragment
+                    "SELECT 1 FROM agents_meta m JOIN inbound_messages i "
                     "ON i.agent_id=m.id WHERE m.id=%s AND i.id=%s AND i.kind='restart' "
                     "AND i.status='done' AND m.status='idling' AND m.runtime_owner IS NULL "
-                    "AND COALESCE((i.payload -> 'lifecycle_release') = 'true'::jsonb, false) "
-                    f"AND {DRAINED_RESOURCES}",
+                    "AND COALESCE((i.payload -> 'lifecycle_release') = 'true'::jsonb, false)",
                     (agent_id, command_id),
                 )
             ).fetchone()
@@ -95,14 +93,10 @@ async def record_drained(pool: AsyncConnectionPool, agent_id: int) -> None:
             await asyncio.to_thread(admission.record_drained, agent_id, command_id)
 
 
-async def run_held(
-    agent_id: int,
-    status: str,
-    control: Callable[[int, str], Awaitable[None]],
-) -> bool:
+async def run_held(agent_id: int, control: Callable[[int], Awaitable[None]]) -> bool:
     current = admission.snapshot()
     if current is None or current.maintenance is None:
         return False
     if admission.pending_command(agent_id) is not None:
-        await control(agent_id, status)
+        await control(agent_id)
     return True

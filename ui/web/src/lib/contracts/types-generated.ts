@@ -2249,7 +2249,6 @@ export interface components {
             files: components["schemas"]["Object"][];
             status_url: string;
         };
-        AdmissionOutcome: "admitted" | "maintenance_hold" | "resource_fence" | "admission_guard_refused";
         AgentActivity: {
             active_seconds: number;
             alive_seconds: number;
@@ -2261,16 +2260,13 @@ export interface components {
             reason: components["schemas"]["AvailabilityReason"];
             observed_at: string;
             evidence_at?: string | null;
-            admission_outcome?: components["schemas"]["AdmissionOutcome"] | null;
         };
         AgentCard: {
             agent_id: number;
             spawner: string;
             fork_source_agent_id: number | null;
             status: components["schemas"]["AgentStatus"];
-            pid: number | null;
             spawned_at: string;
-            started_at: string | null;
             last_active_at: string;
             last_inbound_at: string;
             label: string | null;
@@ -2323,7 +2319,6 @@ export interface components {
             observation?: components["schemas"]["AgentObservation"] | null;
             shells_available?: boolean | null;
             spawned_at: string;
-            started_at?: string | null;
             shells: components["schemas"]["ShellInfo"][];
             config_overlay: {
                 [key: string]: unknown;
@@ -2391,7 +2386,6 @@ export interface components {
         AgentObservation: {
             machine_probe_at?: string | null;
             machine_probe_valid_until?: string | null;
-            runtime_lease_expires_at?: string | null;
             runtime_owner: "unknown";
         };
         AgentRoster: {
@@ -2404,9 +2398,7 @@ export interface components {
             fork_source_agent_id: number | null;
             fork_source_checkpoint_id: string | null;
             status: components["schemas"]["AgentStatus"];
-            pid: number | null;
             spawned_at: string;
-            started_at: string | null;
             last_active_at: string;
             last_inbound_at: string;
             label: string | null;
@@ -2578,7 +2570,7 @@ export interface components {
             days: number;
             timezone: string;
         };
-        AvailabilityReason: "unknown" | "host_unavailable" | "awaiting_admission" | "admission_refused" | "admitted" | "launch_unreachable" | "launch_rejected" | "launch_unknown";
+        AvailabilityReason: "unknown" | "host_unavailable" | "awaiting_admission" | "admitted" | "launch_unreachable" | "launch_rejected" | "launch_unknown";
         Body_upload_api_keyed_v1_agents__agent_id__uploads_post: {
             files: string[];
         };

@@ -107,8 +107,8 @@ class TestFatalProviderReport:
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agents_meta "
-                "(id, spawner, born_spawner, status, lease_expires_at) "
-                "VALUES (%s, 'user', 'user', 'running', now() + interval '1 hour')",
+                "(id, spawner, born_spawner, status) "
+                "VALUES (%s, 'user', 'user', 'running')",
                 (root,),
             )
             cur.execute(

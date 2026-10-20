@@ -24,35 +24,22 @@ The journal records one restart ID per captured live incarnation. Preparation
 first records the cohort, commits commands, then records their IDs. A retry
 reuses the same commands. Normal claim binds the target generation and owner.
 Only an agent with work in flight must have the live original owner. An idle
-row with no PID, no live lease, no exec allocation and an owner that is not the
-host being restarted (none, or a departed host's, with an unconsumed birth
-marker, NULL resources or an admitted-but-empty set) is parked when lifecycle
-work is settled, whether or not a host is running; its next wake is an ordinary
-re-admission, which proves the previous host gone. Running turns, recorded
-PIDs, live leases, outstanding exec allocations and ambiguous work refuse drain.
+row whose owner is not the host being restarted (none, or a departed boot's) is
+parked when lifecycle work is settled, whether or not a host is running; its next
+wake is an ordinary re-admission under the new boot. Running turns and ambiguous
+work refuse drain.
 
-Already-stopped hosted units also preserve legacy idle rows whose lease is
-NULL and whose PID/resources are empty, after proving the local host absent.
-An applied old restart and claimed ordinary work remain untouched for normal
-cold admission. `cold.py` also recognizes retired owned idle rows
-with an expired lease. That requires an absent native host/legacy consumer,
-empty PID/resources, no live or unattributable exec request evidence (a provably
-stale envelope is quarantined with a receipt, not deleted), and the latest
-persisted v4 checkpoint at END (halted, no ready channels or pending
-tasks/writes). Preparation holds the metadata row lock and rechecks the latest
-checkpoint identity; it writes nothing, so historical leases, owners/generations,
-commands and checkpoints stay unchanged.
-Unknown checkpoint versions, live consumers and fresh leases still refuse.
-This is preserved idle intent, not a fabricated continuation receipt.
+A host that crashes during the drain restarts with a new boot owner: held
+admission lets a row with an unfinished restart/terminate command through
+whichever boot owns it, so the new host runs it and records the drain. Nothing needs cancelling.
 
-Hosted drain receipts require the shielded continuation, final checkpoint
-flush, resources and owner settlement to finish. The matching DB restart must
+Hosted drain receipts require the shielded continuation and final checkpoint
+flush to finish. The matching DB restart must
 be done with its release marker, over an idle row whose runtime identity is
 released: the apply executes and closes the restart in one transaction, so that
 single fact is the proof, whichever host looks next. Held lifecycle controls
 flush any prior buffered checkpoint before claiming their restart, without
-invoking the graph or consuming ordinary messages; an idle row or a released
-lease alone is insufficient.
+invoking the graph or consuming ordinary messages; an idle row alone is insufficient.
 
 A turn that fails while its continuation is still owed to a draining hold
 (`agent_host/lifecycle/maintenance.py`) ends that agent's restart command once:

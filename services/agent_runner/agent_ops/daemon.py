@@ -29,7 +29,7 @@ from pydantic import ValidationError
 
 from base import paths
 from base.agents.context.clients import ClientSet
-from base.api_contracts.agent_contract import MeivaAgentError, ResurrectRefused
+from base.api_contracts.agent_contract import MeivaAgentError
 from base.api_contracts.launch_retry import LaunchReconcileRequest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
@@ -222,7 +222,7 @@ async def _dispatch(
         }
     except (ValidationError, ValueError, InvalidConfigOverlay) as exc:
         return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
-    except (ShellNotFoundError, ResurrectRefused) as exc:
+    except ShellNotFoundError as exc:
         return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
 
 

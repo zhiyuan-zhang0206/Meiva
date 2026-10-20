@@ -12,8 +12,8 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.ownership.inbound import lock_inbound_owner
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.inbox.live import ALIVE_STATUSES
 from base.agents.messages.inbound import InterruptReason
+from base.api_contracts.agent_contract import AgentStatus
 from base.clock import Timers
 from base.config import settings
 from base.db import Database
@@ -170,6 +170,7 @@ class ClaimedInbound(NamedTuple):
 
 
 _MAX_SPAWNER_ANCESTOR_DEPTH = 32
+_LIVE_STATUSES = (AgentStatus.RUNNING.value, AgentStatus.IDLING.value)
 _FATAL_PROVIDER_REPORT_LOCATION = "agent.turn.runloop._handle_fatal_llm_error"
 
 
@@ -210,12 +211,12 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
     )
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
-            "WITH RECURSIVE spawner_walk(agent_id, spawner, status, lease_expires_at, path, depth) "
+            "WITH RECURSIVE spawner_walk(agent_id, spawner, status, path, depth) "
             "AS ("
-            "  SELECT id, born_spawner, status, lease_expires_at, ARRAY[id], 0 "
+            "  SELECT id, born_spawner, status, ARRAY[id], 0 "
             "  FROM agents_meta WHERE id = %s "
             "  UNION ALL "
-            "  SELECT parent.id, parent.born_spawner, parent.status, parent.lease_expires_at, "
+            "  SELECT parent.id, parent.born_spawner, parent.status, "
             "         walk.path || parent.id, walk.depth + 1 "
             "  FROM spawner_walk walk "
             "  JOIN agents_meta parent "
@@ -223,9 +224,9 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
             "  WHERE walk.depth < %s AND NOT parent.id = ANY(walk.path)"
             ") "
             "SELECT agent_id FROM spawner_walk "
-            "WHERE depth > 0 AND status = ANY(%s) AND lease_expires_at > now() "
+            "WHERE depth > 0 AND status = ANY(%s) "
             "ORDER BY depth ASC LIMIT 1",
-            (failed_agent_id, _MAX_SPAWNER_ANCESTOR_DEPTH, list(ALIVE_STATUSES)),
+            (failed_agent_id, _MAX_SPAWNER_ANCESTOR_DEPTH, list(_LIVE_STATUSES)),
         )
         row = await cur.fetchone()
         if row is None:
@@ -305,9 +306,11 @@ async def claim_inbound_batch(
             "SELECT set_config('lock_timeout', %s, true)", (f"{acquire_timeout_s:g}s",)
         )
         await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
-        await cur.execute("SELECT runtime_kind FROM agents_meta WHERE id=%s", (agent_id,))
+        await cur.execute(
+            "SELECT runtime_owner IS NOT NULL FROM agents_meta WHERE id=%s", (agent_id,)
+        )
         runtime = await cur.fetchone()
-        runtime_owned = runtime == ("hosted",)
+        runtime_owned = runtime == (True,)
         if runtime_owned:
             accepted = await _claim_lifecycle_command(cur, agent_id)
             if accepted is not None:

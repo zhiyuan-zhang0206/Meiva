@@ -77,9 +77,7 @@ async def _assert_restart_released_the_runtime(
     agent_id: int,
 ) -> None:
     assert not await settle_hosted_runtime(pool, old, bus=event_bus)
-    new = await admit_hosted_runtime(
-        pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=database
-    )
+    new = await admit_hosted_runtime(pool, agent_id, "claim-test", uuid4(), db=database)
     assert new is not None and new.generation != old.generation
 
 

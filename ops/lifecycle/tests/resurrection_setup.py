@@ -3,11 +3,9 @@ from __future__ import annotations
 from uuid import uuid4
 
 import psycopg
-from psycopg.types.json import Jsonb
 
 from base.agents.birth.spawn import create_agent_row
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.incarnation.resources import IncarnationResources
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -20,10 +18,10 @@ def noop(_db: object, _bus: object, *_args: object, **_kwargs: object) -> None:
     return None
 
 
-def agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str, int | None] | None:
+def agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str] | None:
     with db.cursor() as cur:
         cur.execute(
-            "SELECT id, spawner, status, pid FROM agents_meta WHERE id = %s",
+            "SELECT id, spawner, status FROM agents_meta WHERE id = %s",
             (agent_id,),
         )
         return cur.fetchone()
@@ -96,11 +94,9 @@ def hosted_agent(
         local_machine=local_machine,
     )
     generation, owner = uuid4(), uuid4()
-    resources = IncarnationResources(generation=generation, owner=owner, requests={})
     db.execute(
-        "UPDATE agents_meta SET runtime_kind='hosted', runtime_generation=%s, "
-        "runtime_owner=%s, incarnation_resources=%s WHERE id=%s",
-        (generation, owner, Jsonb(resources.model_dump(mode="json")), agent_id),
+        "UPDATE agents_meta SET runtime_generation=%s, runtime_owner=%s WHERE id=%s",
+        (generation, owner, agent_id),
     )
     db.commit()
     return agent_id

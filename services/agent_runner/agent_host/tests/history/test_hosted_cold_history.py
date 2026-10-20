@@ -1,13 +1,11 @@
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
-from uuid import uuid4
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import START, StateGraph
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
@@ -16,7 +14,6 @@ from base.agents.history.delta_read_compat import (
     recovery_reconstruction_scope,
     wrap_saver_reads_with_delta_reconstruction,
 )
-from base.agents.incarnation.resources import ResourceBirth
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -62,11 +59,6 @@ async def test_cold_admission_reads_the_history_once_and_never_repairs_it(
         catalog=model_catalog,
         authority=config_authority,
     )
-    async with aops_pool.connection() as conn:
-        await conn.execute(
-            "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
-            (Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")), agent),
-        )
     saver = AsyncPostgresSaver(cast(Any, aops_pool))
     wrap_saver_reads_with_delta_reconstruction(saver)
     observed: list[Any] = []

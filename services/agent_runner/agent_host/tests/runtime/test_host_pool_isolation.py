@@ -70,10 +70,8 @@ class TestPoolIsolation:
             _machine: str,
             owner: UUID,
             *,
-            expected_from: str,
             db: object,
         ) -> RuntimeIncarnation:
-            assert expected_from == "idling"
             calls.append(("admit", pool))
             return RuntimeIncarnation(agent_id, uuid4(), owner)
 

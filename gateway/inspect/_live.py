@@ -29,7 +29,6 @@ class InspectDbRows(NamedTuple):
     last_active_at: Any
     last_heartbeat_at: Any
     spawned_at: Any
-    started_at: Any
     paused_until: Any
     pending_inbound: bool
     config_overlay: dict[str, Any]
@@ -43,9 +42,9 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT config_overlay, machine, status, last_active_at, last_heartbeat_at, "
-            "       spawned_at, started_at, "
+            "       spawned_at, "
             "       CASE WHEN heartbeat_paused_until > now() THEN heartbeat_paused_until END, "
-            "       liveness_state, last_probe_at, lease_expires_at, "
+            "       liveness_state, last_probe_at, "
             "       (SELECT mp.last_probe_at FROM machine_probe mp "
             "        WHERE mp.machine_name = agents_meta.machine) "
             "FROM agents_meta WHERE id = %s",
@@ -68,13 +67,12 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
             last_active_at=row[3],
             last_heartbeat_at=row[4],
             spawned_at=row[5],
-            started_at=row[6],
-            paused_until=row[7],
+            paused_until=row[6],
             pending_inbound=bool(pending_row[0]),
             config_overlay=row[0] if row[0] is not None else {},
-            liveness_state=LivenessState(row[8]),
-            last_probe_at=row[9],
-            observation=observation(row[11], row[10]),
+            liveness_state=LivenessState(row[7]),
+            last_probe_at=row[8],
+            observation=observation(row[9]),
         )
 
 

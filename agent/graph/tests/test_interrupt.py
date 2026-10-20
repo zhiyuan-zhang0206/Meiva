@@ -150,8 +150,7 @@ class TestHasPendingInterrupt:
             payload=_MAINTENANCE_PAYLOAD,
         )
         db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
-            "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
-            "VALUES(%s,'running',%s,'hosted')",
+            "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'running',%s)",
             (tid, machine_identity.name()),
         )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]

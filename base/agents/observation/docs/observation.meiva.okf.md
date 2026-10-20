@@ -8,16 +8,15 @@ tags: [base, observability]
 # Agent observation evidence
 
 `base/agents/observation/` (`snapshot.py`, `roster.py`) projects existing
-`machine_probe.last_probe_at` and `agents_meta.lease_expires_at` into list and
-inspector responses. A machine
+`machine_probe.last_probe_at` into list and inspector responses. A machine
 probe only observes machine reachability. Its deadline uses the existing
 heartbeat cadence and consecutive-failure window, shared with the writer.
 The liveness merge preserves the actual probe timestamp; absent probes remain
 unknown rather than gaining a synthetic successful observation.
 
-Lifecycle remains running, idling, or terminated. An unexpired runtime lease
-does not prove ownership: this compatibility slice reports runtime owner as
-unknown until a generation-bound ownership contract is available. Execution
+Lifecycle remains running, idling, or terminated. A probe does not prove
+ownership: this slice reports runtime owner as unknown until a
+generation-bound ownership contract is available. Execution
 progress and `last_active_at` are not heartbeats. UI renders observation age
 and absolute deadlines using its existing clock, without extra network probes.
 The existing per-row minute timers remain; no additional list timer is added.
@@ -26,10 +25,10 @@ The existing per-row minute timers remain; no additional list timer is added.
 and `AgentSnapshot`. The heartbeat status probe retains its existing
 `agent_host_online` verdict in `machine_probe` without changing what that probe
 means. A host verdict is fresh for two 60-second liveness intervals; a durable
-per-agent admission result is fresh for five minutes. Both clocks must be fresh
-before reporting `admitted` or `admission_refused`. A fresh host-down verdict
+per-agent last admission (`last_admission_at`) is fresh for five minutes. Both
+clocks must be fresh before reporting `admitted`. A fresh host-down verdict
 takes precedence over older admission history. A fresh host-up verdict with no
-admission result means `awaiting_admission`; missing or stale evidence is
+admission means `awaiting_admission`; missing or stale evidence is
 `unknown`. `observed_at` is when this projection was evaluated and `evidence_at`
 is the source observation time. `admitted` means the ownership row was claimed,
 not that a message was claimed or a turn completed. Lifecycle `status` is
@@ -40,7 +39,7 @@ per-agent failed dispatch observation (`launch_unreachable`, `launch_rejected`,
 or `launch_unknown`). For a nonterminated row it takes precedence over host
 probe evidence and does not expire silently. The paired fields clear on a
 successful dispatch for the same `last_launch_attempt_id` or in the same
-transaction as a host admission result. A delayed failure response cannot
+transaction as a host admission. A delayed failure response cannot
 replace a newer attempt or admission. Cards and detail expose the same typed
 reason and timestamp while lifecycle status remains `idling`.
 

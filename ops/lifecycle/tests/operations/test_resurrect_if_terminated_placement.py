@@ -267,41 +267,6 @@ class TestResurrectIfTerminatedPlacement:
             )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("remote", [False, True])
-    async def test_known_resurrection_refusal_keeps_inbound_queued(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        event_bus: EventBus,
-        remote: bool,
-        *,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        from base.api_contracts.agent_contract import AgentStatus, ResurrectRefused
-        from ops.cluster.rpc import ClusterOpFailed
-
-        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
-        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "runner-a")
-
-        async def refuse(*_args: object, **_kwargs: object) -> dict:
-            if remote:
-                raise ClusterOpFailed({"error": "ResurrectRefused: runtime_cutover_required"})
-            raise ResurrectRefused("runtime_cutover_required")
-
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", refuse)
-        assert (
-            await lifecycle.resurrect_if_terminated(
-                _db(database_gate=database_gate),
-                event_bus,
-                7,
-                trigger_inbound_id=99,
-                trigger_inbound_kind=InboundKind.CHAT,
-                local_machine=machine_identity.name(),
-            )
-            is AgentStatus.TERMINATED
-        )
-
-    @pytest.mark.asyncio
     async def test_not_terminated_short_circuits(
         self,
         monkeypatch: pytest.MonkeyPatch,

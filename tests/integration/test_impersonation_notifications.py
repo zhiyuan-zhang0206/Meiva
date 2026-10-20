@@ -51,9 +51,8 @@ def test_reminder_commands_are_bare_meiva(
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
-        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
-        "clock_timestamp()+interval '10 minutes')",
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner) "
+        "VALUES(%s,'idling',%s,%s,%s)",
         (agent_id, local_machine, owner.generation, owner.owner),
     )
     db_conn.commit()
@@ -115,9 +114,8 @@ def test_request_rejects_a_malformed_invoked_python(
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
-        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
-        "clock_timestamp()+interval '10 minutes')",
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner) "
+        "VALUES(%s,'idling',%s,%s,%s)",
         (agent_id, local_machine, owner.generation, owner.owner),
     )
     db_conn.commit()
@@ -157,7 +155,6 @@ async def _termination_session(
         agent_id,
         local_machine,
         uuid4(),
-        expected_from="idling",
         db=Database.from_settings(gate=database_gate),
     )
     assert owner is not None
@@ -318,7 +315,6 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         owner.agent_id,
         local_machine,
         uuid4(),
-        expected_from="idling",
         db=database,
     )
     assert successor is not None

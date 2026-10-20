@@ -72,7 +72,6 @@ async def _live_member(
         agent,
         machine_identity.name(),
         owner,
-        expected_from="idling",
         db=Database.from_settings(gate=database_gate),
     )
     assert incarnation is not None
@@ -561,9 +560,7 @@ def test_parked_claim_guards_agree_on_waitability(
     hold = MaintenanceHold(parked=(agent,))
 
     with pytest.raises(cohort.LifecycleCollisionError) as collision_guard:
-        cohort.refuse_inflight_lifecycle(
-            db_conn, hold, frozenset[int](), holder="move", acquired_at=WHEN
-        )
+        cohort.refuse_inflight_lifecycle(db_conn, hold, holder="move", acquired_at=WHEN)
     with pytest.raises(cohort.LifecycleCollisionError) as resolved_guard:
         cohort.require_resolved(db_conn, hold)
     assert collision_guard.value.waitable and resolved_guard.value.waitable
@@ -583,9 +580,7 @@ def test_parked_claim_guards_agree_on_waitability(
     db_conn.commit()
 
     with pytest.raises(cohort.LifecycleCollisionError) as collision_refused:
-        cohort.refuse_inflight_lifecycle(
-            db_conn, hold, frozenset[int](), holder="move", acquired_at=WHEN
-        )
+        cohort.refuse_inflight_lifecycle(db_conn, hold, holder="move", acquired_at=WHEN)
     with pytest.raises(cohort.LifecycleCollisionError) as resolved_refused:
         cohort.require_resolved(db_conn, hold)
     assert not collision_refused.value.waitable and not resolved_refused.value.waitable

@@ -54,9 +54,7 @@ async def _admit(
         (agent_id,),
     )
     db.commit()
-    incarnation = await admit_hosted_runtime(
-        pool, agent_id, "host-test", uuid4(), expected_from="idling", db=database
-    )
+    incarnation = await admit_hosted_runtime(pool, agent_id, "host-test", uuid4(), db=database)
     assert incarnation is not None
     assert await settle_hosted_runtime(
         pool,
@@ -204,8 +202,7 @@ def test_gateway_rejects_a_malformed_declaration_before_any_insert(
 ) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agents_meta (id, status, lease_expires_at) "
-        "VALUES (%s, 'idling', now() + interval '5 minutes')",
+        "INSERT INTO agents_meta (id, status) VALUES (%s, 'idling')",
         (agent_id,),
     )
     db_conn.commit()

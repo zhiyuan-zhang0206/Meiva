@@ -185,13 +185,13 @@ async def test_a_member_with_an_open_restart_is_run_held(
     database: Database,
 ) -> None:
     agent, _command_id, _hold = _owed(db_conn, machine_identity, database)
-    controls: list[tuple[int, str]] = []
+    controls: list[int] = []
 
-    async def control(agent_id: int, status: str) -> None:
-        controls.append((agent_id, status))
+    async def control(agent_id: int) -> None:
+        controls.append(agent_id)
 
-    assert await receipts.run_held(agent, "idling", control) is True
-    assert controls == [(agent, "idling")]
+    assert await receipts.run_held(agent, control) is True
+    assert controls == [agent]
 
 
 async def test_failure_outside_a_hold_is_not_reported(alerts: Alerts) -> None:
