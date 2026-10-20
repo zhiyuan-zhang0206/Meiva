@@ -805,18 +805,6 @@ Event publication and payloads belong to
 [the live event bus](../../base/events/live/docs/live/live.meiva.okf.md);
 interrupt and control belong to [the agent graph](../../agent/graph/docs/graph.meiva.okf.md).
 
-**Lifecycle command residue:** a force-terminate whose original host died before
-observing it is never settled by a successor boot or a sweep. The agent stays
-terminated with `agents_meta.lifecycle_command_id` set, `meiva agents resurrect`
-refuses ("outstanding hosted lifecycle command has not settled"), and the
-`lifecycle_pointer_stuck` alert fires from the hourly TTL-reaper scan. The
-operator settles it by hand: in one transaction, mark
-the command observed (`status='done'`, `observed_at` set, only while it is still
-`claimed`, applied and unobserved) and clear the pointer and `lease_expires_at`. Never flip the command to
-`done` without clearing the pointer — that is exactly the torn shape the
-commit-time guard rejects (task #3678) — and never clear the pointer without
-settling the command, which only makes the failure invisible.
-
 ### Exec run-directory hygiene
 
 `run/exec/<agent>/` holds one request and one result file for each running exec.

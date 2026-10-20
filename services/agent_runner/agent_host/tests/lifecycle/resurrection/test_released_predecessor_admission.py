@@ -5,7 +5,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
-import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
@@ -28,7 +27,6 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 
 
@@ -83,7 +81,7 @@ async def _reaped_closed_life(
     assert row is not None
     resources = decode_resources(row[0])
     assert isinstance(resources, IncarnationResources)
-    assert not resources.requests and resources.frozen_by is None
+    assert not resources.requests
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind IN ('restart','terminate')",
         (aid,),
@@ -291,101 +289,3 @@ async def test_attached_requests_refuse_as_receipt_less(
         loguru_records,
         reason="receipt-less",
     )
-
-
-async def test_force_freeze_fences_old_owner_until_release(
-    redis_url: str,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    database: Database,
-    event_bus: EventBus,
-    loguru_records: list[dict[str, Any]],
-    *,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    machine = machine_identity.name()
-    aid, owner, resources = await _reaped_closed_life(
-        db_conn,
-        aops_pool,
-        database,
-        event_bus,
-        config_authority=config_authority,
-        model_catalog=model_catalog,
-        database_gate=database_gate,
-        machine_identity=machine_identity,
-    )
-    frozen = resources.model_copy(update={"frozen_by": 1})
-    db_conn.execute(
-        "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
-        (Jsonb(frozen.model_dump(mode="json")), aid),
-    )
-    db_conn.commit()
-    await _refused_with(
-        aops_pool,
-        aid,
-        machine,
-        owner,
-        database,
-        loguru_records,
-        reason="fences",
-    )
-    _resurrect(db_conn, aid, machine, database_gate)
-    successor = await admit_hosted_runtime(
-        aops_pool, aid, machine, owner, expected_from="idling", db=database
-    )
-    assert successor is not None and successor.generation != resources.generation
-
-
-async def test_deferred_resurrection_rolls_back_its_epoch(
-    redis_url: str,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    database: Database,
-    event_bus: EventBus,
-    *,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    aid, _owner, resources = await _reaped_closed_life(
-        db_conn,
-        aops_pool,
-        database,
-        event_bus,
-        config_authority=config_authority,
-        model_catalog=model_catalog,
-        database_gate=database_gate,
-        machine_identity=machine_identity,
-    )
-    command = db_conn.execute(
-        "INSERT INTO inbound_messages (agent_id, content, kind, source, status, claimed_at, "
-        "applied_at, target_generation, target_owner) "
-        "VALUES (%s,'','restart','system:test','claimed',clock_timestamp(),clock_timestamp(),%s,%s) "
-        "RETURNING id",
-        (aid, resources.generation, resources.owner),
-    ).fetchone()
-    assert command is not None
-    db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (command[0], aid))
-    db_conn.commit()
-
-    with pytest.raises(ResurrectSettlementDeferredError):
-        resurrect_agent(
-            Database.from_settings(gate=database_gate),
-            EventBus.from_settings(),
-            aid,
-            resurrected_by="user",
-        )
-
-    assert db_conn.execute(
-        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect'", (aid,)
-    ).fetchone() == (0,)
-    row = db_conn.execute(
-        "SELECT status,runtime_kind,incarnation_resources FROM agents_meta WHERE id=%s", (aid,)
-    ).fetchone()
-    assert row is not None
-    assert row[0] == "terminated"
-    assert decode_resources(row[2]) == resources

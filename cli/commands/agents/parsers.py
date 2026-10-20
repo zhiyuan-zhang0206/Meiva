@@ -240,7 +240,7 @@ def _add_source_argument(*parsers: argparse.ArgumentParser) -> None:
 def _add_compact_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     agents_compact_p = sub.add_parser(
         "compact",
-        help="request compaction of observed closed conversation history",
+        help="queue a compaction of the agent's history for its next turn",
     )
     agents_compact_p.add_argument("agent_id", type=int, help="agent id to compact")
     agents_compact_p.set_defaults(func=_h_agents_compact)

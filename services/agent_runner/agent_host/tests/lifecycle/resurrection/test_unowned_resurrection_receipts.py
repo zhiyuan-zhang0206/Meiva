@@ -18,7 +18,6 @@ from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import wake
-from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from services.agent_runner.agent_host.tests.lifecycle.resurrection.resurrection_support import (
     force,
     status,
@@ -35,7 +34,7 @@ from services.agent_runner.agent_host.tests.lifecycle.resurrection.test_resurrec
 )
 
 
-async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
+async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt_and_resurrects_at_once(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database: Database,
@@ -63,14 +62,8 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
     force_receipt = force(aid)
 
     assert not unowned_receipt(db_conn, force_receipt)
-    with pytest.raises(ResurrectSettlementDeferredError):
-        wake.resurrect_agent(
-            database,
-            event_bus,
-            aid,
-            resurrected_by="user",
-        )
-    assert status(db_conn, aid) == ("terminated", "hosted")
+    wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
+    assert status(db_conn, aid) == ("idling", None)
 
 
 async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_receipt(

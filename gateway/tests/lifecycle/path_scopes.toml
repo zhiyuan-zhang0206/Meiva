@@ -6,6 +6,3 @@
 "base.config.tests.config_authority" = [
     ".",
 ]
-"base.packages.tests.model_catalog" = [
-    "test_native_cancel.py",
-]

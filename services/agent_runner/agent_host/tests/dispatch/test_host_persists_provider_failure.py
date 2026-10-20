@@ -119,7 +119,6 @@ async def test_host_persists_provider_failure_before_releasing_turn(
                         _breaker_ctx(aops_pool, database_gate=database_gate),
                         original_incarnation=incarnation,
                         hosted_resources=resources,
-                        native_work=None,
                     ),
                 )
             ).exited

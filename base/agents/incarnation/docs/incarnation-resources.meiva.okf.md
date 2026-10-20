@@ -14,9 +14,7 @@ establish ownership before creating a complete empty set.
 An exec leaves no database evidence: nothing registers, attaches or discharges an
 allocation any more (see "Exec processes" below). The stored model still carries a
 `requests` map for values an earlier runtime wrote; a non-empty map refuses
-successor admission and resurrection until an operator clears it by hand. Force
-acceptance serializes on the metadata row and freezes the stored set
-(`freeze_resources`); a frozen set refuses same-owner admission.
+successor admission and resurrection until an operator clears it by hand.
 
 A retirement migration takes ACCESS EXCLUSIVE before checking evidence and
 retains that lock through DROP. Only entirely NULL, never-enabled storage can
@@ -36,8 +34,8 @@ receipt and no host restart. Resurrection refuses a stored exec allocation
 before releasing the identity.
 
 An unreleased managed owner can be replaced only when its admission-captured
-host native birth is proven ended, with an empty, unfrozen resource set. A live
-host, an expired lease alone, a missing host identity, a frozen set, or any request
+host native birth is proven ended, with an empty resource set. A live
+host, an expired lease alone, a missing host identity, or any request
 refuses that takeover. A legacy NULL row keeps its unknown set
 (admission never mints an empty one) and is replaced only after its lease
 expires; NULL evidence never authorizes an earlier takeover. Fresh `base.agents.birth.transaction.insert_agent_birth` metadata INSERTs stamp
@@ -85,5 +83,3 @@ stored receipt rather than rewriting its facts.
 
 Hosted admission retains the exact owner and resource fences. It does not
 produce a cross-generation work-transfer certificate or recover cancellation.
-Guarded work identity and cancellation:
-[[native-work-cancel.meiva.okf.md|native work cancellation]].

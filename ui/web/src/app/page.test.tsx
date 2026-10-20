@@ -169,7 +169,6 @@ vi.mock("@/lib/transport/api", () => ({
   },
   api: {
     sendMessage: vi.fn().mockResolvedValue(undefined),
-    observeWork: vi.fn().mockResolvedValue({ agent_id: 5, work_id: "original" }),
     cancel: vi.fn().mockResolvedValue(undefined),
     uploadFiles: vi.fn().mockResolvedValue(undefined),
     submitUploadedFiles: vi.fn().mockResolvedValue(undefined),
@@ -879,7 +878,7 @@ describe("pasted image routing", () => {
     ],
   };
 
-  it("explains unknown model capabilities while text and exact-work stop remain available", async () => {
+  it("explains unknown model capabilities while text and stop remain available", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: null, status: "running" })];
     wrap(<HomePage />);
@@ -888,8 +887,7 @@ describe("pasted image routing", () => {
     fireEvent.click(screen.getByTestId("composer-send-plain"));
     await waitFor(() => expect(api.sendMessage).toHaveBeenCalled());
     fireEvent.click(screen.getByTestId("composer-stop"));
-    await waitFor(() => expect(api.observeWork).toHaveBeenCalledWith(5));
-    expect(api.cancel).toHaveBeenCalledWith({ agent_id: 5, work_id: "original" }, expect.any(String));
+    await waitFor(() => expect(api.cancel).toHaveBeenCalledWith(5));
     expect(hooksState.agents[0].status).toBe("running");
     const image = new File(["png"], "paste.png", { type: "image/png" });
     fireEvent.paste(screen.getByTestId("composer-paste-target"), {

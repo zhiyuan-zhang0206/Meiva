@@ -1,7 +1,7 @@
-exports = ["delivery.py", "events.py", "launch.py", "launch_reconcile.py", "native_restart.py", "termination.py"]
+exports = ["delivery.py", "events.py", "launch.py", "launch_reconcile.py", "termination.py"]
 
 [uses]
-"__init__.py" = ["events.py", "launch.py", "native_restart.py", "resurrect_gates.py", "termination.py"]
+"__init__.py" = ["events.py", "launch.py", "resurrect_gates.py", "termination.py"]
 "delivery.py" = ["__init__.py"]
 "termination.py" = ["events.py"]
 "tests" = ["__init__.py", "launch.py", "termination.py"]

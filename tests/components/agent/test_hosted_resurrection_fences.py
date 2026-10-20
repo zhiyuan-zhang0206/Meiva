@@ -20,14 +20,11 @@ from base.agents.inbox.insert import insert_inbound_message
 from base.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
-    ResourceEvidenceError,
     ResourceProcess,
     decode_resources,
-    freeze_resources,
 )
 from base.agents.incarnation.tests.test_resources import (
     exec_allocation_entry,
-    force_incarnation,
     plant_exec_allocation,
 )
 from base.agents.messages.inbound import InboundKind
@@ -96,9 +93,7 @@ async def _resurrected(
         bus=EventBus.from_settings(),
         database=Database.from_settings(gate=database_gate),
     )
-    assert [
-        item.id for item in await claim_inbound_batch(pool, aid, incarnation=old, work=None)
-    ] == [command]
+    assert [item.id for item in await claim_inbound_batch(pool, aid, incarnation=old)] == [command]
     assert (
         await apply_hosted_lifecycle(
             pool,
@@ -120,7 +115,7 @@ async def _resurrected(
     return aid, command, old.owner, resources
 
 
-@pytest.mark.parametrize("missing", ["applied", "observed", "resource_closure"])
+@pytest.mark.parametrize("missing", ["command_row", "resource_closure"])
 async def test_released_owner_uses_resource_closure_instead_of_historical_receipts(
     redis_url: str,
     db_conn: psycopg.Connection,
@@ -154,17 +149,8 @@ async def test_released_owner_uses_resource_closure_instead_of_historical_receip
             "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
             (Jsonb(resources.model_dump(mode="json")), aid),
         )
-    elif missing == "applied":
-        db_conn.execute(
-            "UPDATE inbound_messages SET status='claimed',applied_at=NULL,observed_at=NULL "
-            "WHERE id=%s",
-            (command,),
-        )
     else:
-        db_conn.execute(
-            "UPDATE inbound_messages SET status='claimed',observed_at=NULL WHERE id=%s",
-            (command,),
-        )
+        db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (command,))
     db_conn.commit()
 
     if missing == "resource_closure":
@@ -301,11 +287,6 @@ async def test_crash_reap_resurrect_readmits_in_the_same_live_host(
         bus=event_bus,
     )
     assert not (await stamp_turn_fatal(aops_pool, old)).applied
-    with (
-        pytest.raises(ResourceEvidenceError, match="lost its runtime incarnation"),
-        db_conn.transaction(),
-    ):
-        freeze_resources(db_conn, old, 1)
     row = db_conn.execute(
         "SELECT status,runtime_generation,runtime_owner,last_turn_fatal_at,incarnation_resources "
         "FROM agents_meta WHERE id=%s",
@@ -382,7 +363,10 @@ async def test_resurrection_keeps_unresolved_exec_identity_for_receipt_recovery(
     entry = exec_allocation_entry()
     with db_conn.transaction():
         plant_exec_allocation(db_conn, old, entry)
-        command = force_incarnation(db_conn, old)
+        db_conn.execute(
+            "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
+            (old.agent_id,),
+        )
     with pytest.raises(ResurrectError, match="exec resources remain unresolved"):
         resurrect_agent(
             database,
@@ -391,14 +375,13 @@ async def test_resurrection_keeps_unresolved_exec_identity_for_receipt_recovery(
             resurrected_by="user",
         )
     row = db_conn.execute(
-        "SELECT status,runtime_generation,runtime_owner,incarnation_resources,lifecycle_command_id "
+        "SELECT status,runtime_generation,runtime_owner,incarnation_resources "
         "FROM agents_meta WHERE id=%s",
         (old.agent_id,),
     ).fetchone()
     assert row is not None
     assert row[:3] == ("terminated", old.generation, old.owner)
     assert row[3]["requests"][str(entry.request)] == entry.model_dump(mode="json")
-    assert row[4] == command
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect'",
         (old.agent_id,),

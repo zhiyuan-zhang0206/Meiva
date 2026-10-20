@@ -247,7 +247,7 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
     # Issue #2159: the timeout names per-agent delivery state, row fences and
     # the live host's view instead of the bare agent list the operator had.
     message = str(raised.value)
-    assert f"agent {agent}: command {command} pending, applied=no" in message
+    assert f"agent {agent}: command {command} pending; row running" in message
     assert "lease_fresh=yes" in message and "resources_settled=yes" in message
     assert "host active=yes" in message
     assert db_conn.execute(

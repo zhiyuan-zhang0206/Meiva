@@ -539,7 +539,7 @@ async def restarted(
         database=Database.from_settings(gate=database_gate),
     )
     db.commit()
-    await claim_inbound_batch(pool, aid, incarnation=owner, work=None)
+    await claim_inbound_batch(pool, aid, incarnation=owner)
     assert (
         await apply_hosted_lifecycle(
             pool,
@@ -581,7 +581,7 @@ async def managed_restarted(
         database=Database.from_settings(gate=database_gate),
     )
     db.commit()
-    await claim_inbound_batch(pool, aid, incarnation=owner, work=None)
+    await claim_inbound_batch(pool, aid, incarnation=owner)
     assert (
         await apply_hosted_lifecycle(
             pool,

@@ -82,7 +82,7 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert await settle_checkpoint(
@@ -111,7 +111,7 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     assert not model_calls
     leases.release(
@@ -165,7 +165,7 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert await settle_checkpoint(
@@ -226,9 +226,7 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
     resumed = await graph.ainvoke(
         reset,
         config,
-        context=replace(
-            replacement_ctx, original_incarnation=successor, hosted_resources=None, native_work=None
-        ),
+        context=replace(replacement_ctx, original_incarnation=successor, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert len(model_calls) == 1
@@ -265,7 +263,7 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert await settle_checkpoint(
@@ -316,7 +314,7 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     assert not model_calls
     leases.ack(
@@ -346,7 +344,7 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     assert not model_calls
 
@@ -392,7 +390,7 @@ async def test_end_note_resumes_an_empty_queue(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     assert not model_calls
     await flush_checkpoint(saver, owner.agent_id)
@@ -429,7 +427,7 @@ async def test_end_note_resumes_an_empty_queue(
     resumed = await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert len(model_calls) == 1
@@ -440,7 +438,7 @@ async def test_end_note_resumes_an_empty_queue(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     assert len(model_calls) == 1
     assert resumed["impersonation_handoff_id"] == f"{owner.agent_id}:0"
@@ -476,7 +474,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert await settle_checkpoint(
@@ -516,7 +514,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert not await settle_checkpoint(
@@ -532,7 +530,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert len(model_calls) == 1

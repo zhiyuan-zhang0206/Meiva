@@ -158,7 +158,7 @@ async def test_next_claim_does_not_re_deliver_any_interrupted_row(
         aops_pool,
         incarnation,
     )
-    claimed = await claim_inbound_batch(aops_pool, agent, incarnation=incarnation, work=None)
+    claimed = await claim_inbound_batch(aops_pool, agent, incarnation=incarnation)
 
     assert claimed == []
     assert row_statuses(db_conn, [first, second]) == {first: "done", second: "done"}

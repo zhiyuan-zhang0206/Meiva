@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from typing import Any, cast
-from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
-from base.agents.incarnation import hosted_force
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -16,7 +14,6 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement
-from services.agent_runner.agent_host.invocation import native_work
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     Build,
     FakePool,
@@ -92,19 +89,8 @@ class TestPoolIsolation:
                 calls.append(("settle", pool))
             return TurnSettlement(stamp=TurnFatalStamp(applied=crashed), settled=not exited)
 
-        async def force(pool: object, *_args: object, **_kwargs: object) -> bool:
-            calls.append(("force", pool))
-            return False
-
         monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
-        monkeypatch.setattr(host_mod, "recover_native_cancel", AsyncMock(return_value=True))
-        monkeypatch.setattr(
-            native_work,
-            "prepare_native_invocation",
-            AsyncMock(return_value=None),
-        )
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
-        monkeypatch.setattr(hosted_force, "original_host_force", force)
         host = build_agent_host(
             catalog=model_catalog,
             pool=cast(AsyncConnectionPool[Any], turn_pool),
@@ -119,6 +105,6 @@ class TestPoolIsolation:
         await host.run_turn(11)
 
         assert turn_pool.reads == 0
-        assert control_pool.reads == 2
+        assert control_pool.reads == 1
         assert graph.observations[-1].ops_pool is turn_pool
-        assert calls == [("admit", control_pool), ("settle", control_pool), ("force", control_pool)]
+        assert calls == [("admit", control_pool), ("settle", control_pool)]

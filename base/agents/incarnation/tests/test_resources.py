@@ -6,14 +6,12 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from base.agents.incarnation.hosted_force import install_hosted_force
 from base.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
     decode_resources,
-    freeze_resources,
 )
 from base.db import create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -68,56 +66,7 @@ def plant_exec_allocation(
     )
 
 
-def force_incarnation(conn: psycopg.Connection, target: RuntimeIncarnation) -> int:
-    conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (target.agent_id,))
-    row = conn.execute(
-        "INSERT INTO inbound_messages(agent_id,kind,content,source,status) "
-        "VALUES(%s,'terminate','','user','pending') RETURNING id",
-        (target.agent_id,),
-    ).fetchone()
-    assert row is not None
-    conn.execute(
-        "UPDATE agents_meta SET status='terminated',termination_source='user',"
-        "lifecycle_command_id=%s WHERE id=%s",
-        (row[0], target.agent_id),
-    )
-    install_hosted_force(conn, target.agent_id, row[0])
-    freeze_resources(conn, target, row[0])
-    return row[0]
-
-
 @pytest.mark.parametrize("value", [None, {}, {"version": 2, "state": "admitted"}])
 def test_unknown_or_bad_evidence_is_never_empty(value: object) -> None:
     with pytest.raises((ValueError, ResourceEvidenceError)):
         decode_resources(value)
-
-
-def test_force_freezes_the_stored_set(db_conn: psycopg.Connection) -> None:
-    target = _admitted(db_conn)
-    entry = exec_allocation_entry()
-    with db_conn.transaction():
-        plant_exec_allocation(db_conn, target, entry)
-        force = force_incarnation(db_conn, target)
-    row = db_conn.execute(
-        "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
-    ).fetchone()
-    assert row is not None
-    stored = decode_resources(row[0])
-    assert isinstance(stored, IncarnationResources)
-    assert stored.frozen_by == force and stored.requests == {str(entry.request): entry}
-    db_conn.commit()
-
-
-@pytest.mark.parametrize("wrong_part", ["generation", "owner"])
-def test_freeze_requires_the_exact_live_owner(db_conn: psycopg.Connection, wrong_part: str) -> None:
-    target = _admitted(db_conn)
-    wrong = RuntimeIncarnation(
-        target.agent_id,
-        uuid4() if wrong_part == "generation" else target.generation,
-        uuid4() if wrong_part == "owner" else target.owner,
-    )
-    with (
-        pytest.raises(ResourceEvidenceError, match="lost its runtime incarnation"),
-        db_conn.transaction(),
-    ):
-        freeze_resources(db_conn, wrong, 1)

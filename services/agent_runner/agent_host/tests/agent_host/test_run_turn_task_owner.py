@@ -1,86 +1,53 @@
 import asyncio
-from collections.abc import Awaitable
 
 import pytest
 
-from services.agent_runner.agent_host.invocation.compact import source as compact_source
 from services.agent_runner.agent_host.tests.runtime.host_support import Build, Row
 from services.agent_runner.agent_host.tests.runtime.host_support import host_plugin as host_plugin
 from services.agent_runner.agent_host.tests.runtime.host_support import wired as wired
 
 
-async def test_business_error_remains_primary_when_settlement_also_fails(
+async def test_business_error_remains_primary_and_is_joined_at_stop(
     wired: Build, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     host, _, _ = wired({7: Row()})
     primary = ValueError("original hosted business failure")
-    cleanup = RuntimeError("original hosted settlement failure")
 
     async def work(_agent: int, **_kwargs: object) -> None:
         raise primary
 
-    async def settle(force: Awaitable[bool], *_args: object, **_kwargs: object) -> None:
-        await force
-        raise cleanup
-
     monkeypatch.setattr(host, "_run_turn", work)
-    monkeypatch.setattr(compact_source, "finish_force_and_compact", settle)
     with pytest.raises(ValueError) as observed:
         await host.run_turn(7)
     assert observed.value is primary
-    assert any(repr(cleanup) in note for note in primary.__notes__)
-    with pytest.raises(ExceptionGroup) as joined:
+    with pytest.raises(ValueError) as joined:
         await host._resource_service.aclose()
-    assert joined.value.exceptions == (primary, cleanup)
+    assert joined.value is primary
 
 
-async def test_root_cancellation_cancels_work_and_retains_finite_settlement(
+async def test_root_cancellation_cancels_the_work_and_joins_it(
     wired: Build, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     host, _, _ = wired({7: Row()})
-    work_entered, work_release = asyncio.Event(), asyncio.Event()
-    settle_entered, settle_release = asyncio.Event(), asyncio.Event()
+    work_entered = asyncio.Event()
     actual_work: asyncio.Task[object] | None = None
-    actual_settle: asyncio.Task[object] | None = None
 
     async def work(_agent: int, **_kwargs: object) -> None:
         nonlocal actual_work
         actual_work = asyncio.current_task()
         work_entered.set()
-        await work_release.wait()
-
-    async def settle(force: Awaitable[bool], *_args: object, **_kwargs: object) -> None:
-        nonlocal actual_settle
-        await force
-        actual_settle = asyncio.current_task()
-        settle_entered.set()
-        await settle_release.wait()
+        await asyncio.Event().wait()
 
     monkeypatch.setattr(host, "_run_turn", work)
-    monkeypatch.setattr(compact_source, "finish_force_and_compact", settle)
     root = asyncio.create_task(host.run_turn(7))
     try:
         await work_entered.wait()
         assert actual_work is not None and actual_work in host._resource_service._pending
         root.cancel()
-        await asyncio.sleep(0)
-        assert actual_work.cancelling()
-        assert not root.done()
-        work_release.set()
-        await settle_entered.wait()
-        assert actual_settle is not None and actual_settle in host._resource_service._pending
-        root.cancel()
-        with pytest.raises(TimeoutError, match="unfinished"):
-            await host._resource_service.aclose(deadline=asyncio.get_running_loop().time())
-        assert not host.resources_joined
-        assert not actual_settle.cancelling()
-        assert actual_settle in host._resource_service._pending
-        assert not root.done()
-    finally:
-        root.cancel()
-        work_release.set()
-        settle_release.set()
         with pytest.raises(asyncio.CancelledError):
             await root
+        assert actual_work.cancelled()
         await host._resource_service.aclose()
-    assert host.resources_joined
+        assert host.resources_joined
+    finally:
+        root.cancel()

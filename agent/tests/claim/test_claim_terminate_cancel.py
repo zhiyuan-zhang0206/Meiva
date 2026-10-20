@@ -629,8 +629,8 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     # The host has not applied the accepted restart yet.
     await await_status(aops_pool, tid, "running")
     assert db_conn.execute(
-        "SELECT status,applied_at,observed_at FROM inbound_messages WHERE id=%s", (restart_id,)
-    ).fetchone() == ("claimed", None, None)
+        "SELECT status FROM inbound_messages WHERE id=%s", (restart_id,)
+    ).fetchone() == ("claimed",)
 
 
 async def test_claim_restart_before_terminate_preserves_serial_order(

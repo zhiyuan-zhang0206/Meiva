@@ -2,57 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Annotated, Literal
-from uuid import UUID
+from typing import Literal
 
 import psycopg
-from fastapi import APIRouter, Body, HTTPException, Path, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 from psycopg_pool import ConnectionPool, PoolTimeout
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field
 
-from base.agents.compaction.commands import accept as accept_guarded_compact
-from base.agents.compaction.commands import observe as observe_guarded_compact
-from base.agents.compaction.commands import status as guarded_compact_status
-from base.agents.compaction.models import (
-    CompactAcceptance,
-    CompactConflictError,
-    CompactStatus,
-    CompactTarget,
-)
 from base.agents.impersonation import ImpersonationError
 from base.agents.impersonation.maintenance import force_expire_impersonation
-from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.inbox.native_cancel import (
-    NativeCancelConflictError,
-    accept_native_cancel,
-    observe_native_work,
-)
-from base.agents.inbox.native_restart import (
-    NativeRestartConflictError,
-    lookup_native_restart,
-    native_restart_progress,
-)
-from base.agents.incarnation.native_restart_models import (
-    NativeRestartAcceptance,
-    NativeRestartAccepted,
-    NativeRestartOperation,
-    NativeRestartProgress,
-    NativeRestartRefused,
-    NativeRestartRequest,
-)
-from base.agents.incarnation.native_work_models import NativeCancelAcceptance, NativeWorkTarget
+from base.agents.inbox.compact import insert_compact_request_inbound
+from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
 from base.db import Database
 from base.db.transaction import write_transaction
+from base.events.live.bus import EventBus
 from gateway.agents.forward import forward_to_home_machine
-from gateway.http.auth.request_principal import (
-    PRINCIPAL_SCOPE,
-    SCOPE_HEADER,
-    AuthPrincipal,
-    PrincipalScopeError,
-    request_key,
-)
 from gateway.http.model_catalog import require_model_catalog
 from ops.rpc_schemas import (
+    CancelAgentResponse,
+    CompactAgentResponse,
     OpenTaskRow,
     OpenTasksHint,
     RestartAgentRequest,
@@ -242,188 +210,45 @@ async def post_agent_restart(
     return RestartAgentResponse.model_validate(forwarded)
 
 
-@router.get(
-    "/api/keyed/v1/agents/{agent_id}/native-work",
-    description="Expose only eligible ACTIVE work backed by actual managed-owner evidence.",
-)
-async def native_work(
-    agent_id: Annotated[int, Path(gt=0, lt=2**63)], request: Request
-) -> NativeWorkTarget:
-
-    target = await asyncio.to_thread(observe_native_work, request.app.state.db_pool, agent_id)
-    if target is None:
-        raise HTTPException(status_code=409, detail="no eligible active native work")
-    return target
-
-
 @router.post(
-    "/api/keyed/v1/agents/{agent_id}/cancel-work",
-    description="Accept one exact work intent; acceptance does not prove checkpoint execution.",
+    "/api/agents/{agent_id}/cancel",
+    description="Cancel the agent's running turn without terminating the agent.\n\nThe request is forwarded to the home runner, whose host cancels the running\nturn task. The agent stays alive and idles; its next input starts a fresh\nturn. `cancelled` means a running turn was cancelled; `not_running` means\nthere was none. An unreachable home runner is an error, not `not_running`.",
 )
-async def native_cancel(
-    agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: NativeWorkTarget, request: Request
-) -> NativeCancelAcceptance:
+async def post_agent_cancel(agent_id: int, request: Request) -> CancelAgentResponse:
 
-    scoped = _native_control_key(request)
-    try:
-        return await asyncio.to_thread(
-            accept_native_cancel, request.app.state.db_pool, scoped, agent_id, body
-        )
-    except NativeCancelConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-def _native_control_key(request: Request) -> str:
-    key = request.headers.get("Idempotency-Key")
-    if (
-        key is None
-        or request.headers.get(SCOPE_HEADER) != PRINCIPAL_SCOPE
-        or not isinstance(getattr(request.state, "auth_principal", None), AuthPrincipal)
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="guarded native control requires a key and verified principal-v1 scope",
-        )
-    try:
-        return request_key(request, key, method="POST", path=request.url.path)
-    except PrincipalScopeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.post(
-    "/api/keyed/v1/agents/{agent_id}/restart-work",
-    description="Accept the original ACTIVE restart once through its dedicated executor.",
-)
-async def native_restart(
-    agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: NativeRestartRequest, request: Request
-) -> NativeRestartAcceptance:
-
-    key = _native_control_key(request)
-    try:
-        previous = await asyncio.to_thread(
-            lookup_native_restart, request.app.state.db_pool, key, agent_id, body
-        )
-    except NativeRestartConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if previous is not None:
-        return previous
-    operation = NativeRestartOperation(operation_key=key, request=body)
-    reply = await forward_to_home_machine(
+    forwarded = await forward_to_home_machine(
         agent_id,
-        f"/api/agents/{agent_id}/restart-work",
-        operation.model_dump(mode="json"),
+        f"/api/agents/{agent_id}/cancel",
+        {},
         db=request.app.state.db,
         pool=request.app.state.db_pool,
-        idempotency_key=key,
     )
-    try:
-        adapter: TypeAdapter[NativeRestartAccepted | NativeRestartRefused] = TypeAdapter(
-            NativeRestartAccepted | NativeRestartRefused
-        )
-        result = adapter.validate_python(reply)
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=502, detail="native restart executor protocol is unsupported"
-        ) from exc
-    if isinstance(result, NativeRestartRefused):
-        raise HTTPException(
-            status_code=409 if result.reason == "identity_conflict" else 422, detail=result.detail
-        )
-    stored = await asyncio.to_thread(
-        lookup_native_restart, request.app.state.db_pool, key, agent_id, body
-    )
-    if stored is None or stored != result.acceptance:
-        raise HTTPException(
-            status_code=502, detail="native restart executor has no matching durable acceptance"
-        )
-    return stored
-
-
-@router.get(
-    "/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}",
-    description="Observe retained original execution facts; no mutable current-owner inference.",
-)
-async def native_restart_status(
-    agent_id: Annotated[int, Path(gt=0, lt=2**63)],
-    command_id: Annotated[int, Path(gt=0, lt=2**63)],
-    request: Request,
-) -> NativeRestartProgress:
-
-    progress = await asyncio.to_thread(
-        native_restart_progress, request.app.state.db_pool, agent_id, command_id
-    )
-    if progress is None:
-        raise HTTPException(status_code=404, detail="native restart command not found")
-    return progress
-
-
-@router.get(
-    "/api/keyed/v1/agents/{agent_id}/compact-target",
-    description="Observe only actual new-host quiescent, closed-resource source evidence.",
-)
-async def guarded_compact_target(
-    agent_id: Annotated[int, Path(gt=0, lt=2**63)], request: Request
-) -> CompactTarget:
-
-    try:
-        return await asyncio.to_thread(observe_guarded_compact, request.app.state.db_pool, agent_id)
-    except CompactConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return CancelAgentResponse.model_validate(forwarded)
 
 
 @router.post(
-    "/api/keyed/v1/agents/{agent_id}/compact-history",
-    status_code=202,
-    description="Accept the original observed history; 202 is not summary/application success.",
+    "/api/agents/{agent_id}/compact",
+    description="Ask the agent to compact its history at its next turn.\n\nInserts a `compact_request` inbound and wakes the host; the agent summarizes and\nreplaces its history when it next claims input. The response says the request\nis durable, not that the summary was applied. A terminated agent returns 409.",
 )
-async def guarded_compact_history(
-    agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: CompactTarget, request: Request
-) -> CompactAcceptance:
+async def post_agent_compact(agent_id: int, request: Request) -> CompactAgentResponse:
 
-    key = request.headers.get("Idempotency-Key")
-    if (
-        key is None
-        or request.headers.get(SCOPE_HEADER) != PRINCIPAL_SCOPE
-        or not isinstance(getattr(request.state, "auth_principal", None), AuthPrincipal)
-    ):
-        raise HTTPException(
-            status_code=400, detail="guarded compact requires a key and verified principal-v1 scope"
-        )
-    try:
-        scoped = request_key(request, key, method="POST", path=request.url.path)
-    except PrincipalScopeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        accepted = await asyncio.to_thread(
-            accept_guarded_compact, request.app.state.db_pool, scoped, agent_id, body
-        )
-    except CompactConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    current = await asyncio.to_thread(
-        guarded_compact_status, request.app.state.db_pool, agent_id, accepted.command_id
+    return await asyncio.to_thread(
+        _request_compaction_blocking,
+        request.app.state.db_pool,
+        request.app.state.db,
+        request.app.state.bus,
+        agent_id,
     )
-    if not current.continuation_released:
-        await asyncio.to_thread(
-            publish_inbound_wake,
-            request.app.state.db,
-            request.app.state.bus,
-            agent_id,
-            str(accepted.command_id),
-        )
-    return accepted
 
 
-@router.get(
-    "/api/keyed/v1/agents/{agent_id}/compact-commands/{command_id}",
-    description="Inspect current execution evidence independently of immutable acceptance.",
-)
-async def guarded_compact_command(
-    agent_id: Annotated[int, Path(gt=0, lt=2**63)], command_id: UUID, request: Request
-) -> CompactStatus:
-
-    try:
-        return await asyncio.to_thread(
-            guarded_compact_status, request.app.state.db_pool, agent_id, command_id
-        )
-    except CompactConflictError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+def _request_compaction_blocking(
+    pool: ConnectionPool, db: Database, bus: EventBus, agent_id: int
+) -> CompactAgentResponse:
+    with pool.connection() as conn:
+        row = conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+        if row is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+        if row[0] == AgentStatus.TERMINATED:
+            raise HTTPException(status_code=409, detail=f"agent {agent_id} is terminated")
+        inbound_id = insert_compact_request_inbound(conn, agent_id, database=db, bus=bus)
+    return CompactAgentResponse(inbound_id=inbound_id)

@@ -107,7 +107,6 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                         ),
                         original_incarnation=incarnation,
                         hosted_resources=resources,
-                        native_work=None,
                     ),
                 )
             ).exited

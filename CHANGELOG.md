@@ -33,6 +33,17 @@ and the matching GitHub Releases.
   `spawn_agent_guarded_v1` a `prompt_source` and `spawner` that the API validates; `get_messages` returns
   the API's raw message window
   ([decision](docs/decisions/data/security/2026-10-20-mcp-is-a-thin-api-forwarder.md)).
+- Restart and terminate commands are claimed at the turn boundary and executed and closed in
+  one transaction; a force terminate writes `terminated` in the API's own transaction and then
+  asks the home host to cancel the running turn. The pointer, target, applied and observed
+  stages, the force fence and the stuck-pointer scan and its alert are gone. The stop button,
+  `meiva agents cancel` and `meiva.agents.cancel` call one plain route,
+  `POST /api/agents/{id}/cancel` (`cancelled` / `not_running`), instead of the keyed native-work
+  pair. `meiva agents compact`, the compact action and `meiva.agents.compact` queue a
+  `compact_request` through `POST /api/agents/{id}/compact`. Removed: the keyed
+  `native-work`, `cancel-work`, `restart-work`, `restart-commands`, `compact-target`,
+  `compact-history` and `compact-commands` routes and `meiva.agents.work` and
+  `meiva.agents.compaction`.
 - A notification is only a request that needs the user's reply (user ruling 2026-10-19).
   `core.turn_finished` and `meiva_fleet.task_closed` are gone as categories and producers:
   the agent host logs a finished turn and the task registry logs a closed task, both

@@ -7,23 +7,18 @@ tags: []
 
 # Lifecycle Settlement
 
-## Completion evidence
+## Completion
 
-Native restart and terminate target the generation and owner accepted under
-the metadata lock. Claim returns END; the host flushes the checkpoint and
-settles the actual continuation and managed resources before applying the
-command. Cache eviction, a NULL PID, an expired lease or a health endpoint
-alone cannot prove completion.
-
-Restart keeps its applied command pointer for a successor admission to
-observe in its own transaction. Termination is observed after the original
-execution is settled. Cold recovery only completes a command when its
-original owner and resources are positively absent; unresolved evidence
-remains pending.
+A restart or terminate command is claimed at a turn boundary and executed by
+`apply_hosted_lifecycle` in one transaction, fenced by the incarnation's
+generation and owner: the row changes and the command is marked done together,
+or neither happens. Claim returns END; the host flushes the checkpoint before
+applying. Cache eviction, a NULL PID, an expired lease or a health endpoint
+alone cannot prove completion. A command claimed by a host that died before
+applying is claimed again by the replacement; nothing needs observing.
 
 Resurrection requires the terminated hosted incarnation's retained generation
-and owner, no per-agent PID, no unresolved exec allocations, and no outstanding
-applied lifecycle command. The resource check precedes identity release so
+and owner, no per-agent PID, and no unresolved exec allocations. The resource check precedes identity release so
 receipt recovery can still address the original incarnation. Admission then
 uses the released metadata row and closed resource set, without consulting
 historical lifecycle receipts or requiring the shared host to exit. A
@@ -34,8 +29,8 @@ force-terminated while no incarnation owned it: the force records
 `unowned_termination` on its own command, but only when the row's unowned
 state has a lifecycle origin. That origin is the spawn's birth epoch
 (`last_resurrect_inbound_id = 0`), or a `lifecycle_release` receipt on the
-resurrection or applied restart that left the row unowned. The receipt must
-belong to the current life, that is, have an id above the epoch fence
+resurrection or executed restart that left the row unowned. The receipt must
+belong to the current life, that is, have an id above the latest resurrect inbound
 (`docs/decisions/agents/lifecycle/2026-09-29-unowned-termination-resurrects.md`).
 Historical process runtimes, unknown runtime kinds, incomplete hosted
 identities and resources the current model cannot decode refuse resurrection
@@ -55,38 +50,32 @@ and database cutover remains required.
 
 ## Force and later commands
 
-Explicit force fixes the original command and target, supersedes earlier
-unfinished commands for that identity, and cancels the actual host task.
-Superseded is not observed exit. Resource settlement still guards later
-admission; already-started external effects cannot be undone by a DB write.
-Later commands and chat are not acknowledged as a side effect of force.
+Explicit force writes `terminated` in the API's own transaction, closes every
+older open command as superseded and asks the home host to cancel the running
+turn. Cancelling is acceleration: the terminated row already stops admission
+and the turn ends at its next ownership check. Later commands and chat are not
+acknowledged as a side effect of force.
 
-## Resurrection epochs
+## Resurrection supersession
 
-Every resurrection records the id of its `kind='resurrect'` inbound as the
-identity's epoch fence. Earlier unapplied restart/terminate commands were
-superseded by an intent that came after them: the resurrection transaction
-settles them as superseded (the payload names the resurrect inbound), and
-acceptance settles any such row it still finds instead of adopting it. An
-applied command is never rewritten, and no observation timestamp is invented.
+A resurrection inserts its `kind='resurrect'` inbound and closes every older
+open restart/terminate command as superseded (the payload names the resurrect
+inbound), so a command queued in the previous life cannot act on the next.
 A command created after the resurrect inbound is current intent and can still
-stop the new incarnation.
+stop the new incarnation. A command that commits after the resurrection
+transaction but carries an older id is not recognized; the id order is not
+re-checked at claim.
 
 ## Resurrection and user wakes
 
 `ops/agents/wake.py` locks home placement and the pause latch, verifies the
-terminated state and outstanding lifecycle evidence, commits the epoch fence
-with its resurrection marker and optional work, then publishes the wake. A
-refusal rolls the whole transaction back, fence included. The agent host admits
-the successor; no OS launcher is involved.
-
-A force-terminate whose original host died before observing it keeps its
-lifecycle pointer set; resurrection is refused with "outstanding hosted
-lifecycle command has not settled" until an operator settles the command, and
-the hourly `lifecycle_pointer_stuck` alert says so.
+terminated state, inserts the resurrection marker, supersedes older commands
+and optional work, then publishes the wake. A refusal rolls the whole
+transaction back. The agent host admits the successor; no OS launcher is
+involved.
 
 A queued wake keeps its original inbound identity. A changed home, paused
-machine or unsettled prior execution cannot be bypassed by retrying the wake.
+machine or unresolved prior execution cannot be bypassed by retrying the wake.
 
 A corpse reap records termination and diagnostics. It produces no recovery chat,
 resurrection request or retry job. The delivery watchdog does not resurrect
@@ -95,11 +84,10 @@ terminated owners.
 An ordinary fresh chat may wake a terminated agent through the normal delivery
 path. A permanent provider rejection blocks background wakes immediately;
 explicit new chat or per-agent operator resurrection may retry after a fix.
-Native cancel and interrupted compact/restart attempts are not reconstructed
-from an old checkpoint. Unknown accepted operations stay held.
+A cancelled or interrupted turn is not reconstructed from an old checkpoint;
+the next invocation starts halted and waits for fresh input.
 
 ## Entry Points
 
 - `agent/ownership/hosted.py` — native completion and resource settlement
-- `agent/ownership/lifecycle_intent.py` — successor admission observation
 - `ops/agents/wake.py` — transactional resurrection

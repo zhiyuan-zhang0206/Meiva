@@ -47,23 +47,24 @@ This is preserved idle intent, not a fabricated continuation receipt.
 
 Hosted drain receipts require the shielded continuation, final checkpoint
 flush, resources and owner settlement to finish. The matching DB restart must
-be applied and unobserved. A successor cannot sign an absent original receipt.
-Held lifecycle controls flush any prior buffered checkpoint before claiming
-their restart, without invoking the graph or consuming ordinary messages;
-`applied_at`, an idle row, or a released lease alone is insufficient.
+be done with its release marker, over an idle row whose runtime identity is
+released: the apply executes and closes the restart in one transaction, so that
+single fact is the proof, whichever host looks next. Held lifecycle controls
+flush any prior buffered checkpoint before claiming their restart, without
+invoking the graph or consuming ordinary messages; an idle row or a released
+lease alone is insufficient.
 
 A turn that fails while its continuation is still owed to a draining hold
 (`agent_host/lifecycle/maintenance.py`) ends that agent's restart command once:
-an unapplied command is settled `done` with a `failed` lifecycle result
-(`continuation_failed`) and the agent's pointer is cleared, ERROR is logged and
+an open command is settled `done` with a `failed` lifecycle result
+(`continuation_failed`), ERROR is logged and
 `agent_continuation_lost` (read by an alert rule) is raised once, and the pending
 wake scan no longer drives that agent. Nothing is latched in the journal and
-nothing is fenced. A restart whose effect had already started is not rewritten
-(it is neither undone nor declared unexecuted); it is reported and keeps its
-normal completion path. The agent stays in the hold: it never drains, so
+nothing is fenced. A restart that had already executed is done and is not
+rewritten. The agent stays in the hold: it never drains, so
 `meiva stop` ends at its drain deadline with the stall report, and a person takes
 it from there; `meiva start` releases the hold. The failed turn's own work may be
-lost, and an unapplied restart that was ended is not carried out.
+lost, and an open restart that was ended is not carried out.
 
 Phases are `preparing → draining → drained → stopping → stopped`, owned by
 `state.MaintenancePhase`; `meiva stop` / `meiva restart` walk all five. Journal

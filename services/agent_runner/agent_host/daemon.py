@@ -649,7 +649,7 @@ async def run(
             liveness=liveness,
             extra_routes={
                 ("GET", "/stats"): stats_route(host, scheduler),
-                ("POST", "/cancel-turn"): cancel_turn_route(scheduler, host),
+                ("POST", "/cancel-turn"): cancel_turn_route(scheduler),
             },
         )
         logger.info(

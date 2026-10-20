@@ -86,7 +86,7 @@ def prepare(
                 row = RuntimeRow(*values)
                 if row.retired_intent():
                     require_cold_end(conn, row.agent_id)
-        applied = applied_capture(conn, hold, host_owner, holder, acquired_at)
+        applied = applied_capture(conn, hold, holder, acquired_at)
         captured = classify([RuntimeRow(*row) for row in rows], hold, host_owner, applied)
         cold = _cold_agents([RuntimeRow(*row) for row in rows], host_owner, host_absent=host_absent)
         settled = _settle_orphan_claims(conn, captured, cold)
@@ -140,7 +140,7 @@ class RuntimeRow(NamedTuple):
         state = decode_resources(self.resources)
         if isinstance(state, ResourceBirth):
             return True
-        return not state.requests and state.frozen_by is None
+        return not state.requests
 
     def retired_intent(self) -> bool:
         return (
@@ -290,26 +290,22 @@ def _require_live_owners(selected: list[RuntimeRow], owner: UUID | None, applied
 
 
 def applied_capture(
-    conn: psycopg.Connection,
-    hold: MaintenanceHold,
-    owner: UUID | None,
-    holder: str,
-    acquired_at: datetime,
+    conn: psycopg.Connection, hold: MaintenanceHold, holder: str, acquired_at: datetime
 ) -> set[int]:
-    # The original host can apply a committed restart before the journal's
-    # final write succeeds. Preserve this cohort on retry; this is NOT a final
-    # continuation receipt, which only the original boot may later sign.
+    # meiva:note
+    # The original host can execute a committed restart before the journal's
+    # final write succeeds. Preserve this cohort on retry: the restart row is
+    # done, it carries the release marker, and it names this exact operation.
     operation = Jsonb({"holder": holder, "acquired_at": acquired_at.isoformat()})
     rows = conn.execute(
         "SELECT m.id FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant SQL fragment
-        "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
+        "ON i.agent_id=m.id "
         "WHERE m.id=ANY(%s) AND m.status='idling' AND m.runtime_owner IS NULL "
         f"AND m.runtime_generation IS NULL AND {DRAINED_RESOURCES} "
-        "AND i.kind='restart' AND i.source='system:restart' AND i.status='claimed' "
-        "AND i.target_owner=%s "
-        "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
+        "AND i.kind='restart' AND i.source='system:restart' AND i.status='done' "
+        "AND COALESCE((i.payload -> 'lifecycle_release') = 'true'::jsonb, false) "
         "AND i.payload->'maintenance'=%s",
-        (list(hold.commands), owner, operation),
+        (list(hold.commands), operation),
     ).fetchall()
     return {row[0] for row in rows}
 
@@ -344,7 +340,6 @@ class _CommandRow(NamedTuple):
     command_id: int
     kind: str
     status: str
-    applied: bool
     maintenance: object
 
 
@@ -353,7 +348,7 @@ def _open_commands(conn: psycopg.Connection, agents: list[int]) -> list[_Command
     return [
         _CommandRow(*row)
         for row in conn.execute(
-            "SELECT agent_id, id, kind, status, applied_at IS NOT NULL, payload->'maintenance' "
+            "SELECT agent_id, id, kind, status, payload->'maintenance' "
             "FROM inbound_messages WHERE agent_id=ANY(%s) AND status IN ('pending','claimed') "
             "ORDER BY agent_id, id",
             (agents,),
@@ -435,11 +430,7 @@ def _collision_line(agent_id: int, rows: list[_CommandRow]) -> str:
 def _unresolved_parked(row: _CommandRow, agent_id: int, cold: frozenset[int]) -> bool:
     """`require_resolved`'s predicate, per row, for the waitability decision."""
     if row.status == "claimed":
-        return (
-            agent_id not in cold
-            or row.kind == "terminate"
-            or (row.kind == "restart" and not row.applied)
-        )
+        return agent_id not in cold or row.kind in ("restart", "terminate")
     return row.kind in ("restart", "terminate")
 
 
@@ -455,6 +446,16 @@ def _restart(conn: psycopg.Connection, agent_id: int, holder: str, acquired_at: 
         if len(pending) != 1 or pending[0][1] != operation:
             raise RuntimeError(f"agent {agent_id} has another unfinished lifecycle command")
         return pending[0][0]
+    # meiva:note
+    # A retry finds the restart this operation already had executed.
+    executed = conn.execute(
+        "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='restart' "
+        "AND source='system:restart' AND status='done' AND payload->'maintenance'=%s "
+        "ORDER BY id DESC LIMIT 1",
+        (agent_id, Jsonb(operation)),
+    ).fetchone()
+    if executed is not None:
+        return executed[0]
     row = conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,payload) "
         "VALUES(%s,'restart','system:restart','',%s) RETURNING id",
@@ -464,8 +465,9 @@ def _restart(conn: psycopg.Connection, agent_id: int, holder: str, acquired_at: 
     return row[0]
 
 
+# meiva:note
+# Cross-check local continuation receipts against the executed restart rows.
 def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
-    """Cross-check local continuation receipts against preserved DB pointers."""
     if set(hold.drained) != set(hold.commands):
         raise RuntimeError("maintenance still has unfinished continuations")
     if hold.parked:
@@ -481,12 +483,12 @@ def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
     for agent_id, command_id in hold.commands.items():
         row = conn.execute(
             "SELECT 1 FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant SQL fragment
-            "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
-            "WHERE m.id=%s AND i.id=%s AND i.kind='restart' AND i.status='claimed' "
-            "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
+            "ON i.agent_id=m.id WHERE m.id=%s AND i.id=%s AND i.kind='restart' "
+            "AND i.status='done' "
+            "AND COALESCE((i.payload -> 'lifecycle_release') = 'true'::jsonb, false) "
             "AND m.status='idling' AND m.runtime_owner IS NULL AND m.runtime_generation IS NULL "
             f"AND {DRAINED_RESOURCES}",
             (agent_id, command_id),
         ).fetchone()
         if row is None:
-            raise RuntimeError(f"agent {agent_id} no longer has its drained restart pointer")
+            raise RuntimeError(f"agent {agent_id} no longer has its executed restart")

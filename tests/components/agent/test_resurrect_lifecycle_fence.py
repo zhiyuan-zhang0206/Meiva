@@ -7,13 +7,10 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
-from agent.ownership.lifecycle_intent import accept_lifecycle_intent
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS, Database, create_agent
-from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import force_terminate_transaction
 
@@ -68,7 +65,7 @@ def _epoch(conn: psycopg.Connection, agent_id: int) -> int:
 
 def _command_row(conn: psycopg.Connection, command: int) -> tuple[object, ...]:
     row = conn.execute(
-        "SELECT status,applied_at,payload->'lifecycle_result' FROM inbound_messages WHERE id=%s",
+        "SELECT status,payload->'lifecycle_result' FROM inbound_messages WHERE id=%s",
         (command,),
     ).fetchone()
     assert row is not None
@@ -96,16 +93,11 @@ async def test_resurrect_supersedes_the_pending_terminate_it_would_replay(
     epoch = _epoch(db_conn, agent_id)
     assert _command_row(db_conn, stale) == (
         "done",
-        None,
         {"outcome": "superseded", "reason": "resurrect", "resurrect_inbound_id": epoch},
     )
-    assert db_conn.execute(
-        "SELECT last_resurrect_inbound_id,lifecycle_command_id FROM agents_meta WHERE id=%s",
-        (agent_id,),
-    ).fetchone() == (epoch, None)
 
     owner = await _admit(aops_pool, agent_id, db=database)
-    batch = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    batch = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     assert [item.kind for item in batch] == ["resurrect"]
     assert (
         await apply_hosted_lifecycle(
@@ -118,35 +110,6 @@ async def test_resurrect_supersedes_the_pending_terminate_it_would_replay(
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("running",)
-
-
-async def test_acceptance_settles_a_command_that_committed_after_the_epoch(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database: Database
-) -> None:
-    agent_id = _agent(db_conn)
-    stale = _command(db_conn, agent_id, "terminate")
-    epoch = db_conn.execute(
-        "INSERT INTO inbound_messages (agent_id,content,kind,source) "
-        "VALUES (%s,'','resurrect','user') RETURNING id",
-        (agent_id,),
-    ).fetchone()
-    assert epoch is not None
-    db_conn.execute(
-        "UPDATE agents_meta SET last_resurrect_inbound_id=%s WHERE id=%s", (epoch[0], agent_id)
-    )
-    db_conn.commit()
-
-    owner = await _admit(aops_pool, agent_id, db=database)
-    async with async_write_transaction(aops_pool) as conn:
-        assert await accept_lifecycle_intent(conn, agent_id, incarnation=owner) is None
-    assert _command_row(db_conn, stale) == (
-        "done",
-        None,
-        {"outcome": "superseded", "reason": "resurrect", "resurrect_inbound_id": epoch[0]},
-    )
-    assert db_conn.execute(
-        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (None,)
 
 
 async def test_a_command_created_after_the_resurrect_still_applies(
@@ -167,7 +130,7 @@ async def test_a_command_created_after_the_resurrect_still_applies(
     )
     owner = await _admit(aops_pool, agent_id, db=database)
     newer = _command(db_conn, agent_id, "terminate")
-    batch = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    batch = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     assert [item.kind for item in batch] == ["terminate"]
     assert (
         await apply_hosted_lifecycle(
@@ -181,11 +144,11 @@ async def test_a_command_created_after_the_resurrect_still_applies(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("terminated",)
     assert db_conn.execute(
-        "SELECT status,applied_at IS NOT NULL FROM inbound_messages WHERE id=%s", (newer,)
-    ).fetchone() == ("done", True)
+        "SELECT status FROM inbound_messages WHERE id=%s", (newer,)
+    ).fetchone() == ("done",)
 
 
-async def test_an_accepted_but_unapplied_command_is_superseded_not_deferred(
+async def test_a_claimed_but_unapplied_command_is_superseded_not_deferred(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database: Database,
@@ -194,9 +157,8 @@ async def test_an_accepted_but_unapplied_command_is_superseded_not_deferred(
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id, db=database)
     command = _command(db_conn, agent_id, "terminate")
-    async with async_write_transaction(aops_pool) as conn:
-        intent = await accept_lifecycle_intent(conn, agent_id, incarnation=owner)
-    assert intent is not None and intent.id == command
+    claimed = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
+    assert [item.id for item in claimed] == [command]
     _die(db_conn, agent_id)
 
     resurrect_agent(
@@ -209,12 +171,8 @@ async def test_an_accepted_but_unapplied_command_is_superseded_not_deferred(
     epoch = _epoch(db_conn, agent_id)
     assert _command_row(db_conn, command) == (
         "done",
-        None,
         {"outcome": "superseded", "reason": "resurrect", "resurrect_inbound_id": epoch},
     )
-    assert db_conn.execute(
-        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (None,)
 
 
 async def test_force_on_unadmitted_row_cannot_create_a_hosted_successor(
@@ -239,71 +197,13 @@ async def test_force_on_unadmitted_row_cannot_create_a_hosted_successor(
             agent_id,
             resurrected_by="user",
         )
-    assert _command_row(db_conn, force) == ("pending", None, None)
+    assert _command_row(db_conn, force) == ("done", None)
     assert db_conn.execute(
-        "SELECT status,last_resurrect_inbound_id,runtime_kind FROM agents_meta WHERE id=%s",
-        (agent_id,),
-    ).fetchone() == ("terminated", None, None)
+        "SELECT status,runtime_kind FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("terminated", None)
 
 
-async def test_refused_resurrect_leaves_no_fence_or_marker_for_the_retry(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id, db=database)
-    command = _command(db_conn, agent_id, "terminate")
-    async with async_write_transaction(aops_pool) as conn:
-        assert await accept_lifecycle_intent(conn, agent_id, incarnation=owner) is not None
-    db_conn.execute(
-        "UPDATE inbound_messages SET applied_at=clock_timestamp() WHERE id=%s", (command,)
-    )
-    _die(db_conn, agent_id)
-
-    with pytest.raises(ResurrectSettlementDeferredError):
-        resurrect_agent(
-            database,
-            event_bus,
-            agent_id,
-            resurrected_by="user",
-        )
-
-    assert db_conn.execute(
-        "SELECT last_resurrect_inbound_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (None,)
-    assert db_conn.execute(
-        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect'",
-        (agent_id,),
-    ).fetchone() == (0,)
-    assert db_conn.execute(
-        "SELECT status,applied_at IS NOT NULL,payload->'lifecycle_result' "
-        "FROM inbound_messages WHERE id=%s",
-        (command,),
-    ).fetchone() == ("claimed", True, None)
-
-    db_conn.execute(
-        "UPDATE inbound_messages SET status='done',observed_at=clock_timestamp() WHERE id=%s",
-        (command,),
-    )
-    db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
-    db_conn.commit()
-    resurrect_agent(
-        database,
-        event_bus,
-        agent_id,
-        resurrected_by="user",
-    )
-    assert (
-        db_conn.execute(
-            "SELECT last_resurrect_inbound_id FROM agents_meta WHERE id=%s", (agent_id,)
-        ).fetchone()
-        is not None
-    )
-
-
-async def test_reacceptance_is_idempotent_and_preserves_command_history(
+async def test_reclaiming_after_a_resurrect_preserves_command_history(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database: Database,
@@ -330,8 +230,10 @@ async def test_reacceptance_is_idempotent_and_preserves_command_history(
 
     owner = await _admit(aops_pool, agent_id, db=database)
     for _ in range(2):
-        async with async_write_transaction(aops_pool) as conn:
-            assert await accept_lifecycle_intent(conn, agent_id, incarnation=owner) is None
+        batch = await claim_inbound_batch(
+            aops_pool, agent_id, lifecycle_only=True, incarnation=owner
+        )
+        assert batch == []
     assert _command_row(db_conn, stale[0]) == settled
     payload = db_conn.execute(
         "SELECT payload FROM inbound_messages WHERE id=%s", (stale[0],)

@@ -1,36 +1,34 @@
-"""The reaper's database-only sweep: expired pages, browser sessions, notices and
-impersonation leases, plus the slow maintenance phases on durable cadences.
-
-One resident loop (`sweep_loop`) runs `sweep_round` every
-`MEIVA_TTL_REAPER_POLL_INTERVAL_SECONDS`. A round runs its phases in order; each
-phase is a bounded batch, and a backlog drains over successive rounds:
-
-- **Pages** — the row is terminalized with ``expired_at`` (the reverse proxy
-  then answers the page's link with the friendly "page expired" notice), a
-  ``PageClosed`` event is published so the frontend drops the entry, and the
-  page-server daemon stops the page session when its reconcile sees the row
-  leave the open set (the daemon's existing two-layer teardown). Pages have a
-  hard lifetime (user ruling 2026-08-25; default 24h, ``MEIVA_PAGE_DEFAULT_TTL_SECONDS``).
-- **Browser sessions** — expired ``web_sessions`` rows are deleted here, so
-  cleanup does not depend on the next login.
-- **Notices** — ``agent_notices`` past ``expire_at`` auto-resolve.
-- **Impersonation** — expiring leases are reminded, expired ones reaped, and ended
-  leases still waiting for an open event source (or with a failed one) emit the
-  ``impersonation_event_log_incomplete`` signal.
-- **Schedule fire log** — ``schedule_fire_log`` claims older than the configured
-  retention window (30 days by default) are deleted once per day.
-- **Lifecycle pointers** — the hourly scan that alerts on a pointer nothing
-  will settle (``lifecycle_fences``).
-
-The slow phases are claimed in ``maintenance_state`` (``cadence``), so a restart
-resumes their cadence. Owners are notified (inbound, source ``"system"``) only
-when the agent is running or idling — a terminated agent's page expiring is
-exactly the cleanup the TTL exists for, and must not resurrect it.
-
-Every reclaim is a CAS that loses cleanly to ``close()`` / termination. The sweep
-has no remote calls; shell kills and work-failure redelivery live in the
-``remote`` loop so a slow machine never delays a page expiry.
-"""
+# meiva:note
+# The reaper's database-only sweep: expired pages, browser sessions, notices and
+# impersonation leases, plus the slow maintenance phases on durable cadences.
+#
+# One resident loop (`sweep_loop`) runs `sweep_round` every
+# `MEIVA_TTL_REAPER_POLL_INTERVAL_SECONDS`. A round runs its phases in order; each
+# phase is a bounded batch, and a backlog drains over successive rounds:
+#
+# - **Pages** — the row is terminalized with ``expired_at`` (the reverse proxy
+#   then answers the page's link with the friendly "page expired" notice), a
+#   ``PageClosed`` event is published so the frontend drops the entry, and the
+#   page-server daemon stops the page session when its reconcile sees the row
+#   leave the open set (the daemon's existing two-layer teardown). Pages have a
+#   hard lifetime (user ruling 2026-08-25; default 24h, ``MEIVA_PAGE_DEFAULT_TTL_SECONDS``).
+# - **Browser sessions** — expired ``web_sessions`` rows are deleted here, so
+#   cleanup does not depend on the next login.
+# - **Notices** — ``agent_notices`` past ``expire_at`` auto-resolve.
+# - **Impersonation** — expiring leases are reminded, expired ones reaped, and ended
+#   leases still waiting for an open event source (or with a failed one) emit the
+#   ``impersonation_event_log_incomplete`` signal.
+# - **Schedule fire log** — ``schedule_fire_log`` claims older than the configured
+#   retention window (30 days by default) are deleted once per day.
+#
+# The slow phases are claimed in ``maintenance_state`` (``cadence``), so a restart
+# resumes their cadence. Owners are notified (inbound, source ``"system"``) only
+# when the agent is running or idling — a terminated agent's page expiring is
+# exactly the cleanup the TTL exists for, and must not resurrect it.
+#
+# Every reclaim is a CAS that loses cleanly to ``close()`` / termination. The sweep
+# has no remote calls; shell kills and work-failure redelivery live in the
+# ``remote`` loop so a slow machine never delays a page expiry.
 
 from __future__ import annotations
 
@@ -56,7 +54,6 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed
 from ops import lifecycle
 from services.upkeep.ttl_reaper import cadence
-from services.upkeep.ttl_reaper.lifecycle_fences import scan_stuck_lifecycle_pointers_blocking
 from services.upkeep.ttl_reaper.owner_notice import PASS_BATCH, notify_owner
 
 _log = logging.getLogger(__name__)
@@ -227,10 +224,10 @@ def prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
         return cur.rowcount
 
 
-async def _slow_phases(pool: ConnectionPool) -> tuple[int, int]:
-    """The cadence-gated phases that came due: (pruned fire-log rows, stuck
-    lifecycle pointers found)."""
-    pruned = stuck = 0
+# meiva:note
+# The cadence-gated phases that came due: the number of pruned fire-log rows.
+async def _slow_phases(pool: ConnectionPool) -> int:
+    pruned = 0
     if await asyncio.to_thread(
         cadence.claim_due,
         pool,
@@ -238,11 +235,7 @@ async def _slow_phases(pool: ConnectionPool) -> tuple[int, int]:
         settings.daemon.schedule_fire_log_cleanup_interval_seconds,
     ):
         pruned = await asyncio.to_thread(prune_schedule_fire_log_blocking, pool)
-    if await asyncio.to_thread(
-        cadence.claim_due, pool, cadence.STUCK_POINTER_SCAN, cadence.HOURLY_S
-    ):
-        stuck = await asyncio.to_thread(scan_stuck_lifecycle_pointers_blocking, pool)
-    return pruned, stuck
+    return pruned
 
 
 async def sweep_round(
@@ -262,27 +255,18 @@ async def sweep_round(
     for agent_id, nid, details in notices:
         await lifecycle.publish_notice_resolved(bus, agent_id, nid, facts=details)
     progress.beat()
-    pruned_fire_log, stuck_pointers = await _slow_phases(pool)
-    if (
-        pages
-        or sessions
-        or impersonations
-        or notices
-        or reminded
-        or pruned_fire_log
-        or stuck_pointers
-    ):
+    pruned_fire_log = await _slow_phases(pool)
+    if pages or sessions or impersonations or notices or reminded or pruned_fire_log:
         _log.info(
             "[ttl-reaper] reclaimed %d page(s), %d web session(s), %d impersonation(s), "
             "%d notice(s); reminded %d impersonation lease(s); "
-            "pruned %d schedule fire-log row(s); found %d stuck lifecycle pointer(s)",
+            "pruned %d schedule fire-log row(s)",
             len(pages),
             sessions,
             impersonations,
             len(notices),
             reminded,
             pruned_fire_log,
-            stuck_pointers,
         )
 
 

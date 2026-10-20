@@ -9,10 +9,11 @@ from psycopg.types.json import Jsonb
 
 from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.incarnation.lifecycle_acceptance import (
+from base.agents.incarnation.lifecycle_commands import (
     LIFECYCLE_RELEASE,
     UNOWNED_TERMINATION_ID,
     UNOWNED_TERMINATION_RECORDED,
+    supersede_lifecycle_for_resurrect,
 )
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
 from base.api_contracts.agent_contract import (
@@ -21,17 +22,14 @@ from base.api_contracts.agent_contract import (
     MachinePaused,
     ResurrectAlreadyAlive,
 )
-from base.db import Database, fetch_one
+from base.db import Database
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry.audit_events import prepare_event_log, record_audit
-from ops.agents.resurrection_retry import (
-    ResurrectSettlementDeferredError,
-    hosted_resurrection_target,
-)
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError as ResurrectTriggerStaleError
+from ops.agents.resurrection_retry import hosted_resurrection_target
 from ops.agents.resurrection_retry import lock_active_home_machine as _lock_active_home_machine
 
 # The exact retained hosted identity; or, all three NULL, a never-admitted row
@@ -88,7 +86,7 @@ def transition_terminated_to_unclaimed_idling(
                 "last_turn_fatal_at = NULL, "
                 "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL "
                 "WHERE id = %s AND status = %s AND {} "
-                "AND pid IS NULL AND lifecycle_command_id IS NULL "
+                "AND pid IS NULL "
                 "AND {} "
                 "AND EXISTS ("
                 "  SELECT 1 FROM inbound_messages m "
@@ -111,7 +109,7 @@ def transition_terminated_to_unclaimed_idling(
                 "last_turn_fatal_at = NULL, "
                 "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL "
                 "WHERE id = %s AND status = %s AND {} "
-                "AND pid IS NULL AND lifecycle_command_id IS NULL RETURNING status_changed_at"
+                "AND pid IS NULL RETURNING status_changed_at"
             ).format(sql.SQL(_RESURRECTION_TARGET)),
             base_params,
         )
@@ -167,8 +165,6 @@ def _prepare_resurrect_attempt(
     trigger_inbound_kind: WakeTriggerKind | None,
 ) -> telemetry.Event:
     """Commit ordinary resurrection and its optional prompt before waking the host."""
-    from base.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_resurrect
-
     with db.write_transaction() as conn, conn.cursor() as cur:
         # Task before agent: producers hold the task while inserting an inbound
         # whose foreign key can lock agents_meta. Keep the same lock order.
@@ -202,11 +198,11 @@ def _prepare_resurrect_attempt(
             resources=row[8],
             unowned_termination=unowned_termination,
         )
-        # The resurrection inbound is inserted before the settlement check so
-        # its id can fence the new incarnation's epoch: every earlier unapplied
-        # lifecycle command is settled as superseded right here (issue #2158),
-        # and a command that never applied cannot defer this resurrection. A
-        # refusal below rolls the whole transaction back - fence included.
+        # meiva:note
+        # The resurrection inbound is inserted first so its id can close every
+        # earlier open lifecycle command as superseded right here (issue
+        # #2158): a restart or terminate queued in the previous life must not
+        # act on the new one. A refusal below rolls the whole transaction back.
         # Stamp after the lock: a transaction begun before termination committed
         # must not sort its resurrection ahead of the interruption notices. The
         # row leaves this transaction unowned, a lifecycle release.
@@ -219,11 +215,6 @@ def _prepare_resurrect_attempt(
         if resurrect_row is None:
             raise RuntimeError("resurrect lifecycle inbound INSERT returned no id")
         supersede_lifecycle_for_resurrect(conn, agent_id, resurrect_row[0])
-        cur.execute("SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,))
-        if fetch_one(cur, "resurrect: locked lifecycle pointer")[0] is not None:
-            raise ResurrectSettlementDeferredError(
-                "outstanding hosted lifecycle command has not settled"
-            )
         transition_terminated_to_unclaimed_idling(
             cur,
             agent_id,

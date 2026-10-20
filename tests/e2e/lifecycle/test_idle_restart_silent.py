@@ -38,7 +38,7 @@ def _agent_status_row(agent_id: int) -> tuple[Any, ...] | None:
 def _restart_inbound_applied(agent_id: int) -> bool:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT applied_at IS NOT NULL FROM inbound_messages "
+            "SELECT status = 'done' FROM inbound_messages "
             "WHERE agent_id = %s AND kind = 'restart' LIMIT 1",
             (agent_id,),
         )

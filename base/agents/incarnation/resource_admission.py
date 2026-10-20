@@ -25,20 +25,17 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 _LOCK = "SELECT incarnation_resources,runtime_generation,runtime_owner,runtime_kind,pid,started_at FROM agents_meta WHERE id=%s FOR UPDATE"
 _STORE = "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s"
+# meiva:note
 # What a drained restart leaves: protocol-zero NULL, or the complete recorded
-# set of exactly the incarnation restart `i` released, empty and unfrozen.
+# set of an incarnation, empty. The restart released the runtime in the same
+# transaction that closed its command (alias `m` is the agents_meta row).
 DRAINED_RESOURCES = (
     "(m.incarnation_resources IS NULL OR (m.incarnation_resources->>'state'='admitted' "
-    "AND m.incarnation_resources->>'generation'=i.target_generation::text "
-    "AND m.incarnation_resources->>'owner'=i.target_owner::text "
-    "AND m.incarnation_resources->>'frozen_by' IS NULL "
     "AND m.incarnation_resources->'requests'='{}'::jsonb))"
 )
 
 
 def _require_same_host(state: IncarnationResources, host: ResourceProcess) -> None:
-    if state.frozen_by is not None:
-        raise ResourceFenceError("force freezes same-owner admission")
     if state.host_process is None or not state.host_process.same_birth(host):
         raise ResourceFenceError("same owner changed its actual host process")
 
@@ -61,11 +58,7 @@ def next_incarnation_resources(
             _require_same_host(state, host)
             return state
         released = all(value is None for value in row[1:5])
-        exited_host = (
-            state.frozen_by is None
-            and state.host_process is not None
-            and state.host_process == exited_predecessor
-        )
+        exited_host = state.host_process is not None and state.host_process == exited_predecessor
         if state.requests or not (released or exited_host):
             raise ResourceClosureError(
                 "successor requires released ownership and closed exec resources",

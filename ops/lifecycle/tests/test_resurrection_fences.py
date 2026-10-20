@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import psycopg
 import pytest
-from psycopg_pool import AsyncConnectionPool
 
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind
@@ -23,7 +22,6 @@ from ops.lifecycle.tests.resurrection_setup import (
     hosted_agent,
     inbound_rows,
     noop,
-    settle_hosted_force,
 )
 from ops.tests.pool_support import make_test_pool
 
@@ -33,7 +31,6 @@ class TestResurrectAgent:
         self,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
-        aops_pool: AsyncConnectionPool,
         database: Database,
         event_bus: EventBus,
         *,
@@ -95,8 +92,6 @@ class TestResurrectAgent:
         assert repeated_agent_row[1] > first_agent_row[1]
         assert repeated_page_row[0] == first_page_row[0]
 
-        await settle_hosted_force(db_conn, aops_pool, agent_id, local_machine=machine_identity)
-
         resurrect_agent(
             database,
             event_bus,
@@ -116,7 +111,6 @@ class TestResurrectAgent:
         self,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
-        aops_pool: AsyncConnectionPool,
         database: Database,
         event_bus: EventBus,
         *,
@@ -148,8 +142,6 @@ class TestResurrectAgent:
         )
         with make_test_pool() as pool:
             force_mark_terminated(database, event_bus, agent_id, pool)
-
-        await settle_hosted_force(db_conn, aops_pool, agent_id, local_machine=machine_identity)
 
         with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
             resurrect_agent(
@@ -438,7 +430,6 @@ class TestResurrectAgent:
         self,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
-        aops_pool: AsyncConnectionPool,
         database: Database,
         event_bus: EventBus,
         *,
@@ -471,8 +462,6 @@ class TestResurrectAgent:
         )
         with make_test_pool() as pool:
             force_mark_terminated(database, event_bus, agent_id, pool)
-
-        await settle_hosted_force(db_conn, aops_pool, agent_id, local_machine=machine_identity)
 
         with pytest.raises(ResurrectTriggerStaleError):
             resurrect_agent(

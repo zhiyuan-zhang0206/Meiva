@@ -95,7 +95,7 @@ def test_completed_retired_consumer_parks_without_inventing_receipts(
     agent = _retired(db_conn, machine_identity=machine_identity)
     before = db_conn.execute(
         "SELECT runtime_kind,runtime_owner,runtime_generation,lease_expires_at,"
-        "lifecycle_command_id,incarnation_resources FROM agents_meta WHERE id=%s",
+        "incarnation_resources FROM agents_meta WHERE id=%s",
         (agent,),
     ).fetchone()
     messages = db_conn.execute(
@@ -123,7 +123,7 @@ def test_completed_retired_consumer_parks_without_inventing_receipts(
     assert (
         db_conn.execute(
             "SELECT runtime_kind,runtime_owner,runtime_generation,lease_expires_at,"
-            "lifecycle_command_id,incarnation_resources FROM agents_meta WHERE id=%s",
+            "incarnation_resources FROM agents_meta WHERE id=%s",
             (agent,),
         ).fetchone()
         == before

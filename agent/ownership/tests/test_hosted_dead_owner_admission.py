@@ -55,7 +55,6 @@ def _seed(
         generation=uuid4(),
         owner=uuid4(),
         host_process=None if fence == "unknown_host" else host,
-        frozen_by=1 if fence == "frozen" else None,
         requests=requests,
     )
     conn.execute(
@@ -78,7 +77,7 @@ def _seed(
     return agent_id, evidence
 
 
-@pytest.mark.parametrize("fence", ["other_machine", "open_request", "frozen", "unknown_host"])
+@pytest.mark.parametrize("fence", ["other_machine", "open_request", "unknown_host"])
 async def test_dead_host_does_not_bypass_resource_or_machine_fences(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,

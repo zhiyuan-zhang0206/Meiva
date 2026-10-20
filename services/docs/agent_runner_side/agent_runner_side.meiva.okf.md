@@ -74,10 +74,6 @@ supervisor recovery; backlog recovery does not weaken that resource boundary.
 - [[services/supervision/meiva_root_glue/docs/meiva_root_glue.meiva.okf.md]] — root probes and supervises the selected service manifest.
 - [[services/docs/services.meiva.okf.md|Background Services Overview]] — the upper-level index of grouping and capability distribution
 
-Guarded manual compact requires the actual host producer and cold application
-proof: [[base/agents/compaction/docs/manual-compact/manual-compact.meiva.okf.md]]. Legacy compaction
-and older runners do not acquire this capability from installed routes/schema.
-
 ## Hosted failure regression boundaries
 
 `agent_host/tests/dispatch/test_failure_report_cutoff.py` runs synchronous

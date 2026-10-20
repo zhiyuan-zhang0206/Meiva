@@ -16,16 +16,15 @@ from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.events.live.bus import EventBus
 
 
-@pytest.mark.parametrize("observed", [False, True])
-def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
+def _cold_agent_with_a_restart_and_a_claimed_chat(
     db_conn: psycopg.Connection[Any],
-    observed: bool,
     database: Database,
     event_bus: EventBus,
     machine_identity: MachineIdentity,
-) -> None:
+    *,
+    restart_status: str,
+) -> tuple[int, int]:
     agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
-    owner, generation = uuid4(), uuid4()
     chat = insert_inbound_message(
         db_conn, agent, "unfinished action", "user", bus=event_bus, database=database
     )
@@ -34,35 +33,25 @@ def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
     )
     db_conn.execute("UPDATE inbound_messages SET status='claimed' WHERE id=%s", (chat,))
     db_conn.execute(
-        "UPDATE inbound_messages SET status=%s,applied_at=clock_timestamp(),observed_at=%s,"
-        "target_owner=%s,target_generation=%s,claimed_at=clock_timestamp() WHERE id=%s",
-        ("done" if observed else "claimed", WHEN if observed else None, owner, generation, restart),
-    )
-    db_conn.execute(
-        "UPDATE agents_meta SET runtime_kind=%s,runtime_owner=%s,runtime_generation=%s,"
-        "lifecycle_command_id=%s WHERE id=%s",
-        (
-            "hosted" if observed else None,
-            owner if observed else None,
-            generation if observed else None,
-            None if observed else restart,
-            agent,
-        ),
+        "UPDATE inbound_messages SET status=%s,claimed_at=clock_timestamp() WHERE id=%s",
+        (restart_status, restart),
     )
     db_conn.commit()
+    return agent, chat
+
+
+def test_cold_executed_restart_and_claimed_chat_are_preserved(
+    db_conn: psycopg.Connection[Any],
+    database: Database,
+    event_bus: EventBus,
+    machine_identity: MachineIdentity,
+) -> None:
+    agent, chat = _cold_agent_with_a_restart_and_a_claimed_chat(
+        db_conn, database, event_bus, machine_identity, restart_status="done"
+    )
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     db_conn.commit()
     pause_owner.begin_maintenance("cold", WHEN)
-    if not observed:
-        with pytest.raises(RuntimeError):
-            cohort.prepare(
-                db_conn,
-                machine=machine_identity.name(),
-                host_owner=None,
-                holder="cold",
-                acquired_at=WHEN,
-            )
-        db_conn.rollback()
     held = cohort.prepare(
         db_conn,
         machine=machine_identity.name(),
@@ -77,6 +66,27 @@ def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (chat,)
     ).fetchone() == ("claimed",)
+
+
+def test_cold_agent_with_an_open_restart_refuses_preparation(
+    db_conn: psycopg.Connection[Any],
+    database: Database,
+    event_bus: EventBus,
+    machine_identity: MachineIdentity,
+) -> None:
+    _cold_agent_with_a_restart_and_a_claimed_chat(
+        db_conn, database, event_bus, machine_identity, restart_status="claimed"
+    )
+    pause_owner.begin_maintenance("cold", WHEN)
+    with pytest.raises(cohort.LifecycleCollisionError):
+        cohort.prepare(
+            db_conn,
+            machine=machine_identity.name(),
+            host_owner=None,
+            holder="cold",
+            acquired_at=WHEN,
+            host_absent=True,
+        )
 
 
 def test_expired_host_lease_does_not_prove_normal_shutdown(

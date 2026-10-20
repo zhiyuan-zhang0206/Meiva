@@ -1,9 +1,9 @@
-"""Complete per-incarnation exec allocation set, serialized by agents_meta.
-
-These are server-owned facts, never request payloads or configuration. The
-caller retains one explicit transaction through registration/force acceptance;
-no process launch, filesystem read or network wait belongs under that lock.
-"""
+# meiva:note
+# Complete per-incarnation exec allocation set, serialized by agents_meta.
+#
+# These are server-owned facts, never request payloads or configuration. The
+# caller retains one explicit transaction through registration;
+# no process launch, filesystem read or network wait belongs under that lock.
 
 import hashlib
 import json
@@ -13,9 +13,6 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 import psutil
-import psycopg
-from psycopg.pq import TransactionStatus
-from psycopg.types.json import Jsonb
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -28,7 +25,6 @@ from pydantic import (
 
 from base import native_process
 from base.native_process import ownership as proc_tree
-from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 class ResourceEvidenceError(RuntimeError):
@@ -228,7 +224,6 @@ class IncarnationResources(_StrictEvidence):
     generation: UUID
     owner: UUID
     host_process: ResourceProcess | None = None
-    frozen_by: int | None = Field(default=None, gt=0)
     requests: dict[str, ExecAllocation]
 
     @model_validator(mode="after")
@@ -252,55 +247,3 @@ def decode_resources(value: object) -> ResourceBirth | IncarnationResources:
             "stored incarnation resources do not match the current model; "
             "explicit cutover reconciliation is required"
         ) from exc
-
-
-def _transaction(conn: psycopg.Connection) -> None:
-    if conn.info.transaction_status != TransactionStatus.INTRANS:
-        raise ResourceEvidenceError("resource evidence requires an explicit transaction")
-
-
-def _locked(
-    conn: psycopg.Connection, target: RuntimeIncarnation
-) -> tuple[IncarnationResources, str, int | None]:
-    _transaction(conn)
-    row = conn.execute(
-        "SELECT runtime_generation,runtime_owner,incarnation_resources,status,lifecycle_command_id "
-        "FROM agents_meta WHERE id=%s FOR UPDATE",
-        (target.agent_id,),
-    ).fetchone()
-    if row is None or row[:2] != (target.generation, target.owner):
-        raise ResourceEvidenceError("resource writer lost its runtime incarnation")
-    evidence = decode_resources(row[2])
-    if not isinstance(evidence, IncarnationResources) or (evidence.generation, evidence.owner) != (
-        target.generation,
-        target.owner,
-    ):
-        raise ResourceEvidenceError("resource set belongs to another incarnation")
-    return evidence, row[3], row[4]
-
-
-def _store(
-    conn: psycopg.Connection, target: RuntimeIncarnation, evidence: IncarnationResources
-) -> None:
-    conn.execute(
-        "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
-        (Jsonb(evidence.model_dump(mode="json")), target.agent_id),
-    )
-
-
-def freeze_resources(conn: psycopg.Connection, target: RuntimeIncarnation, command_id: int) -> None:
-    """Freeze the complete stored set only for the actual accepted force pointer."""
-    evidence, status, pointer = _locked(conn, target)
-    if status != "terminated" or pointer != command_id:
-        raise ResourceEvidenceError("resource freeze does not own the force pointer")
-    command = conn.execute(
-        "SELECT id FROM inbound_messages WHERE id=%s AND agent_id=%s AND kind='terminate' "
-        "AND status='claimed' AND applied_at IS NOT NULL AND observed_at IS NULL "
-        "AND target_generation=%s AND target_owner=%s FOR UPDATE",
-        (command_id, target.agent_id, target.generation, target.owner),
-    ).fetchone()
-    if command != (command_id,) or (
-        evidence.frozen_by is not None and evidence.frozen_by > command_id
-    ):
-        raise ResourceEvidenceError("resource freeze has stale command authority")
-    _store(conn, target, evidence.model_copy(update={"frozen_by": command_id}))

@@ -86,10 +86,13 @@ def require_persisted_end(conn: psycopg.Connection[Any], agent_id: int) -> str:
     The real compiled-graph tests compare these checks to next/tasks; unknown
     checkpoint versions refuse rather than guessing the dependency's format.
     """
-    meta = conn.execute(
-        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    claimed = conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM inbound_messages WHERE agent_id=%s "
+        "AND kind IN ('restart','terminate') AND status='claimed') "
+        "FROM agents_meta WHERE id=%s",
+        (agent_id, agent_id),
     ).fetchone()
-    if meta is None or meta[0] is not None:
+    if claimed is None or claimed[0]:
         raise RuntimeError(f"cold agent {agent_id} still owns a lifecycle command")
     serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     saved = PostgresSaver(conn, serde=serde).get_tuple(

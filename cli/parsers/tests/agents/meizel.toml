@@ -1,6 +1,3 @@
-[uses]
-"test_rpc_result_domains.py" = ["test_agents_cmd.py"]
-
 [debt.env-patch]
 "test_external_caller_cli.py#monkeypatch.delenv os.environ.MEIVA_CALLER_IDENTITY" = 4
 "test_external_caller_cli.py#monkeypatch.setenv os.environ.MEIVA_CALLER_IDENTITY" = 1
@@ -34,9 +31,8 @@
 "test_impersonation_bridge_parsers.py#monkeypatch.setattr cli.commands.agents.impersonation.relay_token_from_env" = 2
 "test_impersonation_bridge_parsers.py#monkeypatch.setattr cli.commands.agents.impersonation_adapters.live_submit" = 2
 "test_impersonation_bridge_parsers.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.reserve_delivery" = 2
-"test_rpc_result_domains.py#monkeypatch.setattr base.host.net.http_dial.get" = 1
 "test_rpc_result_domains.py#monkeypatch.setattr base.host.net.http_dial.post" = 1
 
 [debt.third-party-patch]
-"test_agents_cmd.py#monkeypatch.setattr httpx.get" = 6
+"test_agents_cmd.py#monkeypatch.setattr httpx.get" = 4
 "test_agents_cmd.py#monkeypatch.setattr httpx.post" = 2

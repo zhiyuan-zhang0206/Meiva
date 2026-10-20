@@ -90,9 +90,7 @@ def authenticated_gateway(
 async def _claimed_text(
     pool: AsyncConnectionPool, incarnation: RuntimeIncarnation
 ) -> tuple[str, str, dict[str, object] | None]:
-    claimed = await claim_inbound_batch(
-        pool, incarnation.agent_id, incarnation=incarnation, work=None
-    )
+    claimed = await claim_inbound_batch(pool, incarnation.agent_id, incarnation=incarnation)
     assert len(claimed) == 1
     item = claimed[0]
     message, _ = build_chat_inbound(

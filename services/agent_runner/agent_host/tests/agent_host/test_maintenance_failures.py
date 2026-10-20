@@ -119,4 +119,4 @@ async def test_a_settled_members_held_wake_claims_nothing(
     fc10_hold(phase, parked=(5,))
     await host.run_turn(agent)
     control.assert_not_awaited()
-    assert pool.reads == 2
+    assert pool.reads == 1

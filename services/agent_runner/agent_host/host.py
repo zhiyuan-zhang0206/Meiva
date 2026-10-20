@@ -1,9 +1,9 @@
-"""Run local agents through a shared graph and explicit per-turn context.
-
-The dispatcher owns single-flight; turns borrow the daemon's pools, checkpointer
-and machine. Cold admission consumes interrupted inputs without replaying work.
-Lifecycle requests retain settlement fences; unknown failures propagate.
-"""
+# meiva:note
+# Run local agents through a shared graph and explicit per-turn context.
+#
+# The dispatcher owns single-flight; turns borrow the daemon's pools, checkpointer
+# and machine. Cold admission consumes interrupted inputs without replaying work.
+# A restart or terminate executes at the turn boundary in one transaction; unknown failures propagate.
 
 from __future__ import annotations
 
@@ -50,7 +50,6 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
-from base.agents.incarnation.native_work_models import NativeWorkTarget, NativeWorkUncertainError
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.api_contracts.agent_contract import Harness
@@ -74,25 +73,16 @@ from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.paths import harness_registrations_dir, harness_sessions_dir
 from base.telemetry.tracing import turn_span
-from services.agent_runner.agent_host.force_termination import (
-    force_termination_outcome,
-    force_termination_stop,
-    kill_terminating_agent_shells,
-)
 from services.agent_runner.agent_host.invocation import (
     PendingWorkResult,
     finish_completed_invocation,
     finish_pending_failure,
+    settle_handoff_before_invocation,
 )
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.invocation.driver import drive_context
-from services.agent_runner.agent_host.invocation.native_work import (
-    NativeWorkContinuation,
-    hold_native_cancel,
-    invoke_prepared_graph,
-    recover_native_cancel,
-)
 from services.agent_runner.agent_host.lifecycle import maintenance as maintenance_receipts
+from services.agent_runner.agent_host.lifecycle.shells import kill_terminating_agent_shells
 from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
 from services.agent_runner.agent_host.runtime import (
     AgentRuntime,
@@ -204,7 +194,6 @@ class AgentHost:
             work = asyncio.create_task(self._run_turn(agent_id, resources=resources))
             self._resource_service.retain_task(resources, work)
             cancelled = False
-            primary: BaseException | None = None
             try:
                 try:
                     await asyncio.shield(work)
@@ -214,7 +203,6 @@ class AgentHost:
                     await wait_shielded_task(work)
                 work.result()
             except BaseException as exc:
-                primary = exc
                 try:
                     await maintenance_receipts.record_failure(self._control_pool, agent_id, exc)
                 except BaseException as receipt_error:
@@ -223,57 +211,11 @@ class AgentHost:
             finally:
                 if not work.done():
                     raise HostRestartRequiredError("hosted work remains live after cancellation")
-                try:
-                    from base.agents.incarnation.hosted_force import original_host_force
-
-                    # The exclusive pump also covers no-task wakes.
-                    if cancelled:
-                        self.drop_agent(agent_id)
-                    from services.agent_runner.agent_host.invocation.compact.source import (
-                        finish_force_and_compact,
-                    )
-
-                    settlement = asyncio.create_task(
-                        finish_force_and_compact(
-                            original_host_force(
-                                self._control_pool,
-                                agent_id,
-                                self._owner,
-                                self._machine,
-                                quiescent=True,
-                                kill_shell_sessions=kill_terminating_agent_shells,
-                            ),
-                            self._control_pool,
-                            self._checkpointer,
-                            agent_id,
-                            self._owner,
-                            self._bus,
-                            self.drop_agent,
-                            catalog=self._catalog,
-                            llm_override=self._policy.llm_override(),
-                            default_reader=self._policy.default_reader,
-                        )
-                    )
-                    self._resource_service.retain_task(resources, settlement)
-                    cancelled = await wait_shielded_task(settlement) or cancelled
-                    settlement.result()
-                except BaseException as cleanup_error:
-                    if isinstance(cleanup_error, HostRestartRequiredError):
-                        raise
-                    if primary is None:
-                        raise
-                    primary.add_note(f"hosted turn cleanup failed: {cleanup_error!r}")
+                if cancelled:
+                    self.drop_agent(agent_id)
             if cancelled:
                 raise asyncio.CancelledError
-            await maintenance_receipts.record_drained(self._control_pool, self._owner, agent_id)
-
-    async def accepts_force(self, agent_id: int, command_id: int) -> bool:
-        """Authenticate cancellation against this live host's actual boot owner."""
-        from base.agents.incarnation.hosted_force import original_host_force
-
-        return await original_host_force(
-            self._control_pool, agent_id, self._owner, self._machine, command_id=command_id
-        )
+            await maintenance_receipts.record_drained(self._control_pool, agent_id)
 
     async def _run_turn(self, agent_id: int, *, resources: HostedTurnResources | None) -> None:
         """Run to idle, re-reading ownership and configuration each turn boundary.
@@ -349,11 +291,7 @@ class AgentHost:
                 # Admission may have waited for prepare's real row lock.
                 # Its only permitted continuation now is the owned control;
                 # do not build a new runtime or run initialization hooks.
-                await self._apply_held_controls(
-                    agent_id,
-                    incarnation,
-                    work=None,
-                )
+                await self._apply_held_controls(agent_id, incarnation)
                 return
             outcome = TurnOutcome(exited=False, crashed=False)
             # Admission is durable before its optional live announce; every await
@@ -372,26 +310,22 @@ class AgentHost:
                     )
                     await publish_agent_updated(self._bus, agent_id)
                     slices = self._policy.resolve_slices(pins, plugin_pins, self._plugin_configs)
-                    if await recover_native_cancel(self._control_pool, incarnation):
-                        runtime = await self._runtime_for(
-                            agent_id,
-                            stored.fingerprint,
-                            slices,
-                            incarnation=incarnation,
-                            checkpoints=checkpoints,
-                            harness=Harness(stored.harness),
-                        )
-                        outcome = await self._drive_turns(
-                            agent_id,
-                            runtime,
-                            slices,
-                            incarnation=incarnation,
-                            resources=resources,
-                            checkpoints=checkpoints,
-                        )
-                    else:
-                        self.drop_agent(agent_id)
-                        outcome = TurnOutcome(exited=False, crashed=False, native_held=True)
+                    runtime = await self._runtime_for(
+                        agent_id,
+                        stored.fingerprint,
+                        slices,
+                        incarnation=incarnation,
+                        checkpoints=checkpoints,
+                        harness=Harness(stored.harness),
+                    )
+                    outcome = await self._drive_turns(
+                        agent_id,
+                        runtime,
+                        slices,
+                        incarnation=incarnation,
+                        resources=resources,
+                        checkpoints=checkpoints,
+                    )
                     # meiva:note
                     # A finished turn is a log line, not a notification: it asks the
                     # user nothing, and at the measured 16k-34k turns a day
@@ -399,10 +333,11 @@ class AgentHost:
                     # plus the settled agent row; this DEBUG line (the file sink
                     # records DEBUG) keeps it greppable without flooding INFO.
                     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-                    if not outcome.crashed and not outcome.native_held and not outcome.truncated:
+                    if not outcome.crashed:
                         logger.debug("hosted turn finished for agent {agent_id}", agent_id=agent_id)
             except asyncio.CancelledError:
-                # A cancelled turn (stale-turn scan, force terminate, shutdown)
+                # meiva:note
+                # A cancelled turn (stale-turn scan, cancel route, force terminate, shutdown)
                 # must not keep its runtime either: the next wake re-runs the
                 # startup reconcile. External cancellation is not a corpse.
                 self.drop_agent(agent_id)
@@ -438,20 +373,9 @@ class AgentHost:
         )
         if incarnation is None:
             return
-        async with force_termination_stop(self._control_pool, incarnation):
-            await self._apply_held_controls(
-                agent_id,
-                incarnation,
-                work=None,
-            )
+        await self._apply_held_controls(agent_id, incarnation)
 
-    async def _apply_held_controls(
-        self,
-        agent_id: int,
-        incarnation: RuntimeIncarnation,
-        *,
-        work: NativeWorkTarget | None,
-    ) -> None:
+    async def _apply_held_controls(self, agent_id: int, incarnation: RuntimeIncarnation) -> None:
         from agent.db import claim_inbound_batch
 
         # An external lease owns decisions; held wakes alone supervise its relays.
@@ -475,7 +399,6 @@ class AgentHost:
             agent_id,
             lifecycle_only=True,
             incarnation=incarnation,
-            work=work,
         )
         if len(batch) > 1 or any(not item.durable_lifecycle for item in batch):
             raise RuntimeError("held control claim returned an unaccepted command")
@@ -568,7 +491,7 @@ class AgentHost:
 
     async def pending_inbound_wakes(self) -> list[int]:
         """Use the scheduling owner's durable work/maintenance scan."""
-        return await scan_candidates(self._control_pool, self._owner, self._machine)
+        return await scan_candidates(self._control_pool, self._machine)
 
     def drop_agent(self, agent_id: int) -> None:
         """Forget an agent's cached runtime — the hosted equivalent of the
@@ -640,13 +563,7 @@ class AgentHost:
             harness_bridge=runtime.harness_bridge,
         )
         return await drive_context(
-            self._control_pool,
-            checkpoints.saver,
-            checkpoints.graph,
-            agent_id,
-            ctx,
-            partial(self._invoke_until_done, checkpoints=checkpoints),
-            self.drop_agent,
+            agent_id, ctx, partial(self._invoke_until_done, checkpoints=checkpoints)
         )
 
     async def _invoke_native_graph(
@@ -679,22 +596,10 @@ class AgentHost:
         turn = 0
         while True:
             turn += 1
-            work = NativeWorkContinuation(uuid4(), require_fresh_input=turn == 1)
             with turn_span(name=f"meiva-agent-{agent_id}", session_id=str(agent_id), turn=turn):
                 try:
-                    prepared = await invoke_prepared_graph(
-                        self._control_pool,
-                        checkpoints.graph,
-                        agent_id,
-                        ctx,
-                        work,
-                        db=self._db,
-                        bus=self._bus,
-                        relays=self.relays,
-                        notes=self._policy.handoff_notes,
-                        invoke=partial(
-                            self._invoke_native_graph, agent_id, config, graph=checkpoints.graph
-                        ),
+                    prepared = await self._invoke_graph(
+                        agent_id, ctx, config, checkpoints, fresh_input=turn == 1
                     )
                     if isinstance(prepared, PendingTurnFailure):
                         return await finish_pending_failure(
@@ -704,15 +609,13 @@ class AgentHost:
                             ctx,
                             config,
                             prepared,
-                            native_work=work.target,
                         )
-                    pending = PendingWorkResult(prepared, native_work=work.target)
                     outcome = await finish_completed_invocation(
                         self._control_pool,
                         checkpoints,
                         agent_id,
                         ctx,
-                        pending,
+                        PendingWorkResult(prepared),
                         self.drop_agent,
                         kill_terminating_agent_shells,
                         db=self._db,
@@ -722,17 +625,7 @@ class AgentHost:
                     )
                     if outcome is not None:
                         return outcome
-                except NativeWorkUncertainError:
-                    await hold_native_cancel(self._control_pool, work.target)
-                    self.drop_agent(agent_id)
-                    return TurnOutcome(exited=False, crashed=False, native_held=True)
                 except Exception as exc:
-                    ended = await force_termination_outcome(
-                        exc, self._control_pool, agent_id, incarnation=ctx.original_incarnation
-                    )
-                    if ended is not None:
-                        self.drop_agent(agent_id)
-                        return ended
                     emit_error_event(
                         ctx,
                         agent_id,
@@ -742,6 +635,43 @@ class AgentHost:
                     raise
                 finally:
                     flush_node_exit_aggregate(agent_id)
+
+    # meiva:note
+    # Settle the handoff checkpoint, then run the graph once.
+    #
+    #         A turn's first invocation sets `halted` so that a continuation left by
+    #         an interrupted predecessor is abandoned and waits for fresh input.
+    async def _invoke_graph(
+        self,
+        agent_id: int,
+        ctx: MeivaContext,
+        config: RunnableConfig,
+        checkpoints: TurnCheckpoints,
+        *,
+        fresh_input: bool,
+    ) -> dict[str, object] | PendingTurnFailure:
+        await settle_handoff_before_invocation(
+            checkpoints.graph,
+            ctx,
+            agent_id,
+            db=self._db,
+            bus=self._bus,
+            relays=self.relays,
+            notes=self._policy.handoff_notes,
+        )
+        return await self._invoke_native_graph(
+            agent_id,
+            config,
+            ctx,
+            {
+                **({"halted": True} if fresh_input else {}),
+                "turn_active": False,
+                "exit_requested": False,
+                "turn_idle": False,
+                "restart_requested": False,
+            },
+            graph=checkpoints.graph,
+        )
 
     @property
     def resources_joined(self) -> bool:

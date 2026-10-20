@@ -4,7 +4,6 @@ from uuid import uuid4
 
 import psycopg
 from psycopg.types.json import Jsonb
-from psycopg_pool import AsyncConnectionPool
 
 from base.agents.birth.spawn import create_agent_row
 from base.agents.impersonation.wake import publish_inbound_wake
@@ -107,27 +106,11 @@ def hosted_agent(
     return agent_id
 
 
-async def settle_hosted_force(
-    db: psycopg.Connection,
-    pool: AsyncConnectionPool,
-    agent_id: int,
-    *,
-    local_machine: MachineIdentity,
-) -> None:
-    from base.agents.incarnation.hosted_force import original_host_force
-
-    row = db.execute("SELECT runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
-    assert row is not None
-    db.commit()
-    assert await original_host_force(pool, agent_id, row[0], local_machine.name(), quiescent=True)
-
-
 __all__ = [
     "agents_row",
     "hosted_agent",
     "inbound_count",
     "inbound_rows",
     "noop",
-    "settle_hosted_force",
     "spawn_agent",
 ]

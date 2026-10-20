@@ -1,12 +1,11 @@
-"""Durable cadence clocks for the reaper's slow phases.
-
-The fire-log prune (daily) and the stuck lifecycle-pointer scan (hourly) run
-once per interval, not once per pass.
-The clock lives in `maintenance_state`, one row per phase, so a restart resumes
-the cadence instead of running every slow phase at once.
-
-Synchronous psycopg; the loops call it through `asyncio.to_thread`.
-"""
+# meiva:note
+# Durable cadence clocks for the reaper's slow phases.
+#
+# The fire-log prune (daily) runs once per interval, not once per pass.
+# The clock lives in `maintenance_state`, one row per phase, so a restart resumes
+# the cadence instead of running every slow phase at once.
+#
+# Synchronous psycopg; the loops call it through `asyncio.to_thread`.
 
 from __future__ import annotations
 
@@ -15,9 +14,6 @@ from psycopg_pool import ConnectionPool
 from base.db.transaction import write_transaction
 
 FIRE_LOG_PRUNE = "schedule_fire_log_prune"
-STUCK_POINTER_SCAN = "stuck_pointer_scan"
-
-HOURLY_S = 3600.0
 
 
 def claim_due(pool: ConnectionPool, kind: str, interval_s: float) -> bool:

@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Never
+from typing import Any, Literal, Never
 from uuid import UUID, uuid4
 
 import psutil
@@ -15,10 +15,6 @@ from agent.ownership.hosted_claim import claim_admission_row
 from agent.ownership.hosted_cleanup import finish_termination
 from base import telemetry
 from base.agents.impersonation.replacement import end_for_replacement
-from base.agents.incarnation.lifecycle_acceptance import (
-    RECORD_APPLIED,
-    terminate_kills_shell_sessions,
-)
 from base.agents.incarnation.resource_admission import admit_resources_async
 from base.agents.incarnation.resources import (
     IncarnationResources,
@@ -119,74 +115,77 @@ async def _admission_attempt_at(pool: AsyncConnectionPool) -> datetime:
     return row[0]
 
 
+# meiva:note
+# Execute the claimed restart/terminate command and mark it done, in one transaction.
+#
+#     Called after the existing single-flight continuation has safely ended. The
+#     agent row is locked and fenced by this incarnation's generation and owner;
+#     the oldest claimed command is then executed and closed in the same
+#     transaction, so no state exists in which it is half applied. Restart
+#     releases ownership, so the next admission creates a new incarnation.
+#     Terminate keeps the runtime identity and closes every open terminate of the
+#     agent, since one death serves them all. Returns the executed kind, or None
+#     when the incarnation no longer owns the row or no command was claimed.
+#
+#     When a terminate asked to take the agent's shell sessions with it, the
+#     row lock captures the next shell ID. After committing the termination,
+#     `kill_shell_sessions(agent_id, cutoff)` attempts only older sessions. The
+#     host reports cleanup failures; they cannot roll back the durable death.
+#     A crash or a session created after this cutoff can leave live sessions for operators.
 async def apply_hosted_lifecycle(
     pool: AsyncConnectionPool,
     incarnation: RuntimeIncarnation,
     *,
     bus: EventBus,
     kill_shell_sessions: Callable[[int, int], None] | None = None,
-    expected_command_id: int | None = None,
-) -> str | None:
-    """Apply after the existing single-flight continuation has safely ended.
-
-    The durable pointer, not a graph boolean or cache entry, identifies the
-    command. An optional expected ID fences a completed invocation to its original
-    command across database recovery. Restart releases ownership atomically, so any
-    successor admission must create a new incarnation before observing it.
-    Termination is observed in this same transaction: the caller has already
-    returned from the real continuation and dropped its non-authoritative cache.
-
-    When a terminate asked to take the agent's shell sessions with it, the
-    row lock captures the next shell ID. After committing the termination,
-    `kill_shell_sessions(agent_id, cutoff)` attempts only older sessions. The
-    host reports cleanup failures; they cannot roll back the durable death.
-    A crash or a session created after this cutoff can leave live sessions for operators.
-    """
+) -> Literal["restart", "terminate"] | None:
     shell_cutoff: int | None = None
     async with async_write_transaction(pool) as conn:
-        from base.agents.incarnation.resource_admission import require_resources_closed_async
-
-        await require_resources_closed_async(conn, incarnation.agent_id)
         cursor = await conn.execute(
-            "SELECT lifecycle_command_id,lease_expires_at,session_index FROM agents_meta WHERE id=%s "
+            "SELECT session_index FROM agents_meta WHERE id=%s "
             "AND runtime_generation=%s AND runtime_owner=%s AND runtime_kind='hosted' "
-            "AND status IN ('running','idling') "
-            "AND (%s::bigint IS NULL OR lifecycle_command_id=%s) FOR UPDATE",
-            (
-                incarnation.agent_id,
-                incarnation.generation,
-                incarnation.owner,
-                expected_command_id,
-                expected_command_id,
-            ),
+            "AND status IN ('running','idling') FOR UPDATE",
+            (incarnation.agent_id, incarnation.generation, incarnation.owner),
         )
         row = await cursor.fetchone()
-        if row is None or row[0] is None or row[1] is None:
-            return None
-        cursor = await conn.execute("SELECT %s > clock_timestamp()", (row[1],))
-        if await cursor.fetchone() != (True,):
+        if row is None:
             return None
         cursor = await conn.execute(
-            "SELECT kind FROM inbound_messages WHERE id=%s AND agent_id=%s "
-            "AND target_generation=%s AND target_owner=%s AND status='claimed' "
-            "AND applied_at IS NULL FOR UPDATE",
-            (row[0], incarnation.agent_id, incarnation.generation, incarnation.owner),
+            "SELECT id,kind FROM inbound_messages WHERE agent_id=%s "
+            "AND kind IN ('restart','terminate') AND status='claimed' "
+            "ORDER BY id LIMIT 1 FOR UPDATE",
+            (incarnation.agent_id,),
         )
         command = await cursor.fetchone()
         if command is None:
             return None
-        lifecycle_kind = command[0]
+        command_id, lifecycle_kind = command
         if lifecycle_kind == "restart":
             await conn.execute(
                 "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
                 "runtime_owner=NULL,runtime_kind=NULL,lease_expires_at=NULL WHERE id=%s",
                 (incarnation.agent_id,),
             )
+            # meiva:note
+            # The release marker lets resurrection recognize this unowned row as
+            # this runtime's own lifecycle state.
+            await conn.execute(
+                "UPDATE inbound_messages SET status='done',"
+                "payload=COALESCE(payload,'{}'::jsonb)||jsonb_build_object('lifecycle_release',true) "
+                "WHERE id=%s",
+                (command_id,),
+            )
         elif lifecycle_kind == "terminate":
-            if await terminate_kills_shell_sessions(conn, incarnation.agent_id):
+            closed = await conn.execute(
+                "UPDATE inbound_messages SET status='done' WHERE agent_id=%s AND kind='terminate' "
+                "AND status IN ('pending','claimed') RETURNING "
+                "COALESCE((payload -> 'kill_all_shell_sessions') = 'true'::jsonb, false)",
+                (incarnation.agent_id,),
+            )
+            if any(kill for (kill,) in await closed.fetchall()):
                 if kill_shell_sessions is None:
                     raise RuntimeError("shell-session kill requested but no killer is bound")
-                shell_cutoff = row[2]
+                shell_cutoff = row[0]
             await conn.execute(
                 "UPDATE agents_meta SET status='terminated',termination_source='user',"
                 "lease_expires_at=NULL WHERE id=%s",
@@ -194,18 +193,6 @@ async def apply_hosted_lifecycle(
             )
         else:
             raise ValueError(f"not an executable lifecycle command: {lifecycle_kind}")
-        await conn.execute(RECORD_APPLIED, (row[0],))  # an applied restart is a release
-        if lifecycle_kind == "terminate":
-            await conn.execute(
-                "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
-                "WHERE id=%s",
-                (row[0],),
-            )
-            await conn.execute(
-                "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s "
-                "AND lifecycle_command_id=%s",
-                (incarnation.agent_id, row[0]),
-            )
     if lifecycle_kind == "terminate":
         await finish_termination(bus, incarnation.agent_id, shell_cutoff, kill_shell_sessions)
     return lifecycle_kind
@@ -254,7 +241,6 @@ async def _dead_predecessor_evidence(
     if (
         isinstance(prior_resources, IncarnationResources)
         and not prior_resources.requests
-        and prior_resources.frozen_by is None
         and prior_resources.host_process is not None
     ):
         # The row lock binds this monotonic exact-process observation to the
@@ -274,7 +260,7 @@ async def _lock_previous(conn: psycopg.AsyncConnection[Any], agent_id: int, owne
     previous = await (
         await conn.execute(
             "SELECT runtime_generation,runtime_owner,runtime_kind,machine,"
-            "incarnation_resources,lease_expires_at,native_work_id FROM agents_meta "
+            "incarnation_resources,lease_expires_at FROM agents_meta "
             "WHERE id=%s FOR UPDATE",
             (agent_id,),
         )
@@ -367,9 +353,6 @@ async def admit_hosted_runtime(
             if row is None:
                 # Resource transfer and ordinary admission are one transaction.
                 _refuse_hosted_admission()
-            from agent.ownership.lifecycle_intent import observe_hosted_admission
-
-            await observe_hosted_admission(conn, RuntimeIncarnation(agent_id, row[0], owner))
             ended_lease = await end_for_replacement(
                 conn, agent_id, RuntimeIncarnation(agent_id, row[0], owner)
             )

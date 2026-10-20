@@ -254,7 +254,7 @@ def stall_report(
                 "SELECT m.status, m.runtime_kind, m.runtime_owner, "  # noqa: S608 -- constant SQL fragment
                 "m.lease_expires_at IS NOT NULL AND m.lease_expires_at > clock_timestamp(), "
                 f"{DRAINED_RESOURCES}, m.last_active_at, "
-                "i.status, i.applied_at IS NOT NULL "
+                "i.status "
                 "FROM unnest(%s::int[], %s::bigint[]) AS cohort(agent_id, command_id) "
                 "LEFT JOIN agents_meta m ON m.id = cohort.agent_id "
                 "LEFT JOIN inbound_messages i ON i.id = cohort.command_id "
@@ -283,7 +283,6 @@ class _StallRow(NamedTuple):
     resources_settled: bool | None
     last_active: datetime | None
     delivery: str | None
-    applied: bool | None
 
 
 def _stall_line(
@@ -298,8 +297,7 @@ def _stall_line(
         return f"agent {agent}: row missing; its restart command {command} is unreachable"
     seen = "yes" if agent in host_active else "no"
     line = (
-        f"agent {agent}: command {command} {row.delivery}, "
-        f"applied={'yes' if row.applied else 'no'}; "
+        f"agent {agent}: command {command} {row.delivery}; "
         f"row {status} kind={row.kind} owner={row.runtime_owner} "
         f"lease_fresh={'yes' if row.lease_fresh else 'no'} "
         f"resources_settled={'yes' if row.resources_settled else 'no'} "

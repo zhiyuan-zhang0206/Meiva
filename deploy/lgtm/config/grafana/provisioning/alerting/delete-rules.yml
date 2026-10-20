@@ -18,6 +18,9 @@ deleteRules:
     uid: meiva-ops-checkpoint-blobs-warning
   - orgId: 1
     uid: meiva-ops-checkpoint-blobs-error
+  # The stuck-lifecycle-pointer scan and its event left with the pointer.
+  - orgId: 1
+    uid: meiva-ops-lifecycle-pointer-stuck
 
 # Every rule below was re-provisioned under its meiva-* uid on 2026-10-17; the old
 # uid stayed orphaned and kept evaluating beside the new one.

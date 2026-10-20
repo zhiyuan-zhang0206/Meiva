@@ -56,13 +56,6 @@ class NodeExit(TypedDict):
     nodes: list[NodeExitEntry]
 
 
-class NativeCancelUncertain(TypedDict):
-    """`native_cancel_uncertain` identifies the original work held for proof recovery."""
-
-    agent_id: int
-    work_id: str
-
-
 # meiva:note
 # These payloads carry what the bridge learned, never what it hoped. `settled=None`
 # means the adapter never observed the process tree (its provider SDK exposes the pid
@@ -96,13 +89,6 @@ class HarnessCloseResidue(TypedDict):
 
 
 EVENTS: dict[str, EventSpec] = {
-    "native_cancel_uncertain": telemetry_event(
-        "native_cancel_uncertain",
-        "native cancel recovery lacks exact execution or certified stop proof; "
-        "the supported consumer holds new work",
-        payload=NativeCancelUncertain,
-        tier="anomaly",
-    ),
     "agent_continuation_lost": telemetry_event(
         "agent_continuation_lost",
         "an agent's turn failed while its continuation was owed to a draining maintenance hold; "

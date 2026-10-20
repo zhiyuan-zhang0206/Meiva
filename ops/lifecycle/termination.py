@@ -1,4 +1,5 @@
-"""Durable termination messages and force fences. Resource settlement is owned by the original agent host."""
+# meiva:note
+# Durable termination messages and the force termination transaction.
 
 from __future__ import annotations
 
@@ -8,8 +9,9 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.incarnation.lifecycle_acceptance import (
+from base.agents.incarnation.lifecycle_commands import (
     KILL_ALL_SHELL_SESSIONS,
+    record_unowned_termination,
 )
 from base.agents.messages.envelope import validate_source
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
@@ -22,6 +24,12 @@ from ops.lifecycle.events import publish_page_closed as publish_page_closed
 from ops.pages import list_open_page_names
 
 
+# meiva:note
+# Insert an optional pending chat followed by its terminate command.
+#
+#     `kill_all_shell_sessions` rides the command's payload
+#     (`base.agents.incarnation.lifecycle_commands.KILL_ALL_SHELL_SESSIONS`), so the request is
+#     durable in the same statement as the termination it accompanies.
 def insert_termination_pair(
     conn: psycopg.Connection,
     agent_id: int,
@@ -30,12 +38,6 @@ def insert_termination_pair(
     message: str | None,
     kill_all_shell_sessions: bool = False,
 ) -> tuple[int | None, int]:
-    """Insert an optional pending chat followed by its terminate command.
-
-    `kill_all_shell_sessions` rides the command's payload
-    (`base.agents.incarnation.lifecycle_acceptance.KILL_ALL_SHELL_SESSIONS`), so the request is
-    durable in the same statement as the termination it accompanies.
-    """
     message_id: int | None = None
     with conn.cursor() as cur:
         if message is not None:
@@ -211,6 +213,19 @@ def enqueue_termination_inbounds(
     return terminate_id, None
 
 
+# meiva:note
+# Lock the agent, write its termination and close every open lifecycle command.
+#
+#     Force writes `terminated` itself, in this one transaction; the caller then
+#     asks the home host to cancel the running turn. `kill_all_shell_sessions` is
+#     recorded on the force command and in its audit event; the returned shell
+#     cutoff is captured under this row lock, and after commit the caller attempts
+#     older sessions. A force kills sessions only when asked itself, so any open
+#     graceful terminate, with its own shell-session request, is closed unserved.
+#
+#     `last_force_terminate_inbound_id` fences automatic resurrection: input that
+#     was queued before the latest explicit force cannot revive the agent, even
+#     when the force found it already terminated and changed no status.
 def force_terminate_transaction(
     agent_id: int,
     db_pool: ConnectionPool,
@@ -219,16 +234,6 @@ def force_terminate_transaction(
     message: str | None = None,
     kill_all_shell_sessions: bool = False,
 ) -> tuple[AgentStatus, int | None, list[str], int, int]:
-    """Lock the agent, insert termination intent and install its host resource fence. A newer inbound cannot bypass this accepted force command.
-
-    `kill_all_shell_sessions` is recorded on the force command and in its audit
-    event; the returned shell cutoff is captured under this row lock. After
-    commit the caller attempts older sessions, and the host captures one new
-    cutoff when it observes the force quiescent
-    (`base.agents.incarnation.hosted_force`). The fence supersedes any unapplied graceful
-    terminate, including a shell-session kill that terminate carried: a force
-    kills sessions only when asked itself.
-    """
     with db_pool.connection() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         cur.execute(
@@ -248,11 +253,26 @@ def force_terminate_transaction(
             message=message,
             kill_all_shell_sessions=kill_all_shell_sessions,
         )
-        from base.agents.incarnation.lifecycle_acceptance import record_unowned_termination
-
         # Judged on the row as it is before this force ends it: no incarnation
         # to settle leaves a receipt resurrection accepts.
         record_unowned_termination(conn, agent_id, terminate_inbound_id)
+        # meiva:note
+        # Older commands are closed visibly, never silently dropped; the force's
+        # own command is simply done, since this transaction executed it.
+        cur.execute(
+            "UPDATE inbound_messages SET status='done', "
+            "payload=COALESCE(payload,'{}'::jsonb)||%s "
+            "WHERE agent_id=%s AND id<%s AND kind IN ('restart','terminate') "
+            "AND status IN ('pending','claimed')",
+            (
+                Jsonb({"lifecycle_result": {"outcome": "superseded", "reason": "force_terminate"}}),
+                agent_id,
+                terminate_inbound_id,
+            ),
+        )
+        cur.execute(
+            "UPDATE inbound_messages SET status='done' WHERE id=%s", (terminate_inbound_id,)
+        )
         cur.execute(
             # termination_source='user': force-kill / a terminate that found the
             # pid already dead. Both are the user's will to end the agent, so it
@@ -262,12 +282,6 @@ def force_terminate_transaction(
             "WHERE id = %s",
             (terminate_inbound_id, agent_id),
         )
-        from base.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_force
-
-        supersede_lifecycle_for_force(conn, agent_id, terminate_inbound_id)
-        from base.agents.incarnation.hosted_force import install_hosted_force
-
-        install_hosted_force(conn, agent_id, terminate_inbound_id)
         prepared_event = _stage_termination_event(
             conn,
             agent_id=agent_id,
@@ -279,13 +293,16 @@ def force_terminate_transaction(
     return old_status, pid, page_names, terminate_inbound_id, row[2]
 
 
+# meiva:note
+# Publish the non-transactional wake after the audit commit.
 def publish_force_terminate_inbound(
     db: Database, bus: EventBus, agent_id: int, inbound_id: int, _source: str
 ) -> None:
-    """Publish the non-transactional wake after the fenced audit commit."""
     publish_inbound_wake(db, bus, agent_id, str(inbound_id))
 
 
+# meiva:note
+# Terminate by force and return the affected page names.
 def force_mark_terminated(
     db: Database,
     bus: EventBus,
@@ -295,7 +312,6 @@ def force_mark_terminated(
     source: str = "user",
     message: str | None = None,
 ) -> list[str]:
-    """Install a force fence and return the affected page names."""
     _, _, page_names, inbound_id, _cutoff = force_terminate_transaction(
         agent_id,
         db_pool,

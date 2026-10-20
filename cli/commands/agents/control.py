@@ -183,7 +183,6 @@ def send_agent_message(
     """Deliver with bounded same-key retries and expose the final failure."""
     import sys
     import time
-    from uuid import uuid4
 
     from base.agents.messages.delivery.retry import network_errors, retryable_response
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
@@ -216,34 +215,23 @@ def send_agent_message(
     raise AssertionError("bounded message delivery exhausted without an outcome")
 
 
+# meiva:note
+# `meiva agents cancel <id>` — POST /api/agents/{id}/cancel.
+#
+#     Cancels the agent's running turn; the agent stays alive and idles. The
+#     status line says `cancelled` or `not_running` (there was no turn to cancel).
 def cmd_agents_cancel(agent_id: int) -> int:
-    """Cancel the exact observed ACTIVE native work; acceptance precedes its stop."""
-    from base.agents.incarnation.native_work_models import NativeCancelAcceptance, NativeWorkTarget
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
     from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import get as dial_get
     from base.host.net.http_dial import post as dial_post
+    from ops.rpc_schemas import CancelAgentResponse
 
     access = gateway_access_from_settings()  # ambient: C
-    root = f"{gateway_api_base(access.gateway_url)}/api/keyed/v1/agents/{agent_id}"
-    observed = dial_get(
-        f"{root}/native-work", timeout=_TIMEOUT_S, headers=gateway_auth_headers(access)
-    )
-    observed.raise_for_status()
-    target = NativeWorkTarget.model_validate(observed.json())
-    if target.agent_id != agent_id:
-        raise ValueError("work observation targets another agent")
-    resp = dial_post(
-        f"{root}/cancel-work",
-        json=target.model_dump(mode="json"),
-        timeout=_TIMEOUT_S,
-        headers={**gateway_auth_headers(access), **keyed_headers(uuid4().hex)},
-    )
+    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/cancel"
+    resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
     resp.raise_for_status()
-    accepted = NativeCancelAcceptance.model_validate(resp.json())
-    if accepted.target != target:
-        raise ValueError("cancel acceptance targets another work")
-    print(f"  ✓ agent {agent_id} cancel accepted: {accepted.command_id}")
+    answer = CancelAgentResponse.model_validate(resp.json())
+    print(f"  ✓ agent {agent_id} cancel: {answer.status.value}")
     return 0
 
 
@@ -400,32 +388,20 @@ def cmd_agents_kill(
     )
 
 
+# meiva:note
+# `meiva agents compact <id>` — POST /api/agents/{id}/compact.
+#
+#     Queues a compact request; the agent summarizes its history at its next turn.
 def cmd_agents_compact(agent_id: int) -> int:
-    """Accept manual compaction of the exact observed closed source history."""
-    from base.agents.compaction.models import CompactAcceptance, CompactTarget
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
     from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import get as dial_get
     from base.host.net.http_dial import post as dial_post
+    from ops.rpc_schemas import CompactAgentResponse
 
     access = gateway_access_from_settings()  # ambient: C
-    root = f"{gateway_api_base(access.gateway_url)}/api/keyed/v1/agents/{agent_id}"
-    observed = dial_get(
-        f"{root}/compact-target", timeout=_TIMEOUT_S, headers=gateway_auth_headers(access)
-    )
-    observed.raise_for_status()
-    target = CompactTarget.model_validate(observed.json())
-    if target.source.agent_id != agent_id:
-        raise ValueError("compact observation targets another agent")
-    resp = dial_post(
-        f"{root}/compact-history",
-        json=target.model_dump(mode="json"),
-        timeout=_TIMEOUT_S,
-        headers={**gateway_auth_headers(access), **keyed_headers(uuid4().hex)},
-    )
+    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/compact"
+    resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
     resp.raise_for_status()
-    accepted = CompactAcceptance.model_validate(resp.json())
-    if accepted.target != target:
-        raise ValueError("compact acceptance targets another history")
-    print(f"  ✓ agent {agent_id} compact accepted: {accepted.command_id}")
+    queued = CompactAgentResponse.model_validate(resp.json())
+    print(f"  ✓ agent {agent_id} compact requested: inbound {queued.inbound_id}")
     return 0
