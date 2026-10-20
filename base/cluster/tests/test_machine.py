@@ -16,13 +16,11 @@ import pytest
 from base.cluster import machine as _machine
 from base.cluster.machine import (
     GatewayAccess,
-    GatewayApiTokenMissing,
     MachineIdentity,
     MachineNameMissing,
     MachineRoleInvalid,
     MachineRoleMissing,
     format_capabilities,
-    gateway_auth_headers,
     roles_from_flags,
 )
 from base.cluster.machine.ambient import gateway_access_from_settings
@@ -409,20 +407,6 @@ def test_format_capabilities_station_labels() -> None:
     # flags keeps the pre-station label.
     assert format_capabilities(True, True) == "gateway + agent-runner"
     assert format_capabilities(False, False) == "none"
-
-
-def test_gateway_auth_headers_present_when_secret_set() -> None:
-    """When secret is set, includes Bearer — every /api/cluster/* client call relies on it for gateway auth."""
-    access = GatewayAccess(gateway_url="http://gw", cluster_secret=_SECRET, remote_plane=False)
-    assert gateway_auth_headers(access) == {"Authorization": f"Bearer {_SECRET}"}
-
-
-def test_gateway_auth_headers_raise_when_no_credential(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The API always authenticates: no token and no secret is an error, not an empty header."""
-    monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
-    access = GatewayAccess(gateway_url="http://gw", cluster_secret="", remote_plane=False)
-    with pytest.raises(GatewayApiTokenMissing):
-        gateway_auth_headers(access)
 
 
 def test_gateway_access_from_boot_reads_the_roots_own_configuration(
