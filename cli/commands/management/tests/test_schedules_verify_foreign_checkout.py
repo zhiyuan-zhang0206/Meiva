@@ -53,15 +53,6 @@ def worktree_process(
     return run
 
 
-def test_a_process_outside_the_home_checkout_cannot_read_the_table(
-    worktree_process: Callable[[str, Path], subprocess.CompletedProcess[str]], tmp_path: Path
-) -> None:
-    proc = worktree_process("read_table", tmp_path / "rows.json")
-    assert proc.returncode != 0
-    assert "NoDatabaseAuthorityError" in proc.stderr
-    assert "not the home's source checkout" in proc.stderr
-
-
 def test_the_sweep_over_a_rows_file_needs_no_database_authority(
     worktree_process: Callable[[str, Path], subprocess.CompletedProcess[str]], tmp_path: Path
 ) -> None:

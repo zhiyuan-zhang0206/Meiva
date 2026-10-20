@@ -154,7 +154,6 @@ def _h_notices_audit(args: argparse.Namespace) -> int:
     from cli.commands.agents.notices_audit import cmd_notices_audit
 
     return cmd_notices_audit(
-        database_factory=args.database_factory,
         days=args.days,
         category=args.category,
         tz_name=args.tz,
@@ -368,7 +367,9 @@ def _add_notices_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser
         "--category", default=None, help="one modelled category (default: all of them)"
     )
     notices_audit_p.add_argument(
-        "--tz", default=None, help="IANA zone for the day and hour buckets (default: local)"
+        "--tz",
+        default=None,
+        help="IANA zone for the day and hour buckets (default: the cluster clock zone)",
     )
     notices_audit_p.add_argument(
         "--now", type=_instant, default=None, help="window end as an ISO instant (default: now)"

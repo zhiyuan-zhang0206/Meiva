@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -104,23 +103,16 @@ def test_a_class_constructor_is_checked_too() -> None:
 def test_check_file_prints_the_call_signature_verdict(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     stale = tmp_path / "stale.py"
     stale.write_text(_OLD_HIERARCHY, encoding="utf-8")
-    assert (
-        _verify.cmd_schedules_verify(
-            check_file=str(stale), database_factory=operator_database, producer=operator_pipeline
-        )
-        == 1
-    )
+    assert _verify.cmd_schedules_verify(check_file=str(stale), producer=operator_pipeline) == 1
     assert "CHECK-RED missing=call-signature:L16 fire_slot_once()" in capsys.readouterr().out
 
 
 def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     rows = [(1, "built-in", _NEW_HIERARCHY), (9, "agent-made-poller", _OLD_HIERARCHY)]
@@ -135,7 +127,6 @@ def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
         _verify.cmd_schedules_verify(
             notify=False,
             ports=ports,
-            database_factory=operator_database,
             producer=operator_pipeline,
         )
         == 1
@@ -254,15 +245,9 @@ def test_a_star_import_disables_the_check() -> None:
 def test_check_file_prints_the_undefined_name_verdict(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     stale = tmp_path / "stale.py"
     stale.write_text("from base.config import settings\nroot = base.__file__\n", encoding="utf-8")
-    assert (
-        _verify.cmd_schedules_verify(
-            check_file=str(stale), database_factory=operator_database, producer=operator_pipeline
-        )
-        == 1
-    )
+    assert _verify.cmd_schedules_verify(check_file=str(stale), producer=operator_pipeline) == 1
     assert "CHECK-RED missing=undefined-name:L2 base" in capsys.readouterr().out

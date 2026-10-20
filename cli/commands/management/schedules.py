@@ -1,23 +1,23 @@
-"""`meiva schedules` — manage gateway-supervised schedules (thin client over the gateway).
-
-A schedule is a persistent session (a `script` + the `command` that runs it) the
-gateway's ScheduleManager keeps alive in a pty session. This is the
-shell-level management surface: list / get / create / update / delete plus the control verbs
-(start / stop / restart), the two read-only observation verbs (logs / runs), and the local
-`verify` dry-import sweep.
-
-Most verbs forward to an existing route under `/api/schedules` and render the
-result — the gateway owns the effect (script syntax check, version snapshot,
-session reconcile), the CLI adds only arg parsing + rendering. This is the
-operator/agent primitive form: `POST /api/keyed/v1/schedules/draft` (hand a natural-
-language request to a schedule_writer agent) is deliberately NOT exposed here —
-the CLI writes a script it already has, it does not run a conversation. Two
-verbs never touch the gateway: `provision` (restores the built-ins) and
-`verify` (dry-imports the DB's in-store scripts against this checkout), so both
-keep working while the gateway is down.
-
-Every verb that names a schedule accepts a name or a numeric id.
-"""
+# meiva:note
+# `meiva schedules` — manage gateway-supervised schedules (thin client over the gateway).
+#
+# A schedule is a persistent session (a `script` + the `command` that runs it) the
+# gateway's ScheduleManager keeps alive in a pty session. This is the
+# shell-level management surface: list / get / create / update / delete plus the control verbs
+# (start / stop / restart), the two read-only observation verbs (logs / runs), and the local
+# `verify` dry-import sweep.
+#
+# Most verbs forward to an existing route under `/api/schedules` and render the
+# result — the gateway owns the effect (script syntax check, version snapshot,
+# session reconcile), the CLI adds only arg parsing + rendering. This is the
+# operator/agent primitive form: `POST /api/keyed/v1/schedules/draft` (hand a natural-
+# language request to a schedule_writer agent) is deliberately NOT exposed here —
+# the CLI writes a script it already has, it does not run a conversation. Two
+# verbs are local: `provision` (restores the built-ins; never touches the gateway, so it
+# works while the gateway is down) and `verify` (reads the in-store scripts through the
+# gateway, then dry-imports them against this checkout).
+#
+# Every verb that names a schedule accepts a name or a numeric id.
 
 from __future__ import annotations
 

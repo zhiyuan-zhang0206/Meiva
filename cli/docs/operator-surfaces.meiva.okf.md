@@ -33,8 +33,9 @@ tags:
   Bare reads of resolved notices retain the gateway's successful response.
   Resolution is one keyed attempt (`principal-v1`) with a fresh key per invocation.
   `audit` replays a window of producer candidates through the delivery policy and
-  writes nothing; it reads the runtime database directly, so it reports a switch's
-  effect on a window in which that category was already switched off. `--out json`
+  writes nothing; the gateway serves the report (`GET /api/notifications/audit`) and the
+  CLI renders it, so it reports a switch's effect on a window in which that category
+  was already switched off. `--out json`
   prints the same report as one object (window, switches, sources, per-day and
   per-category deliveries, hour buckets, candidate suppression, simulations) for
   another tool to consume.
@@ -89,7 +90,9 @@ tags:
   provision creates the built-in schedules from `schedules/manifest.json` and
   also runs at every schedule-manager start;
   it creates missing rows and resyncs a built-in row whose script differs from the template.
-  `meiva schedules verify` checks each stored script's imports, the names it reads and its calls into repo code.
+  `meiva schedules verify` reads each stored script through the gateway (which must be
+  reachable; `--rows-file` and `--check-file` read none) and checks its imports, the names
+  it reads and its calls into repo code in this checkout.
 - `meiva trace ship`
 - `meiva lgtm on/off/status`: observability-stack toggle on this host, represented
   by its marker and native lifecycle.

@@ -406,18 +406,12 @@ def _verify_ports(
 def test_verify_green_prints_the_result_line_and_reports_nothing(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """All scripts clean -> the RESULT counts, rc 0, and no failure report (the
     alert resolves once reds stop recurring)."""
     ports, alerts = _verify_ports([(1, "a", "print(1)\n"), (2, "b", "print(2)\n")], lambda _s: None)
-    assert (
-        _verify.cmd_schedules_verify(
-            ports=ports, database_factory=operator_database, producer=operator_pipeline
-        )
-        == 0
-    )
+    assert _verify.cmd_schedules_verify(ports=ports, producer=operator_pipeline) == 0
     out = capsys.readouterr().out
     assert "RESULT ts=" in out
     assert "checked=2 green=2 red=0 rc=0" in out
@@ -427,7 +421,6 @@ def test_verify_green_prints_the_result_line_and_reports_nothing(
 def test_verify_red_lines_name_each_failure(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """One RED line per failing script (id/name/missing); blank scripts count
@@ -440,12 +433,7 @@ def test_verify_red_lines_name_each_failure(
     ports, alerts = _verify_ports(
         rows, lambda s: "shared.watcher" if "shared.watcher" in s else None
     )
-    assert (
-        _verify.cmd_schedules_verify(
-            ports=ports, database_factory=operator_database, producer=operator_pipeline
-        )
-        == 1
-    )
+    assert _verify.cmd_schedules_verify(ports=ports, producer=operator_pipeline) == 1
     out = capsys.readouterr().out
     assert "checked=3 green=2 red=1 rc=1" in out
     assert "RED id=7 name=drifted missing=shared.watcher" in out
@@ -455,7 +443,6 @@ def test_verify_red_lines_name_each_failure(
 def test_verify_tool_error_when_the_table_cannot_be_read(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """A failing DB read is rc 2 with the TOOL-ERROR line, and still reports."""
@@ -467,12 +454,7 @@ def test_verify_tool_error_when_the_table_cannot_be_read(
     ports = _verify.VerifyPorts(
         read_rows=boom, check_script=ports.check_script, report=ports.report
     )
-    assert (
-        _verify.cmd_schedules_verify(
-            ports=ports, database_factory=operator_database, producer=operator_pipeline
-        )
-        == 2
-    )
+    assert _verify.cmd_schedules_verify(ports=ports, producer=operator_pipeline) == 2
     out = capsys.readouterr().out
     assert "checked=0 green=0 red=0 rc=2" in out
     assert "TOOL-ERROR RuntimeError: db down" in out
@@ -482,7 +464,6 @@ def test_verify_tool_error_when_the_table_cannot_be_read(
 def test_verify_no_notify_suppresses_the_report(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     ports, alerts = _verify_ports([(7, "x", "import os\n")], lambda _s: "boom")
@@ -490,7 +471,6 @@ def test_verify_no_notify_suppresses_the_report(
         _verify.cmd_schedules_verify(
             notify=False,
             ports=ports,
-            database_factory=operator_database,
             producer=operator_pipeline,
         )
         == 1
@@ -503,27 +483,17 @@ def test_verify_rows_file_sweeps_the_dump_without_the_db_or_a_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """`--rows-file` replaces the table read and never reports, even with notify on."""
 
-    def no_table() -> list[tuple[int, str, str]]:
-        raise AssertionError("the table must not be read")
-
     def no_report(**_kwargs: object) -> None:
         raise AssertionError("a rows-file sweep must not report")
 
-    monkeypatch.setattr(_verify, "_read_schedule_rows", no_table)
     monkeypatch.setattr(_verify, "_report_verify", no_report)
     rows = tmp_path / "rows.json"
     rows.write_text(json.dumps([[3, "ok", "import os\n"], [4, "stale", "import zz_meiva_gone\n"]]))
-    assert (
-        _verify.cmd_schedules_verify(
-            rows_file=str(rows), database_factory=operator_database, producer=operator_pipeline
-        )
-        == 1
-    )
+    assert _verify.cmd_schedules_verify(rows_file=str(rows), producer=operator_pipeline) == 1
     out = capsys.readouterr().out
     assert "checked=2 green=1 red=1 rc=1" in out
     assert "RED id=4 name=stale missing=zz_meiva_gone" in out
@@ -532,21 +502,14 @@ def test_verify_rows_file_sweeps_the_dump_without_the_db_or_a_report(
 def test_verify_rows_file_unreadable_is_a_tool_error(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     broken = tmp_path / "rows.json"
     broken.write_text("not json")
-    assert (
-        _verify.cmd_schedules_verify(
-            rows_file=str(broken), database_factory=operator_database, producer=operator_pipeline
-        )
-        == 2
-    )
+    assert _verify.cmd_schedules_verify(rows_file=str(broken), producer=operator_pipeline) == 2
     assert (
         _verify.cmd_schedules_verify(
             rows_file=str(tmp_path / "missing.json"),
-            database_factory=operator_database,
             producer=operator_pipeline,
         )
         == 2
@@ -559,52 +522,34 @@ def test_verify_rows_file_unreadable_is_a_tool_error(
 def test_verify_check_file_ok_red_and_syntax_error(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The --check-file falsification hook runs the real child: clean imports
     CHECK-OK; a module that no longer resolves / a syntax error are RED."""
     good = tmp_path / "good.py"
     good.write_text("import os\n", encoding="utf-8")
-    assert (
-        _verify.cmd_schedules_verify(
-            check_file=str(good), database_factory=operator_database, producer=operator_pipeline
-        )
-        == 0
-    )
+    assert _verify.cmd_schedules_verify(check_file=str(good), producer=operator_pipeline) == 0
     assert "CHECK-OK" in capsys.readouterr().out
 
     bad = tmp_path / "bad.py"
     bad.write_text("import zz_meiva_verify_missing\n", encoding="utf-8")
-    assert (
-        _verify.cmd_schedules_verify(
-            check_file=str(bad), database_factory=operator_database, producer=operator_pipeline
-        )
-        == 1
-    )
+    assert _verify.cmd_schedules_verify(check_file=str(bad), producer=operator_pipeline) == 1
     assert "CHECK-RED missing=zz_meiva_verify_missing" in capsys.readouterr().out
 
     broken = tmp_path / "broken.py"
     broken.write_text("def (:\n", encoding="utf-8")
-    assert (
-        _verify.cmd_schedules_verify(
-            check_file=str(broken), database_factory=operator_database, producer=operator_pipeline
-        )
-        == 1
-    )
+    assert _verify.cmd_schedules_verify(check_file=str(broken), producer=operator_pipeline) == 1
     assert "CHECK-RED missing=compile-error:" in capsys.readouterr().out
 
 
 def test_verify_check_file_unreadable_is_a_tool_error(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     assert (
         _verify.cmd_schedules_verify(
             check_file=str(tmp_path / "missing.py"),
-            database_factory=operator_database,
             producer=operator_pipeline,
         )
         == 2
@@ -613,12 +558,7 @@ def test_verify_check_file_unreadable_is_a_tool_error(
 
     binary = tmp_path / "binary.py"
     binary.write_bytes(b"\xff\xfe\x00")
-    assert (
-        _verify.cmd_schedules_verify(
-            check_file=str(binary), database_factory=operator_database, producer=operator_pipeline
-        )
-        == 2
-    )
+    assert _verify.cmd_schedules_verify(check_file=str(binary), producer=operator_pipeline) == 2
     assert "cannot read script file" in capsys.readouterr().err
 
 
@@ -657,18 +597,36 @@ def test_report_verify_tool_error_names_the_error(emitted_events: EmittedEvents)
     assert "RuntimeError: db down" in str(event["detail"])
 
 
-def test_verify_reads_all_rows_from_the_real_table(
-    db_url: str, capsys: pytest.CaptureFixture[str], operator_database: Callable[[], Any]
-) -> None:
-    """The sweep input is the DB table itself: every row including disabled /
-    stopped ones, in id order."""
-    assert _sched.cmd_schedules_provision(database_factory=operator_database) == 0
-    rows = _verify._read_schedule_rows(database_factory=operator_database)
-    names = [row[1] for row in rows]
-    assert "self-evolution-weekly" in names  # enabled builtin
-    assert "trace-ship-tempo" not in names  # retired: only `meiva trace ship` remains
-    ids = [row[0] for row in rows]
-    assert ids == sorted(ids)
+# meiva:note
+# The sweep input is the gateway's view: the list names every row (stopped ones
+# included), the per-id route carries each script; rows come back in id order.
+def test_verify_reads_every_schedule_through_the_gateway() -> None:
+    seen: list[str] = []
+    bodies: dict[str, Any] = {
+        "http://gw/api/schedules": [{"id": 9, "name": "b"}, {"id": 2, "name": "a"}],
+        "http://gw/api/schedules/2": {"id": 2, "name": "a", "script": "print(1)\n"},
+        "http://gw/api/schedules/9": {"id": 9, "name": "b", "script": None},
+    }
+
+    def get(url: str, **kwargs: Any) -> httpx.Response:
+        seen.append(url)
+        assert kwargs["headers"] == {"Authorization": "Bearer t"}
+        return httpx.Response(200, json=bodies[url], request=httpx.Request("GET", url))
+
+    rows = _verify._read_schedule_rows(lambda: ("http://gw", {"Authorization": "Bearer t"}, get))
+
+    assert rows == [(2, "a", "print(1)\n"), (9, "b", "")]
+    assert seen == [
+        "http://gw/api/schedules",
+        "http://gw/api/schedules/2",
+        "http://gw/api/schedules/9",
+    ]
+
+    def refuse(url: str, **_kwargs: Any) -> httpx.Response:
+        return httpx.Response(401, json={}, request=httpx.Request("GET", url))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _verify._read_schedule_rows(lambda: ("http://gw", {}, refuse))
 
 
 # ── parser wiring ──
