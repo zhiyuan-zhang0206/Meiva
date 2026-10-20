@@ -109,16 +109,15 @@ def gateway_client_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None
     yield
 
 
+# meiva:note
+# True once the gateway answers HTTP: the retained listening socket accepts
+# connections before any process serves them, so only a response proves it. A
+# session that never minted credentials runs without the stack (a suite that
+# stubs every API call never starts one), so there is nothing to log in to, and
+# the probe must answer without a request: the autouse client-credential hook
+# intercepts this probe's own call and would fail it for the missing mint.
+# meiva:link docs/conventions/testing.md
 def _gateway_serving() -> bool:
-    """True once the gateway answers HTTP. The retained listening socket accepts
-    connections before any process serves them, so only a response proves it.
-
-    A session that never minted credentials runs without the stack (the
-    visual-baselines workflow renders its stubbed pages standalone), so there is
-    nothing to log in to, and the probe must answer without a request: the
-    autouse client-credential hook intercepts this probe's own call and would
-    fail it for the missing mint.
-    """
     if _current is None:
         return False
     try:

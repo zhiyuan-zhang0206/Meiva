@@ -151,7 +151,7 @@ for arbitrarily long or concurrent runs.
 | `flow/test_sdk_effects.py` | `sdk_effects:*` | **execute_code and SDK effects, asserted on the tool output / notes the model is handed back and on disk**: a raising or hard-crashing exec is reported and the agent carries on; `meiva.files.edit` missing/ambiguous/replace_all contract; reading injection-like content yields a SECURITY note (source and triggers, never the body); a `/command` expands into the model input and is listed by `meiva.agents.commands()`; an uploaded file is announced to the agent and readable at the announced path; an exec timeout kills the child and its own subprocess |
 | `flow/test_schedules_api.py` | `schedules:build` | **Schedule management through real gateway and CLI processes**: REST CRUD and version snapshots; start/stop/restart persist a sync request for the absent manager; runs and transcript reads; draft launches a writer whose model sees the request; `meiva schedules` verbs reach the same gateway rows. Session execution is covered separately by SC2/SC3. |
 
-The test files sit in subdirectories by domain, which also keeps `tests/e2e` under its direct-entry budget: `flow/` (full-turn panoramic cases), `lifecycle/` (restart, resurrect, terminate, fork, impersonation), `state/` (browser scroll and navigation state), `visual/` (layout, accessibility and snapshot tests with their `_layout_assertions.py`, `_visual_snapshot.py` helpers and the `__snapshots__/` goldens). The shared helpers (`_db.py`, `fixture_environment.py`, `_ports.py`, `process_support.py`, `_settings.py`, `_truncate.py`) and `conftest.py` stay at the top level, so the package-scoped fixtures cover every subdirectory.
+The test files sit in subdirectories by domain, which also keeps `tests/e2e` under its direct-entry budget: `flow/` (full-turn panoramic cases), `lifecycle/` (restart, resurrect, terminate, fork, impersonation), `state/` (browser scroll and navigation state), `visual/` (layout, accessibility and structural checks with their `layout_assertions.py` and `stubbed_home.py` helpers). The shared helpers (`_db.py`, `fixture_environment.py`, `_ports.py`, `process_support.py`, `_settings.py`, `_truncate.py`) and `conftest.py` stay at the top level, so the package-scoped fixtures cover every subdirectory.
 
 `tests.e2e.process_support` owns managed fixture processes, listener evidence,
 and stale-run cleanup. Consumers query `registered_server()` rather than mutate
@@ -188,31 +188,6 @@ process follows the lifecycle trigger SCRIPT, and the later segment follows an i
 (defensive, actually not consumed). Checking `inbound_messages` rather than `messages`:
 restarter / `resurrect_agent` INSERT of these rows is the only definitive marker that
 "a new process has started", and the `kind` field precisely corresponds.
-
-## Visual regression
-
-- `visual/test_visual_regression.py` — three full-page snapshots (home, fleet,
-  mobile) against `tests/e2e/visual/__snapshots__/test_visual_regression/`, compared
-  with the browser-native pixel diff (0.1% ratio, channel delta 16).
-- `visual/test_preview_visual_gate.py` — the five-surface post-deploy matrix (same
-  shared engine as the deployment gate: `scripts/post_deploy_visual/matrix.py`)
-  against the committed goldens under
-  `tests/e2e/visual/__snapshots__/preview-gate/`. Blocking on every PR. Goldens are
-  minted and refreshed only on the ubuntu CI runner via the
-  visual-baselines workflow (`workflow_dispatch` on the PR head) — generation
-  and comparison share one rendering environment; a structurally broken run
-  can never become the golden.
-
-The browser-free `lifecycle/test_budget_handoff.py` exercises the usage observer
-as a separate process: a new fork joins an already observed spawn lineage,
-actual telemetry crosses a threshold, and the reminder reaches the owner's model
-input. Scripted goal and orchestration decisions preserve partial results,
-leave peers alive, and honor a saved pause after a late checkpoint and restart.
-Every JSON handoff writer publishes through the shared atomic-file helper, so
-cross-process readers see complete snapshots during prepare, dispatch and pause.
-`fakes/test_budget_handoff.py` holds a real child writer before publication and
-checks that readers retain the previous snapshot until replacement.
-This validates runtime composition, not unprompted model compliance with skills.
 
 ## Scope (not done in this phase)
 

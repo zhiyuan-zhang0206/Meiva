@@ -25,8 +25,7 @@ budget applies to tests and fixture metadata as well as source code.
 - `tests/components/ops/` — agent drain, pause/recovery, deployment holds, health inventory,
   service roster and resource admission
 - `tests/components/lifecycle/` — lifecycle qualification, grouped by database authority,
-  native root custody and the fleet update script
-  (`preview/` holds the CI preview visual gate's golden-minting contracts).
+  native root custody and the fleet update script.
   Native platform cases keep their explicit gates; moving the tests does not
   turn a simulated result into native evidence.
 - `tests/skills/` — skills

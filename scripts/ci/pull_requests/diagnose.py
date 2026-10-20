@@ -26,11 +26,6 @@ _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
         "split the file into focused modules, fix, resubmit",
     ),
     (
-        r"toMatchImageSnapshot|visual regression|baseline image|snapshot baseline",
-        "e2e visual regression (stale snapshot baseline)",
-        "UI change: refresh the visual snapshot baseline, resubmit",
-    ),
-    (
         r"archive cache is empty|no offline fallback|apt-get install",
         "runner-side network flake (pgdg/apt family)",
         "rerun the failed job — no code change; resubmit if the queue already failed",

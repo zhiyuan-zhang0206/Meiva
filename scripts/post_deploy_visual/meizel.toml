@@ -1,10 +1,1 @@
-exports = ["check.py", "layout_assertions.py", "matrix.py"]
-
-[uses]
-"check.py" = ["matrix.py", "policy.py", "runner.py"]
-"matrix.py" = ["browser_js.py", "fixtures.py", "layout_assertions.py", "policy.py"]
-"runner.py" = ["layout_assertions.py", "matrix.py", "policy.py"]
-"tests" = ["check.py", "fixtures.py", "layout_assertions.py", "matrix.py", "policy.py", "refresh_visual_baselines.py"]
-
-[debt.private-name]
-"tests/test_refresh_visual_baselines.py -> refresh_visual_baselines.py#_REPO_ROOT" = 5
+exports = ["layout_assertions.py"]

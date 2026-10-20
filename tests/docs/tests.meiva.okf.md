@@ -28,8 +28,8 @@ tags:
 `scripts/post_deploy_visual/layout_assertions.py` is the shared real-browser structural layer for
 document overflow, viewport containment, center-point occlusion, nonempty blocks,
 settle-before-capture, and the bounded wait that absorbs asynchronously mounted
-panels before declared minimum visible counts are probed. Both the layout-invariant
-suite and the post-deploy visual gate consume it so their definitions cannot drift.
+panels before declared minimum visible counts are probed. The layout-invariant
+suites share it so their definitions cannot drift.
 `tests/e2e/visual/stubbed_home.py` holds the stubbed Home page the shell-geometry
 suites drive: a fake EventSource, `/api/**` JSON stubs, and the shared context/open/settle helpers.
 

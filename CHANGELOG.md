@@ -7,6 +7,14 @@ and the matching GitHub Releases.
 
 ## [Unreleased]
 
+### Removed
+
+- The frontend pixel-regression apparatus is gone (user ruling 2026-10-20): the
+  Visual baselines workflow, the screenshot regression suite with its goldens, the
+  preview-gate matrix with its 44 captures, and the post-deploy visual gate. The
+  real-browser structural probes it shared (overflow, containment, occlusion,
+  visibility) remain, unused by any pixel comparison.
+
 ### Changed
 - The gateway `/mcp` endpoint is a thin forwarder onto the HTTP API (user ruling 2026-10-20):
   it authenticates like any API route (cluster bearer, session or `trusted_network`), each
