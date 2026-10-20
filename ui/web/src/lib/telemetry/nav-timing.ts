@@ -11,11 +11,14 @@
 // change: a full load costs ~1.5 s on the machine that reported the stall, which
 // bounds the worst case instead of leaving it unbounded.
 //
-// The floor is 2000 ms because click-to-commit measures p50 69 / p95 84 / p99 106
+// The floor is 5000 ms: click-to-commit measures p50 69 / p95 84 / p99 106
 // unthrottled (30 navigations, preview build, ubuntu host, 2026-10-20), p99 332 at
-// 4x CPU throttle and 655 at 8x: 2000 is ~19x the unthrottled p99 and ~1.8x the
-// slowest healthy commit measured, so a slow client is not mis-fired. The user can
-// override it with behavior.navFallbackMs.
+// 4x CPU throttle and 655 at 8x, so 5000 is ~47x the unthrottled p99 and ~7.6x the
+// slowest healthy commit measured. It is deliberately far above any healthy
+// navigation: everything faster than it is a real measurement, so the fallback
+// never rewrites a slow-but-fine commit into a full reload, and the only rows it
+// produces are genuine non-commits. A real hang costs 5000 ms plus the ~0.6 s load
+// that follows. The user can override it with behavior.navFallbackMs.
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 
 import { usePathname } from "next/navigation";
@@ -24,7 +27,7 @@ import { useEffect, useRef } from "react";
 import { track } from "./telemetry";
 
 const SETTLE_MS = 400;
-const NAV_FALLBACK_MS = 2000;
+const NAV_FALLBACK_MS = 5000;
 let fallbackMs = NAV_FALLBACK_MS;
 
 let intentAt: number | null = null;
