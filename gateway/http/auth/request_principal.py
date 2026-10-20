@@ -186,10 +186,14 @@ def session_mints(
     return mints
 
 
-# The facts of the human cluster secret: its bearer and the sessions it minted.
-# Every other fact (`machine_token:<class>`, `machine_session:runner`) is bound
-# to a write generation and dies with it.
-HUMAN_CREDENTIAL_FACTS = frozenset({"cluster_bearer", _MINT_FACTS["human"]})
+TRUSTED_NETWORK_FACT = "trusted_network"
+
+# meiva:note
+# The facts of a human caller: the human cluster secret's bearer and the sessions it
+# minted, and a request admitted without a credential on a trusted network. Every other
+# fact (`machine_token:<class>`, `machine_session:runner`) is bound to a write generation
+# and dies with it.
+HUMAN_CREDENTIAL_FACTS = frozenset({"cluster_bearer", _MINT_FACTS["human"], TRUSTED_NETWORK_FACT})
 
 
 def require_human_credential(request: Request) -> None:
@@ -204,7 +208,7 @@ def require_human_credential(request: Request) -> None:
     if getattr(request.state, "source_verified_by", None) not in HUMAN_CREDENTIAL_FACTS:
         raise HTTPException(
             status_code=403,
-            detail="requires the human cluster secret or a session it minted; "
+            detail="requires the human cluster secret, a session it minted or a trusted network; "
             "a write generation's credential cannot manage credentials that outlive it",
         )
 

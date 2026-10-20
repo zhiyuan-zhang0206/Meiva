@@ -7,6 +7,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from base.clock import Clock
+from base.events.notifications.audit import run_audit
 from base.events.notifications.publish import announce_sync, deliver_sync
 from base.events.notifications.store import latest_id_sync, read_overrides_sync, recent_sync
 from gateway.extensions.notification_categories import declared_categories
@@ -32,6 +34,60 @@ class NotificationCategoryItem(BaseModel):
 
 class NotificationCategoriesResponse(BaseModel):
     categories: list[NotificationCategoryItem]
+
+
+class AuditWindow(BaseModel):
+    start: str
+    end: str
+    days: int
+    timezone: str
+
+
+class AuditDay(BaseModel):
+    day: str
+    by_category: dict[str, int]
+    total: int
+
+
+class AuditDelivered(BaseModel):
+    total: int
+    per_day: list[AuditDay]
+    per_category: dict[str, int]
+    per_hour: list[int]
+
+
+class AuditCandidates(BaseModel):
+    category: str
+    candidates: int
+    delivered: int
+    suppressed: int
+    repeat_deliveries: int
+
+
+class AuditSimulation(BaseModel):
+    variant: str
+    delivered: int
+    delta: int
+    per_day: float
+
+
+class AuditExplained(BaseModel):
+    at: str
+    category: str
+    agent_id: int
+    dedupe_key: str | None
+    outcome: str
+
+
+class NotificationAuditResponse(BaseModel):
+    window: AuditWindow
+    switches: dict[str, bool]
+    categories: list[str]
+    sources: dict[str, str]
+    delivered: AuditDelivered
+    candidates: list[AuditCandidates]
+    simulations: list[AuditSimulation]
+    explain: list[AuditExplained] | None = None
 
 
 class NotificationDeliveryItem(BaseModel):
@@ -144,3 +200,42 @@ async def get_notifications(
         ],
         latest_id=latest_id,
     )
+
+
+# meiva:note
+# A read-only replay of the producers over a window, run server-side so the
+# operator CLI and any other client see the same answer: the candidates come from
+# the notice rows, the switches from the stored overrides and the declared catalog
+# from the installed manifests. A bad window, zone, category or simulation is a 422;
+# `tz` defaults to the cluster clock's configured zone, never the caller's.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+@router.get("/api/notifications/audit")
+async def get_notification_audit(
+    request: Request,
+    *,
+    days: Annotated[int, Query(ge=1)] = 7,
+    category: str | None = None,
+    tz: str | None = None,
+    now: datetime | None = None,
+    simulate: Annotated[list[str] | None, Query()] = None,
+    explain: bool = False,
+) -> NotificationAuditResponse:
+    if now is not None and now.tzinfo is None:
+        raise HTTPException(status_code=422, detail="now needs a UTC offset")
+    pool = request.app.state.db_pool
+    catalog = await asyncio.to_thread(declared_categories)
+    try:
+        report = await asyncio.to_thread(
+            run_audit,
+            pool,
+            catalog=catalog,
+            days=days,
+            category=category,
+            tz_name=tz or Clock.from_settings().timezone,
+            now=now,
+            simulate=simulate or (),
+            explain=explain,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return NotificationAuditResponse.model_validate(report)

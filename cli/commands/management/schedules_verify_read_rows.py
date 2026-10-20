@@ -9,7 +9,8 @@ from cli.commands.management import schedules_verify as verify
 
 def read_rows(out: str) -> None:
     rows: list[tuple[int, str, str]]
-    if "database_factory" in inspect.signature(verify._read_schedule_rows).parameters:
+    read_schedule_rows: Any = verify._read_schedule_rows
+    if "database_factory" in inspect.signature(read_schedule_rows).parameters:
         from cli.database import operator_database_factory
         from cli.database.runtime import CommandRuntime
 
@@ -34,10 +35,14 @@ def read_rows(out: str) -> None:
         else:
             legacy_factory = operator_database_factory
             database_factory = legacy_factory(local_host=command.machine.host)
-        rows = verify._read_schedule_rows(database_factory=database_factory)
+        rows = read_schedule_rows(database_factory=database_factory)
+    elif "access" in inspect.signature(read_schedule_rows).parameters:
+        from base.cluster.machine.boot import gateway_access_from_boot
+        from cli.database.runtime import CommandRuntime
+
+        rows = read_schedule_rows(gateway_access_from_boot(CommandRuntime.create().config))
     else:
-        legacy: Any = verify._read_schedule_rows
-        rows = legacy()
+        rows = read_schedule_rows()
     with Path(out).open("w") as handle:
         json.dump([list(row) for row in rows], handle)
 
