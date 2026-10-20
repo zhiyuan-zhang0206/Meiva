@@ -125,6 +125,10 @@ export interface StickyController {
   /** Current sticky flag. True = content growth pins the viewport to the
    * bottom. */
   isSticky(): boolean;
+  // meiva:note
+  // Whether the reader is watching the tail right now: inside the bottom zone, or only short of it because a chunk grew the content ahead of the pin that will follow it. A position save reads this instead of a raw distance, so a switch away inside a streaming frame still records "follow the bottom" rather than a row's pixel, and a released reader parked mid-history is never mistaken for one.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  isAtTail(view: ScrollSnapshot): boolean;
   /** Feed every viewport scroll event here (snapshot read from the live
    * DOM, not the event). Upward movement accumulates into a run; a run of
    * more than one bottom zone releases following — regardless of how small
@@ -265,6 +269,9 @@ export function createStickyController(
 
   return {
     isSticky: () => sticky,
+
+    isAtTail: (view) =>
+      isAtBottom(view, thresholds) || (sticky && nearLastKnownBottom(view)),
 
     handleScroll(view) {
       const zone = bottomZone(view.clientHeight, thresholds);

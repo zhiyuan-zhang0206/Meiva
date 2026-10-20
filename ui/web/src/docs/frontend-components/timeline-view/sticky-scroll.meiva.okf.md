@@ -30,9 +30,12 @@ of page-level scroll without touching scrollTop. A pending bookmark restore
 lands before the pin, so the reader never sees the bottom first, and a bookmark
 saved on the tail restores the newest message rather than a row's old pixel: a
 thread that grew while the reader was away returns to its end, not to the row
-they left. The scroll-to-bottom button reads the measured distance to the bottom
-rather than the follow flag (a height change with no scroll event would
-otherwise leave it hidden). While a refresh is in flight it rests on the same
+they left. The save asks the follow rule itself (`isAtTail`: inside the bottom
+zone, or only short of it because a chunk outran its pin) rather than measuring
+a distance, so a switch away inside a streaming frame still counts as the tail.
+The scroll-to-bottom button reads the measured distance to the bottom rather
+than the follow flag (a height change with no scroll event would otherwise
+leave it hidden). While a refresh is in flight it rests on the same
 ring the pull-to-load gesture uses and swaps to the arrow on hover or keyboard
 focus, so waiting never hides that the control is still a button (user
 report 2026-10-19). Its smooth ride requests the stick instead of pinning, so the

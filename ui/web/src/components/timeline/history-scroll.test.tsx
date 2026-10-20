@@ -332,6 +332,32 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(6400);
   });
 
+  it("keeps following when the switch lands between a chunk and its pin", () => {
+    const { rerender } = render(tabs(42, "agent-chunk-frame"));
+    act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
+    act(() => { height = 6000; });
+    rerender(tabs(43, "agent-chunk-frame"));
+    expect(readScrollMemory("agent-chunk-frame:agent:42")).toEqual({
+      contentKey: "42", scrollTop: 4400, followBottom: true,
+    });
+    rerender(tabs(42, "agent-chunk-frame"));
+    resize();
+    expect(viewport().scrollTop).toBe(5400);
+  });
+
+  it("reads the wider touch bottom zone as the tail", () => {
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: query === "(pointer: coarse)", media: query, onchange: null,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+    }));
+    render(tabs(42, "agent-touch-zone"));
+    act(() => { viewport().scrollTop = 4300; fireEvent.scroll(viewport()); });
+    expect(readScrollMemory("agent-touch-zone:agent:42")).toEqual({
+      contentKey: "42", scrollTop: 4300, followBottom: true,
+    });
+  });
+
   it("returns a parked reader to their item after messages arrived while away", () => {
     const { rerender } = render(tabs(42, "agent-new-parked"));
     act(() => { viewport().scrollTop = 4300; fireEvent.scroll(viewport()); });

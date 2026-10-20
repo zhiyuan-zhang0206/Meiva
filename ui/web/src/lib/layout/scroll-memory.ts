@@ -30,9 +30,9 @@ export interface SavedScroll {
   scrollTop: number;
   /** The visible timeline item and its position inside the viewport. */
   anchor?: { itemId: string; rank: number; viewportTop: number };
-  /** Whether the container was following the bottom (new output keeps
-   *  pulling it down) on return. Terminal panes retain following; timeline
-   *  bookmarks deliberately save false to preserve the last read item. */
+  // meiva:note
+  // Whether the container was following the bottom on return, so new output keeps pulling it down. Terminal panes retain following; a timeline bookmark keeps it for a reader who was watching the tail and preserves the last read item otherwise.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
   followBottom: boolean;
 }
 

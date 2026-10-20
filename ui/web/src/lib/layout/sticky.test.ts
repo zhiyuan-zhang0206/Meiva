@@ -822,3 +822,37 @@ describe("notifyRestored (back/forward re-entry)", () => {
     expect(ctl.isSticky()).toBe(false);
   });
 });
+
+describe("isAtTail (a saved position's tail measure)", () => {
+  it("is at the tail for a follower inside the zone", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 2000);
+    expect(ctl.isAtTail(view(1400, 2000))).toBe(true);
+  });
+
+  it("is at the tail for a follower whose chunk outran its pin", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 2000);
+    expect(ctl.isAtTail(view(1400, 3000))).toBe(true);
+  });
+
+  it("is not at the tail for a released reader parked mid-history", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 2000);
+    ctl.handleScroll(view(900, 2000));
+    expect(ctl.isAtTail(view(900, 2000))).toBe(false);
+    expect(ctl.isAtTail(view(900, 2600))).toBe(false);
+  });
+
+  it("is at the tail for a released reader a collapse carried to the bottom", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 2000);
+    ctl.handleScroll(view(900, 2000));
+    expect(ctl.isAtTail(view(480, 1080))).toBe(true);
+  });
+
+  it("is not at the tail before the first pin", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    expect(ctl.isAtTail(view(0, 5000))).toBe(false);
+  });
+});
