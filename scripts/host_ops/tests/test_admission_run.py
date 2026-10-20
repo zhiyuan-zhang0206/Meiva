@@ -8,12 +8,12 @@ import pytest
 
 from scripts.host_ops import admission_run as admission
 
-FIXED_DISK = admission.DiskReading(free_gib=26.1, df_pct=84.0, unstable=False)
-
 
 def _collect(free_gib: float = 26.1, pressure: int = 1, unstable: bool = False):
-    def reader() -> admission.DiskReading:
-        return admission.DiskReading(free_gib=free_gib, df_pct=84.0, unstable=unstable)
+    def reader() -> admission.Reading:
+        return admission.Reading(
+            free_gib=free_gib, source="disk", unstable=unstable, detail="df 84.0%"
+        )
 
     return reader, lambda: pressure
 
@@ -104,8 +104,10 @@ def _run(
     disk, pressure_reader = _collect(free_gib, pressure, unstable)
     code = admission.main(
         argv,
-        disk_reader=disk,
+        budget_reader=disk,
         pressure_reader=pressure_reader,
+        psi_reader=lambda: None,
+        gpu_reader=lambda: None,
         executor=recorder,
         home=tmp_path,
     )
@@ -225,3 +227,78 @@ class TestBypass:
         event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
         assert event["kind"] == "bypassed"
         assert event["reason"] == "known-good small run"
+
+
+class TestLinuxReaders:
+    def test_memavailable_is_the_budget(self, tmp_path: Path) -> None:
+        meminfo = tmp_path / "meminfo"
+        meminfo.write_text("MemTotal:       32800000 kB\nMemAvailable:   24117248 kB\n")
+
+        reading = admission.read_memory(str(meminfo))
+
+        assert reading is not None
+        assert reading.source == "memory"
+        assert reading.free_gib == pytest.approx(23.0)
+        assert reading.unstable is False
+
+    def test_a_missing_meminfo_is_unknown_not_zero(self, tmp_path: Path) -> None:
+        assert admission.read_memory(str(tmp_path / "absent")) is None
+
+    def test_meminfo_without_memavailable_is_unknown(self, tmp_path: Path) -> None:
+        meminfo = tmp_path / "meminfo"
+        meminfo.write_text("MemTotal:       32800000 kB\n")
+
+        assert admission.read_memory(str(meminfo)) is None
+
+    def test_psi_is_recorded_and_absent_when_the_kernel_has_none(self, tmp_path: Path) -> None:
+        psi = tmp_path / "memory"
+        psi.write_text("some avg10=1.25 avg60=0.50 avg300=0.10 total=1234\nfull avg10=0.00\n")
+
+        assert admission.read_psi(str(psi)) == pytest.approx(1.25)
+        assert admission.read_psi(str(tmp_path / "absent")) is None
+
+    def test_gpu_usage_and_capacity_come_from_the_largest_device(self) -> None:
+        assert admission.read_gpu(("printf", "0, 8188\n3712, 8188\n")) == (3712, 8188)
+
+    def test_gpu_is_unknown_without_the_tool(self) -> None:
+        assert admission.read_gpu(("false",)) is None
+
+    def test_an_absent_budget_reader_keeps_the_requested_concurrency(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        recorder = _Recorder()
+        code = admission.main(
+            ["--peak-mb", "2800", "--", "python", "eval.py", "--jobs", "8"],
+            budget_reader=lambda: None,
+            pressure_reader=lambda: 1,
+            psi_reader=lambda: None,
+            gpu_reader=lambda: None,
+            executor=recorder,
+            home=tmp_path,
+        )
+
+        assert code == 0
+        assert "no budget reading" in capsys.readouterr().err
+        assert recorder.calls == [["python", "eval.py", "--jobs", "8"]]
+        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+        assert event["kind"] == "unknown"
+
+    def test_the_adjusted_event_carries_the_gpu_and_psi_readings(self, tmp_path: Path) -> None:
+        recorder = _Recorder()
+        admission.main(
+            ["--peak-mb", "2800", "--", "python", "eval.py", "--jobs", "8"],
+            budget_reader=lambda: admission.Reading(
+                free_gib=26.1, source="memory", unstable=False, detail="MemAvailable"
+            ),
+            pressure_reader=lambda: 1,
+            psi_reader=lambda: 1.25,
+            gpu_reader=lambda: (3712.0, 8188.0),
+            executor=recorder,
+            home=tmp_path,
+        )
+
+        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+        assert event["budget_source"] == "memory"
+        assert event["psi_some_avg10"] == 1.25
+        assert event["gpu_max_used_mib"] == 3712.0
+        assert event["gpu_total_mib"] == 8188.0

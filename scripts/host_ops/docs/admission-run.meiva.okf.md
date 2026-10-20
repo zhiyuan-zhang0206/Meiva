@@ -12,25 +12,56 @@ peak RSS times the requested workers, against the free space on the data volume 
 and starts it at the concurrency that fits. It lowers, never refuses: a host that
 refuses to run its own maintenance is worse than one that runs it slowly.
 
-The rule exists because macOS caps neither swapfile growth nor page-outs. On
-2026-10-20 four starts of a memory-heavy eval grew the swapfile by 8 GB within a
-minute and pushed `/System/Volumes/Data` to 92.5-92.9%, 0.1-0.5 points under the
-93% hard line; one 8-worker start was killed by the disk guard after 13 minutes
-of work.
+The rule exists because a host cannot absorb an arbitrary number of
+memory-heavy workers. On 2026-10-20 four starts of one eval on a macOS host grew
+the swapfile by 8 GB within a minute and pushed `/System/Volumes/Data` to
+92.5-92.9%, 0.1-0.5 points under the 93% hard line; one 8-worker start was
+killed by the disk guard after 13 minutes of work. On the Linux host the same
+shape appears as one process holding 8.8 GiB plus 3.7 GiB of pinned device
+memory.
 
 ```
-budget   = free GiB on the data volume - --reserve-gib (default 12)
+budget   = room this host has for the job - --reserve-gib (default 12)
 per item = --peak-mb x --swap-multiplier (default 2.0) / 1024
 jobs     = clamp(1, requested, floor(budget / per item))
 ```
 
+**The room is the resource the job's peak actually consumes, and it differs by
+platform.** On macOS a job's peak becomes swapfile on the data volume, so the
+reading is the volume's free space (`statvfs` cross-checked against `df -P`). On
+Linux swap does not grow the volume, so the reading is the kernel's own
+`MemAvailable` from `/proc/meminfo`. A host whose platform has neither reading
+reports `unknown` and keeps the requested concurrency with a line saying so — a
+missing reader is never read as a comfortable zero.
+
+`--peak-mb` means "peak resident memory of one worker", and what counts as
+resident depends on where the GPU's memory lives:
+
+- **Unified memory** (Apple Silicon): GPU buffers are host memory that RSS does
+  not show, so the declared peak is **RSS plus the GPU's resident allocation**.
+- **Discrete GPU**: device memory is separate. It does not consume
+  `MemAvailable`, an overflow is a CUDA OOM rather than a machine-level memory
+  crisis, and the host budget must **not** include it — adding ~4 GiB of device
+  memory to the host peak would under-schedule a job that fits. Declare the
+  host-side peak only; `nvidia-smi`'s per-device `memory.used` and `memory.total`
+  are recorded in the event as `gpu_max_used_mib` and `gpu_total_mib` — the
+  **largest device**, never a sum across devices, because the field answers "does
+  one card hold this job". A job that spreads its memory across cards would need
+  a sum field, which is not added until a host actually does that.
+
+Either way a missing `nvidia-smi` is `null`, never a zero, and device memory
+never enters the formula.
+
 `--reserve-gib 12` is the space one 5-6 GB job needs for its swapfile plus margin
 (measured 1.45x-1.8x of resident size on 2026-10-20). `--swap-multiplier 2.0` is
 the same measurement rounded up. Kernel pressure stays in the decision as a
-downgrade only: level 2 (warn) halves the budget and level 4 (critical) starts one
-worker. `swap used/total` is printed and never enters the formula — on
-2026-10-20 12:55 the machine showed 29.7 GB of swap with 6.77 GB of process RSS:
-that is stale paged-out data occupying disk, not live memory demand.
+downgrade only on macOS: level 2 (warn) halves the budget and level 4 (critical)
+starts one worker. Linux records the kernel's PSI stall average
+(`some avg10`) in the event instead, because `MemAvailable` already prices the
+job continuously and a second invented threshold would drift from the kernel.
+`swap used/total` is printed and never enters the formula — on 2026-10-20 12:55
+the macOS host showed 29.7 GB of swap with 6.77 GB of process RSS: that is stale
+paged-out data occupying disk, not live memory demand.
 
 ## Declaring a job
 
