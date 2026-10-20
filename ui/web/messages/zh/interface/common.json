@@ -26,5 +26,7 @@
   "modelCapabilitiesUnavailable": "模型能力信息暂不可用。你仍可发送文本或请求停止任务。",
   "deliveryUnconfirmedToast": "暂时无法确认消息是否已收到，草稿已保留。",
   "openImage": "查看大图",
-  "closeImage": "关闭大图"
+  "closeImage": "关闭大图",
+  "liveUpdatesReconnecting": "实时更新重连中……",
+  "liveUpdatesDisconnected": "实时更新已断开 — 刷新页面以恢复实时更新"
 }

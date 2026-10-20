@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/resizable";
 import type { AgentRow } from "@/lib/contracts/types";
 import { useFleetAgents } from "@/lib/agents/use-fleet-agents";
+import { useNotices } from "@/lib/notifications/use-notices";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { cn } from "@/lib/format/utils";
@@ -118,11 +119,17 @@ export function FleetView() {
   );
   const aliveCount = agents.length - terminatedCount;
 
-  // Inbox tab badge: total open items across the fleet, rolled up from the agent
-  // snapshot — decisions awaiting a response plus unread FYI notices.
+  // meiva:note
+  // Inbox tab badge: the count the panel itself renders, from the panel's own feed.
+  // It used to roll up the agent snapshot (`awaiting_response_count` +
+  // `unread_notice_count`), a second derivation of the same fact: the roster holds
+  // live agents only, so a terminated owner's open notice counted in the list and
+  // not in the badge, and the two numbers disagreed on the same screen.
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  const noticeFeed = useNotices();
   const inboxCount = useMemo(
-    () => agents.reduce((n, a) => n + a.awaiting_response_count + a.unread_notice_count, 0),
-    [agents],
+    () => noticeFeed.awaiting.length + noticeFeed.open.length,
+    [noticeFeed],
   );
 
   return (

@@ -74,6 +74,25 @@ and the matching GitHub Releases.
   gesture draws, from one component, instead of a second circle drawn to the
   button's own edges: at r=16.5 in a 36-unit box it read as a dial, not a loader
   (user report 2026-10-20).
+- The inline connection banner is translated and says what the reader loses rather
+  than which transport dropped: "Live updates reconnecting…" / "Live updates
+  disconnected — refresh the page to restore them", from the `common` catalog
+  instead of hardcoded English, so a zh console is no longer half-translated.
+- A delivered notification now names the notice it is about: the spine stages the
+  notice's own route in `href` (`/fleet?notice=<id>`), and the app's bridge opens that
+  target on a tap instead of a hardcoded `fleet#inbox` — which on a wide window only
+  switched a mobile tab, so the user landed nowhere near the row the ping was about.
+  Only a same-origin path from the delivery is accepted; `fleet#inbox` stays the
+  fallback ([notification spine](base/events/notifications/docs/notifications.meiva.okf.md),
+  [app delivery](ui/app/docs/notifications.meiva.okf.md)).
+- An Inbox row states its obligation rung (Decision / FYI, with Blocking on the stalled
+  ones). The list rendered only the blocking flag, so a P2 decision and a P2 FYI looked
+  identical and the queue could not say which rows actually wait on the user
+  ([Fleet view](ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md)).
+- The Inbox tab badge counts the panel's own feed (`useNotices()`), not a second roll-up
+  of the agent snapshot: a terminated owner's open notice was counted by the list and not
+  by the badge, so the tab said "Inbox 4" over a list of two
+  ([Fleet view](ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md)).
 - Switching agents no longer scrolls a conversation back up. A reader on the tail
   was saved as a pixel bookmark of one row, so the return restored that row's old
   offset — above the newest message by everything that arrived meanwhile, and

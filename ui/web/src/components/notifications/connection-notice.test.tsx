@@ -1,9 +1,8 @@
-// ConnectionNotice render tests — the inline timeline notification banner.
-//
-// Verifies:
-//   - connState='open' → renders nothing
-//   - connState='reconnecting' → amber "SSE reconnecting…"
-//   - connState='closed' → destructive "SSE connection lost"
+// meiva:note
+// ConnectionNotice render tests — the inline timeline banner. It verifies the three
+// connection states: 'open' renders nothing, 'reconnecting' shows the amber line and
+// 'closed' the destructive line that tells the reader to refresh.
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,7 +32,7 @@ describe("ConnectionNotice", () => {
     storeConnState = "reconnecting";
     render(<ConnectionNotice />);
     const banner = screen.getByRole("status");
-    expect(banner.textContent).toContain("SSE reconnecting");
+    expect(banner.textContent).toContain("Live updates reconnecting");
     expect(banner.className).toContain("amber");
   });
 
@@ -41,7 +40,7 @@ describe("ConnectionNotice", () => {
     storeConnState = "closed";
     render(<ConnectionNotice />);
     const banner = screen.getByRole("status");
-    expect(banner.textContent).toContain("SSE connection lost");
+    expect(banner.textContent).toContain("Live updates disconnected");
     expect(banner.textContent).toContain("refresh");
     expect(banner.className).toContain("destructive");
   });

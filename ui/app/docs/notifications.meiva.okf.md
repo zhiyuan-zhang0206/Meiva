@@ -13,9 +13,18 @@ whose delivery the gateway's spine already decided — category switches,
 deduplication and the delivery log are server-side. See
 [[base/events/notifications/docs/notifications.meiva.okf.md|the notification spine]].
 
-The bridge keeps the two jobs the server cannot do: deduplicating by
-`notification_id` inside the webview session and turning a native notification
-tap into the Inbox deep link (`app_take_pending_click`).
+The bridge keeps the three jobs the server cannot do: deduplicating by
+`notification_id` inside the webview session, remembering where the newest
+delivery points, and turning a native notification tap into that deep link
+(`app_take_pending_click`).
+
+The target is the delivery's own `href` — the notice route (`/fleet?notice=<id>`)
+the spine stages — persisted under `meiva.notify.target` when the delivery is
+rendered, because a tap is consumed by the native side and only then asks the
+bridge where to go. `fleet#inbox` stays the fallback for an install whose first
+tap precedes any delivery. Only a same-origin path is accepted: a scheme, a
+protocol-relative `//host` or a backslash (which the URL parser folds into a
+slash) is refused, since the value comes off the wire.
 
 Delivery is at-least-once by design: a crash between the publish and the mark
 re-announces the same row, so the same `notification_id` can arrive twice. The
