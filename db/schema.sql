@@ -1045,6 +1045,13 @@ CREATE TABLE machines (
     up_since_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     description    TEXT,
     stopped_at     TIMESTAMPTZ,
+    -- A planned window around an intentional stop (meiva stop --maintenance-for):
+    -- maintenance_until is when the operator says this host returns, and
+    -- maintenance_reason the sentence they gave. Both NULL on an open-ended stop,
+    -- and cleared by register_self on the next start. A "stopped too long" rule
+    -- reads them to tell maintenance from a forgotten stop (task #5464).
+    maintenance_until  TIMESTAMPTZ,
+    maintenance_reason TEXT,
     -- operator-set staging latch (migration 20260812T000000): a staging host
     -- is registered + visible in the roster but excluded from the rollout
     -- target set (`list_agent_runners`). Never written by register_self or
@@ -1062,6 +1069,11 @@ CREATE TABLE machines (
     paused_at      TIMESTAMPTZ,
     pause_reason   TEXT
 );
+
+COMMENT ON COLUMN machines.maintenance_until IS
+    'When the operator says this host returns (meiva stop --maintenance-for); NULL on an open-ended stop';
+COMMENT ON COLUMN machines.maintenance_reason IS
+    'The operator''s one-line reason for the window, as typed';
 
 -- machine_probe — per-machine status_probe results, written by the gateway
 -- heartbeat daemon's liveness pass (Task #1174). Raw probe outcome plus the

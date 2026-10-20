@@ -314,7 +314,10 @@ meiva cluster destroy --stop-mode smooth --stop-timeout 300 [--drop-db]
 a missing choice exits 2 and lists all of them): `--keep-shell-sessions|--close-shell-sessions`,
 `--keep-browser|--stop-browser`, `--keep-extras|--stop-extras`, repeated `--keep-service NAME`
 or `--keep-no-services`, `--mode`, `--timeout`, `--yes|--prompt`, and on a gateway-capable
-host `--keep-infra|--stop-infra` (a pure runner refuses it; drop it there). `restart` is the
+host `--keep-infra|--stop-infra` (a pure runner refuses it; drop it there). A stop that will
+outlast a normal restart says so: `--maintenance-for 45m --reason "..."` records when the host
+is expected back, and the `meiva-ops-machine-stopped-too-long` alert then stays quiet until
+that window expires instead of reporting the host 20 minutes in (task #5464). `restart` is the
 ordinary local stop/start path: it needs a scope (`--only agent-host`, or a start selection
 with `--keep-shell-sessions|--close-shell-sessions`, `--keep-browser|--restart-browser`,
 `--keep-extras|--restart-extras`, `--mode`, `--timeout`) and always keeps infrastructure; with

@@ -33,6 +33,9 @@ Gateway's idle agent check scheduler — every `MEIVA_HEARTBEAT_INTERVAL_SECONDS
   snapshot after commit, so the existing frontend fold updates immediately;
   `unknown → online` is not broadcast because both render online and a
   fleet-sized first-pass burst would carry no visible change.
+- **Forgotten stop**: the same pass reports a host whose announced `meiva stop`
+  outlived its maintenance window — see
+  [[heartbeat-stopped-too-long.meiva.okf.md]].
 
 ## Key Dependencies
 - [[agent/db/docs/db.meiva.okf.md]] — reads `agents_meta` table + writes `inbound_messages` table

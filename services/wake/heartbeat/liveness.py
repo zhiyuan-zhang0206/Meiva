@@ -54,6 +54,7 @@ from base import telemetry
 from base.agents.observation.evidence import (
     LIVENESS_PASS_INTERVAL_S,
     MACHINE_OFFLINE_AFTER_FAILURES,
+    MACHINE_STOPPED_TOO_LONG_S,
 )
 from base.cluster.machines import list_agent_runners, list_roster_agent_runners
 from base.config import settings
@@ -241,6 +242,43 @@ async def _record_snapshot(pool: ConnectionPool, name: str, outcome: ProbeOutcom
         )
 
 
+# meiva:note
+# Emits one `machine_stopped_too_long` per host that stayed down past its
+# announced stop: `stopped_at` older than MACHINE_STOPPED_TOO_LONG_S, no
+# `maintenance_until` still ahead, and not paused or staging (a paused host is
+# deliberately away; a staging host is not in the expected-up set).
+# `stopped_at IS NULL` is a different gap — never started or crashed — and the
+# probe rules own it. One event per pass while the row qualifies, the same
+# shape as `machine_probe_failed`: the trailing-window rule reads "still
+# stopped" from the stream, so no second signal is needed to resolve.
+# meiva:link services/docs/gateway_side/heartbeat-stopped-too-long.meiva.okf.md
+def report_stopped_too_long(db: Database) -> list[str]:
+    with db.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT name, EXTRACT(EPOCH FROM (now() - stopped_at))::bigint "
+            "FROM machines "
+            "WHERE stopped_at IS NOT NULL "
+            "  AND now() - stopped_at > make_interval(secs => %s) "
+            "  AND (maintenance_until IS NULL OR maintenance_until <= now()) "
+            "  AND paused_at IS NULL "
+            "  AND NOT is_staging "
+            "ORDER BY name",
+            (MACHINE_STOPPED_TOO_LONG_S,),
+        )
+        rows = cur.fetchall()
+    reported: list[str] = []
+    for name, stopped_for_s in rows:
+        telemetry.emit(
+            "telemetry",
+            "machine_stopped_too_long",
+            level="warning",
+            source="system",
+            attributes={"machine": name, "stopped_for_s": int(stopped_for_s)},
+        )
+        reported.append(name)
+    return reported
+
+
 async def run_liveness_pass(
     db: Database,
     pool: ConnectionPool,
@@ -268,6 +306,15 @@ async def run_liveness_pass(
         if name in targets:
             await _record_probe(pool, name, ok=outcome.reached, host_online=outcome.host_online)
         await _record_snapshot(pool, name, outcome)
+    # meiva:note
+    # Best effort: the stopped-too-long report is an added signal, and a schema
+    # that has not taken its columns yet must not take the agent-liveness merge
+    # down with it (that merge is what every mounted console reads).
+    # meiva:link services/docs/gateway_side/heartbeat-stopped-too-long.meiva.okf.md
+    try:
+        report_stopped_too_long(db)
+    except Exception:
+        _log.warning("[heartbeat] stopped-too-long report failed", exc_info=True)
     changed_agent_ids = merge_liveness(pool)
     # `merge_liveness` committed before these best-effort invalidation hints.
     for agent_id in changed_agent_ids:

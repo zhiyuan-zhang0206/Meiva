@@ -291,6 +291,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-schedule-convergence-abandoned` | `schedule_convergence_abandoned` (24h) | 0m | warning | nothing: the manager's reap and sync retries had no bound and no report |
 | `meiva-ops-maintenance-hold-overdue` | `maintenance_hold_overdue` (24h) | 0m | warning | nothing: a forgotten maintenance hold froze the machine's wakes unreported |
 | `meiva-ops-machine-offline-warning` / `-error` | `machine_probe_failed` per machine | 3m / 10m | warning / error | the machine-offline rows and their clock |
+| `meiva-ops-machine-stopped-too-long` | `machine_stopped_too_long` per machine (an announced stop, 20m+ old, no `--maintenance-for` window) | 0m | error | nothing: an intentionally stopped host leaves the probe target set, so a forgotten stop was invisible inside the cluster (10-14: 53 minutes) |
 | `meiva-ops-exec-child-boot-failed` | `exec_child_boot_failed` | 0s | warning | the exec child's direct post and 600s limit |
 | `meiva-ops-inspect-metrics-gap` | `inspect_metrics_coverage_gap` | 0s | warning | the inspector's cooldown and direct row |
 | `meiva-ops-impersonation-seal-stuck` / `-capture-failed` | `impersonation_event_log_incomplete` | 0s | warning | the impersonation event-log rows |

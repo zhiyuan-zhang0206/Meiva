@@ -143,7 +143,13 @@ async def _dispatch_op(
 
 
 @router.post("/api/cluster/stopping", status_code=200)
-async def post_cluster_stopping(machine: str, home: str, request: Request) -> dict[str, str]:
+async def post_cluster_stopping(
+    machine: str,
+    home: str,
+    request: Request,
+    maintenance_for_seconds: Annotated[int | None, Query(gt=0, le=86_400)] = None,
+    maintenance_reason: Annotated[str | None, Query(max_length=200)] = None,
+) -> dict[str, str]:
     """Record that the (machine, home) unit is shutting down intentionally.
 
     `meiva stop` POSTs this (best-effort) just before local teardown so the
@@ -157,7 +163,14 @@ async def post_cluster_stopping(machine: str, home: str, request: Request) -> di
     Low-stakes: stopped_at is cosmetic and a spuriously-stamped live host still
     probes online=True.
     """
-    return await asyncio.to_thread(_ops.cluster_stopping_op, request.app.state.db, machine, home)
+    return await asyncio.to_thread(
+        _ops.cluster_stopping_op,
+        request.app.state.db,
+        machine,
+        home,
+        maintenance_for_seconds,
+        maintenance_reason,
+    )
 
 
 @router.get("/api/cluster/status")
