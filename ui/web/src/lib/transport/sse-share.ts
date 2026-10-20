@@ -9,14 +9,30 @@ import { notifySessionInvalid } from "../auth/auth-context";
 import { track } from "../telemetry/telemetry";
 
 export type SseChannel = "system" | "alerts" | "systemAll";
+export type SseSlot = SseChannel | "merged";
 export type SseState = "open" | "reconnecting" | "closed";
 export interface SseListener {
   onFrame: (raw: string) => void;
   onState: (state: SseState) => void;
+  onGap?: (dropped: number) => void;
 }
+
+const WIRE_CHANNEL: Record<SseChannel, string> = {
+  system: "global",
+  systemAll: "all",
+  alerts: "alerts",
+};
+const LOGICAL_CHANNEL: Record<string, SseChannel | undefined> = {
+  global: "system",
+  all: "systemAll",
+  alerts: "alerts",
+};
+const MERGED_ORDER: readonly SseChannel[] = ["system", "systemAll", "alerts"];
+const ALL_SLOTS: readonly SseSlot[] = ["system", "alerts", "systemAll", "merged"];
 
 type Message =
   | { type: "frame"; ch: SseChannel; data: string; leaderId: string }
+  | { type: "gap"; ch: SseChannel; n: number; leaderId: string }
   | { type: "state"; ch: SseChannel; state: SseState; leaderId: string }
   | { type: "interest"; tabId: string; activeId: number | null }
   | { type: "leave"; tabId: string }
@@ -36,8 +52,8 @@ const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
 interface Environment {
-  channel: BroadcastChannel;
-  locks: LockManager;
+  channel: BroadcastChannel | null;
+  locks: LockManager | null;
   document: Document;
   source: (url: string) => EventSource;
   checkAuth: typeof api.checkAuth;
@@ -91,8 +107,8 @@ export class ProfileSseTransport {
   private readonly states: Record<SseChannel, SseState | null> = {
     system: null, alerts: null, systemAll: null,
   };
-  private readonly slots: Record<SseChannel, SourceSlot> = {
-    system: newSlot(), alerts: newSlot(), systemAll: newSlot(),
+  private readonly slots: Record<SseSlot, SourceSlot> = {
+    system: newSlot(), alerts: newSlot(), systemAll: newSlot(), merged: newSlot(),
   };
   private readonly interests = new Map<string, { activeId: number | null; seen: number }>();
   private participating = false;
@@ -106,8 +122,21 @@ export class ProfileSseTransport {
   private detailUnion = "";
   private disposed = false;
 
-  constructor(private readonly env: Environment) {
-    env.channel.onmessage = (event: MessageEvent<unknown>) => this.receive(event.data);
+  // meiva:note
+  // `merged` is the set of logical channels one `/api/stream` source carries;
+  // empty means the per-channel endpoints, which is the switch-off behaviour.
+  // `solo` owns that source without the profile lock (plain HTTP has no
+  // navigator.locks, and the per-provider fallback is exactly the case that
+  // exhausts a browser's six connections per origin).
+  // meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+  constructor(
+    private readonly env: Environment,
+    private readonly merged: ReadonlySet<SseChannel> = new Set(),
+    private readonly solo = false,
+  ) {
+    if (env.channel) {
+      env.channel.onmessage = (event: MessageEvent<unknown>) => this.receive(event.data);
+    }
     env.document.addEventListener("visibilitychange", this.syncParticipation);
   }
 
@@ -136,7 +165,7 @@ export class ProfileSseTransport {
   /** A follower can request repair; only the lock holder touches EventSource. */
   restart(ch: SseChannel, backoff = false): void {
     if (!this.participating) return;
-    if (this.leader) this.restartOwned(ch, backoff);
+    if (this.leader) this.restartOwned(this.slotOf(ch), backoff);
     else this.post({ type: "restart", ch, backoff });
   }
 
@@ -146,7 +175,7 @@ export class ProfileSseTransport {
     this.disposed = true;
     this.env.document.removeEventListener("visibilitychange", this.syncParticipation);
     this.stopParticipation();
-    queueMicrotask(() => this.env.channel.close());
+    queueMicrotask(() => this.env.channel?.close());
   }
 
   private readonly syncParticipation = (): void => {
@@ -169,14 +198,24 @@ export class ProfileSseTransport {
     this.post({ type: "leave", tabId: this.tabId });
     this.pendingLock?.abort();
     this.releaseLock?.();
+    if (this.solo && this.leader) {
+      this.stopLeader();
+      this.leader = false;
+    }
     this.currentLeader = null;
   }
 
   private requestLock(): void {
+    if (this.solo) {
+      this.becomeSoloLeader();
+      return;
+    }
     if (this.pendingLock || !this.participating) return;
     const controller = new AbortController();
     this.pendingLock = controller;
-    void this.env.locks.request(NAME, { mode: "exclusive", signal: controller.signal }, async () => {
+    const locks = this.env.locks;
+    if (locks === null) throw new Error("shared SSE lock manager missing");
+    void locks.request(NAME, { mode: "exclusive", signal: controller.signal }, async () => {
       if (!this.participating) return;
       this.leader = true;
       this.currentLeader = this.tabId;
@@ -202,7 +241,28 @@ export class ProfileSseTransport {
     });
   }
 
-  private post(message: Message): void { this.env.channel.postMessage(message); }
+  private becomeSoloLeader(): void {
+    if (this.leader || !this.participating) return;
+    this.leader = true;
+    this.currentLeader = this.tabId;
+    try {
+      this.startLeader();
+    } catch (error) {
+      this.stopLeader();
+      this.leader = false;
+      this.currentLeader = null;
+      console.error("[sse-share] merged source failed", error);
+    }
+  }
+
+  private post(message: Message): void { this.env.channel?.postMessage(message); }
+
+  private slotOf(ch: SseChannel): SseSlot { return this.merged.has(ch) ? "merged" : ch; }
+
+  private carriedChannels(slot: SseSlot): readonly SseChannel[] {
+    if (slot !== "merged") return [slot];
+    return MERGED_ORDER.filter((ch) => this.merged.has(ch));
+  }
 
   private localActiveId(): number | null {
     for (const id of this.detailInterests.values()) if (id !== null) return id;
@@ -252,12 +312,16 @@ export class ProfileSseTransport {
         if (this.participating && !this.leader && message.leaderId === this.currentLeader)
           this.deliverFrame(message.ch, message.data);
         return;
+      case "gap":
+        if (this.participating && !this.leader && message.leaderId === this.currentLeader)
+          this.deliverGap(message.ch, message.n);
+        return;
       case "state":
         if (this.participating && !this.leader && message.leaderId === this.currentLeader)
           this.deliverState(message.ch, message.state);
         return;
       case "restart":
-        if (this.leader) this.restartOwned(message.ch, message.backoff);
+        if (this.leader) this.restartOwned(this.slotOf(message.ch), message.backoff);
         return;
       case "sessionInvalid":
         if (this.participating && !this.leader && message.leaderId === this.currentLeader)
@@ -285,8 +349,22 @@ export class ProfileSseTransport {
       }
       this.scheduleUnion();
     }, PRUNE_MS);
-    this.openSource("system", `${API_BASE}/api/system`);
-    this.openSource("alerts", `${API_BASE}/api/alerts/stream`);
+    if (this.merged.size === 0) {
+      this.openSource("system", `${API_BASE}/api/system`);
+      this.openSource("alerts", `${API_BASE}/api/alerts/stream`);
+      return;
+    }
+    this.closeSource("system");
+    this.closeSource("alerts");
+    this.openSource("merged", this.mergedUrl(this.detailUnion));
+  }
+
+  private mergedUrl(union: string): string {
+    const channels = MERGED_ORDER.filter((ch) => this.merged.has(ch))
+      .map((ch) => WIRE_CHANNEL[ch])
+      .join(",");
+    const agents = this.merged.has("systemAll") ? `&agents=${union === "" ? "0" : union}` : "";
+    return `${API_BASE}/api/stream?channels=${channels}${agents}`;
   }
 
   private stopLeader(): void {
@@ -296,9 +374,9 @@ export class ProfileSseTransport {
     this.pingTimer = null;
     this.pruneTimer = null;
     this.unionTimer = null;
-    for (const ch of ["system", "alerts", "systemAll"] as const) {
-      this.closeSource(ch);
-      this.publishState(ch, "closed");
+    for (const slot of ALL_SLOTS) {
+      this.closeSource(slot);
+      for (const ch of this.carriedChannels(slot)) this.publishState(ch, "closed");
     }
     this.detailUnion = "";
     this.interests.clear();
@@ -315,16 +393,24 @@ export class ProfileSseTransport {
       const union = ids.join(",");
       if (union === this.detailUnion) return;
       this.detailUnion = union;
-      if (union) this.openSource("systemAll", `${API_BASE}/api/system/all?agents=${union}`);
-      else {
-        this.closeSource("systemAll");
-        this.publishState("systemAll", "closed");
-      }
+      this.applyUnion(union);
     }, UNION_DEBOUNCE_MS);
   }
 
-  private closeSource(ch: SseChannel): void {
-    const slot = this.slots[ch];
+  private applyUnion(union: string): void {
+    if (this.merged.has("systemAll")) {
+      this.openSource("merged", this.mergedUrl(union));
+      return;
+    }
+    if (union) this.openSource("systemAll", `${API_BASE}/api/system/all?agents=${union}`);
+    else {
+      this.closeSource("systemAll");
+      this.publishState("systemAll", "closed");
+    }
+  }
+
+  private closeSource(slotName: SseSlot): void {
+    const slot = this.slots[slotName];
     if (slot.retry !== null) clearTimeout(slot.retry);
     slot.retry = null;
     slot.source?.close();
@@ -332,39 +418,41 @@ export class ProfileSseTransport {
     slot.url = null;
   }
 
-  private openSource(ch: SseChannel, url: string): void {
-    this.closeSource(ch);
-    this.publishState(ch, "reconnecting");
-    const slot = this.slots[ch];
+  private openSource(slotName: SseSlot, url: string): void {
+    this.closeSource(slotName);
+    this.publishSlotState(slotName, "reconnecting");
+    const slot = this.slots[slotName];
     slot.url = url;
     const source = this.env.source(url);
     slot.source = source;
     source.onopen = () => {
       if (!this.leader || slot.source !== source) return;
       slot.failures = 0;
-      this.publishState(ch, "open");
+      this.publishSlotState(slotName, "open");
     };
     source.onmessage = (event) => {
       if (!this.leader || slot.source !== source) return;
-      this.publishFrame(ch, typeof event.data === "string" ? event.data : "[non-string SSE payload]");
+      const raw = typeof event.data === "string" ? event.data : "[non-string SSE payload]";
+      if (slotName === "merged") this.publishMergedFrame(raw);
+      else this.publishFrame(slotName, raw);
     };
     source.onerror = () => {
       if (!this.leader || slot.source !== source) return;
       switch (source.readyState) {
         case EventSource.CLOSED:
-          this.publishState(ch, "closed");
+          this.publishSlotState(slotName, "closed");
           void this.env.checkAuth().then((result) => {
             if (!this.leader || slot.source !== source) return;
             if (!result.authenticated) {
               this.post({ type: "sessionInvalid", leaderId: this.tabId });
               this.env.sessionInvalid();
-            } else this.scheduleRetry(ch);
+            } else this.scheduleRetry(slotName);
           }).catch(() => {
-            if (this.leader && slot.source === source) this.scheduleRetry(ch);
+            if (this.leader && slot.source === source) this.scheduleRetry(slotName);
           });
           return;
         case EventSource.CONNECTING:
-          this.publishState(ch, "reconnecting");
+          this.publishSlotState(slotName, "reconnecting");
           return;
         case EventSource.OPEN:
           return;
@@ -374,28 +462,62 @@ export class ProfileSseTransport {
     };
   }
 
-  private scheduleRetry(ch: SseChannel): void {
-    const slot = this.slots[ch];
+  private scheduleRetry(slotName: SseSlot): void {
+    const slot = this.slots[slotName];
     if (slot.retry !== null || slot.url === null) return;
     const delay = Math.min(RECONNECT_BASE_MS * 2 ** slot.failures, RECONNECT_MAX_MS);
     slot.failures += 1;
     slot.retry = setTimeout(() => {
       slot.retry = null;
-      if (this.leader && slot.url !== null) this.openSource(ch, slot.url);
+      if (this.leader && slot.url !== null) this.openSource(slotName, slot.url);
     }, delay);
   }
 
-  private restartOwned(ch: SseChannel, backoff: boolean): void {
-    const slot = this.slots[ch];
+  private restartOwned(slotName: SseSlot, backoff: boolean): void {
+    const slot = this.slots[slotName];
     if (slot.url === null || slot.retry !== null) return;
     // A watchdog or cluster-update bump can arrive from every visible tab.
     if (this.env.now() - slot.lastRestartAt < RECONNECT_BASE_MS) return;
     slot.lastRestartAt = this.env.now();
     if (backoff) {
-      this.publishState(ch, "reconnecting");
+      this.publishSlotState(slotName, "reconnecting");
       slot.source?.close();
-      this.scheduleRetry(ch);
-    } else this.openSource(ch, slot.url);
+      this.scheduleRetry(slotName);
+    } else this.openSource(slotName, slot.url);
+  }
+
+  // meiva:note
+  // The merged wire frame names its channel; subscribers keep the per-channel
+  // payload shapes they already parse (an object for `system` and `alerts`, the
+  // batch array for `systemAll`), so the fan-out lives here and nowhere else.
+  // A channel-scoped `error` frame only degrades that channel, and a `dropped`
+  // count means the server shed payloads: both surface to providers so they
+  // reconcile instead of silently rendering a gap. An unattributable frame is
+  // counted by every merged channel, as a corrupt frame is counted today.
+  // meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+  private publishMergedFrame(raw: string): void {
+    const frame = parseMergedFrame(raw);
+    if (frame === null) {
+      for (const ch of this.carriedChannels("merged")) this.publishFrame(ch, raw);
+      return;
+    }
+    if (frame.error !== undefined) {
+      console.warn(`[sse-share] channel ${frame.ch} degraded: ${frame.error}`);
+      this.publishState(frame.ch, "reconnecting");
+      return;
+    }
+    if (frame.events.length > 0) {
+      if (frame.ch === "systemAll") {
+        this.publishFrame("systemAll", JSON.stringify(frame.events));
+      } else {
+        for (const event of frame.events) this.publishFrame(frame.ch, JSON.stringify(event));
+      }
+    }
+    if (frame.dropped > 0) this.publishGap(frame.ch, frame.dropped);
+  }
+
+  private publishSlotState(slotName: SseSlot, state: SseState): void {
+    for (const ch of this.carriedChannels(slotName)) this.publishState(ch, state);
   }
 
   private deliverFrame(ch: SseChannel, data: string): void {
@@ -405,6 +527,15 @@ export class ProfileSseTransport {
   private publishFrame(ch: SseChannel, data: string): void {
     this.deliverFrame(ch, data);
     this.post({ type: "frame", ch, data, leaderId: this.tabId });
+  }
+
+  private deliverGap(ch: SseChannel, n: number): void {
+    for (const listener of this.listeners[ch]) listener.onGap?.(n);
+  }
+
+  private publishGap(ch: SseChannel, n: number): void {
+    this.deliverGap(ch, n);
+    this.post({ type: "gap", ch, n, leaderId: this.tabId });
   }
 
   private deliverState(ch: SseChannel, state: SseState): void {
@@ -432,4 +563,61 @@ export function sharedSseTransport(): ProfileSseTransport {
     now: Date.now,
   });
   return shared;
+}
+
+interface MergedFrame {
+  ch: SseChannel;
+  events: unknown[];
+  dropped: number;
+  error?: string;
+}
+
+function parseMergedFrame(raw: string): MergedFrame | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const frame = parsed as { ch?: unknown; events?: unknown; dropped?: unknown; error?: unknown };
+  if (typeof frame.ch !== "string") return null;
+  const ch = LOGICAL_CHANNEL[frame.ch];
+  if (ch === undefined) return null;
+  if (typeof frame.error === "string") return { ch, events: [], dropped: 0, error: frame.error };
+  if (!Array.isArray(frame.events)) return null;
+  const dropped = typeof frame.dropped === "number" && frame.dropped > 0 ? frame.dropped : 0;
+  return { ch, events: frame.events, dropped };
+}
+
+const mergedTransports = new Map<string, ProfileSseTransport>();
+
+// meiva:note
+// Without navigator.locks (plain-HTTP LAN, the setup that exhausts six
+// connections) the per-provider fallback is where the sockets multiply, so the
+// merged stream runs there too — one page-local source, no lock and no relay.
+// An empty set keeps every caller on the single-channel endpoints.
+// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+export function sseTransport(merged: readonly SseChannel[]): ProfileSseTransport | null {
+  if (merged.length === 0) return sharedSseSupported() ? sharedSseTransport() : null;
+  const key = merged.join(",");
+  let transport = mergedTransports.get(key);
+  if (transport === undefined) {
+    const solo = !sharedSseSupported();
+    transport = new ProfileSseTransport(
+      {
+        channel: solo ? null : new BroadcastChannel(NAME),
+        locks: solo ? null : navigator.locks,
+        document,
+        source: (url) => new EventSource(url, { withCredentials: true }),
+        checkAuth: () => api.checkAuth(),
+        sessionInvalid: notifySessionInvalid,
+        now: Date.now,
+      },
+      new Set(merged),
+      solo,
+    );
+    mergedTransports.set(key, transport);
+  }
+  return transport;
 }

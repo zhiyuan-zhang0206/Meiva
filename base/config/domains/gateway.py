@@ -96,6 +96,27 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    sse_channel_pending_limit: int = Field(
+        default=1000,
+        ge=1,
+        alias="MEIVA_SSE_CHANNEL_PENDING_LIMIT",
+        description=(
+            "Payloads one merged-stream channel (/api/stream) may hold between flushes. "
+            "A flush window is 1/sse_throttle_rate (100 ms at the default 10/s) and an "
+            "agent coalesces its deltas to ~25 events/s, so a window normally carries a "
+            "few dozen payloads for every observed agent together; the default leaves "
+            "roughly an order of magnitude of headroom. Reaching it means the client "
+            "stopped reading: that channel then sheds its oldest payloads and reports "
+            "the count in the frame's `dropped` field and in the `sse_drop` event."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     notification_outbox_interval_seconds: float = Field(
         default=30.0,
         gt=0,

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../telemetry/telemetry", () => ({ track: vi.fn() }));
 
 import { track } from "../telemetry/telemetry";
-import { ProfileSseTransport, reportSseTransportMode, sharedSseSupported, type SseListener } from "./sse-share";
+import { ProfileSseTransport, reportSseTransportMode, sharedSseSupported, type SseChannel, type SseListener } from "./sse-share";
 
 class FakeChannel {
   static channels = new Set<FakeChannel>();
@@ -102,30 +102,36 @@ class FakeSource {
   }
 }
 
-function tab(locks: FakeLocks) {
+function tab(locks: FakeLocks, options: { merged?: SseChannel[]; solo?: boolean } = {}) {
   const document = new FakeDocument();
   const channel = new FakeChannel();
   const sources: FakeSource[] = [];
   const checkAuth = vi.fn(() => Promise.resolve({ authenticated: true }));
   const sessionInvalid = vi.fn();
-  const transport = new ProfileSseTransport({
-    channel: channel as unknown as BroadcastChannel,
-    locks: locks as unknown as LockManager,
-    document: document as unknown as Document,
-    source: (url: string) => {
-      const source = new FakeSource(url);
-      sources.push(source);
-      return source as unknown as EventSource;
+  const solo = options.solo ?? false;
+  const transport = new ProfileSseTransport(
+    {
+      channel: solo ? null : (channel as unknown as BroadcastChannel),
+      locks: solo ? null : (locks as unknown as LockManager),
+      document: document as unknown as Document,
+      source: (url: string) => {
+        const source = new FakeSource(url);
+        sources.push(source);
+        return source as unknown as EventSource;
+      },
+      checkAuth,
+      sessionInvalid,
+      now: Date.now,
     },
-    checkAuth,
-    sessionInvalid,
-    now: Date.now,
-  });
+    new Set(options.merged ?? []),
+    solo,
+  );
   const listen = (ch: "system" | "alerts" | "systemAll", activeId: number | null = null) => {
     const onFrame = vi.fn<(raw: string) => void>();
     const onState = vi.fn<(state: "open" | "reconnecting" | "closed") => void>();
-    const unsubscribe = transport.subscribe(ch, { onFrame, onState } satisfies SseListener, activeId);
-    return { onFrame, onState, unsubscribe };
+    const onGap = vi.fn<(dropped: number) => void>();
+    const unsubscribe = transport.subscribe(ch, { onFrame, onState, onGap } satisfies SseListener, activeId);
+    return { onFrame, onState, onGap, unsubscribe };
   };
   return { transport, document, channel, sources, checkAuth, sessionInvalid, listen };
 }
@@ -323,6 +329,105 @@ describe("profile SSE transport", () => {
     expect(report).toHaveBeenCalledWith("[sse-share] Web Lock failed", expect.any(Error));
     failed.transport.dispose();
     report.mockRestore();
+  });
+
+  it("carries every merged channel on one source, without the per-channel slots", async () => {
+    const leader = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"] });
+    leader.listen("system");
+    await settle();
+    expect(leader.sources).toHaveLength(1);
+    const url = new URL(leader.sources[0].url);
+    expect(url.pathname).toBe("/api/stream");
+    expect(url.searchParams.get("channels")).toBe("global,all,alerts");
+    expect(url.searchParams.get("agents")).toBe("0");
+    leader.transport.dispose();
+    await settle();
+  });
+
+  it("reopens the merged source with the union when the selection changes", async () => {
+    const leader = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"] });
+    leader.listen("system");
+    leader.listen("systemAll", 7);
+    await settle();
+    await vi.advanceTimersByTimeAsync(UNION_DEBOUNCE_MS_FOR_TEST);
+    const urls = leader.sources.map((source) => new URL(source.url).searchParams.get("agents"));
+    expect(urls).toEqual(["0", "7"]);
+    leader.transport.dispose();
+    await settle();
+  });
+
+  it("hands each wire channel to its subscribers in the shape they already parse", async () => {
+    const leader = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"] });
+    const system = leader.listen("system");
+    const detail = leader.listen("systemAll", 3);
+    const alerts = leader.listen("alerts");
+    await settle();
+    const source = leader.sources[0];
+    source.open();
+    source.frame('{"ch":"global","events":[{"role":"label_updated","agent_id":3}]}');
+    source.frame('{"ch":"all","events":[{"role":"chat_delta"},{"role":"idle"}]}');
+    source.frame('{"ch":"alerts","events":[{"id":1,"status":"unresolved"}]}');
+
+    expect(system.onFrame.mock.calls.map(([raw]) => raw)).toEqual([
+      '{"role":"label_updated","agent_id":3}',
+    ]);
+    expect(detail.onFrame.mock.calls.map(([raw]) => raw)).toEqual([
+      '[{"role":"chat_delta"},{"role":"idle"}]',
+    ]);
+    expect(alerts.onFrame.mock.calls.map(([raw]) => raw)).toEqual([
+      '{"id":1,"status":"unresolved"}',
+    ]);
+    leader.transport.dispose();
+    await settle();
+  });
+
+  it("degrades only the channel an error frame names", async () => {
+    const leader = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"] });
+    const system = leader.listen("system");
+    const detail = leader.listen("systemAll", 3);
+    await settle();
+    const source = leader.sources[0];
+    source.open();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    source.frame('{"ch":"all","error":"event stream interrupted: ConnectionError"}');
+    expect(detail.onState).toHaveBeenLastCalledWith("reconnecting");
+    expect(system.onState).toHaveBeenLastCalledWith("open");
+    expect(leader.sources[0].readyState).toBe(FakeSource.OPEN);
+    warn.mockRestore();
+    leader.transport.dispose();
+    await settle();
+  });
+
+  it("reports a shed count as a gap without inventing frames", async () => {
+    const leader = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"] });
+    const detail = leader.listen("systemAll", 3);
+    await settle();
+    leader.sources[0].frame('{"ch":"all","events":[],"dropped":4}');
+    expect(detail.onGap).toHaveBeenCalledWith(4);
+    expect(detail.onFrame).not.toHaveBeenCalled();
+    leader.transport.dispose();
+    await settle();
+  });
+
+  it("owns the merged source alone when the page has no lock manager", async () => {
+    const solo = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"], solo: true });
+    const received = solo.listen("system");
+    await settle();
+    expect(solo.transport.isLeader()).toBe(true);
+    expect(solo.sources).toHaveLength(1);
+    solo.sources[0].open();
+    solo.sources[0].frame('{"ch":"global","events":[{"role":"agent_spawned"}]}');
+    expect(received.onState).toHaveBeenCalledWith("open");
+    expect(received.onFrame.mock.calls.map(([raw]) => raw)).toEqual(['{"role":"agent_spawned"}']);
+    solo.document.show(false);
+    await settle();
+    expect(solo.sources[0].readyState).toBe(FakeSource.CLOSED);
+    solo.document.show(true);
+    await settle();
+    expect(solo.sources).toHaveLength(2);
+    expect(solo.sources[1].readyState).toBe(FakeSource.CONNECTING);
+    solo.transport.dispose();
+    await settle();
   });
 
   it("reports the fallback mode and capability flags once per tab session", () => {

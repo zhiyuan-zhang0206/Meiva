@@ -45,7 +45,14 @@ visible pages, no streams remain. Direct HTTP is a supported fallback: without
 Web Locks, each page opens its own EventSources. Missing BroadcastChannel or
 Web Locks on HTTPS also selects this path. Keep its navigation, retry, and
 watchdog behavior. HTTP/1.1's six per-origin connection limit can stall a third
-page after two pages open three streams each.
+page after two pages open three streams each — the merged stream above removes
+that multiplication when the switch is on.
+
+## Merged stream (`web.sseSingleStream`, off by default)
+
+One `/api/stream` connection can carry every projection behind a default-off
+switch, which matters most on plain HTTP where a browser allows six connections
+per origin: [[ui/web/src/docs/frontend-data-flow/merged-stream.meiva.okf.md|Merged realtime stream]].
 
 ## Two SSE Providers (`lib/useEventStream.tsx`)
 

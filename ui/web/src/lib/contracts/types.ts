@@ -919,6 +919,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "behavior.spawn_model": null,
   "behavior.spawn_reasoning_effort": null,
   "notification.awaiting_reply": false,
+  "web.sseSingleStream": false,
   // Model picker visibility: model names the user has hidden from the spawn
   // model select. An empty list means all models are visible.
   "models.hidden": [],
