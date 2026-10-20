@@ -27,6 +27,13 @@ DEFAULT_SWAP_MULTIPLIER = 2.0
 UNSTABLE_PCT_DELTA = 2.0
 POLL_SECONDS = 1.0
 INTERPRETERS = frozenset({"uv", "node", "bash", "sh", "zsh", "env"})
+# meiva:note
+# The flags a job names its own concurrency with. `--eval-jobs` is here because the
+# Othello audit scripts spell it that way; a job with a flag we do not know is started
+# unchanged and reports that the plan could not be applied, so this list only grows when
+# a real launch path needs it.
+CONCURRENCY_FLAGS = ("--jobs", "--eval-jobs")
+SHORT_FLAGS = ("-j",)
 
 
 @dataclass(frozen=True)
@@ -94,17 +101,32 @@ def job_key(command: Sequence[str]) -> str:
     return first
 
 
+def _flag_pair(argv: Sequence[str], index: int, flag: str) -> tuple[int, int] | None:
+    # meiva:note
+    # One flag spelling, two forms (`--jobs 8`, `--jobs=8`); None when this token is not
+    # that flag or does not carry a number.
+    if argv[index] == flag and index + 1 < len(argv) and argv[index + 1].isdigit():
+        return int(argv[index + 1]), index + 1
+    prefix = f"{flag}="
+    if argv[index].startswith(prefix) and argv[index][len(prefix) :].isdigit():
+        return int(argv[index][len(prefix) :]), index
+    return None
+
+
 def requested_jobs(argv: Sequence[str]) -> tuple[int, int | None]:
     # meiva:note
     # The wrapper lowers the concurrency the command already asked for; a command that
     # names none keeps 1, because guessing a higher number would defeat the gate.
-    for index, token in enumerate(argv):
-        if token.startswith("--jobs=") and token[len("--jobs=") :].isdigit():
-            return int(token[len("--jobs=") :]), index
-        if token.startswith("-j") and token[2:].isdigit():
-            return int(token[2:]), index
-        if token in {"--jobs", "-j"} and index + 1 < len(argv) and argv[index + 1].isdigit():
-            return int(argv[index + 1]), index + 1
+    for index in range(len(argv)):
+        for flag in CONCURRENCY_FLAGS:
+            found = _flag_pair(argv, index, flag)
+            if found is not None:
+                return found
+        for flag in SHORT_FLAGS:
+            if argv[index] == flag and index + 1 < len(argv) and argv[index + 1].isdigit():
+                return int(argv[index + 1]), index + 1
+            if argv[index].startswith(flag) and argv[index][len(flag) :].isdigit():
+                return int(argv[index][len(flag) :]), index
     return 1, None
 
 
