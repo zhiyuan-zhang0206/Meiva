@@ -1647,6 +1647,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/extensions/{kind}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["put_extension_api_extensions__kind___name__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keyed/v1/packages/draft": {
         parameters: {
             query?: never;
@@ -2940,6 +2956,16 @@ export interface components {
         EventsResponse: {
             meta: components["schemas"]["EventsMeta"];
             items: components["schemas"]["EventRow"][];
+        };
+        ExtensionRegisterRequest: {
+            source: string;
+            source_ref?: string | null;
+            archive_b64: string;
+        };
+        ExtensionRegisterResponse: {
+            name: string;
+            kind: "skill" | "plugin" | "mcp";
+            content_hash: string;
         };
         FleetGraphEdge: {
             from_agent: number;
@@ -7494,6 +7520,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SkillView"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_extension_api_extensions__kind___name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "skill" | "plugin" | "mcp";
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExtensionRegisterRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionRegisterResponse"];
                 };
             };
             422: {

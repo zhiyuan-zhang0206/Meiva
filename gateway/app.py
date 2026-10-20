@@ -61,6 +61,7 @@ from gateway.events import system as system_router
 from gateway.extensions import inventory as inventory_router
 from gateway.extensions import packages as packages_router
 from gateway.extensions import plugin_ui as plugin_ui_router
+from gateway.extensions import registry as extensions_registry_router
 from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
 from gateway.http.auth import rejection_log
@@ -546,6 +547,7 @@ def create_app(
         guide_router.router,
         inventory_router.router,
         skills_router.router,
+        extensions_registry_router.router,
         packages_router.router,
         metrics_router.router,
         events_router.router,

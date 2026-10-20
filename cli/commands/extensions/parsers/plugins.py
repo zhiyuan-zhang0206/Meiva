@@ -8,6 +8,7 @@ parser building never loads Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
+from typing import Any
 
 
 def _duration(value: str) -> str:
@@ -19,6 +20,13 @@ def _duration(value: str) -> str:
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
     return value
+
+
+def _extension_gateway() -> Any:
+    from base.cluster.machine.ambient import gateway_access_from_settings
+    from cli.commands.extensions.packages.cluster_registry import HttpExtensionGateway
+
+    return HttpExtensionGateway(gateway_access_from_settings())  # ambient: C
 
 
 def _h_plugins_update(_args: argparse.Namespace) -> int:
@@ -35,7 +43,7 @@ def _h_plugins_install(args: argparse.Namespace) -> int:
         args.ref,
         args.path,
         accept_risk=args.accept_risk,
-        database_factory=args.database_factory,
+        gateway=_extension_gateway(),
         machine=args.runtime.machine,
     )
 
@@ -111,7 +119,7 @@ def _h_skill_install(args: argparse.Namespace) -> int:
         accept_risk=args.accept_risk,
         update_mode=args.update_mode,
         check_every=args.check_every,
-        database_factory=args.database_factory,
+        gateway=_extension_gateway(),
         machine=args.runtime.machine,
     )
 

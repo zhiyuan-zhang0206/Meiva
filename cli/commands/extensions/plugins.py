@@ -34,10 +34,10 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from cli.commands.extensions._claude_code_plugin import Materialized
 from cli.commands.extensions._manifest_gate import gate_refuses
+from cli.commands.extensions.skill_package import ExtensionGateway
 
 from ._pkg_source import cleanup_temp, clone_git
 
@@ -148,7 +148,7 @@ def _install_bare_skill(
     ref: str | None,
     *,
     accept_risk: bool,
-    database_factory: DatabaseFactory,
+    gateway: ExtensionGateway,
     machine: MachineIdentity,
 ) -> int:
     """Install a cloned bare-skill package into the load dir and register it.
@@ -165,7 +165,7 @@ def _install_bare_skill(
             path=path,
             ref=ref,
             accept_risk=accept_risk,
-            database_factory=database_factory,
+            gateway=gateway,
             machine=machine,
         )
     except SkillScanRefused as e:
@@ -307,7 +307,7 @@ def cmd_plugins_install(
     path: str | None,
     *,
     accept_risk: bool = False,
-    database_factory: DatabaseFactory,
+    gateway: ExtensionGateway,
     machine: MachineIdentity,
 ) -> int:
     """`meiva plugins install <url> [--path SUBDIR] [--ref REF] [--accept-risk]` —
@@ -351,7 +351,7 @@ def cmd_plugins_install(
                 path,
                 ref,
                 accept_risk=accept_risk,
-                database_factory=database_factory,
+                gateway=gateway,
                 machine=machine,
             )
 
