@@ -333,6 +333,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PUT", "/api/settings/{key}"): RouteContract(note="set one key — PUT is idempotent"),
     ("GET", "/api/agents/{agent_id}/shell/{session_id}"): RouteContract(),
     ("GET", "/api/skills"): RouteContract(),
+    ("PUT", "/api/extensions/{kind}/{name}"): RouteContract(
+        note="content-addressed blob plus name-keyed upsert — a replay stores the same content"
+    ),
     ("PUT", "/api/skills"): RouteContract(note="full replace — PUT is idempotent"),
     ("GET", "/api/agents/{agent_id}/messages"): RouteContract(
         note="raw checkpoint history — implicit requests return newest 100; start_index pages backward"

@@ -62,6 +62,7 @@ Owners:
 | `DELETE /api/schedules/{schedule_id}` | natural | delete — repeats are harmless |
 | `PUT /api/settings/{key}` | natural | set one key — PUT is idempotent |
 | `PUT /api/skills` | natural | full replace — PUT is idempotent |
+| `PUT /api/extensions/{kind}/{name}` | natural | content-addressed blob plus name-keyed upsert — a replay stores the same content |
 | `POST /api/agents/{agent_id}/messages` | keyed | enqueue chat inbound — one logical message must land exactly once; clients retry with an Idempotency-Key |
 | `POST /api/agents/{agent_id}/messages/reconcile` | natural | idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery |
 | `POST /api/agents/{agent_id}/system-note` | keyed | optional principal-scoped identity reuses one system-note inbound; changed payload or resurrection policy conflicts |

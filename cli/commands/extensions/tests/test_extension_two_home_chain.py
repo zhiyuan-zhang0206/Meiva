@@ -17,6 +17,20 @@ from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
+
+class _DbGateway:
+    def __init__(self, database_factory: Callable[[], Any]) -> None:
+        self._database_factory = database_factory
+
+    def put_extension(
+        self, *, kind: reg.ExtensionKind, name: str, root: Path, source: str, source_ref: str | None
+    ) -> None:
+        with self._database_factory().pool() as pool:
+            reg.register_tree(
+                pool, root=root, name=name, kind=kind, source=source, source_ref=source_ref
+            )
+
+
 _AsMachine = Callable[[Path], AbstractContextManager[MachineIdentity]]
 
 _SKILL_MD = """---
@@ -55,7 +69,7 @@ def test_install_on_home_a_materializes_on_home_b(
                 str(src),
                 None,
                 None,
-                database_factory=operator_database,
+                gateway=_DbGateway(operator_database),
                 machine=installing_machine,
             )
             == 0
@@ -95,7 +109,7 @@ def test_home_b_is_idempotent_on_a_second_pass(
                 str(src),
                 None,
                 None,
-                database_factory=operator_database,
+                gateway=_DbGateway(operator_database),
                 machine=installing_machine,
             )
             == 0
@@ -127,7 +141,7 @@ def test_the_row_records_the_installing_machine(
                 str(src),
                 None,
                 None,
-                database_factory=operator_database,
+                gateway=_DbGateway(operator_database),
                 machine=installing_machine,
             )
             == 0
@@ -158,7 +172,7 @@ def test_disabling_on_the_cluster_stops_new_machines_getting_it(
                 str(src),
                 None,
                 None,
-                database_factory=operator_database,
+                gateway=_DbGateway(operator_database),
                 machine=installing_machine,
             )
             == 0
@@ -192,7 +206,7 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
                 str(src),
                 None,
                 None,
-                database_factory=operator_database,
+                gateway=_DbGateway(operator_database),
                 machine=installing_machine,
             )
             == 0

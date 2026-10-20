@@ -1,4 +1,4 @@
-exports = ["inventory.py", "notification_categories.py", "packages.py", "plugin_ui.py", "skills.py", "ui_contributions.py"]
+exports = ["inventory.py", "notification_categories.py", "packages.py", "plugin_ui.py", "registry.py", "skills.py", "ui_contributions.py"]
 
 [uses]
 "inventory.py" = ["inventory_matrix.py", "schemas.py"]
