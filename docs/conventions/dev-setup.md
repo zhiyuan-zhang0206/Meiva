@@ -164,6 +164,14 @@ it is not a production update mechanism.
   Imports, lint scripts and codegen hooks work there as they do in CI.
 - End-to-end agent/frontend behavior runs in CI's e2e job (a real gateway, agent
   subprocess and browser against throwaway Postgres and Redis).
+- A preview someone looks at (a frontend build, a gateway route) is a whole cluster
+  of its own: a fresh `MEIVA_HOME`, the development checkout's own
+  `.venv/bin/meiva init` and `meiva start`, which bring up that home's own Postgres,
+  Redis, gateway and frontend. One frontend talks to one backend. Never proxy a
+  preview's `/api` to a production gateway, start a preview with a production home
+  or its database credentials, or start a second gateway against a production
+  database: a gateway's start raises the cluster's minimum code version, and every
+  production process below it exits (seen 2026-10-20).
 
 See [AGENTS.md](../../AGENTS.md) for the worktree and PR workflow.
 
