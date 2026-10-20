@@ -27,6 +27,16 @@ def notice_dedupe_key(notice_id: int, question: object) -> str:
 
 
 # meiva:note
+# A delivery names where its request lives: `href` is the route that shows this
+# notice, which the inbox already accepts (`?notice=<global id>` selects the row).
+# Without it a transport can only open a generic queue, so a user who taps the
+# notification lands somewhere that does not answer "which one is this?".
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+def notice_href(notice_id: int) -> str:
+    return f"/fleet?notice={notice_id}"
+
+
+# meiva:note
 # A producer stages the delivery inside its own transaction, next to the notice
 # row it just wrote: a committed notice that needs an answer always owes one
 # `notification_events` row, so no crash between "notice saved" and "announce"
@@ -55,6 +65,7 @@ def stage_notice_notification(
         category_id="core.needs_input",
         subject=title,
         body=content,
+        href=notice_href(notice_id),
         dedupe_key=notice_dedupe_key(notice_id, question),
         agent_id=agent_id,
     )

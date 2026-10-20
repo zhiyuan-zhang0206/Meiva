@@ -197,6 +197,33 @@ describe("InboxQueue — open stream", () => {
     expect(listTitles()).toEqual(["fyi-p0", "dec-p2", "fyi-p3"]);
   });
 
+  // meiva:note
+  // Three obligation rungs ride this one list: FYI, needs an answer, and stalled
+  // on the answer. A row that does not state its rung makes a P2 decision and a P2
+  // FYI indistinguishable, so the user cannot tell which rows are waiting on them.
+  // Queries scope to the queue list: the auto-selected row's detail heading repeats
+  // its title, so an unscoped lookup matches twice.
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  it("states each row's obligation rung", () => {
+    setFeed({
+      open: [ni({ id: 40, title: "just-fyi", priority: "P2" })],
+      awaiting: [
+        n({ id: 41, title: "needs-answer", priority: "P2" }),
+        n({ id: 42, title: "stalled", priority: "P2", blocking: true }),
+      ],
+    });
+    renderQueue([agent({ agent_id: 1, label: "a" })]);
+    const list = screen.getByRole("list", { name: /inbox queue/i });
+    const rungOf = (title: string) =>
+      within(list)
+        .getByText(title)
+        .closest('[data-testid="inbox-row"]')
+        ?.querySelector('[data-testid="notice-kind"]')?.textContent;
+    expect(rungOf("just-fyi")).toBe("FYI");
+    expect(rungOf("needs-answer")).toBe("Decision");
+    expect(rungOf("stalled")).toBe("Decision");
+  });
+
   it("breaks priority ties by blocking, then oldest", () => {
     setFeed({
       awaiting: [

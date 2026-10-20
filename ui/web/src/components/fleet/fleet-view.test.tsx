@@ -127,6 +127,24 @@ function wrap(ui: ReactElement) {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
+function noticeItem(over: Partial<NoticeItem> & { id: number }): NoticeItem {
+  return {
+    agent_id: 1,
+    agent_label: "worker",
+    title: "Q",
+    content: null,
+    priority: "P3",
+    require_response: true,
+    blocking: false,
+    created_at: "2026-06-06T00:00:00Z",
+    resolved_at: null,
+    resolution: null,
+    reply: null,
+    expire_at: "2026-06-07T00:00:00Z",
+    ...over,
+  };
+}
+
 function makeAgent(over: Partial<AgentRow> & { agent_id: number }): AgentRow {
   return {
     spawner: "user",
@@ -342,18 +360,36 @@ describe("FleetView (mobile)", () => {
     expect(screen.queryByLabelText("Back to list")).toBeNull();
   });
 
-  it("shows the combined Inbox badge on the mobile tab", () => {
+  // meiva:note
+  // The tab badge and the panel must show one number. The badge used to roll up the
+  // agent snapshot while the panel read the notice feed, so the same screen could
+  // say "Inbox 4" over a list of two. The badge now reads the panel's own feed: the
+  // agents below claim 1 decision + 3 unread FYI (4) and the feed carries 2, so the
+  // tab must say 2.
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  it("shows the Inbox badge from the same feed the panel renders", () => {
     agentsMock.mockReturnValue([
       makeAgent({
         agent_id: 1,
         status: "running",
-        awaiting_response_count: ([{ id: 1, title: "Q", content: null, priority: "P3", require_response: true, blocking: false, created_at: "2026-06-06T00:00:00Z" }]).length, highest_notice_priority: "P3",
+        awaiting_response_count: 1,
+        highest_notice_priority: "P3",
         unread_notice_count: 3,
       }),
     ]);
+    useNoticesMock.mockReturnValue({
+      open: [noticeItem({ id: 2, require_response: false })],
+      awaiting: [noticeItem({ id: 1 })],
+      resolved: [],
+      fetchNextPage: () => undefined,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      error: false,
+      resolvedError: false,
+      isLoading: false,
+    });
     wrap(<FleetView />);
-    // Inbox badge = 1 decision + 3 unread FYI = 4; Agents = 1 alive.
-    expect(screen.getByRole("tab", { name: /Inbox 4/ })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /Inbox 2/ })).toBeTruthy();
     expect(screen.getByRole("tab", { name: /Agents 1/ })).toBeTruthy();
   });
 

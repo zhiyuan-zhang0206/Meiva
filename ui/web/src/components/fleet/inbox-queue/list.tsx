@@ -163,6 +163,7 @@ export function QueueList({
           <NoticeListRow
             key={resolvedKey(n.id)}
             priority={n.priority}
+            requireResponse={n.require_response}
             blocking={false}
             title={n.title}
             agentLabel={fmtLabel(n.agent_label, n.agent_id)}
@@ -222,6 +223,7 @@ export function OpenUnits({
               key={key}
               noticeKey={key}
               priority={it.notice.priority}
+              requireResponse={it.notice.require_response}
               blocking={it.notice.blocking}
               title={it.notice.title}
               agentLabel={it.agentLabel}

@@ -67,8 +67,15 @@ export function AgentPageLink({
 }
 
 
+// meiva:note
+// The queue holds three obligation rungs (FYI / needs an answer / stalled on the
+// answer). The row used to render only the last one, so a P2 decision and a P2 FYI
+// looked identical and the user could not tell which row actually waits on them.
+// The row states the rung for both kinds; only the decision carries colour.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 export function NoticeListRow({
   priority,
+  requireResponse,
   blocking,
   title,
   agentLabel,
@@ -85,6 +92,7 @@ export function NoticeListRow({
   anchorHighlighted,
 }: {
   priority: OpenNotice["priority"];
+  requireResponse: boolean;
   blocking: boolean;
   title: string;
   agentLabel: string;
@@ -135,6 +143,15 @@ export function NoticeListRow({
             <span className={cn("items-center gap-1.5", FLEX)}>
               <AgentStatusDot status={agentStatus} />
               <span className="break-all">{agentLabel}</span>
+            </span>
+            <span
+              data-testid="notice-kind"
+              className={cn(
+                "shrink-0",
+                requireResponse ? "font-medium text-amber-700 dark:text-amber-400" : "text-muted-foreground/70",
+              )}
+            >
+              {requireResponse ? t("decision") : t("fyi")}
             </span>
             {createdAt && <span>{formatRelativeTime(createdAt)}</span>}
             {blocking && <span className="text-destructive">{t("blocking")}</span>}
