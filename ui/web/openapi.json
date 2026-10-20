@@ -3393,6 +3393,41 @@
               "type": "string",
               "title": "Home"
             }
+          },
+          {
+            "name": "maintenance_for_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 86400,
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Maintenance For Seconds"
+            }
+          },
+          {
+            "name": "maintenance_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Maintenance Reason"
+            }
           }
         ],
         "responses": {

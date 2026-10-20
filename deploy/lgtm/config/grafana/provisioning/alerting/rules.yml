@@ -2263,6 +2263,87 @@ groups:
                   query:
                     params: [C]
 
+      # ── meiva-ops-machine-stopped-too-long: a host announced `meiva stop` and nobody started it again (task #5464) ──
+      # The heartbeat's liveness pass emits `machine_stopped_too_long` per host once its
+      # announced stop is older than 20 minutes (MACHINE_STOPPED_TOO_LONG_S in
+      # base/agents/observation/evidence.py: a four-host sequential restart measured 14
+      # minutes) and no `--maintenance-for` window is still ahead. The 2026-10-14 stack sat
+      # stopped for 53 minutes with nothing reporting it: the probe rules cannot see it
+      # (an intentionally stopped host is out of the probe target set), so this rule closes
+      # that gap. A paused or staging host is excluded at the source. The event repeats every
+      # pass while the host stays down, so a 2m window and no pending period is the whole
+      # debounce; the alert resolves when the host comes back and the stream goes idle.
+      - uid: meiva-ops-machine-stopped-too-long
+        title: "Machine stopped 20+ minutes (not started again)"
+        condition: D
+        for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: meiva-ops-machine-stopped-too-long
+          metric: machine_stopped_too_long
+          team: meiva-ops
+        annotations:
+          summary: "machine {{ $labels.attributes_machine }} stopped 20+ minutes with no maintenance window"
+          description: >-
+            {{ $labels.attributes_machine }} announced an intentional `meiva stop` more than 20 minutes ago
+            ({{ $values.C }} reports in the last 2m) and declared no `--maintenance-for` window, so either
+            it was forgotten or the window expired. The cluster is alive and this rule runs inside it;
+            `meiva cluster status` shows the roster, and `meiva start` on that host clears the stop.
+            A whole-stack stop (gateway, database and this rule all down) is the external probe's job,
+            not this rule's.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_machine) (count_over_time({service_name="unknown_service",
+                event_name="machine_stopped_too_long"} | json | cluster=".meiva" | category="telemetry"
+                [2m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 120
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
       # ── meiva-ops-exec-child-boot-failed: replaces agent/graph/exec/_alerts.py maybe_alert_exec_boot_failure (POST /api/alerts, source agent-exec, per-agent 600s rate limit) ──
       - uid: meiva-ops-exec-child-boot-failed
         title: "Exec child boot failed"

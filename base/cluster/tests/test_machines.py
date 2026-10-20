@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
@@ -140,6 +141,127 @@ def test_mark_stopping_stamps_then_register_clears(
 
     machine_setup.register(machines_test_db(database_gate=database_gate), url=None)
     assert _read_stopped_at("test-stopping") is None
+
+
+# meiva:note
+# The maintenance-window columns of `name`'s composed row.
+# meiva:link base/cluster/machine/docs/machines-table.meiva.okf.md
+def _read_window(name: str) -> tuple[datetime | None, str | None]:
+    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT maintenance_until, maintenance_reason FROM machines WHERE name = %s",
+            (name,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    return row[0], row[1]
+
+
+# meiva:note
+# `meiva stop --maintenance-for 45m --reason ...` stores when the host returns and why.
+def test_mark_stopping_records_the_window_the_operator_declared(
+    machine_setup: MachineSetup, database_gate: ProcessDbGate
+) -> None:
+    machine_setup(name="test-window", role="agent-runner", home="~/.meiva")
+    machine_setup.register(machines_test_db(database_gate=database_gate), url=None)
+    before = datetime.now(UTC)
+
+    machines.mark_stopping(
+        machines_test_db(database_gate=database_gate),
+        "test-window",
+        "~/.meiva",
+        maintenance_for_seconds=45 * 60,
+        maintenance_reason="pgbouncer maintenance",
+    )
+
+    until, reason = _read_window("test-window")
+    assert until is not None
+    # meiva:note
+    # A window is computed by the database clock; the lower bound allows the test's round trip.
+    assert before + timedelta(minutes=45) <= until <= datetime.now(UTC) + timedelta(minutes=45)
+    assert reason == "pgbouncer maintenance"
+    assert _read_stopped_at("test-window") is not None
+
+
+# meiva:note
+# An open-ended stop must not inherit the previous stop's window.
+def test_a_stop_without_a_window_clears_the_one_before_it(
+    machine_setup: MachineSetup, database_gate: ProcessDbGate
+) -> None:
+    machine_setup(name="test-window", role="agent-runner", home="~/.meiva")
+    database = machines_test_db(database_gate=database_gate)
+    machine_setup.register(database, url=None)
+    machines.mark_stopping(
+        database, "test-window", "~/.meiva", maintenance_for_seconds=600, maintenance_reason="x"
+    )
+    assert _read_window("test-window")[0] is not None
+
+    machines.mark_stopping(database, "test-window", "~/.meiva")
+
+    assert _read_window("test-window") == (None, None)
+    assert _read_stopped_at("test-window") is not None
+
+
+# meiva:note
+# `meiva start` ends the declared window: the host came back before it expired.
+def test_register_self_clears_the_window(
+    machine_setup: MachineSetup, database_gate: ProcessDbGate
+) -> None:
+    machine_setup(name="test-window", role="agent-runner", home="~/.meiva")
+    database = machines_test_db(database_gate=database_gate)
+    machine_setup.register(database, url=None)
+    machines.mark_stopping(
+        database, "test-window", "~/.meiva", maintenance_for_seconds=600, maintenance_reason="x"
+    )
+
+    machine_setup.register(database, url=None)
+
+    assert _read_window("test-window") == (None, None)
+
+
+# meiva:note
+# The window describes when the HOST returns; one unit stopping is not the host going down.
+def test_a_colocated_peer_still_serving_leaves_no_window(
+    machine_setup: MachineSetup, database_gate: ProcessDbGate
+) -> None:
+    machine_setup(name="test-host", role="gateway", home="~/.meiva_gateway")
+    machine_setup.register(
+        machines_test_db(database_gate=database_gate), url="http://test-host:8000"
+    )
+    machine_setup(name="test-host", role="agent-runner", home="~/.meiva")
+    machine_setup.register(
+        machines_test_db(database_gate=database_gate), url="http://localhost:8600"
+    )
+
+    machines.mark_stopping(
+        machines_test_db(database_gate=database_gate),
+        "test-host",
+        "~/.meiva",
+        maintenance_for_seconds=600,
+        maintenance_reason="restarting the runner",
+    )
+
+    assert _read_window("test-host") == (None, None)
+    assert _read_stopped_at("test-host") is None
+
+
+# meiva:note
+# A later recompute must not push `stopped_at` forward — the clock means how long stopped.
+def test_the_stop_stamp_is_the_first_stop_not_the_latest_recompute(
+    machine_setup: MachineSetup, database_gate: ProcessDbGate
+) -> None:
+    machine_setup(name="test-window", role="agent-runner", home="~/.meiva")
+    database = machines_test_db(database_gate=database_gate)
+    machine_setup.register(database, url=None)
+    machines.mark_stopping(database, "test-window", "~/.meiva")
+    first = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
+    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+        cur.execute("UPDATE machines SET stopped_at = %s WHERE name = %s", (first, "test-window"))
+        conn.commit()
+
+    machines.mark_stopping(database, "test-window", "~/.meiva")
+
+    assert _read_stopped_at("test-window") == first
 
 
 def test_register_self_does_not_fall_back_to_gateway_url_when_url_none(

@@ -272,7 +272,14 @@ def register_self(
         conn.commit()
 
 
-def mark_stopping(db: Database, name: str, home: str) -> None:
+def mark_stopping(
+    db: Database,
+    name: str,
+    home: str,
+    *,
+    maintenance_for_seconds: int | None = None,
+    maintenance_reason: str | None = None,
+) -> None:
     """Stamp `stopped_at = NOW()` on the (name, home) UNIT, then recompute.
 
     Called by the `POST /api/cluster/stopping` handler when a unit announces it
@@ -297,6 +304,24 @@ def mark_stopping(db: Database, name: str, home: str) -> None:
             (name, home),
         )
         _recompute_machine_row(cur, name)
+        # meiva:note
+        # The window is a HOST-level fact, written after the recompute so the
+        # composition cannot clobber it, and only on a host that is now fully
+        # stopped: a co-located peer still serving means this host is up. A stop
+        # without a window clears whatever a previous one declared.
+        # meiva:link base/cluster/machine/docs/machines-table.meiva.okf.md
+        cur.execute(
+            "UPDATE machines SET maintenance_until = CASE "
+            "WHEN %s::bigint IS NULL THEN NULL ELSE NOW() + make_interval(secs => %s::bigint) END, "
+            "maintenance_reason = %s "
+            "WHERE name = %s AND stopped_at IS NOT NULL",
+            (
+                maintenance_for_seconds,
+                maintenance_for_seconds,
+                maintenance_reason,
+                name,
+            ),
+        )
         conn.commit()
 
 
@@ -364,9 +389,17 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
 
     role = _composed_role(live)
     if not role:
+        # meiva:note
         # No live unit — leave the existing composed row untouched but mark it
-        # stopped (the machines CHECK forbids an empty role array).
-        cur.execute("UPDATE machines SET stopped_at = NOW() WHERE name = %s", (name,))
+        # stopped (the machines CHECK forbids an empty role array). The stamp is
+        # COALESCEd: every later recompute of an already-stopped host would
+        # otherwise move the stop time forward and "stopped since" would never
+        # age (the stopped-too-long rule reads it).
+        # meiva:link base/cluster/machine/docs/machines-table.meiva.okf.md
+        cur.execute(
+            "UPDATE machines SET stopped_at = COALESCE(stopped_at, NOW()) WHERE name = %s",
+            (name,),
+        )
         return
 
     gateway_url = _composed_gateway_url(live)
@@ -387,7 +420,7 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
         "VALUES (%s, %s, %s, %s, NULL) "
         "ON CONFLICT (name) DO UPDATE SET gateway_url = EXCLUDED.gateway_url, "
         "role = EXCLUDED.role, up_since_at = EXCLUDED.up_since_at, "
-        "stopped_at = NULL",
+        "stopped_at = NULL, maintenance_until = NULL, maintenance_reason = NULL",
         (name, gateway_url, role, up_since_at),
     )
 

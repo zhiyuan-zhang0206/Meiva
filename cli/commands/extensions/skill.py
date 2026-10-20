@@ -72,8 +72,9 @@ def cmd_skill_install(
     aborts the whole install with the report; `--accept-risk` overrides it and
     records which rules were waived.
     """
+    from cli.commands.duration import parse_duration
+
     from ._pkg_source import SourcePathNotFoundError, acquire_source, cleanup_temp
-    from .packages.refresh import parse_duration
     from .skill_package import SkillPackageError, SkillScanRefused, discover, install
 
     try:

@@ -122,7 +122,15 @@ def h_stop(
         roles = None
     if problems := stop_problems(args, roles):
         return refuse_usage("stop", problems)
+    from cli.commands.duration import parse_duration
     from cli.commands.lifecycle.stop import cmd_stop
+
+    try:
+        maintenance_for_seconds = (
+            parse_duration(args.maintenance_for) if args.maintenance_for else None
+        )
+    except ValueError as error:
+        return refuse_usage("stop", [str(error)])
 
     return cmd_stop(
         keep_infra=args.keep_infra,
@@ -133,6 +141,8 @@ def h_stop(
         preserve_sessions=frozenset(args.keep_service),
         force=args.mode == "force",
         timeout=args.timeout,
+        maintenance_for_seconds=maintenance_for_seconds,
+        maintenance_reason=args.reason,
         retained_children=retained_children,
         database_factory=args.database_factory,
         producer=args.producer,
@@ -480,6 +490,19 @@ def add_stop_parser(
     )
     _add_mode_and_timeout(
         stop_p, timeout_help="required: total drain/stop deadline in seconds; failure never forces"
+    )
+    stop_p.add_argument(
+        "--maintenance-for",
+        default=None,
+        metavar="DURATION",
+        help="declare a planned window (30s / 15m / 2h): the stopped-too-long alert reports "
+        "this host as in maintenance until then instead of as a fault",
+    )
+    stop_p.add_argument(
+        "--reason",
+        default=None,
+        metavar="TEXT",
+        help="one line saying why this host stops; recorded with the stop and shown in the window",
     )
     stop_p.set_defaults(
         func=h_stop

@@ -9,6 +9,14 @@ from pydantic import BaseModel
 # Existing machine-probe cadence and consecutive-failure contract.
 LIVENESS_PASS_INTERVAL_S = 60.0
 MACHINE_OFFLINE_AFTER_FAILURES = 2
+# meiva:note
+# How long an announced (`meiva stop`) host may stay down before the liveness
+# pass reports it as forgotten. A four-host sequential restart measured 14
+# minutes on 2026-10-20, and the 2026-10-14 stack sat stopped for 53 minutes
+# with nothing reporting it (task #5464). A declared `--maintenance-for`
+# window suppresses the report until it expires.
+# meiva:link services/docs/gateway_side/heartbeat-stopped-too-long.meiva.okf.md
+MACHINE_STOPPED_TOO_LONG_S = 20 * 60
 
 
 # meiva:note

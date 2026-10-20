@@ -273,7 +273,7 @@ def stop_env(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     for hook in ("stop_permissions_helper",):
         monkeypatch.setattr(_stop_extras, hook, lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    def announce(*, machine: MachineIdentity) -> None:
+    def announce(*, machine: MachineIdentity, **_: object) -> None:
         del machine
 
     monkeypatch.setattr(command, "announce_stopping", announce)

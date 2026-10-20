@@ -7,6 +7,20 @@ and the matching GitHub Releases.
 
 ## [Unreleased]
 
+### Added
+- `meiva stop --maintenance-for 45m --reason "..."` declares how long a host is expected to be
+  down: the stop records `machines.maintenance_until` / `maintenance_reason` on the host, and the
+  next start clears them. An ordinary stop clears whatever a previous one declared, a
+  co-located peer still serving leaves the host without a window, and `stopped_at` keeps the
+  first stop's clock instead of moving forward on every recompute (task #5464).
+- A host that announced an intentional stop and is still down 20 minutes later with no window
+  ahead now reports itself: the gateway liveness pass emits `machine_stopped_too_long` per pass
+  (`stopped_for_s` carries the age), and the `meiva-ops-machine-stopped-too-long` rule turns it
+  into an error per machine. An intentionally stopped host is out of the probe target set, so
+  the 2026-10-14 stack sat stopped for 53 minutes with nothing reporting it; a paused or staging
+  host and a host that never announced a stop stay silent. A whole-stack stop is still the
+  cluster-external probe's job, not this rule's (task #5464).
+
 ### Removed
 
 - The frontend pixel-regression apparatus is gone (user ruling 2026-10-20): the
