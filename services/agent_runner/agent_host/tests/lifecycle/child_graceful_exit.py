@@ -16,7 +16,7 @@ from loguru import logger
 
 from base.agents.observation.turn_progress import TurnProgress
 from base.daemon.shutdown import install_graceful_shutdown
-from services.agent_runner.agent_host.lifecycle.graceful_exit import serve_until_exit
+from services.agent_runner.agent_host.lifecycle.graceful_exit import OwedRestart, serve_until_exit
 
 _AGENT = 7
 
@@ -54,10 +54,10 @@ async def _run() -> dict[str, Any]:
 
     restarts_for: list[int] = []
 
-    async def write_restart(agent_id: int) -> int:
+    async def write_restart(agent_id: int) -> OwedRestart:
         restarts_for.append(agent_id)
         _say("draining")
-        return 1
+        return OwedRestart(1, written=True)
 
     async def dispatch() -> None:
         _say("ready")

@@ -149,7 +149,7 @@ def test_generated_manifest_is_consumed_by_load_manifests(tmp_path: Path) -> Non
     expected = gen.build_units(capabilities=["gateway", "agent-runner"], repo_root=_REPO)
     assert [manifest.id for manifest in registry.units] == [u["id"] for u in expected]
     first = registry.units[0]
-    assert first.id == "gate"
+    assert first.id == "agent-host"
     assert first.exec[0] == "/bin/sh"
     assert first.attach == "root"
 

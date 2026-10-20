@@ -9,8 +9,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Awaitable, Callable, Coroutine
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.observation.turn_progress import TurnProgress
@@ -20,7 +21,14 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.stop_timing import HOST_GRACEFUL_EXIT_DRAIN_S
 
-__all__ = ["RESTART_SOURCE", "GracefulExit", "TurnTasks", "serve_until_exit", "write_exit_restart"]
+__all__ = [
+    "RESTART_SOURCE",
+    "GracefulExit",
+    "OwedRestart",
+    "TurnTasks",
+    "serve_until_exit",
+    "write_exit_restart",
+]
 
 RESTART_SOURCE = "system:restart"
 
@@ -31,14 +39,40 @@ class TurnTasks(Protocol):
     def stop_admission(self) -> frozenset[int]: ...
 
 
-def _insert_restart(db: Database, bus: EventBus, agent_id: int) -> int:
+# meiva:note
+# The lifecycle command that carries one turn's continuation, and whether the exit wrote it.
+class OwedRestart(NamedTuple):
+    inbound_id: int
+    written: bool
+
+
+# meiva:note
+# An agent that already has an unfinished restart or terminate gets no second one: the
+# next host would apply both, and a leftover pending restart collides with the maintenance
+# hold's own command. Unapplied commands older than the agent's latest resurrection do not
+# count, because acceptance settles them as superseded instead of applying them. The row
+# lock is the one a gateway restart or terminate takes before it queues its command.
+_OPEN_LIFECYCLE = (
+    "SELECT i.id FROM agents_meta m JOIN inbound_messages i ON i.agent_id=m.id "
+    "WHERE m.id=%s AND i.kind IN ('restart','terminate') AND i.status IN ('pending','claimed') "
+    "AND (i.applied_at IS NOT NULL OR i.id > COALESCE(m.last_resurrect_inbound_id, 0)) "
+    "ORDER BY i.id LIMIT 1"
+)
+
+
+def _insert_restart(db: Database, bus: EventBus, agent_id: int) -> OwedRestart:
     with db.write_transaction() as conn:
-        return insert_inbound_message(
+        conn.execute("SELECT 1 FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
+        existing = conn.execute(_OPEN_LIFECYCLE, (agent_id,)).fetchone()
+        if existing is not None:
+            return OwedRestart(existing[0], written=False)
+        inbound_id = insert_inbound_message(
             conn, agent_id, "", source=RESTART_SOURCE, kind="restart", database=db, bus=bus
         )
+        return OwedRestart(inbound_id, written=True)
 
 
-async def write_exit_restart(db: Database, bus: EventBus, agent_id: int) -> int:
+async def write_exit_restart(db: Database, bus: EventBus, agent_id: int) -> OwedRestart:
     return await asyncio.to_thread(_insert_restart, db, bus, agent_id)
 
 
@@ -48,7 +82,7 @@ class GracefulExit:
         *,
         turns: TurnTasks,
         progress: TurnProgress,
-        write_restart: Callable[[int], Awaitable[int]],
+        write_restart: Callable[[int], Awaitable[OwedRestart]],
         drain_s: float,
     ) -> None:
         self._turns = turns
@@ -97,30 +131,25 @@ class GracefulExit:
         if self._requested:
             await self.drain()
 
+    # meiva:note
+    # The writes share the drain's deadline with the wait: a slow database cannot spend the
+    # stop ceiling before the turns are even waited for. Every agent left without a restart,
+    # by a failed or an unfinished write, is named at ERROR.
     async def drain(self) -> None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._drain_s
-        restarts: dict[int, int] = {}
-        for agent_id in sorted(self._owed):
-            try:
-                restarts[agent_id] = await self._write_restart(agent_id)
-            except Exception:
-                logger.exception(
-                    "graceful exit could not write the restart of agent {agent_id}; "
-                    "its turn is waited for without one",
-                    event="host_exit_restart_failed",
-                    agent_id=agent_id,
-                )
+        restarts = await self._write_restarts(deadline)
         tasks = {
             agent_id: task
             for agent_id in sorted(self._owed)
             if (task := self._turns.task_for(agent_id)) is not None
         }
         logger.info(
-            "graceful exit: {restarts} restart(s) written, waiting up to {budget:g}s "
-            "for {turns} turn(s)",
+            "graceful exit: {written} restart(s) written, {reused} unfinished lifecycle "
+            "command(s) reused, waiting up to {budget:g}s for {turns} turn(s)",
             event="host_exit_draining",
-            restarts=len(restarts),
+            written=sum(owed.written for owed in restarts.values()),
+            reused=sum(not owed.written for owed in restarts.values()),
             budget=self._drain_s,
             turns=len(tasks),
         )
@@ -131,18 +160,44 @@ class GracefulExit:
             )
         unsettled = [agent_id for agent_id, task in tasks.items() if task in pending]
         for agent_id in unsettled:
+            owed = restarts.get(agent_id)
             logger.error(
-                "graceful exit: the turn of agent {agent_id} did not settle within "
-                "{budget:g}s (last activity {idle_s}s ago); cancelling it — "
-                "restart inbound {restart} wakes it on the next host",
+                "graceful exit: the turn of agent {agent_id} did not end within "
+                "{budget:g}s (last activity {idle_s}s ago); cancelling it — lifecycle "
+                "command {restart} wakes it on the next host",
                 event="host_exit_drain_timeout",
                 agent_id=agent_id,
                 budget=self._drain_s,
                 idle_s=_rounded(self._progress.age_s(agent_id)),
-                restart=restarts.get(agent_id),
+                restart=None if owed is None else owed.inbound_id,
             )
         if not unsettled:
-            logger.info("graceful exit: every turn settled", event="host_exit_drained")
+            logger.info(
+                "graceful exit: every turn it waited for has ended; a restart a turn ended "
+                "before reaching stays pending for the next host",
+                event="host_exit_drained",
+                turns=len(tasks),
+            )
+
+    async def _write_restarts(self, deadline: float) -> dict[int, OwedRestart]:
+        restarts: dict[int, OwedRestart] = {}
+        failures: dict[int, str] = {}
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout_at(deadline):
+                for agent_id in sorted(self._owed):
+                    try:
+                        restarts[agent_id] = await self._write_restart(agent_id)
+                    except Exception as exc:
+                        failures[agent_id] = repr(exc)
+        for agent_id in sorted(self._owed - restarts.keys()):
+            logger.error(
+                "graceful exit wrote no restart for agent {agent_id} ({reason}); its turn is "
+                "still waited for, but if it is cut short nothing wakes it until new input",
+                event="host_exit_restart_failed",
+                agent_id=agent_id,
+                reason=failures.get(agent_id, "the drain deadline passed first"),
+            )
+        return restarts
 
 
 def _rounded(seconds: float | None) -> float | None:
@@ -154,7 +209,7 @@ async def serve_until_exit(
     *,
     turns: TurnTasks,
     progress: TurnProgress,
-    write_restart: Callable[[int], Awaitable[int]],
+    write_restart: Callable[[int], Awaitable[OwedRestart]],
 ) -> None:
     graceful = GracefulExit(
         turns=turns,

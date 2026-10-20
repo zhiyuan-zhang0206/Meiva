@@ -200,14 +200,17 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "host_exit_draining": telemetry_event(
         "host_exit_draining",
-        "a SIGTERMed agent-host closed admission and wrote one system:restart inbound per "
-        "running turn; carries how many restarts it wrote, the drain budget and how many "
-        "turns it now waits for",
+        "a SIGTERMed agent-host closed admission and gave every running turn a lifecycle "
+        "command: a system:restart inbound it wrote, or the unfinished restart/terminate the "
+        "agent already had; carries both counts, the drain budget and how many turns it now "
+        "waits for",
         tier="observation",
     ),
     "host_exit_drained": telemetry_event(
         "host_exit_drained",
-        "every turn a SIGTERMed agent-host waited for settled within the drain budget",
+        "every turn a SIGTERMed agent-host waited for ended within the drain budget — at "
+        "its restart, or before reaching it, in which case the restart stays pending for "
+        "the next host",
         tier="noise",
     ),
     "host_exit_drain_timeout": telemetry_event(
@@ -219,9 +222,9 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "host_exit_restart_failed": telemetry_event(
         "host_exit_restart_failed",
-        "a SIGTERMed agent-host could not write the restart of a running turn; the turn is "
-        "still waited for, and without the restart a turn cut short is not woken again "
-        "until new input arrives",
+        "a SIGTERMed agent-host wrote no restart for a running turn: the write failed, or "
+        "the drain deadline passed first; the turn is still waited for, and without the "
+        "restart a turn cut short is not woken again until new input arrives",
         tier="anomaly",
     ),
     "host_exit_repeated": telemetry_event(
