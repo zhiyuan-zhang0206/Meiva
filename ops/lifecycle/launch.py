@@ -71,7 +71,7 @@ def validate_launch_row(
     # A row records the harness it was born on; refusing to wake one whose
     # launcher does not exist keeps that record honest instead of quietly
     # running the built-in loop under an external harness label.
-    # meiva:link base/agents/docs/harness.meiva.okf.md
+    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
     harness = Harness(row[3])
     if harness not in launchable:
         raise ValueError(

@@ -179,7 +179,7 @@ class MeivaContext:
     # loop: the eval driver, the exec child and every test build one without saying so, and
     # the built-in loop is what they run. `harness_turn` and claim route on this value, and
     # an agent's harness is immutable, so one row never runs two engines.
-    # meiva:link base/agents/docs/harness.meiva.okf.md
+    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
     harness: Harness = Harness.MEIVA
 
     # meiva:note

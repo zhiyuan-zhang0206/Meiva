@@ -64,7 +64,7 @@ Every creation and fork requires an explicit 1–128 character `idempotency_key`
 **Harness.** A new agent's runtime loop is chosen at spawn and never changes;
 a fork keeps its source's. Details, value set and the local availability probe:
 [[harness.meiva.okf.md|Harness]]. The column contract is
-[[base/agents/docs/harness.meiva.okf.md|agent harness identity]].
+[[base/agents/docs/harness/harness.meiva.okf.md|agent harness identity]].
 
 **Fork copy boundary.** A fork copies the source agent's newest saved conversation state, not its
 live turn. When the source is between a tool call and its result, the fork inherits the call

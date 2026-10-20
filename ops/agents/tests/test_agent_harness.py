@@ -168,5 +168,5 @@ def test_fork_naming_another_harness_is_refused(
     # Nothing of the refused birth survives: no identity row, no metadata row, no
     # copied conversation and no fork prompt, because the raise rolls the whole
     # birth transaction back.
-    # meiva:link base/agents/docs/harness.meiva.okf.md
+    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
     assert _birth_row_counts(db_conn) == before
