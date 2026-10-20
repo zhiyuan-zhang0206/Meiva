@@ -36,6 +36,10 @@ and the matching GitHub Releases.
   visibility) remain, unused by any pixel comparison.
 
 ### Fixed
+- The scroll-to-bottom button's loading ring is the same 20px ring the pull-to-load
+  gesture draws, from one component, instead of a second circle drawn to the
+  button's own edges: at r=16.5 in a 36-unit box it read as a dial, not a loader
+  (user report 2026-10-20).
 - Switching agents no longer scrolls a conversation back up. A reader on the tail
   was saved as a pixel bookmark of one row, so the return restored that row's old
   offset — above the newest message by everything that arrived meanwhile, and
