@@ -80,6 +80,8 @@ class TestCommandReading:
             (["python", "x.py", "--jobs=8"], (8, 2)),
             (["python", "x.py", "-j8"], (8, 2)),
             (["python", "x.py", "-j", "8"], (8, 3)),
+            (["python", "x.py", "--eval-jobs", "6"], (6, 3)),
+            (["python", "x.py", "--eval-jobs=6"], (6, 2)),
             (["python", "x.py"], (1, None)),
             (["python", "x.py", "--jobs-many"], (1, None)),
         ],
@@ -122,6 +124,19 @@ class TestStart:
         assert code == 0
         assert out.count("admission: jobs 8->2") == 1
         assert recorder.calls == [["python", "eval.py", "--jobs", "2"]]
+
+    def test_a_lowered_start_rewrites_the_eval_jobs_spelling(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, recorder = _run(
+            ["--peak-mb", "600", "--", "python", "audit.py", "--eval-jobs", "8"],
+            free_gib=13.0,
+            tmp_path=tmp_path,
+        )
+
+        assert code == 0
+        assert "admission: jobs 8->1" in capsys.readouterr().out
+        assert recorder.calls == [["python", "audit.py", "--eval-jobs", "1"]]
 
     def test_a_job_that_fits_prints_nothing(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

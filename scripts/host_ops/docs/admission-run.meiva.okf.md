@@ -47,9 +47,10 @@ python scripts/host_ops/admission_run.py -- .venv/bin/python eval.py --jobs 8
 python scripts/host_ops/admission_run.py --no-admission "12-minute smoke run" -- ./bench
 ```
 
-The concurrency is read from the command's own `--jobs`/`-j` when it has one, and
-that token is rewritten to the lowered value. A command without such a flag is
-started unchanged, with a line saying the plan could not be applied.
+The concurrency is read from the command's own `--jobs`, `--eval-jobs` or `-j`
+when it names one, and that token is rewritten to the lowered value. A command
+without such a flag is started unchanged, with a line saying the plan could not
+be applied.
 
 ## What it prints and records
 
