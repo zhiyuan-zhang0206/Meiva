@@ -19,7 +19,7 @@ def _request(scope: str | None = "principal-v1", principal: AuthPrincipal | None
 
 
 def test_same_principal_operation_and_key_are_stable() -> None:
-    principal = AuthPrincipal("mcp_client", "42")
+    principal = AuthPrincipal("cluster", "42")
     assert principal_key(principal, "post", "/api/example", "retry-1") == principal_key(
         principal, "POST", "/api/example", "retry-1"
     )
@@ -28,9 +28,9 @@ def test_same_principal_operation_and_key_are_stable() -> None:
 def test_distinct_credentials_and_operations_cannot_collide() -> None:
     principals = [
         AuthPrincipal("cluster", "administrator"),
-        AuthPrincipal("mcp_client", "2"),
-        AuthPrincipal("mcp_client", "3"),
-        AuthPrincipal("mcp_client", "1"),
+        AuthPrincipal("cluster", "2"),
+        AuthPrincipal("cluster", "3"),
+        AuthPrincipal("cluster", "1"),
     ]
     keys = {
         principal_key(p, method, path, "same-key")
@@ -42,10 +42,10 @@ def test_distinct_credentials_and_operations_cannot_collide() -> None:
 
 
 def test_labels_do_not_select_principal() -> None:
-    request = _request(principal=AuthPrincipal("mcp_client", "42"))
+    request = _request(principal=AuthPrincipal("cluster", "42"))
     request.state.caller_identity = {"kind": "human", "subject": "admin"}
     assert request_key(request, "k", method="POST", path="/api/a") == principal_key(
-        AuthPrincipal("mcp_client", "42"), "POST", "/api/a", "k"
+        AuthPrincipal("cluster", "42"), "POST", "/api/a", "k"
     )
 
 
@@ -57,7 +57,7 @@ def test_unverified_principal_is_rejected_without_downgrade() -> None:
 
 
 def test_missing_scope_is_rejected_for_every_principal() -> None:
-    for principal in (AuthPrincipal("cluster", "administrator"), AuthPrincipal("mcp_client", "42")):
+    for principal in (AuthPrincipal("cluster", "administrator"), AuthPrincipal("cluster", "42")):
         with pytest.raises(PrincipalScopeError, match="requires the header"):
             request_key(_request(None, principal), "k", method="POST", path="/api/a")
 

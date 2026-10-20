@@ -135,8 +135,4 @@ EVENTS: dict[str, EventSpec] = {
         "computer-use task session closed (idle timeout)",
         payload=ComputerSessionEnd,
     ),
-    "mcp_tool_call": audit_event(
-        "mcp_tool_call",
-        "MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted)",
-    ),
 }

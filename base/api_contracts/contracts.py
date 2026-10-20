@@ -230,14 +230,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/understanding/builds/{build_id}"): RouteContract(
         note="read-only: a build's job statuses, rebuild state and actual cost"
     ),
-    ("GET", "/api/mcp/clients"): RouteContract(),
-    ("POST", "/api/keyed/v1/mcp/clients"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="guarded credential creation; replays recover metadata, never the one-time token",
-    ),
-    ("POST", "/api/mcp/clients/{client_id}/revoke"): RouteContract(
-        note="client revocation — guarded update; repeats cannot revoke twice"
-    ),
     ("GET", "/api/memory/graph"): RouteContract(),
     ("GET", "/api/memory/note"): RouteContract(note="pure read — one note by relative path"),
     ("GET", "/api/memory/pool"): RouteContract(

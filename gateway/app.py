@@ -88,7 +88,6 @@ from gateway.inspect import okf_graph as okf_graph_router
 from gateway.inspect import router as inspect_router
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.mcp_server import endpoint as mcp_server_endpoint
-from gateway.mcp_server import router as mcp_server_router
 from gateway.routers import (
     commands as commands_router,
 )
@@ -302,15 +301,7 @@ async def _background_lifetime(
     mcp_manager = None
     config: GatewayConfig = app.state.gateway_config
     if config.mcp_endpoint_enabled:
-        mcp_manager = mcp_server_endpoint.build_manager(
-            app.state.db_pool,
-            app.state.db,
-            app.state.bus,
-            catalog_reader=lambda: app.state.catalog,
-            authority=app.state.config_authority,
-            image=app.state.process_image,
-            local_machine=app.state.machine,
-        )
+        mcp_manager = mcp_server_endpoint.build_manager(app)
         app.state.mcp_manager = mcp_manager
 
     try:
@@ -376,8 +367,6 @@ _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
         "/api/auth/login-ticket/redeem",
         "/api/auth/check",
         "/api/auth/logout",
-        "/mcp",
-        "/mcp/",
     }
 )
 _AUTH_BYPASS_METHOD_PATHS: frozenset[tuple[str, str]] = frozenset(
@@ -592,7 +581,6 @@ def create_app(
         status_router.router,
         alert_classes_router.router,
         memory_router.router,
-        mcp_server_router.router,
         fleet_graph_router.router,
         frontend_telemetry_router.router,
         grafana_router.router,

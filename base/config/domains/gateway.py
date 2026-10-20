@@ -510,13 +510,12 @@ class GatewaySettings(EnvSettings):
         alias="MEIVA_MCP_ENDPOINT_ENABLED",
         description=(
             "Serve the cluster control plane as an MCP server over Streamable "
-            "HTTP at /mcp on the gateway (design task #1212, step 1). Off by "
-            "default — an additive surface; the existing mcp-daemon path is "
-            "unaffected either way. Only an MCP "
-            "client token authenticates /mcp, and such a token outlives every "
-            "write generation, so switching the endpoint decides whether those "
-            "tokens authenticate at all: no config write sets it (not the API, "
-            "the ops op or `--local`); edit the gateway `.env` on its host."
+            "HTTP at /mcp on the gateway. Off by default — an additive "
+            "surface; the existing mcp-daemon path is unaffected either way. "
+            "/mcp authenticates like the HTTP API and forwards every tool to "
+            "it, so it adds no authority; no config write sets the switch "
+            "(not the API, the ops op or `--local`): edit the gateway `.env` "
+            "on its host."
         ),
         json_schema_extra={
             "restart_required": "gateway",

@@ -1,25 +1,17 @@
 exports = ["test_mcp_endpoint.py"]
 
 [debt.env-patch]
-"test_mcp_endpoint.py#patch.dict os.environ" = 1
 "test_plugin_ui.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_schedule_runner.py#monkeypatch.delenv os.environ.MEIVA_SCHEDULE_ID" = 1
 "test_ui_contributions.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
-"test_guarded_tool_admission.py#monkeypatch.setattr gateway.mcp_server.endpoint.build_manager" = 1
 "test_guide.py#monkeypatch.setattr gateway.routers.guide.create_and_launch_agent" = 1
 "test_inventory_router.py#monkeypatch.setattr gateway.cluster.snapshots.read_all_blocking" = 1
 "test_inventory_router.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 3
 "test_mcp_endpoint.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
 "test_mcp_endpoint.py#monkeypatch.setattr base.config.settings.gateway.mcp_endpoint_enabled" = 1
-"test_mcp_endpoint.py#monkeypatch.setattr gateway.agents.creation.create_and_launch_agent" = 1
 "test_mcp_endpoint.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
-"test_mcp_endpoint.py#monkeypatch.setattr gateway.mcp_server.endpoint.roster.list_directory" = 1
-"test_mcp_guarded_creation.py#monkeypatch.setattr gateway.agents.creation.create_and_launch_agent" = 2
-"test_mcp_guarded_creation.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
-"test_mcp_guarded_creation.py#monkeypatch.setattr gateway.agents.creation.spawn_prechecks_blocking" = 1
-"test_mcp_message_source.py#monkeypatch.setattr base.config.settings.gateway.mcp_endpoint_enabled" = 1
 "test_packages.py#monkeypatch.setattr gateway.extensions.packages.create_and_launch_agent" = 1
 "test_pages.py#monkeypatch.setattr base.config.settings.daemon.page_default_ttl_seconds" = 1
 "test_pages.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 1

@@ -86,7 +86,6 @@ Emit sites and consumers: see the comments at each emit point.
 | `env_unauthorized_write` | out-of-band .env modification detected (no official write recorded) | anomaly | — | events |
 | `computer_session_start` | computer-use task session opened (first action with a task_id) | business | task_id, first_tool, first_action_at | events |
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
-| `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 | `lifecycle_request` | a CLI process asked meiva-root to change unit state — the verb, the units and the caller block (pid/argv/host/operation), recorded when the request is sent rather than when it succeeds, so an operator stop or start is attributable after the fact | business | verb, units, operation_id, caller | events |
 
 ## 3. Telemetry events (category=telemetry)

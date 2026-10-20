@@ -195,12 +195,12 @@ evaluator access, recovery and cost scope from effectiveness claims.
 
 The gateway `/mcp` endpoint exposes the cluster's control plane as an MCP server over
 Streamable HTTP, so a coding agent can run the fleet: start agents, message them,
-read what they did, stop them. Create a client token and register it once
+read what they did, stop them. Register the cluster once
 (setup: [`docs/conventions/extensions/mcp-client-access.md`](conventions/extensions/mcp-client-access.md)) —
 
 ```bash
 claude mcp add --transport http meiva http://<gateway-host>/mcp \
-  --header "Authorization: Bearer <mcp-client-token>"
+  --header "Authorization: Bearer <cluster-secret>"
 ```
 
 (Codex: `codex mcp add`, same shape) — and then just ask: *"spawn an Meiva agent to watch the CI queue and ping me when
@@ -208,7 +208,7 @@ it goes red"*, *"what is agent 42 doing?"*, *"tell it to skip the flaky test"*.
 
 | Tool | Does |
 |---|---|
-| `spawn_agent` | start an agent on a goal; returns its id immediately |
+| `spawn_agent_guarded_v1` | start an agent on a goal; returns its id immediately |
 | `send_message` | send a running agent an instruction, context, or an answer |
 | `list_agents` | every agent with its live status, optionally filtered |
 | `get_agent` | one agent's full state, including questions it is blocked on |
@@ -217,8 +217,8 @@ it goes red"*, *"what is agent 42 doing?"*, *"tell it to skip the flaky test"*.
 | `cluster_status` | is the cluster up, and is it paused for maintenance |
 
 Which cluster it drives is not a flag: the endpoint belongs to the gateway it is
-served from, and every call authenticates with that cluster's own client token.
-The tools are thin handlers over the same functions the web UI's gateway routes call.
+served from, and every call authenticates with that cluster's own credential.
+Each tool forwards to the same HTTP API route the web UI calls.
 
 > The rest of the `meiva mcp` family runs the other direction: `install` / `add` /
 > `list` configure MCP servers Meiva's *own* agents call out to.

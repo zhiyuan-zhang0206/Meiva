@@ -6,7 +6,9 @@ The gateway exposes the cluster control plane as a standard MCP server over
 client — Claude Code, Codex, anything speaking the protocol — drives the fleet
 through it with seven control tools
 (list_agents / get_agent / spawn_agent_guarded_v1 / send_message / get_messages /
-terminate_agent / cluster_status).
+terminate_agent / cluster_status). Each tool forwards to the matching HTTP API
+route, so `/mcp` has no credentials, scopes or audit of its own: it accepts what the
+API accepts.
 
 [Streamable HTTP]: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http
 
@@ -21,75 +23,47 @@ MEIVA_MCP_ENDPOINT_ENABLED=true
 # then restart the gateway: the flag is read at gateway start
 ```
 
-The flag decides whether MCP client tokens authenticate at all, and those
-tokens outlive every write generation, so no config write sets it: `meiva config
-set` (API or `--local`) refuses it and the settings panel shows it read-only,
-as for `MEIVA_ALERTS_WEBHOOK_TOKEN`. Edit the gateway `.env` on its host, after
-the rollout that ships the endpoint code.
+No config write sets the flag: `meiva config set` (API or `--local`) refuses it and
+the settings panel shows it read-only. Edit the gateway `.env` on its host.
 
 ## Connect a client
 
-Create one credential per external client through the admin API, with the
-human cluster secret (or from a browser session logged in with it). A client
-token outlives every write generation, so a machine API token or a
-runner-minted session gets 403 here. Choose `read` for inspection only, or
-`write` when the client must spawn, message, or terminate agents. Creation is
-keyed: send a fresh `Idempotency-Key` (1-128 characters) with
-`Idempotency-Scope: principal-v1`, and reuse that key only to retry the same
-request after an ambiguous response. The plaintext token appears only in the
-first response; a replay of the same key returns the original metadata with
-`replayed: true` and `token: null`, because the gateway stores only the SHA-256
-hash. If the first response was lost, revoke that client and create a new one
-under a new key and an unused name:
-
-```bash
-curl -s http://<gateway-host>/api/keyed/v1/mcp/clients \
-  -H "Authorization: Bearer <cluster-secret>" \
-  -H "Idempotency-Key: $(uuidgen)" \
-  -H "Idempotency-Scope: principal-v1" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"claude","scope":"write"}'
-```
-
-Configure the client with the returned `token`, not the cluster secret:
+Present the same credential the API takes: the cluster secret as a bearer. On a
+cluster running `gateway.human_auth = trusted_network` a client on the trusted
+network needs no credential at all (its `Host` must be one the gateway trusts).
 
 ```bash
 claude mcp add --transport http meiva http://<gateway-host>/mcp \
-  --header "Authorization: Bearer <mcp-client-token>"
+  --header "Authorization: Bearer <cluster-secret>"
 ```
 
 Codex takes the same shape (`codex mcp add`). `<gateway-host>` is the address
-the cluster advertises (`MEIVA_GATEWAY_URL`). `/mcp` requires a client token; a session cookie or cluster-secret Bearer is rejected.
-
-List client metadata with `GET /api/mcp/clients`. Revoke one immediately with
-`POST /api/mcp/clients/<id>/revoke`; a revoked token receives 401 thereafter.
+the cluster advertises (`MEIVA_GATEWAY_URL`). A client cannot be revoked or
+limited to read-only on its own: it is the cluster administrator, exactly as for
+the API. To cut one off, rotate the secret it holds.
 
 ## Verify
 
 ```bash
 curl -s http://<gateway-host>/mcp \
-  -H "Authorization: Bearer <mcp-client-token>" \
+  -H "Authorization: Bearer <cluster-secret>" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 A healthy endpoint answers an SSE stream whose single `data:` frame carries the
-seven tools. A cluster with the flag off gets 404; a missing, invalid, or
-revoked client token gets 401.
+seven tools. A cluster with the flag off gets 404; a missing or invalid
+credential gets 401 (the API's error envelope).
 
 ## Notes
 
 - **Stateless**: each POST is one self-contained JSON-RPC message; the endpoint
   keeps no server-side session state, so clients must not rely on
   `Mcp-Session-Id` resumability.
-- **Audited**: every `tools/call` lands in the unified event stream as an
-  `mcp_tool_call` audit event with the client id/name and outcome. Argument
-  values are never recorded — only each argument's JSON type, character size,
-  and SHA-256. `agent_id` is NULL because the client identity is service-level.
+- **Errors**: a failed call returns a tool error whose text is the API's error
+  envelope (`code`, `status`, `detail`).
 
 Agent creation uses `spawn_agent_guarded_v1` with a required 1–128 character
 `idempotency_key`. Retain the same key and arguments to recover the original
-birth after response loss. The former `spawn_agent` tool has been removed
-without a compatibility alias; do not substitute another creation entry for
-the same intent. See the endpoint owner for retained acceptance semantics.
+birth after response loss. See the endpoint owner for the tool-to-route map.

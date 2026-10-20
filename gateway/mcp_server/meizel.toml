@@ -1,7 +1,1 @@
-exports = ["clients.py", "creation_receipts.py", "endpoint.py", "router.py"]
-
-[uses]
-"creation_receipts.py" = ["clients.py"]
-"endpoint.py" = ["clients.py"]
-"router.py" = ["clients.py", "creation_receipts.py"]
-"tests" = ["endpoint.py"]
+exports = ["endpoint.py"]

@@ -8,6 +8,13 @@ and the matching GitHub Releases.
 ## [Unreleased]
 
 ### Changed
+- The gateway `/mcp` endpoint is a thin forwarder onto the HTTP API (user ruling 2026-10-20):
+  it authenticates like any API route (cluster bearer, session or `trusted_network`), each
+  tool is one in-process request to its API route, and an API error becomes the tool error.
+  MCP client tokens, their `read`/`write` scopes, the `/api/mcp/clients` routes, the
+  `mcp_clients` tables and the `mcp_tool_call` audit event are removed; `get_messages` returns
+  the API's raw message window
+  ([decision](docs/decisions/data/security/2026-10-20-mcp-is-a-thin-api-forwarder.md)).
 - A notification is only a request that needs the user's reply (user ruling 2026-10-19).
   `core.turn_finished` and `meiva_fleet.task_closed` are gone as categories and producers:
   the agent host logs a finished turn and the task registry logs a closed task, both
