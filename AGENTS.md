@@ -24,7 +24,9 @@ Follow the user's authorized scope.
   unrelated suites.
 - Development is separate from a running deployment. Use an isolated checkout,
   its own real virtualenv and a temporary `MEIVA_HOME` for development tools that
-  import application code. Pytest supplies its own isolation.
+  import application code. Pytest supplies its own isolation. A preview of a
+  frontend or gateway change runs on a cluster of its own (own home, data plane,
+  gateway and frontend); it never uses a production home, database or gateway.
 - Merged migrations are immutable. Fix forward, synchronize `db/schema.sql`,
   and use expand-contract for lossy changes. See the [migration guide](db/docs/migrations.md).
 
