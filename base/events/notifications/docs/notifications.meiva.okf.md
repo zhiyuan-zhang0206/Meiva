@@ -102,6 +102,10 @@ default; `--now` and `--tz` place its end and its day/hour buckets) through this
 policy. It reads the producers rather than `notification_events` because the log
 holds only what was delivered — a switched-off category has no rows to count, and
 a switch cannot be simulated from the rows its own policy dropped.
+The replay lives in `audit.py` and the gateway serves it as
+`GET /api/notifications/audit` (`days`, `category`, `tz`, `now`, repeated `simulate`,
+`explain`; `tz` defaults to the cluster clock's zone); the CLI only renders the
+returned report.
 
 - `core.needs_input` comes from `agent_notices` rows that need a response. One
   row is one candidate, or two when the agent added a question after posting: the

@@ -14,14 +14,17 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from base import telemetry
-from base.agents.context.clients import DatabaseFactory
 from base.telemetry import EventPipeline
 
 # One child's budget. task #3696 exception inventory: a self-imposed guard on a
 # single check child — a healthy top-level import set takes seconds, so a child
 # still running at 90s is wedged and must not park the sweep behind it.
 _VERIFY_CHILD_TIMEOUT_S = 90.0
+
+_API_TIMEOUT_S = 15.0
 
 
 # The child's last stdout line -> the RED detail (prefix added to the line's remainder).
@@ -71,16 +74,40 @@ def check_script(script: str) -> str | None:
     return f"tool-error:{tail or f'rc={proc.returncode}'}"
 
 
-def _read_schedule_rows(*, database_factory: DatabaseFactory) -> list[tuple[int, str, str]]:
-    """All schedules as (id, name, script) — stopped rows included.
+_Get = Callable[..., httpx.Response]
 
-    A direct read (not `/api/schedules`) so the check works while the gateway is
-    down: the DB is the authority for what a runner materializes.
-    """
 
-    with database_factory().connect(autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute("SELECT id, name, script FROM schedules ORDER BY id")
-        return [(row[0], row[1], row[2] or "") for row in cur.fetchall()]
+# meiva:note
+# The gateway's API base, its auth headers and the cluster-internal GET.
+def _gateway_dial() -> tuple[str, dict[str, str], _Get]:
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
+    from base.host.net.http_dial import get as dial_get
+
+    access = gateway_access_from_settings()  # ambient: C
+    return gateway_api_base(access.gateway_url), gateway_auth_headers(access), dial_get
+
+
+# meiva:note
+# All schedules as (id, name, script) — stopped rows included, ordered by id.
+#
+# Read through the gateway: the list route names every row, the per-id route carries
+# the script. The sweep needs a reachable gateway; a refused or failed call is the
+# tool-error path.
+def _read_schedule_rows(
+    dial: Callable[[], tuple[str, dict[str, str], _Get]] = _gateway_dial,
+) -> list[tuple[int, str, str]]:
+    base, headers, get = dial()
+    schedules = f"{base}/api/schedules"
+    listing = get(schedules, timeout=_API_TIMEOUT_S, headers=headers)
+    listing.raise_for_status()
+    rows: list[tuple[int, str, str]] = []
+    for summary in sorted(listing.json(), key=lambda row: row["id"]):
+        resp = get(f"{schedules}/{summary['id']}", timeout=_API_TIMEOUT_S, headers=headers)
+        resp.raise_for_status()
+        detail = resp.json()
+        rows.append((detail["id"], detail["name"], detail["script"] or ""))
+    return rows
 
 
 def _read_rows_file(path: str) -> list[tuple[int, str, str]]:
@@ -136,8 +163,9 @@ def _verify_sweep(*, notify: bool, ports: VerifyPorts) -> int:
     return rc
 
 
+# meiva:note
+# `--check-file PATH` — dry-import one script file (no gateway, no signal).
 def _verify_file(path: str) -> int:
-    """`--check-file PATH` — dry-import one script file (no DB, no signal)."""
     try:
         source = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -148,43 +176,42 @@ def _verify_file(path: str) -> int:
     return 0 if missing is None else 1
 
 
+# meiva:note
+# `meiva schedules verify [--check-file PATH | --rows-file PATH] [--no-notify]` — the dry-import and call-signature sweep.
+#
+# Read-only one-shot check of every in-store script (stopped rows included), read
+# through the gateway, which must be reachable:
+# py_compile, a top-level-imports-only execution in this checkout's runner
+# venv, a static read of every name the script uses (any scope) against the
+# names it binds, and a `inspect.signature().bind` of every call the script
+# makes into repo code — nothing is started, stopped, or written. Catches the
+# drift classes where a repo module move (task #4800: #2678, the 2026-09-25 R3
+# Wave-2 regression), a rename leaving a top-level statement reading a name
+# nothing imports (2026-10-01 audit: `base.__file__` after `shared` -> `base`),
+# or a changed signature (2026-10-03: `catch_up()` gained a required `db`)
+# leaves a DB-embedded script stale and the next (re)start crash-loops.
+# Line contract: one `RESULT ts=... checked=... green=... red=...
+# rc=...` line, one `RED id=... name=... missing=...` per red, `TOOL-ERROR
+# ...` on rc=2; exit codes 0 all clean / 1 red / 2 tool error. `--check-file`
+# checks one file off-DB (the falsification hook); `--rows-file` sweeps a JSON
+# dump of the table (`[[id, name, script], ...]`) instead of reading it, so
+# this checkout never dials the gateway, and never signals (the signal
+# reports the live table); otherwise a non-clean sweep emits a
+# `schedule_verify_failed` event unless `--no-notify`.
 def cmd_schedules_verify(
     *,
     check_file: str | None = None,
     rows_file: str | None = None,
     notify: bool = True,
     ports: VerifyPorts | None = None,
-    database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
 ) -> int:
-    """`meiva schedules verify [--check-file PATH | --rows-file PATH] [--no-notify]` — the dry-import and call-signature sweep.
-
-    Read-only one-shot check of every in-store script (stopped rows included):
-    py_compile, a top-level-imports-only execution in this checkout's runner
-    venv, a static read of every name the script uses (any scope) against the
-    names it binds, and a `inspect.signature().bind` of every call the script
-    makes into repo code — nothing is started, stopped, or written. Catches the
-    drift classes where a repo module move (task #4800: #2678, the 2026-09-25 R3
-    Wave-2 regression), a rename leaving a top-level statement reading a name
-    nothing imports (2026-10-01 audit: `base.__file__` after `shared` -> `base`),
-    or a changed signature (2026-10-03: `catch_up()` gained a required `db`)
-    leaves a DB-embedded script stale and the next (re)start crash-loops.
-    Line contract: one `RESULT ts=... checked=... green=... red=...
-    rc=...` line, one `RED id=... name=... missing=...` per red, `TOOL-ERROR
-    ...` on rc=2; exit codes 0 all clean / 1 red / 2 tool error. `--check-file`
-    checks one file off-DB (the falsification hook); `--rows-file` sweeps a JSON
-    dump of the table (`[[id, name, script], ...]`) instead of reading it, so
-    this checkout never dials the database, and never signals (the signal
-    reports the live table); otherwise a non-clean sweep emits a
-    `schedule_verify_failed` event unless `--no-notify`."""
     if check_file is not None:
         return _verify_file(check_file)
     if rows_file is not None:
         notify = False
     ports = ports or VerifyPorts(
-        read_rows=partial(_read_rows_file, rows_file)
-        if rows_file
-        else partial(_read_schedule_rows, database_factory=database_factory),
+        read_rows=partial(_read_rows_file, rows_file) if rows_file else _read_schedule_rows,
         check_script=check_script,
         report=partial(_report_verify, producer=producer),
     )
@@ -229,6 +256,5 @@ def h_schedules_verify(args: argparse.Namespace) -> int:
         check_file=args.check_file,
         rows_file=args.rows_file,
         notify=not args.no_notify,
-        database_factory=args.database_factory,
         producer=args.producer,
     )
