@@ -121,8 +121,11 @@ async def _collect(
         assert isinstance(raw_events, list), f"events is not an array: {payload!r}"
         bucket = seen.by_channel.setdefault(channel, [])
         for event in cast(list[Any], raw_events):
-            if isinstance(event, dict) and event.get("role") != "heartbeat":
-                bucket.append(cast(dict[str, Any], event))
+            if not isinstance(event, dict):
+                continue
+            row = cast(dict[str, Any], event)
+            if row.get("role") != "heartbeat":
+                bucket.append(row)
 
     async def _publish() -> None:
         await asyncio.sleep(0.05)
