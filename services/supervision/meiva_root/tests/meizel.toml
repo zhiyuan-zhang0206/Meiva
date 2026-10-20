@@ -1,5 +1,6 @@
 [uses]
 "test_meiva_root_daemon.py" = ["child_unit.py"]
+"test_meiva_root_left_behind.py" = ["child_unit.py"]
 "test_meiva_root_health.py" = ["child_unit.py"]
 "test_meiva_root_intent.py" = ["child_unit.py"]
 "test_meiva_root_stop_window.py" = ["child_unit.py"]

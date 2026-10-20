@@ -151,6 +151,10 @@ class UnitHealth:
     last_detail: str = ""
     """Detail string of the last probe verdict."""
 
+    # meiva:note
+    # Whether the last report was "answers its probe, owned by no generation here".
+    unowned_alive: bool = False
+
 
 # Explicit stop is expected; every other deferral remains visible as a warning.
 _HELD_DOWN = "held down"
@@ -445,6 +449,7 @@ class HealthMonitor:
                 "next_restart_in_s": self._restart_due_in_s(state),
                 "last_verdict": state.last_verdict,
                 "last_detail": state.last_detail,
+                "unowned_alive": state.unowned_alive,
             }
         return units
 
@@ -493,6 +498,7 @@ class HealthMonitor:
         state.last_detail = result.detail
 
         if result.alive:
+            self._note_alive_ownership(unit_id, state)
             self._reset(state)
             _log.debug("[health] unit %s: alive (%s)", unit_id, result.detail)
             return
@@ -645,6 +651,39 @@ class HealthMonitor:
             unit=unit_id,
             detail=detail,
         )
+
+    # meiva:note
+    # An alive verdict says "this home's daemon of this unit answers" — never "this
+    # root owns it". A leftover of a root that exited without stopping its tree
+    # answers exactly the same way, which is how 11 units read "state stopped /
+    # probe alive" for a day with every monitor green (task #5474). The event is
+    # the only signal for a process no spawn record identifies; a recorded one is
+    # stopped by the supervisor before it spawns (supervisor._clear_left_behind).
+    def _note_alive_ownership(self, unit_id: str, state: UnitHealth) -> None:
+        unowned = state.generation is None
+        if unowned == state.unowned_alive:
+            return
+        state.unowned_alive = unowned
+        from base.log import logger
+
+        try:
+            if unowned:
+                logger.warning(
+                    "unit {unit}: readiness probe answers but this root owns no generation — "
+                    "the answering process is unmanaged and holds this unit's port",
+                    event="root_unit_unowned_alive",
+                    unit=unit_id,
+                    verdict=state.last_verdict,
+                    detail=state.last_detail,
+                )
+            else:
+                logger.info(
+                    "unit {unit}: the answering process is this root's generation again",
+                    event="root_unit_owned_alive",
+                    unit=unit_id,
+                )
+        except Exception:
+            _log.exception("unit %s: ownership event fan-out failed", unit_id)
 
     def _deferral(self, unit_id: str) -> str | None:
         """Probe-only units are observation targets, with no restart authority."""

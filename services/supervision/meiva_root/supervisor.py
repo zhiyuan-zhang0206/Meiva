@@ -29,7 +29,7 @@ from base.native_process.root_control.ipc import (
     error_response,
     ok_response,
 )
-from services.supervision.meiva_root import intent_store
+from services.supervision.meiva_root import intent_store, unit_ledger
 from services.supervision.meiva_root.failure_state import UnitFailureFacts
 from services.supervision.meiva_root.intent_store import (
     CallerFacts,
@@ -40,12 +40,14 @@ from services.supervision.meiva_root.intent_store import (
     UnitIntent,
     merge_record_for_boot,
 )
+from services.supervision.meiva_root.left_behind import LeftBehindMixin
 from services.supervision.meiva_root.manifest import (
     RestartPolicy,
     UnitRegistry,
     UnknownUnitError,
 )
 from services.supervision.meiva_root.stopping import StoppingMixin, SupervisorConfig
+from services.supervision.meiva_root.unit_ledger import GenerationRecord
 from services.supervision.meiva_root.unit_records import Generation, UnitRuntime
 
 _log = logging.getLogger(__name__)
@@ -99,7 +101,7 @@ def _caller_facts(raw: object) -> CallerFacts | None:
 type ChildSpawn = Callable[..., Awaitable[asyncio.subprocess.Process]]
 
 
-class Supervisor(StoppingMixin):
+class Supervisor(LeftBehindMixin, StoppingMixin):
     """Owns the lifecycle of every unit in one registry.
 
     All mutating verbs serialize on one lock, so overlapping commands are
@@ -599,6 +601,8 @@ class Supervisor(StoppingMixin):
         """
         if self._is_active(runtime):
             return
+        if not await self._clear_left_behind(runtime):
+            return
         try:
             await self._spawn(runtime)
         except OSError as exc:
@@ -654,6 +658,22 @@ class Supervisor(StoppingMixin):
         runtime.generation = generation
         runtime.state = UnitState.RUNNING
         runtime.last_error = None
+        # meiva:note
+        # The record is what lets a later root name this process after this one is
+        # gone; it is written before the watch starts so no exit path can leave a
+        # live process nobody recorded.
+        # meiva:link services/supervision/meiva_root/docs/meiva_root.meiva.okf.md
+        if identity is not None:
+            unit_ledger.write(
+                self._run_dir,
+                manifest.id,
+                GenerationRecord(
+                    identity=identity,
+                    generation=generation.seq,
+                    manifest_digest=manifest.digest(),
+                    started_at=time(),
+                ),
+            )
         watch = asyncio.create_task(self._watch(runtime, generation))
         self._retain_watch(watch, generation)
         runtime.watch_task = watch
@@ -673,6 +693,7 @@ class Supervisor(StoppingMixin):
             runtime.generation = None
             if not generation.closing:
                 runtime.last_error = f"unexpected exit: {runtime.last_exit}"
+            unit_ledger.clear(self._run_dir, runtime.manifest.id, generation=generation.seq)
         generation.exited.set()
 
     @staticmethod

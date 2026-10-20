@@ -64,6 +64,30 @@ it) takes the same default at its admitted start: `running`, source `selection`.
 Residue from an older scheme is discarded, never consulted; a fleet update's
 full stop/start leaves no mixed state.
 
+## Left-behind generations
+
+Root records the native birth of every unit process it spawns
+(`units/<unit>.json`: pid, start time, generation, manifest digest) and clears the
+record when that process exits. A record outlives a root that leaves its tree
+running — a crash, or the code-version gate's hard exit from a pool worker
+thread, which cannot stop an asynchronous tree. The next root reads it before it
+starts the same unit: a recorded birth that no longer lives is dropped, and a
+live one is that unit's previous generation, still holding its port, socket or
+instance lock. Root stops it (TERM inside the unit's stop window, then KILL) and
+only then spawns its own, emitting `root_unit_left_behind_reclaimed`; a leftover
+that survives both signals leaves the unit stopped with
+`root_unit_left_behind_stuck` rather than starting a second process onto the
+same port. Nothing is adopted: a leftover runs the code it started with, and
+adopting it across a release is the silent drift this record exists to end
+(task #5474).
+
+A live process that **no** record describes is never signalled — nothing
+distinguishes it from another home's daemon — so the health monitor reports it
+instead: a readiness answer with no generation of this root's own emits
+`root_unit_unowned_alive` once per episode (and `root_unit_owned_alive` when a
+generation answers again). Before this, that state read "unit stopped / probe
+alive" indefinitely with every monitor green.
+
 ## Failure-state signals
 
 How a dying unit is retried — the backoff ladder, the circuit breaker and the

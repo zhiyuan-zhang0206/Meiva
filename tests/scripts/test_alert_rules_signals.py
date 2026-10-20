@@ -89,6 +89,12 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-root-unit-stop-escalated": Signal(
         "root_unit_stop_escalated", "meiva-ops", "0m", "error"
     ),
+    "meiva-ops-root-unit-unowned-alive": Signal(
+        "root_unit_unowned_alive", "meiva-ops", "0m", "error"
+    ),
+    "meiva-ops-root-unit-left-behind-stuck": Signal(
+        "root_unit_left_behind_stuck", "meiva-ops", "0m", "error"
+    ),
     "meiva-ops-root-diagnostic-venv": Signal("root_diagnostic", "meiva-ops", "0m", "warning", 1),
     "meiva-ops-root-diagnostic-brew-pin": Signal(
         "root_diagnostic", "meiva-ops", "0m", "warning", 1
