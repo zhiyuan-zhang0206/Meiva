@@ -25,14 +25,31 @@ let intentPath: string | null = null;
 let longestTask = 0;
 let maxQueueMs = 0;
 let startedResources = 0;
+let resourceNames: string[] = [];
+let frames = 0;
+let frameLoop = 0;
 let observer: PerformanceObserver | null = null;
 let resources: PerformanceObserver | null = null;
 let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+function countFrames(): void {
+  frames += 1;
+  frameLoop = requestAnimationFrame(countFrames);
+}
+
+function stopFrames(): void {
+  if (frameLoop !== 0) cancelAnimationFrame(frameLoop);
+  frameLoop = 0;
+}
 
 function startWatching(): void {
   longestTask = 0;
   maxQueueMs = 0;
   startedResources = 0;
+  resourceNames = [];
+  frames = 0;
+  stopFrames();
+  frameLoop = requestAnimationFrame(countFrames);
   if (typeof PerformanceObserver === "undefined") return;
   try {
     if (observer === null) {
@@ -49,6 +66,9 @@ function startWatching(): void {
         if (intentAt === null) return;
         for (const entry of list.getEntries() as PerformanceResourceTiming[]) {
           startedResources += 1;
+          if (resourceNames.length < 4) {
+            resourceNames.push(entry.name.split("/").pop() ?? entry.name);
+          }
           const queued = entry.requestStart - entry.startTime;
           if (queued > maxQueueMs) maxQueueMs = queued;
         }
@@ -77,10 +97,20 @@ export function markNavIntent(href?: string): void {
     fallbackTimer = null;
     if (window.location.pathname === target) return;
     const elapsed = intentAt === null ? 0 : performance.now() - intentAt;
+    stopFrames();
+    const page = target.replace(/^\//, "") || "home";
     track("nav-timing", {
-      page: target.replace(/^\//, "") || "home",
+      page,
       key: "fallback",
-      value: `c=${Math.round(elapsed)}|n=${startedResources}|q=${Math.round(maxQueueMs)}|f=1`,
+      value:
+        `c=${Math.round(elapsed)}|n=${startedResources}|q=${Math.round(maxQueueMs)}|f=1` +
+        `|fr=${frames}|v=${document.visibilityState === "visible" ? 1 : 0}`,
+      dedupe: false,
+    });
+    track("nav-timing", {
+      page,
+      key: "res",
+      value: resourceNames.join(","),
       dedupe: false,
     });
     window.location.assign(target);
@@ -103,6 +133,7 @@ export function useNavTimingReport(): void {
     previous.current = pathname;
     if (intentAt === null) return;
     clearFallback();
+    stopFrames();
     const commit = performance.now() - intentAt;
     requestAnimationFrame(() => {
       if (intentAt === null) return;
