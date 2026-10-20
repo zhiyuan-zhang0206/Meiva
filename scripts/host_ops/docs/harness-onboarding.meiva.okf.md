@@ -60,6 +60,15 @@ of being resolved silently.
 
 ## Install bookkeeping
 
+An npm install asks `npm root -g` where the global packages would land and whether this
+user can write there. A distribution node on Linux answers `/usr/lib/node_modules`, which
+needs root: rather than dying on `mkdir`, the command falls back to
+`--prefix "$HOME/.local"`. A user-local install is then only useful where the machine's
+own processes look, so the tool checks `command -v <cli>` under the agent search path
+(`transport.AGENT_PATH`, no profile, no `~/.local/bin`) and links the binary into
+`/usr/local/bin` when that directory is writable; when neither works it prints the exact
+`sudo ln -sf` line instead of an npm stack.
+
 Every `install` appends one line to the receiving machine's
 `~/.meiva/onboarding/install-log.jsonl`: what version was asked for, what
 arrived, and by which method. The vendor installers are pinned in `catalog.py`

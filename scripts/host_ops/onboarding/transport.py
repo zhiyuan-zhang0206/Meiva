@@ -18,6 +18,13 @@ PATH_PREAMBLE = (
     '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"'
 )
 
+# meiva:note
+# The search path a service or ssh command actually gets: no profile runs, so the
+# system directories are the whole list. Install verification uses it, because a
+# binary only a login shell finds is missing for the agent that needs it.
+# meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+AGENT_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
 SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
 
 
@@ -58,8 +65,16 @@ class Host:
     def __str__(self) -> str:
         return self.name
 
-    def run(self, command: str, *, stdin: bytes | None = None, timeout: float = 300.0) -> Result:
-        script = f"{PATH_PREAMBLE}\n{command}\n"
+    def run(
+        self,
+        command: str,
+        *,
+        stdin: bytes | None = None,
+        timeout: float = 300.0,
+        agent_path: bool = False,
+    ) -> Result:
+        preamble = f'export PATH="{AGENT_PATH}"' if agent_path else PATH_PREAMBLE
+        script = f"{preamble}\n{command}\n"
         if self.is_local:
             argv = ["bash", "-c", script]
             payload = stdin

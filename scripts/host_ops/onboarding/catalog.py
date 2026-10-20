@@ -163,10 +163,16 @@ def spec(cli: str) -> HarnessSpec:
         raise ValueError(f"unknown harness {cli!r}; choose one of: {legal}") from None
 
 
-def install_command(harness: HarnessSpec, version: str | None = None) -> str:
+def install_command(harness: HarnessSpec, version: str | None = None, *, prefix: str = "") -> str:
+    # meiva:note
+    # The shell command that installs `harness` at `version`. `prefix` redirects an npm
+    # install away from a global root this user cannot write (a system node without sudo);
+    # script installers own their own destination.
+    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
     wanted = harness.pinned_version if version is None else version
     if harness.installer.kind == "npm":
-        return f"npm install -g {harness.installer.target}@{wanted}"
+        where = f" --prefix {prefix}" if prefix else ""
+        return f"npm install -g{where} {harness.installer.target}@{wanted}"
     if not harness.installer.pin_template:
         return f"curl -fsSL {harness.installer.target} | bash"
     args = harness.installer.pin_template.format(version=wanted)
