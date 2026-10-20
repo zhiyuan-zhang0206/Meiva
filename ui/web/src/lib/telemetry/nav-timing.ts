@@ -10,6 +10,12 @@
 // one, so after NAV_FALLBACK_MS without a commit this performs a real location
 // change: a full load costs ~1.5 s on the machine that reported the stall, which
 // bounds the worst case instead of leaving it unbounded.
+//
+// The floor is 2000 ms because click-to-commit measures p50 69 / p95 84 / p99 106
+// unthrottled (30 navigations, preview build, ubuntu host, 2026-10-20), p99 332 at
+// 4x CPU throttle and 655 at 8x: 2000 is ~19x the unthrottled p99 and ~1.8x the
+// slowest healthy commit measured, so a slow client is not mis-fired. The user can
+// override it with behavior.navFallbackMs.
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 
 import { usePathname } from "next/navigation";
@@ -18,7 +24,8 @@ import { useEffect, useRef } from "react";
 import { track } from "./telemetry";
 
 const SETTLE_MS = 400;
-const NAV_FALLBACK_MS = 1500;
+const NAV_FALLBACK_MS = 2000;
+let fallbackMs = NAV_FALLBACK_MS;
 
 let intentAt: number | null = null;
 let intentPath: string | null = null;
@@ -85,6 +92,10 @@ function clearFallback(): void {
   fallbackTimer = null;
 }
 
+export function setNavFallbackMs(ms: number): void {
+  if (Number.isFinite(ms) && ms > 0) fallbackMs = ms;
+}
+
 export function markNavIntent(href?: string): void {
   if (typeof window === "undefined") return;
   intentAt = performance.now();
@@ -114,7 +125,7 @@ export function markNavIntent(href?: string): void {
       dedupe: false,
     });
     window.location.assign(target);
-  }, NAV_FALLBACK_MS);
+  }, fallbackMs);
 }
 
 export function formatNavTiming(commitMs: number, paintMs: number, taskMs: number): string {
