@@ -361,6 +361,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/system"): RouteContract(),
     ("GET", "/api/system/all"): RouteContract(),
     ("GET", "/api/tasks"): RouteContract(),
+    ("GET", "/api/tasks/{task_id}"): RouteContract(
+        note="read-only single task row with its results text — the hover card's read; 404 when no such task",
+    ),
     ("PATCH", "/api/tasks/{task_id}"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="task patch requires a key; immutable result shares the notification transaction",

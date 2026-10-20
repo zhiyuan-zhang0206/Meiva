@@ -11,7 +11,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 
 import { PRIORITY_BG, PRIORITY_RANK } from "@/lib/notifications/notices";
-import type { TaskRow, TaskStatus } from "@/lib/contracts/types";
+import type { TaskGraphRow, TaskStatus } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { ChatMarkdown } from "@/components/content/markdown";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
@@ -34,7 +34,7 @@ export function TaskKanban({
   onSelectAgent,
   routeCarried,
 }: {
-  tasks: readonly TaskRow[];
+  tasks: readonly TaskGraphRow[];
   statusFill: Record<string, string>;
   statusLabel: Record<string, string>;
   selectedTaskId: number | null;
@@ -138,7 +138,7 @@ function KanbanCard({
   selectedAgentId,
   router,
 }: {
-  task: TaskRow;
+  task: TaskGraphRow;
   statusFill: Record<string, string>;
   statusLabel: Record<string, string>;
   selected: boolean;

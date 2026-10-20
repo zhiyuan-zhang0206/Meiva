@@ -12,7 +12,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { api } from "../transport/api";
-import type { TaskFields, TaskListResponse, TaskRow, TaskSummaryRow } from "../contracts/types";
+import type {
+  TaskFields,
+  TaskGraphRow,
+  TaskListResponse,
+  TaskRow,
+  TaskSummaryRow,
+} from "../contracts/types";
 
 const EMPTY_TASKS: TaskListResponse = { tasks: [] };
 
@@ -27,27 +33,34 @@ export interface TasksResult<T extends TaskSummaryRow = TaskSummaryRow> {
 export type TaskWindow = "24h" | "7d" | "30d" | "all";
 
 export function useTasks(window?: TaskWindow, fields?: "full"): TasksResult<TaskRow>;
+export function useTasks(window: TaskWindow, fields: "graph"): TasksResult<TaskGraphRow>;
 export function useTasks(window: TaskWindow, fields: "summary"): TasksResult;
 export function useTasks(
   window: TaskWindow = "all",
   fields: TaskFields = "full",
 ): TasksResult {
   const { data, isError, isLoading } = useQuery({
-    // Projection and window join the key so neither can reuse the other's
-    // rows. The SSE fold owner invalidates ["tasks"] which prefix-matches all.
+    // meiva:note
+    // Projection and window join the key so neither can reuse the other's rows.
+    // The SSE fold owner invalidates ["tasks"] which prefix-matches all.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
     queryKey: ["tasks", fields, window],
     queryFn: () => api.getTasks({ window, fields }),
     retry: false,
-    // Slow reconciliation poll beneath the SSE invalidation below — a CONSTANT
+    // meiva:note
+    // Slow reconciliation poll beneath the SSE invalidation below - a CONSTANT
     // interval (not success-gated), so a failed poll keeps retrying and the board
     // self-heals instead of freezing when SSE is also down.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
     refetchInterval: 30_000,
   });
 
   const result = useMemo(() => {
+    // meiva:note
     // Stale-while-error: once we have data, keep serving it even if the latest
     // poll failed (error carries the failure so the view can flag it). Only fall
     // back to the empty list when there is nothing loaded yet.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
     if (data) {
       return { tasks: data.tasks, loading: false, error: isError };
     }

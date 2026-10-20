@@ -33,7 +33,13 @@ from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
 from gateway.routers.receipts.task import existing_task_receipt, save_task_receipt
-from gateway.schemas.tasks import TaskListResponse, TaskRow, TaskSummaryRow, TaskUpdateRequest
+from gateway.schemas.tasks import (
+    TaskGraphRow,
+    TaskListResponse,
+    TaskRow,
+    TaskSummaryRow,
+    TaskUpdateRequest,
+)
 from ops import lifecycle as _ops
 
 router = APIRouter()
@@ -55,6 +61,11 @@ _TASK_COLS = (
     "t.id, t.parent_id, t.title, t.description, t.results, t.status, t.owner, "
     "t.created_by, t.created_at, t.updated_at, "
     "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+)
+
+_TASK_GRAPH_COLS = (
+    "t.id, t.parent_id, t.title, t.description, t.status, t.owner, t.created_by, t.created_at, "
+    "t.updated_at, t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
 )
 
 _TASK_SUMMARY_COLS = (
@@ -79,12 +90,39 @@ def _row_to_task(
 ) -> TaskSummaryRow: ...
 
 
+@overload
 def _row_to_task(
     row: tuple[Any, ...],
-    fields: Literal["full", "summary"],
+    fields: Literal["graph"],
     owner_label: str | None = None,
-) -> TaskRow | TaskSummaryRow:
-    """Build a task row from the selected projection plus its owner label."""
+) -> TaskGraphRow: ...
+
+
+# meiva:note
+# Build a task row from the selected projection plus its owner label.
+# meiva:link gateway/routers/docs/routers.meiva.okf.md
+def _row_to_task(
+    row: tuple[Any, ...],
+    fields: Literal["full", "summary", "graph"],
+    owner_label: str | None = None,
+) -> TaskRow | TaskSummaryRow | TaskGraphRow:
+    if fields == "graph":
+        return TaskGraphRow(
+            id=row[0],
+            parent_id=row[1],
+            title=row[2],
+            description=row[3],
+            status=row[4],
+            owner=row[5],
+            owner_label=owner_label,
+            created_by=row[6],
+            created_at=row[7].isoformat(),
+            updated_at=row[8].isoformat(),
+            remind_interval_seconds=row[9],
+            last_reminded_at=row[10].isoformat() if row[10] else None,
+            reminder_count=row[11],
+            priority=row[12],
+        )
     if fields == "summary":
         return TaskSummaryRow(
             id=row[0],
@@ -164,28 +202,46 @@ def _windowed_tasks(
     return result
 
 
+# meiva:note
+# Return one task with its text columns. The Fleet task graph reads the compact
+# `fields=graph` list and fetches this row only for the card it is showing, so
+# the 3 MB of `results` text stays off the list (user report 2026-10-20: the
+# full 24-hour list was 3.1 MB and 85% of it was `results`, which only the
+# hover card renders).
+# meiva:link gateway/routers/docs/routers.meiva.okf.md
+@router.get("/api/tasks/{task_id}", dependencies=[Depends(deny_isolated_result_read)])
+def get_task(request: Request, task_id: int) -> TaskRow:
+    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {_TASK_COLS}, a.label AS owner_label "  # noqa: S608
+            "FROM agent_tasks t LEFT JOIN agents a ON t.owner = a.id WHERE t.id = %s",
+            (task_id,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
+    return _row_to_task(row[:-1], "full", owner_label=row[-1])
+
+
 @router.get("/api/tasks", dependencies=[Depends(deny_isolated_result_read)])
+# meiva:note
+# Return the task registry, newest first. `fields=full` (the default) returns the
+# compatibility projection; `fields=graph` is the Fleet task graph's read (the
+# summary columns plus the description the board renders, without `results`);
+# `fields=summary` returns metadata only. `window` (24h / 7d / 30d / all) narrows
+# the list by last activity, so the graph's default 24-hour view never pulls the
+# full registry; a windowed list still carries every kept task's out-of-window
+# ancestors flagged ghost=True (see _windowed_tasks). No pagination - the
+# registry is bounded. Order by created_at DESC so the newest tasks surface first.
+# meiva:link gateway/routers/docs/routers.meiva.okf.md
 def get_tasks(
     request: Request,
     window: str = Query("all", pattern="^(24h|7d|30d|all)$"),
-    fields: Literal["full", "summary"] = Query("full"),
+    fields: Literal["full", "summary", "graph"] = Query("full"),
 ) -> TaskListResponse:
-    """Return the task registry, newest first.
-
-    `fields=full` (the default) returns the compatibility projection. `fields=summary`
-    returns metadata only, selecting neither task text column. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity
-    (updated_at) on the backend, so the task graph's default 24-hour view never
-    pulls the full registry. A windowed list still carries every kept task's
-    out-of-window ancestors flagged ghost=True (see _windowed_tasks); without
-    a window the full table is returned unchanged.
-
-    No pagination — the task registry is bounded (tasks are created by agents;
-    closed tasks are kept). Order by created_at DESC so the newest tasks
-    surface first in the Task Graph view.
-    """
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_TASK_COLS if fields == 'full' else _TASK_SUMMARY_COLS}, a.label AS owner_label "  # noqa: S608
+            f"SELECT {_TASK_COLS if fields == 'full' else _TASK_GRAPH_COLS if fields == 'graph' else _TASK_SUMMARY_COLS}, a.label AS owner_label "  # noqa: S608
             "FROM agent_tasks t "
             "LEFT JOIN agents a ON t.owner = a.id "
             "ORDER BY t.created_at DESC"
