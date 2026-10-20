@@ -24,6 +24,7 @@ import {
 } from "@/lib/harness/harness";
 
 const COLUMNS = "grid grid-cols-[7rem_7.5rem_minmax(0,1fr)_4.5rem] border-b border-border text-xs";
+const HEADER = "border-b border-r border-border px-2 py-1.5 font-medium text-muted-foreground";
 const CELL = "flex w-full items-center gap-1 rounded-sm px-2 py-1 text-left";
 const SELECTED = "bg-foreground/10 font-medium text-foreground";
 const IDLE = "text-muted-foreground hover:bg-accent hover:text-foreground";
@@ -106,13 +107,10 @@ export function SpawnTable({
   }
   return (
     <div className={COLUMNS} data-testid="spawn-table">
-      <div className="border-b border-border px-2 py-1.5 font-medium text-muted-foreground">{t("machine")}</div>
-      <div className="border-b border-border px-2 py-1.5 font-medium text-muted-foreground">{t("harness")}</div>
-      <div className="border-b border-border px-2 py-1.5 font-medium text-muted-foreground">
-        {t("model")}
-        {prices && <div className="text-[10px] font-normal text-muted-foreground/70">{t("priceColumns")}</div>}
-      </div>
-      <div className="border-b border-border px-2 py-1.5 font-medium text-muted-foreground">{t("reasoningEffort")}</div>
+      <div className={HEADER}>{t("machine")}</div>
+      <div className={HEADER}>{t("harness")}</div>
+      <div className={HEADER}>{t("model")}</div>
+      <div className={cn(HEADER, "border-r-0")}>{t("reasoningEffort")}</div>
 
       <ul aria-label={t("machine")} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1 pb-2">
         {machines.map((row) => {

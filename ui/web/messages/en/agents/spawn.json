@@ -9,7 +9,6 @@
   "spawnOn": "Spawn on",
   "spawn": "Spawn",
   "model": "Model",
-  "priceColumns": "in / cache / out, USD per 1M",
   "reasoningEffort": "Effort",
   "spawnAgent": "Spawn agent",
   "hostUnavailable": "Agent host unavailable",
