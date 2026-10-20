@@ -190,7 +190,7 @@ def test_distinct_task_paths_and_principals_are_independent(db_conn: psycopg.Con
             )
         for subject in ("one", "two"):
             key = principal_key(
-                AuthPrincipal("mcp_client", subject), "PATCH", f"/api/tasks/{first}", "raw"
+                AuthPrincipal("cluster", subject), "PATCH", f"/api/tasks/{first}", "raw"
             )
             tasks.patch_task_blocking(
                 client.app.state.db_pool, first, TaskUpdateRequest(priority=Priority.P2), key

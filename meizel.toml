@@ -115,7 +115,6 @@ frontend = ["ui"]
 "tests/components/lifecycle/db_authority/test_api_tokens.py -> cli/commands/data_plane/bringup.py" = 5
 "tests/components/lifecycle/db_authority/test_api_tokens.py -> gateway/http/auth/request_principal.py" = 6
 "tests/components/lifecycle/db_authority/test_api_tokens.py -> gateway/http/auth/webhook.py" = 1
-"tests/components/lifecycle/db_authority/test_api_tokens.py -> gateway/mcp_server/clients.py" = 2
 "tests/components/lifecycle/db_authority/test_api_tokens.py -> gateway/tests/agents/gateway_auth.py" = 1
 "tests/components/lifecycle/db_authority/test_api_tokens.py -> services/agent_runner/agent_ops/boot.py" = 8
 "tests/components/lifecycle/db_authority/test_api_tokens.py -> services/supervision/roster/service_spec.py" = 1

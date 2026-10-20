@@ -44,10 +44,8 @@ environment carries the profile) stamps the profile's source the same way.
 The declaration is not a credential, so it adds no authorization scope, token
 store or idempotency namespace.
 
-MCP tool audit events use the existing authenticated token lookup: display
-source is `external_agent:mcp:<client-id>`, while separate
-`auth_principal={kind:mcp_client,id:...}` identifies the server-bound credential.
-The client name is metadata, not authority; tokens never enter audit attributes.
+The gateway `/mcp` endpoint forwards `send_message` with `as_external_agent` to the HTTP
+API as source `external_agent:mcp`; the API authenticates the caller like any other request.
 
 The Codex and Claude launch wrappers accept `--caller-instance run-42` as an
 explicit opt-in, placing a shell-quoted JSON profile only on the external child.

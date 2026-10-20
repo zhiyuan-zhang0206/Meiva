@@ -1,90 +1,66 @@
-"""Contract tests for the gateway /mcp endpoint (design task #1212 step 1).
-
-The endpoint is flag-gated (`settings.gateway.mcp_endpoint_enabled`, default
-off) and additive: off, /mcp answers 404 and the rest of the gateway is
-unchanged. On, it speaks stateless Streamable HTTP (2026-07-28 revision) —
-every POST carries one JSON-RPC message, responses come back as an SSE stream
-(the transport default; the client must accept application/json AND
-text/event-stream).
-
-Tests run the real app via TestClient (its lifespan builds the MCP session
-manager and enters `manager.run()`), with the ops-routing autouse fixtures
-from tests/path_scoped/gateway_tests.py standing in for the local runner.
-"""
-
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
-from typing import Any
-from unittest.mock import patch
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import replace
+from typing import Any, cast
 
 import psycopg
 import pytest
 
-from base import config, telemetry
-from base.api_contracts.mcp_tool_contract import project_message
+from base import config
 from base.host.net.auth import bearer_header
-from base.lm.catalog import ModelCatalog
+from gateway.tests.mcp_calls import enable_endpoint as enable_endpoint
 from gateway.tests.mcp_calls import (
-    ACCEPT,
-    create_token,
     initialize,
+    post_mcp,
     post_message,
-    sse_messages,
     tool_call,
     tool_result,
 )
-from gateway.tests.mcp_calls import enable_endpoint as enable_endpoint
-from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
+_TOOLS_LIST = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
 
 
-def _audit_hits(tool: str, client_name: str) -> list[dict[str, Any]]:
-    telemetry.sync()
-    from base.paths import logs_dir
-
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    mirror = logs_dir() / f"events-{day}.jsonl"
-    lines = mirror.read_text(encoding="utf-8").splitlines()
-    return [
-        json.loads(line)
-        for line in lines
-        if json.loads(line).get("event_name") == "mcp_tool_call"
-        and json.loads(line).get("attributes", {}).get("tool") == tool
-        and json.loads(line).get("attributes", {}).get("client_name") == client_name
-    ]
+def _error_envelope(result: dict[str, Any]) -> dict[str, Any]:
+    assert result["result"].get("isError") is True
+    text = tool_result(result)
+    return json.loads(text[text.index("{") :])
 
 
-# ── flag off: additive surface, nothing changes ──────────────────────────
+def _stable(value: Any) -> Any:
+    if isinstance(value, dict):
+        fields = cast(dict[str, Any], value)
+        return {k: _stable(v) for k, v in fields.items() if k != "observed_at"}
+    if isinstance(value, list):
+        return [_stable(v) for v in cast(list[Any], value)]
+    return value
+
+
+def _spawn(client: GatewayTestClient, key: str = "birth-intent") -> int:
+    spawned = tool_result(
+        tool_call(client, "spawn_agent_guarded_v1", {"idempotency_key": key, "prompt": "goal"})
+    )
+    return int(spawned["id"])
 
 
 def test_disabled_endpoint_answers_404(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config.settings.gateway, "mcp_endpoint_enabled", False)
     with gateway_test_client() as client:
-        resp = client.post(
-            "/mcp",
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-            headers={"Accept": ACCEPT, "Content-Type": "application/json"},
-        )
+        resp = post_mcp(client, _TOOLS_LIST)
     assert resp.status_code == 404
     assert resp.json()["detail"] == "mcp endpoint is disabled"
     assert resp.json()["code"] == "mcp_endpoint_disabled"
 
 
-# ── handshake + tool surface ─────────────────────────────────────────────
-
-
-def test_initialize_negotiates_and_lists_guarded_creation_tool() -> None:
+def test_initialize_negotiates_and_lists_the_tool_surface() -> None:
     with gateway_test_client() as client:
-        token = create_token(client)
-        init = initialize(client, token)
+        init = initialize(client)
         assert init[0]["result"]["protocolVersion"]
-        messages = post_message(client, token, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        messages = post_message(client, _TOOLS_LIST)
     tools = {t["name"]: t for t in messages[0]["result"]["tools"]}
     assert set(tools) == {
         "list_agents",
@@ -95,147 +71,188 @@ def test_initialize_negotiates_and_lists_guarded_creation_tool() -> None:
         "terminate_agent",
         "cluster_status",
     }
-    creation_schema = tools["spawn_agent_guarded_v1"]["inputSchema"]
-    assert set(creation_schema["required"]) == {"prompt", "idempotency_key"}
-    assert creation_schema["properties"]["idempotency_key"]["minLength"] == 1
-    assert creation_schema["properties"]["idempotency_key"]["maxLength"] == 128
+    assert set(tools["spawn_agent_guarded_v1"]["inputSchema"]["required"]) == {
+        "prompt",
+        "idempotency_key",
+    }
     terminate_description = " ".join(tools["terminate_agent"]["description"].split())
     assert "requests interruption" in terminate_description
-    assert (
-        "an `enqueued` result means accepted, not that the agent or its owned work has exited"
-        in terminate_description
-    )
     assert "Use force only when a clean stop cannot progress" in terminate_description
 
 
-def test_gateway_uses_shared_message_projection() -> None:
-    from gateway.mcp_server import endpoint
-
-    assert endpoint.project_message is project_message
-    assert project_message({"type": "ai", "tool_calls": [{"args": {"other": 1}}]}) == {
-        "role": "ai",
-        "text": "",
-    }
-
-
-def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.agents.observation.roster import AgentCard, AgentDirectoryPage
-    from gateway.mcp_server import endpoint
-
-    seen: dict[str, Any] = {}
-    card = AgentCard.model_validate(
-        {
-            "agent_id": 1,
-            "spawner": "mcp",
-            "fork_source_agent_id": None,
-            "status": "idling",
-            "pid": 123,
-            "spawned_at": "2026-09-01T00:00:00Z",
-            "started_at": "2026-09-01T00:00:01Z",
-            "last_active_at": "2026-09-01T00:00:02Z",
-            "last_inbound_at": "2026-09-01T00:00:02Z",
-            "label": "MCP worker",
-            "machine": "test-machine",
-            "supports_vision": True,
-            "liveness_state": "online",
-            "observation": {},
-            "awaiting_response_count": 0,
-            "highest_notice_priority": None,
-            "unread_notice_count": 0,
-            "heartbeat_paused_until": None,
-            "open_impersonation_session_id": None,
-            "open_impersonation_status": None,
-        }
-    )
-    page = AgentDirectoryPage(agents=[card], next_cursor=1)
-
+@pytest.mark.parametrize("authorization", [None, "Bearer not-the-cluster-secret"])
+def test_required_mode_refuses_missing_or_bad_credentials(
+    monkeypatch: pytest.MonkeyPatch, authorization: str | None
+) -> None:
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+    headers = {} if authorization is None else {"Authorization": authorization}
     with gateway_test_client() as client:
+        client.headers.pop("Authorization")
+        resp = post_mcp(client, _TOOLS_LIST, headers)
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "authentication_required"
 
-        def fake_list_directory(
-            _conn: object,
-            *,
-            catalog: ModelCatalog,
-            default_model_reader: Callable[[], str],
-            **kwargs: Any,
-        ) -> AgentDirectoryPage:
-            assert catalog is client.app.state.catalog
-            assert default_model_reader() == client.app.state.config_authority.service_field_value(
-                "llm_model"
-            )
-            seen.update(kwargs)
-            return page
 
-        monkeypatch.setattr(endpoint.roster, "list_directory", fake_list_directory)
-        token = create_token(client)
-        result = tool_call(
+def test_the_cluster_bearer_calls_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+    with gateway_test_client() as client:
+        client.headers.pop("Authorization")
+        listed = tool_call(client, "list_agents", {}, headers=bearer_header(_SECRET))
+        anonymous = post_mcp(
             client,
-            token,
-            "list_agents",
             {
-                "scope": "all",
-                "query": "worker",
-                "before_id": 42,
-                "limit": 5,
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "list_agents", "arguments": {}},
             },
         )
-    assert seen == {"scope": "all", "query": "worker", "before_id": 42, "limit": 5}
-    assert tool_result(result) == page.model_dump(mode="json")
-    assert not result["result"].get("isError")
+    assert tool_result(listed) == {"agents": [], "next_cursor": None}
+    assert anonymous.status_code == 401
 
 
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        {"scope": "active"},
-        {"limit": 0},
-        {"limit": 201},
-        {"before_id": 0},
-        {"query": "x" * 201},
-    ],
-)
-def test_list_agents_rejects_invalid_directory_arguments(arguments: dict[str, object]) -> None:
+@contextmanager
+def _trusted_network_client(base: GatewayTestClient) -> Generator[GatewayTestClient]:
+    cfg = base.app.state.gateway_config
+    with gateway_test_client(
+        process=base.app.state.gateway_process,
+        config=replace(
+            cfg,
+            human_auth="trusted_network",
+            trusted_hosts=frozenset({*cfg.trusted_hosts, "testserver"}),
+        ),
+    ) as client:
+        client.headers.pop("Authorization")
+        yield client
+
+
+def test_trusted_network_serves_an_anonymous_call(db_conn: psycopg.Connection) -> None:
+    with gateway_test_client() as base, _trusted_network_client(base) as client:
+        agent_id = _spawn(client)
+        row = tool_result(tool_call(client, "get_agent", {"agent_id": agent_id}))
+    assert row["agent_id"] == agent_id
+    assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
+
+
+def test_trusted_network_still_refuses_an_unknown_host() -> None:
+    with gateway_test_client() as base, _trusted_network_client(base) as client:
+        resp = post_mcp(client, _TOOLS_LIST, {"Host": "rebind.attacker.example"})
+    assert resp.status_code == 403
+
+
+def test_tool_results_equal_the_direct_api_responses() -> None:
     with gateway_test_client() as client:
-        token = create_token(client)
-        result = tool_call(client, token, "list_agents", arguments)
-    assert result["result"].get("isError") is True
-
-
-# ── fleet tools against the in-process ops stand-ins ─────────────────────
-
-
-def test_spawn_get_terminate_round_trip(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client() as client:
-        token = create_token(client)
-        payload = tool_result(
-            tool_call(
-                client,
-                token,
-                "spawn_agent_guarded_v1",
-                {"idempotency_key": "birth-intent", "prompt": "test goal"},
-            )
-        )
-        agent_id = int(payload["id"])
-
-        row = tool_result(tool_call(client, token, "get_agent", {"agent_id": agent_id}))
-        assert row["agent_id"] == agent_id
+        agent_id = _spawn(client)
+        listed = tool_result(tool_call(client, "list_agents", {}))
+        assert _stable(listed) == _stable(client.get("/api/agents").json())
+        assert [card["agent_id"] for card in listed["agents"]] == [agent_id]
+        row = tool_result(tool_call(client, "get_agent", {"agent_id": agent_id}))
+        assert _stable(row) == _stable(client.get(f"/api/agents/{agent_id}").json())
         assert row["spawner"] == "mcp"
+        messages = tool_result(tool_call(client, "get_messages", {"agent_id": agent_id}))
+        assert messages == client.get(f"/api/agents/{agent_id}/messages").json()
 
-        status = tool_result(
+
+def test_list_agents_passes_its_arguments_as_query_parameters() -> None:
+    with gateway_test_client() as client:
+        _spawn(client)
+        args = {"scope": "terminated", "query": "x", "before_id": 5, "limit": 3}
+        result = tool_result(tool_call(client, "list_agents", args))
+        assert _stable(result) == _stable(client.get("/api/agents", params=args).json())
+        assert result["agents"] == []
+
+
+def test_cluster_status_reports_this_host() -> None:
+    with gateway_test_client() as client:
+        client.app.state.machine.set(role="gateway")
+        payload = tool_result(tool_call(client, "cluster_status", {}))
+        assert _stable(payload) == _stable(client.get("/api/cluster/status").json())
+    assert payload["machine_name"]
+
+
+def test_spawn_message_terminate_round_trip(db_conn: psycopg.Connection) -> None:
+    with gateway_test_client() as client:
+        agent_id = _spawn(client)
+        sent = tool_result(
+            tool_call(client, "send_message", {"agent_id": agent_id, "content": "hi"})
+        )
+        assert sent["status"] in {"queued", "claimed", "idling"}
+        stopped = tool_result(
             tool_call(
                 client,
-                token,
                 "terminate_agent",
                 {"agent_id": agent_id, "message": "retain this result"},
             )
         )
-        assert status["status"] == "enqueued"
+        assert stopped["status"] == "enqueued"
     assert db_conn.execute(
         "SELECT content,kind,source FROM inbound_messages WHERE agent_id=%s ORDER BY id",
         (agent_id,),
-    ).fetchall()[-2:] == [
+    ).fetchall() == [
+        ("goal", "chat", "user"),
+        ("hi", "chat", "user"),
         ("retain this result", "chat", "user"),
         ("", "terminate", "user"),
     ]
+
+
+def test_send_message_defaults_to_the_user_and_can_speak_as_an_external_agent(
+    db_conn: psycopg.Connection,
+) -> None:
+    with gateway_test_client() as client:
+        agent_id = _spawn(client)
+        tool_call(client, "send_message", {"agent_id": agent_id, "content": "as the user"})
+        tool_call(
+            client,
+            "send_message",
+            {"agent_id": agent_id, "content": "as a peer", "as_external_agent": True},
+        )
+    rows = dict(
+        db_conn.execute(
+            "SELECT content, source FROM inbound_messages WHERE agent_id = %s", (agent_id,)
+        ).fetchall()
+    )
+    assert rows["as the user"] == "user"
+    assert rows["as a peer"] == "external_agent:mcp"
+
+
+def test_idempotency_keys_reach_the_api() -> None:
+    with gateway_test_client() as client:
+        first = _spawn(client)
+        assert _spawn(client) == first
+        args = {"agent_id": first, "content": "same", "idempotency_key": "same-key"}
+        one = tool_result(tool_call(client, "send_message", args))
+        repeat = tool_result(tool_call(client, "send_message", args))
+        assert one["inbound_id"] == repeat["inbound_id"]
+        conflict = tool_call(client, "send_message", args | {"content": "different"})
+        assert _error_envelope(conflict)["status"] == 409
+        changed = tool_call(
+            client, "spawn_agent_guarded_v1", {"idempotency_key": "birth-intent", "prompt": "new"}
+        )
+        assert _error_envelope(changed)["status"] == 409
+
+
+def test_an_api_error_is_a_tool_error_with_the_api_envelope() -> None:
+    with gateway_test_client() as client:
+        result = tool_call(client, "get_agent", {"agent_id": 999999})
+        direct = client.get("/api/agents/999999")
+    envelope = _error_envelope(result)
+    assert direct.status_code == 404
+    assert (envelope["code"], envelope["status"], envelope["detail"]) == (
+        direct.json()["code"],
+        404,
+        direct.json()["detail"],
+    )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [{"limit": 0}, {"limit": 201}, {"before_id": 0}, {"query": "x" * 201}],
+)
+def test_the_api_rejects_invalid_directory_arguments(arguments: dict[str, object]) -> None:
+    with gateway_test_client() as client:
+        result = tool_call(client, "list_agents", arguments)
+    assert _error_envelope(result)["status"] == 422
 
 
 def test_spawn_launch_failure_tool_error_names_committed_agent(
@@ -251,437 +268,13 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
 
     monkeypatch.setattr(creation, "forward_spawn_to_remote", _fail)
     with gateway_test_client() as client:
-        token = create_token(client)
         response = tool_call(
             client,
-            token,
             "spawn_agent_guarded_v1",
             {"idempotency_key": "birth-intent", "prompt": "Keep this task"},
         )
     assert response["result"]["isError"] is True
     message = tool_result(response)
-    assert "agent_id=" in message
-    assert "retry_launch_path=/api/keyed/v1/agents/" in message
+    assert "agent_id" in message
+    assert "retry_launch_path" in message
     assert "launch_unreachable" in message
-
-
-def test_get_agent_not_found_is_an_error() -> None:
-    with gateway_test_client() as client:
-        token = create_token(client)
-        result = tool_call(client, token, "get_agent", {"agent_id": 999999})
-    assert result["result"].get("isError") is True
-    assert "does not exist" in tool_result(result)
-
-
-def test_send_message_and_get_messages() -> None:
-    with gateway_test_client() as client:
-        token = create_token(client)
-        agent_id = int(
-            tool_result(
-                tool_call(
-                    client,
-                    token,
-                    "spawn_agent_guarded_v1",
-                    {"idempotency_key": "birth-intent", "prompt": "test goal"},
-                )
-            )["id"]
-        )
-
-        sent = tool_result(
-            tool_call(
-                client,
-                token,
-                "send_message",
-                {"agent_id": agent_id, "content": "hello"},
-            )
-        )
-        # "idling" is the true delivery-time status of a never-claimed
-        # agent — the same value the REST endpoint returns in tests.
-        assert sent["status"] in {"queued", "claimed", "idling"}
-
-        payload = tool_result(
-            tool_call(
-                client,
-                token,
-                "get_messages",
-                {"agent_id": agent_id, "limit": 10},
-            )
-        )
-        # A never-run test agent has no checkpoint yet — the shape is the
-        # contract, the count is honest zero.
-        assert isinstance(payload["total"], int)
-        assert isinstance(payload["messages"], list)
-        assert {m["role"] for m in payload["messages"]} <= {"human", "ai", "system"}
-
-
-def test_token_clients_same_key_are_isolated_and_body_reuse_conflicts() -> None:
-    with gateway_test_client() as client:
-        first = create_token(client, name="idem-first")
-        second = create_token(client, name="idem-second")
-        agent_id = int(
-            tool_result(
-                tool_call(
-                    client,
-                    first,
-                    "spawn_agent_guarded_v1",
-                    {"idempotency_key": "birth-intent", "prompt": "goal"},
-                )
-            )["id"]
-        )
-        args = {"agent_id": agent_id, "content": "same", "idempotency_key": "same-key"}
-        one = tool_result(tool_call(client, first, "send_message", args))
-        repeat = tool_result(tool_call(client, first, "send_message", args))
-        two = tool_result(tool_call(client, second, "send_message", args))
-        assert one["inbound_id"] == repeat["inbound_id"]
-        assert one["inbound_id"] != two["inbound_id"]
-        conflict = tool_call(client, first, "send_message", args | {"content": "different"})
-        assert conflict["result"].get("isError") is True
-        assert "different message" in tool_result(conflict)
-
-
-def test_revoked_client_cannot_replay_prior_key() -> None:
-    with gateway_test_client() as client:
-        created = create_mcp_client(client, "idem-revoked", "write").json()
-        token = created["token"]
-        agent_id = int(
-            tool_result(
-                tool_call(
-                    client,
-                    token,
-                    "spawn_agent_guarded_v1",
-                    {"idempotency_key": "birth-intent", "prompt": "goal"},
-                )
-            )["id"]
-        )
-        args = {"agent_id": agent_id, "content": "same", "idempotency_key": "prior-key"}
-        tool_call(client, token, "send_message", args)
-        client.post(f"/api/mcp/clients/{created['id']}/revoke").raise_for_status()
-        response = client.post(
-            "/mcp",
-            headers={"Accept": ACCEPT, "Authorization": f"Bearer {token}"},
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": "send_message", "arguments": args},
-            },
-        )
-        assert response.status_code == 401
-
-
-def test_read_scope_cannot_call_write_tools() -> None:
-    with gateway_test_client() as client:
-        token = create_token(client, name="read-client", scope="read")
-        denied = tool_call(
-            client,
-            token,
-            "spawn_agent_guarded_v1",
-            {"idempotency_key": "birth-intent", "prompt": "must not run"},
-        )
-        agents = tool_result(tool_call(client, token, "list_agents", {}))
-
-    assert denied["result"].get("isError") is True
-    assert "requires write scope" in tool_result(denied)
-    assert agents == {"agents": [], "next_cursor": None}
-
-
-def test_scope_denial_is_audited_as_an_error_without_raw_args() -> None:
-    prompt = "blocked sensitive prompt"
-    with gateway_test_client() as client:
-        token = create_token(client, name="audit-read-client", scope="read")
-        tool_call(
-            client,
-            token,
-            "spawn_agent_guarded_v1",
-            {"idempotency_key": "birth-intent", "prompt": prompt},
-        )
-
-    hits = _audit_hits("spawn_agent_guarded_v1", "audit-read-client")
-    assert hits, "no mcp_tool_call event for the denied spawn reached the mirror"
-    attributes = hits[-1]["attributes"]
-    assert attributes["outcome"] == "error"
-    assert attributes["error"] == "tool call returned an error"
-    assert prompt not in json.dumps(attributes, ensure_ascii=False)
-
-
-def test_tool_error_does_not_reintroduce_raw_args_into_audit() -> None:
-    scope = "private-invalid-scope"
-    with gateway_test_client() as client:
-        token = create_token(client, name="audit-error-client", scope="read")
-        result = tool_call(client, token, "list_agents", {"scope": scope})
-
-    assert scope in tool_result(result)
-    hits = _audit_hits("list_agents", "audit-error-client")
-    assert hits, "no mcp_tool_call event for invalid scope reached the mirror"
-    attributes = hits[-1]["attributes"]
-    assert attributes["outcome"] == "error"
-    assert scope not in json.dumps(attributes, ensure_ascii=False)
-
-
-def test_cluster_status_reports_this_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Pure-gateway branch: no ops server stand-in exists for status_probe, so
-    # the tool takes the local snapshot path (the same branch a gateway-only
-    # host serves).
-    with gateway_test_client() as client:
-        client.app.state.machine.set(role="gateway")
-        token = create_token(client)
-        payload = tool_result(tool_call(client, token, "cluster_status", {}))
-    assert payload["machine_name"]
-    assert isinstance(payload["paused"], bool)
-
-
-# ── auth: dedicated per-client credentials ───────────────────────────────
-
-
-@pytest.mark.parametrize("authorization", [None, "Bearer not-a-client-token"])
-def test_mcp_rejects_missing_or_bad_client_token(authorization: str | None) -> None:
-    headers = {"Accept": ACCEPT, "Content-Type": "application/json"}
-    if authorization is not None:
-        headers["Authorization"] = authorization
-    with gateway_test_client() as client:
-        resp = client.post(
-            "/mcp",
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-            headers=headers,
-        )
-    assert resp.status_code == 401
-    assert resp.json() == {"detail": "invalid or revoked MCP client token"}
-
-
-def test_cluster_secret_bearer_is_not_an_mcp_client_token(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with gateway_test_client() as client:
-        resp = client.post(
-            "/mcp",
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-            headers={
-                "Accept": ACCEPT,
-                "Content-Type": "application/json",
-                **bearer_header(_SECRET),
-            },
-        )
-    assert resp.status_code == 401
-
-
-def test_client_token_works_when_cluster_auth_is_enabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with gateway_test_client() as client:
-        created = create_mcp_client(
-            client, "separate-auth-client", "read", headers=bearer_header(_SECRET)
-        )
-        assert created.status_code == 200, created.text
-
-        messages = post_message(
-            client,
-            created.json()["token"],
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
-        listed = client.get("/api/mcp/clients", headers=bearer_header(_SECRET))
-
-    assert messages[0]["result"]["tools"]
-    assert listed.status_code == 200, listed.text
-    assert listed.json()[0]["last_used_at"] is not None
-
-
-def test_revoked_client_token_is_rejected() -> None:
-    with gateway_test_client() as client:
-        created = create_mcp_client(client, "revoked-client", "write")
-        assert created.status_code == 200, created.text
-        body = created.json()
-        revoked = client.post(f"/api/mcp/clients/{body['id']}/revoke")
-        assert revoked.status_code == 200, revoked.text
-
-        resp = client.post(
-            "/mcp",
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-            headers={
-                "Accept": ACCEPT,
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {body['token']}",
-            },
-        )
-
-    assert resp.status_code == 401
-    assert resp.json() == {"detail": "invalid or revoked MCP client token"}
-
-
-# ── audit: every tools/call lands in the unified event stream ────────────
-
-
-def test_tool_call_audit_identifies_client_and_redacts_args() -> None:
-    prompt = "sensitive audit prompt"
-    with gateway_test_client() as client:
-        created = create_mcp_client(client, "audit-write-client", "write")
-        assert created.status_code == 200, created.text
-        body = created.json()
-        tool_call(
-            client,
-            body["token"],
-            "spawn_agent_guarded_v1",
-            {"idempotency_key": "birth-intent", "prompt": prompt},
-            req_id=7,
-        )
-
-    hits = _audit_hits("spawn_agent_guarded_v1", "audit-write-client")
-    assert hits, "no mcp_tool_call event for spawn_agent_guarded_v1 reached the mirror"
-    attributes = hits[-1]["attributes"]
-    encoded = json.dumps(prompt, ensure_ascii=False)
-    encoded_key = json.dumps("birth-intent")
-    assert attributes["client_id"] == body["id"]
-    assert attributes["client_name"] == "audit-write-client"
-    assert attributes["outcome"] == "ok"
-    assert attributes["args"] == {
-        "schema": {"prompt": "string", "idempotency_key": "string"},
-        "size": {"prompt": len(encoded), "idempotency_key": len(encoded_key)},
-        "sha256": {
-            "prompt": hashlib.sha256(encoded.encode()).hexdigest(),
-            "idempotency_key": hashlib.sha256(encoded_key.encode()).hexdigest(),
-        },
-    }
-    assert prompt not in json.dumps(attributes, ensure_ascii=False)
-    assert hits[-1]["category"] == "audit"
-    assert hits[-1]["source"] == f"external_agent:mcp:{body['id']}"
-    assert attributes["auth_principal"] == {"kind": "mcp_client", "id": body["id"]}
-    assert attributes["caller_identity"] == {
-        "kind": "external_agent",
-        "subject": "mcp",
-        "instance": str(body["id"]),
-    }
-    assert body["token"] not in json.dumps(attributes)
-
-
-# ── SSE decoding: Unicode line separators that are legal raw in JSON ─────
-#
-# U+0085 / U+2028 / U+2029 may appear unescaped inside a JSON string, and
-# the /mcp writer emits them raw on the legacy streamable-HTTP path
-# (pydantic model_dump_json, then sse-starlette, which splits lines on
-# CR/LF only) - so the test decoder must never split a data line there.
-
-
-@pytest.mark.parametrize("ch", ("\u0085", "\u2028", "\u2029"), ids=("U+0085", "U+2028", "U+2029"))
-def testsse_messages_keeps_unicode_line_separators(ch: str) -> None:
-    """One frame, one data line; the payload decodes unchanged."""
-    message = {"jsonrpc": "2.0", "id": 1, "result": {"label": f"a{ch}b"}}
-    body = "event: message\r\ndata: " + json.dumps(message, ensure_ascii=False) + "\r\n\r\n"
-    assert sse_messages(body) == [message]
-
-
-def test_creation_key_replays_identity_conflicts_and_scopes_to_client() -> None:
-    with gateway_test_client() as client:
-        first = create_token(client, name="creation-first")
-        second = create_token(client, name="creation-second")
-        args = {"prompt": "same goal", "idempotency_key": "creation-a"}
-        original = tool_result(tool_call(client, first, "spawn_agent_guarded_v1", args))
-        replay = tool_result(tool_call(client, first, "spawn_agent_guarded_v1", args))
-        assert replay["id"] == original["id"]
-        changed = tool_call(
-            client,
-            first,
-            "spawn_agent_guarded_v1",
-            {"idempotency_key": "birth-intent", **args, "prompt": "changed goal"},
-        )
-        assert changed["result"].get("isError") is True
-        other = tool_result(tool_call(client, second, "spawn_agent_guarded_v1", args))
-        assert other["id"] != original["id"]
-        new = tool_result(
-            tool_call(
-                client, first, "spawn_agent_guarded_v1", {**args, "idempotency_key": "creation-b"}
-            )
-        )
-        assert new["id"] != original["id"]
-
-
-@pytest.mark.parametrize("key", ["", "x" * 129])
-def test_creation_tool_rejects_invalid_key(key: str) -> None:
-    with gateway_test_client() as client:
-        token = create_token(client)
-        response = tool_call(
-            client, token, "spawn_agent_guarded_v1", {"prompt": "goal", "idempotency_key": key}
-        )
-    assert response["result"].get("isError") is True
-
-
-def test_concurrent_mcp_creation_retries_share_one_identity() -> None:
-    from concurrent.futures import ThreadPoolExecutor
-
-    with gateway_test_client() as client:
-        token = create_token(client)
-
-        def submit(index: int) -> int:
-            result = tool_result(
-                tool_call(
-                    client,
-                    token,
-                    "spawn_agent_guarded_v1",
-                    {"prompt": "one concurrent goal", "idempotency_key": "concurrent-birth"},
-                    req_id=index + 10,
-                )
-            )
-            return int(result["id"])
-
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            ids = list(executor.map(submit, range(3)))
-    assert len(set(ids)) == 1
-
-
-def test_concurrent_requests_keep_verified_clients_and_ignore_context_arguments(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-
-    from gateway.agents import creation
-
-    create = creation.create_and_launch_agent
-    both_started = asyncio.Event()
-    started = 0
-
-    async def simultaneous_create(*args: Any, **kwargs: Any) -> Any:
-        nonlocal started
-        started += 1
-        if started == 2:
-            both_started.set()
-        await asyncio.wait_for(both_started.wait(), timeout=10)
-        return await create(*args, **kwargs)
-
-    monkeypatch.setattr(creation, "create_and_launch_agent", simultaneous_create)
-    with gateway_test_client() as client:
-        credentials = [
-            create_mcp_client(client, name, "write").json()
-            for name in ("concurrent-first", "concurrent-second")
-        ]
-
-        def submit(index: int) -> int:
-            result = tool_result(
-                tool_call(
-                    client,
-                    credentials[index]["token"],
-                    "spawn_agent_guarded_v1",
-                    {
-                        "prompt": "shared intent",
-                        "idempotency_key": "same-key",
-                        "ctx": {"client_id": credentials[1 - index]["id"]},
-                    },
-                    req_id=index + 20,
-                )
-            )
-            return int(result["id"])
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            ids = list(executor.map(submit, range(2)))
-    assert len(set(ids)) == 2
-    for credential in credentials:
-        hits = _audit_hits("spawn_agent_guarded_v1", credential["name"])
-        assert hits[-1]["attributes"]["client_id"] == credential["id"]
-        assert hits[-1]["attributes"]["outcome"] == "ok"
-
-
-@pytest.fixture(autouse=True)
-def _restore_cold_gateway_delivery() -> Iterator[None]:
-    """This module owns every environment mutation made by its real gateway lifespan."""
-    with patch.dict(os.environ):
-        yield

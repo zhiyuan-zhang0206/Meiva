@@ -23,12 +23,13 @@ secret), `machine_token:<class>` (the active write generation's machine API
 token, `cluster_credential`), `user_session` (a browser session the human secret
 minted) or `machine_session:runner` (one a runner token minted, a unit's managed
 browser). Both bearers authenticate the
-same cluster administrator; a pending generation's token never matches. Scoped webhook and MCP boundaries establish their own
-`webhook:<provider>` or `mcp_client:<id>` fact after authenticating outside the
-cluster middleware. The fact is never copied from request JSON, and it grants
-authority in one place only: the MCP client admin routes mint tokens bound to
+same cluster administrator; a pending generation's token never matches. Scoped webhook boundaries establish their own
+`webhook:<provider>` fact after authenticating outside the
+cluster middleware; `/mcp` is not one of them, it authenticates in the cluster
+middleware like any API route. The fact is never copied from request JSON, and it grants
+authority in one place only: the login-ticket route mints a credential bound to
 no write generation, so `require_human_credential` admits only the human facts
-(`cluster_bearer`, `user_session`) there and answers 403 to a generation-bound
+(`cluster_bearer`, `user_session`, `trusted_network`) there and answers 403 to a generation-bound
 one.
 
 Supplied keys must contain 1 to 128 characters, and every key arrives with

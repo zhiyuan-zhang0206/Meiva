@@ -23,7 +23,6 @@ from gateway.http.config import GatewayConfig, gateway_config_from_boot
 __all__ = [
     "SPAWN_PATH",
     "GatewayTestClient",
-    "create_mcp_client",
     "gateway_test_app",
     "gateway_test_client",
     "gateway_test_process",
@@ -152,22 +151,4 @@ def spawn_via_http(
 def post_spawn(gateway_url: str, body: Mapping[str, Any], *, timeout: float) -> httpx.Response:
     return httpx.post(
         f"{gateway_url}{SPAWN_PATH}", json=dict(body), headers=spawn_headers(), timeout=timeout
-    )
-
-
-def create_mcp_client(
-    client: TestClient,
-    name: str,
-    scope: str = "read",
-    *,
-    headers: Mapping[str, str] | None = None,
-) -> httpx2.Response:
-    return client.post(
-        "/api/keyed/v1/mcp/clients",
-        json={"name": name, "scope": scope},
-        headers={
-            "Idempotency-Key": uuid.uuid4().hex,
-            SCOPE_HEADER: PRINCIPAL_SCOPE,
-            **(headers or {}),
-        },
     )

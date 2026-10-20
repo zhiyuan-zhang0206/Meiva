@@ -131,7 +131,7 @@ def test_creation_identity_is_bound_to_verified_principal(
                 "headers": [(b"idempotency-key", b"same"), (b"idempotency-scope", b"principal-v1")],
             }
         )
-        request.state.auth_principal = AuthPrincipal("mcp_client", subject)
+        request.state.auth_principal = AuthPrincipal("cluster", subject)
         return creation_receipts.operation_key(request)
 
     with base.db.pool(gate=database_gate) as pool:

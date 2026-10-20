@@ -10,7 +10,7 @@ from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
 from base.paths import plugins_dir
-from gateway.tests.mcp_calls import create_token, post_message, tool_call, tool_result
+from gateway.tests.mcp_calls import post_message, tool_call, tool_result
 from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 
 
@@ -37,13 +37,12 @@ def test_provider_failure_keeps_mcp_reads(
     failed_provider_agent: tuple[GatewayTestClient, int],
 ) -> None:
     client, agent_id = failed_provider_agent
-    token = create_token(client)
-    tools = post_message(client, token, {"jsonrpc": "2.0", "id": 0, "method": "tools/list"})
+    tools = post_message(client, {"jsonrpc": "2.0", "id": 0, "method": "tools/list"})
     assert len(tools[0]["result"]["tools"]) == 7
-    listed = tool_result(tool_call(client, token, "list_agents", {}))
+    listed = tool_result(tool_call(client, "list_agents", {}))
     assert [card["agent_id"] for card in listed["agents"]] == [agent_id]
     assert listed["agents"][0]["supports_vision"] is None
-    detail = tool_result(tool_call(client, token, "get_agent", {"agent_id": agent_id}))
+    detail = tool_result(tool_call(client, "get_agent", {"agent_id": agent_id}))
     assert detail["agent_id"] == agent_id and detail["supports_vision"] is None
 
 
@@ -51,10 +50,8 @@ def test_provider_failure_blocks_new_model_work(
     failed_provider_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection
 ) -> None:
     client, _agent_id = failed_provider_agent
-    token = create_token(client)
     result = tool_call(
         client,
-        token,
         "spawn_agent_guarded_v1",
         {"prompt": "new", "idempotency_key": "blocked-model"},
     )
@@ -64,23 +61,6 @@ def test_provider_failure_blocks_new_model_work(
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
 
 
-def test_provider_failure_preserves_mcp_read_scope(
-    failed_provider_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection
-) -> None:
-    client, agent_id = failed_provider_agent
-    read_token = create_token(client, name="read-only-during-failure", scope="read")
-    read_detail = tool_result(tool_call(client, read_token, "get_agent", {"agent_id": agent_id}))
-    assert read_detail["supports_vision"] is None
-    refused = tool_call(
-        client, read_token, "send_message", {"agent_id": agent_id, "content": "forbidden"}
-    )
-    assert refused["result"]["isError"] is True
-    assert "requires write scope" in tool_result(refused)
-    assert db_conn.execute(
-        "SELECT count(*) FROM inbound_messages WHERE content='forbidden'"
-    ).fetchone() == (0,)
-
-
 def test_provider_failure_keeps_mcp_recovery_tools(
     failed_provider_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection,
@@ -88,16 +68,15 @@ def test_provider_failure_keeps_mcp_recovery_tools(
     machine_identity: MachineIdentity,
 ) -> None:
     client, agent_id = failed_provider_agent
-    token = create_token(client)
     sent = tool_result(
-        tool_call(client, token, "send_message", {"agent_id": agent_id, "content": "still here"})
+        tool_call(client, "send_message", {"agent_id": agent_id, "content": "still here"})
     )
     assert sent["status"] in {"queued", "claimed", "idling"}
-    messages = tool_result(tool_call(client, token, "get_messages", {"agent_id": agent_id}))
+    messages = tool_result(tool_call(client, "get_messages", {"agent_id": agent_id}))
     assert isinstance(messages["messages"], list)
-    stopped = tool_result(tool_call(client, token, "terminate_agent", {"agent_id": agent_id}))
+    stopped = tool_result(tool_call(client, "terminate_agent", {"agent_id": agent_id}))
     assert stopped["status"] == "enqueued"
     machine_identity.set(role="gateway")
-    status = tool_result(tool_call(client, token, "cluster_status", {}))
+    status = tool_result(tool_call(client, "cluster_status", {}))
     assert status["machine_name"]
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)

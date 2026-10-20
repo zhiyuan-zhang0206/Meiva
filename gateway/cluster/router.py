@@ -185,7 +185,6 @@ async def get_cluster_status(request: Request) -> ClusterStatus:
 async def cluster_status_snapshot(
     db: Database, *, image: LoadedCommit, local_machine: MachineIdentity
 ) -> ClusterStatus:
-    """The `/api/cluster/status` body, also read by the MCP `cluster_status` tool."""
     if "agent-runner" in local_machine.role():
         result = await _dispatch_op(db, local_machine.name(), "status_probe", {})
         return ClusterStatus.model_validate(result)

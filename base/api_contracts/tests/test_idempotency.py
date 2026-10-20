@@ -42,7 +42,7 @@ def test_stored_key_separates_credential_route_and_caller_key() -> None:
     assert base == stored_key("cluster", "administrator", "POST", "/api/a", "k")
     assert base.startswith("principal-v1:")
     others = {
-        stored_key("mcp_client", "administrator", "POST", "/api/a", "k"),
+        stored_key("other", "administrator", "POST", "/api/a", "k"),
         stored_key("cluster", "unauthenticated", "POST", "/api/a", "k"),
         stored_key("cluster", "administrator", "PATCH", "/api/a", "k"),
         stored_key("cluster", "administrator", "POST", "/api/b", "k"),
