@@ -47,7 +47,7 @@ describe("nav timing", () => {
     expect(tracked).toEqual([]);
   });
 
-  it("performs a real location change when the router never commits", async () => {
+  it("performs a real location change when the router never commits", () => {
     vi.useFakeTimers();
     const assign = vi.fn();
     const realLocation = window.location;
