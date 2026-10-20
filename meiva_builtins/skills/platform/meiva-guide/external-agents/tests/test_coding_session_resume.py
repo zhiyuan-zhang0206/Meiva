@@ -138,7 +138,8 @@ def test_a_resumed_worker_reopens_its_session_and_is_told_it_was_interrupted(
     assert session_id == _SESSION
     assert endpoint.startswith("unix://")
     assert f"codex app-server --listen {endpoint}" in sent[0]
-    assert f"exec codex resume {_SESSION} --remote {endpoint} --dangerously-bypass" in sent[1]
+    assert f"codex resume {_SESSION} --remote {endpoint} --dangerously-bypass" in sent[1]
+    assert "exec env -u OPENAI_API_KEY" in sent[1]
     assert sent[2].startswith("This session was interrupted")
     assert "continue from where you stopped" in sent[2]
 
