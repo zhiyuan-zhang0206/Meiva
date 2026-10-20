@@ -1,7 +1,9 @@
 exports = ["recovery_admission.py", "resurrection", "test_hosted_lifecycle.py"]
 
 [uses]
-"test_graceful_exit.py" = ["blocking_model.py", "child_graceful_exit.py"]
+"restart_cluster.py" = ["scripted_model.py"]
+"test_graceful_exit.py" = ["child_graceful_exit.py", "restart_cluster.py", "scripted_model.py"]
+"test_restart_resume.py" = ["restart_cluster.py", "scripted_model.py"]
 "test_hosted_backlog_recovery.py" = ["recovery_admission.py"]
 "test_hosted_idle_recovery.py" = ["recovery_admission.py"]
 

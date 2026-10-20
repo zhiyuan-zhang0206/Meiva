@@ -178,6 +178,10 @@ async def claim_node_impl(
     # branch, which never flips the row).
     update["exit_requested"] = (st.next_goto == END) and not st.restart_requested
     update["restart_requested"] = st.restart_requested
+    if state.interrupted_by_restart:
+        # meiva:note
+        # The claim that takes the restart has read the mark; it describes one interrupt.
+        update["interrupted_by_restart"] = False
     return Command[ClaimGoto](update=update, goto=route_target(ctx, outcome.command.goto))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportArgumentType]
 
 

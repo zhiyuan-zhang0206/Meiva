@@ -108,9 +108,19 @@ async def finish_completed_invocation(
     if pending.result["exit_requested"] or pending.result["restart_requested"]:
         incarnation = ctx.require_original_incarnation(agent_id)
         drop_agent(agent_id)
+        # meiva:note
+        # After a restart claim `halted` is the claim's verdict on the agent it found:
+        # set, it was idle; clear, its turn was unfinished and the apply queues the note
+        # that continues it. Nothing else reads the turn's progress here.
+        # meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+        resume_turn = bool(pending.result["restart_requested"]) and not pending.result["halted"]
         async with database_phase():
             kind = await apply_hosted_lifecycle(
-                pool, incarnation, bus=bus, kill_shell_sessions=kill_shell_sessions
+                pool,
+                incarnation,
+                bus=bus,
+                resume_turn=resume_turn,
+                kill_shell_sessions=kill_shell_sessions,
             )
         logger.info(
             "hosted lifecycle return settled",

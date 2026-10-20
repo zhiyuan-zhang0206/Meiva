@@ -228,6 +228,7 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
             aops_pool,
             old,
             bus=event_bus,
+            resume_turn=False,
         )
         == "terminate"
     )

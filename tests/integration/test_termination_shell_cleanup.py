@@ -42,7 +42,9 @@ async def _settle(
     bus: EventBus,
     killer: Callable[[int, int], None],
 ) -> object:
-    return await apply_hosted_lifecycle(pool, owner, bus=bus, kill_shell_sessions=killer)
+    return await apply_hosted_lifecycle(
+        pool, owner, bus=bus, kill_shell_sessions=killer, resume_turn=False
+    )
 
 
 def _assert_committed_and_allocate(dsn: str, agent_id: int, command: int) -> None:

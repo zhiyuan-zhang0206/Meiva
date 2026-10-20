@@ -21,6 +21,7 @@ from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 
 # The slow-borrow threshold is settings.agent.db_pool_slow_acquire_warn_seconds: a
 # slow-but-served borrow is visible below the acquire timeout.
@@ -425,11 +426,17 @@ async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> boo
 # meiva:note
 # Attribute the first queued external abort without claiming its command.
 #
-#     A status='pending' EXTERNAL interrupt (kind cancel/terminate) fires: the
-#     in-flight llm/exec node polls this (via `subscribe_interrupt`) to abort the
-#     current action the moment a pause/terminate lands — without claiming the
-#     row; the dispatch itself (cancel -> idle, terminate -> END) stays in the
-#     claim node, the single owner of inbound semantics.
+#     A status='pending' EXTERNAL interrupt fires: the in-flight llm/exec node
+#     polls this (via `subscribe_interrupt`) to abort the current action the
+#     moment a pause/terminate lands — without claiming the row; the dispatch
+#     itself (cancel -> idle, terminate -> END, restart -> END and resume) stays
+#     in the claim node, the single owner of inbound semantics.
+#
+#     A cancel or terminate interrupts at once. A restart interrupts only after
+#     it has waited `RESTART_INTERRUPT_GRACE_S` (its own `created_at`, read on
+#     the database clock): most code runs end well inside the grace, and the
+#     restart then takes effect at the turn's next boundary without cutting
+#     anything short.
 #
 #     Self-initiated lifecycle (`source='self'`, i.e. `meiva.self.terminate()` /
 #     restart from inside the agent's own exec) is EXCLUDED: that path already
@@ -443,12 +450,17 @@ async def pending_interrupt_reason(
 ) -> InterruptReason | None:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
-            "SELECT i.source FROM inbound_messages i WHERE i.agent_id=%s "
-            "AND i.source <> 'self' AND i.kind IN ('cancel','terminate') "
-            "AND i.status='pending' ORDER BY i.id LIMIT 1",
-            (agent_id,),
+            "SELECT i.kind, i.source FROM inbound_messages i WHERE i.agent_id=%s "
+            "AND i.source <> 'self' AND i.status='pending' AND (i.kind IN ('cancel','terminate') "
+            "OR (i.kind='restart' "
+            "AND i.created_at <= clock_timestamp() - make_interval(secs => %s))) "
+            "ORDER BY i.id LIMIT 1",
+            (agent_id, RESTART_INTERRUPT_GRACE_S),
         )
         row = await cur.fetchone()
     if row is None:
         return None
-    return InterruptReason.USER if row[0] == "user" else InterruptReason.SYSTEM
+    kind, source = row
+    if kind == "restart":
+        return InterruptReason.RESTART
+    return InterruptReason.USER if source == "user" else InterruptReason.SYSTEM

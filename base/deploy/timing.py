@@ -1,16 +1,17 @@
-"""Load-bearing timing relationships for hosted agents and cluster maintenance.
-
-Each registered clock is safe only relative to its declared neighbours: agent
-leases outlast their renewal interval, service-readiness windows nest inside one
-another, and wedged detection allows the full exec and model retry budget.
-Independent HTTP deadlines remain beside their consumers.
-
-Define values in the relevant family module (deploy, stop, or schedule timing),
-register them in CLOCKS, and declare their ordering in CONSTRAINTS. Tests check
-all defaults; agent-host startup rejects operator overrides that violate the
-same relationships. The clock-lattice lint prevents unregistered timing
-constants from silently introducing competing deadlines.
-"""
+# meiva:note
+# Load-bearing timing relationships for hosted agents and cluster maintenance.
+#
+# Each registered clock is safe only relative to its declared neighbours: a
+# graceful exit outlasts the restart interrupt it waits for, service-readiness
+# windows nest inside one another, and wedged detection allows the full exec and
+# model retry budget.
+# Independent HTTP deadlines remain beside their consumers.
+#
+# Define values in the relevant family module (deploy, stop, or schedule timing),
+# register them in CLOCKS, and declare their ordering in CONSTRAINTS. Tests check
+# all defaults; agent-host startup rejects operator overrides that violate the
+# same relationships. The clock-lattice lint prevents unregistered timing
+# constants from silently introducing competing deadlines.
 
 from __future__ import annotations
 
@@ -173,6 +174,16 @@ CLOCKS: dict[str, Clock] = {
         lambda: stop.HOST_GRACEFUL_EXIT_DRAIN_S,
         "graceful exit: how long a SIGTERMed agent-host waits for in-flight turns to settle",
     ),
+    "RESTART_INTERRUPT_GRACE_S": Clock(
+        "stop",
+        lambda: stop.RESTART_INTERRUPT_GRACE_S,
+        "how long a pending restart waits before it interrupts the call or code run in flight",
+    ),
+    "INTERRUPT_POLL_S": Clock(
+        "stop",
+        lambda: stop.INTERRUPT_POLL_S,
+        "the interrupt watcher's poll: how soon an in-flight call notices a durable interrupt",
+    ),
     "HOST_STOP_CEILING_S": Clock(
         "stop",
         lambda: stop.HOST_STOP_CEILING_S,
@@ -223,6 +234,14 @@ CONSTRAINTS: list[Constraint] = [
         "SCHEDULE_STALL_ALERT_AFTER_S",
         "the schedule-silence alert must outlive a legitimate rollout's "
         "no-progress window, so normal stop-the-world service churn stays quiet",
+    ),
+    Constraint(
+        "<",
+        "RESTART_INTERRUPT_GRACE_S + INTERRUPT_POLL_S + CANCEL_UNWIND_TIMEOUT_S",
+        "HOST_GRACEFUL_EXIT_DRAIN_S",
+        "a turn still running when its restart's grace ends is interrupted at the next poll "
+        "and has one unwind bound to abort and flush, all inside the drain; a shorter drain "
+        "would cancel turns the restart was about to interrupt",
     ),
     Constraint(
         "<",

@@ -64,6 +64,7 @@ async def test_hosted_status_changes_publish_agent_updated(
             aops_pool,
             incarnation,
             bus=event_bus,
+            resume_turn=False,
         )
         == "terminate"
     )
@@ -88,6 +89,7 @@ async def test_hosted_restart_releases_before_new_incarnation(
             aops_pool,
             first,
             bus=event_bus,
+            resume_turn=False,
         )
         == "restart"
     )

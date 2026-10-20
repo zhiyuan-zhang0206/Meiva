@@ -53,6 +53,7 @@ from agent.state import AgentState
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.projection import EVENT_ADAPTER
+from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.native_process.turn_identity import HostedTurnResources
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
@@ -69,25 +70,35 @@ _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 # ---------------------------------------------------------------------------
 
 
+# meiva:note
+# A restart that has waited its grace ends the run, says so, and marks the turn unfinished so
+# the claim that takes it resumes the turn instead of idling the agent.
 @pytest.mark.parametrize(
-    ("source", "expected"),
-    [("user", "user"), ("agent:9", "system")],
+    ("kind", "source", "waited_s", "marker", "unfinished"),
+    [
+        ("cancel", "user", 0, "[cancelled by user]", False),
+        ("cancel", "agent:9", 0, "[cancelled by system]", False),
+        ("restart", "user", RESTART_INTERRUPT_GRACE_S + 1, "[interrupted by restart]", True),
+    ],
 )
 async def test_exec_node_preserves_durable_interrupt_attribution(
     hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    kind: str,
     source: str,
-    expected: str,
+    waited_s: float,
+    marker: str,
+    unfinished: bool,
     database_gate: ProcessDbGate,
 ) -> None:
     """The real watcher aborts once, preserves partial output, and leaves claim its command."""
     agent_id = create_agent(db_conn)
     command = db_conn.execute(
-        "INSERT INTO inbound_messages(agent_id,kind,source,content) "
-        "VALUES(%s,'cancel',%s,'') RETURNING id",
-        (agent_id, source),
+        "INSERT INTO inbound_messages(agent_id,kind,source,content,created_at) "
+        "VALUES(%s,%s,%s,'',clock_timestamp() - make_interval(secs => %s)) RETURNING id",
+        (agent_id, kind, source, waited_s),
     ).fetchone()
     assert command is not None
     db_conn.commit()
@@ -117,7 +128,9 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     assert result.goto == "after_exec"
     assert result.update["halted"] is True
     message = cast(ToolMessage, result.update["messages"][0])
-    assert f"[cancelled by {expected}]" in message.content
+    assert marker in message.content
+    assert cast(dict[str, object], result.update).get("interrupted_by_restart", False) is unfinished
+    assert (kind == "restart") == ("cancelled by" not in message.content)
     assert "external side effect already happened" in message.content
     assert db_conn.execute(
         "SELECT status,claimed_at FROM inbound_messages WHERE id=%s",

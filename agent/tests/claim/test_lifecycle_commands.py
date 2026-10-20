@@ -80,7 +80,10 @@ async def test_apply_restart_releases_the_runtime_and_closes_the_command_togethe
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     command = insert_lifecycle_command(db_conn, agent_id, "restart")
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
-    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus) == "restart"
+    assert (
+        await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resume_turn=False)
+        == "restart"
+    )
     assert db_conn.execute(
         "SELECT status,runtime_generation,runtime_owner FROM agents_meta WHERE id=%s",
         (agent_id,),
@@ -108,7 +111,10 @@ async def test_apply_terminate_ends_the_agent_and_closes_every_open_terminate(
     restart = insert_lifecycle_command(db_conn, agent_id, "restart")
     chat = insert(db_conn, agent_id)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
-    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus) == "terminate"
+    assert (
+        await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resume_turn=False)
+        == "terminate"
+    )
     assert db_conn.execute(
         "SELECT status,termination_source,runtime_generation FROM agents_meta WHERE id=%s",
         (agent_id,),
@@ -137,7 +143,11 @@ async def test_terminate_with_a_shell_kill_request_on_any_open_terminate_kills_s
     killed: list[tuple[int, int]] = []
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     kind = await apply_hosted_lifecycle(
-        aops_pool, owner, bus=event_bus, kill_shell_sessions=lambda a, c: killed.append((a, c))
+        aops_pool,
+        owner,
+        bus=event_bus,
+        kill_shell_sessions=lambda a, c: killed.append((a, c)),
+        resume_turn=False,
     )
     assert kind == "terminate" and killed == [(agent_id, 7)]
 
@@ -151,11 +161,11 @@ async def test_apply_is_fenced_by_the_incarnation_and_by_a_claimed_command(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus) is None
+    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resume_turn=False) is None
     command = insert_lifecycle_command(db_conn, agent_id, "restart")
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     stale = RuntimeIncarnation(agent_id, owner.generation, uuid4())
-    assert await apply_hosted_lifecycle(aops_pool, stale, bus=event_bus) is None
+    assert await apply_hosted_lifecycle(aops_pool, stale, bus=event_bus, resume_turn=False) is None
     assert _status(db_conn, command) == "claimed"
     assert db_conn.execute(
         "SELECT status,runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)
@@ -178,8 +188,101 @@ async def test_a_failed_apply_leaves_neither_half_behind(
     )
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     with pytest.raises(RuntimeError, match="no killer is bound"):
-        await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus)
+        await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resume_turn=False)
     assert _status(db_conn, command) == "claimed"
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("running",)
+
+
+def _notes(
+    conn: psycopg.Connection, agent_id: int
+) -> list[tuple[str, str, str, dict[str, object]]]:
+    return conn.execute(
+        "SELECT source,status,content,payload FROM inbound_messages "
+        "WHERE agent_id=%s AND kind='system_note' ORDER BY id",
+        (agent_id,),
+    ).fetchall()
+
+
+# meiva:note
+# The note that continues an unfinished turn is written in the transaction that executes the
+# restart, from the restart's own source, so no restart is done without it.
+@pytest.mark.parametrize(
+    ("source", "who"),
+    [("user", "user"), ("self", "yourself"), ("system:restart", "system:restart")],
+)
+async def test_apply_restart_queues_one_continuation_note_for_an_unfinished_turn(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    event_bus: EventBus,
+    source: str,
+    who: str,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    agent_id = agent_row(db_conn)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
+    command = insert_lifecycle_command(db_conn, agent_id, "restart")
+    db_conn.execute("UPDATE inbound_messages SET source=%s WHERE id=%s", (source, command))
+    db_conn.commit()
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
+
+    assert (
+        await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resume_turn=True) == "restart"
+    )
+
+    assert _status(db_conn, command) == "done"
+    [(note_source, status, content, payload)] = _notes(db_conn, agent_id)
+    assert (note_source, status, payload) == (source, "pending", {"note_tag": "lifecycle_restart"})
+    assert content.startswith(f"Restart was accepted from {who} while your turn was unfinished.")
+    assert "meiva.shell.sessions" in content
+
+
+async def test_apply_restart_of_an_idle_agent_queues_no_note(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    agent_id = agent_row(db_conn)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
+    insert_lifecycle_command(db_conn, agent_id, "restart")
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
+    await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resume_turn=False)
+    assert _notes(db_conn, agent_id) == []
+
+
+async def test_apply_terminate_queues_no_continuation_even_when_the_turn_was_unfinished(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    agent_id = agent_row(db_conn)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
+    insert_lifecycle_command(db_conn, agent_id, "terminate")
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
+    assert (
+        await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resume_turn=True)
+        == "terminate"
+    )
+    assert _notes(db_conn, agent_id) == []
+
+
+async def test_a_fenced_apply_queues_no_note(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    agent_id = agent_row(db_conn)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
+    insert_lifecycle_command(db_conn, agent_id, "restart")
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
+    stale = RuntimeIncarnation(agent_id, owner.generation, uuid4())
+    assert await apply_hosted_lifecycle(aops_pool, stale, bus=event_bus, resume_turn=True) is None
+    assert _notes(db_conn, agent_id) == []

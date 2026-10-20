@@ -4,17 +4,17 @@
 # When entering an interruptible section (the LLM stream or code execution), the
 # node uses `async with subscribe_interrupt(...) as event:` to get an
 # asyncio.Event; the context manager spawns a background task that watches for a
-# durable interrupt inbound (kind 'cancel'/'terminate') for this agent and sets
-# the event the moment one is queued. The node races its work vs `event.wait()`
-# and aborts when the event fires.
+# durable interrupt inbound (kind 'cancel'/'terminate', or a 'restart' that has waited
+# its grace) for this agent and sets the event the moment one is queued. The node races
+# its work vs `event.wait()` and aborts when the event fires.
 #
 # Durability is the whole point. The signal is a real `inbound_messages` row
 # (a pending cancel inbound or the terminate path), detected via a
 # short DB poll. A signal that lands while no node is interruptible is NOT lost:
 # it stays a pending row and the next claim pass dispatches it. This node only
 # *aborts* the current action; the semantic dispatch (cancel -> halt to idle,
-# terminate -> goto END) stays in the claim node, the single owner of inbound
-# semantics.
+# terminate -> goto END, restart -> goto END and resume) stays in the claim node, the
+# single owner of inbound semantics.
 #
 # The watcher polls `inbound_messages` on a short cadence (`INTERRUPT_POLL_S`)
 # instead of sharing the agent's Redis inbound listener with the claim node's
@@ -30,7 +30,8 @@
 #
 # Cancel latency trades from "instant (pub/sub)" to "≤ one poll interval" — 2s
 # is well inside what a pause/terminate UI action tolerates, and the claim
-# path's instant wake is untouched.
+# path's instant wake is untouched. A restart adds its grace to that
+# (`pending_interrupt_reason`).
 #
 # Container/eval mode has no inbound queue (pool None); subscribe_interrupt then
 # yields an event that never fires, so the wrapped action runs uninterruptibly —
@@ -48,6 +49,7 @@ from agent.db import pending_interrupt_reason
 from agent.graph.node_log import awaiter_chain_lines
 from base.agents.messages.inbound import InterruptReason
 from base.log import logger
+from base.native_process.stop_timing import INTERRUPT_POLL_S
 from base.native_process.turn_identity import HostedTurnResources
 
 
@@ -68,8 +70,23 @@ class InterruptEvent(asyncio.Event):
             super().set()
 
 
+# meiva:note
+# The state update of a node an interrupt ended: halted, and why when a restart did. The one
+# place that says a restart's interrupt leaves an unfinished turn halted
+# (`AgentState.interrupted_by_restart`). Cancel and terminate need no mark: the claim that
+# takes them decides what follows.
+def interrupt_halt(reason: InterruptReason) -> dict[str, bool]:
+    if reason is InterruptReason.RESTART:
+        return {"halted": True, "interrupted_by_restart": True}
+    return {"halted": True}
+
+
 class ModelInterruptedError(Exception):
     """A model operation settled without a result; claim still owns the command."""
+
+    def __init__(self, reason: InterruptReason) -> None:
+        super().__init__(f"interrupted by {reason.value}")
+        self.reason = reason
 
 
 async def interruptible_model[T](
@@ -106,7 +123,9 @@ async def interruptible_model[T](
     ):
         raise outcome
     if cancelled:
-        raise ModelInterruptedError
+        raise ModelInterruptedError(
+            event.reason if isinstance(event, InterruptEvent) else InterruptReason.USER
+        )
     if isinstance(outcome, BaseException):
         raise outcome
     return outcome[0]
@@ -151,12 +170,6 @@ async def watch_for_interrupt(
 # nothing after cancel besides unwinding (the stop flag is already set).
 # The original service still owns its actual task and eventual result.
 WATCHER_EXIT_TIMEOUT_S = 5.0
-
-# Poll cadence for the interrupt watcher (see `watch_for_interrupt`). 2s
-# bounds cancel/terminate abort latency for an in-flight llm/exec; the old
-# shared pub/sub listener woke instantly but coupled the watcher to the claim
-# node's idle wait — the coupling was the bug.
-INTERRUPT_POLL_S = 2.0
 
 
 class _InterruptWatch:

@@ -14,12 +14,14 @@ from agent.graph.exec.tests.cancel_fixture import (
     make_runtime,
     set_after,
 )
+from agent.graph.interrupt import InterruptEvent
 from agent.graph.llm.node import llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState
 
 # Most tests here drive exec_node/llm_node with mocked run_in_subprocess / a
 # fake cancel_event, so they are deterministic and run in the parallel pool.
+from base.agents.messages.inbound import InterruptReason
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.turn_identity import HostedTurnResources
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
@@ -65,6 +67,42 @@ async def test_llm_node_cancel_event_race_discards_partial(
     # Clean discard: no partial AIMessage, no marker
     assert committed_messages(update) == []
     assert has_cancelled_event(pub, agent_id=7)
+
+
+# meiva:note
+# A restart's interrupt drops the half-generated reply like any interrupt, and says on the state
+# that the halted turn is unfinished: claim must resume it, not treat it as idle.
+async def test_llm_node_restart_interrupt_discards_partial_and_marks_the_turn_unfinished(
+    hosted_resources: HostedTurnResources,
+    fake_cancel_event: InterruptEvent,
+    database_gate: ProcessDbGate,
+) -> None:
+
+    async def _stream_then_hang():
+        yield AIMessageChunk(content="half a sentence")
+        await asyncio.Future()
+
+    fake_llm = MagicMock()
+    fake_llm.astream.return_value = _stream_then_hang()
+    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
+
+    async def restart_lands() -> None:
+        await asyncio.sleep(0.1)
+        fake_cancel_event.set(InterruptReason.RESTART)
+
+    trigger = asyncio.create_task(restart_lands())
+    runtime = make_runtime(
+        hosted_resources=hosted_resources,
+        llm=fake_llm,
+        event_publisher=MagicMock(),
+        database_gate=database_gate,
+    )
+    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
+    await trigger
+
+    assert isinstance(result, Command)
+    assert result.goto == "after_exec"
+    assert result.update == {"halted": True, "interrupted_by_restart": True}
 
 
 async def test_llm_node_cancel_event_race_discards_partial_tool_call(

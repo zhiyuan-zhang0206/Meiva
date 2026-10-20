@@ -32,6 +32,7 @@ from base.agents.messages.envelope import EnvelopeReadInputs
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.kwargs import MeivaMsgType
+from base.agents.messages.lifecycle_text import by_who
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
@@ -79,20 +80,6 @@ class BatchState:
                     created_at=datetime.now(UTC),
                 )
             )
-
-
-def by_who(source: str) -> str:
-    """Render "by X" in lifecycle marker text.
-
-    'self' (meiva.self.terminate / restart called by agent itself) → "yourself"
-    makes the marker read naturally ("You are terminated by yourself" expresses
-    "self-killed" semantics more accurately than "by self").
-    Other sources ('user' / 'agent:N' / 'system') concatenate the
-    raw value — the agent immediately sees the trigger's identity.
-    """
-    if source == "self":
-        return "yourself"
-    return source
 
 
 def _ts_prefix(ctx: MeivaContext) -> str:
@@ -348,37 +335,44 @@ async def _handle_terminate(
     st.next_goto = END
 
 
+# meiva:note
+# Take a restart: end this invocation so the host can flush the checkpoint and apply the
+# command, and settle what the agent is told.
+#
+# An agent that was idle stays idle (`restart_preserves_idle`) and reads the acceptance
+# marker. An agent whose turn was unfinished resumes: the host's apply queues the one note
+# that continues it (`restart_resume_note`), so no marker is added here. The two cases are
+# told apart by `_turn_was_idle`.
 async def handle_restart(
     ctx: MeivaContext,
-    _agent_id: int,
-    item: ClaimedInbound,
-    st: BatchState,
-) -> None:
-    """Render restart acceptance and end this invocation. The host applies the durable command after the graph returns and the checkpoint flushes."""
-    st.new_msgs.append(
-        system_note_message(
-            content=f"{_ts_prefix(ctx)}Restart was accepted from {by_who(item.source)}",
-            tag=NoteTag.LIFECYCLE_RESTART,
-            created_at=datetime.now(UTC),
-        )
-    )
-    st.next_goto = END
-    st.restart_requested = True
-
-
-# meiva:note
-# Set restart_preserves_idle from state context.
-#
-# Separated from handle_restart because these decisions depend on
-# *state* (AgentState), which the dispatch loop already has.
-async def _handle_restart_stateful(
     state: _state.AgentState,
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
-    st.restart_preserves_idle = (state.halted or not state.messages) and item.source not in (
-        "self",
-    )
+    st.next_goto = END
+    st.restart_requested = True
+    st.restart_preserves_idle = _turn_was_idle(state, item)
+    if st.restart_preserves_idle:
+        st.new_msgs.append(
+            system_note_message(
+                content=f"{_ts_prefix(ctx)}Restart was accepted from {by_who(item.source)}",
+                tag=NoteTag.LIFECYCLE_RESTART,
+                created_at=datetime.now(UTC),
+            )
+        )
+
+
+# meiva:note
+# Whether a restart finds the agent idle, with no unfinished turn to continue.
+#
+#     `halted` alone cannot say so. A cancel pauses an agent by setting it, and so does a
+#     model call or code run a restart interrupted, though that turn is unfinished:
+#     `interrupted_by_restart` marks the latter. An agent with no history is idle. A
+#     restart from the agent's own code (`meiva.self.restart()`) leaves its exec halted
+#     with the turn unfinished, so it never counts as idle.
+def _turn_was_idle(state: _state.AgentState, item: ClaimedInbound) -> bool:
+    halted = state.halted and not state.interrupted_by_restart
+    return (halted or not state.messages) and item.source != "self"
 
 
 async def _handle_resurrect(
@@ -469,8 +463,7 @@ async def _dispatch_item(
     elif kind == InboundKind.TERMINATE:
         await _handle_terminate(ctx, item, st)
     elif kind == InboundKind.RESTART:
-        await handle_restart(ctx, agent_id, item, st)
-        await _handle_restart_stateful(state, item, st)
+        await handle_restart(ctx, state, item, st)
     elif kind == InboundKind.RESURRECT:
         if item.id == latest_resurrect_id:
             await _handle_resurrect(ctx, item, st)
