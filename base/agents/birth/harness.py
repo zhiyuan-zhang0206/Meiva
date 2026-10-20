@@ -5,6 +5,7 @@ import os
 import shutil
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
@@ -28,7 +29,7 @@ DEFAULT_HARNESS = Harness.MEIVA
 # because the graph routes its turns to `harness_turn`, whose bridge opens an
 # adapter session; removing a value retires its launcher and leaves rows born on
 # it inert, which is the rollback.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 LAUNCHABLE_HARNESSES: frozenset[Harness] = frozenset(
     {Harness.MEIVA, Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY}
 )
@@ -52,7 +53,7 @@ class _LoginEvidence:
 # Install directories a user-level CLI lands in even when the process PATH is
 # trimmed. Agents start without the interactive shell profile, so a missing PATH
 # entry alone is not proof that the harness is absent.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 _FALLBACK_BIN_DIRS = (
     ".local/bin",
     ".npm-global/bin",
@@ -81,7 +82,7 @@ def coerce_harness(value: str | Harness | None) -> Harness:
 # neither run nor move onto another loop, and only a force terminate could end
 # it. A fork inherits its source's harness, so a source that never got a
 # launcher is refused by the same rule instead of copying the dead value.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def _require_launchable(
     harness: Harness, fork_from: int | None, launchable: Collection[Harness]
 ) -> Harness:
@@ -106,7 +107,7 @@ def _require_launchable(
 # a different one is refused here, inside the birth transaction, so a caller that
 # skipped request validation still cannot fork across harnesses; omitting the
 # value inherits the source's.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def resolve_birth_harness(
     cur: psycopg.Cursor[Any],
     requested: str | Harness | None,
@@ -145,34 +146,165 @@ def _has_value(mapping: object, key: str) -> bool:
     return bool(cast("dict[str, object]", mapping).get(key))
 
 
-def _claude_code_login(home: Path) -> _LoginEvidence:
-    if (home / ".claude" / ".credentials.json").is_file():
+def _nested(value: object, key: str) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    inner = cast("dict[str, object]", value).get(key)
+    return cast("dict[str, object]", inner) if isinstance(inner, dict) else None
+
+
+def _epoch_ms(value: object) -> datetime | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        return datetime.fromtimestamp(float(value) / 1000, UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _iso_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed.astimezone(UTC) if parsed.tzinfo is not None else None
+
+
+# meiva:note
+# A credential store answers the login question only as far as it can be read. A
+# token it holds is evidence; an account name it remembers is not, because that
+# record outlives the login: an ubuntu machine kept `oauthAccount` in
+# `~/.claude.json` while `claude auth status` reported `loggedIn: false`, and the
+# probe called it available. Where the store records an expiry, the one that
+# decides is the deadline of a credential that cannot renew itself; a past
+# access-token expiry only schedules a refresh, so reading it as a logout would
+# mark an idle machine unavailable. `_session_deadline` takes such a deadline and
+# `_renewable_credential` reports a renewable one as the age of the stored token.
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+def _session_deadline(deadline: datetime | None, *, where: str) -> _LoginEvidence:
+    if deadline is None:
         return _LoginEvidence(
-            signed_in=True, detail="credentials file found at ~/.claude/.credentials.json"
+            signed_in=True, detail=f"a token is stored in {where}, which records no expiry for it"
         )
+    if deadline <= datetime.now(UTC):
+        return _LoginEvidence(
+            signed_in=False, detail=f"the credentials in {where} expired at {deadline.isoformat()}"
+        )
+    return _LoginEvidence(
+        signed_in=True, detail=f"the credentials in {where} are valid until {deadline.isoformat()}"
+    )
+
+
+def _renewable_credential(
+    deadline: datetime | None, *, where: str, credential: str
+) -> _LoginEvidence:
+    if deadline is None:
+        return _LoginEvidence(signed_in=True, detail=f"a token is stored in {where}")
+    return _LoginEvidence(
+        signed_in=True,
+        detail=f"a token is stored in {where}; its {credential} runs out at "
+        f"{deadline.isoformat()} and is renewed on use",
+    )
+
+
+def _claude_credentials(record: object) -> _LoginEvidence:
+    where = "~/.claude/.credentials.json"
+    oauth = _nested(record, "claudeAiOauth")
+    if oauth is None:
+        return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
+    if not _has_value(oauth, "accessToken") and not _has_value(oauth, "refreshToken"):
+        return _LoginEvidence(signed_in=False, detail=f"{where} holds no token")
+    if _has_value(oauth, "refreshToken"):
+        return _session_deadline(_epoch_ms(oauth.get("refreshTokenExpiresAt")), where=where)
+    return _session_deadline(_epoch_ms(oauth.get("expiresAt")), where=where)
+
+
+# meiva:note
+# This row reports one thing: a token set that `~/.claude/.credentials.json`
+# stores and whose refresh token has not expired. An account named in
+# `~/.claude.json` is not that evidence — the record outlives the login — so on its
+# own it reads `unknown`, as does a missing or unreadable store.
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+def _claude_code_login(home: Path) -> _LoginEvidence:
+    credentials = home / ".claude" / ".credentials.json"
+    if credentials.is_file():
+        return _claude_credentials(_read_json(credentials))
     account = _read_json(home / ".claude.json")
     if _has_value(account, "oauthAccount"):
-        return _LoginEvidence(signed_in=True, detail="signed-in account recorded in ~/.claude.json")
+        return _LoginEvidence(
+            signed_in=None,
+            detail="~/.claude.json names the account that signed in but stores no token, and "
+            "that record outlives the login",
+        )
     if (home / ".claude.json").is_file():
         return _LoginEvidence(signed_in=False, detail="~/.claude.json records no signed-in account")
     return _LoginEvidence(signed_in=None, detail="no Claude Code configuration found")
 
 
+# meiva:note
+# This row reports a token set stored in `~/.codex/auth.json`. The file records no
+# expiry for it — the access token is renewed from the refresh token, and
+# `last_refresh` says when that last happened — and no threshold on that age would
+# be more than a guess, so the token set is the evidence and the reason carries the
+# age. A missing or unreadable file reads `unknown`; a file holding no token reads
+# `unavailable`.
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def _codex_login(home: Path) -> _LoginEvidence:
+    where = "~/.codex/auth.json"
     auth = home / ".codex" / "auth.json"
     if not auth.is_file():
-        return _LoginEvidence(signed_in=None, detail="no ~/.codex/auth.json")
-    data = _read_json(auth)
-    if data is None:
-        return _LoginEvidence(signed_in=None, detail="~/.codex/auth.json is unreadable")
-    if _has_value(data, "OPENAI_API_KEY") or _has_value(data, "tokens"):
-        return _LoginEvidence(signed_in=True, detail="credentials found in ~/.codex/auth.json")
-    return _LoginEvidence(signed_in=False, detail="~/.codex/auth.json holds no credentials")
+        return _LoginEvidence(signed_in=None, detail=f"no {where}")
+    record = _read_json(auth)
+    if not isinstance(record, dict):
+        return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
+    data = cast("dict[str, object]", record)
+    if _has_value(data, "OPENAI_API_KEY"):
+        return _LoginEvidence(signed_in=True, detail=f"an API key is stored in {where}")
+    tokens = _nested(data, "tokens")
+    holds_token = _has_value(tokens, "access_token") or _has_value(tokens, "refresh_token")
+    if tokens is None or not holds_token:
+        return _LoginEvidence(signed_in=False, detail=f"{where} holds no credentials")
+    refreshed = data.get("last_refresh")
+    age = f", last refreshed {refreshed}" if isinstance(refreshed, str) else ""
+    return _LoginEvidence(signed_in=True, detail=f"a ChatGPT token set is stored in {where}{age}")
 
 
-def _antigravity_login(_home: Path) -> _LoginEvidence:
+# meiva:note
+# The CLI keeps its session in its own directory. `~/.gemini/jetski-standalone-oauth-token`
+# is written by the IDE, not by the CLI, and the CLI does not read it: on a machine
+# holding only that file and a fresh token, `agy -p` still answered "authentication
+# required". Reading it would report that machine available, so the probe asks for the
+# CLI's own file and nothing else.
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+_ANTIGRAVITY_SESSION_FILE = ".gemini/antigravity-cli/antigravity-oauth-token"
+
+
+def _antigravity_session(record: object, where: str) -> _LoginEvidence:
+    token = _nested(record, "token")
+    if token is None:
+        return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
+    if not _has_value(token, "access_token"):
+        return _LoginEvidence(signed_in=False, detail=f"{where} holds no access token")
+    return _renewable_credential(
+        _iso_timestamp(token.get("expiry")), where=where, credential="access token"
+    )
+
+
+# meiva:note
+# This row reports the session file its CLI wrote, and nothing else on the machine: an
+# IDE login is a different credential. A readable file holding an access token is
+# `available`, and its expiry is reported as age — the CLI renews from the refresh
+# token, so a past access expiry is not a logout. No file, or one that cannot be read,
+# is `unknown`.
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+def _antigravity_login(home: Path) -> _LoginEvidence:
+    token_file = home / _ANTIGRAVITY_SESSION_FILE
+    if token_file.is_file():
+        return _antigravity_session(_read_json(token_file), f"~/{_ANTIGRAVITY_SESSION_FILE}")
     return _LoginEvidence(
-        signed_in=None, detail="the CLI stores its session outside its config directory"
+        signed_in=None, detail=f"no Antigravity session file found at ~/{_ANTIGRAVITY_SESSION_FILE}"
     )
 
 
@@ -248,7 +380,7 @@ def _probe_external(
 # The probe reads the filesystem only: no command runs, so it cannot hang on a
 # login prompt, spend quota or start a session. A sign-in it cannot prove is
 # reported as unknown rather than guessed either way.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def probe_local_harnesses(
     home: Path | None = None,
     path_env: str | None = None,

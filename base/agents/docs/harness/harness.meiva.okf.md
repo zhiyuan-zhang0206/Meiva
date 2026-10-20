@@ -62,58 +62,44 @@ start.
 
 ## No launcher, no birth
 
-Recording a value nobody can honour would make the column a claim about a runtime
-loop that is not running — and because the value never changes, the agent could
-be neither run nor moved onto another loop. `LAUNCHABLE_HARNESSES` names the
-harnesses a launcher exists for, and `resolve_birth_harness` refuses the birth
-itself for anything else:
-`HarnessNotLaunchable` (`harness_not_launchable`, HTTP 400) names the harness and
-the launchable ones, and the transaction rolls back before the row exists. A fork
-inherits its source's harness, so a source born before this rule — or one whose
-launcher was retired — is refused by the same check instead of copying a value
-nothing can start.
-
-## Rows born before the rule
-
-Membership is checked again at run time, which is what keeps pre-existing rows
-inert instead of quietly running the built-in loop under an external label. Two
-gates refuse to run anything outside the set:
-
-- `validate_launch_row` (`ops/lifecycle/launch.py`) refuses the spawn's launch op
-  with a reason naming the harness, so the caller sees why;
-- `is_runnable` (`services/agent_runner/agent_host/scheduling/wake_screening.py`)
-  refuses the hosted turn itself. The launch op is only one way into a turn: the
-  delivery watchdog, the durable pending scan and pub/sub wakes all reach
-  `_run_turn` without it, and every one of them passes this gate.
-
-Such a row keeps its stored value and stays inert: no turn starts on it, so no
-built-in loop runs under an external label. Adding a launcher back means adding
-its harness to the set, and `retry_launch` can then wake the rows it serves.
-Ending one in the meantime needs a force terminate — a graceful terminate is
-applied inside a turn the row cannot get.
-
-A launchable harness is not a working one: the wake gate says the release has a
-launcher, and the session itself is what fails first if the CLI or its SDK is
-missing (`agent/graph/docs/harness-turn.meiva.okf.md`).
+Recording a harness no launcher serves would make the column a claim about a
+runtime loop that is not running, and the value never changes, so such an agent
+could be neither run nor moved. The birth boundary refuses it, and two run-time
+gates keep rows born before the rule inert. The set, both gates and what
+"launchable" does not promise:
+[[base/agents/docs/harness/launchable-and-birth.meiva.okf.md|launchable harnesses and the birth gate]].
 
 ## The availability probe
 
-`meiva.agents.harness_availability()` reports one row per harness for the machine
-the caller runs on. Each row carries a status — `available` (installed with a
-credential marker present), `unavailable` (not installed, or installed with a
-marker holding no credentials) or `unknown` (installed, but the sign-in state
-cannot be read here) — plus a readable reason, the resolved executable path
-(symlinks followed, so not always the name on PATH) and whether PATH led to it.
-The probe reads that a credential file exists and is shaped like a session; it
-does not validate freshness, so an expired credential still reads as `available`.
+`meiva.agents.harness_availability()` reports one row per harness for this machine.
+A row carries a status — `available` (installed, and the store holds a token),
+`unavailable` (not installed, a store holding no token, or credentials that cannot
+renew and have expired) or `unknown` (installed, but the store is missing or
+unreadable) — plus a readable reason, the resolved executable path (symlinks
+followed, so not always the name on PATH) and whether PATH led to it.
+
+The probe reads a credential store; it does not authenticate. Two distinctions
+follow. A store is evidence, an account record is not: `~/.claude.json` keeps
+`oauthAccount` after the login behind it dies, so a probe reading it alone called
+an ubuntu machine signed in while its CLI reported `loggedIn: false`; the record
+now reads `unknown`. And a recorded expiry proves a logout only where the
+credential cannot renew itself — Claude Code's refresh token does, its access
+token is renewed from it, and Antigravity records a one-hour access token plus
+the refresh token that replaces it. A past access-token expiry only schedules the
+next renewal, so it is reported as age. Where the store records no expiry at all
+(Codex keeps opaque tokens), the token is the evidence and the reason its age.
+
+The store has to belong to the CLI: Antigravity's IDE writes
+`~/.gemini/jetski-standalone-oauth-token`, the CLI reads only its own
+`antigravity-cli/antigravity-oauth-token`, and an IDE-only machine answers
+`authentication required` — so only the CLI's file is read.
 
 The probe reads the filesystem only. It runs no CLI, so it cannot hang on a login
 prompt, spend quota or start a session. When PATH misses a user-level install the
 probe still looks in the conventional bin directories, because an agent process
 starts without the interactive shell profile; `on_path=false` says that is how the
-executable was found. A harness whose credentials are kept outside those files
-(Antigravity's CLI keeps its session elsewhere) reports `unknown` rather than an
-invented answer.
+executable was found. A harness whose credentials are kept somewhere the probe
+does not know reports `unknown` rather than an invented answer.
 
 Recording and validating the harness is one slice: the launchers that actually
 start a session on an external harness are separate, and they read this column

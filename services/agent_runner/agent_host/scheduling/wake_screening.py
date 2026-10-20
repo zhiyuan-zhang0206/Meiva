@@ -4,7 +4,7 @@
 # machine, status, harness and two config maps the turn needs, and the quiet
 # rejections decide whether this host is the one to run it. Split out of `host.py`
 # to keep it inside the file-size ceiling.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ __all__ = ["is_runnable", "read_stored_config"]
 # runner sees every wake), a terminated agent's wake is the delivery watchdog's
 # resurrect path, and a row born on a harness this release has no launcher for
 # has nothing this host could run it on. None is a fault of this host.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def is_runnable(
     machine: str,
     agent_id: int,
@@ -55,7 +55,7 @@ def is_runnable(
     # into a turn: the delivery watchdog, the durable pending scan and pub/sub
     # wakes reach it without one. Without a launcher the only loop this host
     # could run for a row is the built-in one, which is not what the row says.
-    # meiva:link base/agents/docs/harness.meiva.okf.md
+    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
     if Harness(stored.harness) not in launchable:
         logger.debug(
             "hosted wake for agent {agent_id} ignored — harness {harness} has no launcher",
@@ -72,7 +72,7 @@ def is_runnable(
 # maps that decide what running means. None = the row is gone, a real anomaly (a
 # wake was published for an agent that does not exist), and is logged rather than
 # screened like the rejections above.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 async def read_stored_config(
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection], agent_id: int
 ) -> StoredConfig | None:

@@ -90,7 +90,7 @@ class SpawnAgentRequest(BaseModel):
     # The runtime loop the agent is born on. A fork inherits its source's harness;
     # naming a different one fails the birth instead of overriding it, and an
     # unknown value is a 422 here rather than a fallback to the default.
-    # meiva:link base/agents/docs/harness.meiva.okf.md
+    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
     harness: Harness | None = Field(default=None)
 
     @model_validator(mode="after")
@@ -537,7 +537,7 @@ class InventoryWriteOpResult(BaseModel):
 # and `on_path` whether PATH alone found it — False means only a conventional
 # install directory held it, so a process started with a trimmed PATH may not see
 # it. Whether a launcher exists at all is the gateway's answer, not the probe's.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 class HarnessProbeRow(BaseModel):
     harness: Harness
     status: HarnessStatus

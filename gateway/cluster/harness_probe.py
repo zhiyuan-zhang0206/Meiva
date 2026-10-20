@@ -26,7 +26,7 @@ DispatchOp = Callable[[Database, str, OpKind, dict[str, Any]], Awaitable[dict[st
 # this module only asks and remembers. An answer is cached per machine for 30
 # seconds because an install or a login changes at human speed, while the spawn
 # form can be opened, closed and reopened many times in that window.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 class HarnessProbeCache:
     def __init__(
         self,
@@ -60,7 +60,7 @@ class HarnessProbeCache:
 # one owner) AND the machine can actually run it — installed and signed in, or the
 # built-in runtime, which needs neither. Testing only the set would offer a choice
 # the spawn then refuses.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def launchable(row: HarnessProbeRow) -> bool:
     if row.harness not in LAUNCHABLE_HARNESSES:
         return False
@@ -84,7 +84,7 @@ def availability_rows(probed: HarnessProbeResult) -> list[HarnessAvailability]:
 # birth one there, so its install state would be an answer to a question nobody can
 # act on — it reports 503 like any other unrunnable target, and the form shows
 # `unknown` rather than a `launchable` option that leads nowhere.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 async def probe_harnesses(
     target: str, *, db: Database, local_machine: MachineIdentity, dispatch: DispatchOp
 ) -> HarnessProbeResult:
