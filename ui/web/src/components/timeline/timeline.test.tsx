@@ -309,8 +309,8 @@ describe("timeline document work", () => {
       sdk_calls: [{ method: "files.read", count: 2 }],
     });
     rerender(<TimelineView items={[next]} threadKey="first" />);
-    expect(screen.getByTestId("turn-toggle").textContent).toContain("files.read × 2");
     fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByTestId("turn-toggle").textContent).toContain("files.read × 2");
     expect(screen.getByTestId("python-code").textContent).toBe("meiva.files.read('updated')");
 
     rerender(

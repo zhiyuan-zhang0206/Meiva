@@ -64,6 +64,8 @@ Secondary items (thinking, code, output and the other detail kinds) group into T
 
 ## Turn timer
 
+The collapsed turn strip is one fixed-height line: the summary truncates and the SDK-call chips are expanded-only, because a block carrying chips stood up to 38px taller than one without and those strips sit between cards (user report 2026-10-21).
+
 The turn header's timer reads ONE basis in both states — `summarizeTurn.workedMs`, the sum of the turn's block durations — with the live "Working for" adding only the in-flight block's elapsed on top, so it does not drop when the turn ends. Wall-clock across a turn is never displayed: a turn is a maximal run of secondary items and can span an idle gap (a restart, a wake-up the agent had not picked up yet).
 
 ## Column geometry
