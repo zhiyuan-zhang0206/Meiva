@@ -82,5 +82,5 @@ only a small bottom padding, and shares the same column cap with one
 
 - [[ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md|Frontend Components]] — the catalog this node was split out of; the sidebar, composer, and inspector live there.
 - [[ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md|Per-Thread Timeline Cache]] — the store that feeds this view, including the compact-replace edge and the retention re-attach.
-- [[ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md|Card chrome]] — the copy overlay and its pointer gating.
+- [[ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md|Card chrome]] — the hover footer under a card (timestamp and Copy) and its pointer gating.
 - [[ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md|System markers]] — system-marker dispatch and the fail-loud unrecognized alarm.

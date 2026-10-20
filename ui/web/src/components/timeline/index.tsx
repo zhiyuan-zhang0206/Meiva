@@ -664,7 +664,7 @@ export const TimelineView = memo(function TimelineView({
           config={null}
           streaming={streaming}
           expanded={false}
-          showActions={false}
+          copyable={false}
           isStuck={false}
           onToggle={toggleExpanded}
         />
@@ -679,7 +679,7 @@ export const TimelineView = memo(function TimelineView({
       : config.fixedDefault;
     const expanded = overrides.has(item.item_id) ? !defaultExpanded : defaultExpanded;
 
-    const showActions = expanded && !item.partial;
+    const copyable = expanded && !item.partial;
 
     return (
       <TimelineRow
@@ -689,7 +689,7 @@ export const TimelineView = memo(function TimelineView({
         config={config}
         streaming={streaming}
         expanded={expanded}
-        showActions={showActions}
+        copyable={copyable}
 
         stickyHeader={isPrimary ? false : "nested"}
         isStuck={!isPrimary && activeStuckChildId === item.item_id}

@@ -73,6 +73,11 @@ and the matching GitHub Releases.
   host — the machine name is a deployment detail, not a label
   ([sticky scroll](ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md),
   [creation availability](ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md)).
+- A message card's timestamp and Copy moved out of the card into a footer under it, aligned to
+  the card's bottom-right and revealed on hover or focus (user ruling 2026-10-20): the card box
+  keeps its own padding, the footer reserves its own line so nothing shifts when it appears, and a
+  coarse pointer — which cannot hover — keeps it visible
+  ([card chrome](ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md)).
 - The create popover is one table instead of three dropdowns: harness, then the models that
   harness runs, then the efforts that model publishes — each column narrows the next and the
   config the last spawn used is marked on entry. A click is only a pick until a spawn is issued,

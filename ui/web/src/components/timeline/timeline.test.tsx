@@ -199,6 +199,7 @@ vi.mock("@/lib/state/use-user-settings", () => ({
 import { TimelineView } from ".";
 import { LoadOlderSpinner } from "./overlays";
 import { ItemView, streamingParseIntervalMs } from "./item";
+import { formatItemTime } from "./timestamp";
 import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "./markers";
 import { resolveSavedTimelineAnchor } from "./model/use-timeline-window";
 
@@ -2980,6 +2981,58 @@ describe("ItemTimestamp", () => {
   });
 });
 
+// meiva:note
+// The item stamp and Copy share one footer OUTSIDE the card box; the band is hover-revealed, so the card body keeps its own padding and both pieces of chrome line up under the card's bottom-right corner.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+describe("card hover footer", () => {
+  it("timestamp and Copy share the one band under the card, outside the card box", () => {
+    const item = makeItem({
+      kind: "agent_chat",
+      payload: "hello",
+      created_at: "2026-10-06T13:39:25+00:00",
+    });
+    render(<TimelineView items={[item]} />);
+    const stamp = screen.getByText(formatItemTime(item.created_at!, { showWeekday: true }));
+    const band = stamp.parentElement;
+    expect(band).toBe(screen.getByLabelText("Copy message").parentElement);
+    expect(band?.className).toContain("justify-end");
+    expect(band?.closest('[data-testid="card-toggle"]')).toBeNull();
+    expect(band?.previousElementSibling?.textContent).toContain("hello");
+  });
+
+  it("a streaming reply stamps the timestamp but offers no Copy", () => {
+    const item = makeItem({
+      kind: "agent_chat",
+      payload: "streaming",
+      partial: true,
+      created_at: "2026-10-06T13:39:25+00:00",
+    });
+    render(<TimelineView items={[item]} />);
+    const stamp = screen.getByText(formatItemTime(item.created_at!, { showWeekday: true }));
+    expect(stamp.parentElement?.className).toContain("justify-end");
+    expect(screen.queryByLabelText("Copy message")).toBeNull();
+  });
+
+  it("standing notes (show_timestamp false) and undated items stamp nothing", () => {
+    const standing = makeItem({
+      kind: "system_marker",
+      source: "agent_id",
+      payload: "note",
+      show_timestamp: false,
+      created_at: "2026-10-06T13:39:25+00:00",
+    });
+    const undated = makeItem({
+      kind: "system_marker",
+      source: "impersonation",
+      payload: "event",
+      created_at: null,
+    });
+    const { container } = render(<TimelineView items={[standing, undated]} />);
+    expect(container.textContent).not.toContain(formatItemTime(standing.created_at!, { showWeekday: true }));
+    expect(container.querySelectorAll(".font-mono.tabular-nums")).toHaveLength(0);
+  });
+});
+
 // CopyButton 1s feedback + rapid repeat-click resets the timer.
 describe("CopyButton feedback state machine", () => {
   beforeEach(() => {
@@ -3110,15 +3163,15 @@ describe("block-level copy actions (MessageCard overlay)", () => {
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
 
-  it("the action row carries the copy button and nothing else", () => {
+  it("the footer holds Copy and no other control", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "ok" })]}
       />,
     );
 
-    const pill = screen.getByLabelText("Copy message").closest("button")?.parentElement;
-    expect(pill?.querySelectorAll("button")).toHaveLength(1);
+    const band = screen.getByLabelText("Copy message").parentElement;
+    expect(band?.querySelectorAll("button")).toHaveLength(1);
   });
 
   it("copy button carries no title tooltip (aria-label only)", () => {
@@ -3133,31 +3186,21 @@ describe("block-level copy actions (MessageCard overlay)", () => {
   });
 
   // meiva:note
-  // Actual hover reveal is CSS-only (opacity-0 / group-hover/msgcard) — jsdom has no layout/paint engine to simulate a real :hover-triggered opacity change, so this only pins that the structural classes are present, NOT that hovering visually reveals the pill.
+  // The reveal itself is CSS (`group-hover`/`group-focus-within`) and jsdom has no paint engine to evaluate it, so the tests pin the structure the browser turns into the behavior: hidden means no paint AND no hit-testing, focus inside the card reveals it for keyboard users, and a coarse pointer — which cannot hover — keeps it visible in the flow.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  it("actions pill starts hidden (opacity-0) and is wired to reveal on card hover", () => {
+  it("footer is hidden and click-through until the card is hovered or focused", () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />,
     );
-    const pill = screen.getByLabelText("Copy message").closest("button")?.parentElement;
-    expect(pill?.className).toContain("opacity-0");
-    expect(pill?.className).toContain("group-hover/msgcard:opacity-100");
-  });
-
-  // meiva:note
-  // A hidden pill (opacity-0) is still hit-testable unless pointer-events is ALSO gated — otherwise a tap in the card's bottom-right corner on a touch device (no real :hover) silently hits an unseen copy button.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  it("actions pill defaults to pointer-events-none while hidden; only switches on with the same hover/focus variant that reveals it", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "agent_chat", payload: "ok" })]}
-      />,
-    );
-    const pill = screen.getByLabelText("Copy message").closest("button")?.parentElement;
-    expect(pill?.className).toContain("pointer-events-none");
-    expect(pill?.className).toContain("group-hover/msgcard:pointer-events-auto");
-    expect(pill?.className).toContain("focus-within:pointer-events-auto");
-    expect(pill?.className).toContain("pointer-coarse:hidden");
+    const band = screen.getByLabelText("Copy message").parentElement;
+    expect(band?.className).toContain("justify-end");
+    expect(band?.className).toContain("opacity-0");
+    expect(band?.className).toContain("pointer-events-none");
+    expect(band?.className).toContain("group-hover/msgcard:opacity-100");
+    expect(band?.className).toContain("group-hover/msgcard:pointer-events-auto");
+    expect(band?.className).toContain("group-focus-within/msgcard:opacity-100");
+    expect(band?.className).toContain("group-focus-within/msgcard:pointer-events-auto");
+    expect(band?.className).toContain("pointer-coarse:opacity-100");
   });
 });
 
