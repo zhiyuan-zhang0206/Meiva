@@ -14,7 +14,7 @@ from starlette.responses import JSONResponse, Response
 
 from base import paths
 from base.config.domains.gateway import GatewaySettings
-from base.host.net.auth import bearer_header
+from base.host.net.auth import bearer_header, cookie_name
 from gateway.app import cluster_auth_middleware
 from gateway.http.auth import rejection_log
 from gateway.http.auth.request_principal import (
@@ -126,6 +126,28 @@ def test_a_bearer_keeps_its_own_fact_in_trusted_network_mode() -> None:
 
     assert passed is not None
     assert passed.state.source_verified_by == "cluster_bearer"
+
+
+@pytest.mark.parametrize(
+    "authorization", ["Bearer wrong-secret", "Bearer machine-token-revoked", "Basic abc", ""]
+)
+def test_an_invalid_authorization_header_stays_a_401(authorization: str) -> None:
+    app = _app("trusted_network")
+
+    response, passed = _run(_request(app, authorization=authorization))
+
+    assert (response.status_code, passed) == (401, None)
+
+
+def test_an_invalid_session_cookie_still_falls_through_to_the_anonymous_path() -> None:
+    app = _app("trusted_network")
+    app.state.sessions = SimpleNamespace(is_valid=lambda *_args, **_kwargs: False)
+    request = _request(app)
+    request.scope["headers"].append((b"cookie", f"{cookie_name()}=stale.value".encode()))
+
+    response, passed = _run(request)
+
+    assert (response.status_code, passed is not None) == (200, True)
 
 
 def test_a_foreign_origin_cannot_post_anonymously() -> None:

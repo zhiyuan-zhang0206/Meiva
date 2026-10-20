@@ -63,4 +63,4 @@ unchanged): machine tokens and the telemetry token derive from it.
   administrator; the Host check only closes the browser path.
 - Audit actors and idempotency principals of anonymous callers read `trusted_network` /
   `cluster:administrator`; individual people are not distinguished, as with the shared bearer.
-- A client presenting an invalid bearer in this mode is served anonymously instead of getting 401.
+- Only a request with no `Authorization` header at all is served anonymously. An invalid one (wrong secret, revoked or expired machine token, malformed scheme) is still a 401, so a misconfigured machine fails at once instead of working until the mode is switched back. A stale session cookie falls through to the anonymous path, since a browser cannot clear it.

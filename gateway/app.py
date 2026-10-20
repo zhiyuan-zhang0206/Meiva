@@ -426,10 +426,13 @@ def _origin_refused() -> JSONResponse:
 
 
 # meiva:note
-# With `human_auth = trusted_network`, a request that presents no session cookie and no
-# bearer is served as the cluster administrator (fact `trusted_network`). A browser page is
+# With `human_auth = trusted_network`, a request that presents no valid session cookie and
+# no Authorization header at all is served as the cluster administrator (fact `trusted_network`). A browser page is
 # the one way to reach that listener without the operator choosing to, so these anonymous
-# requests, and only these, also face the Origin and Host checks.
+# requests, and only these, also face the Origin and Host checks. An Authorization header
+# that does not verify is a client error and stays a 401, so a misconfigured machine fails
+# now instead of working silently until the mode is switched back. A stale session cookie
+# is not: a browser cannot clear it.
 # meiva:link gateway/http/auth/docs/web-sessions.meiva.okf.md
 async def cluster_auth_middleware(
     request: Request,
@@ -483,7 +486,7 @@ async def cluster_auth_middleware(
         request.state.source_verified_by = verified_by
         return await call_next(request)
 
-    if config.human_auth == "trusted_network":
+    if config.human_auth == "trusted_network" and request.headers.get("Authorization") is None:
         if _foreign_origin(request, config):
             return _origin_refused()
         if request_host(request.headers.get("Host")) not in config.trusted_hosts:

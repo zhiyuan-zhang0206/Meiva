@@ -1,5 +1,3 @@
-"""Auth enforcement on protected routes: unauthenticated 401s, CORS preflight exemption, bearer/cookie acceptance, and the empty-secret cluster posture; split from gateway/tests/bootstrap/test_auth.py (task #4922)."""
-
 from __future__ import annotations
 
 from pathlib import Path
