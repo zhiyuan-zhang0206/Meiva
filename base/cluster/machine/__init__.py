@@ -320,8 +320,8 @@ def resolve_gateway_bearer(
             "while the cluster API is authenticated. The root "
             "launcher delivers the active write generation's token to every agent host and "
             "runner service it starts, and such a process never presents the human secret "
-            "instead: restart the cluster's services (`meiva stop`, then `meiva start`) so the "
-            "launcher delivers it."
+            "instead: restart the cluster's services (stop with `meiva stop`, then start again: see `meiva stop --help` and "
+            "`meiva start --help`) so the launcher delivers it."
         )
     if not secret:
         raise GatewayApiTokenMissing(

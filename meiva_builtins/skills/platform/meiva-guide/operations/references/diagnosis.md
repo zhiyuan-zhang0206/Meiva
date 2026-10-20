@@ -20,7 +20,7 @@ from real incidents; the concrete sizes and dates are illustrative.
   cluster was never stopped; a worktree no longer owns one).
 - Response: checkpoints are never deleted automatically (never-delete ruling);
   the events-maintenance daemon only samples table sizes and runs the blob
-  vacuum. Reclaiming space is an operator-led capacity decision. Stop a leftover cluster at an orphan home with `MEIVA_HOME=<home> meiva stop -y`
+  vacuum. Reclaiming space is an operator-led capacity decision. Stop a leftover cluster at an orphan home with `MEIVA_HOME=<home> meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300` (drop `--stop-infra` on a pure runner)
   *then* delete the directory; delete verified-obsolete backups only with
   user approval.
 
@@ -69,7 +69,7 @@ from real incidents; the concrete sizes and dates are illustrative.
   (same agent-id-derived ports) — tear down the whole unit, not just the dir.
 - Response: match the backend to the session type (PTY → `get_shell_backend`),
   kill stale sessions by exact name (`=name`, prefix matching kills siblings),
-  remove the whole stale unit (`MEIVA_HOME=<home> meiva stop -y` + bootout probes +
+  remove the whole stale unit (`MEIVA_HOME=<home> meiva stop --yes …` with every choice explicit + bootout probes +
   delete plist).
 
 ### Schedules not running / breaker tripped

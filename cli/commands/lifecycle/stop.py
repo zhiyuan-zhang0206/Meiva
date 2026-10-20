@@ -1,11 +1,12 @@
-"""Local stop and restart commands over the shared native drain boundary.
-
-Normal paths retain checkpoints and never escalate a service or data-plane
-stop on timeout; a normal stop's terminal closure SIGKILLs what outlives its
-bounded grace. Explicit force uses the separate legacy resource teardown.
-A stop or restart closes terminals unless `--keep-service pty-sessions` keeps
-the service that holds them.
-"""
+# meiva:note
+# Local stop and restart commands over the shared native drain boundary.
+#
+# Normal paths retain checkpoints and never escalate a service or data-plane
+# stop on timeout; a normal stop's terminal closure SIGKILLs what outlives its
+# bounded grace. Explicit force uses the separate legacy resource teardown.
+# Every keep-or-stop choice (shell sessions, browser, extras, data plane, other
+# services), the interruption mode and the budget are the caller's explicit
+# arguments; nothing here defaults or infers one.
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import session_name
@@ -24,22 +26,23 @@ from base.sessions.hosting import hosting_supervised_session
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
 from cli.commands._repo import repo_root
-from cli.commands.lifecycle import _temporary_stop
+from cli.commands.data_plane.stop_waits import deadline_after, remaining
+from cli.commands.lifecycle import _temporary_stop, root_driver, root_readiness
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import force_close_terminals
 from cli.database import OperatorDatabaseFactory
 from cli.database.lifecycle_audit import (
     lifecycle_audit,
     operator_request_recorder,
+    record_lifecycle_request,
 )
 from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
+from services.supervision.roster.service_spec import ServiceSpec
 
-# The browser service runs a headed Chrome on a persistent login profile. A
-# restart / backend update preserves it by default (keep_browser=True):
-# bouncing it pops a window, risks a session-restore prompt, and re-attaches CDP
-# for no gain — the login state is the expensive part. Only a full teardown
-# (`meiva stop`, `meiva cluster destroy`) takes it down.
+# meiva:note
+# The browser service runs a headed Chrome on a persistent login profile; the
+# operator keeps or stops it explicitly (`--keep-browser`/`--stop-browser`).
 _BROWSER_SESSION = "browser"
 
 
@@ -100,32 +103,17 @@ def reap_cluster_chrome() -> None:
         print(f"  ✓ reaped Chrome left outside the session: {', '.join(map(str, pids))}")
 
 
-def _compute_stop_scope(
-    *,
-    preserve_sessions: frozenset[str],
-    keep_browser: bool,
-    keep_infra: bool,
-    machine: MachineIdentity,
-) -> tuple[list[str], bool, bool]:
-    """What this stop actually tears down: (service_sessions, runner_only, skip_infra).
-
-    The browser session joins the preserve set when keep_browser is set. A host
-    without the gateway capability has no local data plane; unknown (None, role
-    unresolved) conservatively takes the gateway path (stops infra). skip_infra
-    (keep_infra — the fleet-update / internal-restart path) leaves the instance
-    running so the following migrate/start still has DB.
-    """
-    # Dynamic lookup for monkeypatch-aware tests.
-    import cli.commands._repo as _repo_commands
-    import cli.commands.lifecycle.root_driver as _root_driver_commands
-
-    if keep_browser:
-        preserve_sessions = preserve_sessions | {_BROWSER_SESSION}
-
-    roles = _repo_commands.roles_or_none(machine=machine)
-    runner_only = roles is not None and "agent-runner" in roles and "gateway" not in roles
-    service_sessions = _root_driver_commands.root_tree_plan(preserve_sessions)
-    return service_sessions, runner_only, keep_infra or runner_only
+def _compute_stop_scope(*, keep_infra: bool | None, machine: MachineIdentity) -> tuple[bool, bool]:
+    # meiva:note
+    # (runner_only, skip_infra) for this stop, from the operator's infra choice.
+    #
+    # The host's capabilities only refuse a choice that does not apply: a gateway
+    # requires one, a host without the gateway capability has no local data plane
+    # and accepts none, and unreadable capabilities refuse the stop.
+    roles = machine.role()
+    _temporary_stop.require_infra_choice(roles, keep_infra=keep_infra)
+    runner_only = keep_infra is None
+    return runner_only, runner_only or bool(keep_infra)
 
 
 def _print_stop_plan(
@@ -142,7 +130,7 @@ def _print_stop_plan(
     print("\nThe following will be stopped:")
     print(f"  service sessions: {', '.join(service_sessions) if service_sessions else '(none)'}")
     if not keep_terminals:
-        print("  persistent terminals: closed")
+        print("  shell sessions: closed")
     if keep_browser:
         print(f"  browser: kept up ({session_name(_BROWSER_SESSION)}, login session preserved)")
     if runner_only:
@@ -157,42 +145,42 @@ def _print_stop_plan(
 def force_stop(
     _repo: Path,  # retained for the common stop call contract
     *,
-    require_confirmation: bool = True,
-    keep_infra: bool = False,
-    preserve_sessions: frozenset[str] = frozenset(),
-    keep_browser: bool = True,
-    announce: bool = False,
+    require_confirmation: bool,
+    keep_infra: bool | None,
+    preserve_sessions: frozenset[str],
+    keep_browser: bool,
+    keep_shell_sessions: bool,
+    announce: bool,
+    teardown_extras: bool,
+    timeout: float,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
     helper: HelperFactory | None,
 ) -> int:
-    """Explicit force-only resource stop; normal commands use _temporary_stop.
-
-    Preserves agent identities/data and the selected service/infra/terminal
-    scope, but may interrupt work. Never entered merely because drain timed out.
-    """
+    # meiva:note
+    # Explicit force-only resource stop; normal commands use _temporary_stop.
+    #
+    # Preserves agent identities/data and the selected service/infra/shell-session
+    # scope, but may interrupt work. Never entered merely because drain timed out.
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 
-    _service_sessions, runner_only, skip_infra = _compute_stop_scope(
-        preserve_sessions=preserve_sessions,
-        keep_browser=keep_browser,
-        keep_infra=keep_infra,
-        machine=machine,
-    )
+    _temporary_stop.require_dedicated_choices(preserve_sessions)
+    runner_only, skip_infra = _compute_stop_scope(keep_infra=keep_infra, machine=machine)
     root_preserve = preserve_sessions | (
         frozenset({_BROWSER_SESSION}) if keep_browser else frozenset[str]()
     )
-    # Keeping the pty-sessions service keeps the terminals it holds.
-    keep_terminals = SERVICE_UNIT in preserve_sessions
+    keep_terminals = keep_shell_sessions
+    if keep_terminals:
+        root_preserve |= {SERVICE_UNIT}
     plan_sessions = _root_driver_commands.root_tree_plan(root_preserve)
     _print_stop_plan(
         plan_sessions,
         keep_terminals=keep_terminals,
         keep_browser=keep_browser,
         runner_only=runner_only,
-        keep_infra=keep_infra,
+        keep_infra=bool(keep_infra),
     )
     if not _temporary_stop.confirm_stop(require_confirmation=require_confirmation):
         return 0
@@ -205,13 +193,17 @@ def force_stop(
 
     if announce:
         _temporary_stop.announce_stopping(machine=machine)
+    deadline = deadline_after(timeout)
 
     # Explicit force interrupts the host process. Agent metadata/checkpoints
     # remain untouched; the next host uses its existing owner recovery. This
     # path does not fabricate drain receipts and remains usable offline. The
     # pty-sessions service outlives this step: it closes the terminals below.
     _root_driver_commands.stop_root_service_tree(
-        preserve=root_preserve | {SERVICE_UNIT}, force=True, helper=helper
+        preserve=root_preserve | {SERVICE_UNIT},
+        timeout_s=remaining(deadline),
+        force=True,
+        helper=helper,
     )
 
     # 1.4) a teardown that asked for the browser down finishes the job: kill any
@@ -229,8 +221,11 @@ def force_stop(
     if not keep_terminals:
         force_close_terminals()
         _root_driver_commands.stop_root_service_tree(
-            preserve=root_preserve, force=True, helper=helper
+            preserve=root_preserve, timeout_s=remaining(deadline), force=True, helper=helper
         )
+
+    if teardown_extras:
+        _temporary_stop.stop_extras(deadline)
 
     # 2) stop the data plane (data persists on disk).
     _stop_data_plane(
@@ -247,14 +242,15 @@ def force_stop(
 def do_stop(
     _repo: Path,
     *,
-    require_confirmation: bool = True,
-    keep_infra: bool = False,
-    preserve_sessions: frozenset[str] = frozenset(),
-    keep_browser: bool = True,
-    announce: bool = False,
-    teardown_extras: bool = False,
-    force: bool = False,
-    timeout: float = 300,
+    require_confirmation: bool,
+    keep_infra: bool | None,
+    preserve_sessions: frozenset[str],
+    keep_browser: bool,
+    keep_shell_sessions: bool,
+    announce: bool,
+    teardown_extras: bool,
+    force: bool,
+    timeout: float,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
@@ -269,7 +265,10 @@ def do_stop(
             keep_infra=keep_infra,
             preserve_sessions=preserve_sessions,
             keep_browser=keep_browser,
+            keep_shell_sessions=keep_shell_sessions,
             announce=announce,
+            teardown_extras=teardown_extras,
+            timeout=timeout,
             retained_children=retained_children,
             producer=producer,
             machine=machine,
@@ -280,6 +279,7 @@ def do_stop(
         keep_infra=keep_infra,
         preserve_sessions=preserve_sessions,
         keep_browser=keep_browser,
+        keep_shell_sessions=keep_shell_sessions,
         announce=announce,
         teardown_extras=teardown_extras,
         timeout=timeout,
@@ -293,28 +293,35 @@ def do_stop(
 
 def cmd_stop(
     *,
-    keep_infra: bool = False,
-    require_confirmation: bool = True,
-    stop_browser: bool = True,
-    preserve_sessions: frozenset[str] = frozenset(),
-    force: bool = False,
-    timeout: float = 300,
+    keep_infra: bool | None,
+    require_confirmation: bool,
+    keep_browser: bool,
+    keep_shell_sessions: bool,
+    teardown_extras: bool,
+    preserve_sessions: frozenset[str],
+    force: bool,
+    timeout: float,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
     helper: HelperFactory | None,
 ) -> int:
-    """Stop this unit, including terminals and infrastructure; retain its data."""
+    # meiva:note
+    # Stop this unit as the operator chose; retain its data.
+    #
+    # `keep_infra` is None exactly on a host without the gateway capability (no
+    # local data plane); every other choice is a required explicit answer.
     with lifecycle_audit(operator_request_recorder(database_factory=database_factory)):
         return do_stop(
             repo_root(),
             require_confirmation=require_confirmation,
             keep_infra=keep_infra,
             preserve_sessions=preserve_sessions,
-            keep_browser=not stop_browser,
+            keep_browser=keep_browser,
+            keep_shell_sessions=keep_shell_sessions,
             announce=True,
-            teardown_extras=True,
+            teardown_extras=teardown_extras,
             force=force,
             timeout=timeout,
             retained_children=retained_children,
@@ -405,17 +412,26 @@ def restart_runtime() -> StartRuntime:
 
 def _cmd_restart_body(
     *,
-    mode: str = "smooth",
+    only_services: tuple[str, ...],
+    disabled_services: tuple[str, ...],
+    all_services: bool,
+    keep_shell_sessions: bool,
+    keep_browser: bool,
+    restart_extras: bool,
+    force: bool,
+    timeout: float,
+    start_timeout: float,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
-    """Stop then start without a stdin confirmation prompt.
-
-    Hosted agents drain through the shared stop boundary before service stop.
-    Explicit force authorizes interrupting resource shutdown.
-    """
+    # meiva:note
+    # Stop then start the service tree without a stdin confirmation prompt.
+    #
+    # Hosted agents drain through the shared stop boundary before service stop.
+    # Explicit force authorizes interrupting resource shutdown. `timeout` bounds
+    # the stop leg; the start leg launches exactly the named service selection.
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
@@ -467,8 +483,6 @@ def _cmd_restart_body(
     repo = runtime.code_root
     print(f"[meiva restart] cwd = {repo}")
     from base.deploy.lifecycle import status_journal
-    from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
-    from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 
     # Only the journal's opener closes it — the same owns_journal contract
     # _temporary_stop keeps (task #2898). When an outer operation's journal is
@@ -476,8 +490,8 @@ def _cmd_restart_body(
     # to that caller instead of clobbering its diagnosis.
     owns_journal = status_journal.begin("restart")
     print(
-        f"[meiva restart] budget contract: stop up to {PAUSE_TIMEOUT_SECONDS:.0f}s + "
-        f"start readiness up to {SERVICE_READY_TIMEOUT_S:.0f}s + bounded preflight probes; "
+        f"[meiva restart] budget contract: stop up to {timeout:.0f}s + "
+        f"start readiness up to {start_timeout:.0f}s + bounded preflight probes; "
         "an outer caller's timeout must exceed this total. Status journal: "
         f"{status_journal.status_path()} (phase progress and the final diagnosis "
         "stay readable there even if this process is cut off)",
@@ -513,6 +527,9 @@ def _cmd_restart_body(
             repo,
             check_launcher=False,
             runtime=runtime,
+            only_services=only_services,
+            disabled_services=disabled_services,
+            all_services=all_services,
             machine=command.machine,
             host=command.host,
         )
@@ -533,18 +550,24 @@ def _cmd_restart_body(
     # silently authorizes force.
     require_restart_runtime(runtime)
 
-    # Restart replaces the services, persistent terminals included (they close
-    # as at `meiva stop`: the pty-sessions service runs the new code afterwards),
-    # and keeps the private data plane (keep_infra), the browser (keep_browser)
-    # and, with teardown_extras left off, Gate, the permissions helper and native LGTM.
+    # meiva:note
+    # Restart replaces the services and keeps the private data plane: its start
+    # leg needs the database. Shell sessions, the browser and the extras (Gate,
+    # the permissions helper, native LGTM) are kept or restarted as the operator
+    # chose. A host without the gateway capability has no local data plane.
+    keep_infra = True if "gateway" in command.machine.role() else None
     with status_journal.phase("stop"):
         rc = do_stop(
             repo,
             require_confirmation=False,
-            keep_infra=True,
-            keep_browser=True,
-            teardown_extras=False,
-            force=mode == "force",
+            keep_infra=keep_infra,
+            preserve_sessions=frozenset(),
+            keep_browser=keep_browser,
+            keep_shell_sessions=keep_shell_sessions,
+            announce=False,
+            teardown_extras=restart_extras,
+            force=force,
+            timeout=timeout,
             retained_children=retained_children,
             database_factory=database_factory,
             producer=producer,
@@ -560,14 +583,20 @@ def _cmd_restart_body(
         if owns_journal:
             status_journal.finish(rc, error="stop leg failed")
         return rc
-    # Keep the captured runtime and the operator's durable selection through
-    # startup; neither is recaptured from a later caller or moving selector.
+    # meiva:note
+    # Keep the captured runtime and the operator's selection through startup;
+    # neither is recaptured from a later caller or moving selector. Units the
+    # stop leg kept still run, so the live root is not reconciled to the selection.
     with status_journal.phase("start"):
         rc = start.cmd_start_body(
             None,
             database_factory,
             command.machine,
-            persist_services=False,
+            only_services=only_services,
+            disabled_services=disabled_services,
+            all_services=all_services,
+            reconcile=False,
+            ready_timeout=start_timeout,
             runtime=runtime,
             retained_children=retained_children,
             producer=producer,
@@ -580,18 +609,128 @@ def _cmd_restart_body(
 
 def cmd_restart(
     *,
-    mode: str = "smooth",
+    only_services: tuple[str, ...],
+    disabled_services: tuple[str, ...],
+    all_services: bool,
+    keep_shell_sessions: bool,
+    keep_browser: bool,
+    restart_extras: bool,
+    force: bool,
+    timeout: float,
+    start_timeout: float,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
-    """Stop then start without a confirmation prompt."""
+    # meiva:note
+    # Stop then start the service tree without a confirmation prompt.
     with lifecycle_audit(operator_request_recorder(database_factory=database_factory)):
         return _cmd_restart_body(
-            mode=mode,
+            only_services=only_services,
+            disabled_services=disabled_services,
+            all_services=all_services,
+            keep_shell_sessions=keep_shell_sessions,
+            keep_browser=keep_browser,
+            restart_extras=restart_extras,
+            force=force,
+            timeout=timeout,
+            start_timeout=start_timeout,
             retained_children=retained_children,
             database_factory=database_factory,
             producer=producer,
             command=command,
         )
+
+
+AGENT_HOST = "agent-host"
+
+
+def _require_ok(response: dict[str, object], what: str) -> None:
+    if not response.get("ok"):
+        raise root_driver.RootDriverError(
+            f"{what} failed: {response.get('code')}: {response.get('error')}"
+        )
+
+
+# meiva:note
+# `meiva restart --only agent-host`: stop agent-host and let its root bring it back.
+#
+# The scope is agent-host alone, so shell sessions, the browser, the extras, every
+# other service and the data plane are outside this operation: there is no
+# keep-or-stop choice to make. The operator names the interruption mode and the
+# stop budget. Agent-host settles its own in-flight turns on SIGTERM; a unit that
+# outlives the root's stop window is the root's to kill.
+def restart_agent_host(
+    *,
+    force: bool,
+    timeout: float,
+    client_for: Callable[[float], Any],
+    require_owner: Callable[[dict[str, Any]], None],
+    ready: Callable[[ServiceSpec], bool],
+) -> int:
+    # meiva:note
+    # Down agent-host through its live root (`force_down` only with `force`), then up.
+    #
+    # `client_for(timeout)` opens a root control client, `require_owner` refuses a root
+    # this unit does not own and `ready` waits for the unit's protocol readiness.
+    from services.supervision.roster import build_services
+
+    client = client_for(timeout)
+    status = root_driver.root_status(client)
+    if status is None:
+        print(
+            "  ✗ refusing restart: no live meiva-root on this unit; start it with `meiva start`",
+            file=sys.stderr,
+        )
+        return 1
+    require_owner(status)
+    if AGENT_HOST not in root_driver.root_units(status):
+        print(f"  ✗ refusing restart: the live root runs no {AGENT_HOST} unit", file=sys.stderr)
+        return 1
+    spec = next(spec for spec in build_services() if spec.session == AGENT_HOST)
+    record_lifecycle_request("force-down" if force else "down", [AGENT_HOST])
+    _require_ok(
+        client.force_down(AGENT_HOST) if force else client.down(AGENT_HOST),
+        f"down {AGENT_HOST}",
+    )
+    print(f"  ✓ {AGENT_HOST} stopped")
+    record_lifecycle_request("up", [AGENT_HOST])
+    _require_ok(client_for(timeout).up(AGENT_HOST), f"up {AGENT_HOST}")
+    if not ready(spec):
+        print(f"  ✗ {AGENT_HOST} did not become ready after restart", file=sys.stderr)
+        return 1
+    print(f"  ✓ {AGENT_HOST} restarted and ready")
+    return 0
+
+
+def cmd_restart_agent_host(
+    *,
+    force: bool,
+    timeout: float,
+    start_timeout: float,
+    database_factory: OperatorDatabaseFactory,
+    command: CommandRuntime,
+) -> int:
+    # meiva:note
+    # Stop agent-host within `timeout` (force-killing only with `force`), then bring it up and
+    # wait up to `start_timeout` for its readiness.
+    with lifecycle_audit(operator_request_recorder(database_factory=database_factory)):
+        try:
+            _temporary_stop.refuse_hosted_stop()
+            return restart_agent_host(
+                force=force,
+                timeout=timeout,
+                client_for=lambda seconds: root_driver.root_client(timeout=seconds),
+                require_owner=lambda status: root_driver.require_root_owner(
+                    status, helper=command.helper
+                ),
+                ready=lambda spec: (
+                    not root_readiness.wait_for_service_tree(
+                        (spec,), timeout_s=start_timeout, timers=command.timers
+                    ).unready
+                ),
+            )
+        except (RuntimeError, OSError) as exc:
+            print(f"  ✗ restart of {AGENT_HOST} incomplete: {exc}", file=sys.stderr)
+            return 1

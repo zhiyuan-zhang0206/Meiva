@@ -39,17 +39,24 @@ def test_cluster_group_has_status_and_destroy() -> None:
 
 def test_cluster_destroy_acts_on_this_home_and_takes_no_path(tmp_path: Path) -> None:
     p = build_parser()
-    assert p.parse_args(["cluster", "destroy"]).drop_db is False
-    assert p.parse_args(["cluster", "destroy", "--drop-db"]).drop_db is True
+    destroy = ["cluster", "destroy", "--stop-mode", "smooth", "--stop-timeout", "300"]
+    assert p.parse_args(destroy).drop_db is False
+    assert p.parse_args([*destroy, "--drop-db"]).drop_db is True
     with pytest.raises(SystemExit):
-        p.parse_args(["cluster", "destroy", "--path", str(tmp_path / ".meiva-t")])
+        p.parse_args([*destroy, "--path", str(tmp_path / ".meiva-t")])
+    with pytest.raises(SystemExit):
+        # meiva:note
+        # the stop's mode and budget are explicit
+        p.parse_args(["cluster", "destroy"])
 
 
 def test_cluster_destroy_has_no_flag_that_skips_its_confirmation() -> None:
     p = build_parser()
     for flag in ("--yes", "-y", "--force"):
         with pytest.raises(SystemExit):
-            p.parse_args(["cluster", "destroy", flag])
+            p.parse_args(
+                ["cluster", "destroy", "--stop-mode", "smooth", "--stop-timeout", "300", flag]
+            )
 
 
 def test_help_builds_parser_config_free(tmp_path: Path) -> None:

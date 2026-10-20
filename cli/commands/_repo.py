@@ -150,7 +150,7 @@ def assert_schema_current_or_die(db_url: str) -> int:
             f"    The central DB is ahead of this code — typically the gateway moved to a newer "
             f"revision while this host stayed on an older one. Bring this host to the gateway's "
             f"revision (a source checkout: check out that commit and `uv sync`), then retry "
-            f"`meiva start`.",
+            f"`meiva start` with this unit's explicit service selection.",
             file=sys.stderr,
         )
         return 1
@@ -333,9 +333,9 @@ def register_machine_or_die(
     except psycopg.errors.UndefinedTable as e:
         print(
             f"  ✗ register_self failed: `machines` table does not exist ({e}).\n"
-            f"    Gateway's DB schema is behind — run `meiva stop` then `meiva start` on the gateway "
-            f"(a source-run gateway applies pending migrations on a cold start), then retry "
-            f"`meiva start` here.",
+            f"    Gateway's DB schema is behind — run `meiva stop` then `meiva start` on the gateway, each with its explicit "
+            f"choices (see their `--help`) (a source-run gateway applies pending migrations on a cold start), then retry "
+            f"`meiva start` here (with this unit's explicit service selection).",
             file=sys.stderr,
         )
         return 1

@@ -25,7 +25,8 @@ reported rather than started.
 The start uses `up`'s own shape — gateway first, then the runners, macOS through
 the same one-shot `gui_oneshot` LaunchAgent — and no code is rolled back: the
 switch phase never started, so those hosts still carry OLD and come back as a
-usable old version. It is plain `meiva start`, not `--boot`: a boot attempt records
+usable old version. It is `meiva start` with the operator's explicit service
+selection and `--start-timeout` (both required on every half), not `--boot`: a boot attempt records
 its failures into the boot budget, and on macOS the failing attempt that spends
 that budget exits `0` — launchd retries every nonzero exit with no attempt limit
 (`base/host/system/boot_policy.py`) — so a failed recovery would read as a

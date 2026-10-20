@@ -349,7 +349,7 @@ def start_pg(
             f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
             f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — postgres cannot bind "
             f"it. On reboot this means the private network has not come "
-            f"up yet; retry `meiva start` once it is.",
+            f"up yet; retry `meiva start --all-services` (or this unit's own service selection) once it is.",
             file=sys.stderr,
         )
         return 1

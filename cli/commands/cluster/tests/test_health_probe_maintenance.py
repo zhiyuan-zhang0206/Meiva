@@ -11,7 +11,6 @@ import pytest
 from base import paths
 from base.agents.context.clients import DatabaseFactory
 from base.db.tests.fakes import patch_database
-from base.deploy.lifecycle import service_selection
 from base.deploy.maintenance import pause_owner
 from base.telemetry.tests.capture.event_capture import EmittedEvents, FollowedAttributes
 from cli.commands.cluster import health as cluster_health
@@ -43,9 +42,17 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
-def _select_excluded(names: set[str]) -> None:
-    service_selection.resolve_selection(
-        {"agent-host", "frontend"}, excluded=tuple(sorted(names)), all_services=not names
+def _launched_without(names: set[str]) -> None:
+    # meiva:note
+    # The last start launched agent-host and frontend, minus `names` (its root manifest).
+    from services.supervision.meiva_root_glue.manifests import generate
+    from services.supervision.roster import build_services
+
+    launched = {"agent-host", "frontend"} - names
+    generate(
+        paths.root_manifests_path(paths.meiva_home()),
+        capabilities=["gateway", "agent-runner"],
+        specs=[spec for spec in build_services() if spec.session in launched],
     )
 
 
@@ -68,7 +75,6 @@ def probe_home(
     on every round (task #5064), and the subject here is the population verdict."""
     assert db_conn.execute("SELECT count(*) FROM agents_meta").fetchone() == (0,)
     monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
-    monkeypatch.setattr(service_selection, "meiva_home", lambda: tmp_path)
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
     monkeypatch.setattr(cluster_health, "disk_usage_failure", lambda: None)
     monkeypatch.setattr(cluster_health.telemetry, "init_telemetry", _no_init)
@@ -105,8 +111,8 @@ def test_expected_low_population_does_not_rollback_or_promote(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     if intent == "disabled":
-        _select_excluded({"agent-host"})
-        marker = service_selection.selection_path()
+        _launched_without({"agent-host"})
+        marker = paths.root_manifests_path(probe_home)
     else:
         pause_owner.begin_maintenance("test-maintenance", datetime.now(UTC))
         marker = pause_owner.state_path()
@@ -136,7 +142,7 @@ def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
 ) -> None:
     holder, acquired_at = "test-maintenance", datetime.now(UTC)
     if intent == "other-service":
-        _select_excluded({"frontend"})
+        _launched_without({"frontend"})
     elif intent == "holdless-pause":
         # A record without a maintenance hold reads as invalid.
         marker = pause_owner.state_path()
@@ -164,11 +170,11 @@ def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
 def test_reenabled_host_keeps_low_population_unhealthy(
     probe: Probe, probe_home: Path, rollbacks: list[list[str]], alerts: FollowedAttributes
 ) -> None:
-    _select_excluded({"agent-host"})
+    _launched_without({"agent-host"})
     assert probe() == 1
     assert rollbacks == []
 
-    _select_excluded(set())
+    _launched_without(set())
     assert probe() == 1
     assert rollbacks == []
 
@@ -181,7 +187,7 @@ def test_disabled_host_does_not_explain_gateway_code_failure(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: DatabaseFactory,
 ) -> None:
-    _select_excluded({"agent-host"})
+    _launched_without({"agent-host"})
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
 
     def _plane_abnormal(*, database_factory: DatabaseFactory) -> bool:
@@ -202,7 +208,7 @@ def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
     alerts: FollowedAttributes,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _select_excluded({"agent-host"})
+    _launched_without({"agent-host"})
 
     def down(**_kwargs: object) -> None:
         raise ConnectionError("private test data plane unavailable")

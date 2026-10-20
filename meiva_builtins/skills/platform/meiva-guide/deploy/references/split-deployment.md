@@ -23,7 +23,7 @@ transport; the other supported declarations are `tls` and `mtls`. Then run:
   --machine-name machine-1 --machine-host <this-host-addr> \
   --gateway-url http://<reachable-address>:8000 \
   --config-file /absolute/path/gateway.env
-.venv/bin/meiva start
+.venv/bin/meiva start --all-services
 ```
 
 The gateway-only identity mints the control-plane bearer and the independent

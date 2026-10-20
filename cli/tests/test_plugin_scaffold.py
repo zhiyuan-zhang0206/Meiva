@@ -252,6 +252,7 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
             frozenset({"agent-runner"}),
             meiva_home=paths.meiva_home(),
             steps=converge_host.CONVERGE_STEPS,
+            services=frozenset(),
             database_factory=operator_database,
             producer=operator_pipeline,
             command=command_runtime,

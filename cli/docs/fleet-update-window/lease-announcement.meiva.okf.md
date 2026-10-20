@@ -27,15 +27,14 @@ non-zero is the same warning, not a refusal — because an unreadable list must
 not strand a window. "No active lease" and "not read" are separate lines and
 cannot be confused.
 
-`--lease-confirm-seconds` (default 0) then holds the stops open for that long
+The required `--lease-confirm-seconds` then holds the stops open for that long
 with a printed countdown, so the operator can release or renew a lease first.
-The default waits for nobody: the operator chose the window and the leases are
-named before the first stop, so an ordinary update never pays a pause; a wave
-that must not end a takeover passes the window explicitly. `--dry-run` reports
+0 waits for nobody: the leases are still named before the first stop; a wave
+that must not end a takeover passes a longer window. `--dry-run` reports
 the window and does not sleep.
 
 ## Contract
 
-Before anything stops — under --dry-run too, in the same words — down reads the gateway's agent_impersonations rows with status='active' and names each lease by agent, session, executor and expiry, followed by one warning that the stops end them; a read that fails — an unreadable table or a program that exits non-zero — only warns and the window goes on; --lease-confirm-seconds (default 0, report only) holds the stops open that long with a countdown, and dry-run prints that window without sleeping.
+Before anything stops — under --dry-run too, in the same words — down reads the gateway's agent_impersonations rows with status='active' and names each lease by agent, session, executor and expiry, followed by one warning that the stops end them; a read that fails — an unreadable table or a program that exits non-zero — only warns and the window goes on; the required --lease-confirm-seconds (0 reports only) holds the stops open that long with a countdown, and dry-run prints that window without sleeping.
 
 Parent: [[cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md]].

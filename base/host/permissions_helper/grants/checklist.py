@@ -103,7 +103,7 @@ def _restart_note(item: PermissionItem) -> str:
         return ""
     return (
         "macOS re-reads this grant only at process start. Recreate the helper under"
-        " custody -- `meiva stop`, then `meiva start`; never `launchctl kickstart -k`,"
+        " custody -- `meiva stop` with its explicit choices (see `meiva stop --help`), then `meiva start` with this unit's explicit service selection (see `meiva start --help`); never `launchctl kickstart -k`,"
         " which replaces it under the running root and takes every agent down."
     )
 

@@ -10,7 +10,7 @@ tags:
 
 # Start readiness
 
-`meiva start` first validates the persisted home (initialized by `meiva init`) and service selection.
+`meiva start` first validates the persisted home (initialized by `meiva init`) and validates the service selection named on the command line (nothing is read back from an earlier start).
 Before converge, `cli/commands/data_plane/host_dependencies.py` runs the host
 dependency preflight: it resolves every external executable and OS service the
 selected roster executes, installs a missing group through `scripts/provision/*`

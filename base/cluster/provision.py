@@ -384,7 +384,7 @@ def assert_checkpoint_schema_current(db_url: str, *, expected_data_dir: Path | N
         raise CheckpointSchemaMismatchError(
             "checkpoint schema is not current: "
             f"missing={sorted(expected - found)}, unexpected={sorted(found - expected)}, "
-            f"table_present={actual is not None}. Run `meiva start` on the gateway; "
+            f"table_present={actual is not None}. Run `meiva start --all-services` (or this unit's own service selection) on the gateway; "
             "do not grant schema CREATE to runtime roles."
         )
 

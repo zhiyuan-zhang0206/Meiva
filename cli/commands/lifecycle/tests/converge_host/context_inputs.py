@@ -49,6 +49,7 @@ def converge(
 ) -> Converge:
     return partial(
         converge_host.converge_host,
+        services=frozenset(),
         database_factory=operator_database,
         producer=operator_pipeline,
         command=command_runtime,

@@ -33,7 +33,7 @@ platform packages alone.
 
 - The bump is approved (approved-stable) and the expand change is deployed on
   the target.
-- Freeze the home: `meiva stop` (a full local stop; agents drain first).
+- Freeze the home: `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300` (a full local stop; agents drain first).
   PgBouncer and Redis are untouched by a Postgres major; no change needed.
 - Fresh recovery points: the newest WAL-G base backup recent, the newest
   logical dump verified, and the archive queue drained before the stop (see
@@ -53,7 +53,7 @@ platform packages alone.
 
 ## Path A — pg_upgrade
 
-1. `meiva stop`; confirm a clean stop and that the archiver's queue is empty.
+1. `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300`; confirm a clean stop and that the archiver's queue is empty.
 2. Install the 18 binaries for this host's resolution mode: the vendored tree
    when the expand change ships it, else the platform packages
    (apt: `postgresql-18` + `postgresql-18-pgvector`; macOS: the
@@ -72,7 +72,7 @@ platform packages alone.
    the old directory unusable as-is.
 6. Swap directories on the same filesystem: keep the old one
    (`mv pg pg-17-old; mv pg-new pg`).
-7. Switch the WAL-G configuration JSON to the new prefix, then `meiva start`
+7. Switch the WAL-G configuration JSON to the new prefix, then `meiva start --all-services`
    (converge re-validates the toolchain and the key pin), confirm
    `archive_mode=on`, `meiva backup walg check`, and `meiva backup walg run` for
    the first full backup of the 18 chain.
@@ -87,7 +87,7 @@ archive the source of truth: after the drain, the newest backup plus its WAL
 covers every committed transaction, so no "final backup at the freeze" step is
 needed.
 
-1. `meiva stop` and let the archiver's queue drain (see the planned-stop note).
+1. `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300` and let the archiver's queue drain (see the planned-stop note).
 2. Scratch restore on 17 (same verb as the weekly drill, newest backup that
    started before the freeze; recovering to the end of the archive):
    `meiva backup walg restore --dir <scratch> --backup <name>`. Then start the
@@ -96,7 +96,7 @@ needed.
    `pg_dump --format=custom --file=<scratch>/meiva_main.dump -h "$sock" -p 55444
    meiva_main` through the private socket.
 3. Move the live directory aside (`mv $MEIVA_HOME/pg $MEIVA_HOME/pg-17-old`) and
-   bring up the 18 cluster through Meiva's own provisioning: `meiva start` (the
+   bring up the 18 cluster through Meiva's own provisioning: `meiva start --all-services` (the
    missing data directory is `initdb`ed by the same code path as a fresh
    install; roles, the write generation, the schema and its migrations are the
    repository's, not hand-built). Stop the writers again before loading.
@@ -105,7 +105,7 @@ needed.
    (add `--disable-triggers` only if foreign keys force it, as the admin role).
    Sequence values are data; verify them during acceptance and `setval`
    where needed.
-5. Switch the WAL-G configuration to the new prefix; `meiva start` fully;
+5. Switch the WAL-G configuration to the new prefix; `meiva start --all-services` fully;
    `meiva backup walg check` and `meiva backup walg run` for the new chain's first
    full backup.
 6. Verify against the acceptance list — including a per-table count comparison

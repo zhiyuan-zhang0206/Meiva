@@ -197,6 +197,8 @@ def test_every_registrar_reads_gate_once_before_home(
     monkeypatch.setattr(cron, "owns_os_jobs", owns)
     if register is pr_flow_job.register_pr_flow_job:
         register(enabled_reader=disabled, production=True, host=fake_host())
+    elif register is autostart.register_autostart:
+        register(services=frozenset({"gateway"}), enabled_reader=disabled, host=fake_host())
     else:
         register(enabled_reader=disabled, host=fake_host())
     assert reads == ["enabled"]

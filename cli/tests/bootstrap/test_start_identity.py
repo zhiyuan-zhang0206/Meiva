@@ -253,7 +253,7 @@ def _args(*extra: str):
 def _start_args(*extra: str, command_runtime: CommandRuntime):
     from cli.parsers import build_parser
 
-    args = build_parser().parse_args(["start", *extra])
+    args = build_parser().parse_args(["start", *(extra or ("--all-services",))])
     args.runtime = command_runtime
     return args
 

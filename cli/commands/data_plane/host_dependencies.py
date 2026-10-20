@@ -428,8 +428,8 @@ HOST_TOOLS: tuple[HostTool, ...] = (
         component=None,
         needed=_needs_os_jobs_sudo,
         probe=_which_probe("sudo"),
-        repair="run `meiva start` as root, or allow passwordless sudo (`sudo -n true`) for the "
-        "boot-unit install, or run `MEIVA_OS_JOBS_ENABLED=0 meiva start`",
+        repair="run `meiva start --all-services` (or this unit's own service selection) as root, or allow passwordless sudo (`sudo -n true`) for the "
+        "boot-unit install, or run `MEIVA_OS_JOBS_ENABLED=0 meiva start --all-services`",
     ),
     HostTool(
         name="launchctl",
@@ -438,7 +438,7 @@ HOST_TOOLS: tuple[HostTool, ...] = (
         needed=_needs_os_jobs_macos,
         probe=_which_probe("launchctl"),
         repair="launchd ships with macOS; a host without it cannot register OS jobs — run "
-        "`MEIVA_OS_JOBS_ENABLED=0 meiva start`",
+        "`MEIVA_OS_JOBS_ENABLED=0 meiva start --all-services`",
     ),
     HostTool(
         name="curl",
@@ -606,7 +606,8 @@ def ensure_host_dependencies_step(
     if check(repo=ctx.repo, scope=scope):
         raise RuntimeError(
             "host dependency preflight refused this start; install the tools named above "
-            "and retry `meiva start`"
+            "and retry "
+            "`meiva start --all-services` (or this unit's own service selection)"
         )
 
 

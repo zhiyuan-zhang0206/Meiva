@@ -25,9 +25,9 @@ Operator inputs are described in [[cli/database/docs/database.meiva.okf.md]].
 | Command | Function |
 |---------|----------|
 | `meiva init` | Once per home, Settings-free: records the machine name, capabilities, credentials, ports and (for a runner) the gateway join, publishes `.env`, and starts nothing. An interrupted init resumes with no flags; an initialized home is refused |
-| `meiva start` | Idempotent first and repeated startup of an initialized home; it takes only the service selection and refuses a home `meiva init` has not finished. A Settings-free admission precedes host convergence, owned storage/schema provisioning (first start), root launch, and all-selected-service readiness. Exit 0 means ready, 4 means readiness failed, and 1 means a step failed |
-| `meiva stop` | Same drain, then full local stop including terminals, browser, extras and private pg/redis; `--keep-infra` / repeatable `--keep-service` preserve selected resources; `--force` is explicit |
-| `meiva restart` | Stop + start on this unit: services are replaced and terminals close; the browser and infrastructure stay up |
+| `meiva start` | Idempotent startup of an initialized home with a required service selection (`--all-services`, `--only-service` or `--disable-service`; never persisted). Admission, host convergence, storage/schema provisioning, root launch, readiness. Exit 0 ready, 4 readiness failed, 1 a step failed |
+| `meiva stop` | Drain, then a local stop in which every choice is required (all missing ones listed, exit 2): shell sessions, browser, extras, `--keep-service NAME`/`--keep-no-services`, `--mode`, `--timeout`, `--yes`/`--prompt`; `--keep-infra`/`--stop-infra` on a gateway only |
+| `meiva restart` | Stop + start with an explicit scope: `--only agent-host` (`--mode`, `--timeout`) or a start selection plus the shell-session, browser and extras choices, `--mode` and `--timeout`; the data plane stays up |
 | `meiva status` | status (including the maintenance hold, pg/redis and the end-to-end private-network Redis bridge view); `meiva status --json` prints only the hold as one JSON object, settings-lite |
 | `meiva converge` | replays idempotent host wiring (symlink/PATH/dirs/plugin images and the macOS Redis bridge), usually via `meiva start`; it never touches the memory pool |
 | `meiva firewall status` / `meiva firewall sync` | macOS Application Firewall allowlist manifest: `status` renders each manifest purpose, glob, resolved path, and Allow/Block/Missing state; `sync` applies it (repair + prune stale rules). Unprivileged mutation was empirically verified on the macmini running macOS 15.3.1, then falls back to non-interactive `sudo -n` and finally reports the exact manual commands on platforms that still require elevation |
@@ -48,8 +48,8 @@ Agent lifecycle, context reads, local operations, and package-management command
 groups are enumerated in [[cli/docs/operator-surfaces.meiva.okf.md]].
 
 Ordinary `meiva start` resumes the existing local maintenance hold after readiness. Durable
-agent identity and work survive both stop and restart; live terminal processes
-survive neither. See [operator procedure](../../docs/conventions/operations/graceful-maintenance.md).
+agent identity and work survive both stop and restart; live shell sessions survive
+either only with `--keep-shell-sessions`. See [operator procedure](../../docs/conventions/operations/graceful-maintenance.md).
 
 ## Init and idempotent start
 
@@ -57,8 +57,8 @@ survive neither. See [operator procedure](../../docs/conventions/operations/grac
 `cli/start_identity.py` durably records the home, capabilities, credentials, and the
 port table under the home lifecycle lock; init stops there. `cli/start_intent.py`
 admits an initialized home for `meiva start` (Settings-free, no side effects), holds
-the lock through readiness, and a bare repeated start preserves identity and
-desired service selection. A home never initialized, one whose init was
+the lock through readiness, and a repeated start preserves identity; the service
+selection is named again on every start and never stored. A home never initialized, one whose init was
 interrupted, unknown existing resources, and a destroyed home refuse a start; an
 initialized home refuses an init. The contract is in
 [[cli/docs/start_identity.meiva.okf.md]].

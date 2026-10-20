@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -274,6 +275,18 @@ async def test_glue_uses_shared_readiness_tiers_for_native_startup(
             assert health[name]["restart_attempts"] == 0
     finally:
         await context.supervisor.shutdown()
+
+
+def test_launched_services_reads_the_root_manifest(tmp_path: Path) -> None:
+    from services.supervision.meiva_root_glue.manifests import launched_services
+
+    path = tmp_path / "manifests.json"
+    # meiva:note
+    # nothing was ever launched
+    assert launched_services(path) is None
+    units = [{"id": name, "exec": ["true"], "restart": "never"} for name in ("gateway", "frontend")]
+    path.write_text(json.dumps({"units": units}), encoding="utf-8")
+    assert launched_services(path) == frozenset({"gateway", "frontend"})
 
 
 def test_static_probe_references_are_read_only() -> None:

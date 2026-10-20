@@ -25,10 +25,18 @@ scripts reach them. The `_`-prefixed modules are steps only this package calls.
 
 ## Stop, restart and maintenance
 
-`stop.py` exposes `stop` through `_temporary_stop`; restart calls the same stop
-kernel with the data plane and browser kept (`keep_infra`,
-`keep_browser`); terminals are closed like in any stop, once `_start_readiness_preflight` has not
-refused it for a start that would fail ([[start-readiness-preflight.meiva.okf.md]]).
+`stop.py` exposes `stop` through `_temporary_stop`. Every keep-or-stop choice
+(shell sessions, browser, extras, data plane, other services), the mode and the
+budget are explicit keyword-only arguments with no default; the host's
+capabilities only refuse a data-plane choice that does not apply
+(`_temporary_stop.require_infra_choice`), and `--keep-service` cannot name the
+shell-session or browser services, which have their own choices. Restart over the
+service tree calls the same stop kernel with the data plane kept and the
+operator's other choices, once `_start_readiness_preflight` has not refused it
+for a start that would fail ([[start-readiness-preflight.meiva.okf.md]]); its
+start leg launches the operator's explicit service selection.
+`meiva restart --only agent-host` (`stop.restart_agent_host`) stops agent-host
+through the root and brings it back, touching nothing else.
 `ops.agent_pause` and `ops.agent_pause.probe` own prepare/drain and runtime
 capability checks; `service_stop` and `data_plane/maintenance_stop` verify
 resource exits (`data_plane/maintenance_stop_report` names survivors).
