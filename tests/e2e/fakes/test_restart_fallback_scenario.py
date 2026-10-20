@@ -55,10 +55,6 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
         (agent_id,),
     ).fetchall()
     assert rows == [(original_request, "restart", "self", status)]
-    assert db_conn.execute(
-        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='restart_completed'",
-        (agent_id,),
-    ).fetchone() == (0,)
     successor = lifecycle_restart.build("diagnostic", agent_id=agent_id)
     assert successor.cursor == 0
     assert successor.script == lifecycle_restart.IDLE_SCRIPT

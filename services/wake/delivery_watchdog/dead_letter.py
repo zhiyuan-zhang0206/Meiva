@@ -87,7 +87,7 @@ def dead_letter_stale_pending_terminated(pool: ConnectionPool, threshold_s: floa
             "WHERE m.agent_id = am.id "
             "  AND am.status = 'terminated' "
             "  AND m.status = 'pending' "
-            "  AND m.kind IN ('terminate', 'system_note', 'restart_completed') "
+            "  AND m.kind IN ('terminate', 'system_note') "
             "  AND NOT (m.kind='system_note' AND m.source='system:impersonation' "
             "           AND COALESCE(m.payload->'impersonation_termination_notice' "
             "                        = 'true'::jsonb, false)) "

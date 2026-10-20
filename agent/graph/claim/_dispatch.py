@@ -1,18 +1,16 @@
-"""Per-kind inbound dispatch for the claim node.
-
-Chat appends an envelope; compaction replaces history with its summary.
-Terminate and restart append acceptance markers and end the invocation so the
-host can flush the checkpoint before applying the command. Resurrect and fork
-append identity markers. Historical restart_completed messages remain readable.
-Routing guards select lifecycle and compaction winners; unknown kinds fail fast.
-"""
+# meiva:note
+# Per-kind inbound dispatch for the claim node.
+#
+# Chat appends an envelope; compaction replaces history with its summary.
+# Terminate and restart append acceptance markers and end the invocation so the
+# host can flush the checkpoint before applying the command. Resurrect and fork
+# append identity markers. Routing guards select lifecycle and compaction
+# winners; unknown kinds fail fast.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, cast
 
 from langchain_core.messages import BaseMessage
 
@@ -105,49 +103,6 @@ def _ts_prefix(ctx: MeivaContext) -> str:
         if ctx.require_agent().read("general", "message_timestamps")
         else ""
     )
-
-
-# Overlay keys that may carry credentials — their values are never rendered
-# into a restart marker, which lands in the checkpoint, the frontend timeline
-# and the LLM context (2026-08-08 audit, P1-3). Match on the normalized name so
-# `api_key` / `provider_token` / `cluster_secret` are all caught; over-matching
-# only redacts a non-secret from the marker text, which costs nothing.
-_SENSITIVE_OVERLAY_KEY_FRAGMENTS = ("api_key", "apikey", "token", "secret", "password")
-
-
-def _is_sensitive_overlay_key(key: str) -> bool:
-    normalized = key.lower().replace("-", "_")
-    return any(fragment in normalized for fragment in _SENSITIVE_OVERLAY_KEY_FRAGMENTS)
-
-
-# meiva:note
-# Lifecycle marker text for restart_completed inbound.
-#
-# Reads "You have been restarted by {by_who(source)}".
-#
-# Payload contains ``config_overlay`` (`meiva.self.restart(config_overlay=...)` path) →
-# append ``with config {k=v, ...}`` at the end so the agent immediately sees the
-# per-agent overlay fields actually in effect for this process. Empty / missing
-# overlay does not append the suffix. Overlay values for credential-like keys
-# (``*_api_key`` / ``*_token`` / ``*_secret`` / ``*_password``) render as
-# ``<redacted>`` — the marker is a new plaintext copy of the overlay that lands
-# in the checkpoint / timeline / LLM context.
-def render_restart_completed_marker(
-    source: str, payload: dict[str, object] | None = None, *, timestamp_prefix: Callable[[], str]
-) -> str:
-    ts = timestamp_prefix()
-    base = f"{ts}You have been restarted by {by_who(source)}"
-
-    if payload:
-        overlay = payload.get("config_overlay")
-        if isinstance(overlay, dict) and overlay:
-            overlay = cast(dict[str, Any], overlay)
-            diff = ", ".join(
-                f"{k}=<redacted>" if _is_sensitive_overlay_key(k) else f"{k}={v!r}"
-                for k, v in sorted(overlay.items())
-            )
-            base = f"{base} with config {{{diff}}}"
-    return base
 
 
 async def _handle_chat(
@@ -426,27 +381,6 @@ async def _handle_restart_stateful(
     )
 
 
-# meiva:note
-# RESTART_COMPLETED: append lifecycle marker (correct tense).
-#
-# Never competes for routing — the marker is appended regardless of who
-# won.
-async def _handle_restart_completed(
-    ctx: MeivaContext,
-    item: ClaimedInbound,
-    st: BatchState,
-) -> None:
-    st.new_msgs.append(
-        system_note_message(
-            content=render_restart_completed_marker(
-                item.source, item.payload, timestamp_prefix=lambda: _ts_prefix(ctx)
-            ),
-            tag=NoteTag.LIFECYCLE_RESTART,
-            created_at=datetime.now(UTC),
-        )
-    )
-
-
 async def _handle_resurrect(
     ctx: MeivaContext,
     item: ClaimedInbound,
@@ -537,8 +471,6 @@ async def _dispatch_item(
     elif kind == InboundKind.RESTART:
         await handle_restart(ctx, agent_id, item, st)
         await _handle_restart_stateful(state, item, st)
-    elif kind == InboundKind.RESTART_COMPLETED:
-        await _handle_restart_completed(ctx, item, st)
     elif kind == InboundKind.RESURRECT:
         if item.id == latest_resurrect_id:
             await _handle_resurrect(ctx, item, st)
