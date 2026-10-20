@@ -60,7 +60,6 @@ class BatchState:
     cancelled: bool = False
     restart_preserves_idle: bool = False
     restart_requested: bool = False
-    update_initiated: bool = False
     committed_chat_ids: list[int] = field(default_factory=list)
 
     def append_scanned(self, message: BaseMessage, finding: SecurityFindingEntry | None) -> None:
@@ -121,31 +120,23 @@ def _is_sensitive_overlay_key(key: str) -> bool:
     return any(fragment in normalized for fragment in _SENSITIVE_OVERLAY_KEY_FRAGMENTS)
 
 
+# meiva:note
+# Lifecycle marker text for restart_completed inbound.
+#
+# Reads "You have been restarted by {by_who(source)}".
+#
+# Payload contains ``config_overlay`` (`meiva.self.restart(config_overlay=...)` path) →
+# append ``with config {k=v, ...}`` at the end so the agent immediately sees the
+# per-agent overlay fields actually in effect for this process. Empty / missing
+# overlay does not append the suffix. Overlay values for credential-like keys
+# (``*_api_key`` / ``*_token`` / ``*_secret`` / ``*_password``) render as
+# ``<redacted>`` — the marker is a new plaintext copy of the overlay that lands
+# in the checkpoint / timeline / LLM context.
 def render_restart_completed_marker(
     source: str, payload: dict[str, object] | None = None, *, timestamp_prefix: Callable[[], str]
 ) -> str:
-    """Lifecycle marker text for restart_completed inbound.
-
-    Update sources (`system:update`) get distinct wording so the agent can tell
-    an update rollout from an ordinary restart:
-    - `system:update` → "You have been updated and restarted" (no actor suffix —
-      a system-driven cluster rollout has no single human actor). This is the
-      marker each agent wakes to on the new code after a rollout.
-    - Any other source → "You have been restarted by {by_who(source)}"
-
-    Payload contains ``config_overlay`` (`meiva.self.restart(config_overlay=...)` path) →
-    append ``with config {k=v, ...}`` at the end so the agent immediately sees the
-    per-agent overlay fields actually in effect for this process. Empty / missing
-    overlay does not append the suffix. Overlay values for credential-like keys
-    (``*_api_key`` / ``*_token`` / ``*_secret`` / ``*_password``) render as
-    ``<redacted>`` — the marker is a new plaintext copy of the overlay that lands
-    in the checkpoint / timeline / LLM context.
-    """
     ts = timestamp_prefix()
-    if source == "system:update":
-        base = f"{ts}You have been updated and restarted"
-    else:
-        base = f"{ts}You have been restarted by {by_who(source)}"
+    base = f"{ts}You have been restarted by {by_who(source)}"
 
     if payload:
         overlay = payload.get("config_overlay")
@@ -420,35 +411,31 @@ async def handle_restart(
     st.restart_requested = True
 
 
+# meiva:note
+# Set restart_preserves_idle from state context.
+#
+# Separated from handle_restart because these decisions depend on
+# *state* (AgentState), which the dispatch loop already has.
 async def _handle_restart_stateful(
     state: _state.AgentState,
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
-    """Set restart_preserves_idle and update_initiated from state context.
-
-    Separated from handle_restart because these decisions depend on
-    *state* (AgentState), which the dispatch loop already has.
-    """
     st.restart_preserves_idle = (state.halted or not state.messages) and item.source not in (
         "self",
     )
-    if item.source == "self":
-        st.update_initiated = True
-    if st.update_initiated:
-        st.restart_preserves_idle = False
 
 
+# meiva:note
+# RESTART_COMPLETED: append lifecycle marker (correct tense).
+#
+# Never competes for routing — the marker is appended regardless of who
+# won.
 async def _handle_restart_completed(
     ctx: MeivaContext,
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
-    """RESTART_COMPLETED: append lifecycle marker (correct tense).
-
-    Never competes for routing — the marker is appended regardless of who
-    won.  Tracks update_initiated for the idle-restart gate.
-    """
     st.new_msgs.append(
         system_note_message(
             content=render_restart_completed_marker(
@@ -458,8 +445,6 @@ async def _handle_restart_completed(
             created_at=datetime.now(UTC),
         )
     )
-    if item.source == "system:update" and st.update_initiated:
-        st.update_initiated = False
 
 
 async def _handle_resurrect(

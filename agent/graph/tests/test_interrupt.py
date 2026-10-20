@@ -150,7 +150,7 @@ class TestHasPendingInterrupt:
             db_conn,  # pyright: ignore[reportUnknownArgumentType]
             tid,
             "restart",
-            source="system:maintenance",
+            source="system:restart",
             payload=_MAINTENANCE_PAYLOAD,
         )
         db_conn.execute(  # pyright: ignore[reportUnknownMemberType]

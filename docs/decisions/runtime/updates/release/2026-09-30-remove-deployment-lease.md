@@ -117,3 +117,5 @@ Forward link (2026-10-03): the stranded-pause exits are now `meiva maintenance c
 
 Forward link (2026-10-04): `meiva maintenance` is deleted entirely; the stranded-pause read is `meiva
 status` and the exit is `meiva start`. See [delete-meiva-maintenance](../../../agents/graph/2026-10-04-delete-meiva-maintenance.md).
+
+Forward link (2026-10-20): `ops/deploy_window.py` and `base/cluster/machine_exclusions.py` are deleted; the WAL-G tick gates on Postgres connectivity only. See [delete the deploy-window readers](2026-10-20-delete-deploy-window-readers.md).

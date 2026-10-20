@@ -76,7 +76,7 @@ def _drained(
     before = retired(uuid4(), uuid4(), **resources)
     receipt = db.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,payload,status,claimed_at,"
-        "applied_at,target_generation,target_owner) VALUES(%s,'restart','system:maintenance',"
+        "applied_at,target_generation,target_owner) VALUES(%s,'restart','system:restart',"
         "'',%s,'claimed',now(),now(),%s,%s) RETURNING id",
         (aid, Jsonb(_DRAIN), before["generation"], before["owner"]),
     ).fetchone()
@@ -333,7 +333,7 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
     assert incarnation is not None
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,payload) "
-        "VALUES(%s,'restart','system:maintenance','',%s) RETURNING id",
+        "VALUES(%s,'restart','system:restart','',%s) RETURNING id",
         (aid, Jsonb(_DRAIN)),
     ).fetchone()
     db_conn.commit()

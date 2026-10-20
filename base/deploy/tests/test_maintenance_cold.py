@@ -30,7 +30,7 @@ def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
         db_conn, agent, "unfinished action", "user", bus=event_bus, database=database
     )
     restart = insert_inbound_message(
-        db_conn, agent, "", "system:update", kind="restart", bus=event_bus, database=database
+        db_conn, agent, "", "system:restart", kind="restart", bus=event_bus, database=database
     )
     db_conn.execute("UPDATE inbound_messages SET status='claimed' WHERE id=%s", (chat,))
     db_conn.execute(
