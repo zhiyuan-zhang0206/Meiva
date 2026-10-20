@@ -119,7 +119,9 @@ for arbitrarily long or concurrent runs.
   and does not guarantee uninterrupted exclusion. The ops and agent-host daemons take their health
   ports from the same reserved block, one sub-block per daemon kind, released right before the daemon
   is spawned: a kernel-assigned health port can be handed to any other `bind(0)` or connection source
-  port while the daemon boots, which killed an ops daemon with EADDRINUSE (2026-10-17). Postgres/Redis
+  port while the daemon boots, which killed an ops daemon with EADDRINUSE (2026-10-17). The ops
+  daemon dials the agent host's port to cancel a turn, so that port is reserved by its own fixture
+  (`agent_host_health_reservation`) before either daemon starts and is handed to both. Postgres/Redis
   use base/deploy/tests/containers.py
   for independent native clusters per worker. This gateway FD path targets the existing POSIX E2E CI.
 - **dev and e2e can run simultaneously** — ports/databases/channels are all separate

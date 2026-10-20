@@ -66,11 +66,13 @@ from tests.e2e._ports import (
     GATEWAY_PORT,
     GATEWAY_SOCKET,
     GATEWAY_URL,
+    PortReservation,
     reserve_health_port,
 )
 from tests.e2e._truncate import truncate_with_deadlock_retry
 from tests.e2e.fixture_environment import E2EEnv
 from tests.e2e.process_support import (
+    gc_orphan_e2e_dirs,
     listener_evidence,
     managed_proc,
     proc_log_tail,
@@ -130,41 +132,6 @@ _MEIVA_HOME = _REPO_ROOT / "tmp" / f"meiva_e2e_home_{_E2E_SUFFIX}"
 # ---- session fixtures ---------------------------------------------------
 
 
-_GC_THRESHOLD_SECONDS = 3600
-
-
-def _gc_orphan_e2e() -> None:
-    """GC orphan tmp MEIVA_HOME + frontend build dirs older than 1h, left by a
-    crashed session. The e2e Postgres is the suite's session cluster
-    (auto-removed), so there are no orphan databases to drop."""
-    threshold_us = int((time.time() - _GC_THRESHOLD_SECONDS) * 1_000_000)
-    # tmp dir GC
-    tmp_root = _REPO_ROOT / "tmp"
-    if tmp_root.exists():
-        for d in tmp_root.glob("meiva_e2e_home_*"):
-            try:
-                ts_us = int(d.name.rsplit("_", 1)[1])
-            except (IndexError, ValueError):
-                continue
-            if ts_us > threshold_us:
-                continue
-            with contextlib.suppress(OSError):
-                shutil.rmtree(d)
-    # frontend build dirs (in ui/web/.builds/, not in tmp/ because Turbopack
-    # symlink constraints—see frontend_proc fixture docstring)
-    builds_root = _REPO_ROOT / "ui" / "web" / ".builds"
-    if builds_root.exists():
-        for d in builds_root.glob("build-*"):
-            try:
-                ts_us = int(d.name.rsplit("_", 1)[1])
-            except (IndexError, ValueError):
-                continue
-            if ts_us > threshold_us:
-                continue
-            with contextlib.suppress(OSError):
-                shutil.rmtree(d)
-
-
 @pytest.fixture(scope="package")
 def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[None]:
     """Layer e2e-specific process config on the suite's session Postgres +
@@ -182,7 +149,7 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
     `e2e_db` is (a session-scoped consumer raises `ScopeMismatch`, which is how pytest
     tells you about the rest of the chain).
     """
-    _gc_orphan_e2e()
+    gc_orphan_e2e_dirs(_REPO_ROOT)
     # Belt over the collection-time reaping above: a session can reach package
     # setup with residue that appeared since (e.g. a peer's run died mid-way).
     # A reaper failure must not abort the session (same rule as collection) —
@@ -616,7 +583,26 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
 
 
 @pytest.fixture
-def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None]:
+def agent_host_health_reservation() -> Iterator[PortReservation]:
+    """The agent host's loopback health port, held until the host binds it.
+
+    The ops daemon dials it to cancel a turn (`ops.lifecycle.cancel_hosted_turn`), as it
+    does in a started cluster where every daemon resolves the same configured port. The
+    port is therefore reserved before either process starts and handed to both.
+    """
+    reservation = reserve_health_port("agent-host")
+    try:
+        yield reservation
+    finally:
+        reservation.release()
+
+
+@pytest.fixture
+def agent_host_proc(
+    gateway_proc: str,
+    pty_sessions_proc: None,
+    agent_host_health_reservation: PortReservation,
+) -> Iterator[None]:
     """Run the local agent host with this test's model and machine identity."""
     cmd = [sys.executable, "-m", "tests.e2e.process_support", gateway_proc, _AGENT_HOST_MODULE]
     env = os.environ.copy()
@@ -626,11 +612,10 @@ def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None
     env["MEIVA_PROCESS_PROFILE"] = "agent"
     env.update(current_credentials().service_env("runner"))
     env["MEIVA_DB_URL"] = runner_projection()
-    agent_host_reservation = reserve_health_port("agent-host")
-    agent_host_health_port = agent_host_reservation.port
+    agent_host_health_port = agent_host_health_reservation.port
     env["MEIVA_AGENT_HOST_HEALTH_PORT"] = str(agent_host_health_port)
     log_path = _LOG_DIR / f"agent-host-{_E2E_SUFFIX}.log"
-    agent_host_reservation.release()
+    agent_host_health_reservation.release()
     with managed_proc(cmd, env=env, label="agent-host", log_path=str(log_path)) as proc:
         try:
             wait_for_port("127.0.0.1", agent_host_health_port, timeout=30.0, label="agent-host")
@@ -646,7 +631,7 @@ def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None
 
 
 @pytest.fixture
-def ops_proc(gateway_proc: str) -> Iterator[None]:
+def ops_proc(gateway_proc: str, agent_host_health_reservation: PortReservation) -> Iterator[None]:
     """services/agent_runner/agent_ops/daemon.py — the agent-runner ops server.
 
     Spawn is HTTP-uniform: `POST /api/keyed/v1/agents` creates the row on the gateway and
@@ -663,6 +648,7 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
     reservation = reserve_health_port("ops")
     ops_port = reservation.port
     env["MEIVA_OPS_HEALTH_PORT"] = str(ops_port)
+    env["MEIVA_AGENT_HOST_HEALTH_PORT"] = str(agent_host_health_reservation.port)
     # Register this single box as a runner advertising its ops URL — what the
     # gateway dials. UPSERT (function-scoped; the port is re-allocated per test).
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
@@ -696,20 +682,19 @@ def spawned_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> 
         # Allocation creates idle intent; an idle agent owns no process or task.
         deadline = time.monotonic() + 90.0
         last_status: str | None = None
-        last_pid: int | None = None
         while time.monotonic() < deadline:
             with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
-                cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
+                cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
                 row = cur.fetchone()
             if row is not None:
-                last_status, last_pid = row
+                (last_status,) = row
                 if last_status == AgentStatus.IDLING.value:
                     break
             time.sleep(0.3)
         else:
             raise RuntimeError(
                 f"agent {agent_id} did not reach idling within 90s: "
-                f"last_status={last_status!r} last_pid={last_pid!r}; "
+                f"last_status={last_status!r}; "
                 f"see $MEIVA_HOME/logs/agent-{agent_id}.log "
                 f"(CI: the e2e-logs artifact)"
             )

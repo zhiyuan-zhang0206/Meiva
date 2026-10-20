@@ -29,10 +29,11 @@ def _ai_count(values: dict[str, Any]) -> int:
     return sum(1 for m in values.get("messages", []) if isinstance(m, AIMessage))
 
 
-def _agent_status_row(agent_id: int) -> tuple[Any, ...] | None:
+def _agent_status(agent_id: int) -> str | None:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
-        cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
-        return cur.fetchone()
+        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+    return None if row is None else row[0]
 
 
 def _restart_inbound_applied(agent_id: int) -> bool:
@@ -49,8 +50,7 @@ def _wait_for_pre_restart_turn(agent_id: int) -> dict[str, Any]:
     deadline = time.monotonic() + 90.0
     while time.monotonic() < deadline:
         values = _checkpoint_values(agent_id)
-        row = _agent_status_row(agent_id)
-        if row and row[0] == AgentStatus.IDLING.value and _ai_count(values) == 2:
+        if _agent_status(agent_id) == AgentStatus.IDLING.value and _ai_count(values) == 2:
             return values
         time.sleep(0.3)
     raise RuntimeError(f"agent {agent_id} did not complete pre-restart turn within 90s")
@@ -58,26 +58,21 @@ def _wait_for_pre_restart_turn(agent_id: int) -> dict[str, Any]:
 
 def _wait_for_silent_restart_cycle(agent_id: int) -> dict[str, Any]:
     deadline = time.monotonic() + 90.0
-    last: tuple = ()
+    last: tuple[bool, str | None, bool] = (False, None, False)
     while time.monotonic() < deadline:
         completed = _restart_inbound_applied(agent_id)
-        row = _agent_status_row(agent_id)
+        status = _agent_status(agent_id)
         values = _checkpoint_values(agent_id)
         marker_committed = any(
             "Restart was accepted from user" in str(m.content) for m in values.get("messages", [])
         )
-        last = (completed, row, marker_committed)
-        if (
-            completed
-            and row is not None
-            and row[0] == AgentStatus.IDLING.value
-            and marker_committed
-        ):
+        last = (completed, status, marker_committed)
+        if completed and status == AgentStatus.IDLING.value and marker_committed:
             return values
         time.sleep(0.5)
     raise RuntimeError(
         f"agent {agent_id} did not complete silent restart cycle within 90s: "
-        f"(completed, (status, pid), marker_committed)={last!r}"
+        f"(completed, status, marker_committed)={last!r}"
     )
 
 
@@ -114,6 +109,5 @@ def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
 
     time.sleep(2.0)
     values = _checkpoint_values(agent_id)
-    row = _agent_status_row(agent_id)
-    assert row is not None and row[0] == AgentStatus.IDLING.value
+    assert _agent_status(agent_id) == AgentStatus.IDLING.value
     assert _ai_count(values) == 2
