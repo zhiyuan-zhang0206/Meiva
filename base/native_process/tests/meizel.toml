@@ -37,7 +37,6 @@ exports = ["fake_process_control.py", "host_pipe.py"]
 "test_proc_tree_identity.py#monkeypatch.setattr ctypes.CDLL" = 1
 
 [debt.third-party-patch]
-"test_hosted_force_quiescence_native_process.py#monkeypatch.setattr psutil.process_iter" = 1
 "test_proc_tree_identity.py#monkeypatch.setattr psutil.Process.children" = 1
 
 [debt.unresolved-patch]
