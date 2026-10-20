@@ -2063,54 +2063,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/mcp/clients": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_mcp_clients_api_mcp_clients_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/mcp/clients/{client_id}/revoke": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["post_mcp_client_revoke_api_mcp_clients__client_id__revoke_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/keyed/v1/mcp/clients": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["post_guarded_mcp_client_api_keyed_v1_mcp_clients_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/fleet/graph": {
         parameters: {
             query?: never;
@@ -2923,18 +2875,6 @@ export interface components {
             output_tokens: number;
             cost_usd: number | null;
         };
-        CredentialCreationRequest: {
-            name: string;
-            scope: components["schemas"]["McpClientScope"];
-        };
-        CredentialCreationResult: {
-            id: number;
-            name: string;
-            scope: components["schemas"]["McpClientScope"];
-            created_at: string;
-            replayed: boolean;
-            token: string | null;
-        };
         DefaultModelSource: "cluster" | "config";
         DefaultModelView: {
             model: string;
@@ -3283,18 +3223,6 @@ export interface components {
                 [key: string]: unknown;
             }[];
             resource?: components["schemas"]["ResourceSample"] | null;
-        };
-        McpClientRevoked: {
-            ok: boolean;
-        };
-        McpClientScope: "read" | "write";
-        McpClientView: {
-            id: number;
-            name: string;
-            scope: components["schemas"]["McpClientScope"];
-            created_at: string;
-            revoked_at: string | null;
-            last_used_at: string | null;
         };
         MemoryGraphEdge: {
             source: string;
@@ -8429,88 +8357,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-        };
-    };
-    get_mcp_clients_api_mcp_clients_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["McpClientView"][];
-                };
-            };
-        };
-    };
-    post_mcp_client_revoke_api_mcp_clients__client_id__revoke_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                client_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["McpClientRevoked"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_guarded_mcp_client_api_keyed_v1_mcp_clients_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": string;
-                "Idempotency-Scope": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CredentialCreationRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CredentialCreationResult"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
             };
         };
     };

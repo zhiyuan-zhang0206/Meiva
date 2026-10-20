@@ -10,10 +10,10 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 "extensions" = ["agents", "cluster", "http"]
 "http" = ["schemas"]
 "inspect" = ["lgtm", "schemas"]
-"mcp_server" = ["agents", "cluster", "http"]
+"mcp_server" = ["http"]
 "routers" = ["agents", "extensions", "http", "lgtm", "schemas"]
 "schedules" = ["agents", "http", "routers"]
-"tests" = ["agents", "alerts", "app.py", "cluster", "events", "extensions", "http", "inspect", "lgtm", "mcp_server", "routers", "schedules", "schemas", "upload_delivery"]
+"tests" = ["agents", "alerts", "app.py", "cluster", "events", "extensions", "http", "inspect", "lgtm", "routers", "schedules", "schemas", "upload_delivery"]
 "upload_delivery" = ["agents", "http", "routers"]
 
 [debt.private-module]

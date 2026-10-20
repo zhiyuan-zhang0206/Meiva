@@ -1,8 +1,4 @@
-"""Shared MCP message projection and the advertised tool contract of the gateway `/mcp` endpoint."""
-
 from __future__ import annotations
-
-from typing import Any, cast
 
 # The SDK uses the explicit description verbatim, including indentation and
 # trailing whitespace.
@@ -22,15 +18,15 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         """,
     "spawn_agent_guarded_v1": """Create an agent with a retained original birth receipt.
 
-        Requires a 1-128 character idempotency_key scoped to your authenticated
-        MCP client and this tool. Reuse the same tool, key and arguments after
-        response loss; changed requests conflict. A new key creates a new agent.
+        Requires a 1-128 character idempotency_key. Reuse the same key and
+        arguments after response loss; changed requests conflict. A new key creates a new agent.
         Replay retains the original agent, placement, config and launch attempt.
         It can wake only the original pending, unadmitted attempt; historical
         acceptance does not prove execution or revive later work.
         Supply a standing objective in prompt. label names the agent in fleet
         views; machine selects its host. config_overlay overrides its settings.
-        This is the sole creation tool. Older servers reject it before effects.
+        prompt_source (default `user`) and spawner (default `mcp`) are declared
+        by you and validated by the API.
         No automatic retries are added.
         """,
     "send_message": """Send a message to a running agent — a new instruction, more context,
@@ -42,25 +38,23 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         Messaging an agent that has already terminated brings it back with its
         history intact.
 
-        By default the message reaches the agent as coming from the user. Pass
-        as_external_agent=true to deliver it as a message from an external
-        agent instead, identified by your authenticated MCP client: use it when
-        you collaborate with the agent beside the user rather than speaking for
-        the user. It adds no permissions. Do not supply source or instance: the
-        server owns them.
+        `source` declares who the message is from and is passed to the API
+        unchanged, which validates it (see the legal sources in
+        `base/agents/messages/envelope.py:validate_source`). The default `user`
+        delivers it as the user; `external_agent:<subject>[:<instance>]`
+        delivers it as a message from that external agent, for when you
+        collaborate with the agent beside the user rather than speaking for the
+        user. A source is a self-declared label and adds no permissions.
 
         An optional idempotency_key identifies a retry of this exact message.
-        The server always scopes it to your authenticated MCP client identity;
-        another token client using the same key cannot retrieve your receipt.
         """,
     "get_messages": """Read an agent's conversation history — what it was told and what it
         has said and done.
 
-        Returns the newest `limit` messages, oldest first. Each entry has a
-        `role` (human / ai / system), the message `text`, and — for a turn
-        where the agent acted — the Python `code` it ran, which is how an Meiva
-        agent does everything. `total` is the full history length, so a caller
-        can see how much was left out.
+        Returns the newest `limit` messages (the API's default window when
+        omitted), oldest first, as the raw LangChain message dumps (`type`,
+        `content`, `tool_calls`, ...). `msg_count` is the full history length
+        and `has_more` says whether older messages exist.
         """,
     "terminate_agent": """DESTRUCTIVE. End an agent: it stops working and its process exits.
 
@@ -112,45 +106,3 @@ def server_instructions() -> str:
 def tool_description(name: str) -> str:
     """The advertised prose of one control tool."""
     return _TOOL_DESCRIPTIONS[name]
-
-
-def message_text(content: Any) -> str:
-    """Flatten one message's content to text.
-
-    A model message is either a plain string or a list of typed blocks
-    (text / thinking / tool_use / image). Only the text blocks are readable
-    prose; the rest is either rendered separately (tool calls, below) or not
-    representable in a transcript read.
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(
-            str(cast(dict[str, Any], b)["text"])
-            for b in cast(list[Any], content)
-            if isinstance(b, dict) and cast(dict[str, Any], b).get("type") == "text"
-        )
-    return str(content)
-
-
-def project_message(msg: dict[str, Any]) -> dict[str, Any]:
-    """One transcript entry, reduced to role + text + the code the agent ran.
-
-    Meiva agents act by writing Python (`execute_code` is their only tool), so the
-    code of a turn *is* what the agent did — dropping it would leave a reader
-    seeing an agent that talks and never acts. Everything else in the raw
-    message (ids, provider metadata, token accounting) is machinery.
-    """
-    projected: dict[str, Any] = {
-        "role": msg["type"],
-        "text": message_text(msg.get("content", "")),
-    }
-    calls: list[Any] = msg.get("tool_calls") or []
-    code = [
-        str(c["args"]["code"])
-        for c in calls
-        if isinstance(c.get("args"), dict) and "code" in c["args"]
-    ]
-    if code:
-        projected["code"] = code
-    return projected

@@ -25,7 +25,7 @@ The user ruled on 2026-10-20 that human-facing authentication may be switched of
 - In `trusted_network` mode the auth middleware keeps its order: a valid session cookie, then a
   bearer (a machine token keeps its own credential fact). A request presenting neither is served
   as the cluster administrator with `source_verified_by = "trusted_network"`. That fact counts as
-  a human credential (`HUMAN_CREDENTIAL_FACTS`), so the UI can mint MCP client tokens and login
+  a human credential (`HUMAN_CREDENTIAL_FACTS`), so the UI can mint login
   tickets. `/api/auth/check` answers authenticated for such a request, so the Gate and the UI skip
   the login page.
 - A request admitted without a credential still faces the browser attacks a private network does
@@ -64,3 +64,6 @@ unchanged): machine tokens and the telemetry token derive from it.
 - Audit actors and idempotency principals of anonymous callers read `trusted_network` /
   `cluster:administrator`; individual people are not distinguished, as with the shared bearer.
 - Only a request with no `Authorization` header at all is served anonymously. An invalid one (wrong secret, revoked or expired machine token, malformed scheme) is still a 401, so a misconfigured machine fails at once instead of working until the mode is switched back. A stale session cookie falls through to the anonymous path, since a browser cannot clear it.
+
+Superseded in part by [the `/mcp` endpoint is a thin forwarder onto the gateway HTTP API](2026-10-20-mcp-is-a-thin-api-forwarder.md):
+`/mcp` no longer has client tokens of its own; it follows this switch like the rest of the API.

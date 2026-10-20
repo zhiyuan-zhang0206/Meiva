@@ -9,18 +9,15 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.agents.birth.creation_identity import creation_request_hash
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from gateway.agents import creation as agent_creation
 from gateway.agents.creation import scoped_creation_key
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
-from gateway.tests.mcp_calls import tool_call, tool_result
-from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
+from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import (
     GatewayTestClient,
-    create_mcp_client,
     gateway_test_client,
 )
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
@@ -122,54 +119,6 @@ def test_revoked_credential_cannot_replay_guarded_receipt(
     ) as rotated:
         assert rotated.post(PATH, json={}, headers=HEADERS).status_code == 401
     assert _count(db_conn) == 1
-
-
-def test_preexisting_mcp_canonical_hash_replays_original_agent(
-    gateway_data_plane: None,
-    client: GatewayTestClient,
-    db_conn: psycopg.Connection,
-) -> None:
-    # The MCP manager is built by lifespan, so re-enter with the flag enabled.
-    with gateway_test_client(
-        process=client.app.state.gateway_process,
-        config=replace(client.app.state.gateway_config, mcp_endpoint_enabled=True),
-        headers={"Authorization": f"Bearer {SECRET}"},
-    ) as mcp:
-        credentials = create_mcp_client(mcp, "prior", "write").json()
-        token = credentials["token"]
-        original = tool_result(
-            tool_call(
-                mcp,
-                token,
-                "spawn_agent_guarded_v1",
-                {"prompt": "prior goal", "machine": "local-test", "idempotency_key": "prior-key"},
-            )
-        )
-        canonical = principal_key(
-            AuthPrincipal("mcp_client", str(credentials["id"])),
-            "POST",
-            "/mcp/tools/spawn_agent_guarded_v1",
-            "prior-key",
-        )
-        body = SpawnAgentRequest(
-            prompt="prior goal", prompt_source="user", spawner="mcp", machine="local-test"
-        )
-        fingerprint = creation_request_hash(body.model_dump(mode="json"))
-        recorded = db_conn.execute(
-            "SELECT creation_key, request_hash FROM agent_creation_snapshots WHERE agent_id=%s",
-            (original["id"],),
-        ).fetchone()
-        assert recorded == (canonical, fingerprint)
-        replay = tool_result(
-            tool_call(
-                mcp,
-                token,
-                "spawn_agent_guarded_v1",
-                {"prompt": "prior goal", "machine": "local-test", "idempotency_key": "prior-key"},
-            )
-        )
-        assert replay["id"] == original["id"]
-        assert _count(db_conn) == 1
 
 
 def test_scoped_creation_key_binds_the_principal_and_the_operation_path() -> None:

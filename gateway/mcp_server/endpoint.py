@@ -1,438 +1,111 @@
 from __future__ import annotations
 
-import asyncio
-import hashlib
-import json
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, Literal, cast
+from typing import Any, Literal, cast
 
-from fastapi import FastAPI, HTTPException, Request
+import httpx
+from fastapi import FastAPI, Request
 from mcp.server.mcpserver import Context
-from pydantic import Field
-from starlette.responses import JSONResponse
 
-from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages
-from base.agents.inbox.chat_delivery import ClientMessageConflictError
-from base.agents.messages.inbound_provenance import InboundProvenance
-from base.agents.observation import roster
-from base.agents.observation import snapshot as snapshot_module
-from base.api_contracts.agent_contract import MeivaAgentError
-from base.api_contracts.caller_identity import CallerIdentity
-from base.api_contracts.mcp_tool_contract import (
-    project_message,
-    server_instructions,
-    tool_description,
-)
-from base.cluster.machine import MachineIdentity
-from base.config.service_read import ConfigAuthority
-from base.db import Database
-from base.events.live.bus import EventBus
-from base.lm.catalog import ModelCatalog
-from base.native_process.loaded_commit import LoadedCommit
-from base.telemetry.audit_events import prepare_event_log, record_audit_reported
-from gateway.agents import creation as _agents_creation
-from gateway.agents.lifecycle import terminate_agent_with_open_tasks
-from gateway.agents.schemas import AgentRow
-from gateway.http.auth.request_principal import AuthPrincipal, PrincipalScopeError, principal_key
+from base.api_contracts.idempotency import keyed_headers
+from base.api_contracts.mcp_tool_contract import server_instructions, tool_description
 from gateway.http.middleware.error_envelope import error_response
-from gateway.http.model_catalog import (
-    CatalogLoadFailure,
-    ModelCatalogUnavailableError,
-    catalog_for_observation,
-    require_catalog,
-)
-from gateway.mcp_server import clients
-from ops.agents import get_agent_status
-from ops.lifecycle.delivery import deliver_chat_inbound
-from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
 
+# meiva:note
+# The request headers a forwarded call inherits: the credentials the auth middleware reads,
+# plus the Host and Origin it checks on a trusted network.
+# meiva:link gateway/mcp_server/docs/mcp-endpoint/mcp-endpoint.meiva.okf.md
+_FORWARDED_HEADERS = ("authorization", "cookie", "host", "origin")
+_API_BASE_URL = "http://mcp-forward.invalid"
 _SPAWNER = "mcp"
 _MESSAGE_SOURCE = "user"
 
 
-_DEFAULT_MESSAGE_LIMIT = 20
-
-
-def _authenticated_client(request: Request | None) -> dict[str, Any]:
-
-    if request is None:
-        raise RuntimeError("authenticated MCP client request is missing")
-    client = getattr(request.state, "meiva_mcp_client", None)
-    if client is None:
-        raise RuntimeError("authenticated MCP client context is missing")
-    return cast(dict[str, Any], client)
-
-
-def _json_type(value: Any) -> str:
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "bool"
-    if isinstance(value, (int, float)):
-        return "number"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, dict):
-        return "object"
-    if isinstance(value, list):
-        return "array"
-    raise TypeError(f"MCP argument has non-JSON type {type(value).__name__}")
-
-
-def _redact_args(args: dict[str, Any]) -> dict[str, dict[str, str | int]]:
-    schema: dict[str, str | int] = {}
-    size: dict[str, str | int] = {}
-    hashes: dict[str, str | int] = {}
-    for name, value in args.items():
-        serialized = json.dumps(value, ensure_ascii=False)
-        schema[name] = _json_type(value)
-        size[name] = len(serialized)
-        hashes[name] = hashlib.sha256(serialized.encode()).hexdigest()
-    return {"schema": schema, "size": size, "sha256": hashes}
-
-
-def _tool_result_is_error(
-    result: HandlerResult,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-) -> bool:
-    from mcp.server.context import HandlerResult
-
-    typed_result = cast(HandlerResult, result)
-    is_error = getattr(typed_result, "is_error", False)
-    if isinstance(typed_result, dict):
-        is_error = typed_result.get("isError", typed_result.get("is_error", False))
-    return bool(is_error)
-
-
-def _validate_mcp_identity_arguments(tool: str, args: dict[str, Any]) -> None:
+async def _call_api(
+    app: FastAPI,
+    ctx: Context,
+    method: str,
+    path: str,
+    *,
+    params: dict[str, Any] | None = None,
+    body: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     from mcp.server.mcpserver.exceptions import ToolError
 
-    if tool in ("spawn_agent_guarded_v1", "send_message"):
-        reserved = {"source", "instance", "caller_identity", "auth_principal", "client_id"}
-        if reserved.intersection(args):
-            raise ToolError("caller identity is server-derived; remove identity arguments")
-
-
-class _AuditMiddleware:
-    def __init__(self, db: Database) -> None:
-        self._db = db
-
-    async def __call__(
-        self,
-        ctx: ServerRequestContext[Any, Any],  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-        call_next: CallNext,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    ) -> HandlerResult:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-        from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
-
-        typed_ctx = cast(ServerRequestContext[Any, Any], ctx)
-        typed_call_next = cast(CallNext, call_next)
-        result: HandlerResult
-        if typed_ctx.method != "tools/call":
-            return await typed_call_next(typed_ctx)
-        params = dict(typed_ctx.params or {})
-        tool = str(params.get("name", "?"))
-        raw_args = params.get("arguments")
-        args = cast(dict[str, Any], raw_args) if isinstance(raw_args, dict) else {}
-        client = _authenticated_client(typed_ctx.request)
-
-        caller = CallerIdentity(kind="external_agent", subject="mcp", instance=str(client["id"]))
-        payload: dict[str, Any] = {
-            "tool": tool,
-            "client_id": client["id"],
-            "client_name": client["name"],
-            "args": _redact_args(args),
-            "auth_principal": {"kind": "mcp_client", "id": client["id"]},
-        }
-        try:
-            _validate_mcp_identity_arguments(tool, args)
-            result = await typed_call_next(typed_ctx)
-        except Exception as exc:
-            await record_tool_call(
-                self._db,
-                caller,
-                payload | {"outcome": "error", "error": type(exc).__name__},
-            )
-            raise
-        is_error = _tool_result_is_error(result)
-        await record_tool_call(
-            self._db,
-            caller,
-            payload
-            | (
-                {"outcome": "error", "error": "tool call returned an error"}
-                if is_error
-                else {"outcome": "ok"}
-            ),
+    origin = ctx.request_context.request
+    if not isinstance(origin, Request):
+        raise TypeError("an MCP tool call must arrive over an HTTP request")
+    forwarded = {
+        name: origin.headers[name] for name in _FORWARDED_HEADERS if name in origin.headers
+    }
+    peer = ("", 0) if origin.client is None else (origin.client.host, origin.client.port)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, client=peer), base_url=_API_BASE_URL
+    ) as api:
+        response = await api.request(
+            method,
+            path,
+            params={k: v for k, v in (params or {}).items() if v is not None},
+            json=body,
+            headers={**forwarded, **(headers or {})},
         )
-        return result
+    if response.is_error:
+        raise ToolError(response.text)
+    return cast(dict[str, Any], response.json())
 
 
-async def record_tool_call(db: Database, caller: CallerIdentity, payload: dict[str, Any]) -> None:
-
-    event = prepare_event_log(
-        event_type="mcp_tool_call", agent_id=None, source=caller.source(), payload=payload
-    )
-    await asyncio.to_thread(record_audit_reported, db, event)
-
-
-def _select_directory_blocking(
-    pool: Any,
-    *,
-    catalog: ModelCatalog | None,
-    default_model_reader: Callable[[], str],
-    scope: roster.AgentDirectoryScope,
-    query: str,
-    before_id: int | None,
-    limit: int,
-) -> roster.AgentDirectoryPage:
-    with pool.connection() as conn:
-        return roster.list_directory(
-            conn,
-            catalog=catalog,
-            scope=scope,
-            query=query,
-            before_id=before_id,
-            limit=limit,
-            default_model_reader=default_model_reader,
-        )
-
-
-def _select_one_blocking(
-    pool: Any,
-    agent_id: int,
-    *,
-    catalog: ModelCatalog | None,
-    default_model_reader: Callable[[], str],
-) -> Any:
-    with pool.connection() as conn:
-        return snapshot_module.select_one(
-            conn, agent_id, catalog=catalog, default_model_reader=default_model_reader
-        )
-
-
-def _require_write_scope(tool: str, client: dict[str, Any]) -> None:
-
-    from mcp.server.mcpserver.exceptions import ToolError
-
-    if clients.McpClientScope(client["scope"]) != clients.McpClientScope.WRITE:
-        raise ToolError(f"tool {tool!r} requires write scope")
-
-
-def _require_tool_catalog(read: Callable[[], ModelCatalog | CatalogLoadFailure]) -> ModelCatalog:
-    from mcp.server.mcpserver.exceptions import ToolError
-
-    try:
-        return require_catalog(read())
-    except ModelCatalogUnavailableError as exc:
-        raise ToolError(str(exc)) from exc
-
-
-def _register_read_tools(
-    server: MCPServer,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    pool: Any,
-    db: Database,
-    *,
-    catalog_reader: Callable[[], ModelCatalog | CatalogLoadFailure],
-    default_model_reader: Callable[[], str],
-    image: LoadedCommit,
-    local_machine: MachineIdentity,
-) -> None:
-
+def _register_tools(server: object, app: FastAPI) -> None:
     from mcp.server.mcpserver import MCPServer
-    from mcp.server.mcpserver.exceptions import ToolError
 
     typed_server = cast(MCPServer, server)
 
     @typed_server.tool(description=tool_description("list_agents"))
     async def list_agents(
-        scope: Literal["live", "terminated", "all"] = "live",
-        query: Annotated[str, Field(max_length=200)] = "",
-        before_id: Annotated[int | None, Field(ge=1, le=9223372036854775807)] = None,
-        limit: Annotated[int, Field(ge=1, le=200)] = 100,
+        ctx: Context,
+        scope: Literal["live", "terminated", "all"] | None = None,
+        query: str | None = None,
+        before_id: int | None = None,
+        limit: int | None = None,
     ) -> dict[str, Any]:
-        page = await asyncio.to_thread(
-            _select_directory_blocking,
-            pool,
-            default_model_reader=default_model_reader,
-            catalog=catalog_for_observation(catalog_reader()),
-            scope=scope,
-            query=query,
-            before_id=before_id,
-            limit=limit,
-        )
-        return page.model_dump(mode="json")
+        params = {"scope": scope, "query": query, "before_id": before_id, "limit": limit}
+        return await _call_api(app, ctx, "GET", "/api/agents", params=params)
 
     @typed_server.tool(description=tool_description("get_agent"))
-    async def get_agent(agent_id: int) -> dict[str, Any]:
-        snap = await asyncio.to_thread(
-            _select_one_blocking,
-            pool,
-            agent_id,
-            catalog=catalog_for_observation(catalog_reader()),
-            default_model_reader=default_model_reader,
-        )
-        if snap is None:
-            raise ToolError(f"agent {agent_id} does not exist")
-        return AgentRow.model_validate(snap.model_dump()).model_dump(mode="json")
+    async def get_agent(agent_id: int, ctx: Context) -> dict[str, Any]:
+        return await _call_api(app, ctx, "GET", f"/api/agents/{agent_id}")
 
     @typed_server.tool(description=tool_description("cluster_status"))
-    async def cluster_status() -> dict[str, Any]:
-        from gateway.cluster.router import cluster_status_snapshot
-
-        snapshot = await cluster_status_snapshot(db, image=image, local_machine=local_machine)
-        return snapshot.model_dump(mode="json")
-
-
-async def _mcp_deliver_send_message(
-    pool: Any,
-    db: Database,
-    bus: EventBus,
-    agent_id: int,
-    content: str,
-    *,
-    client: dict[str, Any],
-    as_external_agent: bool,
-    idempotency_key: str | None,
-    local_machine: str,
-) -> dict[str, Any]:
-
-    from mcp.server.mcpserver.exceptions import ToolError
-
-    source = _MESSAGE_SOURCE
-    if as_external_agent:
-        source = CallerIdentity(
-            kind="external_agent", subject="mcp", instance=str(client["id"])
-        ).source()
-    stored_key = None
-    if idempotency_key is not None:
-        try:
-            stored_key = principal_key(
-                AuthPrincipal("mcp_client", str(client["id"])),
-                "POST",
-                f"/api/agents/{agent_id}/messages",
-                idempotency_key,
-            )
-        except PrincipalScopeError as exc:
-            raise ToolError(str(exc)) from exc
-
-    try:
-        await asyncio.to_thread(get_agent_status, db, agent_id)
-        delivery = await deliver_chat_inbound(
-            pool,
-            db,
-            bus,
-            agent_id,
-            prepare=lambda _conn: content,
-            source=source,
-            payload=None,
-            client_message_id=stored_key,
-            provenance=InboundProvenance(
-                source_verified_by=f"mcp_client:{client['id']}",
-                source_transport="http",
-            ),
-            local_machine=local_machine,
-        )
-    except (MeivaAgentError, ClientMessageConflictError) as exc:
-        raise ToolError(str(exc)) from exc
-    except HTTPException as exc:
-        raise ToolError(str(exc.detail)) from exc
-    return {"status": delivery.status, "inbound_id": delivery.inbound_id}
-
-
-def _register_spawn_tools(
-    server: object,
-    pool: Any,
-    db: Database,
-    bus: EventBus,
-    *,
-    catalog_reader: Callable[[], ModelCatalog | CatalogLoadFailure],
-    authority: ConfigAuthority,
-    local_machine: MachineIdentity,
-) -> None:
-
-    from mcp.server.mcpserver import MCPServer
-    from mcp.server.mcpserver.exceptions import ToolError
-
-    typed_server = cast(MCPServer, server)
+    async def cluster_status(ctx: Context) -> dict[str, Any]:
+        return await _call_api(app, ctx, "GET", "/api/cluster/status")
 
     @typed_server.tool(description=tool_description("spawn_agent_guarded_v1"))
     async def spawn_agent_guarded_v1(
         prompt: str,
-        idempotency_key: Annotated[str, Field(min_length=1, max_length=128)],
+        idempotency_key: str,
         ctx: Context,
         label: str | None = None,
         machine: str | None = None,
         config_overlay: dict[str, Any] | None = None,
+        prompt_source: str = _MESSAGE_SOURCE,
+        spawner: str = _SPAWNER,
     ) -> dict[str, Any]:
-        client = _authenticated_client(ctx.request_context.request)
-        _require_write_scope("spawn_agent_guarded_v1", client)
-        try:
-            creation_key = principal_key(
-                AuthPrincipal("mcp_client", str(client["id"])),
-                "POST",
-                "/mcp/tools/spawn_agent_guarded_v1",
-                idempotency_key,
-            )
-        except PrincipalScopeError as exc:
-            raise ToolError(str(exc)) from exc
-        body = SpawnAgentRequest(
-            prompt=prompt,
-            prompt_source=_MESSAGE_SOURCE,
-            spawner=_SPAWNER,
-            label=label,
-            machine=machine,
-            config=config_overlay,
+        body = {
+            "prompt": prompt,
+            "prompt_source": prompt_source,
+            "spawner": spawner,
+            "label": label,
+            "machine": machine,
+            "config": config_overlay,
+        }
+        return await _call_api(
+            app,
+            ctx,
+            "POST",
+            "/api/keyed/v1/agents",
+            body=body,
+            headers=keyed_headers(idempotency_key),
         )
-        target = body.machine if body.machine is not None else local_machine.name()
-
-        try:
-            spawned = await _agents_creation.create_and_launch_agent(
-                body,
-                target,
-                pool,
-                db,
-                bus,
-                catalog=_require_tool_catalog(catalog_reader),
-                authority=authority,
-                creation_key=creation_key,
-            )
-        except HTTPException as exc:
-            raise ToolError(str(exc.detail)) from exc
-        except MeivaAgentError as exc:
-            from base.api_contracts.agent_contract import AgentLaunchFailed
-
-            if isinstance(exc, AgentLaunchFailed):
-                raise ToolError(
-                    f"{exc}; created agent_id={exc.agent_id}, "
-                    f"state={exc.state}, retry_launch_path={exc.retry_launch_path}"
-                ) from exc
-            raise ToolError(str(exc)) from exc
-        return spawned.model_dump(mode="json")
-
-
-def _register_fleet_tools(
-    server: MCPServer,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    pool: Any,
-    db: Database,
-    bus: EventBus,
-    *,
-    catalog_reader: Callable[[], ModelCatalog | CatalogLoadFailure],
-    authority: ConfigAuthority,
-    local_machine: MachineIdentity,
-) -> None:
-
-    from mcp.server.mcpserver import MCPServer
-    from mcp.server.mcpserver.exceptions import ToolError
-
-    typed_server = cast(MCPServer, server)
-    _register_spawn_tools(
-        typed_server,
-        pool,
-        db,
-        bus,
-        catalog_reader=catalog_reader,
-        authority=authority,
-        local_machine=local_machine,
-    )
 
     @typed_server.tool(description=tool_description("send_message"))
     async def send_message(
@@ -440,42 +113,23 @@ def _register_fleet_tools(
         content: str,
         ctx: Context,
         *,
-        as_external_agent: bool = False,
+        source: str = _MESSAGE_SOURCE,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        client = _authenticated_client(ctx.request_context.request)
-        _require_write_scope("send_message", client)
-        return await _mcp_deliver_send_message(
-            pool,
-            db,
-            bus,
-            agent_id,
-            content,
-            client=client,
-            as_external_agent=as_external_agent,
-            idempotency_key=idempotency_key,
-            local_machine=local_machine.name(),
+        return await _call_api(
+            app,
+            ctx,
+            "POST",
+            f"/api/agents/{agent_id}/messages",
+            body={"content": content, "source": source},
+            headers=None if idempotency_key is None else keyed_headers(idempotency_key),
         )
 
     @typed_server.tool(description=tool_description("get_messages"))
-    async def get_messages(agent_id: int, limit: int = _DEFAULT_MESSAGE_LIMIT) -> dict[str, Any]:
-        from base.db import agent_exists
-
-        def _exists() -> bool:
-            with pool.connection() as conn:
-                return agent_exists(conn, agent_id)
-
-        if not await asyncio.to_thread(_exists):
-            raise ToolError(f"agent {agent_id} does not exist")
-        try:
-            messages = await asyncio.to_thread(load_checkpoint_messages, db, agent_id)
-        except CheckpointReadError as exc:
-            raise ToolError(f"checkpoint read failed; retry or check store health: {exc}") from exc
-        window = messages[-limit:]
-        return {
-            "messages": [project_message(m.model_dump()) for m in window],
-            "total": len(messages),
-        }
+    async def get_messages(agent_id: int, ctx: Context, limit: int | None = None) -> dict[str, Any]:
+        return await _call_api(
+            app, ctx, "GET", f"/api/agents/{agent_id}/messages", params={"limit": limit}
+        )
 
     @typed_server.tool(description=tool_description("terminate_agent"))
     async def terminate_agent(
@@ -485,99 +139,25 @@ def _register_fleet_tools(
         message: str | None = None,
         force: bool = False,
     ) -> dict[str, Any]:
-        client = _authenticated_client(ctx.request_context.request)
-        _require_write_scope("terminate_agent", client)
-        try:
-            result = await terminate_agent_with_open_tasks(
-                agent_id,
-                TerminateAgentRequest(message=message, force=force),
-                pool,
-                db=db,
-            )
-        except MeivaAgentError as exc:
-            raise ToolError(str(exc)) from exc
-        return result.model_dump(mode="json")
+        return await _call_api(
+            app,
+            ctx,
+            "POST",
+            f"/api/agents/{agent_id}/terminate",
+            body={"message": message, "force": force},
+        )
 
 
 # meiva:link gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.meiva.okf.md
-def _build_server(  # noqa: ANN202
-    pool: Any,
-    db: Database,
-    bus: EventBus,
-    *,
-    catalog_reader: Callable[[], ModelCatalog | CatalogLoadFailure],
-    authority: ConfigAuthority,
-    image: LoadedCommit,
-    local_machine: MachineIdentity,
-):
-
+def build_manager(app: FastAPI):  # noqa: ANN201
     from mcp.server.mcpserver import MCPServer
-
-    server = MCPServer(
-        "meiva", instructions=server_instructions(), middleware=[_AuditMiddleware(db)]
-    )
-    _register_read_tools(
-        server,
-        pool,
-        db,
-        catalog_reader=catalog_reader,
-        default_model_reader=lambda: cast(str, authority.service_field_value("llm_model")),
-        image=image,
-        local_machine=local_machine,
-    )
-    _register_fleet_tools(
-        server,
-        pool,
-        db,
-        bus,
-        catalog_reader=catalog_reader,
-        authority=authority,
-        local_machine=local_machine,
-    )
-    return server
-
-
-# meiva:link gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.meiva.okf.md
-def build_manager(  # noqa: ANN201
-    pool: Any,
-    db: Database,
-    bus: EventBus,
-    *,
-    catalog_reader: Callable[[], ModelCatalog | CatalogLoadFailure],
-    authority: ConfigAuthority,
-    image: LoadedCommit,
-    local_machine: MachineIdentity,
-):
-
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-    server = _build_server(
-        pool,
-        db,
-        bus,
-        catalog_reader=catalog_reader,
-        authority=authority,
-        image=image,
-        local_machine=local_machine,
-    )
-
+    server = MCPServer("meiva", instructions=server_instructions())
+    _register_tools(server, app)
     server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, host="")
     manager: StreamableHTTPSessionManager = server.session_manager
     return manager
-
-
-def _bearer_token(scope: dict[str, Any]) -> str | None:
-
-    authorization = None
-    for name, value in scope.get("headers", []):
-        if name.lower() == b"authorization":
-            authorization = value.decode("latin-1")
-            break
-    prefix = "Bearer "
-    if authorization is None or not authorization.startswith(prefix):
-        return None
-    token = authorization[len(prefix) :]
-    return token or None
 
 
 def mcp_gateway(app: FastAPI) -> Callable[..., Awaitable[None]]:
@@ -596,23 +176,6 @@ def mcp_gateway(app: FastAPI) -> Callable[..., Awaitable[None]]:
             )
             await response(scope, receive, send)
             return
-        token = _bearer_token(scope)
-        client = (
-            await asyncio.to_thread(
-                clients.lookup_client_by_token,
-                app.state.db_pool,
-                token,
-            )
-            if token is not None
-            else None
-        )
-        if client is None:
-            response = JSONResponse(
-                {"detail": "invalid or revoked MCP client token"}, status_code=401
-            )
-            await response(scope, receive, send)
-            return
-        Request(scope).state.meiva_mcp_client = client
         await manager.asgi_app(scope, receive, send)
 
     return _gateway

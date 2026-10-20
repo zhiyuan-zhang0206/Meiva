@@ -42,7 +42,7 @@ from gateway.http.auth.webhook import authenticate_webhook
 from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
 from services.agent_runner.agent_ops import boot as ops_boot
 from services.supervision.roster.service_spec import ServiceSpec, api_access
-from tests.fixtures.gateway_config import create_mcp_client, gateway_test_app, gateway_test_client
+from tests.fixtures.gateway_config import gateway_test_app, gateway_test_client
 
 _HUMAN = "human-" + "h" * 40
 _ENDPOINT = "postgresql://meiva@10.0.0.7:6433/meiva"
@@ -335,72 +335,6 @@ def test_a_machine_token_cannot_choose_the_human_secret(
         )
     assert resp.status_code == 400, resp.text
     assert not (store / ".env").exists()
-
-
-def test_a_machine_token_cannot_open_the_mcp_endpoint(
-    gateway_data_plane: None,
-    gateway: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
-) -> None:
-    """Switching `/mcp` on decides whether MCP client tokens, which outlive
-    every generation, authenticate at all: no config write may choose it."""
-    from base.host.env import dotenv_file
-
-    store = tmp_path / "config-store"
-    store.mkdir()
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: store)
-    monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
-    runner = _tokens(gateway).api.runner
-    with gateway_test_client(machine=machine_identity) as client:
-        resp = client.put(
-            "/api/config", json={"mcp_endpoint_enabled": True}, headers=bearer_header(runner)
-        )
-    assert resp.status_code == 400, resp.text
-    assert not (store / ".env").exists()
-
-
-def test_only_a_human_credential_manages_mcp_clients(
-    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
-) -> None:
-    """An MCP client token lives in `mcp_clients`, bound to no write generation.
-    A generation-bound admission (either machine token, or a session a runner
-    token minted) must not mint one that outlives it, nor list or revoke them;
-    the human secret and the sessions it minted manage them."""
-    from gateway.mcp_server import clients
-
-    tokens = _tokens(gateway).api
-    with gateway_test_client(machine=machine_identity) as client:
-        pool = client.app.state.db_pool
-        runner_session = client.post("/api/auth/login", json={"password": tokens.runner})
-        client.cookies.clear()
-        human_session = client.post("/api/auth/login", json={"password": _HUMAN})
-        client.cookies.clear()
-        generation_bound = (
-            bearer_header(tokens.runner),
-            bearer_header(tokens.gateway),
-            {"Cookie": f"{cookie_name()}={runner_session.cookies[cookie_name()]}"},
-        )
-        for headers in generation_bound:
-            minted = create_mcp_client(client, "minted", "write", headers=headers)
-            assert minted.status_code == 403, minted.text
-            assert client.get("/api/mcp/clients", headers=headers).status_code == 403
-            assert client.post("/api/mcp/clients/1/revoke", headers=headers).status_code == 403
-        assert clients.list_clients(pool) == []
-
-        human = (
-            bearer_header(_HUMAN),
-            {"Cookie": f"{cookie_name()}={human_session.cookies[cookie_name()]}"},
-        )
-        for index, headers in enumerate(human):
-            created = create_mcp_client(client, f"human-{index}", "write", headers=headers)
-            assert created.status_code == 200, created.text
-            assert client.get("/api/mcp/clients", headers=headers).status_code == 200
-            revoked = client.post(
-                f"/api/mcp/clients/{created.json()['id']}/revoke", headers=headers
-            )
-            assert revoked.status_code == 200, revoked.text
 
 
 def _webhook_request(authorization: str | None) -> Request:

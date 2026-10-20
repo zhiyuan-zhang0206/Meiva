@@ -537,10 +537,19 @@ def _assert_preflight_and_bearer_isolation(
         ).status_code,
     ) == (404, 401, 404, 401)
 
+    mcp_list = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    mcp_headers = {"Accept": "application/json, text/event-stream"}
     assert (
-        client_alpha.get("/mcp", headers=bearer_header("secret-alpha")).status_code,
-        client_beta.get("/mcp", headers=bearer_header("secret-beta")).status_code,
-    ) == (401, 404)
+        client_alpha.post(
+            "/mcp", json=mcp_list, headers=mcp_headers | bearer_header("secret-alpha")
+        ).status_code,
+        client_alpha.post(
+            "/mcp", json=mcp_list, headers=mcp_headers | bearer_header("secret-beta")
+        ).status_code,
+        client_beta.post(
+            "/mcp", json=mcp_list, headers=mcp_headers | bearer_header("secret-beta")
+        ).status_code,
+    ) == (200, 401, 404)
 
 
 def _assert_session_cookie_isolation(

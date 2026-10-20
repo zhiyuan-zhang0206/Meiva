@@ -29,7 +29,7 @@ from base.host.db_authority.api import AcceptanceCache
 class AuthPrincipal:
     """Construct only after credential verification, never from request JSON."""
 
-    kind: Literal["cluster", "mcp_client"]
+    kind: Literal["cluster"]
     subject: str
 
 
@@ -196,13 +196,10 @@ TRUSTED_NETWORK_FACT = "trusted_network"
 HUMAN_CREDENTIAL_FACTS = frozenset({"cluster_bearer", _MINT_FACTS["human"], TRUSTED_NETWORK_FACT})
 
 
+# meiva:note
+# Route dependency: 403 unless a human credential authenticated the request. It guards routes
+# that mint a credential outliving any write generation (login tickets).
 def require_human_credential(request: Request) -> None:
-    """Route dependency: 403 unless the human secret authenticated `request`.
-
-    Guards routes that mint a credential outliving any write generation (MCP
-    client tokens): a generation-bound admission must not leave behind a
-    credential its own revocation cannot end.
-    """
     from fastapi import HTTPException
 
     if getattr(request.state, "source_verified_by", None) not in HUMAN_CREDENTIAL_FACTS:
