@@ -257,8 +257,10 @@ class TestLinuxReaders:
         assert admission.read_psi(str(psi)) == pytest.approx(1.25)
         assert admission.read_psi(str(tmp_path / "absent")) is None
 
-    def test_gpu_usage_is_the_largest_device_and_unknown_without_the_tool(self) -> None:
-        assert admission.read_gpu(("printf", "0\n3712\n")) == 3712
+    def test_gpu_usage_and_capacity_come_from_the_largest_device(self) -> None:
+        assert admission.read_gpu(("printf", "0, 8188\n3712, 8188\n")) == (3712, 8188)
+
+    def test_gpu_is_unknown_without_the_tool(self) -> None:
         assert admission.read_gpu(("false",)) is None
 
     def test_an_absent_budget_reader_keeps_the_requested_concurrency(
@@ -290,7 +292,7 @@ class TestLinuxReaders:
             ),
             pressure_reader=lambda: 1,
             psi_reader=lambda: 1.25,
-            gpu_reader=lambda: 3712.0,
+            gpu_reader=lambda: (3712.0, 8188.0),
             executor=recorder,
             home=tmp_path,
         )
@@ -299,3 +301,4 @@ class TestLinuxReaders:
         assert event["budget_source"] == "memory"
         assert event["psi_some_avg10"] == 1.25
         assert event["gpu_used_mib"] == 3712.0
+        assert event["gpu_total_mib"] == 8188.0
