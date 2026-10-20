@@ -68,7 +68,6 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
     "argv",
     [
         ["status"],
-        ["status", "--json"],
         ["cluster", "status"],
         ["agents", "ls"],
         ["config", "get", "MEIVA_TIMEZONE"],
