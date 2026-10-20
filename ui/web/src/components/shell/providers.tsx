@@ -14,6 +14,8 @@ import { AuthProvider, notifySessionInvalid } from "@/lib/auth/auth-context";
 import { ApiError } from "@/lib/transport/api";
 import { NonceProvider } from "@/lib/auth/nonce-context";
 import { EventStreamProvider } from "@/lib/transport/useEventStream";
+import { setNavFallbackMs, useNavTimingReport } from "@/lib/telemetry/nav-timing";
+import { useUserSettings } from "@/lib/state/use-user-settings";
 import { AlertsProvider } from "@/lib/notifications/use-alerts";
 
 // The inline script next-themes injects toggles .dark on <html> before
@@ -110,6 +112,7 @@ export function Providers({ children, nonce }: { children: React.ReactNode; nonc
                       light/dark palette; renders nothing. */}
                   <ThemePackTokens />
                   <ThemeColorSync />
+                  <NavTimingReporter />
                   <AppConnectionBanner />
                   {children}
                   {/* The toast renderer is root-level so error toasts reach the
@@ -127,4 +130,11 @@ export function Providers({ children, nonce }: { children: React.ReactNode; nonc
       </QueryClientProvider>
     </NonceProvider>
   );
+}
+
+function NavTimingReporter() {
+  const { settings } = useUserSettings();
+  useNavTimingReport();
+  setNavFallbackMs(Number(settings["behavior.navFallbackMs"] ?? 0));
+  return null;
 }
