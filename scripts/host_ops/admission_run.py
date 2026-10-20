@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # meiva:note
 # A job starts at the concurrency this host can absorb: per-worker peak memory times the
-# requested workers, priced against the free space on the data volume, and the requested
-# workers are lowered (never refused) when it does not fit. Every lowered or bypassed start
-# leaves one line and one JSON event. The linked document owns the formula, the knobs and
-# the boundary with the disk and agent-host guards.
+# requested workers, priced against the room this host has for it — the data volume's free
+# space on macOS (where swap grows the volume), the kernel's MemAvailable on Linux (where
+# the job competes for memory and swap does not grow the disk) — and the requested workers
+# are lowered (never refused) when it does not fit. Every lowered or bypassed start leaves
+# one line and one JSON event. The linked document owns the formula, the per-platform
+# readings and the boundary with the disk and agent-host guards.
 # meiva:link scripts/host_ops/docs/admission-run.meiva.okf.md
 from __future__ import annotations
 
@@ -22,6 +24,9 @@ from pathlib import Path
 
 GIB = 1024**3
 DATA_VOLUME = "/System/Volumes/Data"
+MEM_INFO = "/proc/meminfo"
+PSI_FILE = "/proc/pressure/memory"
+NVIDIA_SMI = ("nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits")
 DEFAULT_RESERVE_GIB = 12.0
 DEFAULT_SWAP_MULTIPLIER = 2.0
 UNSTABLE_PCT_DELTA = 2.0
@@ -36,11 +41,15 @@ CONCURRENCY_FLAGS = ("--jobs", "--eval-jobs")
 SHORT_FLAGS = ("-j",)
 
 
+# meiva:note
+# Room this host has for the job, in the resource its peak actually consumes: the data
+# volume on macOS, MemAvailable on Linux. `detail` is what the line and the event print.
 @dataclass(frozen=True)
-class DiskReading:
+class Reading:
     free_gib: float
-    df_pct: float
+    source: str
     unstable: bool
+    detail: str
 
 
 @dataclass(frozen=True)
@@ -130,7 +139,7 @@ def requested_jobs(argv: Sequence[str]) -> tuple[int, int | None]:
     return 1, None
 
 
-def read_disk(path: str = DATA_VOLUME) -> DiskReading:
+def read_disk(path: str = DATA_VOLUME) -> Reading:
     # meiva:note
     # Both subprocess calls run fixed argv (`df -P <volume>`, `ps -g <pid>`, the operator's
     # own job), never a string built from input.
@@ -154,17 +163,85 @@ def read_disk(path: str = DATA_VOLUME) -> DiskReading:
         df_free = int(fields[3]) * 1024
     except (IndexError, ValueError):
         df_pct, df_free = statvfs_pct, free
-    return DiskReading(
+    return Reading(
         free_gib=min(free, df_free) / GIB,
-        df_pct=df_pct,
+        source="disk",
         unstable=abs(df_pct - statvfs_pct) > UNSTABLE_PCT_DELTA,
+        detail=f"df {df_pct:.1f}%",
     )
+
+
+def read_memory(path: str = MEM_INFO) -> Reading | None:
+    # meiva:note
+    # Linux prices memory, not disk: swap does not grow the volume here, so the quantity a
+    # job competes for is MemAvailable. None (not 0) when the file cannot be read — an
+    # unreadable reader must say unknown instead of reporting a comfortable zero.
+    try:
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            if line.startswith("MemAvailable:"):
+                return Reading(
+                    free_gib=int(line.split()[1]) / (1024 * 1024),
+                    source="memory",
+                    unstable=False,
+                    detail="MemAvailable",
+                )
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def read_budget() -> Reading | None:
+    # meiva:note
+    # One question, two platforms: how much room does this host have for the job's cost.
+    # macOS answers with the data volume (a swapfile grows it); Linux answers with
+    # MemAvailable; anything else answers unknown rather than a guess.
+    if sys.platform == "darwin":
+        return read_disk()
+    if sys.platform.startswith("linux"):
+        return read_memory()
+    return None
+
+
+def read_psi(path: str = PSI_FILE) -> float | None:
+    # meiva:note
+    # Linux's own stall counter, recorded in the event only: the memory budget already
+    # prices the job, and inventing a second threshold here would drift from the kernel.
+    try:
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            if line.startswith("some "):
+                for part in line.split()[1:]:
+                    if part.startswith("avg10="):
+                        return float(part.split("=", 1)[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def read_gpu(command: Sequence[str] = NVIDIA_SMI) -> float | None:
+    # meiva:note
+    # Device memory in use, in MiB, recorded in the event — a GPU job's declared peak is
+    # RSS plus what it pins, and the pin is invisible in the RSS. None when the tool is
+    # absent, so a CPU-only host reports unknown instead of a fake zero.
+    done = subprocess.run(  # noqa: S603
+        list(command), capture_output=True, text=True, check=False
+    )
+    if done.returncode != 0:
+        return None
+    values: list[float] = []
+    for line in done.stdout.split():
+        with contextlib.suppress(ValueError):
+            values.append(float(line))
+    return max(values) if values else None
 
 
 def read_pressure() -> int:
     # meiva:note
-    # The kernel's own three-level classification (1 normal, 2 warn, 4 critical) is the
-    # only pressure input; no threshold constant of ours can drift from it.
+    # macOS: the kernel's own three-level classification (1 normal, 2 warn, 4 critical) is
+    # the only pressure input; no threshold constant of ours can drift from it. Linux
+    # answers 1 by design: MemAvailable already prices this job continuously, and PSI is
+    # recorded in the event rather than turned into a second threshold here.
+    if sys.platform != "darwin":
+        return 1
     try:
         out = subprocess.run(
             ["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
@@ -180,6 +257,17 @@ def read_pressure() -> int:
 def swap_line() -> str:
     # meiva:note
     # Printed for the reader, never a criterion: used/total is dominated by stale pages.
+    if sys.platform != "darwin":
+        values = {}
+        with contextlib.suppress(OSError):
+            for line in Path(MEM_INFO).read_text(encoding="utf-8").splitlines():
+                if line.startswith(("SwapTotal:", "SwapFree:")):
+                    key, _, rest = line.partition(":")
+                    values[key] = int(rest.split()[0]) / (1024 * 1024)
+        if "SwapTotal" in values:
+            used = values["SwapTotal"] - values.get("SwapFree", 0.0)
+            return f"swap {used:.1f}/{values['SwapTotal']:.1f} GiB"
+        return "swap unknown"
     done = subprocess.run(
         ["sysctl", "-n", "vm.swapusage"], capture_output=True, text=True, check=False
     )
@@ -291,32 +379,47 @@ def _announce_gate(
     peak_mb: float,
     reserve_gib: float,
     multiplier: float,
-    disk_reader: Callable[[], DiskReading],
+    budget_reader: Callable[[], Reading | None],
     pressure_reader: Callable[[], int],
+    psi_reader: Callable[[], float | None],
+    gpu_reader: Callable[[], float | None],
     events: Path,
 ) -> int:
     # meiva:note
     # The whole visible half of the gate: decide, print the one line when it changed, and
-    # leave the event. A job that fits prints nothing, so silence stays meaningful.
-    disk = disk_reader()
-    pressure = pressure_reader()
-    outcome = plan(requested, peak_mb, disk.free_gib, pressure, reserve_gib, multiplier)
-    if disk.unstable:
+    # leave the event. A job that fits prints nothing, so silence stays meaningful. A
+    # reader that cannot answer is recorded as unknown and never read as a comfortable
+    # zero: the job runs at its requested concurrency and the line says why.
+    budget = budget_reader()
+    if budget is None:
         print(
-            f"admission: unstable sample — df {disk.df_pct:.1f}% disagrees with statvfs; "
+            f"admission: no budget reading on {sys.platform}; keeping jobs {requested}",
+            file=sys.stderr,
+        )
+        emit(events, "unknown", script=script, reason="budget", platform=sys.platform)
+        return requested
+    pressure = pressure_reader()
+    outcome = plan(requested, peak_mb, budget.free_gib, pressure, reserve_gib, multiplier)
+    if budget.unstable:
+        print(
+            f"admission: unstable sample — {budget.detail} disagrees with statvfs; "
             f"keeping jobs {requested}",
             file=sys.stderr,
         )
         emit(
-            events, "unstable", script=script, df_pct=disk.df_pct, free_gib=round(disk.free_gib, 2)
+            events,
+            "unstable",
+            script=script,
+            detail=budget.detail,
+            free_gib=round(budget.free_gib, 2),
         )
         return requested
     if outcome.jobs == requested:
         return requested
     why = "overcommitted, still starting one" if outcome.overcommitted else "lowered"
     print(
-        f"admission: jobs {requested}->{outcome.jobs} ({why}: free {disk.free_gib:.1f} GiB - "
-        f"reserve {reserve_gib:.1f} GiB = {outcome.budget_gib:.1f} GiB / "
+        f"admission: jobs {requested}->{outcome.jobs} ({why}: free {budget.free_gib:.1f} GiB "
+        f"({budget.source}) - reserve {reserve_gib:.1f} GiB = {outcome.budget_gib:.1f} GiB / "
         f"{outcome.cost_gib:.2f} GiB per worker; pressure {pressure}; {swap_line()})",
         flush=True,
     )
@@ -328,9 +431,12 @@ def _announce_gate(
         jobs=outcome.jobs,
         peak_mb=peak_mb,
         multiplier=multiplier,
-        free_disk_gib=round(disk.free_gib, 2),
+        budget_source=budget.source,
+        free_gib=round(budget.free_gib, 2),
         budget_gib=round(outcome.budget_gib, 2),
         pressure=pressure,
+        psi_some_avg10=psi_reader(),
+        gpu_used_mib=gpu_reader(),
     )
     return outcome.jobs
 
@@ -384,8 +490,10 @@ def _command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[
 def main(
     argv: Sequence[str],
     *,
-    disk_reader: Callable[[], DiskReading] = read_disk,
+    budget_reader: Callable[[], Reading | None] = read_budget,
     pressure_reader: Callable[[], int] = read_pressure,
+    psi_reader: Callable[[], float | None] = read_psi,
+    gpu_reader: Callable[[], float | None] = read_gpu,
     executor: Callable[[Sequence[str], dict[str, object]], int] | None = None,
     home: Path | None = None,
 ) -> int:
@@ -427,8 +535,10 @@ def main(
         peak_mb=peak_mb,
         reserve_gib=args.reserve_gib,
         multiplier=args.swap_multiplier,
-        disk_reader=disk_reader,
+        budget_reader=budget_reader,
         pressure_reader=pressure_reader,
+        psi_reader=psi_reader,
+        gpu_reader=gpu_reader,
         events=events,
     )
     if args.dry_run:
