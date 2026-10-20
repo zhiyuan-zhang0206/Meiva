@@ -203,7 +203,7 @@ describe("HomeLayout frame contract", () => {
     expect(directPanelDefaults(groups[1]).reduce((sum, size) => sum + size, 0)).toBe(100);
   });
 
-  it("insets both desktop divider lines across the same header-to-composer segment", () => {
+  it("draws both desktop dividers edge to edge", () => {
     render(
       <HomeLayout
         {...panes()}
@@ -217,19 +217,16 @@ describe("HomeLayout frame contract", () => {
       document.querySelectorAll<HTMLElement>('[data-slot="resizable-handle"]'),
     );
     expect(handles).toHaveLength(2);
-    expect(handles.map((handle) => handle.className)).toEqual([
-      "after:top-[var(--home-divider-line-top)] after:bottom-[var(--home-divider-line-bottom)]",
-      "after:top-[var(--home-divider-line-top)] after:bottom-[var(--home-divider-line-bottom)]",
-    ]);
-    expect(
-      handles.map((handle) => ({
-        top: handle.style.getPropertyValue("--home-divider-line-top"),
-        bottom: handle.style.getPropertyValue("--home-divider-line-bottom"),
-      })),
-    ).toEqual([
-      { top: "84px", bottom: "89px" },
-      { top: "84px", bottom: "89px" },
-    ]);
+    // meiva:note
+    // The ui handle paints `after:top-0 after:bottom-0`; a caller-side inset
+    // overrides it, and none may: a line that stops above the composer reads as
+    // broken next to the ones that run edge to edge.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    for (const handle of handles) {
+      expect(handle.className).not.toContain("after:top-[");
+      expect(handle.style.getPropertyValue("--home-divider-line-top")).toBe("");
+      expect(handle.style.getPropertyValue("--home-divider-line-bottom")).toBe("");
+    }
   });
 
   it("collapsed desktop frame renders nothing of the sidebar and cannot write panel layout storage", () => {

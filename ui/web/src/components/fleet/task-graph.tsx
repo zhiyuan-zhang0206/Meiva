@@ -180,8 +180,8 @@ function TaskHoverCard({
         <MetaRow label={t("meta.createdBy")}>{creator}</MetaRow>
         <MetaRow label={t("meta.parent")}>{parentTitle ?? "—"}</MetaRow>
         <MetaRow label={t("meta.reminder")}>{reminder}</MetaRow>
-        <MetaRow label={t("meta.created")}>{formatRelative(task.created_at)}</MetaRow>
-        <MetaRow label={t("meta.updated")}>{formatRelative(task.updated_at)}</MetaRow>
+        <MetaRow label={t("meta.created")}>{formatRelative(task.created_at, undefined, { capitalize: true })}</MetaRow>
+        <MetaRow label={t("meta.updated")}>{formatRelative(task.updated_at, undefined, { capitalize: true })}</MetaRow>
       </div>
 
       {/* Reminder extras — only when the task actually has a reminder history. */}

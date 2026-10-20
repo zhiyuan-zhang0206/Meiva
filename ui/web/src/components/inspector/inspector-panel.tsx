@@ -729,14 +729,14 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
         <Metric
           className="col-span-2"
           label={t("metricBirth")}
-          value={`${formatRelative(spawned_at)}, ${formatAbsolute(spawned_at)}`}
+          value={`${formatRelative(spawned_at, undefined, { capitalize: true })}, ${formatAbsolute(spawned_at)}`}
         />
         <Metric label={t("metricNextHeartbeat")} value={next} />
         <Metric
           label={t("metricLastPause")}
           value={
             lastPause
-              ? `${formatRelative(lastPause.at)} · ${formatInterval(Math.round(lastPause.duration_s))}`
+              ? `${formatRelative(lastPause.at, undefined, { capitalize: true })} · ${formatInterval(Math.round(lastPause.duration_s))}`
               : t("neverPaused")
           }
         />
