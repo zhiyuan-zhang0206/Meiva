@@ -26,7 +26,11 @@ GIB = 1024**3
 DATA_VOLUME = "/System/Volumes/Data"
 MEM_INFO = "/proc/meminfo"
 PSI_FILE = "/proc/pressure/memory"
-NVIDIA_SMI = ("nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits")
+NVIDIA_SMI = (
+    "nvidia-smi",
+    "--query-gpu=memory.used,memory.total",
+    "--format=csv,noheader,nounits",
+)
 DEFAULT_RESERVE_GIB = 12.0
 DEFAULT_SWAP_MULTIPLIER = 2.0
 UNSTABLE_PCT_DELTA = 2.0
@@ -217,21 +221,29 @@ def read_psi(path: str = PSI_FILE) -> float | None:
     return None
 
 
-def read_gpu(command: Sequence[str] = NVIDIA_SMI) -> float | None:
+def read_gpu(command: Sequence[str] = NVIDIA_SMI) -> tuple[float, float] | None:
     # meiva:note
-    # Device memory in use, in MiB, recorded in the event — a GPU job's declared peak is
-    # RSS plus what it pins, and the pin is invisible in the RSS. None when the tool is
-    # absent, so a CPU-only host reports unknown instead of a fake zero.
+    # (device memory in use, device capacity) in MiB, recorded in the event. On a discrete
+    # GPU this is separate memory: it never enters the host budget (overflowing it is a
+    # CUDA OOM, not a machine-memory crisis), it is judged against the card. None when the
+    # tool is absent, so a CPU-only host reports unknown instead of a fake zero.
     done = subprocess.run(  # noqa: S603
         list(command), capture_output=True, text=True, check=False
     )
     if done.returncode != 0:
         return None
-    values: list[float] = []
-    for line in done.stdout.split():
+    used: list[float] = []
+    total: list[float] = []
+    for line in done.stdout.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 2:
+            continue
         with contextlib.suppress(ValueError):
-            values.append(float(line))
-    return max(values) if values else None
+            used.append(float(parts[0]))
+            total.append(float(parts[1]))
+    if not used:
+        return None
+    return max(used), max(total)
 
 
 def read_pressure() -> int:
@@ -382,7 +394,7 @@ def _announce_gate(
     budget_reader: Callable[[], Reading | None],
     pressure_reader: Callable[[], int],
     psi_reader: Callable[[], float | None],
-    gpu_reader: Callable[[], float | None],
+    gpu_reader: Callable[[], tuple[float, float] | None],
     events: Path,
 ) -> int:
     # meiva:note
@@ -423,6 +435,7 @@ def _announce_gate(
         f"{outcome.cost_gib:.2f} GiB per worker; pressure {pressure}; {swap_line()})",
         flush=True,
     )
+    gpu = gpu_reader()
     emit(
         events,
         "overcommitted" if outcome.overcommitted else "adjusted",
@@ -436,7 +449,8 @@ def _announce_gate(
         budget_gib=round(outcome.budget_gib, 2),
         pressure=pressure,
         psi_some_avg10=psi_reader(),
-        gpu_used_mib=gpu_reader(),
+        gpu_used_mib=gpu[0] if gpu else None,
+        gpu_total_mib=gpu[1] if gpu else None,
     )
     return outcome.jobs
 
@@ -493,7 +507,7 @@ def main(
     budget_reader: Callable[[], Reading | None] = read_budget,
     pressure_reader: Callable[[], int] = read_pressure,
     psi_reader: Callable[[], float | None] = read_psi,
-    gpu_reader: Callable[[], float | None] = read_gpu,
+    gpu_reader: Callable[[], tuple[float, float] | None] = read_gpu,
     executor: Callable[[Sequence[str], dict[str, object]], int] | None = None,
     home: Path | None = None,
 ) -> int:

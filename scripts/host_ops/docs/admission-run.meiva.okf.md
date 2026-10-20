@@ -34,12 +34,20 @@ Linux swap does not grow the volume, so the reading is the kernel's own
 reports `unknown` and keeps the requested concurrency with a line saying so — a
 missing reader is never read as a comfortable zero.
 
-`--peak-mb` therefore means "peak resident memory of one worker", and on a host
-with a GPU it is **RSS plus the device memory that job pins** (measured 8.81 GiB
-+ 3.7 GiB on 2026-10-20); the pin is invisible in RSS, and on a host whose GPU
-shares physical memory it is the same budget. `nvidia-smi`'s
-`memory.used` is recorded in the event when the tool exists and reported as
-`unknown` when it does not — it never enters the formula as a zero.
+`--peak-mb` means "peak resident memory of one worker", and what counts as
+resident depends on where the GPU's memory lives:
+
+- **Unified memory** (Apple Silicon): GPU buffers are host memory that RSS does
+  not show, so the declared peak is **RSS plus the GPU's resident allocation**.
+- **Discrete GPU**: device memory is separate. It does not consume
+  `MemAvailable`, an overflow is a CUDA OOM rather than a machine-level memory
+  crisis, and the host budget must **not** include it — adding ~4 GiB of device
+  memory to the host peak would under-schedule a job that fits. Declare the
+  host-side peak only; `nvidia-smi`'s `memory.used` and `memory.total` are
+  recorded in the event so the device side can be judged against its own card.
+
+Either way a missing `nvidia-smi` is `null`, never a zero, and device memory
+never enters the formula.
 
 `--reserve-gib 12` is the space one 5-6 GB job needs for its swapfile plus margin
 (measured 1.45x-1.8x of resident size on 2026-10-20). `--swap-multiplier 2.0` is
