@@ -229,7 +229,7 @@ describe("HomeLayout frame contract", () => {
     }
   });
 
-  it("collapsed desktop frame renders nothing of the sidebar and cannot write panel layout storage", () => {
+  it("collapsed desktop frame keeps the group and drops only the sidebar panel, without writing panel layout storage", () => {
     localStorage.setItem("sentinel", "unchanged");
 
     render(
@@ -242,7 +242,15 @@ describe("HomeLayout frame contract", () => {
       />,
     );
 
-    expect(screen.queryAllByTestId("resizable-panel-group")).toHaveLength(0);
+    // meiva:note
+    // The group stays mounted so the conversation keeps its component; only the
+    // sidebar's own panel and divider leave, and the sole remaining panel takes
+    // the whole group.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    const groups = screen.getAllByTestId("resizable-panel-group");
+    expect(groups).toHaveLength(2);
+    expect(directPanelIds(groups[0])).toEqual(["panel-main"]);
+    expect(directPanelDefaults(groups[0])).toEqual([100]);
     expect(screen.queryByTestId("agent-tree")).toBeNull();
     expect(document.querySelector('[data-slot="static-divider"]')).toBeNull();
     expect(screen.getByTestId("main-timeline")).toBeTruthy();
@@ -335,5 +343,27 @@ describe("HomeLayout frame contract", () => {
     }
     expect(localStorage.getItem("react-resizable-panels:meiva.home.columns.context")).not.toBeNull();
     expect(localStorage.getItem("react-resizable-panels:meiva.home.context.desktop")).not.toBeNull();
+  });
+});
+
+describe("HomeLayout collapsed frame", () => {
+  it("keeps the conversation mounted when the sidebar collapses or expands", () => {
+    // meiva:note
+    // Collapsing used to swap a panel group for a bare div, so React unmounted
+    // the whole main subtree: the conversation rebuilt, its height flashed, and
+    // the reader's position came back from the per-entry bookmark instead of
+    // staying put (user report 2026-10-20).
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    const main = <section data-testid="main-timeline" />;
+    const props = { sidebar: <aside data-testid="agent-tree" />, main, inspector: null, isNarrow: false, isLarge: true };
+
+    const view = render(<HomeLayout {...props} sidebarCollapsed={false} />);
+    const before = screen.getByTestId("main-timeline");
+
+    view.rerender(<HomeLayout {...props} sidebarCollapsed />);
+    expect(screen.getByTestId("main-timeline")).toBe(before);
+
+    view.rerender(<HomeLayout {...props} sidebarCollapsed={false} />);
+    expect(screen.getByTestId("main-timeline")).toBe(before);
   });
 });

@@ -7,8 +7,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useContentToggle, useContentToggleReset } from "@/lib/layout/content-toggle-store";
 import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "@/lib/timeline/timeline";
 import {
-  POINTER_STICKY_THRESHOLDS,
-  TOUCH_STICKY_THRESHOLDS,
   type StickyController,
   createStickyController,
   isAtBottom,
@@ -33,6 +31,8 @@ import { groupTimelineSegments } from "./model/segments";
 import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
 import { useOlderHistoryPull } from "./model/use-older-history-pull";
 import { usePinRequests } from "./model/use-pin-requests";
+import { useReanchorOnWidthChange } from "./model/width-change-anchor";
+import { useStickyThresholds } from "./model/sticky-thresholds";
 import { useTimelineWindow, useTimelineWindowLimits } from "./model/use-timeline-window";
 import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
@@ -151,17 +151,15 @@ export const TimelineView = memo(function TimelineView({
     setActiveStuckChildId((prev) => (prev === childId ? prev : childId));
   }, []);
 
-  const stickyThresholds = useMemo(
-    () =>
-      typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches
-        ? TOUCH_STICKY_THRESHOLDS
-        : POINTER_STICKY_THRESHOLDS,
-    [],
-  );
+  const stickyThresholds = useStickyThresholds();
 
   const [controller] = useState<StickyController>(() =>
     createStickyController(stickyThresholds),
   );
+  useReanchorOnWidthChange({
+    wrapperRef, entriesRef: scrollMemoryRef, holdRef: holdRestoredPositionRef,
+    controller, compactBuffer, canonicalItems,
+  });
 
   useLayoutEffect(() => () => {
     const mem = scrollMemoryRef.current;

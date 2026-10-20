@@ -36,6 +36,25 @@ matching the rail behaviour they mirror.
 
 The collapsed rail's restore control and a collapsed right panel's reopen control are pinned to HeaderBar's own edges, never to the centred conversation column.
 
+## Column frame
+
+The columns group stays mounted whether the sidebar is open or collapsed: only
+the sidebar's own panel and its divider leave, keyed so React matches the
+conversation's panel by key and keeps its component. Swapping the whole group
+for a bare div unmounted the main subtree on every toggle, so the conversation
+rebuilt itself — its height flashed and the reader's place came back from the
+per-entry bookmark instead of staying put (user report 2026-10-20).
+
+Collapsed, the group holds one panel and that panel takes the whole group: the
+library reads a stored layout only when its key count matches the panels
+present, so the stored two-panel split cannot leave a gap. Only user-driven
+commits are persisted, under each frame's own layout id, so the collapse itself
+writes nothing.
+
+The conversation's own side of the same report — a width change re-wraps every
+row, so the reader's pixel offset no longer points at their row — belongs to
+[sticky scroll](../timeline-view/sticky-scroll.meiva.okf.md).
+
 ## Details mode
 
 The Details mode has one writer and one surface: the Display settings row bound to
