@@ -6,11 +6,12 @@
 // Ctrl-F- and deep-link-reachable), the body, and a visibility provider that
 // pauses only the section's polling once it scrolls out of view.
 //
-// The heading paints with the route; the body mounts one frame later (bounded by
-// DEFERRED_MOUNT_DEADLINE_MS) because mounting nine bodies in the same
-// transition is what held the URL back for seconds. Queries still start on the
-// body's mount, long before a reader can scroll to it, so the page still lands
-// populated. A deep-link jump keeps landing where it should: useSettledAnchorScroll
+// The heading paints with the route; the body claims a slice of the shared mount
+// queue, which releases one waiting subtree per idle callback - mounting nine
+// bodies in the same transition is what held the URL back, and mounting them all
+// in one idle callback kept the main thread busy afterwards. Queries still start
+// on the body's mount, long before a reader can scroll to it, so the page still
+// lands populated. A deep-link jump keeps landing where it should: useSettledAnchorScroll
 // re-applies it while content above the target is still growing.
 // meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
 

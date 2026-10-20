@@ -39,6 +39,13 @@ and the matching GitHub Releases.
   ([timeline view](ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md)).
 
 ### Changed
+- Opening Control no longer freezes the page: the section bodies, and the config
+  form's seventeen groups inside them, queue up and mount one per idle slice
+  instead of all in one commit. The page still lands fully populated (7874 nodes,
+  116 switches) and Ctrl-F still reaches every field; only the scheduling moved.
+  Measured on the deployed preview at 8x CPU throttle: main-thread blocking after
+  the click 1208 ms -> 505 ms, longest single task 643 ms -> 166 ms
+  ([Control first paint](ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md)).
 - A force graph of 200+ nodes settles in time-budgeted slices instead of one React render per
   physics tick: every live tick committed a fresh position map, and every commit repainted the
   whole SVG, so the preview's 1,949-node Fleet graph spent 4.4 s of main-thread time in its first

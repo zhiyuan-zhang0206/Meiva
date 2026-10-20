@@ -34,42 +34,65 @@ export function useClientReady(): boolean {
 
 // meiva:note
 // Mount timing for subtrees that are expensive but not part of the route's
-// answer. A page that mounts every section body in the same transition pays for
-// all of it before the router commits the URL: Control added 13,878 DOM nodes in
-// one transition and its URL did not change for 1.36 s on a 4x-slower CPU (user
-// report 2026-10-20). DEFERRED_MOUNT_DEADLINE_MS is a hard ceiling, so a page
-// that never reaches idle still mounts its bodies instead of hanging. A URL that
-// carries a hash starts already mounted: it lands on a section and lets
-// useSettledAnchorScroll settle the jump while the content above grows, so that
-// path keeps the growth schedule it always had.
+// answer. Deferring them past the first paint is not enough on its own: they
+// then all land in the same idle callback, which is one commit - and one style
+// and layout pass - over every node at once. Control still froze for 1.2 s at
+// 8x CPU throttle that way, and its config form alone is 6.6k nodes of 380
+// rows. So waiting subtrees queue up and the queue releases ONE per idle slice:
+// the route commits at once, and the page fills in over frames instead of
+// holding the main thread for seconds (user 2026-10-20: opening Settings stayed
+// frozen for ~5 s on their machine).
 // meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
-export const DEFERRED_MOUNT_DEADLINE_MS = 200;
+export const DEFERRED_MOUNT_SLICE_TIMEOUT_MS = 50;
 
-export function useDeferredMount(deadlineMs: number = DEFERRED_MOUNT_DEADLINE_MS): boolean {
+const waiting: (() => void)[] = [];
+let pumpScheduled = false;
+
+function releaseOne(): void {
+  pumpScheduled = false;
+  const next = waiting.shift();
+  if (next === undefined) return;
+  next();
+  schedulePump();
+}
+
+function schedulePump(): void {
+  if (pumpScheduled || waiting.length === 0) return;
+  pumpScheduled = true;
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(releaseOne, { timeout: DEFERRED_MOUNT_SLICE_TIMEOUT_MS });
+  } else {
+    setTimeout(releaseOne, 0);
+  }
+}
+
+function enqueueMount(release: () => void): () => void {
+  waiting.push(release);
+  schedulePump();
+  return () => {
+    const at = waiting.indexOf(release);
+    if (at >= 0) waiting.splice(at, 1);
+  };
+}
+
+export function useDeferredMount(): boolean {
   const [mounted, setMounted] = useState(() =>
     typeof window !== "undefined" && window.location.hash.length > 1,
   );
   useEffect(() => {
     let cancelled = false;
-    let idle: number | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let drop: (() => void) | null = null;
     const mount = () => {
       if (!cancelled) setMounted(true);
     };
     const frame = requestAnimationFrame(() => {
-      if (cancelled) return;
-      if (typeof requestIdleCallback === "function") {
-        idle = requestIdleCallback(mount, { timeout: deadlineMs });
-      } else {
-        timer = setTimeout(mount, 0);
-      }
+      if (!cancelled) drop = enqueueMount(mount);
     });
     return () => {
       cancelled = true;
       cancelAnimationFrame(frame);
-      if (idle !== null) cancelIdleCallback(idle);
-      if (timer !== null) clearTimeout(timer);
+      drop?.();
     };
-  }, [deadlineMs]);
+  }, []);
   return mounted;
 }

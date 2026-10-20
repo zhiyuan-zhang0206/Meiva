@@ -324,6 +324,11 @@ const RESOLVED: ResolvedConfigView = {
 beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
+  vi.stubGlobal("requestIdleCallback", (cb: IdleRequestCallback) => {
+    cb({ didTimeout: true, timeRemaining: () => 0 });
+    return 0;
+  });
+  vi.stubGlobal("cancelIdleCallback", () => undefined);
   vi.spyOn(api, "getMachines").mockResolvedValue(MACHINES);
   vi.spyOn(api, "getSystemStatus").mockResolvedValue(STATUS);
   vi.spyOn(api, "getModels").mockResolvedValue(MODELS);
@@ -587,7 +592,7 @@ describe("ConfigPage tag filter", () => {
     expect(screen.getByText("1 setting")).toBeTruthy();
 
     fireEvent.click(screen.getByTestId("filter-all"));
-    expect(screen.getByText("LOG LEVEL")).toBeTruthy();
+    await waitFor(() => screen.getByText("LOG LEVEL"));
   });
 
   it("filtering by CLI-only keeps only non-editable rows", async () => {
@@ -595,7 +600,7 @@ describe("ConfigPage tag filter", () => {
     await renderSettled();
     fireEvent.click(screen.getByTestId("filter-cli-only"));
 
-    expect(screen.getByText("BUILD SHA")).toBeTruthy();
+    await waitFor(() => screen.getByText("BUILD SHA"));
     expect(screen.getByText("GATEWAY PORT")).toBeTruthy();
     expect(screen.queryByText("API KEY")).toBeNull();
     expect(screen.queryByText("LOG LEVEL")).toBeNull();
