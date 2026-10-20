@@ -6,6 +6,7 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -32,6 +33,7 @@ __all__ = [
     "ResidueSweepPlan",
     "dead_server_evidence",
     "fixture_entrypoint",
+    "gc_orphan_e2e_dirs",
     "listener_evidence",
     "managed_proc",
     "proc_log_tail",
@@ -645,6 +647,30 @@ def _signal_sweep_targets(
                 owner=process.run[0],
                 kind=kind,
             )
+
+
+_ORPHAN_DIR_AGE_S = 3600
+
+
+# meiva:note
+# Remove the throwaway MEIVA_HOME and frontend build directories that a crashed session left
+# behind for over an hour. The frontend builds live in ui/web/.builds, not in tmp/, because of
+# Turbopack's symlink constraints (see `frontend_proc`). The e2e Postgres is the suite's
+# session cluster, which removes itself, so there are no orphan databases to drop.
+def gc_orphan_e2e_dirs(repo_root: Path) -> None:
+    threshold_us = int((time.time() - _ORPHAN_DIR_AGE_S) * 1_000_000)
+    for root, pattern in (
+        (repo_root / "tmp", "meiva_e2e_home_*"),
+        (repo_root / "ui" / "web" / ".builds", "build-*"),
+    ):
+        for directory in root.glob(pattern):
+            try:
+                created_us = int(directory.name.rsplit("_", 1)[1])
+            except (IndexError, ValueError):
+                continue
+            if created_us <= threshold_us:
+                with contextlib.suppress(OSError):
+                    shutil.rmtree(directory)
 
 
 def sweep_stale_e2e_processes(
