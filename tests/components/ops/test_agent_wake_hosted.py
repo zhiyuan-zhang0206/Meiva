@@ -103,7 +103,10 @@ def test_resurrect_agent_hosted_flips_and_wakes(
         machine_identity=machine_identity,
     )
     out = wake.resurrect_agent(
-        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+        database,
+        event_bus,
+        aid,
+        resurrected_by="user",
     )
     assert out == aid
     assert _row(db_conn, aid) == ("idling", None)
@@ -137,7 +140,10 @@ def test_resurrect_agent_hosted_clears_the_corpse_marker(
     )
     db_conn.commit()
     wake.resurrect_agent(
-        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+        database,
+        event_bus,
+        aid,
+        resurrected_by="user",
     )
     assert db_conn.execute(
         "SELECT last_turn_fatal_at FROM agents_meta WHERE id = %s", (aid,)
@@ -171,7 +177,6 @@ def test_resurrect_agent_hosted_keeps_trigger_guard(
             resurrected_by="system",
             trigger_inbound_id=999999,
             trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
         )
     assert _row(db_conn, aid)[0] == "terminated"
     assert wakes == []
@@ -233,7 +238,12 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
         item.id for item in await claim_inbound_batch(aops_pool, aid, incarnation=old, work=None)
     ] == [command]
     assert (
-        await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None) == "terminate"
+        await apply_hosted_lifecycle(
+            aops_pool,
+            old,
+            bus=event_bus,
+        )
+        == "terminate"
     )
     trigger = insert_inbound_message(
         db_conn, aid, "continue", "user", bus=event_bus, database=database
@@ -245,7 +255,6 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger if guarded else None,
         trigger_inbound_kind=InboundKind.CHAT if guarded else None,
-        local_machine=machine_identity.name(),
     )
     successor = await admit_hosted_runtime(
         aops_pool,
@@ -325,7 +334,6 @@ def _guarded_resurrect(
         resurrected_by="system",
         trigger_inbound_id=trigger,
         trigger_inbound_kind=InboundKind.CHAT,
-        local_machine=machine_identity.name(),
     )
 
 
@@ -358,7 +366,6 @@ def test_reaped_crash_row_refuses_leftover_work(
             resurrected_by="system",
             trigger_inbound_id=trigger,
             trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
         )
     assert _row(db_conn, aid) == ("terminated", None)
     assert wakes == []
@@ -522,7 +529,10 @@ def test_manual_resurrect_stays_exempt_from_the_gates(
 
     assert (
         wake.resurrect_agent(
-            database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+            database,
+            event_bus,
+            aid,
+            resurrected_by="user",
         )
         == aid
     )
@@ -585,7 +595,6 @@ def test_historical_runtime_cannot_be_resurrected(
             resurrected_by="system" if guarded else "user",
             trigger_inbound_id=trigger if guarded else None,
             trigger_inbound_kind=InboundKind.CHAT if guarded else None,
-            local_machine=machine_identity.name(),
         )
 
     assert db_conn.execute(query, (aid,)).fetchone() == before
@@ -625,7 +634,10 @@ def test_incomplete_hosted_target_requires_cutover(
     db_conn.commit()
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
         wake.resurrect_agent(
-            database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+            database,
+            event_bus,
+            aid,
+            resurrected_by="user",
         )
     assert _row(db_conn, aid)[0] == "terminated"
     assert _kind_rows(db_conn, aid, "resurrect") == 0

@@ -317,8 +317,7 @@ EVENTS: dict[str, EventSpec] = {
         "host_abort_reconcile_skipped",
         "the settled hosted turn abort skipped the immediate inbound reconcile "
         "(fail-closed) — the claimed rows are left to the next cold admission. "
-        "Carries the reason: the turn's resources never fully settled "
-        "(resources_unsettled), or the runtime ownership was already replaced "
+        "Carries the reason: the runtime ownership was already replaced "
         "(ownership_lost — the replacement disposes the rows)",
         tier="noise",
     ),
@@ -334,8 +333,7 @@ EVENTS: dict[str, EventSpec] = {
         "host_turn_reconcile_skipped",
         "the finished hosted turn skipped the immediate inbound reconcile "
         "(fail-closed) — the claimed rows are left to the next cold admission. "
-        "Carries the reason: the turn's resources never fully settled "
-        "(resources_unsettled), or the runtime ownership was already replaced "
+        "Carries the reason: the runtime ownership was already replaced "
         "(ownership_lost — the replacement disposes the rows)",
         tier="noise",
     ),

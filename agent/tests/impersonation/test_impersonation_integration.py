@@ -94,7 +94,6 @@ async def test_consent_exec_inbox_release_and_resume(
         agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=scope,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -145,7 +144,6 @@ async def test_consent_exec_inbox_release_and_resume(
         agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=scope,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -166,7 +164,6 @@ async def test_consent_exec_inbox_release_and_resume(
         agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=scope,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -227,7 +224,6 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -261,7 +257,6 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -277,7 +272,6 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -329,7 +323,6 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -398,7 +391,6 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -487,7 +479,6 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )

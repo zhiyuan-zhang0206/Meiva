@@ -1,11 +1,9 @@
 """Real persisted ENDs distinguish retired consumers from unfinished work."""
 
-import json
 import os
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, TypedDict
@@ -21,7 +19,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.agents.inbox.insert import insert_inbound_message
-from base.agents.incarnation import exec_request_evidence
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance import cohort, pause_owner
@@ -95,7 +92,6 @@ def test_completed_retired_consumer_parks_without_inventing_receipts(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    _hide_machine_processes(monkeypatch)
     agent = _retired(db_conn, machine_identity=machine_identity)
     before = db_conn.execute(
         "SELECT runtime_kind,runtime_owner,runtime_generation,lease_expires_at,"
@@ -241,151 +237,6 @@ def test_real_unrecorded_legacy_consumer_blocks_cold_prepare(
     )
 
 
-def _aged_request(
-    exec_dir: Path, agent_id: int, *, owner: object | None, age_s: float = 3600.0
-) -> Path:
-    """One request envelope whose mtime predates any live birth window."""
-    agent_dir = exec_dir / str(agent_id)
-    agent_dir.mkdir(parents=True, exist_ok=True)
-    request = agent_dir / f"req-{uuid4().hex}.json"
-    envelope: dict[str, object] = {
-        "v": 1,
-        "code": "print('x')",
-        "agent_id": agent_id,
-        "timeout_s": 30.0,
-    }
-    if owner is not None:
-        envelope["incarnation"] = {"generation": str(uuid4()), "owner": str(owner)}
-    request.write_text(json.dumps(envelope))
-    stamp = request.stat().st_mtime - age_s
-    os.utime(request, (stamp, stamp))
-    return request
-
-
-def _no_process_iteration(*_args: Any, **_kwargs: Any) -> Iterator[Any]:
-    """A `psutil.process_iter` stand-in yielding no processes at all."""
-    return iter(())
-
-
-def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """This box runs other agents' exec children; isolate the test's own legs."""
-    monkeypatch.setattr(exec_request_evidence.psutil, "process_iter", _no_process_iteration)
-
-
-def _exec_request_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
-    exec_dir = tmp_path / "exec"
-    quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda _home: exec_dir)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        exec_request_evidence,
-        "quarantined_exec_requests_dir",
-        lambda _home: quarantine,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    return exec_dir, quarantine
-
-
-def test_superseded_exec_envelope_is_quarantined_and_cold_prepare_parks(
-    db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A superseded incarnation's envelope no longer fences cold preparation."""
-    agent = _retired(db_conn, machine_identity=machine_identity)
-    exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
-    request = _aged_request(exec_dir, agent, owner=uuid4())
-    before = request.read_text()
-
-    _prepare(db_conn, machine_identity=machine_identity)
-
-    assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
-        "idling",
-    )
-    assert not request.exists()
-    (moved,) = quarantine.glob(f"*/{agent}/{request.name}")
-    assert moved.read_text() == before
-    receipt = json.loads((moved.parent / "receipt.json").read_text())
-    assert receipt["reason"] == "maintenance cold prepare"
-    assert receipt["entries"][0]["source"] == str(request)
-
-
-def test_unattributable_exec_envelope_refuses_cold_prepare_with_disposition(
-    db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """No incarnation attribution: refuse, name the file, keep the evidence."""
-    agent = _retired(db_conn, machine_identity=machine_identity)
-    exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
-    request = _aged_request(exec_dir, agent, owner=None)
-
-    with pytest.raises(RuntimeError, match="unsettled exec request") as excinfo:
-        _prepare(db_conn, machine_identity=machine_identity)
-
-    message = str(excinfo.value)
-    assert request.name in message
-    assert (
-        f"--agent {agent}" in message and "base.agents.incarnation.exec_request_evidence" in message
-    )
-    assert request.exists() and not quarantine.exists()
-    assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
-        "idling",
-    )
-
-
-def test_old_unreadable_exec_envelope_still_refuses_cold_prepare(
-    db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """Age cannot prove unknown code execution settled; retain the envelope."""
-    agent = _retired(db_conn, machine_identity=machine_identity)
-    exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
-    request = exec_dir / str(agent) / f"req-{uuid4().hex}.json"
-    request.parent.mkdir(parents=True, exist_ok=True)
-    request.write_text("")
-    stamp = request.stat().st_mtime - 7 * 86400
-    os.utime(request, (stamp, stamp))
-    _hide_machine_processes(monkeypatch)
-
-    with pytest.raises(RuntimeError, match="unsettled exec request"):
-        _prepare(db_conn, machine_identity=machine_identity)
-
-    assert request.exists() and not quarantine.exists()
-    assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
-        "idling",
-    )
-
-
-def test_young_unreadable_exec_envelope_still_refuses_cold_prepare(
-    db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """Young remnants still refuse: the bound waits out the request's full life."""
-    agent = _retired(db_conn, machine_identity=machine_identity)
-    exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
-    request = exec_dir / str(agent) / f"req-{uuid4().hex}.json"
-    request.parent.mkdir(parents=True, exist_ok=True)
-    request.write_text("{not json")
-    _hide_machine_processes(monkeypatch)
-
-    with pytest.raises(RuntimeError, match="unsettled exec request"):
-        _prepare(db_conn, machine_identity=machine_identity)
-
-    assert request.exists() and not quarantine.exists()
-    assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
-        "idling",
-    )
-
-
 def test_checkpoint_replaced_by_real_second_connection_refuses_parking(
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -394,7 +245,6 @@ def test_checkpoint_replaced_by_real_second_connection_refuses_parking(
 ) -> None:
     from base.deploy.maintenance import cold
 
-    _hide_machine_processes(monkeypatch)
     agent = _retired(db_conn, machine_identity=machine_identity)
     original = cold.require_persisted_end
 
@@ -443,7 +293,11 @@ async def test_resume_admits_a_successor_without_rewriting_legacy_history(
         aops_pool, agent, machine_identity.name(), owner, expected_from="idling", db=database
     )
     assert admitted is not None and admitted.owner == owner
-    assert await settle_hosted_runtime(aops_pool, admitted, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        admitted,
+        bus=event_bus,
+    )
     assert db_conn.execute(
         "SELECT status,runtime_owner FROM agents_meta WHERE id=%s", (agent,)
     ).fetchone() == ("idling", owner)

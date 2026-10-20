@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from agent.graph.exec.protocol import read_result, write_request
+from base.native_process.tests.host_pipe import live_host_control
 from meiva.tests.fixtures.pin_agent import exec_context
 
 
@@ -72,14 +73,16 @@ def test_child_plugin_binding_failure_keeps_original_boot_error(
         "MEIVA_AGENT_CONFIG_OVERLAY": json.dumps({"value": 2}),
     }
     env.pop("MEIVA_AGENT_ID", None)
-    process = subprocess.run(
-        [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
+    with live_host_control() as stdin:
+        process = subprocess.run(
+            [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
+            stdin=stdin,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
     assert process.returncode == 0, process.stderr
     payload = read_result(result)
     assert payload.kind == "crashed" and payload.code_reached is False

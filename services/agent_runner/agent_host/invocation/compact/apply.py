@@ -18,7 +18,6 @@ from base.agents.incarnation.native_work import latest_checkpoint_id_in_transact
 from base.agents.messages.kwargs import MeivaMsgType
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources, hosted_resources_settled
 from services.agent_runner.agent_host.invocation.compact.checkpoint import (
     cold_application,
     cold_reader,
@@ -33,14 +32,10 @@ async def acknowledge(
     saver: AsyncPostgresSaver,
     command: CompactCommand,
     incarnation: RuntimeIncarnation,
-    *,
-    resources: HostedTurnResources | None,
 ) -> bool:
     checkpoint_id = await cold_application(saver, command)
     if checkpoint_id is None:
         return False
-    if not hosted_resources_settled(resources):
-        raise CompactHeldError("compact application still has unresolved native resources")
     async with async_write_transaction(pool) as conn:
         await require_receiver(conn, command, incarnation)
         if await latest_checkpoint_id_in_transaction(conn, incarnation.agent_id) != checkpoint_id:
@@ -101,7 +96,12 @@ async def apply_prepared(
     # standing head; END prevents ordinary claim/model work before cold ACK.
     await graph.ainvoke(None, config=config, context=ctx)  # pyright: ignore[reportUnknownMemberType]
     await flush_checkpoint(saver, incarnation.agent_id)
-    if not await acknowledge(pool, saver, command, incarnation, resources=ctx.hosted_resources):
+    if not await acknowledge(
+        pool,
+        saver,
+        command,
+        incarnation,
+    ):
         raise CompactHeldError(
             "compact replacement has no committed materialized application proof"
         )

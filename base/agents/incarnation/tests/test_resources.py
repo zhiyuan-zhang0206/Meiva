@@ -1,5 +1,3 @@
-import threading
-import time
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -14,10 +12,8 @@ from base.agents.incarnation.resources import (
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
-    attach_exec,
     decode_resources,
     freeze_resources,
-    register_exec,
 )
 from base.db import create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -54,6 +50,24 @@ def exec_allocation_entry() -> ExecAllocation:
     )
 
 
+# meiva:note
+# Store an allocation the way a retired writer left it, for the refusals that still read it.
+def plant_exec_allocation(
+    conn: psycopg.Connection, target: RuntimeIncarnation, entry: ExecAllocation
+) -> None:
+    row = conn.execute(
+        "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
+    ).fetchone()
+    assert row is not None
+    stored = decode_resources(row[0])
+    assert isinstance(stored, IncarnationResources)
+    planted = stored.model_copy(update={"requests": stored.requests | {str(entry.request): entry}})
+    conn.execute(
+        "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
+        (Jsonb(planted.model_dump(mode="json")), target.agent_id),
+    )
+
+
 def force_incarnation(conn: psycopg.Connection, target: RuntimeIncarnation) -> int:
     conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (target.agent_id,))
     row = conn.execute(
@@ -78,49 +92,12 @@ def test_unknown_or_bad_evidence_is_never_empty(value: object) -> None:
         decode_resources(value)
 
 
-def test_registration_and_attachment_require_exact_live_owner(db_conn: psycopg.Connection) -> None:
+def test_force_freezes_the_stored_set(db_conn: psycopg.Connection) -> None:
     target = _admitted(db_conn)
     entry = exec_allocation_entry()
     with db_conn.transaction():
-        register_exec(db_conn, target, entry)
-    for wrong in (
-        RuntimeIncarnation(target.agent_id, uuid4(), target.owner),
-        RuntimeIncarnation(target.agent_id, target.generation, uuid4()),
-    ):
-        with pytest.raises(ResourceEvidenceError), db_conn.transaction():
-            register_exec(db_conn, wrong, exec_allocation_entry())
-    attached = entry.model_copy(
-        update={
-            "owner_process": _process(100, 1.0),
-            "root_process": _process(101, 2.0),
-        }
-    )
-    with db_conn.transaction():
-        attach_exec(db_conn, target, entry, attached)
-    with pytest.raises(ResourceEvidenceError), db_conn.transaction():
-        attach_exec(db_conn, target, entry, attached)
-
-
-def test_force_freezes_registered_set_and_blocks_later_permit(db_conn: psycopg.Connection) -> None:
-    target = _admitted(db_conn)
-    entry = exec_allocation_entry()
-    with db_conn.transaction():
-        register_exec(db_conn, target, entry)
+        plant_exec_allocation(db_conn, target, entry)
         force = force_incarnation(db_conn, target)
-    with pytest.raises(ResourceEvidenceError), db_conn.transaction():
-        register_exec(db_conn, target, exec_allocation_entry())
-    with pytest.raises(ResourceEvidenceError), db_conn.transaction():
-        attach_exec(
-            db_conn,
-            target,
-            entry,
-            entry.model_copy(
-                update={
-                    "owner_process": _process(100, 1.0),
-                    "root_process": _process(101, 2.0),
-                }
-            ),
-        )
     row = db_conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
     ).fetchone()
@@ -131,99 +108,16 @@ def test_force_freezes_registered_set_and_blocks_later_permit(db_conn: psycopg.C
     db_conn.commit()
 
 
-def test_force_lock_wins_over_concurrent_registration(db_conn: psycopg.Connection) -> None:
+@pytest.mark.parametrize("wrong_part", ["generation", "owner"])
+def test_freeze_requires_the_exact_live_owner(db_conn: psycopg.Connection, wrong_part: str) -> None:
     target = _admitted(db_conn)
-    started = threading.Event()
-    finished = threading.Event()
-    failures: list[BaseException] = []
-    with psycopg.connect(db_conn.info.dsn) as writer:
-        path = db_conn.execute("SHOW search_path").fetchone()
-        assert path is not None
-        writer.execute("SELECT set_config('search_path',%s,false)", (path[0],))
-        writer.commit()
-        db_conn.commit()
-
-        def register() -> None:
-            try:
-                with writer.transaction():
-                    started.set()
-                    register_exec(writer, target, exec_allocation_entry())
-            except BaseException as exc:
-                failures.append(exc)
-            finally:
-                finished.set()
-
-        with db_conn.transaction():
-            force_incarnation(db_conn, target)
-            thread = threading.Thread(target=register)
-            thread.start()
-            assert started.wait(2)
-            assert not finished.wait(0.1)
-        thread.join(5)
-        assert not thread.is_alive()
-    assert len(failures) == 1 and isinstance(failures[0], ResourceEvidenceError)
-
-
-@pytest.mark.parametrize("phase", ["register", "attach"])
-def test_unchanged_locked_row_expiring_lease_never_permits_exec(
-    db_conn: psycopg.Connection,
-    phase: str,
-) -> None:
-    target = _admitted(db_conn)
-    entry = exec_allocation_entry()
-    with db_conn.transaction():
-        if phase == "attach":
-            register_exec(db_conn, target, entry)
-        db_conn.execute(
-            "UPDATE agents_meta SET lease_expires_at=clock_timestamp()+interval '0.3 seconds' WHERE id=%s",
-            (target.agent_id,),
-        )
-    path = db_conn.execute("SHOW search_path").fetchone()
-    assert path is not None
-    db_conn.commit()
-    errors: list[BaseException] = []
-    started = threading.Event()
-    with psycopg.connect(db_conn.info.dsn) as contender:
-        contender.execute("SELECT set_config('search_path',%s,false)", (path[0],))
-        contender.commit()
-
-        def compete() -> None:
-            try:
-                with contender.transaction():
-                    started.set()
-                    if phase == "register":
-                        register_exec(contender, target, entry)
-                    else:
-                        attach_exec(
-                            contender,
-                            target,
-                            entry,
-                            entry.model_copy(
-                                update={
-                                    "owner_process": _process(100, 1.0),
-                                    "root_process": _process(101, 2.0),
-                                }
-                            ),
-                        )
-            except BaseException as exc:
-                errors.append(exc)
-
-        with db_conn.transaction():
-            db_conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (target.agent_id,))
-            thread = threading.Thread(target=compete)
-            thread.start()
-            assert started.wait(2)
-            until = time.monotonic() + 5
-            while time.monotonic() < until:
-                row = db_conn.execute(
-                    "SELECT lease_expires_at<=clock_timestamp() FROM agents_meta WHERE id=%s",
-                    (target.agent_id,),
-                ).fetchone()
-                if row == (True,):
-                    break
-                time.sleep(0.01)
-            else:
-                raise AssertionError("lease did not expire while row remained locked")
-        thread.join(5)
-        assert not thread.is_alive()
-    assert len(errors) == 1 and isinstance(errors[0], ResourceEvidenceError)
+    wrong = RuntimeIncarnation(
+        target.agent_id,
+        uuid4() if wrong_part == "generation" else target.generation,
+        uuid4() if wrong_part == "owner" else target.owner,
+    )
+    with (
+        pytest.raises(ResourceEvidenceError, match="lost its runtime incarnation"),
+        db_conn.transaction(),
+    ):
+        freeze_resources(db_conn, wrong, 1)

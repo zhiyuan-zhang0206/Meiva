@@ -1,8 +1,8 @@
-"""The resource-admission protocol: an unknown or unresolved set cannot be reset, terminal consumption is exact, a malformed record never downgrades to legacy, and an owner receipt recovers only the exact persisted allocation."""
+# meiva:note
+# The resource-admission protocol: an unknown or unresolved set cannot be reset and a malformed record never downgrades to legacy.
 
 import os
 from collections.abc import Iterator
-from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -12,22 +12,15 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.incarnation.resource_admission import admit_resources_async
-from base.agents.incarnation.resources import (
-    ResourceEvidenceError,
-    attach_exec,
-    complete_exec,
-    register_exec,
-)
+from base.agents.incarnation.resources import ResourceEvidenceError
 from base.agents.incarnation.tests.test_resources import (
     _admitted,
     _process,
     exec_allocation_entry,
-    force_incarnation,
+    plant_exec_allocation,
 )
-from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.paths import exec_run_dir
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +36,7 @@ async def test_successor_cannot_reset_unknown_or_unresolved_set(
     target = _admitted(db_conn)
     entry = exec_allocation_entry()
     with db_conn.transaction():
-        register_exec(db_conn, target, entry)
+        plant_exec_allocation(db_conn, target, entry)
     successor = RuntimeIncarnation(target.agent_id, uuid4(), uuid4())
     with pytest.raises(ResourceEvidenceError):
         async with async_write_transaction(aops_pool) as conn:
@@ -52,34 +45,6 @@ async def test_successor_cannot_reset_unknown_or_unresolved_set(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
     ).fetchone()
     assert row is not None and str(entry.request) in row[0]["requests"]
-
-
-def test_exact_terminal_consumption_survives_force_but_replay_refuses(
-    db_conn: psycopg.Connection,
-) -> None:
-    target = _admitted(db_conn)
-    entry = exec_allocation_entry()
-    attached = entry.model_copy(
-        update={
-            "owner_process": _process(10, 1.0),
-            "root_process": _process(11, 2.0),
-        }
-    )
-    with db_conn.transaction():
-        register_exec(db_conn, target, entry)
-        attach_exec(db_conn, target, entry, attached)
-        command = force_incarnation(db_conn, target)
-    with pytest.raises(ResourceEvidenceError), db_conn.transaction():
-        complete_exec(db_conn, target, attached.model_copy(update={"domain": uuid4()}))
-    with db_conn.transaction():
-        complete_exec(db_conn, target, attached)
-    with pytest.raises(ResourceEvidenceError), db_conn.transaction():
-        complete_exec(db_conn, target, attached)
-    row = db_conn.execute(
-        "SELECT incarnation_resources,lifecycle_command_id FROM agents_meta WHERE id=%s",
-        (target.agent_id,),
-    ).fetchone()
-    assert row is not None and row[0]["requests"] == {} and row[1] == command
 
 
 async def test_malformed_never_downgrades_to_legacy(
@@ -94,71 +59,3 @@ async def test_malformed_never_downgrades_to_legacy(
     with pytest.raises(ValueError):
         async with async_write_transaction(aops_pool) as conn:
             await admit_resources_async(conn, target, _process(10, 1.0))
-
-
-def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
-    db_conn: psycopg.Connection, tmp_path: Path, database: Database
-) -> None:
-    from agent.tests.execution.test_exec_owner_entry import (
-        _start,
-        exec_owner_context,
-        wait_for_owner_ready,
-    )
-    from base.agents.incarnation import exec_owner_recovery
-
-    target = _admitted(db_conn)
-    home = tmp_path / "home"
-    exec_dir = exec_run_dir(home)
-    exec_dir.mkdir(parents=True)
-    context = exec_owner_context(exec_dir, target.agent_id)
-    directory = exec_dir / str(target.agent_id) / "domains" / str(context.allocation.request)
-    directory.mkdir(parents=True)
-    request = directory / context.request_path.name
-    context.request_path.rename(request)
-    context = context.model_copy(
-        update={
-            "agent_id": target.agent_id,
-            "generation": target.generation,
-            "runtime_owner": target.owner,
-            "request_path": request,
-            "result_path": directory / "result.json",
-        }
-    )
-    with db_conn.transaction():
-        register_exec(db_conn, target, context.allocation)
-    proc = _start(directory, context)
-    try:
-        ready = wait_for_owner_ready(directory, proc)
-        with db_conn.transaction():
-            attach_exec(db_conn, target, context.allocation, ready.allocation)
-        assert proc.stdin is not None
-        proc.stdin.close()
-        assert proc.wait(timeout=10) == 0
-        receipt = directory / "owner.closed"
-        withheld = directory / "withheld.closed"
-        receipt.rename(withheld)
-        exec_owner_recovery.recover_local_resources(
-            database, target.agent_id, "resource-test", home=home
-        )
-        row = db_conn.execute(
-            "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
-        ).fetchone()
-        assert row is not None and str(context.allocation.request) in row[0]["requests"]
-        db_conn.commit()
-        withheld.rename(receipt)
-        exec_owner_recovery.recover_local_resources(
-            database, target.agent_id, "resource-test", home=home
-        )
-        row = db_conn.execute(
-            "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
-        ).fetchone()
-        assert row is not None and row[0]["requests"] == {}
-        # Replaying the same exact observation is a no-op, not a new admission.
-        db_conn.commit()
-        exec_owner_recovery.recover_local_resources(
-            database, target.agent_id, "resource-test", home=home
-        )
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait(timeout=5)

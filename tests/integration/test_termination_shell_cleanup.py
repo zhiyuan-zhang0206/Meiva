@@ -14,7 +14,6 @@ from agent.db import claim_inbound_batch
 from agent.ownership import hosted_cleanup
 from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
-from base.agents.incarnation import exec_request_evidence
 from base.agents.incarnation.hosted_force import original_host_force
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -60,9 +59,7 @@ async def _settle(
     killer: Callable[[int, int], None],
 ) -> object:
     if phase == "graceful":
-        return await apply_hosted_lifecycle(
-            pool, owner, bus=bus, resources=None, kill_shell_sessions=killer
-        )
+        return await apply_hosted_lifecycle(pool, owner, bus=bus, kill_shell_sessions=killer)
     return await original_host_force(
         pool,
         owner.agent_id,
@@ -102,7 +99,6 @@ async def test_blocked_shell_cleanup_releases_row_lock_with_fixed_cutoff(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda _home: tmp_path)  # pyright: ignore[reportUnknownArgumentType]
     owner, command = await _prepare(phase, db_conn, aops_pool, database_gate=database_gate)
     entered, release = asyncio.Event(), threading.Event()
     loop = asyncio.get_running_loop()
@@ -136,7 +132,6 @@ async def test_unknown_cleanup_error_keeps_original_exception_and_committed_rece
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda _home: tmp_path)  # pyright: ignore[reportUnknownArgumentType]
     owner, command = await _prepare(phase, db_conn, aops_pool, database_gate=database_gate)
     original = RuntimeError("unknown cleanup defect")
 

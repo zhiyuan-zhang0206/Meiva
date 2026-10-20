@@ -77,7 +77,10 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
     claimed = claimed_row(db_conn, agent, "claimed")
     _replace_owner(db_conn, agent)
 
-    await settlement_mod.reconcile_inbounds_after_abort(aops_pool, incarnation, resources=None)
+    await settlement_mod.reconcile_inbounds_after_abort(
+        aops_pool,
+        incarnation,
+    )
 
     assert row_statuses(db_conn, [claimed]) == {claimed: "claimed"}
     skips = [r for r in loguru_records if r["extra"].get("event") == "host_abort_reconcile_skipped"]

@@ -115,7 +115,6 @@ from services.agent_runner.agent_host.scheduling.wake_screening import (
 )
 from services.agent_runner.agent_host.settlement import (
     close_hosted_turn,
-    wait_retained_resources,
     wait_shielded_task,
 )
 from services.agent_runner.agent_host.stall_guard import (
@@ -227,18 +226,6 @@ class AgentHost:
                 try:
                     from base.agents.incarnation.hosted_force import original_host_force
 
-                    if resources.unresolved:
-                        # Keep the actual domains and scheduler registration alive.
-                        # No timer/cache reset can turn a failed close into quiescence.
-                        self._in_flight.add(agent_id)
-                        logger.error(
-                            "hosted resources unresolved; force remains unobserved, "
-                            "exact resource inspection required: {requests}",
-                            agent_id=agent_id,
-                            requests=[str(path) for path in resources.unresolved],
-                        )
-                        cancelled = await wait_retained_resources(resources) or cancelled
-                        self._in_flight.discard(agent_id)
                     # The exclusive pump also covers no-task wakes.
                     if cancelled:
                         self.drop_agent(agent_id)
@@ -260,7 +247,6 @@ class AgentHost:
                             self._checkpointer,
                             agent_id,
                             self._owner,
-                            resources,
                             self._bus,
                             self.drop_agent,
                             catalog=self._catalog,
@@ -306,14 +292,19 @@ class AgentHost:
         if await maintenance_receipts.run_held(
             agent_id,
             stored.status,
-            partial(self._run_held_controls, resources=resources),
+            partial(
+                self._run_held_controls,
+            ),
         ):
             return
 
         # An active external lease owns decisions; no native graph or plugin
         # initialization may start on a dispatcher wake or a host restart.
         if await active_lease(self._control_pool, agent_id):
-            await self._run_held_controls(agent_id, stored.status, resources=resources)
+            await self._run_held_controls(
+                agent_id,
+                stored.status,
+            )
             return
 
         async with self.admission.admit(agent_id):
@@ -359,7 +350,9 @@ class AgentHost:
                 # Its only permitted continuation now is the owned control;
                 # do not build a new runtime or run initialization hooks.
                 await self._apply_held_controls(
-                    agent_id, incarnation, work=None, resources=resources
+                    agent_id,
+                    incarnation,
+                    work=None,
                 )
                 return
             outcome = TurnOutcome(exited=False, crashed=False)
@@ -430,12 +423,9 @@ class AgentHost:
                     self._bus,
                     incarnation,
                     outcome,
-                    resources=resources,
                 )
 
-    async def _run_held_controls(
-        self, agent_id: int, status: str, *, resources: HostedTurnResources | None
-    ) -> None:
+    async def _run_held_controls(self, agent_id: int, status: str) -> None:
         """Maintain ownership and apply admin intent without touching the graph."""
 
         incarnation = await admit_hosted_runtime(
@@ -449,7 +439,11 @@ class AgentHost:
         if incarnation is None:
             return
         async with force_termination_stop(self._control_pool, incarnation):
-            await self._apply_held_controls(agent_id, incarnation, work=None, resources=resources)
+            await self._apply_held_controls(
+                agent_id,
+                incarnation,
+                work=None,
+            )
 
     async def _apply_held_controls(
         self,
@@ -457,7 +451,6 @@ class AgentHost:
         incarnation: RuntimeIncarnation,
         *,
         work: NativeWorkTarget | None,
-        resources: HostedTurnResources | None,
     ) -> None:
         from agent.db import claim_inbound_batch
 
@@ -491,11 +484,12 @@ class AgentHost:
             incarnation,
             bus=self._bus,
             kill_shell_sessions=kill_terminating_agent_shells,
-            resources=resources,
         )
         if kind is None:
             await settle_hosted_runtime(
-                self._control_pool, incarnation, bus=self._bus, resources=resources
+                self._control_pool,
+                incarnation,
+                bus=self._bus,
             )
         else:
             self.drop_agent(agent_id)

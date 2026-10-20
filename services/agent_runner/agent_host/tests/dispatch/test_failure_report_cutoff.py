@@ -59,7 +59,13 @@ async def _close(
     incarnation: RuntimeIncarnation,
     outcome: TurnOutcome,
 ) -> None:
-    await settlement.close_hosted_turn(pool, pool, bus, incarnation, outcome, resources=None)
+    await settlement.close_hosted_turn(
+        pool,
+        pool,
+        bus,
+        incarnation,
+        outcome,
+    )
 
 
 async def _admit(

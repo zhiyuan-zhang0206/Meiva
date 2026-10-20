@@ -7,4 +7,3 @@
 ]
 "meiva.tests.fixtures.meiva_tests" = [
 ]
-"agent.graph.exec.tests.admission_fixture" = ["test_resource_admission.py"]

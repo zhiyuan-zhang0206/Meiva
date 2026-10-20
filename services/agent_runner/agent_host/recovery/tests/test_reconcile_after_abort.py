@@ -68,7 +68,10 @@ async def test_settled_abort_consumes_every_claimed_row(
     young = claimed_row(db_conn, agent, "young")
     stale = claimed_row(db_conn, agent, "stale", age=timedelta(days=2))
 
-    await settlement_mod.reconcile_inbounds_after_abort(aops_pool, incarnation, resources=None)
+    await settlement_mod.reconcile_inbounds_after_abort(
+        aops_pool,
+        incarnation,
+    )
 
     assert row_statuses(db_conn, [young, stale]) == {young: "done", stale: "done"}
     records = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
@@ -96,7 +99,10 @@ async def test_boot_consume_after_the_abort_pass_changes_nothing(
     agent = incarnation.agent_id
     claimed = claimed_row(db_conn, agent, "claimed")
 
-    await settlement_mod.reconcile_inbounds_after_abort(aops_pool, incarnation, resources=None)
+    await settlement_mod.reconcile_inbounds_after_abort(
+        aops_pool,
+        incarnation,
+    )
     assert row_statuses(db_conn, [claimed]) == {claimed: "done"}
     logged = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
     await consume_claimed_inbounds(aops_pool, agent, incarnation=incarnation)
@@ -148,7 +154,10 @@ async def test_next_claim_does_not_re_deliver_any_interrupted_row(
     first = claimed_row(db_conn, agent, "first")
     second = claimed_row(db_conn, agent, "second")
 
-    await settlement_mod.reconcile_inbounds_after_abort(aops_pool, incarnation, resources=None)
+    await settlement_mod.reconcile_inbounds_after_abort(
+        aops_pool,
+        incarnation,
+    )
     claimed = await claim_inbound_batch(aops_pool, agent, incarnation=incarnation, work=None)
 
     assert claimed == []

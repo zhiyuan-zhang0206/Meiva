@@ -134,19 +134,20 @@ async def exec_node(
         return await _exec_node_impl(state, runtime, config)
 
 
+# meiva:note
+# Graph-level exec node timeout — defense-in-depth above the per-code-block
+# exec_timeout_seconds. If the inner deadline misses a cancellable framework
+# hang, this outer shield requests cancellation and surfaces a timeout after
+# the exec's process group is killed and reaped. It is not an independent hard
+# bound on an OS kill/reap call that itself wedges. (The interrupt
+# subscription sits outside this wait_for and is bounded by its own watcher
+# exit timeout.)
 async def _exec_with_node_shield(
     coro: Awaitable[tuple[ExecResult, ResultPayload | None]],
     agent_id: int,
     *,
     read_timeout: Callable[[], float],
 ) -> tuple[ExecResult, ResultPayload | None]:
-    """Graph-level exec node timeout — defense-in-depth above the per-code-block
-    exec_timeout_seconds. If the inner deadline misses a cancellable framework
-    hang, this outer shield requests cancellation and surfaces a timeout after
-    the owned process-resource barrier finishes. It is not an independent hard
-    bound on an OS close/reap call that itself wedges. (The interrupt
-    subscription sits outside this wait_for and is bounded by its own watcher
-    exit timeout.)"""
     try:
         return await asyncio.wait_for(coro, timeout=read_timeout())
     except TimeoutError:
@@ -205,7 +206,6 @@ async def run_agent_code(
     ) as cancel_event:
         outcome = await _exec_with_node_shield(
             run_in_subprocess(
-                ctx.require_db(),
                 code,
                 ctx,
                 cancel_event,

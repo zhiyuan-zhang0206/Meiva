@@ -78,7 +78,9 @@ async def _live_member(
     )
     assert incarnation is not None
     assert await settle_hosted_runtime(
-        aops_pool, incarnation, bus=EventBus.from_settings(), resources=None
+        aops_pool,
+        incarnation,
+        bus=EventBus.from_settings(),
     )
     return agent
 

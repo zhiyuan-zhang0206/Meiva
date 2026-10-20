@@ -269,7 +269,6 @@ async def resurrect_agent_op(
     *,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
-    local_machine: str,
 ) -> ResurrectAgentResponse:
     """Commit hosted resurrection intent, then publish a wake to the home host.
 
@@ -291,7 +290,6 @@ async def resurrect_agent_op(
             prompt=body.prompt,
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
-            local_machine=local_machine,
         )
     except (ResurrectAlreadyAlive, ResurrectTriggerStaleError):
         return ResurrectAgentResponse(status=ResurrectResult.ALREADY_ALIVE)
@@ -364,7 +362,6 @@ async def resurrect_if_terminated(
                         body,
                         trigger_inbound_id=trigger_inbound_id,
                         trigger_inbound_kind=trigger_inbound_kind,
-                        local_machine=local_machine,
                     )
                 ).status
             else:
@@ -509,7 +506,6 @@ async def lifecycle_op(
     catalog: ModelCatalog,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
-    local_machine: str,
 ) -> (
     TerminateAgentResponse
     | ResurrectAgentResponse
@@ -548,7 +544,6 @@ async def lifecycle_op(
             bus,
             agent_id,
             ResurrectAgentRequest.model_validate(body),
-            local_machine=local_machine,
         )
     if action == "resurrect-if-pending-work":
         request = _pending_work_resurrection_request(body, trigger_inbound_id)
@@ -559,7 +554,6 @@ async def lifecycle_op(
             request,
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
-            local_machine=local_machine,
         )
     if action == "restart":
         return await restart_agent_op(

@@ -75,7 +75,12 @@ async def test_force_observation_waits_for_actual_projection_continuation(
     async def continuation(agent: int, *, resources: HostedTurnResources | None) -> None:
         assert agent == target.agent_id
         await settle_native_invocation(
-            aops_pool, saver, graph, incarnation, target, config, resources=resources
+            aops_pool,
+            saver,
+            graph,
+            incarnation,
+            target,
+            config,
         )
 
     monkeypatch.setattr(graph, "aupdate_state", pause)
@@ -100,7 +105,6 @@ async def test_force_observation_waits_for_actual_projection_continuation(
                 EventBus.from_settings(),
                 target.agent_id,
                 resurrected_by="user",
-                local_machine=machine_identity.name(),
             )
         release.set()
         with pytest.raises(NativeWorkUncertainError):
@@ -115,7 +119,6 @@ async def test_force_observation_waits_for_actual_projection_continuation(
             EventBus.from_settings(),
             target.agent_id,
             resurrected_by="user",
-            local_machine=machine_identity.name(),
         )
         successor = await admit_hosted_runtime(
             aops_pool,

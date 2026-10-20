@@ -129,6 +129,23 @@ class ResourceProcess(_StrictEvidence):
 
 
 # meiva:note
+# Whether the exact recorded process is provably gone; unknown is never ended.
+def process_ended(identity: ResourceProcess) -> bool:
+    try:
+        # meiva:note
+        # Missing native evidence cannot become exit merely because a PID is
+        # absent. Only a complete receipt can establish reuse or another boot.
+        if not identity.in_current_boot():
+            return True
+        # meiva:note
+        # PID reuse means the exact old process ended, not permission to signal
+        # the replacement. This helper never signals or scans descendants.
+        return not identity.as_identity().live()
+    except (psutil.AccessDenied, OSError, RuntimeError, ValueError):
+        return False
+
+
+# meiva:note
 # `digest_version` says what `request_digest` is the digest of: version 1 is the
 # request envelope's bytes, version 2 the allocation's own identity, with the
 # payload bytes riding separately in `request_sha256`. The envelope is readable by
@@ -271,29 +288,6 @@ def _store(
     )
 
 
-def register_exec(
-    conn: psycopg.Connection, target: RuntimeIncarnation, entry: ExecAllocation
-) -> None:
-    """Reserve before root permit; an ambiguous commit is not permission to run."""
-    evidence, status, pointer = _locked(conn, target)
-    if status not in {"running", "idling"} or pointer is not None or evidence.frozen_by is not None:
-        raise ResourceEvidenceError("incarnation is frozen for lifecycle work")
-    if entry.owner_process is not None or str(entry.request) in evidence.requests:
-        raise ResourceEvidenceError("exec allocation is already attached or registered")
-    fresh = conn.execute(
-        "SELECT lease_expires_at>clock_timestamp() AND %s>clock_timestamp() "
-        "FROM agents_meta WHERE id=%s",
-        (entry.deadline, target.agent_id),
-    ).fetchone()
-    if fresh != (True,):
-        raise ResourceEvidenceError("exec registration requires fresh runtime lease and deadline")
-    _store(
-        conn,
-        target,
-        evidence.model_copy(update={"requests": evidence.requests | {str(entry.request): entry}}),
-    )
-
-
 def freeze_resources(conn: psycopg.Connection, target: RuntimeIncarnation, command_id: int) -> None:
     """Freeze the complete stored set only for the actual accepted force pointer."""
     evidence, status, pointer = _locked(conn, target)
@@ -310,54 +304,3 @@ def freeze_resources(conn: psycopg.Connection, target: RuntimeIncarnation, comma
     ):
         raise ResourceEvidenceError("resource freeze has stale command authority")
     _store(conn, target, evidence.model_copy(update={"frozen_by": command_id}))
-
-
-def attach_exec(
-    conn: psycopg.Connection,
-    target: RuntimeIncarnation,
-    reserved: ExecAllocation,
-    attached: ExecAllocation,
-) -> None:
-    """Bind actual owner/root before releasing user code; force wins this race."""
-    evidence, status, pointer = _locked(conn, target)
-    if evidence.frozen_by is not None or pointer is not None or status not in {"running", "idling"}:
-        raise ResourceEvidenceError("force prevents exec user-code admission")
-    if (
-        evidence.requests.get(str(reserved.request)) != reserved
-        or reserved.owner_process is not None
-    ):
-        raise ResourceEvidenceError("exec reservation changed before attachment")
-    if (
-        attached.owner_process is None
-        or attached.model_copy(update={"owner_process": None, "root_process": None}) != reserved
-    ):
-        raise ResourceEvidenceError("attached domain does not match the original allocation")
-    if conn.execute(
-        "SELECT %s>clock_timestamp() AND lease_expires_at>clock_timestamp() "
-        "FROM agents_meta WHERE id=%s",
-        (reserved.deadline, target.agent_id),
-    ).fetchone() != (True,):
-        raise ResourceEvidenceError("exec allocation expired before user code")
-    _store(
-        conn,
-        target,
-        evidence.model_copy(
-            update={"requests": evidence.requests | {str(reserved.request): attached}}
-        ),
-    )
-
-
-def complete_exec(
-    conn: psycopg.Connection, target: RuntimeIncarnation, entry: ExecAllocation
-) -> None:
-    """Consume an independently validated exact terminal receipt, even after freeze.
-
-    Callers must read and validate the native owner's immutable receipt before
-    taking this lock. An unattached/ambiguous reservation cannot be discharged.
-    """
-    evidence, _, _ = _locked(conn, target)
-    if entry.owner_process is None or evidence.requests.get(str(entry.request)) != entry:
-        raise ResourceEvidenceError("terminal receipt does not match the attached allocation")
-    remaining = dict(evidence.requests)
-    del remaining[str(entry.request)]
-    _store(conn, target, evidence.model_copy(update={"requests": remaining}))

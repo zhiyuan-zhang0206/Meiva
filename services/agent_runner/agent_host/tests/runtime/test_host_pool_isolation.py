@@ -87,7 +87,6 @@ class TestPoolIsolation:
             bus: object,
             exited: bool,
             crashed: bool,
-            resources: object,
         ) -> TurnSettlement:
             if not exited:
                 calls.append(("settle", pool))

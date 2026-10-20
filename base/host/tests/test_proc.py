@@ -68,10 +68,11 @@ def _predicate_in_new_session(*argv_tail: str) -> str:
     return result.stdout.strip()
 
 
-@pytest.mark.parametrize("entry", ["agent.execution.child", "agent.execution.owner_child"])
-def test_hosting_exec_domain_names_the_entry_of_its_session_leader(entry: str) -> None:
-    """Both exec spawn shapes make their root the session leader; the entry
-    module on its argv is what marks the session as an exec domain."""
+# meiva:note
+# The exec spawn makes its root the session leader; the entry module on its
+# argv is what marks the session as an exec domain.
+def test_hosting_exec_domain_names_the_entry_of_its_session_leader() -> None:
+    entry = "agent.execution.child"
     assert _predicate_in_new_session(entry) == repr(entry)
 
 

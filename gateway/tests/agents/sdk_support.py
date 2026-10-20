@@ -122,7 +122,6 @@ def sdk_via_gateway(
                     json_body,
                     app.state.db_pool,
                     catalog=build_model_catalog(),
-                    local_machine=machine_identity.name(),
                 )
             ).model_dump(mode="json")
 

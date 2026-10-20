@@ -200,7 +200,6 @@ async def _dispatch(
                     trigger_inbound_id=lc.trigger_inbound_id,
                     trigger_inbound_kind=lc.trigger_inbound_kind,
                     catalog=catalog,
-                    local_machine=local_machine.name(),
                 )
                 return OpStatus.COMPLETED, resp.model_dump(mode="json")
             case _:

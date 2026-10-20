@@ -182,7 +182,6 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
             host._bus,
             incarnation,
             TurnOutcome(exited=False, crashed=True),
-            resources=resources,
         )
         assert resources.require_service().failures == [(resources, original_error)]
     row = db_conn.execute(

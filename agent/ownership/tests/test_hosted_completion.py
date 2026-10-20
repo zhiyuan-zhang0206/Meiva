@@ -36,14 +36,20 @@ async def test_completion_requires_original_applied_and_observed_receipt(
     assert await completed_hosted_lifecycle_kind(aops_pool, original, command) is None
     assert (
         await apply_hosted_lifecycle(
-            aops_pool, original, bus=event_bus, expected_command_id=command + 1, resources=None
+            aops_pool,
+            original,
+            bus=event_bus,
+            expected_command_id=command + 1,
         )
         is None
     )
     assert await pending_hosted_lifecycle_id(aops_pool, original) == command
     assert (
         await apply_hosted_lifecycle(
-            aops_pool, original, bus=event_bus, expected_command_id=command, resources=None
+            aops_pool,
+            original,
+            bus=event_bus,
+            expected_command_id=command,
         )
         == kind
     )

@@ -73,7 +73,11 @@ async def test_hosted_status_changes_publish_agent_updated(
     publish.assert_not_awaited()
 
     publish.reset_mock()
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+    )
     publish.assert_awaited_once_with(ANY, agent_id)
 
     incarnation = await admit_hosted_runtime(
@@ -86,7 +90,11 @@ async def test_hosted_status_changes_publish_agent_updated(
     publish.reset_mock()
     await claim_inbound_batch(aops_pool, agent_id, incarnation=incarnation, work=None)
     assert (
-        await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus, resources=None)
+        await apply_hosted_lifecycle(
+            aops_pool,
+            incarnation,
+            bus=event_bus,
+        )
         == "terminate"
     )
     publish.assert_awaited_once_with(ANY, agent_id)
@@ -108,13 +116,22 @@ async def test_hosted_restart_releases_before_new_incarnation(
     )
     await claim_inbound_batch(aops_pool, agent_id, incarnation=first, work=None)
     assert (
-        await apply_hosted_lifecycle(aops_pool, first, bus=event_bus, resources=None) == "restart"
+        await apply_hosted_lifecycle(
+            aops_pool,
+            first,
+            bus=event_bus,
+        )
+        == "restart"
     )
     second = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert second is not None and second.generation != first.generation
-    assert not await settle_hosted_runtime(aops_pool, first, bus=event_bus, resources=None)
+    assert not await settle_hosted_runtime(
+        aops_pool,
+        first,
+        bus=event_bus,
+    )
 
 
 async def test_owner_beat_renews_a_mid_turn_row_and_the_guard_stays_green(

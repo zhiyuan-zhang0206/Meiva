@@ -96,7 +96,6 @@ async def test_never_admitted_birth_resurrects_as_a_fresh_hosted_birth(
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger,
         trigger_inbound_kind=InboundKind.CHAT if guarded else None,
-        local_machine=machine_identity.name(),
     )
 
     assert status(db_conn, aid) == ("idling", None)
@@ -200,7 +199,10 @@ def test_retired_resources_require_cutover_before_resurrection(
 
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
         wake.resurrect_agent(
-            database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+            database,
+            event_bus,
+            aid,
+            resurrected_by="user",
         )
     assert status(db_conn, aid) == ("terminated", "hosted")
     assert resources(db_conn, aid) == before
@@ -245,7 +247,10 @@ async def test_closed_form_terminated_row_resurrects_through_its_terminate_recei
     closed_form(db_conn, aid, before)
 
     wake.resurrect_agent(
-        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+        database,
+        event_bus,
+        aid,
+        resurrected_by="user",
     )
     successor = await admit_hosted_runtime(
         aops_pool, aid, machine_identity.name(), uuid4(), expected_from="idling", db=database
@@ -501,7 +506,6 @@ async def _resurrected(
         EventBus.from_settings(),
         aid,
         resurrected_by="user",
-        local_machine=machine_identity.name(),
     )
     return aid
 
@@ -537,7 +541,11 @@ async def restarted(
     db.commit()
     await claim_inbound_batch(pool, aid, incarnation=owner, work=None)
     assert (
-        await apply_hosted_lifecycle(pool, owner, bus=EventBus.from_settings(), resources=None)
+        await apply_hosted_lifecycle(
+            pool,
+            owner,
+            bus=EventBus.from_settings(),
+        )
         == "restart"
     )
     return aid
@@ -575,7 +583,11 @@ async def managed_restarted(
     db.commit()
     await claim_inbound_batch(pool, aid, incarnation=owner, work=None)
     assert (
-        await apply_hosted_lifecycle(pool, owner, bus=EventBus.from_settings(), resources=None)
+        await apply_hosted_lifecycle(
+            pool,
+            owner,
+            bus=EventBus.from_settings(),
+        )
         == "restart"
     )
     assert isinstance(decode_resources(resources(db, aid)), IncarnationResources)
@@ -624,7 +636,6 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger,
         trigger_inbound_kind=InboundKind.CHAT if guarded else None,
-        local_machine=machine_identity.name(),
     )
 
     assert _unowned_idle(db_conn, aid)
@@ -668,12 +679,18 @@ async def test_a_managed_row_ended_unowned_keeps_its_predecessor_receipt(
     )
     db_conn.commit()
     wake.resurrect_agent(
-        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+        database,
+        event_bus,
+        aid,
+        resurrected_by="user",
     )
     assert unowned_receipt(db_conn, force(aid))
 
     wake.resurrect_agent(
-        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+        database,
+        event_bus,
+        aid,
+        resurrected_by="user",
     )
 
     successor = await admit_hosted_incarnation(

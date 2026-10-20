@@ -17,7 +17,6 @@ from agent.graph.llm.node import llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState
 from base.agents.inbox.native_cancel import accept_native_cancel
-from base.agents.incarnation.exec_owner_protocol import OwnerClosed
 from base.agents.incarnation.native_work_models import NativeCancelMarker
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -35,16 +34,16 @@ from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.managed_work import managed_work
 
 
-async def test_real_managed_exec_abort_closes_resources_before_original_ack(
+async def test_real_exec_abort_ends_its_group_before_original_ack(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     tmp_path: Path,
-    database: Database,
     hosted_resources: HostedTurnResources,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     pool: ConnectionPool
+    started = tmp_path / "started"
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     graph, saver, config, _history = await prepare_graph(aops_pool, target.agent_id, 100, [])
     scope = hosted_resources
@@ -53,8 +52,7 @@ async def test_real_managed_exec_abort_closes_resources_before_original_ack(
     ) as interrupted:
         execution = asyncio.create_task(
             run_in_subprocess(
-                database,
-                "import time; print('strong-exec-started', flush=True); time.sleep(60)",
+                f"import pathlib, time; pathlib.Path({str(started)!r}).write_text('x'); time.sleep(60)",
                 exec_context(target.agent_id, incarnation=incarnation, resources=scope),
                 interrupted,
                 30,
@@ -63,7 +61,7 @@ async def test_real_managed_exec_abort_closes_resources_before_original_ack(
             )
         )
         try:
-            await _wait_attached_exec(db_conn, target.agent_id)
+            await _wait_for_file(started)
             with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
                 accepted = await asyncio.to_thread(
                     accept_native_cancel, pool, "real-exec-stop", target.agent_id, target
@@ -73,19 +71,13 @@ async def test_real_managed_exec_abort_closes_resources_before_original_ack(
             assert interrupted.native_cancel == NativeCancelMarker(
                 command_id=accepted.command_id, target=target
             )
-            assert not scope.unresolved
-            assert db_conn.execute(
-                "SELECT incarnation_resources->'requests' FROM agents_meta WHERE id=%s",
-                (target.agent_id,),
-            ).fetchone() == ({},)
-            receipts = list((tmp_path / str(target.agent_id) / "domains").glob("*/owner.closed"))
-            assert len(receipts) == 1
-            assert (
-                OwnerClosed.model_validate_json(receipts[0].read_bytes()).allocation.request
-                is not None
-            )
             assert await settle_native_invocation(
-                aops_pool, saver, graph, incarnation, target, config, resources=scope
+                aops_pool,
+                saver,
+                graph,
+                incarnation,
+                target,
+                config,
             )
             assert db_conn.execute(
                 "SELECT outcome FROM native_cancel_commands WHERE work_id=%s", (target.work_id,)
@@ -168,16 +160,7 @@ async def test_real_model_watcher_discards_partial_then_claim_attributes_origina
         await asyncio.gather(running, return_exceptions=True)
 
 
-async def _wait_attached_exec(conn: psycopg.Connection, agent: int) -> None:
+async def _wait_for_file(path: Path) -> None:
     async with asyncio.timeout(10):
-        while True:
-            row = conn.execute(
-                "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent,)
-            ).fetchone()
-            assert row is not None
-            if (
-                row[0]["requests"]
-                and next(iter(row[0]["requests"].values()))["owner_process"] is not None
-            ):
-                return
+        while not path.exists():
             await asyncio.sleep(0.02)

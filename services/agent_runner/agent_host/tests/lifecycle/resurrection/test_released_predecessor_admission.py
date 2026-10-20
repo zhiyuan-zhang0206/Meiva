@@ -64,7 +64,11 @@ async def _reaped_closed_life(
     )
     assert old is not None
     assert (await stamp_turn_fatal(aops_pool, old)).applied
-    assert await settle_hosted_runtime(aops_pool, old, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        old,
+        bus=event_bus,
+    )
     db_conn.execute(
         "UPDATE agents_meta SET last_turn_fatal_at = clock_timestamp() - interval '1 hour' "
         "WHERE id = %s",
@@ -95,7 +99,6 @@ def _resurrect(
         EventBus.from_settings(),
         aid,
         resurrected_by="user",
-        local_machine=machine,
     )
     row = db_conn.execute(
         "SELECT status,runtime_kind,incarnation_resources FROM agents_meta WHERE id=%s", (aid,)
@@ -348,7 +351,6 @@ async def test_deferred_resurrection_rolls_back_its_epoch(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    machine = machine_identity.name()
     aid, _owner, resources = await _reaped_closed_life(
         db_conn,
         aops_pool,
@@ -376,7 +378,6 @@ async def test_deferred_resurrection_rolls_back_its_epoch(
             EventBus.from_settings(),
             aid,
             resurrected_by="user",
-            local_machine=machine,
         )
 
     assert db_conn.execute(

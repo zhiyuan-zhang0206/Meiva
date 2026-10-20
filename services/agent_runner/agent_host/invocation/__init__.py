@@ -75,7 +75,6 @@ async def finish_pending_failure(
                 incarnation,
                 native_work,
                 config,
-                resources=ctx.hosted_resources,
             )
         await attach_trace_checkpoint_ref(graph, ctx, agent_id)
     return TurnOutcome(
@@ -142,7 +141,6 @@ async def finish_completed_invocation(
                 incarnation,
                 pending.native_work,
                 {"configurable": {"thread_id": str(agent_id)}},
-                resources=ctx.hosted_resources,
             )
             pending.native_settled = True
         if not pending.trace_attached:
@@ -162,7 +160,6 @@ async def finish_completed_invocation(
                 bus=bus,
                 kill_shell_sessions=kill_shell_sessions,
                 expected_command_id=pending.lifecycle_command_id,
-                resources=ctx.hosted_resources,
             )
             if kind is None:
                 kind = await completed_hosted_lifecycle_kind(
@@ -184,7 +181,6 @@ async def finish_completed_invocation(
                 agent_id,
                 relays,
                 incarnation=ctx.original_incarnation,
-                resources=ctx.hosted_resources,
                 notes=notes,
                 read_local_machine=lambda: ctx.require_machine().name(),
             )

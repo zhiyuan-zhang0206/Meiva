@@ -55,15 +55,14 @@ class TestSettlementReconciles:
             bus: object,
             exited: bool,
             crashed: bool,
-            resources: object,
         ) -> TurnSettlement:
             order.append("settle")
             return TurnSettlement(stamp=TurnFatalStamp(applied=crashed), settled=not exited)
 
-        async def reconcile(_pool: object, _incarnation: object, *, resources: object) -> None:
+        async def reconcile(_pool: object, _incarnation: object) -> None:
             order.append("reconcile")
 
-        async def reconcile_turn(_pool: object, _incarnation: object, *, resources: object) -> None:
+        async def reconcile_turn(_pool: object, _incarnation: object) -> None:
             order.append("reconcile-turn")
 
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)

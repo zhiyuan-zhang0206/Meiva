@@ -118,7 +118,10 @@ async def _assert_pending_force(
     handles = Database.from_settings(gate=database_gate), EventBus.from_settings()
     with pytest.raises(ResurrectSettlementDeferredError):
         await asyncio.to_thread(
-            resurrect_agent, *handles, agent_id, resurrected_by="user", local_machine=local_machine
+            resurrect_agent,
+            *handles,
+            agent_id,
+            resurrected_by="user",
         )
     assert (
         await hosted.admit_hosted_runtime(
@@ -271,7 +274,6 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
             await asyncio.to_thread(_blocking_work, entered, release)
         else:
             await run_in_subprocess(
-                database,
                 "from pathlib import Path\nimport time\n"
                 f"Path({str(marker)!r}).touch()\n"
                 f"while not Path({str(release_file)!r}).exists(): time.sleep(0.01)\n",
@@ -447,5 +449,4 @@ async def test_a_force_its_original_host_never_observed_is_not_settled_by_a_succ
             EventBus.from_settings(),
             agent_id,
             resurrected_by="user",
-            local_machine=machine_identity.name(),
         )

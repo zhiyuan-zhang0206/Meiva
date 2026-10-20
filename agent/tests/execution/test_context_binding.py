@@ -51,6 +51,7 @@ def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[s
     return (
         subprocess.Popen(
             [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -61,12 +62,18 @@ def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[s
 
 
 def _finish(process: subprocess.Popen[str], result: Path) -> tuple[str, ResultPayload]:
+    # meiva:note
+    # `communicate` would close stdin, which tells the child its host is gone.
+    host_end, process.stdin = process.stdin, None
     try:
         stdout, stderr = process.communicate(timeout=60)
     except subprocess.TimeoutExpired:
         process.kill()
         process.communicate()
         raise
+    finally:
+        if host_end is not None:
+            host_end.close()
     assert process.returncode == 0, stderr
     return stdout, read_result(result)
 

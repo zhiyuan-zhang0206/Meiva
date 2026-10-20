@@ -106,7 +106,7 @@ def test_only_the_registry_failure_names_count_as_exec_failures() -> None:
         assert fact is not None and (fact.exec_ok, fact.exec_failed) == (0, 1)
     ok = metrics.observe_event(_event("exec"))
     assert ok is not None and (ok.exec_ok, ok.exec_failed) == (1, 0)
-    for name in ("exec_envelope", "exec_child_boot", "exec_request_quarantine"):
+    for name in ("exec_envelope", "exec_child_boot"):
         assert metrics.observe_event(_event(name)) is None
 
 

@@ -27,8 +27,6 @@ from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec._subprocess import run_in_subprocess
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from base.config import settings
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
 from base.host.env.dotenv_file import upsert_env
 from base.host.proc import kill_process_tree
 from base.paths import logs_dir
@@ -61,7 +59,6 @@ async def _run(
     cancel_after: float | None = None,
     state: dict[str, Any] | None = None,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
-    database_gate: ProcessDbGate,
 ):
     cancel_event = asyncio.Event()
     cancel_task: asyncio.Task[None] | None = None
@@ -74,7 +71,6 @@ async def _run(
         cancel_task = asyncio.create_task(_set_cancel())
     try:
         result, _payload = await run_in_subprocess(
-            Database.from_settings(gate=database_gate),
             code,
             exec_context(_AGENT_ID),
             cancel_event,
@@ -130,16 +126,14 @@ async def test_assert_tree_gone_rejects_pid_still_running_after_deadline(
         await _assert_tree_gone([12345], timeout_s=0.3)
 
 
-async def test_subprocess_done(tmp_path: Path, database_gate: ProcessDbGate) -> None:
-    result = await _run(tmp_path, "print('hello from child')", database_gate=database_gate)
+async def test_subprocess_done(tmp_path: Path) -> None:
+    result = await _run(tmp_path, "print('hello from child')")
     assert isinstance(result, ExecDone)
     assert "hello from child" in result.output
     assert not list((tmp_path / "exec" / str(_AGENT_ID)).iterdir())
 
 
-async def test_exec_child_disables_otlp_after_cluster_env_authority(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
+async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Path) -> None:
     env_path = Path(os.environ["MEIVA_HOME"]) / ".env"
     original_env = env_path.read_text()
     log_path = logs_dir() / f"agent-{_AGENT_ID}.log"
@@ -159,7 +153,6 @@ async def test_exec_child_disables_otlp_after_cluster_env_authority(
                 "meiva.context.clients.event_pipeline().warmup_exports()\n"
                 'print("OTLP_ENABLED_IN_CHILD:", bool(probes))\n'
             ),
-            database_gate=database_gate,
         )
     finally:
         env_path.write_text(original_env)
@@ -171,7 +164,7 @@ async def test_exec_child_disables_otlp_after_cluster_env_authority(
 
 
 async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     old_checkout = tmp_path / "old-checkout"
     (old_checkout / "agent").mkdir(parents=True)
@@ -182,7 +175,6 @@ async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(
     result = await _run(
         tmp_path,
         ("import agent.execution.child as entry\nprint('exec-child', entry.__file__)\n"),
-        database_gate=database_gate,
     )
 
     assert isinstance(result, ExecDone)
@@ -192,7 +184,7 @@ async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(
 
 
 async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("PYTHONUTF8", "0")
     monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
@@ -205,7 +197,6 @@ async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(
             "print('stdout-encoding', sys.stdout.encoding)\n"
             "print('cjk', '\u5b50\u8fdb\u7a0b')\n"
         ),
-        database_gate=database_gate,
     )
 
     assert isinstance(result, ExecDone)
@@ -214,30 +205,23 @@ async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(
     assert "cjk \u5b50\u8fdb\u7a0b" in result.output
 
 
-async def test_subprocess_merged_stream_preserves_order(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
+async def test_subprocess_merged_stream_preserves_order(tmp_path: Path) -> None:
     result = await _run(
         tmp_path,
         "import sys\nprint('one')\nprint('two', file=sys.stderr)\nprint('three')",
-        database_gate=database_gate,
     )
     assert isinstance(result, ExecDone)
     assert result.output.index("one") < result.output.index("two") < result.output.index("three")
 
 
-async def test_subprocess_output_contains_only_agent_text(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
-    result = await _run(tmp_path, "print('ok')", database_gate=database_gate)
+async def test_subprocess_output_contains_only_agent_text(tmp_path: Path) -> None:
+    result = await _run(tmp_path, "print('ok')")
     assert isinstance(result, ExecDone)
     assert result.output == "ok\n"
 
 
-async def test_subprocess_crashed_carries_child_traceback(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
-    result = await _run(tmp_path, "raise ValueError('boom')", database_gate=database_gate)
+async def test_subprocess_crashed_carries_child_traceback(tmp_path: Path) -> None:
+    result = await _run(tmp_path, "raise ValueError('boom')")
     assert isinstance(result, ExecCrashed)
     assert isinstance(result.exc, ExecChildError)
     assert "boom" in (result.exc.exc_msg or "")
@@ -246,17 +230,15 @@ async def test_subprocess_crashed_carries_child_traceback(
     assert "ValueError: boom" in result.output
 
 
-async def test_subprocess_os_exit_without_envelope_is_crash(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
-    result = await _run(tmp_path, "import os\nos._exit(5)", database_gate=database_gate)
+async def test_subprocess_os_exit_without_envelope_is_crash(tmp_path: Path) -> None:
+    result = await _run(tmp_path, "import os\nos._exit(5)")
     assert isinstance(result, ExecCrashed)
     assert "without writing a result envelope" in str(result.exc)
 
 
 @pytest.mark.parametrize("exit_code", [5, 124])
 async def test_abrupt_root_exit_stops_descendant_before_reader_cleanup(
-    tmp_path: Path, exit_code: int, database_gate: ProcessDbGate
+    tmp_path: Path, exit_code: int
 ) -> None:
     pid_file = tmp_path / f"abrupt-{exit_code}.pid"
     code = (
@@ -271,7 +253,7 @@ async def test_abrupt_root_exit_stops_descendant_before_reader_cleanup(
     )
     descendant_pid: int | None = None
     try:
-        result = await _run(tmp_path, code, database_gate=database_gate)
+        result = await _run(tmp_path, code)
         assert isinstance(result, ExecCrashed)
         descendant_pid = int(pid_file.read_text(encoding="utf-8"))
         await _assert_tree_gone([descendant_pid])
@@ -293,7 +275,7 @@ async def test_abrupt_root_exit_stops_descendant_before_reader_cleanup(
     ],
 )
 async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
-    tmp_path: Path, fault: str, trigger: str, database_gate: ProcessDbGate
+    tmp_path: Path, fault: str, trigger: str
 ) -> None:
     pid_file = tmp_path / f"{fault}.pid"
     code = (
@@ -307,7 +289,7 @@ async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
     )
     descendant_pid: int | None = None
     try:
-        result = await _run(tmp_path, code, database_gate=database_gate)
+        result = await _run(tmp_path, code)
         assert isinstance(result, ExecCrashed)
         assert "without writing a result envelope" in str(result.exc)
         assert "before the fault" in result.output
@@ -317,7 +299,7 @@ async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
             thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
         )
 
-        after = await _run(tmp_path, "print('still serving')", database_gate=database_gate)
+        after = await _run(tmp_path, "print('still serving')")
         assert isinstance(after, ExecDone)
         assert after.output == "still serving\n"
     finally:
@@ -327,27 +309,22 @@ async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
             kill_process_tree(descendant_pid, grace_s=0.0)
 
 
-async def test_subprocess_timeout(tmp_path: Path, database_gate: ProcessDbGate) -> None:
+async def test_subprocess_timeout(tmp_path: Path) -> None:
     result = await _run(
         tmp_path,
         "import time\nprint('started', flush=True)\ntime.sleep(60)",
         timeout=10.0,
-        database_gate=database_gate,
     )
     assert isinstance(result, ExecTimedOut)
     assert "started" in result.output
 
 
-async def test_subprocess_cancel(tmp_path: Path, database_gate: ProcessDbGate) -> None:
-    result = await _run(
-        tmp_path, "import time\ntime.sleep(60)", cancel_after=0.4, database_gate=database_gate
-    )
+async def test_subprocess_cancel(tmp_path: Path) -> None:
+    result = await _run(tmp_path, "import time\ntime.sleep(60)", cancel_after=0.4)
     assert isinstance(result, ExecCancelled)
 
 
-async def test_natural_exit_reaps_ordinary_descendant_holding_stdout(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
+async def test_natural_exit_reaps_ordinary_descendant_holding_stdout(tmp_path: Path) -> None:
     pid_file = tmp_path / "natural-descendant.pid"
     code = (
         "import pathlib, subprocess, sys\n"
@@ -360,7 +337,7 @@ async def test_natural_exit_reaps_ordinary_descendant_holding_stdout(
     )
     descendant_pid: int | None = None
     try:
-        result = await _run(tmp_path, code, database_gate=database_gate)
+        result = await _run(tmp_path, code)
         assert isinstance(result, ExecDone)
         descendant_pid = int(pid_file.read_text(encoding="utf-8"))
         await _assert_tree_gone([descendant_pid])
@@ -372,9 +349,7 @@ async def test_natural_exit_reaps_ordinary_descendant_holding_stdout(
             kill_process_tree(descendant_pid, grace_s=0.0)
 
 
-async def test_outer_task_cancel_reaps_child_and_descendant(
-    tmp_path: Path, database: Database
-) -> None:
+async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> None:
     pid_file = tmp_path / "exec-tree.pids"
     code = (
         "import os, pathlib, subprocess, sys, time\n"
@@ -389,7 +364,6 @@ async def test_outer_task_cancel_reaps_child_and_descendant(
     )
     task = asyncio.create_task(
         run_in_subprocess(
-            database,
             code,
             exec_context(_AGENT_ID),
             asyncio.Event(),
@@ -427,9 +401,7 @@ async def test_outer_task_cancel_reaps_child_and_descendant(
                 os.waitpid(pids[0], 0)
 
 
-async def test_subprocess_streaming_chunks_published_incrementally(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
+async def test_subprocess_streaming_chunks_published_incrementally(tmp_path: Path) -> None:
     emitter = MagicMock()
     publisher = ExecOutputChunkPublisher(emitter, agent_id=_AGENT_ID, item_id="7.0")
     result = await _run(
@@ -437,15 +409,12 @@ async def test_subprocess_streaming_chunks_published_incrementally(
         "import time\nfor i in range(5):\n    print(f'line {i}')\n    time.sleep(0.15)",
         timeout=30.0,
         chunk_publisher=publisher,
-        database_gate=database_gate,
     )
     assert isinstance(result, ExecDone)
     assert emitter.emit.call_count >= 2
 
 
-async def test_subprocess_silent_child_publishes_keepalive(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
+async def test_subprocess_silent_child_publishes_keepalive(tmp_path: Path) -> None:
     emitter = MagicMock()
     publisher = ExecOutputChunkPublisher(emitter, agent_id=_AGENT_ID, item_id="7.0")
 
@@ -454,7 +423,6 @@ async def test_subprocess_silent_child_publishes_keepalive(
         "import time; time.sleep(1.3)",
         timeout=30.0,
         chunk_publisher=publisher,
-        database_gate=database_gate,
     )
 
     assert isinstance(result, ExecDone)
@@ -491,15 +459,12 @@ def test_chunk_publisher_real_output_resets_keepalive_deadline(
     ]
 
 
-async def test_subprocess_state_snapshot_reaches_child(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
+async def test_subprocess_state_snapshot_reaches_child(tmp_path: Path) -> None:
     state = {"messages": [HumanMessage(content="snapshot says hi")], "halted": False}
     result = await _run(
         tmp_path,
         "import meiva\nprint(meiva.state.messages[0].content)",
         state=state,
-        database_gate=database_gate,
     )
     assert isinstance(result, ExecDone)
     assert "snapshot says hi" in result.output
@@ -517,14 +482,10 @@ def _self_lifecycle_code(action: str) -> str:
 
 
 @pytest.mark.usefixtures("runner_exec_env")
-async def test_subprocess_self_terminate_lifecycle_and_inbound(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
+async def test_subprocess_self_terminate_lifecycle_and_inbound(tmp_path: Path) -> None:
     _seed_agent_for_self_lifecycle()
 
-    result = await _run(
-        tmp_path, _self_lifecycle_code("meiva.self.terminate()"), database_gate=database_gate
-    )
+    result = await _run(tmp_path, _self_lifecycle_code("meiva.self.terminate()"))
 
     assert isinstance(result, ExecLifecycle)
     assert isinstance(result.exc, AgentTermination)
@@ -534,14 +495,10 @@ async def test_subprocess_self_terminate_lifecycle_and_inbound(
 
 
 @pytest.mark.usefixtures("runner_exec_env")
-async def test_subprocess_self_restart_lifecycle_and_inbound(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
+async def test_subprocess_self_restart_lifecycle_and_inbound(tmp_path: Path) -> None:
     _seed_agent_for_self_lifecycle()
 
-    result = await _run(
-        tmp_path, _self_lifecycle_code("meiva.self.restart()"), database_gate=database_gate
-    )
+    result = await _run(tmp_path, _self_lifecycle_code("meiva.self.restart()"))
 
     assert isinstance(result, ExecLifecycle)
     assert isinstance(result.exc, AgentRestart)
@@ -551,15 +508,12 @@ async def test_subprocess_self_restart_lifecycle_and_inbound(
 
 
 @pytest.mark.usefixtures("runner_exec_env")
-async def test_subprocess_self_compact_lifecycle_and_inbound(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
+async def test_subprocess_self_compact_lifecycle_and_inbound(tmp_path: Path) -> None:
     _seed_agent_for_self_lifecycle()
 
     result = await _run(
         tmp_path,
         _self_lifecycle_code("meiva.self.compact('audit e2e summary')"),
-        database_gate=database_gate,
     )
 
     assert isinstance(result, ExecLifecycle)
@@ -569,9 +523,7 @@ async def test_subprocess_self_compact_lifecycle_and_inbound(
     assert content == "audit e2e summary"
 
 
-async def test_subprocess_unknown_lifecycle_class_crashes(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
+async def test_subprocess_unknown_lifecycle_class_crashes(tmp_path: Path) -> None:
     result = await _run(
         tmp_path,
         (
@@ -581,7 +533,6 @@ async def test_subprocess_unknown_lifecycle_class_crashes(
             "        super().__init__(0)\n"
             "raise _MysteryLifecycle()\n"
         ),
-        database_gate=database_gate,
     )
 
     assert isinstance(result, ExecCrashed)
@@ -590,9 +541,7 @@ async def test_subprocess_unknown_lifecycle_class_crashes(
     assert result.exc.exc_msg == ("child reported unknown lifecycle class '_MysteryLifecycle'")
 
 
-async def test_subprocess_kills_process_group_on_timeout(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
+async def test_subprocess_kills_process_group_on_timeout(tmp_path: Path) -> None:
     pid_file = tmp_path / "grandchild.pid"
     code = (
         "import subprocess, time\n"
@@ -600,7 +549,7 @@ async def test_subprocess_kills_process_group_on_timeout(
         f"open({str(pid_file)!r}, 'w').write(str(p.pid))\n"
         "time.sleep(60)\n"
     )
-    result = await _run(tmp_path, code, timeout=10.0, database_gate=database_gate)
+    result = await _run(tmp_path, code, timeout=10.0)
     assert isinstance(result, ExecTimedOut)
     gc_pid = int(pid_file.read_text(encoding="utf-8"))
     deadline = time.monotonic() + 5.0

@@ -59,7 +59,9 @@ async def _admit(
     )
     assert incarnation is not None
     assert await settle_hosted_runtime(
-        pool, incarnation, bus=EventBus.from_settings(), resources=None
+        pool,
+        incarnation,
+        bus=EventBus.from_settings(),
     )
     return incarnation
 

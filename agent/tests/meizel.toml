@@ -17,7 +17,6 @@ exports = ["agent_tests.py", "claim"]
 "test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONPATH" = 1
 "test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONUTF8" = 1
 "test_external.py#monkeypatch.setenv os.environ.MEIVA_CALLER_IDENTITY" = 1
-"test_resource_admission.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
 "test_compact_part2.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1

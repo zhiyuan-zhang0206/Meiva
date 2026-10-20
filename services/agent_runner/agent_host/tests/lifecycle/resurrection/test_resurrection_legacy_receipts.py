@@ -79,7 +79,6 @@ def _legacy_forced_beside_a_marked_neighbour(
         EventBus.from_settings(),
         other,
         resurrected_by="user",
-        local_machine=machine_identity.name(),
     )
     released = db.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect' "
@@ -161,7 +160,6 @@ def _earlier_life_receipt(
         EventBus.from_settings(),
         aid,
         resurrected_by="user",
-        local_machine=machine_identity.name(),
     )
     db.execute(
         "UPDATE agents_meta SET status='terminated',termination_source='user', "
@@ -213,7 +211,10 @@ def test_an_unowned_end_without_this_lifes_receipt_still_refuses(
 
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
         wake.resurrect_agent(
-            database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+            database,
+            event_bus,
+            aid,
+            resurrected_by="user",
         )
 
     assert status(db_conn, aid)[0] == "terminated"

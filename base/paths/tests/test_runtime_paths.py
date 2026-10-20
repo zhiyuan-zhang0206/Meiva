@@ -15,7 +15,6 @@ def test_runtime_path_uses_the_explicit_home_without_creating_it(
         (paths.exec_run_dir(home), "run/exec"),
         (paths.root_run_dir(home), "run/meiva-root"),
         (paths.root_manifests_path(home), "run/meiva-root/manifests.json"),
-        (paths.quarantined_exec_requests_dir(home), "quarantined-exec-requests"),
         (paths.computer_mcp_socket(home), "run/computer-mcp.sock"),
         (paths.insights_socket(home), "run/insights.sock"),
         (paths.insights_pidfile(home), "run/insights.pid"),

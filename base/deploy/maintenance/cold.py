@@ -15,9 +15,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.checkpoint_serializer import CheckpointSerializer
-from base.agents.incarnation import exec_request_evidence
 from base.log import logger
-from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import meiva_home
 from base.sessions import backend
 
@@ -26,62 +24,25 @@ _CONSUMER_MODULES = frozenset(
         "agent",
         "agent.loop",
         "agent.execution.child",
-        "agent.execution.owner_child",
-        "agent.execution.domain_owner",
         "services.agent_runner.agent_host.daemon",
     }
 )
 
 
-def require_no_consumers(conn: psycopg.Connection[Any], agent_id: int) -> None:
-    """Reject native consumers and unsettled exec requests; retain all PTYs.
-
-    Reuse the native session backend and the host probe's module/home scan.
-    Unknown home ownership is not proof of absence. Nothing here signals a
-    process or treats a persistent shell, watcher or browser as an exec child.
-
-    Exec request envelopes are judged by incarnation attribution and process
-    proof, and unreadable bytes additionally by the protocol bound
-    (base/agents/incarnation/exec_request_evidence.py). The caller established the retired host
-    is absent, so provably disposable evidence is quarantined — preserved with
-    a receipt, never deleted — while evidence that is still live or not
-    provably disposable refuses with its file, attribution and disposition
-    commands.
-    """
+# meiva:note
+# Reject native consumers; retain all PTYs.
+#
+# Reuse the native session backend and the host probe's module/home scan.
+# Unknown home ownership is not proof of absence. Nothing here signals a
+# process or treats a persistent shell, watcher or browser as an exec child.
+# A live exec child is a consumer: it names `agent.execution.child`.
+def require_no_consumers(agent_id: int) -> None:
     native_backend = backend.get_backend()
     if native_backend.has_session(f"meiva-agent-{agent_id}") or native_backend.list_sessions(
         prefix=f"meiva-boot-{agent_id}-"
     ):
         raise RuntimeError(f"legacy native consumer still owns agent {agent_id}")
-    _require_no_unsettled_exec(conn, agent_id)
     require_no_consumer_process()
-
-
-def _require_no_unsettled_exec(conn: psycopg.Connection[Any], agent_id: int) -> None:
-    row = conn.execute(
-        "SELECT runtime_generation,runtime_owner,incarnation_resources FROM agents_meta "
-        "WHERE id=%s",
-        (agent_id,),
-    ).fetchone()
-    incumbent = (
-        RuntimeIncarnation(agent_id, row[0], row[1])
-        if row is not None and row[0] is not None and row[1] is not None
-        else None
-    )
-    report = exec_request_evidence.quarantine_stale(
-        agent_id,
-        home=meiva_home(),
-        incumbent=incumbent,
-        resources=None if row is None else row[2],
-        reason="maintenance cold prepare",
-    )
-    if report.retained:
-        raise RuntimeError(
-            f"agent {agent_id} still has an unsettled exec request: "
-            + "; ".join(entry.describe() for entry in report.retained)
-            + ". "
-            + exec_request_evidence.disposition_hint(agent_id)
-        )
 
 
 def require_no_consumer_process(*, processes: Iterable[Any] | None = None) -> None:
@@ -156,7 +117,7 @@ def require_cold_end(conn: psycopg.Connection[Any], agent_id: int) -> None:
     read and the caller's use of it. The caller's row lock still binds all owner
     fields; this also rechecks the latest checkpoint identity.
     """
-    require_no_consumers(conn, agent_id)
+    require_no_consumers(agent_id)
     checkpoint_id = require_persisted_end(conn, agent_id)
     latest = conn.execute(
         "SELECT checkpoint_id FROM checkpoints WHERE thread_id=%s "

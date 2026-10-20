@@ -57,15 +57,16 @@ process-generation contract.
 the calls whose failure a test must be able to cause. A component that signals takes it as a
 required argument; a composition root passes `SYSTEM_PROCESS_CONTROL`.
 `ExecProcessDomain.launch_posix` takes the port with the launch and keeps that same one for
-every later group signal and member-group read.
+every later group signal. It starts the child in a new session, and `signal` and `kill_and_reap`
+reach the group only while the leader is unreaped: the leader's zombie keeps the group number
+reserved, so a reaped leader means the number may belong to someone else and nothing is sent.
 `tests/fake_process_control.FakeProcessControl` records the signals in
 order and sends none, refuses chosen targets, answers group and session reads from a table, and can
 forward to the system implementation for a test that signals a real child. Observing who is in a
-group stays with `group_closure` and `ownership`.
+group stays with `ownership`.
 
 ## Documented components
 
-- [[base/native_process/docs/group-closure.meiva.okf.md]] — Process-group closure core.
 - [[base/native_process/root_control/docs/root_control.meiva.okf.md]] — Root control contract — protocol and Unix-socket client.
 
 ## Captured code as an entry-owned value

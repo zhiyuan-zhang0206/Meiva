@@ -99,9 +99,7 @@ class TestResurrectIfTerminatedPlacement:
             *,
             trigger_inbound_id: int | None = None,
             trigger_inbound_kind: str | None = None,
-            local_machine: str,
         ) -> ResurrectAgentResponse:
-            del local_machine
             called["agent_id"] = agent_id
             called["resurrected_by"] = body.resurrected_by
             called["trigger_inbound_id"] = trigger_inbound_id
@@ -171,9 +169,8 @@ class TestResurrectIfTerminatedPlacement:
         machine_identity.set(name="gateway-host")
 
         async def _no_local(
-            _db: object, _bus: object, *_a: object, local_machine: str, **_kw: object
+            _db: object, _bus: object, *_a: object, **_kw: object
         ) -> ResurrectAgentResponse:
-            del local_machine
             raise AssertionError("remote-homed resurrect must not launch locally")
 
         monkeypatch.setattr(lifecycle, "resurrect_agent_op", _no_local)
@@ -404,9 +401,7 @@ class TestResurrectIfTerminatedNotificationGuard:
             *,
             trigger_inbound_id: int | None = None,
             trigger_inbound_kind: str | None = None,
-            local_machine: str,
         ) -> ResurrectAgentResponse:
-            del local_machine
             calls.append(agent_id)
             return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
 

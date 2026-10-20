@@ -76,7 +76,7 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
     # Graph-level timeout very short, inner timeout irrelevant (patched out)
     monkeypatch.setattr(config.settings.sandbox, "exec_node_timeout_seconds", 0.05)
 
-    async def _hang_forever(_db: object, *args, **kwargs):
+    async def _hang_forever(*args, **kwargs):
         await asyncio.Future()  # never completes
 
     monkeypatch.setattr(
@@ -127,7 +127,7 @@ async def test_exec_node_timeout_does_not_fire_when_fast(
     from agent.graph.exec.node import ExecDone, ExecResult
     from agent.graph.exec.protocol import ResultPayload
 
-    async def _fast_return(_db: object, *args, **kwargs) -> tuple[ExecResult, ResultPayload | None]:
+    async def _fast_return(*args, **kwargs) -> tuple[ExecResult, ResultPayload | None]:
         return (ExecDone(output="hello"), None)
 
     monkeypatch.setattr(

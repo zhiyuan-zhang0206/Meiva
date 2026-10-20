@@ -1,7 +1,4 @@
-import asyncio
-import time
 from dataclasses import replace
-from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -10,8 +7,6 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 import services.agent_runner.agent_host.host as agent_host_host
-from agent.graph.exec._subprocess import run_in_subprocess
-from agent.ownership import hosted
 from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.agents.context import MeivaContext
 from base.agents.impersonation import ImpersonationError
@@ -24,7 +19,6 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
-from meiva.tests.fixtures.pin_agent import exec_context as ctx_of
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
@@ -141,7 +135,6 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
             event_bus,
             incarnation,
             outcome,
-            resources=None,
         )
         assert db_conn.execute(
             "SELECT status, last_turn_fatal_at FROM agents_meta WHERE id=%s", (agent_id,)
@@ -270,7 +263,10 @@ async def test_the_held_wake_force_guard_stops_quietly(
     host = _host(
         _raising_graph(), aops_pool, model_catalog=model_catalog, database_gate=database_gate
     )
-    await host._run_held_controls(agent_id, "running", resources=None)
+    await host._run_held_controls(
+        agent_id,
+        "running",
+    )
 
 
 async def test_an_observed_force_still_crashes(
@@ -492,79 +488,3 @@ async def test_a_lapsed_lease_still_crashes(
                 native_work=None,
             ),
         )
-
-
-def _assert_failed_exec_owner(owner: object, pid: int, failure: BaseException) -> None:
-    from agent.graph.exec._process import DomainCloseOwner
-
-    assert isinstance(owner, DomainCloseOwner)
-    assert owner.pid == pid
-    assert owner.task.done()
-    assert owner.task.exception() is failure
-    assert owner.reap_task is not None
-    assert owner.reap_task.done()
-    assert owner.reap_task.exception() is failure
-
-
-async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    database: Database,
-    event_bus: EventBus,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    from agent.graph.exec._result import ExecCrashed
-    from base.native_process.exec_domain import ExecProcessDomain
-    from base.native_process.turn_identity import HostedTurnResources
-
-    agent_id = agent_row(db_conn)
-    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-    original_close = ExecProcessDomain.close_confirmed
-    failure = PermissionError("injected unverifiable domain closure")
-    closed_domains: list[ExecProcessDomain] = []
-
-    def failed_close(domain: ExecProcessDomain, deadline: float) -> None:
-        closed_domains.append(domain)
-        original_close(domain, deadline)
-        raise failure
-
-    monkeypatch.setattr(ExecProcessDomain, "close_confirmed", failed_close)
-    scope = HostedTurnResources()
-    ctx = replace(ctx_of(agent_id), original_incarnation=incarnation, hosted_resources=scope)
-    outcome, _ = await run_in_subprocess(
-        database,
-        "print('resource-proof')",
-        ctx,
-        asyncio.Event(),
-        10,
-        exec_dir=tmp_path,
-        accumulation_max_chars=1_000_000,
-    )
-    (domain,) = closed_domains
-    try:
-        assert isinstance(outcome, ExecCrashed)
-        assert "teardown failure" in outcome.output
-        assert len(scope.unresolved) == 1
-        path, owner = next(iter(scope.unresolved.items()))
-        assert path.exists()
-        _assert_failed_exec_owner(owner, domain.proc.pid, failure)
-        assert not scope.complete(path, object())
-        assert scope.unresolved[path] is owner
-        assert domain.proc.returncode is None
-        assert (
-            await hosted.apply_hosted_lifecycle(
-                aops_pool, incarnation, bus=event_bus, resources=scope
-            )
-            is None
-        )
-        assert not await hosted.settle_hosted_runtime(
-            aops_pool, incarnation, bus=event_bus, resources=scope
-        )
-        assert scope.unresolved[path] is owner
-        assert domain.proc.returncode is None
-    finally:
-        original_close(domain, time.monotonic() + 5)
-        domain.proc.wait(timeout=5)

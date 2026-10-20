@@ -70,7 +70,6 @@ def test_reassigned_task_refuses_delayed_home_wake(
             resurrected_by="system",
             trigger_inbound_id=selected[0][1],
             trigger_inbound_kind=InboundKind.SYSTEM_NOTE,
-            local_machine=machine_identity.name(),
         )
     assert status(db_conn, owner)[0] == "terminated"
     assert db_conn.execute(

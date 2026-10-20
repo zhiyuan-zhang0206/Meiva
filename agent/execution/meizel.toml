@@ -1,9 +1,7 @@
-exports = ["child.py", "domain_owner.py"]
+exports = ["child.py"]
 
 [uses]
-"domain_owner.py" = ["owner_child.py"]
-"owner_child.py" = ["child.py"]
-"tests" = ["child.py", "owner_child.py"]
+"tests" = ["child.py"]
 
 [external]
 "child.py" = "executes the agent-authored code of one execute_code call"
