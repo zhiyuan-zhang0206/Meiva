@@ -210,6 +210,12 @@ state is delivery bookkeeping, not completion: the resume note directs the
 native agent to review acknowledged messages for work the summary does not
 show as finished.
 
+The native runtime records that receipt at the next durable boundary it reaches,
+including the held wake that ends the takeover itself: a replacement runtime's
+admission after a restart, and a relay-death abort under supervision. That wake
+records the handoff before it goes idle, so a fresh request never waits for an
+unrelated message to wake a silent agent.
+
 ## Return control
 
 Stop external work and close attachments before releasing:
