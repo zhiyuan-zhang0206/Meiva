@@ -269,7 +269,7 @@ describe("MessageCard", () => {
   // meiva:note
   // The footer is the card's OUTSIDE bottom-right band: a sibling of the card box, so the box keeps its own padding and background and the footer never overlaps the body. It takes its own line (content-visibility paint containment would clip a floating band) and is invisible and click-through until the pointer hovers the card or focus enters it.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  it("footer → sits outside and below the card box, right-aligned, hidden until hover or focus-within", () => {
+  it("footer → floats in the card box's bottom-right corner, hidden until hover or focus-within", () => {
     const { container, getByText } = render(
       <MessageCard config={cfg} footer={<span>act</span>}>
         <div>hello</div>
@@ -283,7 +283,8 @@ describe("MessageCard", () => {
     const box = band?.previousElementSibling;
     expect(box?.className).toContain("bg-red-50");
     expect(box?.contains(band)).toBe(false);
-    expect(band?.className).not.toContain("absolute");
+    expect(band?.className).toContain("absolute");
+    expect(band?.className).toContain("bottom-0");
     expect(band?.className).toContain("justify-end");
     expect(band?.className).toContain("opacity-0");
     expect(band?.className).toContain("pointer-events-none");

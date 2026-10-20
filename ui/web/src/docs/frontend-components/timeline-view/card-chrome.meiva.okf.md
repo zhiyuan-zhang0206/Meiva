@@ -1,26 +1,33 @@
 ---
 type: doc
 title: Timeline card chrome
-description: The hover-revealed footer under a message card — the item timestamp and Copy, its placement outside the card box, and the hover, focus and touch rules.
+description: The hover-revealed footer of a message card — the item timestamp and Copy, its placement in the box's bottom-right corner, and the hover, focus and touch rules.
 tags:
 - frontend
 ---
 
 # Timeline card chrome
 
-`components/timeline/card.tsx` — `MessageCard`. A card has two parts: the tinted
-box (left accent, clickable header, collapsible body) and the **footer** that
-follows it. The footer is a sibling of the box, not part of it, so the box keeps
-its own padding and background and the footer never covers the body. It holds
-the item timestamp (`components/timeline/timestamp.tsx`, `ItemTimestamp`) and, for an expanded, settled
-body, Copy; either half can stand alone, and a card with neither mounts no
-footer and does not join the hover group.
+`components/timeline/card.tsx` — `MessageCard`. A card is the tinted box (left
+accent, clickable header, collapsible body) plus a **footer** holding the item
+timestamp (`components/timeline/timestamp.tsx`, `ItemTimestamp`) and, for an
+expanded, settled body, Copy; either half can stand alone, and a card with
+neither mounts no footer and does not join the hover group.
 
-The footer takes its own line under the box, right-aligned in the card's
-`text-[13px]` column. It stays in the flow rather than floating over the
-inter-row gap: `.timeline-item` carries `content-visibility: auto`, whose paint
-containment clips anything drawn past the row box, and reserving the line also
-keeps the card from jumping when the chrome appears.
+The footer **floats in the box's own bottom-right corner** and takes no layout
+height. It used to take a line under the box, and only the kinds that stamp a
+timestamp or offer Copy got that line — so the gap between two cards depended on
+which kinds they were (12px between two plain cards, 28px between two stamped
+ones; user report 2026-10-21). Floating makes every gap the row spacing, 12px. It
+stays inside the box because `.timeline-item` carries `content-visibility: auto`,
+whose paint containment clips anything drawn past the row box; the price is that
+the revealed chrome sits over the body's bottom-right corner, which the hover
+gate makes transient (it is only ever painted while the pointer is on the card or
+focus is inside it).
+
+The stamp carries no brackets (`2026-05-06 16:56:29`, not `[2026-05-06 …]`) and
+renders at `text-[9px]`; Copy is a `size-3` icon at `p-0.5`. Both are chrome, not
+content, so they stay small enough to read as a footer aside.
 
 ## Reveal rules
 
@@ -34,14 +41,13 @@ keeps the card from jumping when the chrome appears.
 `opacity: 0` alone still hit-tests, so the hidden state gates `pointer-events`
 too. The hidden chrome deliberately stays in the accessibility tree: a screen
 reader does not hover, and removing the footer from it would take Copy away from
-every non-pointer user. A touch device has no reveal gesture at all, so there
-the footer is simply visible — it sits outside the box, so it cannot cover the
-body the way the old in-card pill did (user report 2026-10-17).
+every non-pointer user. A touch device has no reveal gesture at all, so there the
+footer is simply visible.
 
 ```meiva-contract
 id = "card-actions-overlay"
 kind = "invariant"
-statement = "A card's timestamp and Copy live in a hover footer outside the card box: it is invisible and click-through until the pointer hovers the card or focus enters it, and a coarse pointer, which cannot hover, keeps it visible."
+statement = "A card's timestamp and Copy float in the card box's bottom-right corner and take no layout height, so every pair of cards is the same row spacing apart: the chrome is invisible and click-through until the pointer hovers the card or focus enters it, and a coarse pointer, which cannot hover, keeps it visible."
 code = ["ui/web/src/components/timeline/card.tsx:MessageCard"]
 tests = ["ui/web/src/components/timeline/timeline.test.tsx::card hover footer"]
 ```
