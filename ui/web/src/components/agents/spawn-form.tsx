@@ -21,7 +21,7 @@ import { api } from "@/lib/transport/api";
 import { SpawnTable, type SpawnMachine } from "./spawn-table";
 import { groupedModels, isSuperseded, runsOnHarness } from "@/lib/contracts/models";
 import { useUserSettings } from "@/lib/state/use-user-settings";
-import { FLEX } from "@/lib/layout/layout";
+import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 interface SpawnOpts {
@@ -102,16 +102,19 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
   // row and is disabled with the reason, so the picker says what exists instead
   // of hiding it (user 2026-10-20).
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-  const machines: SpawnMachine[] = [...eligible]
+  const machines: SpawnMachine[] = allMachines
+    .filter((m) => m.serve_agent_runner && !m.paused)
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((m) => ({
       name: m.name,
       reason:
-        m.agent_host_online === true
-          ? undefined
-          : m.agent_host_online === false
-            ? t("hostUnavailable")
-            : t("hostUnknown"),
+        !m.online
+          ? t("machineOffline")
+          : m.agent_host_online === true
+            ? undefined
+            : m.agent_host_online === false
+              ? t("hostUnavailable")
+              : t("hostUnknown"),
     }));
   // meiva:note
   // A pick survives a status refresh only while that machine is still offered;
@@ -261,7 +264,14 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
   const spawnReason = target?.reason ?? (harnessBlocked ? t("harnessStatus.unavailable") : undefined);
 
   return (
-    <div className="rounded-md border border-border bg-popover text-popover-foreground">
+    // meiva:note
+    // The action sits to the right of the table, not under it: a footer row made
+    // the popover read as a narrow, tall strip (user 2026-10-20). The rail is a
+    // fixed-width column, so the table keeps its own width and the button lines up
+    // with the columns it acts on.
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    <div className={cn("rounded-md border border-border bg-popover text-popover-foreground", FLEX)}>
+      <div className={cn(MIN_W_0, FLEX_1)}>
       <SpawnTable
         machines={machines}
         machine={selectedMachine}
@@ -283,14 +293,15 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
         // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
         prices={tableHarnessRows.find((row) => row.harness === selectedHarness)?.billing === "api"}
       />
-      <div className="border-t border-border">
+      </div>
+      <div className={cn("w-[5.5rem] shrink-0 justify-end border-l border-border p-2", FLEX, FLEX_COL)}>
         <button
           type="button"
           disabled={spawnReason !== undefined || selectedMachine === undefined}
           title={spawnReason}
           onClick={() => { if (selectedMachine !== undefined) spawnOn(selectedMachine); }}
           className={cn(
-            "w-full items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium hover:bg-sidebar-accent disabled:opacity-50",
+            "w-full items-center justify-center gap-1.5 rounded-sm border border-border px-2 py-1.5 text-xs font-medium hover:bg-sidebar-accent disabled:opacity-50",
             FLEX,
           )}
         >

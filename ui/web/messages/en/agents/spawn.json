@@ -14,6 +14,7 @@
   "spawnAgent": "Spawn agent",
   "hostUnavailable": "Agent host unavailable",
   "hostUnknown": "Agent host status unknown",
+  "machineOffline": "machine offline",
   "noReadyRunner": "No agent runner with an available host",
   "priceBreakdown": "Input / cache read / output, USD per 1M tokens",
   "pricingConditions": "Current base-tier rates. Longer contexts and scheduled rate windows may change pricing.",
