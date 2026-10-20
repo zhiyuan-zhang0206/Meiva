@@ -2908,7 +2908,9 @@ export interface components {
             status: "available" | "unavailable" | "unknown";
             reason: string;
             launchable: boolean;
+            billing: components["schemas"]["HarnessBilling"];
         };
+        HarnessBilling: "api" | "subscription";
         HeartbeatInfo: {
             interval_s: number;
             next_at?: string | null;
