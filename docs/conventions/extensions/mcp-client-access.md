@@ -18,13 +18,12 @@ The endpoint ships **off** — flag-gated so a cluster that does not use it is
 completely unaffected (off, `/mcp` answers 404):
 
 ```bash
-# in the gateway home's .env, on the gateway host:
-MEIVA_MCP_ENDPOINT_ENABLED=true
+meiva config set MEIVA_MCP_ENDPOINT_ENABLED true
 # then restart the gateway: the flag is read at gateway start
 ```
 
-No config write sets the flag: `meiva config set` (API or `--local`) refuses it and
-the settings panel shows it read-only. Edit the gateway `.env` on its host.
+The flag is an ordinary cluster-pinned setting (config API, `meiva config set`, or the
+gateway `.env`); `/mcp` adds no authority beyond the API.
 
 ## Connect a client
 

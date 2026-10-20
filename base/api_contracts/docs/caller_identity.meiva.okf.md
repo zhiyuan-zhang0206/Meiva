@@ -53,10 +53,9 @@ immutable payload. Other sources receive no inferred identity.
   messages (`agent_messages`); `user` is `user_input`.
 - **Timeline / UI**: the inbound row carries `source`; the web timeline shows a
   declared external agent as its own sender kind, not as the human or system.
-- **MCP**: `send_message` attributes to the user by default. With
-  `as_external_agent=true` the server derives
-  `external_agent:mcp:<client-id>` from the authenticated client row; the caller
-  cannot pass `source` or `instance`.
+- **MCP**: `send_message` takes a `source` argument (default `user`) and forwards it
+  unchanged to the API route, which validates it; a caller declares
+  `external_agent:<subject>[:<instance>]` itself.
 
 Never wrap external provenance in `system:*` or `agent:*`. A caller field
 accepted by an HTTP schema but discarded before persistence is not structured

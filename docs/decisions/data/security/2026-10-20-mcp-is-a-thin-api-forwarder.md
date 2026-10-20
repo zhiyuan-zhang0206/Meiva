@@ -48,8 +48,10 @@ rest is deleted.
   They cannot be revoked individually, cannot be limited to read-only, and appear in audit and
   idempotency scopes as the cluster administrator, not as a named client. Existing client tokens
   stop working when the migration drops the tables.
-- `send_message` with `as_external_agent` declares the fixed source `external_agent:mcp`; the
-  per-client instance suffix is gone.
+- `send_message` takes a `source` argument (default `user`) and `spawn_agent_guarded_v1` takes
+  `prompt_source` and `spawner`; all pass to the API unchanged and the API validates them, so a
+  caller declares its own `external_agent:<subject>[:<instance>]`. There is no server-derived
+  client instance any more.
 - `get_messages` returns the API's raw message window (`messages`, `msg_count`, `start_index`,
   `has_more`) instead of the former role/text/code projection.
 - A change to an API route is a change to its MCP tool; the tool surface stays seven tools.

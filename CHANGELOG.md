@@ -12,7 +12,8 @@ and the matching GitHub Releases.
   it authenticates like any API route (cluster bearer, session or `trusted_network`), each
   tool is one in-process request to its API route, and an API error becomes the tool error.
   MCP client tokens, their `read`/`write` scopes, the `/api/mcp/clients` routes, the
-  `mcp_clients` tables and the `mcp_tool_call` audit event are removed; `get_messages` returns
+  `mcp_clients` tables and the `mcp_tool_call` audit event are removed; `send_message` takes a `source` and
+  `spawn_agent_guarded_v1` a `prompt_source` and `spawner` that the API validates; `get_messages` returns
   the API's raw message window
   ([decision](docs/decisions/data/security/2026-10-20-mcp-is-a-thin-api-forwarder.md)).
 - A notification is only a request that needs the user's reply (user ruling 2026-10-19).
@@ -55,7 +56,7 @@ and the matching GitHub Releases.
   delivers as a message from that declared agent (shown with its name in the
   agent's context and in the web timeline). The runtime-protocol negotiation
   that refused every declared external agent is gone; MCP `send_message` takes
-  `as_external_agent` in place of `caller_protocol`.
+  a `source` argument (default `user`), validated by the API, in place of `caller_protocol`.
 - Alert noise from the 2026-10-02/03 triage is downgraded to what each cause
   earns: private-storage convergence skips are one summary WARNING per tree
   (per-node DEBUG, `node_modules` no longer descended — the 18,516-line/24h

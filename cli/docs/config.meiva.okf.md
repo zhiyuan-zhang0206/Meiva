@@ -28,9 +28,8 @@ the gateway.
 Keys that decide who authenticates to the cluster are read-only on every config write path (the API, the ops op and
 `--local`): `MEIVA_CLUSTER_SECRET` rotates only through
 `scripts/data_plane_ops/rotate_cluster_secret.py`, and
-`MEIVA_ALERTS_WEBHOOK_TOKEN` change only by editing the gateway `.env` on its host
-(`MEIVA_MCP_ENDPOINT_ENABLED` is read-only the same way; `/mcp` authenticates like
-the API and adds no authority). Otherwise any authenticated caller, a machine token included, could pick
+`MEIVA_ALERTS_WEBHOOK_TOKEN` change only by editing the gateway `.env` on its host.
+Otherwise any authenticated caller, a machine token included, could pick
 a credential that outlives its own admission. Writable secrets are outbound
 credentials (provider, search, chat and backup-store keys) only;
 `base/config/tests/test_config_editing.py` pins that classification.

@@ -337,28 +337,6 @@ def test_a_machine_token_cannot_choose_the_human_secret(
     assert not (store / ".env").exists()
 
 
-def test_a_machine_token_cannot_open_the_mcp_endpoint(
-    gateway_data_plane: None,
-    gateway: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
-) -> None:
-    from base.host.env import dotenv_file
-
-    store = tmp_path / "config-store"
-    store.mkdir()
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: store)
-    monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
-    runner = _tokens(gateway).api.runner
-    with gateway_test_client(machine=machine_identity) as client:
-        resp = client.put(
-            "/api/config", json={"mcp_endpoint_enabled": True}, headers=bearer_header(runner)
-        )
-    assert resp.status_code == 400, resp.text
-    assert not (store / ".env").exists()
-
-
 def _webhook_request(authorization: str | None) -> Request:
     headers = [] if authorization is None else [(b"authorization", authorization.encode())]
     return Request(

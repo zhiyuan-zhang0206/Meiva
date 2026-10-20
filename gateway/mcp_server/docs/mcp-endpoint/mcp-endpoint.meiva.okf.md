@@ -27,8 +27,8 @@ tool returns.
 | `list_agents` | `GET /api/agents` (`scope`, `query`, `before_id`, `limit` as query parameters) |
 | `get_agent` | `GET /api/agents/{agent_id}` |
 | `cluster_status` | `GET /api/cluster/status` |
-| `spawn_agent_guarded_v1` | `POST /api/keyed/v1/agents` (`Idempotency-Key` from `idempotency_key`; body `prompt`, `prompt_source=user`, `spawner=mcp`, `label`, `machine`, `config=config_overlay`) |
-| `send_message` | `POST /api/agents/{agent_id}/messages` (body `content`, `source` = `user`, or `external_agent:mcp` with `as_external_agent`; optional `Idempotency-Key`) |
+| `spawn_agent_guarded_v1` | `POST /api/keyed/v1/agents` (`Idempotency-Key` from `idempotency_key`; body `prompt`, `prompt_source` (default `user`), `spawner` (default `mcp`), `label`, `machine`, `config=config_overlay`) |
+| `send_message` | `POST /api/agents/{agent_id}/messages` (body `content`, `source`, default `user`, passed unchanged and validated by the API; optional `Idempotency-Key`) |
 | `get_messages` | `GET /api/agents/{agent_id}/messages` (`limit`) |
 | `terminate_agent` | `POST /api/agents/{agent_id}/terminate` (body `message`, `force`) |
 
