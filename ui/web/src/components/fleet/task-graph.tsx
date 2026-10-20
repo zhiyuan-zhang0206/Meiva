@@ -22,16 +22,18 @@ import { CheckCheck, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { WindowSelect, type WindowOption } from "@/components/agents/window-select";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
 import { formatRelative, formatUptime } from "@/lib/format/time";
-import type { TaskRow, TaskStatus } from "@/lib/contracts/types";
+import type { TaskGraphRow, TaskStatus, TaskSummaryRow } from "@/lib/contracts/types";
 import { useTasks, type TaskWindow } from "@/lib/notifications/use-tasks";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { cn } from "@/lib/format/utils";
+import { api } from "@/lib/transport/api";
 
 import {
   FORCE_DEFAULTS,
@@ -71,7 +73,7 @@ const NODE_FILL: Record<string, string> = {
 
 // Fill for a task's node / status dot: reserved violet for the root (the sole
 // parent-less row), otherwise the task's status color.
-function taskFill(task: TaskRow): string {
+function taskFill(task: TaskSummaryRow): string {
   return task.parent_id == null ? ROOT_FILL : STATUS_FILL[task.status];
 }
 
@@ -113,13 +115,23 @@ function TaskHoverCard({
   ownerLabel,
   parentTitle,
 }: {
-  task: TaskRow;
+  task: TaskSummaryRow;
   /** Resolved owner display ("label #id" / "Agent #id" / "Unowned"). */
   ownerLabel: string;
   /** Parent display ("title (#id)") or null when the task has no parent. */
   parentTitle: string | null;
 }) {
   const t = useTranslations("fleet.task");
+  // meiva:note
+  // The list carries no text columns; the card fetches the one row it shows and
+  // renders its description/result once it lands. A failed read says so in one
+  // line instead of an empty card.
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  const full = useQuery({
+    queryKey: ["task", task.id],
+    queryFn: () => api.getTask(task.id),
+    staleTime: Infinity,
+  });
   const statusLabels: Record<string, string> = {
     in_progress: t("status.inProgress"),
     done: t("status.done"),
@@ -180,25 +192,31 @@ function TaskHoverCard({
         </p>
       ) : null}
 
-      {task.description ? (
+      {full.data?.description ? (
         <div className="mt-2 border-t border-border pt-2">
           <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
             {t("meta.description")}
           </p>
           <div className={cn("mt-0.5 max-h-24 break-words text-[11px] leading-snug text-popover-foreground/90", OVERFLOW_HIDDEN)}>
-            <ChatMarkdown content={task.description} />
+            <ChatMarkdown content={full.data.description} />
           </div>
         </div>
       ) : null}
-      {task.results ? (
+      {full.data?.results ? (
         <div className="mt-2 border-t border-border pt-2">
           <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
             {t("meta.result")}
           </p>
           <div className={cn("mt-0.5 max-h-24 break-words text-[11px] leading-snug text-popover-foreground/90", OVERFLOW_HIDDEN)}>
-            <ChatMarkdown content={task.results} />
+            <ChatMarkdown content={full.data.results} />
           </div>
         </div>
+      ) : null}
+
+      {full.isError ? (
+        <p data-testid="task-detail-failed" className="mt-2 border-t border-border pt-2 text-[10px] text-muted-foreground">
+          {t("fullFailed")}
+        </p>
       ) : null}
 
       <p className="mt-2 border-t border-border pt-1.5 text-[9px] text-muted-foreground/60">
@@ -367,7 +385,7 @@ export function TaskGraph({
       ? windowRaw
       : "24h";
   const setTaskWindow = (w: TaskWindow) => setSetting("display.task_window", w);
-  const { tasks, loading, error } = useTasks(taskWindow, "full");
+  const { tasks, loading, error } = useTasks(taskWindow, "graph");
   const showDone = settings["display.task_show_done"] === true;
   const setShowDone = (v: boolean) => setSetting("display.task_show_done", v);
   const showCanceled = settings["display.task_show_canceled"] === true;
@@ -437,10 +455,10 @@ export function TaskGraph({
   // graph as dimmed ghost nodes so the tree stays connected — graph-only
   // (the kanban is a flat list with no parent edges).
   const ghostTasks = useMemo(() => {
-    if (subtasks.length === 0) return [] as TaskRow[];
+    if (subtasks.length === 0) return [] as TaskGraphRow[];
     const visible = new Set(subtasks.map((t) => t.id));
     const byId = new Map(tasks.map((t) => [t.id, t]));
-    const ghosts = new Map<number, TaskRow>();
+    const ghosts = new Map<number, TaskGraphRow>();
     for (const t of subtasks) {
       let cur = t.parent_id == null ? undefined : byId.get(t.parent_id);
       // Walk up while the parent exists, is hidden, and is not the root (the

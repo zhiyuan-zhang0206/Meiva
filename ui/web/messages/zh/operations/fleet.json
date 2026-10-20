@@ -78,6 +78,7 @@
     },
     "reminders": "{count} 次提醒",
     "lastReminder": "上次 {time}",
+    "fullFailed": "无法加载任务全文。",
     "openOwnerConversation": "双击节点以打开负责人的对话",
     "stale": "数据过期",
     "window": "时间窗口",
