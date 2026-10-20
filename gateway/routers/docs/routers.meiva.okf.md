@@ -57,7 +57,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 - **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over `telemetry_events`
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — terminal session monitor (session backend proxy)
-- **tasks** (`/api/tasks` GET + `/api/tasks/{id}` PATCH) — [[task-patch-receipts.meiva.okf.md|task registry read + keyed partial update]] (no create; an owner reassignment notifies the new and, when live, previous owner); GET defaults to a full compatibility row or serves a metadata-only SQL projection with `fields=summary`; rows carry `priority` (`P0`..`P3`, validated, illegal 422)
+- **tasks** (`/api/tasks` GET, `/api/tasks/{id}` GET + PATCH) — [[task-patch-receipts.meiva.okf.md|task registry read + keyed partial update]] (no create; an owner reassignment notifies the new and, when live, previous owner); the list defaults to a full compatibility row or serves a SQL projection — `fields=summary` (metadata only) or `fields=graph` (summary plus `description`, never `results`) — and the single-task GET is the hover card's read of one full row, including `results`; rows carry `priority` (`P0`..`P3`, validated, illegal 422)
 - **memory** (`/api/memory/search`, `/refresh`, `/graph`) — [[memory.meiva.okf.md|shared checkout ownership and bounded search]]; a search stops when its client disconnects
 - **commands** (`/api/commands`) — slash command list acceptable by composer
 - **auth** (`/api/auth/login|logout|check|sessions`) — opaque server-side session login, validation, listing, and per-session revocation
