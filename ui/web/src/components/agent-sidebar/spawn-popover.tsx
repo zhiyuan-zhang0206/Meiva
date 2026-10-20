@@ -5,7 +5,7 @@ import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { SpawnButton } from "@/components/agents/spawn-button";
+import { SpawnForm } from "@/components/agents/spawn-form";
 import { cn } from "@/lib/format/utils";
 
 import { SidebarIconButton } from "./icon-button";
@@ -20,7 +20,7 @@ import { SidebarIconButton } from "./icon-button";
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
 interface Props {
-  onSpawn: Parameters<typeof SpawnButton>[0]["onSpawn"];
+  onSpawn: Parameters<typeof SpawnForm>[0]["onSpawn"];
   variant: "icon" | "cta";
 }
 
@@ -50,9 +50,9 @@ export function SpawnPopover({ onSpawn, variant }: Props) {
         <Popover.Content
           sideOffset={6}
           align="end"
-          className={cn("z-50 w-[460px] max-w-[92vw] rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-md outline-none")}
+          className={cn("z-50 w-[660px] max-w-[94vw] text-popover-foreground outline-none")}
         >
-          <SpawnButton variant="sm" onSpawn={(opts) => { onSpawn(opts); setOpen(false); }} />
+          <SpawnForm onSpawn={onSpawn} onDone={() => setOpen(false)} />
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
