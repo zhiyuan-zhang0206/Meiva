@@ -81,7 +81,7 @@ def _postgres_facts(*, path_reader: Callable[[], Path | None]) -> str:
     except Exception as exc:
         return f"not read ({type(exc).__name__}); the health probe judges it once Postgres is up"
     if expected is not None and probe.settings_differ(state, expected):
-        verdict = "differs from the configuration (meiva stop, then meiva start, to apply)"
+        verdict = "differs from the configuration (stop, then start this unit again, to apply)"
     else:
         verdict = "matches the configuration"
     return (

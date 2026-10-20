@@ -64,7 +64,7 @@ CONFIG_UNUSABLE = "WAL archiving: the WAL-G configuration is unusable"
 KEY_CHANGED = "WAL archiving: the encryption key is not the key this home pinned"
 SETTINGS_DIFFER = (
     "WAL archiving: Postgres is not running with the configured archive settings "
-    "(meiva stop, then meiva start)"
+    "(stop, then start this unit again)"
 )
 ARCHIVER_FAILING = "WAL archiving: the archiver is failing"
 ARCHIVE_BEHIND = "WAL archiving: complete WAL has been waiting for archive beyond the RPO objective"

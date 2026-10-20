@@ -80,7 +80,6 @@ def hermetic_start(
     db_url: str,
     serving_root: RootBirth,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -90,11 +89,9 @@ def hermetic_start(
         return serving_root.runtime
 
     monkeypatch.setattr(start_runtime.StartRuntime, "identity", fixture_runtime)
-    from base.deploy.lifecycle import service_selection
     from cli.commands.data_plane import bringup
     from cli.commands.extensions import materialize
 
-    monkeypatch.setattr(service_selection, "selection_path", lambda: tmp_path / "selection.json")
     monkeypatch.setattr(start, "prod_service_checkout_error", _ignoring_args(lambda: None))
     monkeypatch.setattr(start, "ensure_gateway_data_plane", _ignoring_retention(lambda: 0))
     monkeypatch.setattr(bringup, "prepare_gateway_schema", lambda _config: None)  # pyright: ignore[reportUnknownArgumentType]
@@ -157,6 +154,9 @@ def test_unready_frontend_is_failure_and_never_serving(
     monkeypatch.setattr(_probe_commands, "probe_service", probe)
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -183,6 +183,9 @@ def test_live_repeat_start_never_runs_mutating_preparation(
     monkeypatch.setattr(cluster, "assert_checkpoint_schema_current", _ignoring_args(lambda: None))
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -205,6 +208,9 @@ def test_start_marks_serving_for_live_and_cold_admission(
     monkeypatch.setattr(cluster, "assert_checkpoint_schema_current", _ignoring_args(lambda: None))
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -222,11 +228,6 @@ def test_changed_live_generation_refuses_before_selection_or_converge(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    from base.deploy.lifecycle import service_selection
-
-    service_selection.resolve_selection({"gateway", "frontend"}, only=("gateway",))
-    before = service_selection.selection_path().read_bytes()
-
     def changed(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("changed source generation")
 
@@ -241,6 +242,8 @@ def test_changed_live_generation_refuses_before_selection_or_converge(
     )
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
             all_services=True,
             retained_children=[],
             database_factory=operator_database,
@@ -249,7 +252,6 @@ def test_changed_live_generation_refuses_before_selection_or_converge(
         )
         == 1
     )
-    assert service_selection.selection_path().read_bytes() == before
 
 
 def test_live_schema_mismatch_refuses_without_applying_migrations(
@@ -271,6 +273,9 @@ def test_live_schema_mismatch_refuses_without_applying_migrations(
     )
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -299,6 +304,9 @@ def test_failed_launch_never_becomes_serving(
     monkeypatch.setattr(_root_driver_commands, "launch_service_tree", failed)
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -309,7 +317,7 @@ def test_failed_launch_never_becomes_serving(
     assert not start_serving.is_serving()
 
 
-def test_cold_preparation_receives_candidate_selection_before_publication(
+def test_cold_preparation_receives_the_explicit_selection(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
@@ -317,7 +325,6 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
     command_runtime: CommandRuntime,
 ) -> None:
     from base.cluster.machine import MachineRoles
-    from base.deploy.lifecycle import service_selection
 
     prepared: list[frozenset[str]] = []
     roster(monkeypatch, (("gateway", None), ("otel-collector", None)))
@@ -335,13 +342,14 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
         assert command is command_runtime
         assert database_factory is operator_database
         assert producer is operator_pipeline
-        assert not service_selection.selection_path().exists()
         prepared.append(services)
 
     monkeypatch.setattr(converge_host, "converge_host", prepare)
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
             only_services=("gateway",),
+            all_services=False,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -350,7 +358,6 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
         == 0
     )
     assert prepared == [frozenset({"gateway"})]
-    assert service_selection.read_selection().names == frozenset({"gateway"})
 
 
 def test_lost_generation_never_reports_serving(
@@ -363,6 +370,9 @@ def test_lost_generation_never_reports_serving(
     monkeypatch.setattr(start_serving, "mark_serving", _ignoring_args(lambda: False))
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -372,7 +382,7 @@ def test_lost_generation_never_reports_serving(
     )
 
 
-def test_only_service_persists_for_repeated_start(
+def test_every_start_launches_exactly_the_selection_it_is_given(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
@@ -388,7 +398,9 @@ def test_only_service_persists_for_repeated_start(
     monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
             only_services=("gateway",),
+            all_services=False,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -398,6 +410,9 @@ def test_only_service_persists_for_repeated_start(
     )
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -405,7 +420,10 @@ def test_only_service_persists_for_repeated_start(
         )
         == 0
     )
-    assert launched == [("gateway",), ("gateway",)]
+    assert launched[0] == ("gateway",)
+    # meiva:note
+    # the second start names the full roster; nothing carried over
+    assert len(launched[1]) > 1
 
 
 def test_invalid_selection_never_launches(
@@ -422,7 +440,9 @@ def test_invalid_selection_never_launches(
     )
     with pytest.raises(ValueError, match="unknown"):
         _start_commands.cmd_start(
+            disabled_services=(),
             only_services=("typo",),
+            all_services=False,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -466,6 +486,9 @@ def test_storage_schema_migration_grants_pooler_precede_application(
     monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
     assert (
         _start_commands.cmd_start(
+            disabled_services=(),
+            only_services=(),
+            all_services=True,
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -499,6 +522,9 @@ def test_internal_start_leaves_boot_publication_to_public_dispatch(
         _ignoring_args(lambda: pytest.fail("public dispatch owns publication")),
     )
     assert _start_commands.cmd_start(
+        disabled_services=(),
+        only_services=(),
+        all_services=True,
         retained_children=[],
         database_factory=operator_database,
         producer=operator_pipeline,

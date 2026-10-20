@@ -193,7 +193,7 @@ def test_an_unknown_required_factory_parameter_is_not_silently_replaced(tmp_path
 
 
 def test_the_read_script_imports_nothing_from_cli_database_unconditionally() -> None:
-    read = fleet_update.read_rows_py()
+    read = fleet_update.program_text(fleet_update.VERIFY_SCRIPTS / "schedules_verify_read_rows.py")
     assert read.index("inspect.signature") < read.index("cli.database")
     assert not [
         line
@@ -203,11 +203,18 @@ def test_the_read_script_imports_nothing_from_cli_database_unconditionally() -> 
 
 
 def _render(new: str = "deadbeef") -> str:
-    return fleet_update.PRE_VERIFY.format(
+    script = fleet_update.program_text(fleet_update.VERIFY_SCRIPTS / "fleet_pre_verify.sh")
+    return script.format(
         home=fleet_update.HOME,
         new=new,
-        read_rows=shlex.quote(fleet_update.read_rows_py()),
-        check_rows=shlex.quote(fleet_update.check_rows_py()),
+        read_rows=shlex.quote(
+            fleet_update.program_text(fleet_update.VERIFY_SCRIPTS / "schedules_verify_read_rows.py")
+        ),
+        check_rows=shlex.quote(
+            fleet_update.program_text(
+                fleet_update.VERIFY_SCRIPTS / "schedules_verify_check_rows.py"
+            )
+        ),
     )
 
 
@@ -219,7 +226,9 @@ def test_the_check_goes_through_the_cli_entry_with_a_throwaway_home() -> None:
     assert "cmd_schedules_verify" not in script
     assert '(umask 077; MEIVA_HOME="$H"' in script  # the rows file holds every stored script
     assert 'rm -f "$R"' in script and 'worktree remove --force "$W"' in script
-    check_py = fleet_update.check_rows_py()
+    check_py = fleet_update.program_text(
+        fleet_update.VERIFY_SCRIPTS / "schedules_verify_check_rows.py"
+    )
     assert '"cli.main"' in check_py and '"schedules"' in check_py and '"verify"' in check_py
     assert '"--rows-file"' in check_py and '"--no-notify"' in check_py
 

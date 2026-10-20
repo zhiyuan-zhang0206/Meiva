@@ -146,7 +146,7 @@ def require_retired_helper(executable: Path) -> None:
         return
     raise RuntimeError(
         f"the installed permissions helper is stale but still in use ({blocker}); "
-        "run `meiva stop` first, then `meiva start` replaces it"
+        "run `meiva stop` first (see `meiva stop --help`), then `meiva start` with this unit's explicit service selection replaces it"
     )
 
 

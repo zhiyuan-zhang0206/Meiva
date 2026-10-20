@@ -174,7 +174,7 @@ Enumerate application services through `meiva status`; persistent shells through
 `meiva sessions list`. Idle and paused agent identities remain durable even when
 no active turn task is running; see [agent runtime](../../agent/docs/agent-runtime/agent-runtime.meiva.okf.md).
 
-PTY closure is best effort: known shells/terminals close with bounded signals;
+PTY closure is best effort: known shell sessions close with bounded signals;
 background or detached processes can remain. Known job leftovers are diagnostic.
 Inspect residual processes and OS stalls before explicit operational action;
 there is no automatic host-wide kill or reboot. See the
@@ -316,22 +316,29 @@ The output's escalation policy is diagnostic; an operator decides its use.
 
 The CLI owns local lifecycle; `meiva start` initializes a fresh home and resumes an
 existing one through the same path. First-start inputs persist before native
-effects. Repeated start checks the same identity and selected service roster.
+effects. Repeated start checks the same identity. The service selection is never
+persisted: every start names it (`--all-services`, `--only-service NAME…` or
+`--disable-service NAME…`), and a bare `meiva start` is a usage error.
 
 ```bash
-meiva start
+meiva start --all-services
 meiva status
-meiva stop -y
-meiva restart
+meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
+meiva restart --all-services --close-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300
+meiva restart --only agent-host --mode smooth --timeout 300
 meiva cluster status
-meiva cluster destroy [--drop-db]
+meiva cluster destroy --stop-mode smooth --stop-timeout 300 [--drop-db]
 ```
 
-Full `stop` closes infrastructure, browser and persistent PTYs; `--keep-infra` and
-repeated `--keep-service` preserve explicitly selected resources. `restart` is the
-ordinary local stop/start path: it keeps infrastructure, the browser session, Gate,
-the permissions helper and native LGTM, while persistent terminals close and the
-pty-sessions service restarts with the new code. Destroy decommissions this host's cluster: it stops it, retires the host's
+`stop` takes every choice as an explicit argument (the example above is the full stop;
+a missing choice exits 2 and lists all of them): `--keep-shell-sessions|--close-shell-sessions`,
+`--keep-browser|--stop-browser`, `--keep-extras|--stop-extras`, repeated `--keep-service NAME`
+or `--keep-no-services`, `--mode`, `--timeout`, `--yes|--prompt`, and on a gateway-capable
+host `--keep-infra|--stop-infra` (a pure runner refuses it; drop it there). `restart` is the
+ordinary local stop/start path: it needs a scope (`--only agent-host`, or a start selection
+with `--keep-shell-sessions|--close-shell-sessions`, `--keep-browser|--restart-browser`,
+`--keep-extras|--restart-extras`, `--mode`, `--timeout`) and always keeps infrastructure; with
+`--close-shell-sessions` the pty-sessions service restarts with the new code. Destroy decommissions this host's cluster: it stops it, retires the host's
 native jobs (launchd, crontab, the Linux boot unit, the permissions helper) and marks the home
 detached, so `meiva start` refuses it until `destroy-intent.json` is deleted by hand;
 `--drop-db` additionally removes the data directories (`pg/`, `redis/`). It acts on
@@ -408,7 +415,7 @@ failed attempt is retried (launchd `KeepAlive`, systemd `Restart=on-failure`) fo
 (`base/host/system/boot_policy.py`). The attempt that spends the budget emits
 `boot_retries_exhausted` (alert `meiva-ops-boot-retries-exhausted`); on Linux the unit
 then sits in systemd's `failed` state, on macOS the job exits 0. Fix the cause in the
-boot log, then run `meiva start`. A boot attempt never re-ups a unit whose meiva-root
+boot log, then run `meiva start --all-services` (or your usual selection). A boot attempt never re-ups a unit whose meiva-root
 circuit breaker is open: that unit is not abandoned — root's health monitor keeps
 replacing it on a 60s/5m/15m ladder, grants one immediate attempt when the
 database it depends on answers again (and once on the first usable observation),
@@ -454,7 +461,7 @@ multi-machine ordering, failure recovery and the first-deployment limitation.
 
 Stop-class drills and operations: see the executor-cancellation insurance and hold handover section of [graceful maintenance](operations/graceful-maintenance.md).
 
-Merging a PR does not deploy it. `meiva stop` asks for confirmation unless `-y` is supplied.
+Merging a PR does not deploy it. `meiva stop` asks for confirmation with `--prompt` and skips it with `--yes`.
 
 
 ### Updating a networked cluster in source mode
@@ -467,14 +474,32 @@ separate development checkout over key-based SSH. Keep that checkout and its
 venv unchanged until completion. When the operator's Mac is itself a host, it must be able to `ssh` to
 itself (its own public key in its own `authorized_keys`):
 
+Every choice is an explicit argument: there are no defaults and no inferred
+values, and a missing or conflicting one exits 2 with all of them listed before
+any host is touched. The stop and start choices are forwarded unchanged to each
+host's `meiva stop --yes` / `meiva start`; `--keep-infra|--stop-infra` goes to the
+gateway's stop only. Choose what survives the window yourself — the fleet does
+not compare your choices with the diff. A complete command:
+
 ```bash
 .venv/bin/python -m cli.fleet_update run --new NEW_SHA \
-  --gateway GATEWAY --runner RUNNER [--runner ...] --log-dir DIR
+  --gateway GATEWAY --runner RUNNER --runner RUNNER2 --log-dir DIR --execute \
+  --keep-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
+  --mode smooth --stop-timeout 600 \
+  --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
+  --all-services --start-timeout 1800 --smoke-timeout 300 --roster-timeout 90
 ```
+
+Alternatives per choice: `--no-runners` instead of `--runner`; `--dry-run` instead
+of `--execute`; `--close-shell-sessions`, `--stop-browser`, `--stop-extras`,
+`--stop-infra`; `--keep-service NAME` (repeatable) instead of `--keep-no-services`;
+`--mode force`; `--allow-python-change`, `--allow-red-schedules`;
+`--only-service NAME` or `--disable-service NAME` (repeatable) instead of
+`--all-services`.
 
 `run` accepts both halves' flags, executes `down` then `up` in one log and stops
 at the first failure. It reports the failed half to repair and rerun; a failed
-`down` never enters `up`. `run --dry-run` previews both halves. An authorized
+`down` never enters `up`. `run --dry-run` (in place of `--execute`) previews both halves. An authorized
 Meiva operator agent submits the command to an external OS-owned job and returns
 so it can drain; see the [launchd submission and result procedure](../../meiva_builtins/skills/platform/meiva-guide/ops/references/agent-update.md).
 
@@ -483,9 +508,14 @@ half, use the separate commands:
 
 ```bash
 .venv/bin/python -m cli.fleet_update down --new NEW_SHA \
-  --gateway GATEWAY --runner RUNNER [--runner ...] --log-dir DIR
+  --gateway GATEWAY --runner RUNNER --log-dir DIR --execute \
+  --keep-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
+  --mode smooth --stop-timeout 600 \
+  --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
+  --all-services --start-timeout 1800
 # manual release steps, if any
-.venv/bin/python -m cli.fleet_update up --gateway GATEWAY --runner RUNNER [--runner ...] --log-dir DIR
+.venv/bin/python -m cli.fleet_update up --gateway GATEWAY --runner RUNNER --log-dir DIR --execute \
+  --all-services --start-timeout 1800 --smoke-timeout 300 --roster-timeout 90
 ```
 
 - `down` names the takeovers its stops will end: past the refusal gate and
@@ -493,15 +523,15 @@ half, use the separate commands:
   `agent_impersonations` row still marked `active` (agent, session,
   executor, expiry) — under `--dry-run` too, in the same
   words — because a host or native restart never adopts a relay and an active
-  lease therefore ends with the window. `--lease-confirm-seconds N` (default 0,
-  report only) then holds the stops open N seconds with a countdown so the
+  lease therefore ends with the window. `--lease-confirm-seconds N` (0 reports
+  only) then holds the stops open N seconds with a countdown so the
   leases can be released or renewed first; a lease table that cannot be read
   only warns and the window goes on.
 - `down` refuses (exit 2, nothing changed) when a checkout has a
   `post-checkout` hook, uncommitted changes or `$HOME/.meiva/updates/active`,
   when a host holds maintenance other than a completed stop, when the hosts
-  disagree on HEAD, when `.python-version` changes without
-  `--allow-python-change`, or when it runs inside an Meiva agent's shell. It
+  disagree on HEAD, when `.python-version` changes under
+  `--refuse-python-change`, or when it runs inside an Meiva agent's shell. It
   prints `git diff --stat OLD..NEW` over migrations, helper sources and locks,
   fetches NEW on every host, then — still before anything stops, and also under
   `--dry-run` — runs NEW's `meiva schedules verify` against the running gateway's
@@ -518,44 +548,35 @@ half, use the separate commands:
   `MEIVA_HOME`, offline, never dialing the gateway or the database and never calling its Python
   API directly (that signature changes between versions). A red row (a moved module, an undefined name, a call that no longer binds), or a check that
   could not run, refuses with exit 2, the rows listed and nothing stopped; fix the
-  scripts and rerun, or pass `--allow-red-schedules` to proceed (the rows then
+  scripts and rerun, or give `--allow-red-schedules` to proceed (the rows then
   crash-loop after `up` until fixed). A host that has not fetched NEW (a dry run does
-  not fetch) is reported as not checked. Still before anything stops it derives the keep
-  decision: a dependency closure over the window's `OLD..NEW` diff
-  (`scripts/host_ops/fleet_update_keep.py`, run from the operator's checkout on the same
-  `meizel` facts the locality gate cites) names the stateful components the change does not
-  reach, and every stop gains their `--keep-service` flags — `pty-sessions` (live agent
-  shells stay mounted) and/or `browser` plus `browser-mcp` (the headed Chrome keeps its
-  logins; the two names go together). A component the window touches restarts as before,
-  and so does everything when the decision itself fails; `--restart-all` skips the
-  decision. The verdicts per component print into the log, and `--dry-run` runs the
-  decision too. Then, before the first stop, it opens the window's
-  alert silence (below). Then it runs `meiva stop -y --timeout 600` on each runner and
-  then the gateway (each must leave phase `stopped` with no failures; the keep flags ride
-  the same stop). A stop that fails part-way does not leave the cluster half
-  stopped: `down` brings back every host it took down (a host that was serving
+  not fetch) is reported as not checked. Then, before the first stop, it opens the window's
+  alert silence (below). Then it runs `meiva stop --yes` with your stop flags on each runner and
+  then the gateway (each must leave phase `stopped` with no failures; the gateway's stop also
+  carries `--keep-infra`/`--stop-infra`). A stop that fails part-way does not leave the cluster
+  half stopped: `down` brings back every host it took down (a host that was serving
   when the window began, is down now, and whose stop completed here or whose
   `run/lifecycle-op.json` records a failed stop), on the OLD commit it still
-  carries, through `up`'s own start shape; the failure output names `recovered:`
-  and `needs manual:` and the half still exits non-zero. Then, when every stop
+  carries, with your start selection and `--start-timeout`; the failure output names
+  `recovered:` and `needs manual:` and the half still exits non-zero. Then, when every stop
   succeeded, it moves on to the switch: on
   every host it checks out NEW detached, repairs legacy read-only venv
   directories, runs `uv sync --frozen` and requires a clean tree.
 - Runners fetch through the gateway's source clone (their checkout's `origin` is the gateway host's `~/.meiva/source`): the target commit is fetched by SHA before it is reachable from any of the clone's refs, so the clone carries `uploadpack.allowAnySHA1InWant=true` (repo-local; set 2026-09-30). A reclone of the clone must re-apply it.
 - A failed stop prints the next step: on that host retry
-  `meiva stop -y --timeout 600`, confirm `meiva status` shows
+  `meiva stop` with the same arguments `down` gave it, confirm `meiva status` shows
   paused/stopped, then rerun `down`. A tree that is not clean after the switch
   prints its `git status --porcelain` (first 20 lines). Untracked files are not
   caused by the update (a changed `.gitignore` can reveal them): check them and
   move them away, never delete, then rerun `down`. Nothing is moved, deleted or
   retried automatically.
-- `up` runs `meiva start` on the gateway (its cold start applies migrations),
+- `up` runs `meiva start` with your service selection on the gateway (its cold start applies migrations),
   then on each runner; on macOS as a one-time LaunchAgent in `gui/<uid>`,
   because the helper's launchd job lives in `gui/<uid>` (the user must be
   logged in to the GUI). Each start must release its hold; every machine
   listed by `--gateway`/`--runner` must be online on the roster with checkout and
   running code on one commit (`online` follows the heartbeat, so the roster is
-  re-read every 5 seconds for up to `--roster-timeout`, default 90, and a failure
+  re-read every 5 seconds for up to `--roster-timeout`, and a failure
   shows the last read). A listed host is matched to its roster row by the machine
   name it reports itself (`machine_name()`), not by its SSH alias; a name with no
   row fails the half. Roster machines that are not listed (a laptop that is off) are
@@ -761,7 +782,7 @@ exit `78` (`git rev-parse --is-shallow-repository` must print `false`).
 **A unit exits `78`.** Its log holds one `critical` line: `code version gate:
 process <name> runs code version <v>, below the cluster minimum <m>`. The checkout
 is behind the cluster: check out the commit the gateway runs, `uv sync --frozen`,
-`meiva start`. `meiva stop` and every other `meiva` command keep working meanwhile, so
+`meiva start --all-services`. `meiva stop` and every other `meiva` command keep working meanwhile, so
 a behind host can always be stopped and recovered; only service processes are
 gated. A supervisor that revives the stale service gets the same exit again until
 the checkout is updated.
@@ -785,8 +806,8 @@ argv.
 by itself, and an older process would exit `78` at its first dial (the gateway
 included).
 
-1. Stop the whole cluster (`meiva stop -y` on every unit; the gateway with
-   `--keep-infra`).
+1. Stop the whole cluster (`meiva stop --yes …` with every choice explicit on every unit;
+   the gateway with `--keep-infra`).
 2. Compute the target's version: `git rev-list --count --first-parent <sha>`.
 3. As the administrator, `psql "host=/tmp/meiva-pg-<home-slug> port=<pg port>
    dbname=<db>" -c "UPDATE deployment_state SET min_code_version = <target>
@@ -1085,8 +1106,8 @@ image (`python3 scripts/verify/tart_run.py --ref <ref>`, same flow, plus the hel
   from the release carrying `HELPER_CHAIN_BROKEN_EXIT_CODE` retires itself after
   two broken ancestry readings so the keeper reseeds it; until that release is
   deployed the recovery is manual: shut the stranded root down through its own
-  control socket, let the keeper reseed, then `meiva start`.
-- **After any root the keeper reseeds (not a `meiva start`), run `meiva start`.**
+  control socket, let the keeper reseed, then `meiva start --all-services`.
+- **After any root the keeper reseeds (not a `meiva start`), run `meiva start --all-services` (or your usual selection).**
   A keeper-seeded root publishes no serving receipt, so the host stays in the
   `startup` posture: `meiva cluster status` shows `paused yes` while every agent
   keeps working, `start_serving.is_serving()` is false, and schedule relaunches

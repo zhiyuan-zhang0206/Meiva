@@ -4,7 +4,6 @@ exports = ["cli_tests.py", "gateway_tests.py", "integration_tests.py", "structur
 "integration_tests.py" = ["gateway_tests.py"]
 
 [debt.first-party-patch]
-"cli_tests.py#monkeypatch.setattr base.deploy.lifecycle.service_selection.selection_path" = 1
 "cli_tests.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
 "cli_tests.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
 "cli_tests.py#monkeypatch.setattr base.telemetry.process_logging.init_cli_process" = 1

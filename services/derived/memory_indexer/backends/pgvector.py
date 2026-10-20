@@ -212,7 +212,7 @@ def validate_schema(client: psycopg.Connection, dim: int) -> None:
     if problem is not None:
         raise RuntimeError(
             f"pgvector table {EMBEDDINGS_TABLE!r} {problem}; runtime connections never create or "
-            "rebuild it. Run `meiva start` on the gateway: it prepares the table for the "
+            "rebuild it. Run `meiva start --all-services` (or this unit's own service selection) on the gateway: it prepares the table for the "
             "configured embedding dimension."
         )
 

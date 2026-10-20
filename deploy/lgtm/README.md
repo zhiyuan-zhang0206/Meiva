@@ -210,11 +210,13 @@ the window before changing anything.
 ## Start, stop, and rollback
 
 ```bash
-meiva stop -y                  # planned shutdown before changing the root generation
-meiva lgtm on                  # enable backend intent and invoke normal start
+meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
+                               # planned shutdown before changing the root generation
+meiva lgtm on --all-services   # mark the station and start the named selection (it must include the backends)
 meiva lgtm status              # root-owned protocol readiness
-meiva stop -y
-meiva lgtm off                 # disable backend intent; preserve data and other choices
+meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
+meiva lgtm off --disable-service loki --disable-service prometheus --disable-service grafana
+                               # retract the station and start without the backends; data persists
 ```
 
 All three local backends are ordinary root services. Converge prepares assets and

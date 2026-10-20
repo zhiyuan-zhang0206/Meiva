@@ -29,7 +29,7 @@ export MEIVA_DB_CAPABILITY_KEY
   --machine-name machine-2 --machine-host <this-host-addr> \
   --db-capability /path/to/machine-2.bundle
 unset MEIVA_DB_CAPABILITY_KEY
-.venv/bin/meiva start
+.venv/bin/meiva start --all-services
 ```
 
 Transfer only the bundle and its key through the operator's secret channel.
@@ -65,7 +65,7 @@ Optional `meiva init` inputs:
 - `--config-file PATH`: initial Settings configuration outside the home,
   such as the declared transport encryption mode.
 
-After `meiva init`, use bare `.venv/bin/meiva start` to start and later resume the same
+After `meiva init`, use `.venv/bin/meiva start --all-services` (or another explicit selection) to start and later resume the same
 unit. `meiva start` takes no identity input and `meiva init` refuses an initialized home;
 neither is an identity-edit API.
 The root owns application service lifetime. PTY sessions have separate custody.

@@ -11,7 +11,7 @@ from base.host.verified_file import regular_bytes
 
 def configuration_digest(home: Path) -> str:
     """Include file-authoritative values omitted from child environment transport."""
-    paths = [home / name for name in (".env", "plugins_config.json", "service-selection.json")]
+    paths = [home / name for name in (".env", "plugins_config.json")]
     paths.extend(sorted((home / "configs").glob("*/config.json")))
     files = {str(path.relative_to(home)): _file_digest(path) for path in paths}
     return hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()

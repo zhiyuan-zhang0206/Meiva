@@ -109,7 +109,7 @@ def test_run_dry_run_plans_both_halves_without_mutation(
     assert all(h["up"] and h["head"] == cluster.old for h in cluster.hosts.values())
     output = capsys.readouterr().out
     assert "phase: down" in output and "phase: up" in output
-    assert "stop -y" in output and "launchctl bootstrap" in output
+    assert "stop --yes" in output and "launchctl bootstrap" in output
     assert "smoke MACHINE" in output and "plugins verify" in output
 
 
@@ -128,7 +128,6 @@ def test_run_uses_one_log_and_accepts_both_halves_options(
             "45",
             "--roster-timeout",
             "15",
-            "--restart-all",
             "--silence-hours",
             "2",
         )
@@ -137,8 +136,8 @@ def test_run_uses_one_log_and_accepts_both_halves_options(
     logs = list((tmp_path / "logs").glob("*.log"))
     assert len(logs) == 1 and logs[0].name.endswith("-run.log")
     output = logs[0].read_text()
-    assert "stop -y --timeout 30" in output and " -ge 12 " in output
-    assert "smoke gw 45" in output and "every service stops" in output
+    assert "--mode smooth --timeout 30" in output and " -ge 12 " in output
+    assert "smoke gw 45" in output
     assert "down complete" in output and "up complete" in output
     assert "run `up` when ready" not in output
     assert cluster.silence_hours == 2
@@ -268,7 +267,7 @@ def test_the_dry_run_of_down_reports_a_red_without_changing_anything(
 
 
 def test_macos_start_is_a_gui_one_shot() -> None:
-    script = fleet_update.gui_oneshot("mac", 60)
+    script = fleet_update.gui_oneshot("mac", 60, "--all-services")
     job = plistlib.loads(
         script.split("<<'MEIVA_FLEET_PLIST'\n")[1].split("\nMEIVA_FLEET_PLIST")[0].encode()
     )
@@ -276,7 +275,7 @@ def test_macos_start_is_a_gui_one_shot() -> None:
     assert f'launchctl bootout "gui/$(id -u)/{job["Label"]}"' in script
     assert job["RunAtLoad"] is True and job["KeepAlive"] is False
     assert job["ProgramArguments"][:2] == ["/bin/zsh", "-lc"]
-    assert 'MEIVA_HOME="$H" "$S/.venv/bin/meiva" start' in job["ProgramArguments"][2]
+    assert 'MEIVA_HOME="$H" "$S/.venv/bin/meiva" start --all-services' in job["ProgramArguments"][2]
     assert shlex.split(f"zsh -lc {shlex.quote(script)}")[2] == script and 'rm -rf "$D"' in script
 
 
@@ -286,7 +285,7 @@ def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(
     from base.host.system import cron
     from cli.preflight import require_own_checkout
 
-    script = fleet_update.gui_oneshot("mac", 60)
+    script = fleet_update.gui_oneshot("mac", 60, "--all-services")
     job = plistlib.loads(
         script.split("<<'MEIVA_FLEET_PLIST'\n")[1].split("\nMEIVA_FLEET_PLIST")[0].encode()
     )
@@ -309,7 +308,7 @@ def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(
     assert not {"base", "cli", "gateway", "services", "agent", "meiva"} & imported
 
 
-_STOP_RETRY = 'retry "meiva stop -y --timeout 600"'
+_STOP_RETRY = "retry `meiva stop` with the same arguments this `down` gave it"
 
 
 def test_the_first_failure_stops_the_half(

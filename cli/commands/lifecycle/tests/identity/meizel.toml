@@ -26,7 +26,6 @@
 "restart_inputs.py#monkeypatch.setattr cli.commands.lifecycle.stop.force_close_terminals" = 1
 "restart_inputs.py#monkeypatch.setattr cli.commands.lifecycle.stop.reap_cluster_chrome" = 1
 "restart_inputs.py#monkeypatch.setattr cli.start_runtime.StartRuntime.identity" = 1
-"test_cmd_stop.py#monkeypatch.setattr cli.commands._repo.roles_or_none" = 1
 "test_cmd_stop.py#monkeypatch.setattr cli.commands.data_plane.bringup.stop_cluster_instance" = 1
 "test_cmd_stop.py#monkeypatch.setattr cli.commands.lifecycle.stop.do_stop" = 1
 "test_cmd_stop.py#monkeypatch.setattr cli.commands.lifecycle.stop.repo_root" = 2

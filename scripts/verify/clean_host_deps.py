@@ -194,7 +194,7 @@ def start_cluster(
 def stop_cluster(container: str, *, docker: list[str]) -> None:
     docker_exec(
         container,
-        "cd /home/verify/.meiva/source && MEIVA_OS_JOBS_ENABLED=0 .venv/bin/meiva stop -y",
+        "cd /home/verify/.meiva/source && MEIVA_OS_JOBS_ENABLED=0 .venv/bin/meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 240",
         docker=docker,
         timeout=300,
     )

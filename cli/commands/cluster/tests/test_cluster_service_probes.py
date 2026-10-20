@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-import base.deploy.lifecycle.service_selection as lifecycle_service_selection
+import services.supervision.meiva_root_glue.manifests as root_manifests
 import services.supervision.roster.spec as roster_spec
 from base.cluster.machine import MachineIdentity
 from base.host.system.hostport import Host
@@ -27,6 +28,25 @@ from cli.commands.cluster.tests.health_probe_inputs import ran as ran
 from cli.commands.cluster.tests.health_probe_inputs import signals as signals
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+
+
+def _launched(names: frozenset[str] | None) -> Callable[[Path], frozenset[str] | None]:
+    # meiva:note
+    # A `launched_services` reader that reports `names` for any manifest path.
+
+    def read(_path: Path) -> frozenset[str] | None:
+        return names
+
+    return read
+
+
+@pytest.fixture(autouse=True)
+def every_service_launched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The last start launched the whole roster unless a test says otherwise."""
+    from services.supervision.roster import build_services
+
+    launched = frozenset(spec.session for spec in build_services())
+    monkeypatch.setattr(root_manifests, "launched_services", _launched(launched))
 
 
 def test_service_probes_skips_gated_but_rejects_unknown_specs(
@@ -273,11 +293,8 @@ def test_service_probes_unknown_roster_is_unhealthy(
     ]
 
 
-@pytest.mark.parametrize("mode,names", [("only", ["gateway"]), ("except", ["frontend"])])
-def test_service_probes_respect_durable_service_intent(
+def test_service_probes_check_only_what_the_last_start_launched(
     monkeypatch: pytest.MonkeyPatch,
-    mode: str,
-    names: list[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -288,7 +305,6 @@ def test_service_probes_respect_durable_service_intent(
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
     import services.supervision.roster.service_spec as _service_spec
-    from base.deploy.lifecycle import service_selection
 
     wanted = _service_spec.ServiceSpec("gateway", "unused", frozenset({"gateway"}), True)
     excluded = _service_spec.ServiceSpec("frontend", "unused", frozenset({"gateway"}), False)
@@ -306,15 +322,11 @@ def test_service_probes_respect_durable_service_intent(
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     monkeypatch.setattr(roster_spec, "services_for_capabilities_annotated", roster)
     monkeypatch.setattr(_probe_commands, "probe_service", probe)
-    monkeypatch.setattr(
-        service_selection,
-        "read_selection",
-        lambda: service_selection.ServiceSelection(mode, frozenset(names)),
-    )
+    monkeypatch.setattr(root_manifests, "launched_services", _launched(frozenset({"gateway"})))
     assert cluster_health.service_probes(machine=command_runtime.machine, host=fake_host()) == []
 
 
-def test_service_probes_unreadable_selection_is_unhealthy(
+def test_service_probes_unreadable_launch_manifest_is_unhealthy(
     monkeypatch: pytest.MonkeyPatch, *, command_runtime: CommandRuntime
 ) -> None:
     def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
@@ -323,11 +335,11 @@ def test_service_probes_unreadable_selection_is_unhealthy(
 
     import cli.commands._repo as _repo_commands
 
-    def unreadable() -> None:
-        raise ValueError("corrupt selection")
+    def unreadable(_path: Path) -> None:
+        raise ValueError("corrupt manifest")
 
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
-    monkeypatch.setattr(lifecycle_service_selection, "read_selection", unreadable)
+    monkeypatch.setattr(root_manifests, "launched_services", unreadable)
     assert cluster_health.service_probes(machine=command_runtime.machine, host=fake_host()) == [
-        "service selection unavailable (corrupt selection)"
+        "launched services unavailable (corrupt manifest)"
     ]

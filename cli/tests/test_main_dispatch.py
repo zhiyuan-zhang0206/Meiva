@@ -121,13 +121,13 @@ def test_import_defers_cli_logging_until_dispatch(tmp_path: Path) -> None:
 # Each top-level (and nested) meiva sub-command maps to a _h_* handler defined
 # in its owning settings-free parser module.
 _HANDLERS: tuple[tuple[list[str], object, str], ...] = (
-    (["stop"], _host, "_h_stop"),
-    (["restart"], _host, "_h_restart"),
+    (["stop"], _host, "h_stop"),
+    (["restart"], _host, "h_restart"),
     (["status"], _host, "_h_status"),
     (["pty", "freeze", "--holder", "operator", "--reason", "cleanup"], _pty, "_h_pty_freeze"),
     (["pty", "status"], _pty, "_h_pty_status"),
     (["pty", "resume", "generation"], _pty, "_h_pty_resume"),
-    (["converge"], _host, "_h_converge"),
+    (["converge", "--all-services"], _host, "_h_converge"),
     (["firewall", "status"], _host, "_h_firewall_status"),
     (["firewall", "sync"], _host, "_h_firewall_sync"),
     (["cluster", "status"], _cluster, "_h_cluster_status"),
@@ -354,7 +354,7 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
     assert rc == 7
     ns = captured["args"]
     assert ns.only_service == ["gateway", "frontend"]
-    assert ns.disable_service == [] and ns.all_services is False
+    assert ns.disable_service is None and ns.all_services is False
 
 
 def test_init_subcommand_binds_its_handler_and_takes_the_identity_flags() -> None:
@@ -458,7 +458,7 @@ def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.mark.parametrize(
     "argv",
     [
-        ["start"],
+        ["start", "--all-services"],
         ["stop", "-y"],
         ["restart"],
         ["converge"],
@@ -653,7 +653,29 @@ def _ignoring_retention[T](callback: Callable[[], T]) -> Callable[..., T]:
     return invoke
 
 
+def test_a_bare_start_is_a_usage_error() -> None:
+    # meiva:note
+    # Start infers no selection: naming none of the three forms exits 2.
+    with pytest.raises(SystemExit) as error:
+        build_parser().parse_args(["start"])
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "forms",
+    [
+        ["--only-service", "gateway", "--all-services"],
+        ["--disable-service", "labeler", "--all-services"],
+        ["--only-service", "gateway", "--disable-service", "labeler"],
+    ],
+)
+def test_start_selection_forms_are_mutually_exclusive(forms: list[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        build_parser().parse_args(["start", *forms])
+    assert error.value.code == 2
+
+
 def test_start_parser_rejects_retired_updater_telemetry() -> None:
     with pytest.raises(SystemExit) as error:
-        build_parser().parse_args(["start", "--updater-telemetry"])
+        build_parser().parse_args(["start", "--all-services", "--updater-telemetry"])
     assert error.value.code == 2

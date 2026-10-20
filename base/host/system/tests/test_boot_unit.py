@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 import types
 from pathlib import Path
@@ -47,6 +48,7 @@ def _context(tmp_path: Path) -> BootUnitContext:
         user="meiva-user",
         group="meiva-group",
         home_dir=tmp_path / "user-home",
+        services=frozenset({"gateway", "frontend"}),
     )
 
 
@@ -62,7 +64,7 @@ def test_render_unit_states_the_boot_policy(ctx: BootUnitContext) -> None:
     assert f"StartLimitBurst={BOOT_MAX_ATTEMPTS}" in unit
     assert f"StartLimitIntervalSec={START_LIMIT_INTERVAL_S}" in unit
     assert "StartLimitIntervalSec=0" not in unit
-    assert "start" in unit and '"--boot"' in unit
+    assert '"start" "--boot"' in unit
     assert f"TimeoutStartSec={START_TIMEOUT_S}" in unit
     assert "RuntimeMaxSec" not in unit
     assert "Type=forking" in unit and "GuessMainPID=no" in unit
@@ -84,17 +86,26 @@ def test_render_unit_binds_home_and_checkout(ctx: BootUnitContext) -> None:
     assert f'ExecStart=:"{ctx.repo}/.venv/bin/python" "-m" "cli.main" "start"' in unit
 
 
+def test_render_unit_selects_every_service_by_name_sorted(ctx: BootUnitContext) -> None:
+    unit = render_unit(ctx)
+    assert '"start" "--boot" "--only-service" "frontend" "--only-service" "gateway"' in unit
+
+
+def test_render_unit_refuses_an_empty_selection(ctx: BootUnitContext) -> None:
+    empty = dataclasses.replace(ctx, services=frozenset())
+    with pytest.raises(ValueError, match="at least one selected service"):
+        render_unit(empty)
+
+
 def test_render_unit_quotes_without_shell_expansion(ctx: BootUnitContext) -> None:
-    odd = BootUnitContext(ctx.home, Path('/repo "odd" % $x'), ctx.user, ctx.group, ctx.home_dir)
+    odd = dataclasses.replace(ctx, repo=Path('/repo "odd" % $x'))
     unit = render_unit(odd)
     assert 'ExecStart=:"/repo \\"odd\\" %% $x/.venv/bin/python" "-m" "cli.main" "start"' in unit
     assert "MEIVA_BOOT_PROXY_WAIT" not in unit
 
 
 def test_render_unit_refuses_control_characters(ctx: BootUnitContext) -> None:
-    bad = BootUnitContext(
-        ctx.home, Path("/repo\nExecStart=/bad"), ctx.user, ctx.group, ctx.home_dir
-    )
+    bad = dataclasses.replace(ctx, repo=Path("/repo\nExecStart=/bad"))
     with pytest.raises(ValueError, match="control characters"):
         render_unit(bad)
 
@@ -162,7 +173,7 @@ def test_install_refuses_without_systemd(
 ) -> None:
     monkeypatch.setattr(boot_unit, "systemd_running", _systemd_down)
     with pytest.raises(RuntimeError, match="systemd"):
-        install(context=ctx, host=_linux())
+        install(services=ctx.services, context=ctx, host=_linux())
 
 
 def test_uninstall_removes_only_the_boot_units_paths(
@@ -376,7 +387,7 @@ def test_install_enables_native_unit_without_recursively_starting(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recorded, installed = _install_seams(monkeypatch, tmp_path, enabled=False)
-    steps = install(context=ctx, host=_linux())
+    steps = install(services=ctx.services, context=ctx, host=_linux())
     assert installed["content"] == render_unit(ctx)
     assert ["systemctl", "enable", "meiva-boot.service"] in recorded
     assert ["systemctl", "start", "meiva-boot.service"] not in recorded
@@ -391,5 +402,5 @@ def test_unchanged_enabled_unit_never_restarts_or_rewrites(
     target = boot_unit.unit_path()
     target.parent.mkdir()
     target.write_text(render_unit(ctx))
-    assert install(context=ctx, host=_linux()) == []
+    assert install(services=ctx.services, context=ctx, host=_linux()) == []
     assert recorded == []

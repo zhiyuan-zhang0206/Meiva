@@ -106,16 +106,21 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
 
 
 def ensure_cluster_autostart(ctx: ConvergeCtx) -> None:
-    """Register the boot-time autostart job so a machine reboot brings this
-    cluster's gateway / agents / daemons back up without a manual `meiva start`
-    (macOS launchd RunAtLoad / Linux systemd).
-
-    host_global-gated to the prod install, so a dev worktree cluster never
-    registers autostart (its plist would dangle once the worktree is removed).
-    Delegates to `base.host.system.autostart`. Idempotent."""
+    # meiva:note
+    # Register the boot-time autostart job so a machine reboot brings this
+    # cluster's gateway / agents / daemons back up without a manual `meiva start`
+    # (macOS launchd RunAtLoad / Linux systemd).
+    #
+    # host_global-gated to the prod install, so a dev worktree cluster never
+    # registers autostart (its plist would dangle once the worktree is removed).
+    # The boot job's command line names the services this start selected
+    # (`--only-service` each), so a boot start never infers a selection.
+    # Delegates to `base.host.system.autostart`. Idempotent.
     from base.host.system.autostart import register_autostart
 
     register_autostart(
-        enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled, host=ctx.host
+        services=ctx.services,
+        enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
+        host=ctx.host,
     )
     # On failure the exception propagates so converge fails fast.

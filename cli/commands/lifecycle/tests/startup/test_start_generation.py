@@ -88,22 +88,6 @@ def test_generation_binds_configuration_omitted_from_transport(tmp_path: Path) -
     assert configuration_digest(tmp_path) == initial
 
 
-def test_generation_binds_declared_service_selection_and_refuses_dangling_pointer(
-    tmp_path: Path,
-) -> None:
-    selection = tmp_path / "service-selection.json"
-    initial = configuration_digest(tmp_path)
-    selection.write_text('{"version":1,"mode":"only","names":["gateway"]}')
-    selected = configuration_digest(tmp_path)
-    assert selected != initial
-    selection.write_text('{"version":1,"mode":"only","names":["gateway","ops"]}')
-    assert configuration_digest(tmp_path) != selected
-    selection.unlink()
-    selection.symlink_to(tmp_path / "absent")
-    with pytest.raises(ValueError, match="regular file"):
-        configuration_digest(tmp_path)
-
-
 def test_live_admission_requires_positive_absence(monkeypatch: pytest.MonkeyPatch) -> None:
     from cli.commands.lifecycle import root_driver as driver
 

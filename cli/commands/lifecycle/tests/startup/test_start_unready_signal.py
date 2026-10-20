@@ -40,7 +40,7 @@ def test_readiness_verdict_emits_for_non_critical_only_and_allows_the_start(
     launch = SimpleNamespace(failed=())
     wait = SimpleNamespace(unready=(), non_critical_unready=(_spec("labeler"),))
 
-    assert start_commands.readiness_verdict(launch, wait) is None
+    assert start_commands.readiness_verdict(launch, wait, ready_timeout=180) is None
     assert emitted == [{"service": "meiva-labeler"}]
 
 
@@ -48,7 +48,7 @@ def test_a_ready_start_emits_nothing(emitted: FollowedAttributes) -> None:
     launch = SimpleNamespace(failed=())
     wait = SimpleNamespace(unready=(), non_critical_unready=())
 
-    assert start_commands.readiness_verdict(launch, wait) is None
+    assert start_commands.readiness_verdict(launch, wait, ready_timeout=180) is None
     assert emitted == []
 
 
@@ -58,4 +58,4 @@ def test_only_core_launch_failures_block_serving(
 ) -> None:
     launch = SimpleNamespace(failed=(failed,))
     wait = SimpleNamespace(unready=(), non_critical_unready=())
-    assert start_commands.readiness_verdict(launch, wait) == expected
+    assert start_commands.readiness_verdict(launch, wait, ready_timeout=180) == expected

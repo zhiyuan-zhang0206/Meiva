@@ -387,7 +387,7 @@ class RedisInboundListener:
             "RedisInboundListener[agent={a}]: subscribe to {ch!r} rejected by redis "
             "({exc!r}) — the cluster redis ACL user is not granted this channel. "
             "Falling back to the SELECT recheck for wake (instant pub/sub wake off "
-            "until the ACL grants &{ch}); re-run `meiva start` / check "
+            "until the ACL grants &{ch}); re-run `meiva start` with this unit's explicit service selection (see `meiva start --help`) / check "
             "ensure_cluster_redis_acl.",
             a=self._agent_id,
             ch=self._channel,

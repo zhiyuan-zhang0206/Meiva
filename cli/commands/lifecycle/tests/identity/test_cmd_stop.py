@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle.stop as _stop_commands
 from base.cluster.machine import MachineIdentity
 from base.sessions.tests.refuse_helper import refuse_helper
@@ -40,7 +39,7 @@ _real_reap_cluster_chrome = _stop_commands.reap_cluster_chrome
 # ─── restart ─────────────────────────────────────────────────────────────────
 
 
-def test_cmd_stop_stop_browser_flag_threads_through(
+def test_cmd_stop_passes_every_operator_choice_to_do_stop(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_database: OperatorDatabaseFactory,
@@ -48,46 +47,55 @@ def test_cmd_stop_stop_browser_flag_threads_through(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """`cmd_stop(stop_browser=...)` maps to `do_stop(keep_browser=not stop_browser)`."""
+    # meiva:note
+    # `cmd_stop` forwards each choice unchanged; it adds only the announcement.
     from cli.commands.lifecycle import stop as _stop_mod
 
-    seen: dict[str, object] = {}
+    seen: list[dict[str, object]] = []
 
-    def fake_do_stop(_repo, *, keep_browser=True, **_kw) -> int:
-        seen["keep_browser"] = keep_browser
+    def fake_do_stop(_repo: Path, **kwargs: object) -> int:
+        seen.append(kwargs)
         return 0
 
-    monkeypatch.setattr(_stop_mod, "do_stop", fake_do_stop)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_stop_mod, "do_stop", fake_do_stop)
     monkeypatch.setattr(_stop_mod, "repo_root", lambda: tmp_path)
 
-    _stop_mod.cmd_stop(
-        require_confirmation=False,
-        database_factory=operator_database,
-        producer=operator_pipeline,
-        machine=command_runtime.machine,
-        helper=refuse_helper,
-    )
-    assert seen["keep_browser"] is False, "default cmd_stop closes the browser"
-    _stop_mod.cmd_stop(
-        require_confirmation=False,
-        stop_browser=True,
-        database_factory=operator_database,
-        producer=operator_pipeline,
-        machine=command_runtime.machine,
-        helper=refuse_helper,
-    )
-    assert seen["keep_browser"] is False, "stop_browser=True takes the browser down"
+    for keep_browser, keep_shell_sessions, teardown_extras, force in (
+        (True, True, False, False),
+        (False, False, True, True),
+    ):
+        _stop_mod.cmd_stop(
+            keep_infra=None,
+            require_confirmation=False,
+            keep_browser=keep_browser,
+            keep_shell_sessions=keep_shell_sessions,
+            teardown_extras=teardown_extras,
+            preserve_sessions=frozenset({"worker"}),
+            force=force,
+            timeout=7.0,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            machine=command_runtime.machine,
+            helper=refuse_helper,
+        )
+        choices = seen[-1]
+        assert choices["keep_browser"] is keep_browser
+        assert choices["keep_shell_sessions"] is keep_shell_sessions
+        assert choices["teardown_extras"] is teardown_extras
+        assert choices["force"] is force
+        assert choices["keep_infra"] is None
+        assert choices["preserve_sessions"] == frozenset({"worker"})
+        assert choices["timeout"] == 7.0
+        assert choices["announce"] is True
 
 
 # ─── gateway-backed CLI paths (stop announce) ──────────────────────────────
-def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
-    """Run force stop with a private root boundary and recorded storage teardown."""
-
-    def roles(*, machine: MachineIdentity) -> frozenset[str]:
-        del machine
-        return frozenset({"gateway", "agent-runner"})
-
-    monkeypatch.setattr(_repo_commands, "roles_or_none", roles)
+def _patch_stop_teardown(
+    monkeypatch: pytest.MonkeyPatch, events: list[str], *, machine: MachineIdentity
+) -> None:
+    # meiva:note
+    # Run force stop on a gateway host with a private root boundary and recorded storage teardown.
+    machine.set(role=frozenset({"gateway", "agent-runner"}))
     monkeypatch.setattr(_stop_commands, "repo_root", lambda: Path("/repo"))
     monkeypatch.setattr(
         bringup,
@@ -121,11 +129,17 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
         return FakeResponse({"machine": "test-host"})
 
     monkeypatch.setattr("httpx.post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
-    _patch_stop_teardown(monkeypatch, events)
+    _patch_stop_teardown(monkeypatch, events, machine=command_runtime.machine)
 
     rc = _stop_commands.cmd_stop(
         require_confirmation=False,
+        keep_infra=False,
+        keep_browser=True,
+        keep_shell_sessions=False,
+        teardown_extras=False,
+        preserve_sessions=frozenset(),
         force=True,
+        timeout=5.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
@@ -153,10 +167,17 @@ def test_cmd_stop_aborted_confirm_does_not_announce(
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")  # pyright: ignore[reportUnknownArgumentType]
     events: list[str] = []
     monkeypatch.setattr("httpx.post", lambda *_a, **_kw: events.append("announce"))  # pyright: ignore[reportUnknownArgumentType]
-    _patch_stop_teardown(monkeypatch, events)
+    _patch_stop_teardown(monkeypatch, events, machine=command_runtime.machine)
 
     rc = _stop_commands.cmd_stop(
+        require_confirmation=True,
+        keep_infra=False,
+        keep_browser=True,
+        keep_shell_sessions=False,
+        teardown_extras=False,
+        preserve_sessions=frozenset(),
         force=True,
+        timeout=5.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
@@ -185,11 +206,17 @@ def test_cmd_stop_proceeds_when_announce_fails(
 
     monkeypatch.setattr("httpx.post", _boom)  # pyright: ignore[reportUnknownArgumentType]
     events: list[str] = []
-    _patch_stop_teardown(monkeypatch, events)
+    _patch_stop_teardown(monkeypatch, events, machine=command_runtime.machine)
 
     rc = _stop_commands.cmd_stop(
         require_confirmation=False,
+        keep_infra=False,
+        keep_browser=True,
+        keep_shell_sessions=False,
+        teardown_extras=False,
+        preserve_sessions=frozenset(),
         force=True,
+        timeout=5.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,

@@ -167,8 +167,8 @@ def start_once(
 
             init_cli_logging(["start"], initialize=initialize)
             result = run_start_command(
-                disabled_services=tuple(args.disable_service),
-                only_services=tuple(args.only_service),
+                disabled_services=tuple(args.disable_service or ()),
+                only_services=tuple(args.only_service or ()),
                 all_services=args.all_services,
                 runtime=runtime,
                 retained_children=retained_children,

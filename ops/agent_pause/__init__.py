@@ -197,7 +197,7 @@ def drain(
         hold = require_maintenance_hold(holder, at)
         if hold.phase == MaintenancePhase.PREPARING:
             raise RuntimeError(
-                "preparation is incomplete; re-run `meiva stop`, or abandon it with `meiva start`"
+                "preparation is incomplete; re-run `meiva stop` with the same arguments, or abandon it with `meiva start` and this unit's explicit service selection"
             )
         if set(hold.drained) == set(hold.commands):
             with db.connect() as conn:
@@ -310,7 +310,7 @@ def _stall_line(
         line += (
             f"\n  fence: runtime owned by {row.runtime_owner}, not the live boot {host_owner} — "
             "a successor host cannot certify its predecessor flushed, so re-running "
-            "`meiva stop` cannot clear it; `meiva start` releases the hold and cold "
+            "`meiva stop` cannot clear it; `meiva start` (with this unit's explicit service selection) releases the hold and cold "
             "admission resumes the agent from its checkpoint"
         )
     return line

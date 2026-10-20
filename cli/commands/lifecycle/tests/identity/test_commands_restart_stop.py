@@ -86,6 +86,15 @@ def test_cmd_restart_succeeds_non_interactively(
     )  # pyright: ignore[reportUnknownArgumentType]
     rc = _stop_commands.cmd_restart(
         retained_children=[],
+        only_services=(),
+        disabled_services=(),
+        all_services=True,
+        keep_shell_sessions=False,
+        keep_browser=True,
+        restart_extras=False,
+        force=False,
+        timeout=30.0,
+        start_timeout=30.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         command=command_runtime,
@@ -100,19 +109,25 @@ def test_cmd_restart_calls_stop_then_start(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """cmd_restart invokes stop (require_confirmation=False) then cmd_start_body in order."""
+    # meiva:note
+    # cmd_restart invokes stop (require_confirmation=False) then cmd_start_body in order,
+    # handing each leg exactly the operator's choices.
 
     order: list[str] = []
+    command_runtime.machine.set(role="gateway")
 
     def fake_do_stop(
         _repo,
         *,
-        require_confirmation,
-        keep_infra=False,
-        keep_browser=True,
-        preserve_sessions=frozenset(),
-        teardown_extras=True,
-        force=False,
+        require_confirmation: bool,
+        keep_infra: bool | None,
+        keep_browser: bool,
+        keep_shell_sessions: bool,
+        announce: bool,
+        preserve_sessions: frozenset[str],
+        teardown_extras: bool,
+        force: bool,
+        timeout: float,
         retained_children: object = None,
         database_factory: Callable[[], Any],
         producer: Callable[[], EventPipeline],
@@ -124,11 +139,12 @@ def test_cmd_restart_calls_stop_then_start(
         assert machine is command_runtime.machine
         assert helper is command_runtime.helper, "a restart stops with its own runtime's helper"
         assert require_confirmation is False, "cmd_restart must skip stdin confirmation"
-        assert force is False
-        assert keep_browser is True and teardown_extras is False, (
-            "a restart keeps the browser and Gate/helper/LGTM"
+        assert force is True and timeout == 42.0
+        assert announce is False
+        assert keep_browser is False and keep_shell_sessions is True and teardown_extras is True, (
+            "the stop leg receives the operator's browser, shell-session and extras choices"
         )
-        assert preserve_sessions == frozenset(), "a restart closes the terminals as a stop does"
+        assert preserve_sessions == frozenset(), "a restart preserves no extra service"
         assert keep_infra is True, (
             "an internal restart must keep the shared pg/redis up — stopping the "
             "data plane kills the orchestrator's DB polling mid-rollout"
@@ -148,8 +164,14 @@ def test_cmd_restart_calls_stop_then_start(
         assert kwargs["producer"] is operator_pipeline
         from cli.start_runtime import StartRuntime
 
-        assert kwargs["persist_services"] is False
+        assert kwargs["only_services"] == ("agent-host",)
+        assert kwargs["disabled_services"] == ("browser",)
+        assert kwargs["all_services"] is False
+        assert kwargs["reconcile"] is False, (
+            "units the stop kept are not reconciled to the selection"
+        )
         assert isinstance(kwargs["runtime"], StartRuntime)
+        assert kwargs["ready_timeout"] == 30.0, "the start leg waits the operator's --start-timeout"
         order.append("start")
         return 0
 
@@ -162,6 +184,15 @@ def test_cmd_restart_calls_stop_then_start(
     )  # pyright: ignore[reportUnknownArgumentType]
     rc = _stop_commands.cmd_restart(
         retained_children=[],
+        only_services=("agent-host",),
+        disabled_services=("browser",),
+        all_services=False,
+        keep_shell_sessions=True,
+        keep_browser=False,
+        restart_extras=True,
+        force=True,
+        timeout=42.0,
+        start_timeout=30.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         command=command_runtime,
@@ -226,6 +257,15 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     assert (
         _stop_commands.cmd_restart(
             retained_children=[],
+            only_services=(),
+            disabled_services=(),
+            all_services=True,
+            keep_shell_sessions=False,
+            keep_browser=True,
+            restart_extras=False,
+            force=False,
+            timeout=30.0,
+            start_timeout=30.0,
             database_factory=operator_database,
             producer=operator_pipeline,
             command=command_runtime,
@@ -242,6 +282,15 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     assert (
         _stop_commands.cmd_restart(
             retained_children=[],
+            only_services=(),
+            disabled_services=(),
+            all_services=True,
+            keep_shell_sessions=False,
+            keep_browser=True,
+            restart_extras=False,
+            force=False,
+            timeout=30.0,
+            start_timeout=30.0,
             database_factory=operator_database,
             producer=operator_pipeline,
             command=command_runtime,
@@ -271,6 +320,15 @@ def test_cmd_restart_short_circuits_on_stop_failure(
     )  # pyright: ignore[reportUnknownArgumentType]
     rc = _stop_commands.cmd_restart(
         retained_children=[],
+        only_services=(),
+        disabled_services=(),
+        all_services=True,
+        keep_shell_sessions=False,
+        keep_browser=True,
+        restart_extras=False,
+        force=False,
+        timeout=30.0,
+        start_timeout=30.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         command=command_runtime,
@@ -319,6 +377,15 @@ def test_cmd_restart_aborts_when_preflight_fails(
 
     rc = _stop_commands.cmd_restart(
         retained_children=[],
+        only_services=(),
+        disabled_services=(),
+        all_services=True,
+        keep_shell_sessions=False,
+        keep_browser=True,
+        restart_extras=False,
+        force=False,
+        timeout=30.0,
+        start_timeout=30.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         command=command_runtime,
@@ -372,6 +439,15 @@ def test_cmd_restart_aborts_when_start_readiness_fails(
 
     rc = _stop_commands.cmd_restart(
         retained_children=[],
+        only_services=(),
+        disabled_services=(),
+        all_services=True,
+        keep_shell_sessions=False,
+        keep_browser=True,
+        restart_extras=False,
+        force=False,
+        timeout=30.0,
+        start_timeout=30.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         command=command_runtime,
@@ -398,6 +474,7 @@ def test_stop_aborts_on_no(
     command_runtime: CommandRuntime,
 ) -> None:
     """stdin input not y → abort, no kill / down commands called."""
+    command_runtime.machine.set(role="gateway")
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")  # pyright: ignore[reportUnknownArgumentType]
 
     def fake_run(args, **_kwargs):
@@ -405,7 +482,14 @@ def test_stop_aborts_on_no(
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _stop_commands.cmd_stop(
+        require_confirmation=True,
         force=True,
+        keep_infra=False,
+        keep_browser=True,
+        keep_shell_sessions=False,
+        teardown_extras=False,
+        preserve_sessions=frozenset(),
+        timeout=5.0,
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
@@ -424,6 +508,7 @@ def test_stop_proceeds_on_yes(
     """A confirmed force stop stops the services but keeps the pty-sessions service,
     closes the terminals through it, then stops the service, and only then the
     private data plane."""
+    command_runtime.machine.set(role="gateway")
     events: list[str] = []
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(
@@ -441,7 +526,14 @@ def test_stop_proceeds_on_yes(
     )
     assert (
         _stop_commands.cmd_stop(
+            require_confirmation=True,
             force=True,
+            keep_infra=False,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            timeout=5.0,
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
@@ -460,6 +552,7 @@ def test_stop_revokes_serving_before_stopping_root(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
+    command_runtime.machine.set(role="gateway")
     from base.deploy.lifecycle import start_serving
 
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
@@ -480,6 +573,13 @@ def test_stop_revokes_serving_before_stopping_root(
         force_stop(
             tmp_path,
             require_confirmation=False,
+            keep_infra=False,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            announce=False,
+            timeout=5.0,
             producer=operator_pipeline,
             machine=command_runtime.machine,
             helper=refuse_helper,
@@ -489,19 +589,20 @@ def test_stop_revokes_serving_before_stopping_root(
     assert observed == [False, False], "serving is revoked before either root stop"
 
 
-def test_do_stop_keep_infra_skips_infra_teardown(
+def test_force_stop_keeping_infra_skips_infra_teardown(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
+    command_runtime.machine.set(role="gateway")
     events: list[str] = []
-    monkeypatch.setattr(
-        _root_driver_commands,
-        "stop_root_service_tree",
-        lambda **_kw: events.append("root"),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    )
+
+    def stop_root(**_kw: object) -> None:
+        events.append("root")
+
+    monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", stop_root)
     monkeypatch.setattr(
         bringup,
         "stop_cluster_instance",
@@ -512,6 +613,12 @@ def test_do_stop_keep_infra_skips_infra_teardown(
             tmp_path,
             require_confirmation=False,
             keep_infra=True,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            announce=False,
+            timeout=5.0,
             producer=operator_pipeline,
             machine=command_runtime.machine,
             helper=refuse_helper,
@@ -521,19 +628,21 @@ def test_do_stop_keep_infra_skips_infra_teardown(
     assert events == ["root", "root"], "the services, then the pty-sessions service"
 
 
-def test_do_stop_keeps_browser_by_default(
+def test_force_stop_keeping_the_browser_does_not_reap_its_chrome(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
+    command_runtime.machine.set(role="gateway")
     calls: list[dict[str, object]] = []
     reaps: list[int] = []
     helpers: list[HelperFactory] = []
 
-    def stop_tree(*, helper: HelperFactory, **kw: object) -> None:
+    def stop_tree(*, helper: HelperFactory, timeout_s: float, **kw: object) -> None:
         helpers.append(helper)
+        assert 0 < timeout_s <= 5.0, "the force path spends the operator's budget"
         calls.append(kw)
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", stop_tree)
@@ -547,6 +656,13 @@ def test_do_stop_keeps_browser_by_default(
         force_stop(
             tmp_path,
             require_confirmation=False,
+            keep_infra=False,
+            keep_browser=True,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            announce=False,
+            timeout=5.0,
             producer=operator_pipeline,
             machine=command_runtime.machine,
             helper=refuse_helper,
@@ -561,19 +677,22 @@ def test_do_stop_keeps_browser_by_default(
     assert reaps == []
 
 
-def test_force_stop_keeping_the_pty_sessions_service_closes_no_terminals(
+def test_force_stop_keeping_shell_sessions_closes_no_terminals(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """`--keep-service pty-sessions` keeps the terminals it holds: one services step,
-    no terminal closure, no second stop of the service."""
+    # meiva:note
+    # `--keep-shell-sessions` keeps the terminals the service holds: one services step,
+    # no terminal closure, no second stop of the service.
+    command_runtime.machine.set(role="gateway")
     calls: list[dict[str, object]] = []
 
-    def stop_tree(*, helper: HelperFactory, **kw: object) -> None:
+    def stop_tree(*, helper: HelperFactory, timeout_s: float, **kw: object) -> None:
         assert helper is refuse_helper
+        assert 0 < timeout_s <= 5.0, "the force path spends the operator's budget"
         calls.append(kw)
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", stop_tree)
@@ -591,7 +710,13 @@ def test_force_stop_keeping_the_pty_sessions_service_closes_no_terminals(
         force_stop(
             tmp_path,
             require_confirmation=False,
-            preserve_sessions=frozenset({SERVICE_UNIT}),
+            keep_infra=False,
+            keep_browser=True,
+            keep_shell_sessions=True,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            announce=False,
+            timeout=5.0,
             producer=operator_pipeline,
             machine=command_runtime.machine,
             helper=refuse_helper,
@@ -601,18 +726,21 @@ def test_force_stop_keeping_the_pty_sessions_service_closes_no_terminals(
     assert calls == [{"preserve": frozenset({"browser", SERVICE_UNIT}), "force": True}]
 
 
-def test_do_stop_stop_browser_kills_it(
+def test_force_stop_without_keeping_the_browser_reaps_its_chrome(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
+    command_runtime.machine.set(role="gateway")
     events: list[str] = []
 
     def stop_root(**kwargs: object) -> None:
         assert kwargs["force"] is True
-        events.append("root+terminal-service" if SERVICE_UNIT in kwargs["preserve"] else "root")  # pyright: ignore[reportOperatorIssue]
+        preserve = kwargs["preserve"]
+        assert isinstance(preserve, frozenset)
+        events.append("root+terminal-service" if SERVICE_UNIT in preserve else "root")
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", stop_root)
     monkeypatch.setattr(_stop_commands, "reap_cluster_chrome", lambda: events.append("browser"))
@@ -625,7 +753,13 @@ def test_do_stop_stop_browser_kills_it(
         force_stop(
             tmp_path,
             require_confirmation=False,
+            keep_infra=False,
             keep_browser=False,
+            keep_shell_sessions=False,
+            teardown_extras=False,
+            preserve_sessions=frozenset(),
+            announce=False,
+            timeout=5.0,
             producer=operator_pipeline,
             machine=command_runtime.machine,
             helper=refuse_helper,

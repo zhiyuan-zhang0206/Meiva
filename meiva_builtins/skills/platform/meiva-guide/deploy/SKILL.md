@@ -65,7 +65,7 @@ private home environment now, before the first start:
 ```bash
 ${EDITOR:-vi} ~/.meiva/.env
 chmod 600 ~/.meiva/.env
-.venv/bin/meiva start
+.venv/bin/meiva start --all-services
 .venv/bin/meiva status
 ```
 
@@ -94,10 +94,10 @@ home refuses it, and an interrupted init resumes with no flags, from the payload
 recorded. Provider API keys that are not Settings aliases are
 local environment credentials, not generic configuration fields.
 
-`meiva start` takes no identity flag. A bare repeated `.venv/bin/meiva start` retains
-capabilities, credentials, ports, and desired services. `--only-service NAME` is a repeatable allowlist;
-`--disable-service NAME` is a repeatable exclusion list. These choices are
-mutually exclusive and persist. `--all-services` explicitly resets selection.
+`meiva start` takes no identity flag; capabilities, credentials and ports are recorded by `meiva init`.
+Every start names its service selection, exactly one of `--all-services`, `--only-service NAME`
+(repeatable allowlist) or `--disable-service NAME` (repeatable exclusion list). The selection is
+not persisted: a bare `.venv/bin/meiva start` is a usage error, and a later start names it again.
 A changed running root generation requires a normal stop before replacement.
 
 A failed first start keeps its journal and resource custody. Repeating start
@@ -121,7 +121,7 @@ export MEIVA_DB_CAPABILITY_KEY
   --machine-name machine-2 --machine-host <this-host-addr> \
   --db-capability /path/to/machine-2.bundle
 unset MEIVA_DB_CAPABILITY_KEY
-.venv/bin/meiva start
+.venv/bin/meiva start --all-services
 ```
 
 The bundle comes from `meiva cluster db-authority issue-unit --machine machine-2
@@ -132,7 +132,7 @@ capability and persists local identity; the first start registers the host and w
 for its selected services. It
 creates no local cluster data plane. To refresh the unit's capability (a rotated human secret changes its telemetry token), install the
 newly issued bundle on the stopped unit with `meiva cluster db-authority install-unit
-<bundle>` (the key in `MEIVA_DB_CAPABILITY_KEY` again), then `meiva start`. Each runner process fetches current
+<bundle>` (the key in `MEIVA_DB_CAPABILITY_KEY` again), then `meiva start --all-services`. Each runner process fetches current
 connection facts from the gateway at Settings construction. See
 [join a runner](references/join-a-runner.md) for health-port and TLS inputs.
 

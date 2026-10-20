@@ -343,8 +343,6 @@ check-typed-exception = true
 # re-wraps a failed stop with the retry hint from inside its try (TRY301).
 "cli/fleet_update.py" = ["S603", "S105", "S108", "TRY301"]
 "cli/tests/fleet_update/*.py" = ["S603"]
-"scripts/host_ops/fleet_update_keep.py" = ["S603"]
-"scripts/host_ops/tests/test_fleet_update_keep.py" = ["S603"]
 "tests/ci/test_prepush_branch_diff.py" = ["S603"]
 # Pre-push selectors run only fixed repo-local commands — git queries and
 # scripts/hooks/prepush-*.sh — with repo-owned path arguments, never a shell;

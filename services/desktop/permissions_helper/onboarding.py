@@ -178,7 +178,7 @@ def restart_helper() -> str:
         "The permissions helper re-reads a grant only at process start, and it is the"
         " ancestor of this home's root -- replacing it from inside the tree takes the"
         " agent plane down with it. Retire and recreate it under custody instead:"
-        " `meiva stop`, then `meiva start`. Never `launchctl kickstart -k`."
+        " `meiva stop`, then `meiva start` (each with its explicit choices; see their `--help`). Never `launchctl kickstart -k`."
     )
 
 

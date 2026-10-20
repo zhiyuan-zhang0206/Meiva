@@ -167,10 +167,17 @@ class Cluster:
             emit(self.names[alias])
             return 0
         if " - roster" in command:
-            assert stdin == fleet_update.gateway_program()
+            assert stdin == fleet_update.program_text(
+                fleet_update.VERIFY_SCRIPTS / "fleet_gateway.py"
+            )
             emit(self._roster_json())
             return 0
-        if stdin in (fleet_update.silence_program(), fleet_update.leases_program()):
+        if stdin in (
+            fleet_update.program_text(
+                Path(fleet_update.__file__).with_name("fleet_alert_silence.py")
+            ),
+            fleet_update.program_text(fleet_update.VERIFY_SCRIPTS / "fleet_leases.py"),
+        ):
             return self._shipped(alias, command, stdin, emit)
         if "agent_host.pid" in command:
             emit(f"host={'up' if self.host_up[alias] else 'down'}")
@@ -189,7 +196,7 @@ class Cluster:
     ) -> int:
         kinds = {
             "git fetch": "fetch",
-            "stop -y": "stop",
+            'meiva" stop': "stop",
             "--detach": "switch",
             "launchctl bootstrap": "oneshot",
             'meiva" start': "start",
@@ -215,7 +222,9 @@ class Cluster:
     def _shipped(
         self, alias: str, command: str, stdin: str | None, emit: Callable[[str], None]
     ) -> int:
-        if stdin == fleet_update.silence_program():
+        if stdin == fleet_update.program_text(
+            Path(fleet_update.__file__).with_name("fleet_alert_silence.py")
+        ):
             return self._silence(alias, command, emit)
         self.lease_reads.append(len(self.effects))
         assert alias == "gw", "the lease table is read on the gateway host"
@@ -264,19 +273,3 @@ class Cluster:
         if rc := self.fail.get((kind, alias), 0):
             emit(f"RED the {kind} detail from {alias}")
         return rc
-
-
-# meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
-def stub_decision(repo: Path, payload: dict[str, Any]) -> Path:
-    path = repo / "scripts" / "host_ops" / "fleet_update_keep.py"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "import json, sys\n"
-        f"print(json.dumps({payload!r}))\n"
-        "open(__file__ + '.argv', 'a').write(' '.join(sys.argv) + chr(10))\n"
-    )
-    return path
-
-
-def decision_argvs(stub: Path) -> list[str]:
-    return Path(str(stub) + ".argv").read_text().splitlines()

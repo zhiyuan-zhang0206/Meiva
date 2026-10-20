@@ -23,8 +23,8 @@ def _boot(home: Path, code: int) -> int:
 
 def test_the_parser_marks_a_boot_start_only_when_asked() -> None:
     parser = build_parser()
-    assert parser.parse_args(["start"]).boot is False
-    assert parser.parse_args(["start", "--boot"]).boot is True
+    assert parser.parse_args(["start", "--all-services"]).boot is False
+    assert parser.parse_args(["start", "--all-services", "--boot"]).boot is True
 
 
 @pytest.mark.parametrize("macos", [True, False])
@@ -112,10 +112,10 @@ def test_run_start_hands_the_boot_flag_to_the_start_and_wraps_it(
             producer=cast(Any, object),
         )
 
-    args = build_parser().parse_args(["start", "--boot"])
+    args = build_parser().parse_args(["start", "--all-services", "--boot"])
     assert run(args) == 0
     assert seen == {"boot": True, "home": tmp_path}
-    args = build_parser().parse_args(["start"])
+    args = build_parser().parse_args(["start", "--all-services"])
     seen.clear()
     assert run(args) == 0
     assert seen == {"boot": False}

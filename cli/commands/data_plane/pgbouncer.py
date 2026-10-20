@@ -379,8 +379,8 @@ def ensure_pgbouncer(
                 f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
                 f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — the degraded "
                 "pgbouncer cannot be restarted into a healthy double bind. On reboot "
-                "this means the private network has not come up yet; retry `meiva start` "
-                "once it is.",
+                "this means the private network has not come up yet; retry "
+                "`meiva start --all-services` (or this unit's own service selection) once it is.",
                 file=sys.stderr,
             )
             return 1
@@ -417,7 +417,7 @@ def _launch_pooler(listen_port: int, admin_password: str, *, machine: MachineIde
             f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — pgbouncer would "
             "silently degrade to loopback-only and every remote agent-runner would "
             "lose the pooled MEIVA_DB_URL. On reboot this means the private network has "
-            "not come up yet; retry `meiva start` once it is.",
+            "not come up yet; retry `meiva start --all-services` (or this unit's own service selection) once it is.",
             file=sys.stderr,
         )
         return 1
@@ -456,7 +456,7 @@ def _launch_pooler(listen_port: int, admin_password: str, *, machine: MachineIde
             f"  ✗ pgbouncer started but is NOT listening on the reachable address "
             f"{machine.host()!r} — it degraded to loopback-only (see "
             f"{_logfile_path()}). Every remote agent-runner's pooled MEIVA_DB_URL is "
-            "dead. Retry `meiva start` once the private network is up; the watchdog "
+            "dead. Retry `meiva start --all-services` (or this unit's own service selection) once the private network is up; the watchdog "
             "healthcheck will keep re-attempting.",
             file=sys.stderr,
         )
