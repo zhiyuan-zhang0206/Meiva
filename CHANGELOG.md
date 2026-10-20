@@ -68,6 +68,10 @@ and the matching GitHub Releases.
   gesture draws, from one component, instead of a second circle drawn to the
   button's own edges: at r=16.5 in a 36-unit box it read as a dial, not a loader
   (user report 2026-10-20).
+- The inline connection banner is translated and says what the reader loses rather
+  than which transport dropped: "Live updates reconnecting…" / "Live updates
+  disconnected — refresh the page to restore them", from the `common` catalog
+  instead of hardcoded English, so a zh console is no longer half-translated.
 - A delivered notification now names the notice it is about: the spine stages the
   notice's own route in `href` (`/fleet?notice=<id>`), and the app's bridge opens that
   target on a tap instead of a hardcoded `fleet#inbox` — which on a wide window only
