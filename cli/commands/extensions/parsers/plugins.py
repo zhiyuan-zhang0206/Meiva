@@ -22,11 +22,11 @@ def _duration(value: str) -> str:
     return value
 
 
-def _extension_gateway() -> Any:
-    from base.cluster.machine.ambient import gateway_access_from_settings
+def _extension_gateway(args: argparse.Namespace) -> Any:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.extensions.packages.cluster_registry import HttpExtensionGateway
 
-    return HttpExtensionGateway(gateway_access_from_settings())  # ambient: C
+    return HttpExtensionGateway(gateway_access_from_boot(args.runtime.config))
 
 
 def _h_plugins_update(_args: argparse.Namespace) -> int:
@@ -43,7 +43,7 @@ def _h_plugins_install(args: argparse.Namespace) -> int:
         args.ref,
         args.path,
         accept_risk=args.accept_risk,
-        gateway=_extension_gateway(),
+        gateway=_extension_gateway(args),
         machine=args.runtime.machine,
     )
 
@@ -119,7 +119,7 @@ def _h_skill_install(args: argparse.Namespace) -> int:
         accept_risk=args.accept_risk,
         update_mode=args.update_mode,
         check_every=args.check_every,
-        gateway=_extension_gateway(),
+        gateway=_extension_gateway(args),
         machine=args.runtime.machine,
     )
 
