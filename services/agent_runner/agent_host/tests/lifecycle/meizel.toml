@@ -5,12 +5,9 @@ exports = ["recovery_admission.py", "resurrection", "test_hosted_lifecycle.py"]
 "test_graceful_exit.py" = ["child_graceful_exit.py", "restart_cluster.py", "scripted_model.py"]
 "test_restart_resume.py" = ["restart_cluster.py", "scripted_model.py"]
 "test_hosted_backlog_recovery.py" = ["recovery_admission.py"]
-"test_hosted_idle_recovery.py" = ["recovery_admission.py"]
 
 [debt.first-party-patch]
 "force_host_setup.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 1
-"test_hosted_idle_recovery.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
-"test_hosted_idle_recovery.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
 "test_hosted_lifecycle.py#monkeypatch.setattr ops.cluster_status.kill_agent_shells" = 1
 "test_hosted_ownership_agent_host.py#monkeypatch.setattr agent.ownership.hosted.publish_agent_updated" = 1
 "test_hosted_ownership_agent_host.py#monkeypatch.setattr services.agent_runner.agent_host.host.publish_agent_updated" = 1

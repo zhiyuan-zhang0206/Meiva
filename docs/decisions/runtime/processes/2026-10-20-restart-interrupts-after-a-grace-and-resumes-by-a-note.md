@@ -65,3 +65,7 @@ A restart that waits for the turn boundary also waits for the turn: a long
   every invocation's input.
 - The note is consumed when the successor claims it; a crash between that claim and the
   checkpoint flush loses it, like any other non-chat inbound.
+
+Forward link (2026-10-20): the hold whose admission gate this record's fifth point still
+refers to is deleted; the exit's only admission control is the scheduler's own. See
+[delete the maintenance hold](2026-10-20-delete-maintenance-hold.md).

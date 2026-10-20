@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from typing import Never
 
-import pytest
 from psycopg_pool import PoolTimeout
 
-import gateway.app as gateway_app
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths import meiva_home
@@ -87,14 +85,3 @@ def test_health_control_pool_timeout_returns_degraded_with_identity(
         ],
         "degraded_reasons": ["db: PoolTimeout: control pool saturated"],
     }
-
-
-def test_control_plane_bypasses_an_unreadable_admission_journal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def unexpected_read(_request: object) -> bool:
-        raise AssertionError("control-plane request read the business admission journal")
-
-    monkeypatch.setattr(gateway_app, "cluster_is_paused", unexpected_read)
-    with gateway_test_client() as client:
-        assert client.get("/api/health").status_code == 200

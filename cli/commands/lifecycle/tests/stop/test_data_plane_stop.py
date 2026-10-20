@@ -20,7 +20,6 @@ from base.cluster import ownership
 from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from base.deploy.maintenance import admission
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
@@ -283,11 +282,11 @@ def _dead_shell(launch: Launcher) -> OwnedProcess:
     return identity
 
 
+# meiva:note
+# A recorded job is not a live terminal.
 def test_a_dead_service_with_only_a_known_job_does_not_block_terminal_closure(
     home: Path, launch: Launcher
 ) -> None:
-    """A recorded job is not a live terminal and does not acquire/change a hold."""
-    before = admission.snapshot()
     journal = home / "run/lifecycle-op.json"
     assert not journal.exists()
     job = launch("surviving-job", term="ignore")
@@ -300,7 +299,6 @@ def test_a_dead_service_with_only_a_known_job_does_not_block_terminal_closure(
     stop.require_no_terminals()
     stop.await_no_terminals(time.monotonic(), "terminals")
     assert job.poll() is None, "fixture teardown, not terminal-presence probing, owns this job"
-    assert admission.snapshot() == before
     assert not journal.exists()
 
 

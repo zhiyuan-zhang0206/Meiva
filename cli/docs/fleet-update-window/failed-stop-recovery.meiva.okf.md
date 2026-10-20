@@ -14,8 +14,8 @@ cost an aborted update, not an outage: `down` therefore ends a failed stop phase
 by bringing back the hosts it took down.
 
 Three facts decide one host, and none of them alone is enough: it was serving
-when the window began (the preflight's own hold read, so a host an operator had
-already stopped stays stopped), it is down now (its `agent_host` pid is gone),
+when the window began (the preflight's own read of whether it was already stopped,
+so a host an operator had already stopped stays stopped), it is down now (its `agent_host` pid is gone),
 and this run is what took it down — either its stop completed here, or the
 host's own `run/lifecycle-op.json` records a stop with a non-zero `rc` or
 `complete != true` (written by `base/deploy/lifecycle/status_journal.py`). A

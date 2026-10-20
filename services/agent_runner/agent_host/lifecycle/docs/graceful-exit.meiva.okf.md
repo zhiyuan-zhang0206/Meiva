@@ -24,8 +24,8 @@ signal ignored, so a retry cannot abort the exit it started.
    writes a `kind='restart'`, `source='system:restart'` inbound through
    `base.agents.inbox.insert`, the same row a gateway restart writes, under the
    agent row lock a gateway restart or terminate also takes. An agent that
-   already has an unfinished restart or terminate (an operator's, or the
-   maintenance hold's) keeps that one and gets no second: the next host would
+   already has an unfinished restart or terminate (an operator's) keeps that one
+   and gets no second: the next host would
    apply both. An idle agent has no turn task and gets nothing. A turn task that
    has not started running, or not yet been admitted, is owed one too; its
    restart is durable, so counting it loses nothing.
@@ -88,10 +88,8 @@ when launchd or systemd stops root) and `meiva stop`/`meiva restart`
 (`root_driver.down_units`) both go down the units in that declaration order, one
 at a time, so the agent-host stops first: its draining turns still call ops and
 the gateway, and the data plane stops last. Root answers `down` only once the
-unit has exited. The maintenance hold
-([[base/deploy/maintenance/docs/maintenance.meiva.okf.md]]) still runs before
-this and drains turns itself; a host stopped after a hold has no running turn
-and exits at once.
+unit has exited. Nothing drains the turns ahead of it: this exit is the only
+settling of running turns a stop does.
 
 Why: [the decision](../../../../../docs/decisions/runtime/processes/2026-10-20-host-graceful-exit-writes-own-restart.md)
 and [the restart that interrupts and resumes](../../../../../docs/decisions/runtime/processes/2026-10-20-restart-interrupts-after-a-grace-and-resumes-by-a-note.md).

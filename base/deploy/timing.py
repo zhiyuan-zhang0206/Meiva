@@ -189,6 +189,16 @@ CLOCKS: dict[str, Clock] = {
         lambda: stop.HOST_STOP_CEILING_S,
         "the agent-host's whole SIGTERM exit; root's TERM window for the unit derives from it",
     ),
+    "OPS_DRAIN_S": Clock(
+        "stop",
+        lambda: stop.OPS_DRAIN_S,
+        "graceful exit: how long a SIGTERMed ops server waits for admitted requests and their workers",
+    ),
+    "OPS_STOP_CEILING_S": Clock(
+        "stop",
+        lambda: stop.OPS_STOP_CEILING_S,
+        "the ops server's whole SIGTERM exit; root's TERM window for the unit derives from it",
+    ),
     "STOP_MARGIN_S": Clock(
         "stop",
         lambda: stop.STOP_MARGIN_S,
@@ -256,6 +266,20 @@ CONSTRAINTS: list[Constraint] = [
         "HOST_STOP_CEILING_S + STOP_MARGIN_S",
         "ROOT_HEALTH_INTERVAL_S",
         "root's TERM window for the agent-host (its ceiling plus the margin) stays inside "
+        "the health round a replacement stop runs inside, with slack rather than equality",
+    ),
+    Constraint(
+        "<",
+        "OPS_DRAIN_S",
+        "OPS_STOP_CEILING_S",
+        "the drain leaves room inside the ops server's stop ceiling for the pool, the event "
+        "pipeline and the server closes that carry no bound of their own",
+    ),
+    Constraint(
+        "<",
+        "OPS_STOP_CEILING_S + STOP_MARGIN_S",
+        "ROOT_HEALTH_INTERVAL_S",
+        "root's TERM window for the ops server (its ceiling plus the margin) stays inside "
         "the health round a replacement stop runs inside, with slack rather than equality",
     ),
     # --- wedged family ---

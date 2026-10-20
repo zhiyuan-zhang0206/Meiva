@@ -38,7 +38,7 @@ def _session(status: str = "active", **values: Any) -> dict[str, Any]:
     }
 
 
-async def test_held_host_wake_returns_before_runtime_or_slot(
+async def test_a_leased_agents_wake_returns_before_runtime_or_slot(
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -88,7 +88,7 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     settlement.assert_awaited_once()
 
 
-async def test_held_host_refuses_unaccepted_control_batch(
+async def test_a_lease_refuses_an_unaccepted_control_batch(
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -117,12 +117,12 @@ async def test_held_host_refuses_unaccepted_control_batch(
     apply = AsyncMock(return_value=None)
     monkeypatch.setattr(agent_host_host, "apply_hosted_lifecycle", apply)
     monkeypatch.setattr(agent_host_host, "settle_hosted_runtime", AsyncMock())
-    with pytest.raises(RuntimeError, match="held control claim returned an unaccepted command"):
-        await host._run_held_controls(42)
+    with pytest.raises(RuntimeError, match="lease control claim returned an unaccepted command"):
+        await host._run_lease_controls(42)
     apply.assert_not_awaited()
 
 
-async def test_held_controls_supervise_the_active_lease_relay(
+async def test_lease_controls_supervise_the_active_lease_relay(
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -148,7 +148,7 @@ async def test_held_controls_supervise_the_active_lease_relay(
     monkeypatch.setattr(db, "claim_inbound_batch", AsyncMock(return_value=[]))
     monkeypatch.setattr(agent_host_host, "apply_hosted_lifecycle", AsyncMock(return_value=None))
     monkeypatch.setattr(agent_host_host, "settle_hosted_runtime", AsyncMock())
-    await host._run_held_controls(42)
+    await host._run_lease_controls(42)
     supervise.assert_awaited_once_with(
         host._db,
         host._bus,

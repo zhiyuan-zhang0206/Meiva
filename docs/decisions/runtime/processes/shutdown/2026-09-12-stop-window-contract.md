@@ -100,3 +100,7 @@ pooler's remaining clients.
 Forward: [decisions/2026-10-11-remove-starting-and-ready-maintenance-phases.md](2026-10-11-remove-starting-and-ready-maintenance-phases.md)
 removes the `starting`/`ready` phases and `in_stop_leg()`; `quiesced()` (`drained` .. `stopped`)
 is the only window predicate.
+
+Forward link (2026-10-20): the maintenance hold, its journal, phases and the quiesced window are
+deleted; a stop settles running turns through the agent host's own exit. See
+[delete the maintenance hold](../2026-10-20-delete-maintenance-hold.md).

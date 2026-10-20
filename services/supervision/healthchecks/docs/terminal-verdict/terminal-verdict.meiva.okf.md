@@ -25,8 +25,8 @@ and again on every unavailable-to-answering edge. That is the breaker that keeps
 a fleet-wide dependency outage from becoming a restart storm, and the path that
 brings those machines back without an operator (2026-10-18, task #5315). There is
 no replacement confirmation loop. A new ALIVE observation or observed operator
-stop resets the count and closes the breaker; terminal observations and
-maintenance holds do not replenish it. A code-version-gate exit requires updating
+stop resets the count and closes the breaker; terminal observations
+do not replenish it. A code-version-gate exit requires updating
 the host, so root does not automatically restart that process.
 
 Status and readiness use the same probe evidence. No pidfile, session record,

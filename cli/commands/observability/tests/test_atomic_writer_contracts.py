@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
-from base.deploy.maintenance import pause_owner
 from cli.commands.observability import grafana_render, observatory_urls, otel_collector
 
 _START_GENERATION = "00000000-0000-4000-8000-000000000001"
@@ -22,21 +21,18 @@ def _marker_write(case: str, path: Path) -> None:
         start_serving.write_state(
             start_serving.ServingState(state="starting", generation=_START_GENERATION)
         )
-    elif case == "pause":
-        pause_owner.write_atomic(path, payload)
     elif case == "locks":
         home_lifecycle_locks.write_atomic(path, payload)
     else:
         raise AssertionError(case)
 
 
-@pytest.mark.parametrize("case", ["start", "pause", "locks"])
+@pytest.mark.parametrize("case", ["start", "locks"])
 def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     modules = {
         "start": start_serving,
-        "pause": pause_owner,
         "locks": home_lifecycle_locks,
     }
     module = modules[case]
@@ -80,7 +76,7 @@ def test_concurrent_marker_writers_publish_complete_snapshots(tmp_path: Path) ->
     path = tmp_path / "state.json"
 
     def write(index: int) -> None:
-        pause_owner.write_atomic(path, {"index": index, "data": "x" * 4096})
+        home_lifecycle_locks.write_atomic(path, {"index": index, "data": "x" * 4096})
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(write, range(24)))

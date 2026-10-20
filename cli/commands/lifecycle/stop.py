@@ -1,5 +1,5 @@
 # meiva:note
-# Local stop and restart commands over the shared native drain boundary.
+# Local stop and restart commands over the shared native stop boundary.
 #
 # Normal paths retain checkpoints and never escalate a service or data-plane
 # stop on timeout; a normal stop's terminal closure SIGKILLs what outlives its
@@ -19,8 +19,6 @@ from typing import Any
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import session_name
 from base.cluster.machine import MachineIdentity
-from base.deploy.maintenance.state import MaintenancePhase
-from base.events.live.bus import EventBus
 from base.host.permissions_helper.client import HelperFactory
 from base.sessions.hosting import hosting_supervised_session
 from base.sessions.pty.paths import SERVICE_UNIT
@@ -28,7 +26,7 @@ from base.telemetry import EventPipeline
 from cli.commands._repo import repo_root
 from cli.commands.data_plane.stop_waits import deadline_after, remaining
 from cli.commands.lifecycle import _temporary_stop, root_driver, root_readiness
-from cli.commands.lifecycle._pause_resume import exclusive_resources
+from cli.commands.lifecycle._exclusive_resources import exclusive_resources
 from cli.commands.lifecycle.service_stop import force_close_terminals
 from cli.database import OperatorDatabaseFactory
 from cli.database.lifecycle_audit import (
@@ -163,7 +161,7 @@ def force_stop(
     # Explicit force-only resource stop; normal commands use _temporary_stop.
     #
     # Preserves agent identities/data and the selected service/infra/shell-session
-    # scope, but may interrupt work. Never entered merely because drain timed out.
+    # scope, but may interrupt work. Never entered merely because a graceful stop timed out.
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 
@@ -200,9 +198,10 @@ def force_stop(
         )
     deadline = deadline_after(timeout)
 
+    # meiva:note
     # Explicit force interrupts the host process. Agent metadata/checkpoints
     # remain untouched; the next host uses its existing owner recovery. This
-    # path does not fabricate drain receipts and remains usable offline. The
+    # path leaves no restart behind for the interrupted turns and remains usable offline. The
     # pty-sessions service outlives this step: it closes the terminals below.
     _root_driver_commands.stop_root_service_tree(
         preserve=root_preserve | {SERVICE_UNIT},
@@ -349,68 +348,6 @@ def cmd_stop(
         return code
 
 
-def release_self_heal_pause(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
-    """After a restart that failed before any service stopped, let go of what it took.
-
-    A restart that declines or fails never reaches `meiva start`/`meiva restart`'s
-    unpause, so nothing else would release its hold or a paused posture and the
-    host would sit gated until an operator ran `meiva start`. The hold this
-    process's own stop took in its preparing, draining or drained phase is
-    released here (nothing was stopped; no start is run and nothing is
-    retried). A hold that has entered its stop window keeps gating agents until
-    `meiva start` passes readiness, and a hold taken by anyone else is theirs. A
-    posture read failure leaves the host paused — wrongly unpausing is the
-    worse mistake.
-    """
-    from base.deploy.maintenance import admission
-    from base.deploy.state.host_deploy_state import read
-    from ops.agent_pause import owns_stop_hold
-
-    held = admission.snapshot()
-    if (
-        held is not None
-        and held.maintenance is not None
-        and held.maintenance.phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED)
-    ):
-        print("  · services partially stopped; holding agents until meiva start passes readiness")
-        return
-    if held is not None and owns_stop_hold(held.holder):
-        _release_own_hold(database_factory=database_factory, machine=machine)
-        return
-
-    # The pause lives in the posture row (R1, PR5): only `paused` is this heal's business.
-    try:
-        state = read(database_factory(), machine.name())
-    except Exception as exc:
-        print(
-            f"  · leaving this host paused (could not read host_deploy_state: {exc})",
-            file=sys.stderr,
-        )
-        return
-    if state is None or state.posture != "paused":
-        return  # nothing paused this host; an operator's `meiva restart` changes nothing
-    from ops.cluster_status.pause import unpause_local_cluster
-
-    unpause_local_cluster(database_factory(), EventBus.from_settings(), local_machine=machine)
-    print("  · unpaused this host (nothing else owns the pause; nothing was stopped)")
-
-
-def _release_own_hold(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
-    """Release this process's pre-service stop hold and restore the posture."""
-    from ops.cluster_status.pause import unpause_local_cluster
-
-    try:
-        unpause_local_cluster(database_factory(), EventBus.from_settings(), local_machine=machine)
-    except Exception as exc:
-        print(
-            f"  · could not release the maintenance hold this restart took ({exc}); "
-            "run `meiva start` to release it",
-            file=sys.stderr,
-        )
-        return
-    print("  · released the maintenance hold this restart took (nothing was stopped)")
-
-
 def require_restart_runtime(runtime: StartRuntime) -> None:
     """Recheck the captured runtime before disruptive work."""
     from base.paths import prod_service_checkout_error
@@ -446,7 +383,7 @@ def _cmd_restart_body(
     # meiva:note
     # Stop then start the service tree without a stdin confirmation prompt.
     #
-    # Hosted agents drain through the shared stop boundary before service stop.
+    # Hosted agents settle through the agent-host's own SIGTERM exit in the shared stop boundary.
     # Explicit force authorizes interrupting resource shutdown. `timeout` bounds
     # the stop leg; the start leg launches exactly the named service selection.
     if retained_children is None:
@@ -456,14 +393,16 @@ def _cmd_restart_body(
     from cli.commands import _repo
     from cli.commands.lifecycle import _start_readiness_preflight, start
 
+    # meiva:note
     # Admission precedes even the restart journal: an incompatible caller must
-    # leave the running generation and its maintenance state untouched.
+    # leave the running generation untouched.
     runtime = restart_runtime()
 
+    # meiva:note
     # An exec-domain restart is SIGKILLed by the execute_code call's own
     # teardown — the call's whole process group, as its turn ends (nohup/& do
-    # not leave the group — 2026-09-12: macmini stranded in a local pause).
-    # Refuse before any pause. The restart closes persistent terminals like a stop,
+    # not leave the group — 2026-09-12: macmini stranded mid-stop).
+    # Refuse before anything stops. The restart closes persistent terminals like a stop,
     # so no shell session can host it either: a plain login shell does.
     exec_domain = hosting_exec_domain()
     if exec_domain is not None:
@@ -474,9 +413,6 @@ def _cmd_restart_body(
             "it from a shell no meiva session hosts (e.g. a plain ssh/login shell).",
             file=sys.stderr,
         )
-        release_self_heal_pause(
-            database_factory=database_factory, machine=command.machine
-        )  # same decline contract as the preflight refusal below
         return RESTART_DECLINED_EXIT_CODE
 
     # Same refusal as `cmd_update`'s in-process legs: the stop below kills every
@@ -492,9 +428,6 @@ def _cmd_restart_body(
             "(e.g. a plain ssh/login shell) — host still serving",
             file=sys.stderr,
         )
-        release_self_heal_pause(
-            database_factory=database_factory, machine=command.machine
-        )  # same decline contract as the preflight refusal below
         return RESTART_DECLINED_EXIT_CODE
 
     repo = runtime.code_root
@@ -524,7 +457,6 @@ def _cmd_restart_body(
         rc = _repo.preflight_probes(database_factory(), command=command)
     if rc != 0:
         print("  ✗ refusing restart: preflight probes failed — host still serving", file=sys.stderr)
-        release_self_heal_pause(database_factory=database_factory, machine=command.machine)
         if owns_journal:
             status_journal.finish(RESTART_DECLINED_EXIT_CODE, error="preflight probes failed")
         return RESTART_DECLINED_EXIT_CODE
@@ -556,7 +488,6 @@ def _cmd_restart_body(
             "nothing was stopped. Fix the findings above, then retry.",
             file=sys.stderr,
         )
-        release_self_heal_pause(database_factory=database_factory, machine=command.machine)
         if owns_journal:
             status_journal.finish(
                 RESTART_DECLINED_EXIT_CODE, error="start-readiness preflight failed"
@@ -592,11 +523,8 @@ def _cmd_restart_body(
             helper=command.helper,
         )
     if rc != 0:
-        # The quiesce paused this host; a failed stop means no `meiva start` is
-        # coming to restore it. Release the pause unless a stop hold owns it
-        # (same contract as the refusal paths above). The stop leg's own
-        # journal phases (drain / services / ...) remain readable.
-        release_self_heal_pause(database_factory=database_factory, machine=command.machine)
+        # meiva:note
+        # The stop leg's own journal phases (services / terminals / ...) remain readable.
         if owns_journal:
             status_journal.finish(rc, error="stop leg failed")
         return rc
@@ -606,9 +534,7 @@ def _cmd_restart_body(
     # stop leg kept still run, so the live root is not reconciled to the selection.
     with status_journal.phase("start"):
         rc = start.cmd_start_body(
-            None,
             database_factory,
-            command.machine,
             only_services=only_services,
             disabled_services=disabled_services,
             all_services=all_services,

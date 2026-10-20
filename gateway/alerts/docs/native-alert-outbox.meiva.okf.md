@@ -57,8 +57,7 @@ webhook or reliable SSE/RPC. A bounded rotating keyset scan advances over held
 preparations and wraps; its memory hint is never an acceptance watermark, so low
 IDs committed late remain eligible. Shadow origin is excluded before scanning.
 `im_notify_enabled=false` holds new acceptance/recovery; already accepted work
-retains its durable promise and drains through the existing worker. Operators use
-maintenance admission to stop new provider attempts and drain active calls.
+retains its durable promise and drains through the existing worker.
 
 ## Delivery and completion
 

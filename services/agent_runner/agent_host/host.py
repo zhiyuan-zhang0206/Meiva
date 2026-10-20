@@ -56,7 +56,6 @@ from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentity
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
-from base.deploy.maintenance import admission
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
@@ -80,7 +79,6 @@ from services.agent_runner.agent_host.invocation import (
 )
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.invocation.driver import drive_context
-from services.agent_runner.agent_host.lifecycle import maintenance as maintenance_receipts
 from services.agent_runner.agent_host.lifecycle.shells import kill_terminating_agent_shells
 from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
 from services.agent_runner.agent_host.runtime import (
@@ -97,7 +95,7 @@ from services.agent_runner.agent_host.runtime import (
     refresh_cached_runtime,
 )
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
-from services.agent_runner.agent_host.scheduling.pending_wakes import scan_candidates
+from services.agent_runner.agent_host.scheduling.pending_wakes import scan_rows
 from services.agent_runner.agent_host.scheduling.wake_screening import (
     is_runnable,
     read_stored_config,
@@ -202,12 +200,6 @@ class AgentHost:
                     work.cancel()
                     await wait_shielded_task(work)
                 work.result()
-            except BaseException as exc:
-                try:
-                    await maintenance_receipts.record_failure(self._control_pool, agent_id, exc)
-                except BaseException as receipt_error:
-                    exc.add_note(f"hosted failure receipt failed: {receipt_error!r}")
-                raise
             finally:
                 if not work.done():
                     raise HostRestartRequiredError("hosted work remains live after cancellation")
@@ -215,7 +207,6 @@ class AgentHost:
                     self.drop_agent(agent_id)
             if cancelled:
                 raise asyncio.CancelledError
-            await maintenance_receipts.record_drained(self._control_pool, agent_id)
 
     async def _run_turn(self, agent_id: int, *, resources: HostedTurnResources | None) -> None:
         """Run to idle, re-reading ownership and configuration each turn boundary.
@@ -231,13 +222,10 @@ class AgentHost:
             return
         self.turn_fingerprints[agent_id] = stored.fingerprint
 
-        if await maintenance_receipts.run_held(agent_id, self._run_held_controls):
-            return
-
         # An active external lease owns decisions; no native graph or plugin
         # initialization may start on a dispatcher wake or a host restart.
         if await active_lease(self._control_pool, agent_id):
-            await self._run_held_controls(agent_id)
+            await self._run_lease_controls(agent_id)
             return
 
         async with self.admission.admit(agent_id):
@@ -272,16 +260,10 @@ class AgentHost:
             if incarnation is None:
                 logger.info(
                     "hosted turn for agent {agent_id} not started — row left {status} "
-                    "(no admission granted: terminated, held or placed elsewhere); skipping",
+                    "(no admission granted: terminated or placed elsewhere); skipping",
                     agent_id=agent_id,
                     status=stored.status,
                 )
-                return
-            if admission.held():
-                # Admission may have waited for prepare's real row lock.
-                # Its only permitted continuation now is the owned control;
-                # do not build a new runtime or run initialization hooks.
-                await self._apply_held_controls(agent_id, incarnation)
                 return
             outcome = TurnOutcome(exited=False, crashed=False)
             # Admission is durable before its optional live announce; every await
@@ -351,11 +333,11 @@ class AgentHost:
                 )
 
     # meiva:note
-    # Held controls keep ownership and apply admin intent without a graph turn. The one
+    # Lease controls keep ownership and apply admin intent without a graph turn. The one
     # graph write they owe is a takeover this wake ends itself: its checkpoint handoff
     # must land before the agent idles (#5467).
     # meiva:link docs/conventions/agents/agent-impersonation.md
-    async def _run_held_controls(self, agent_id: int) -> None:
+    async def _run_lease_controls(self, agent_id: int) -> None:
         incarnation = await admit_hosted_runtime(
             self._control_pool,
             agent_id,
@@ -365,15 +347,15 @@ class AgentHost:
         )
         if incarnation is None:
             return
-        await self._apply_held_controls(agent_id, incarnation)
+        await self._apply_lease_controls(agent_id, incarnation)
 
-    async def _apply_held_controls(self, agent_id: int, incarnation: RuntimeIncarnation) -> None:
+    async def _apply_lease_controls(self, agent_id: int, incarnation: RuntimeIncarnation) -> None:
         from agent.db import claim_inbound_batch
 
-        # An external lease owns decisions; held wakes alone supervise its relays.
+        # meiva:note
+        # An external lease owns decisions; these wakes alone supervise its relays.
         # One native_status read checks known exits/heartbeats without models or polling.
-        # Confirmed exit/staleness triggers recovery; failures use held-wake error handling.
-        # record_failure ends the owed restart command once; no later scan drives it.
+        # Confirmed exit/staleness triggers recovery; failures use the scheduler's error handling.
         session = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
         await supervise_relay(
             self._db,
@@ -383,8 +365,9 @@ class AgentHost:
             self.relays,
             incarnation=incarnation,
         )
+        # meiva:note
         # An earlier ordinary failure can leave a buffered tail. Preserve
-        # it before accepting maintenance intent, without replaying graph work.
+        # it before accepting lifecycle intent, without replaying graph work.
         await flush_checkpoint(self._checkpointer, agent_id)
         batch = await claim_inbound_batch(
             self._control_pool,
@@ -393,10 +376,10 @@ class AgentHost:
             incarnation=incarnation,
         )
         if len(batch) > 1 or any(not item.durable_lifecycle for item in batch):
-            raise RuntimeError("held control claim returned an unaccepted command")
+            raise RuntimeError("lease control claim returned an unaccepted command")
         # meiva:note
         # No graph ran here, so nothing says whether the agent's last turn was finished;
-        # a held restart never queues a continuation.
+        # a restart applied under a lease never queues a continuation.
         kind = await apply_hosted_lifecycle(
             self._control_pool,
             incarnation,
@@ -507,9 +490,10 @@ class AgentHost:
         """Read the scheduler's actual LLM activity clock."""
         return await read_last_active_at(self._control_pool, agent_id)
 
+    # meiva:note
+    # Use the scheduling owner's durable work scan.
     async def pending_inbound_wakes(self) -> list[int]:
-        """Use the scheduling owner's durable work/maintenance scan."""
-        return await scan_candidates(self._control_pool, self._machine)
+        return await scan_rows(self._control_pool, self._machine)
 
     # meiva:note
     # The scheduler that runs this host's turns takes `run_turn`, so the host cannot take the

@@ -8,7 +8,6 @@ that async fan-out path and only validate the SystemStatus.cluster data pipeline
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +17,7 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
+from base.deploy.lifecycle import start_serving
 from gateway.cluster import roster_probe
 from gateway.cluster import status as status_router
 from gateway.cluster.process_boot import LOADED_IMAGE
@@ -44,18 +44,13 @@ def truncate_machines(db_conn: psycopg.Connection) -> None:
     db_conn.commit()
 
 
+# meiva:note
+# The serving gate, controllable via a tmp file: the flag's existence stands for a stop
+# that has cleared the gate, so the local machine reads `paused` with reason `startup`.
 @pytest.fixture
 def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """The pause signal, controllable via a tmp file. R1 (Task #1021) moved
-    `is_paused` to the host_deploy_state posture row; the status router's bound
-    name is shimmed to the file's existence so this suite keeps simulating the
-    pause with a file."""
     flag = tmp_path / "cluster_paused"
-
-    def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
-        return flag.exists()
-
-    monkeypatch.setattr(status_router, "cluster_is_paused", paused)
+    monkeypatch.setattr(start_serving, "is_serving", lambda: not flag.exists())
     return flag
 
 
@@ -163,6 +158,9 @@ class TestClusterPanel:
         assert c["current_serve_agent_runner"] is False
         assert c["current_paused"] is False
 
+    # meiva:note
+    # A cleared serving gate (a stop has begun) shows in the cluster sub-section as
+    # `current_paused`.
     def test_current_paused_true_when_flag_exists(
         self,
         db_conn: psycopg.Connection,
@@ -173,8 +171,6 @@ class TestClusterPanel:
         *,
         machine_identity: MachineIdentity,
     ) -> None:
-        """During a pause /api/status is short-circuited to 503 by middleware; call the
-        helper directly to verify the cluster sub-section correctly reflects the paused flag."""
         del stub_remote_probe
         _ = stub_machine_identity
         fake_flag.write_text("")

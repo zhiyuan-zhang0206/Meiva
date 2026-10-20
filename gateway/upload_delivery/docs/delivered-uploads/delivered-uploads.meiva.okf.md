@@ -90,10 +90,10 @@ this contribution. Restoration or cancellation requires a separate reviewed poli
 The worker wakes the target once, right after `source.complete` commits (the same
 publish-wake and resurrect-if-terminated path as ordinary chat delivery). A failed
 wake is logged and not repeated: the accepted chat stays a pending inbound that the
-agent's next ordinary wake delivers. Deleted/done IID is never requeued. Gateway business pause/quiesce stops fresh work. Lifespan stops
+agent's next ordinary wake delivers. Deleted/done IID is never requeued. A stopping gateway stops fresh work. Lifespan stops
 rounds and drains actual shielded native futures before closing the pool; cancelling
 an HTTP wait does not pretend its filesystem/DB thread ended. Ops retains its
-existing maintenance admission and native-worker drainage.
+existing request and native-worker drainage (`agent_ops/in_flight.py`).
 
 See [silent upload owner](../../../routers/docs/upload-batches.meiva.okf.md) for the
 native-image silent save. This is server Outbox recovery of one

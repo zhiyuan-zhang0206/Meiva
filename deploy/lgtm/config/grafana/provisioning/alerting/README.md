@@ -44,7 +44,9 @@ gone. Tombstoned so far: R23 (`meiva-ops-pitr-storage-growth`, retired
 2026-10-02, removed from the station 2026-10-05) and R3
 (`meiva-ops-agent-restart-spike`, which counted an event nothing emits),
 plus the two absolute checkpoint_blobs size tiers (`…-warning` / `…-error`,
-retired 2026-10-17 under T5280 when full retention made them fire forever).
+retired 2026-10-17 under T5280 when full retention made them fire forever), and
+`meiva-ops-agent-continuation-lost` / `meiva-ops-maintenance-hold-overdue`, which
+read events only the deleted maintenance hold raised.
 
 ## Where these run (LGTM stack)
 
@@ -286,10 +288,8 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-service-start-unready` | `service_start_unready` | 0m | warning | start-readiness alert rows |
 | `meiva-ops-boot-retries-exhausted` | `boot_retries_exhausted` | 0m | error | nothing: the boot job's endless retry never reported a permanent failure |
 | `meiva-ops-schedule-verify-failed` | `schedule_verify_failed` | 0m | error | the verify sweep's direct post |
-| `meiva-ops-agent-continuation-lost` | `agent_continuation_lost` per agent | 0m | error | the agent host's alert for a turn that failed while its continuation was owed to a maintenance hold |
 | `meiva-ops-schedule-stalled` | `schedule_stalled` (24h) | 0m | warning | the event had no rule |
 | `meiva-ops-schedule-convergence-abandoned` | `schedule_convergence_abandoned` (24h) | 0m | warning | nothing: the manager's reap and sync retries had no bound and no report |
-| `meiva-ops-maintenance-hold-overdue` | `maintenance_hold_overdue` (24h) | 0m | warning | nothing: a forgotten maintenance hold froze the machine's wakes unreported |
 | `meiva-ops-machine-offline-warning` / `-error` | `machine_probe_failed` per machine | 3m / 10m | warning / error | the machine-offline rows and their clock |
 | `meiva-ops-machine-stopped-too-long` | `machine_stopped_too_long` per machine (an announced stop, 20m+ old, no `--maintenance-for` window) | 0m | error | nothing: an intentionally stopped host leaves the probe target set, so a forgotten stop was invisible inside the cluster (10-14: 53 minutes) |
 | `meiva-ops-exec-child-boot-failed` | `exec_child_boot_failed` | 0s | warning | the exec child's direct post and 600s limit |

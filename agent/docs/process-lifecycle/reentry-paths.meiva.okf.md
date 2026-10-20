@@ -35,7 +35,7 @@ accept different lifecycle states.
 | `terminate()` | finishes native control | retained, terminal | retained |
 | `restart()` | completes, then new admission | retained | retained |
 | `resurrect()` | scheduled for terminated identity | retained | retained |
-| `meiva restart` / update | drains native controls | retained; interrupted work not replayed | closed |
-| full cluster `stop` | drains then stops host | retained; interrupted work not replayed | closed |
+| `meiva restart` / update | exits gracefully; each running turn gets a restart | retained; an unfinished turn continues from a note, a turn past the exit budget is not resumed | closed |
+| full cluster `stop` | exits gracefully, then the rest of the services stop | retained; as above | closed |
 
-Related: [[../lifecycle.meiva.okf.md]] and [[base/deploy/maintenance/docs/maintenance.meiva.okf.md]].
+Related: [[../lifecycle.meiva.okf.md]] and [[services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md]].

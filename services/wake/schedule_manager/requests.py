@@ -1,22 +1,21 @@
-"""Consume the API's sync requests.
-
-`PUT /api/schedules/{id}` (edited script / enabled flag), start, stop, restart
-and delete all need the schedule's session converged now, not at the next
-reconcile. The gateway does not reach into this process: it upserts a row in
-`schedule_sync_requests` (`gateway/schedules/session_control.py`) and waits a
-bounded time for it to disappear. This module is the consumer.
-
-A request is deleted only after its sync ran, and only if it is still the row
-that was read (a newer request for the same schedule survives), so a crash
-between the sync and the delete runs convergence again: matching persisted
-revision/session provenance is adopted instead of kill/relaunch. While a maintenance hold is up nothing is consumed and the requests
-stay queued. A request that stays blocked (a session that survives its reap,
-unreadable launch provenance) is retried for a bounded window; when the manager
-gives up it reports success, so the request is consumed (the schedule is then an
-error with an alert, see ``manager.py``).
-
-Synchronous psycopg; the loop calls it through `asyncio.to_thread`.
-"""
+# meiva:note
+# Consume the API's sync requests.
+#
+# `PUT /api/schedules/{id}` (edited script / enabled flag), start, stop, restart
+# and delete all need the schedule's session converged now, not at the next
+# reconcile. The gateway does not reach into this process: it upserts a row in
+# `schedule_sync_requests` (`gateway/schedules/session_control.py`) and waits a
+# bounded time for it to disappear. This module is the consumer.
+#
+# A request is deleted only after its sync ran, and only if it is still the row
+# that was read (a newer request for the same schedule survives), so a crash
+# between the sync and the delete runs convergence again: matching persisted
+# revision/session provenance is adopted instead of kill/relaunch. A request that stays blocked (a session that survives its reap,
+# unreadable launch provenance) is retried for a bounded window; when the manager
+# gives up it reports success, so the request is consumed (the schedule is then an
+# error with an alert, see ``manager.py``).
+#
+# Synchronous psycopg; the loop calls it through `asyncio.to_thread`.
 
 from __future__ import annotations
 

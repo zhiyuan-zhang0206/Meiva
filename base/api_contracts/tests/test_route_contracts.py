@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from base.api_contracts import contracts
-from base.api_contracts.contracts import Idempotency, PauseSemantics
+from base.api_contracts.contracts import Idempotency
 
 
 def test_sdk_inherits_idempotency_from_contracts() -> None:
@@ -50,7 +50,6 @@ def test_template_matching(template: str, path: str, expected: bool) -> None:
 def test_contracts_have_no_unknown_semantics() -> None:
     for (method, _path), c in contracts.ROUTE_CONTRACTS.items():
         assert c.idempotency in Idempotency, f"bad idempotency on {method} {_path}"
-        assert c.pause in PauseSemantics, f"bad pause on {method} {_path}"
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
@@ -17,8 +16,6 @@ from base.sessions.pty import closure
 from base.telemetry import Event
 from ops import pty_close_notices as notices
 
-_WHEN = datetime(2026, 9, 10, 1, 2, 3, tzinfo=UTC)
-
 
 def _notice(
     *,
@@ -32,8 +29,6 @@ def _notice(
         name=f"meiva-agent-{agent_id}-shell-{session_id}-report",
         shell_pid=9090,
         shell_birth=birth,
-        operation="local-pause:macmini:1:uuid",
-        acquired_at=_WHEN,
         reason=notices.STOP_REASON,
         survivors=survivors,
     )
@@ -88,8 +83,6 @@ def test_closure_notice_rejects_non_agent_shell_names() -> None:
             name="meiva-gateway",
             shell_pid=1,
             shell_birth="birth:1.0",
-            operation="local-pause:macmini:1:uuid",
-            acquired_at=_WHEN,
             reason=notices.STOP_REASON,
         )
         is None
@@ -118,10 +111,11 @@ def test_a_live_owner_gets_one_system_inbound(
     content, source, payload = rows[0]
     assert source == "system"
     assert "closed by an operator stop (meiva stop)" in content
+    assert "probably" not in content, "a stop observed the work it interrupted"
     assert "id 11" in content and "macmini" in content
     closure_payload = json.loads(payload)["closure"]
     assert closure_payload["agent_id"] == aid and closure_payload["session_id"] == 11
-    assert closure_payload["operation"] == "local-pause:macmini:1:uuid"
+    assert "operation" not in closure_payload and "acquired_at" not in closure_payload
 
 
 def test_a_notice_written_twice_is_delivered_once(
@@ -317,7 +311,7 @@ def _ended(agent_id: int, session_id: int = 11, starttime: int = 4242) -> closur
     )
 
 
-def test_a_crash_notice_names_the_crash_and_no_operation(
+def test_a_crash_notice_names_the_crash_and_only_probably_an_interruption(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
@@ -333,7 +327,7 @@ def test_a_crash_notice_names_the_crash_and_no_operation(
 
     ((content, source, payload),) = _inbounds(db_conn, aid)
     assert source == "system"
-    assert notices.CRASH_REASON in content and "operation" not in content
+    assert notices.CRASH_REASON in content and "probably interrupting" in content
     record = json.loads(payload)["closure"]
     assert "operation" not in record and "acquired_at" not in record
     assert record["shell_birth"] == "starttime:4242" and record["shell_pid"] == 9090

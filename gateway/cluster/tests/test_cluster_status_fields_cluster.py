@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from collections.abc import Callable
 from datetime import UTC, datetime
 
 import pytest
@@ -11,6 +10,7 @@ import gateway.cluster.status as status_mod
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
+from base.deploy.lifecycle import start_serving
 from gateway.cluster import roster_probe
 from gateway.cluster.process_boot import LOADED_IMAGE
 
@@ -78,7 +78,6 @@ def test_gather_cluster_status_local_agent_runner_probed(
             "m1",
             identity_log=identity_log,
             image=LOADED_IMAGE,
-            local_machine=machine_identity,
         )
     )
 
@@ -139,7 +138,6 @@ def test_probe_flags_identity_mismatch_when_responder_name_differs(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
-            local_machine=machine_identity,
         )
     )
 
@@ -196,7 +194,6 @@ def test_identity_mismatch_logs_once_per_episode(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
-            local_machine=machine_identity,
         )
     )
     assert machines[0].identity_mismatch is True
@@ -212,7 +209,6 @@ def test_identity_mismatch_logs_once_per_episode(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
-            local_machine=machine_identity,
         )
     )
     assert [r for r in caplog.records if r.name == "gateway.cluster.roster_probe"] == []
@@ -227,7 +223,6 @@ def test_identity_mismatch_logs_once_per_episode(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
-            local_machine=machine_identity,
         )
     )
     assert machines[0].online is True
@@ -241,7 +236,6 @@ def test_identity_mismatch_logs_once_per_episode(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
-            local_machine=machine_identity,
         )
     )
     again = [
@@ -296,7 +290,6 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
-            local_machine=machine_identity,
         )
     )
     asyncio.run(
@@ -306,7 +299,6 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
-            local_machine=machine_identity,
         )
     )
 
@@ -334,11 +326,7 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(
 
     monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
 
-    def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
-        assert machine_name == machine_identity.name
-        return True
-
-    monkeypatch.setattr(status_mod, "cluster_is_paused", paused)
+    monkeypatch.setattr(start_serving, "is_serving", lambda: False)
     monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
 
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
@@ -351,7 +339,6 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(
             "m1",
             identity_log=identity_log,
             image=LOADED_IMAGE,
-            local_machine=machine_identity,
         )
     )
 
@@ -359,6 +346,7 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(
     m = machines[0]
     assert m.online is True
     assert m.paused is True
+    assert m.paused_reason == "startup"
     assert m.head_sha == "abc123"
     assert m.running_sha == LOADED_IMAGE.sha
     assert m.shell_count == 0
@@ -377,11 +365,7 @@ def test_gather_returns_rows_sorted_by_name(
     address-less row is reported offline without a dial; the roster comes back
     ordered by machine name whatever order the table gave."""
 
-    def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
-        assert machine_name == machine_identity.name
-        return False
-
-    monkeypatch.setattr(status_mod, "cluster_is_paused", paused)
+    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
     now = datetime.now(UTC)
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
@@ -396,7 +380,6 @@ def test_gather_returns_rows_sorted_by_name(
             "m1",
             identity_log=identity_log,
             image=LOADED_IMAGE,
-            local_machine=machine_identity,
         )
     )
 
@@ -447,7 +430,6 @@ def test_gather_cluster_status_carries_probe_paused_reason(
             "m1",
             identity_log=identity_log,
             image=LOADED_IMAGE,
-            local_machine=machine_identity,
         )
     )
 

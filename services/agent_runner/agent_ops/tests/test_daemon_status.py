@@ -38,7 +38,7 @@ async def test_ops_route_wraps_dispatch_in_envelope(
         payload: dict[str, Any],
         *,
         active_ops: daemon.ActiveOps,
-        workers: daemon.maintenance_activity.WorkerFutures,
+        workers: daemon.in_flight.WorkerFutures,
         pool: ConnectionPool,
         executor: ThreadPoolExecutor,
         catalog: ModelCatalog,

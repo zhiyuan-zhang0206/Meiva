@@ -20,7 +20,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_ops import daemon
-from services.agent_runner.agent_ops.maintenance import WorkerFutures
+from services.agent_runner.agent_ops.in_flight import WorkerFutures
 
 
 @pytest.fixture

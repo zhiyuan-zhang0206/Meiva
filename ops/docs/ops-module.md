@@ -8,16 +8,15 @@ coordination. Its design rationale is recorded in
 |---|---|
 | Service specification | not in `ops`: the service roster, its `ServiceSpec` contract and gating live in `services/supervision/roster/` (the supervised services own their own declarations) |
 | Observation and status | `ops/cluster_status/` (host snapshot, `pause.py` posture, `schema_mismatch` diagnosis) |
-| Native agent drain | `ops/agent_pause/` (drain, `probe` of the running host) |
 | Alerts | `ops/alerts.py` (the alert row and its SSE publish, shared by the gateway alert endpoints and the events-maintenance reconciler) |
 | Agent lifecycle | `ops/agents/` (birth and wake); `ops/lifecycle/` (lifecycle RPC ops) |
 | RPC | `ops/rpc_schemas/` (wire vocabulary); `ops/cluster/rpc.py` (gateway client) |
 | Op clusters the ops server dispatches | `ops/lifecycle/`, `ops/cluster/operations.py`, `ops/host_config.py`, `ops/inventory.py` |
-| Stop and restart | CLI maintenance orchestration over the shared drain |
+| Stop and restart | CLI stop orchestration; the agent host settles its own running turns on SIGTERM |
 | Fleet update | `cli/fleet_update.py` (down and up scripts per unit, gated by the code version) |
 
 Each package door is the module it grew from; `ops.agents`,
-`ops.rpc_schemas`, `ops.cluster.operations_status` and `ops.agent_pause`
+`ops.rpc_schemas` and `ops.cluster.operations_status`
 kept their import paths. Module names never repeat the package name, so the
 op clusters read `ops.lifecycle`, `ops.cluster.operations.operations`, `ops.host_config`
 and `ops.inventory`. `ops/private_files/` owns the private-file
@@ -39,14 +38,14 @@ process launcher or restarter service. Native service sessions and the
 `pty-sessions` service's persistent shells remain separate execution resources.
 
 The application root owns service supervision. There is no controller manager,
-background checkout/update trigger, scheduled updater reaper, or automatic
-stranded-hold restart path.
+background checkout/update trigger or scheduled updater reaper.
 
-Stop, restart and update hold admission and wait for native restart, checkpoint
-flush, actual continuation completion and resource settlement. Ordinary stop
-shares that drain and then closes the selected local services, PTYs and data
-plane; restart keeps the data plane and browser.
-Timeout fails without implicit force. The complete operator contract is in
+Stop, restart and update stop the agent host first and wait for it: on SIGTERM it
+writes a restart for each running turn, waits for the turns to reach it and exits.
+The stop then closes the selected local services, PTYs and data plane; restart
+keeps the data plane and browser. The ops server drains the requests it already
+admitted before it exits (`agent_ops/in_flight.py`). Timeout fails without implicit
+force. The complete operator contract is in
 [graceful maintenance](../../docs/conventions/operations/graceful-maintenance.md).
 
 A fleet update is `python -m cli.fleet_update`. What the update path still lacks
@@ -69,30 +68,26 @@ its `terminate` and `content` submodules. Gateway-only
 schemas stay in `gateway/schemas/`.
 The [content bound](../rpc_schemas/docs/content.meiva.okf.md) is a shared character
 constraint for prompts and replies, separate from transport and model budgets.
-The client and daemon reject unknown kinds before machine lookup, maintenance
-admission, dedupe, or dispatch. Callers import live pause, status and recovery
-definitions directly. The maintenance fences enforce admission.
+The client and daemon reject unknown kinds before machine lookup, dedupe, or dispatch.
 [Termination test evidence](../lifecycle/docs/termination-tests.meiva.okf.md) describes
 the transaction, row-lock and native shell-session checks.
 Cluster identity remains the installed home path, resolved before runtime
 configuration construction.
 
-The host status snapshot's `paused` field includes native maintenance admission
-and startup that has not reached `start-serving` readiness, in addition to the
-business DB posture; `paused_reason` names the first true clause (`no_state` /
-`business_pause` / `maintenance` / `startup`), so a failed start that parked the
-serving gate reads apart from a deliberate pause. A missing DB snapshot cannot
-claim ready. This status
-projection does not change the business API's pause middleware. The responding
+The host status snapshot's `paused` field is true whenever the host cannot claim
+readiness: its serving gate has not reached `start-serving` (a start in flight, a stop
+that has begun, or a failed start that parked the gate), or its database snapshot
+failed. `paused_reason` names the first true clause (`no_state` / `startup`), so a
+failed start that parked the serving gate reads apart from an unreadable database.
+A missing DB snapshot cannot claim ready. The responding
 ops process SHA and source checkout SHA remain read-only status metadata;
 these fields do not certify every sibling daemon's running code.
 
 `ops/cluster_status/schema_mismatch.py` compares the applied migration set
 with the running image's required set. Wheel runtimes use installed SQL metadata without Git.
 The status contract contains the diagnosis kind, machine and detail; it has no
-Git-pin category, watchdog counters, held-service projection, or stranded-hold
-record. Ordinary stop and the hold status remain independent of this
-read-only schema diagnosis. Invalid database catalogs or image migration layouts
+Git-pin category, watchdog counters or held-service projection. Ordinary stop
+remains independent of this read-only schema diagnosis. Invalid database catalogs or image migration layouts
 report `invalid-migration-layout`; query and connection failures report
 `unavailable`. Only a successful comparison of equal sets returns no diagnosis.
 The batched host snapshot also reports an unavailable comparison when its shared

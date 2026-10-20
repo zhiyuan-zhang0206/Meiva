@@ -214,9 +214,9 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
 
 # meiva:note
 # Relay supervision ends the lease of a relay child this host watched exit, so the same
-# wake owes the same handoff — the second of the two ways a held wake ends a takeover.
+# wake owes the same handoff — the second of the two ways a lease wake ends a takeover.
 # meiva:link docs/conventions/agents/agent-impersonation.md
-async def test_held_controls_settle_the_handoff_of_a_dead_relays_lease(
+async def test_lease_controls_settle_the_handoff_of_a_dead_relays_lease(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database: Database,

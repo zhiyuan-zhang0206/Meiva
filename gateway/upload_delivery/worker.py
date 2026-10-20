@@ -9,7 +9,6 @@ import logging
 from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
-from pathlib import Path
 from typing import Any
 
 from psycopg_pool import ConnectionPool
@@ -29,7 +28,6 @@ from base.agents.upload_delivery.paths import agent_upload_dir
 from base.api_contracts.agent_contract import AgentNotFound
 from base.cluster.machine import MachineIdentity
 from base.db import Database
-from base.deploy.maintenance.admission import business_paused
 from base.events.live.bus import EventBus
 from gateway.http.middleware.stopping import is_stopping
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpTargetAbsent, dispatch_to_machine
@@ -62,11 +60,9 @@ class UploadRecovery:
         bus: EventBus,
         *,
         machine: MachineIdentity,
-        home: Path,
     ) -> None:
         self.pool, self.db, self.bus = pool, db, bus
         self.machine = machine
-        self.home = home
         self.stopped = asyncio.Event()
         self.calls: set[asyncio.Future[Any]] = set()
         self.task: asyncio.Task[None] | None = None
@@ -107,7 +103,7 @@ class UploadRecovery:
     async def run(self) -> None:
         while not self.stopped.is_set():
             try:
-                if not is_stopping() and not await self.native(business_paused, self.home):
+                if not is_stopping():
                     await self.round()
             except Exception:
                 _log.exception(
@@ -147,15 +143,16 @@ class UploadRecovery:
             )
 
     async def copy(self, request: ReceiveRequest) -> None:
-        if self.stopped.is_set() or await self.native(business_paused, self.home):
+        if self.stopped.is_set():
             return
         try:
             if not await self.native(source.validate_pending, self.pool, request):
                 return
             proof = await self.copy_proof(request)
-            # Paused units finish their owned copy, but do not admit a fresh chat
-            # while stop is certified. Retained pending intent retries after resume.
-            if self.stopped.is_set() or await self.native(business_paused, self.home):
+            # meiva:note
+            # A stopping gateway finishes its owned copy, but does not admit a fresh chat.
+            # Retained pending intent retries after the next start.
+            if self.stopped.is_set():
                 return
             inbound_id = await self.native(source.complete, self.pool, request, proof)
         except ClusterOpFailed as exc:

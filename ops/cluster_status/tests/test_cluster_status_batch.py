@@ -6,7 +6,6 @@ import os
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
@@ -18,9 +17,6 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import start_serving
-from base.deploy.maintenance import admission
-from base.deploy.state import host_deploy_state
-from base.deploy.state.host_deploy_state import HostDeployState
 from base.host import resource_sample
 from base.host.resource_sample import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
@@ -66,13 +62,15 @@ class _Pool:
         yield self.conn
 
 
+# meiva:note
+# Keep the snapshot focused on DB bundling and resource sampling. Yields the
+# connections the agent count was read on, one per read.
 @pytest.fixture
 def snapshot_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
-) -> HostDeployState:
-    """Keep the snapshot focused on DB bundling and resource sampling."""
-    state = HostDeployState(machine="runner-a", posture="paused", updated_at=datetime.now(UTC))
+) -> list[object]:
+    agent_connections: list[object] = []
 
     def _dead_pidfile(_path: str) -> tuple[bool, int | None]:
         return False, None
@@ -83,8 +81,9 @@ def snapshot_dependencies(
     monkeypatch.setattr(cluster_status, "check_pidfile", _dead_pidfile)
     monkeypatch.setattr(cluster_status, "collect_sessions", _no_sessions)
 
-    def _no_agents(_conn: object, *, local_machine: str) -> int:
+    def _no_agents(conn: object, *, local_machine: str) -> int:
         assert local_machine == machine_identity.name()
+        agent_connections.append(conn)
         return 0
 
     def _applied(_conn: object) -> set[str]:
@@ -95,7 +94,7 @@ def snapshot_dependencies(
     monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: {"baseline"})
     machine_identity.set(name="runner-a", role=frozenset({"agent-runner"}))
     monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: None)
-    return state
+    return agent_connections
 
 
 class _BatchOnlyBackend:
@@ -155,16 +154,15 @@ def test_collect_sessions_stamps_cluster_zone(monkeypatch: pytest.MonkeyPatch) -
 
 def test_status_snapshot_uses_one_connection_while_sampling_resources(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: HostDeployState,
+    snapshot_dependencies: list[object],
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     """One snapshot shares one connection while its one live sample runs in parallel."""
-    state = snapshot_dependencies
+    agent_connections = snapshot_dependencies
     conn = object()
     connect_calls = 0
-    state_connections: list[object | None] = []
     schema_connections: list[object] = []
     sample_started = threading.Event()
     db_finished = threading.Event()
@@ -181,12 +179,6 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
         finally:
             db_finished.set()
 
-    def _read_state(
-        _db: object, _machine: str | None = None, *, conn: object | None = None
-    ) -> HostDeployState:
-        state_connections.append(conn)
-        return state
-
     def _sample() -> ResourceSample:
         nonlocal sample_calls
         sample_calls += 1
@@ -202,7 +194,6 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
     monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: {"baseline"})
 
     monkeypatch.setattr(Database, "connect", _connect)
-    monkeypatch.setattr(host_deploy_state, "read", _read_state)
     monkeypatch.setattr(resource_sample, "resource_sample", _sample)
 
     snapshot = cluster_status.status_snapshot(
@@ -212,40 +203,31 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
     )
 
     assert connect_calls == 1
-    assert state_connections == [conn]
+    assert agent_connections == [conn]
     assert schema_connections == [conn]
     assert sample_calls == 1
-    assert snapshot.paused is True
     assert snapshot.resource == _RESOURCE
 
 
 def test_status_snapshot_borrows_pool_once_with_a_bounded_timeout(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: HostDeployState,
+    snapshot_dependencies: list[object],
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     """The ops daemon's pool contributes one bounded borrow, not fresh dials."""
-    state = snapshot_dependencies
+    agent_connections = snapshot_dependencies
     conn = object()
     pool = _Pool(conn)
-    state_connections: list[object | None] = []
-
-    def _read_state(
-        _db: object, _machine: str | None = None, *, conn: object | None = None
-    ) -> HostDeployState:
-        state_connections.append(conn)
-        return state
 
     def _fresh_connect(**_kwargs: object) -> object:
         raise AssertionError("pool-backed snapshot opened a fresh DB connection")
 
     monkeypatch.setattr(db, "connect", _fresh_connect)
-    monkeypatch.setattr(host_deploy_state, "read", _read_state)
     monkeypatch.setattr(resource_sample, "resource_sample", lambda: _RESOURCE)
 
-    snapshot = cluster_status.status_snapshot(
+    cluster_status.status_snapshot(
         database,
         pool=pool,
         image=LoadedCommit(source_root=Path(__file__).parent, sha=None),
@@ -253,37 +235,26 @@ def test_status_snapshot_borrows_pool_once_with_a_bounded_timeout(
     )
 
     assert pool.timeouts == [2.0]
-    assert state_connections == [conn]
-    assert snapshot.paused is True
+    assert agent_connections == [conn]
 
 
 def test_two_status_snapshots_do_not_cache_db_or_resource_reads(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: HostDeployState,
+    snapshot_dependencies: list[object],
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     """Sharing is snapshot-local: every later probe reads DB and resources again."""
-    state = snapshot_dependencies
+    agent_connections = snapshot_dependencies
     pool = _Pool(object())
-    state_reads = 0
     sample_reads = 0
-
-    def _read_state(
-        _db: object, _machine: str | None = None, *, conn: object | None = None
-    ) -> HostDeployState:
-        nonlocal state_reads
-        assert conn is pool.conn
-        state_reads += 1
-        return state
 
     def _sample() -> ResourceSample:
         nonlocal sample_reads
         sample_reads += 1
         return _RESOURCE
 
-    monkeypatch.setattr(host_deploy_state, "read", _read_state)
     monkeypatch.setattr(resource_sample, "resource_sample", _sample)
 
     cluster_status.status_snapshot(
@@ -300,22 +271,20 @@ def test_two_status_snapshots_do_not_cache_db_or_resource_reads(
     )
 
     assert pool.timeouts == [2.0, 2.0]
-    assert state_reads == 2
+    assert agent_connections == [pool.conn, pool.conn]
     assert sample_reads == 2
 
 
-@pytest.mark.parametrize("stored_posture", ["idle", "paused"])
+# meiva:note
+# DB-down is a valid snapshot: it cannot claim readiness, and says why.
+@pytest.mark.usefixtures("snapshot_dependencies")
 def test_status_snapshot_degrades_when_the_pool_cannot_reach_db(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: HostDeployState,
-    stored_posture: str,
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """DB-down is valid even if the unreachable row says the host was paused."""
-    del snapshot_dependencies
-    pool = _Pool(object(), error=RuntimeError(f"DB down with {stored_posture} row"))
+    pool = _Pool(object(), error=RuntimeError("DB down"))
     monkeypatch.setattr(resource_sample, "resource_sample", lambda: _RESOURCE)
 
     snapshot = cluster_status.status_snapshot(
@@ -327,6 +296,7 @@ def test_status_snapshot_degrades_when_the_pool_cannot_reach_db(
 
     assert pool.timeouts == [2.0]
     assert snapshot.paused is True  # A missing DB snapshot cannot claim readiness.
+    assert snapshot.paused_reason == "no_state"
     assert snapshot.agent_count == 0
     assert snapshot.resource == _RESOURCE
     assert snapshot.schema_mismatch is not None
@@ -334,26 +304,18 @@ def test_status_snapshot_degrades_when_the_pool_cannot_reach_db(
     assert "status database snapshot failed" in snapshot.schema_mismatch.detail
 
 
+@pytest.mark.usefixtures("snapshot_dependencies")
 def test_status_snapshot_preserves_invalid_real_catalog_diagnosis(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: HostDeployState,
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     from base.deploy.schema.migrations import applied_migration_names
 
-    state = snapshot_dependencies
     pool = _Pool(db_conn)
 
-    def _state(
-        _db: object, _machine: str | None = None, *, conn: object | None = None
-    ) -> HostDeployState:
-        assert conn is db_conn
-        return state
-
-    monkeypatch.setattr(host_deploy_state, "read", _state)
     monkeypatch.setattr(resource_sample, "resource_sample", lambda: _RESOURCE)
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied_migration_names)
     with db_conn.transaction(force_rollback=True):
@@ -371,24 +333,15 @@ def test_status_snapshot_preserves_invalid_real_catalog_diagnosis(
         assert pool.timeouts == [2.0]
 
 
+@pytest.mark.usefixtures("snapshot_dependencies")
 def test_resource_sample_failure_still_degrades_to_none_from_worker(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: HostDeployState,
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     """Moving the sample to a worker must not let its exception fail the probe."""
-    state = snapshot_dependencies
     pool = _Pool(object())
-
-    def _read_state(
-        _db: object, _machine: str | None = None, *, conn: object | None = None
-    ) -> HostDeployState:
-        del conn
-        return state
-
-    monkeypatch.setattr(host_deploy_state, "read", _read_state)
 
     def _sample_failure() -> ResourceSample:
         raise RuntimeError("psutil unavailable")
@@ -430,14 +383,13 @@ def test_agent_count_reads_local_retained_identities_without_processes(
     assert cluster_status.count_local_agents(db_conn, local_machine=machine_identity.name()) == 3
 
 
+@pytest.mark.usefixtures("snapshot_dependencies")
 def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: HostDeployState,
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    state = snapshot_dependencies
     conn = object()
     pool = _Pool(conn)
     seen: list[object] = []
@@ -447,11 +399,7 @@ def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
         seen.append(connection)
         return 7
 
-    def read_state(_db: object, machine: str, **_kwargs: object) -> HostDeployState:
-        return state
-
     monkeypatch.setattr(cluster_status, "count_local_agents", count)
-    monkeypatch.setattr(host_deploy_state, "read", read_state)
     monkeypatch.setattr(cluster_status, "read_resource_sample", lambda: None)
     snapshot = cluster_status.status_snapshot(
         database,
@@ -465,9 +413,9 @@ def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
 
 
 @pytest.mark.parametrize("runner", [False, True])
+@pytest.mark.usefixtures("snapshot_dependencies")
 def test_agent_host_liveness_is_probed_only_on_a_runner(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: HostDeployState,
     runner: bool,
     database: Database,
     *,
@@ -484,13 +432,6 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
     machine_identity.set(role=frozenset({"agent-runner" if runner else "gateway"}))
     monkeypatch.setattr(cluster_status, "check_pidfile", check)
 
-    def no_deploy(
-        _db: object, _pool: object, *, local_machine: MachineIdentity
-    ) -> tuple[None, int, None]:
-        assert local_machine is machine_identity
-        return None, 0, None
-
-    monkeypatch.setattr(cluster_status, "read_deploy_snapshot", no_deploy)
     monkeypatch.setattr(cluster_status, "read_resource_sample", lambda: None)
     snapshot = cluster_status.status_snapshot(
         database,
@@ -502,55 +443,35 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
     assert "restarter_online" not in snapshot.model_dump()
 
 
+@pytest.mark.usefixtures("snapshot_dependencies")
 @pytest.mark.parametrize(
-    ("posture", "held_flag", "serving", "expected_paused", "expected_reason"),
+    ("db_ok", "serving", "expected_reason"),
     [
-        # A failed start parked the serving gate at `starting` while the DB
-        # posture is idle — the exact misread behind task #3404 (paused=true
-        # read like a deliberate pause). The reason must name the gate.
-        ("idle", False, False, True, "startup"),
-        # Deliberate posture pause.
-        ("paused", False, True, True, "business_pause"),
-        # Clause order: posture outranks a hold, a hold outranks the gate.
-        ("paused", True, True, True, "business_pause"),
-        ("idle", True, True, True, "maintenance"),
-        ("idle", True, False, True, "maintenance"),
-        # No readable deploy state is the verdict's first clause — it outranks
-        # every other cause, including a hold and a parked gate.
-        (None, False, True, True, "no_state"),
-        (None, False, False, True, "no_state"),
-        (None, True, True, True, "no_state"),
+        # meiva:note
+        # A start in flight, a stop that has begun, or a failed start that parked the
+        # serving gate short of `serving` while the database reads fine: the reason
+        # names the gate, so it never reads like a failed database snapshot (task #3404).
+        (True, False, "startup"),
+        # meiva:note
+        # An unreadable database snapshot is the verdict's first clause: it outranks
+        # every other cause, including a parked gate.
+        (False, True, "no_state"),
+        (False, False, "no_state"),
         # No clause fired.
-        ("idle", False, True, False, None),
+        (True, True, None),
     ],
 )
 def test_status_snapshot_paused_reason_names_the_first_true_clause(
     monkeypatch: pytest.MonkeyPatch,
-    snapshot_dependencies: HostDeployState,
-    posture: str | None,
-    held_flag: bool,
+    db_ok: bool,
     serving: bool,
-    expected_paused: bool,
     expected_reason: str | None,
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     """`paused` stays an additive-compatible bool; `paused_reason` tells the causes apart."""
-    del snapshot_dependencies
-    state: HostDeployState | None = None
-    if posture is not None:
-        state = HostDeployState(machine="runner-a", posture=posture, updated_at=datetime.now(UTC))
-    pool = _Pool(object())
-
-    def _read_state(
-        _db: object, _machine: str | None = None, *, conn: object | None = None
-    ) -> HostDeployState | None:
-        del conn
-        return state
-
-    monkeypatch.setattr(host_deploy_state, "read", _read_state)
-    monkeypatch.setattr(admission, "held", lambda: held_flag)
+    pool = _Pool(object(), error=None if db_ok else RuntimeError("DB down"))
     monkeypatch.setattr(start_serving, "is_serving", lambda: serving)
     monkeypatch.setattr(resource_sample, "resource_sample", lambda: _RESOURCE)
 
@@ -561,5 +482,5 @@ def test_status_snapshot_paused_reason_names_the_first_true_clause(
         local_machine=machine_identity,
     )
 
-    assert snapshot.paused is expected_paused
+    assert snapshot.paused is (expected_reason is not None)
     assert snapshot.paused_reason == expected_reason

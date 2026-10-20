@@ -25,8 +25,6 @@ REPO = REPO_CODE = Path(__file__).resolve().parents[1]
 HOME = 'H="$HOME/.meiva"; S="$H/source"; cd "$S" || exit 1'
 MEIVA = 'MEIVA_HOME="$H" "$S/.venv/bin/meiva"'
 _PYTHON = f'{HOME}; MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
-_STATUS = f"{HOME}; {MEIVA} status --json"
-_FREE = ("inactive", "resumed")
 POLL_S = 5
 
 # meiva:note
@@ -35,8 +33,8 @@ POLL_S = 5
 LEASE_TICK_S = 5.0
 _STOP_HINT = (
     "\nOn that host retry `meiva stop` with the same arguments this `down` gave it (the logged "
-    "command above), confirm the maintenance hold is paused/stopped (`meiva status`), then "
-    "rerun `down`."
+    "command above), confirm `run/lifecycle-op.json` records a completed stop (operation `stop`, "
+    "complete, rc 0), then rerun `down`."
 )
 CLEAN = (
     'd=$(git status --porcelain | head -n 20); [ -z "$d" ] || { echo "$d"; echo "Untracked files '
@@ -48,7 +46,15 @@ printf '%s\\n' "head=$(git rev-parse HEAD)"
 printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
 test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
 test -e "$H/updates/active" && echo active=yes || echo active=no
-printf '%s\\n' "hold=$({MEIVA} status --json 2>/dev/null | grep '^{{' | tail -n 1)\""""
+printf '%s\\n' "op=$(cat "$H/run/lifecycle-op.json" 2>/dev/null)"
+"$S/.venv/bin/python" -c 'import fcntl, sys
+try:
+    fcntl.flock(open(sys.argv[1], "rb"), fcntl.LOCK_SH | fcntl.LOCK_NB)
+    print("root=down")
+except FileNotFoundError:
+    print("root=down")
+except OSError:
+    print("root=up")' "$H/run/meiva-root/meiva-root.lock" 2>/dev/null"""
 _OP_EVIDENCE = """H="$HOME/.meiva"
 p=$(cat "$H/run/agent_host.pid" 2>/dev/null)
 if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo host=up; else echo host=down; fi
@@ -91,13 +97,6 @@ def ssh(alias: str, command: str, stdin: str | None, emit: Callable[[str], None]
     return process.wait()
 
 
-def split_hold_text(text: str) -> tuple[str, str | None]:
-    data = json.loads([line for line in text.splitlines() if line.startswith("{")][-1])
-    hold = data["hold"]
-    held = hold["maintenance"]
-    return (hold["status"], held["phase"]) if held else (hold["status"], None)
-
-
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
     command = ["git", "-C", str(REPO), *args]
     return subprocess.run(command, capture_output=True, text=True, check=False)
@@ -137,8 +136,6 @@ class Session:
 
 
 def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
-    hold = facts["hold"] or '{"hold": {"status": "unreadable", "maintenance": null}}'
-    status, phase = split_hold_text(hold)
     reasons: list[str] = []
     if facts["dirty"] != "0":
         reasons.append(f"{alias}: $HOME/.meiva/source has uncommitted changes")
@@ -148,29 +145,29 @@ def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
         reasons.append(
             f"{alias}: $HOME/.meiva/updates/active names an unfinished release operation"
         )
-    stopped = (status, phase) == ("paused", "stopped")
-    if status not in _FREE and not stopped:
-        reasons.append(f"{alias}: maintenance hold {status}/{phase}")
     return reasons
 
 
 # meiva:note
-# The hold a probe line reports; an unreadable record reads as a hold of its own, never as a
-# crash inside the gate that is deciding whether to refuse.
-def _hold(hold: str) -> tuple[str, str | None]:
+# The journal a probe line reports; an unreadable record is no journal, never a crash inside the
+# gate that is deciding whether to refuse.
+def _journal_of(text: str) -> dict[str, Any] | None:
     try:
-        return split_hold_text(hold)
-    except (IndexError, ValueError):
-        return ("unreadable", None)
+        parsed: Any = json.loads(text)
+    except ValueError:
+        return None
+    return cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else None
 
 
 # meiva:note
-# One host's probe facts, and whether it was serving when the window began: a completed stop is
-# the only quiet hold a window admits, so every other readable hold means the machine was up.
-def _probe(s: Session, alias: str) -> tuple[dict[str, str], bool]:
+# One host's probe facts, and whether it was serving when the window began: a host is already
+# stopped only when its last lifecycle operation is a completed, successful stop and its
+# meiva-root is not running; any other host was up.
+def probe_host(s: Session, alias: str) -> tuple[dict[str, str], bool]:
     lines = s.run(alias, PROBE, effect=False).splitlines()
     facts = {key: value for key, _, value in (line.partition("=") for line in lines)}
-    return facts, _hold(facts["hold"] or "") != ("paused", "stopped")
+    stopped = facts.get("root") == "down" and _stop_completed(_journal_of(facts.get("op", "")))
+    return facts, not stopped
 
 
 # meiva:note
@@ -204,7 +201,7 @@ def _preflight(
     heads: dict[str, str] = {}
     serving: list[str] = []
     for alias in [args.gateway, *args.runner]:
-        facts, was_serving = _probe(s, alias)
+        facts, was_serving = probe_host(s, alias)
         heads[alias] = facts["head"]
         reasons += _host_refusals(alias, facts)
         if was_serving:
@@ -362,8 +359,6 @@ def _recover_after_failed_stop(
                 else f"{HOME}; {MEIVA} start {flags}"
             )
             s.run(alias, start)
-            if split_hold_text(s.run(alias, _STATUS, effect=False))[0] not in _FREE:
-                raise FailedError(f"{alias}: recovery start left the hold on")
             recovered.append(alias)
         except FailedError as exc:
             s.say(f"recovery: {exc}")
@@ -387,13 +382,20 @@ def _host_up_and_journal(s: Session, alias: str) -> tuple[bool, dict[str, Any] |
 
 
 # meiva:note
-# The host's own journal is the evidence that its stop failed, as opposed to ending in a state the
-# window did not expect.
-def _failed_stop(journal: dict[str, Any] | None) -> bool:
+# The host's own journal is the evidence of how its stop ended: a stop that is complete with
+# rc 0 succeeded; any other stop record is a failed or unfinished stop. Another operation, or no
+# journal, says nothing about a stop.
+def _stop_completed(journal: dict[str, Any] | None) -> bool:
     if journal is None or journal.get("operation") != "stop":
         return False
     result = cast("dict[str, Any]", journal["result"]) if "result" in journal else {}
-    return journal.get("complete") is not True or result.get("rc") != 0
+    return journal.get("complete") is True and result.get("rc") == 0
+
+
+def _failed_stop(journal: dict[str, Any] | None) -> bool:
+    return (
+        journal is not None and journal.get("operation") == "stop" and not _stop_completed(journal)
+    )
 
 
 # meiva:link cli/docs/fleet-update.meiva.okf.md
@@ -421,10 +423,10 @@ def down(s: Session, args: argparse.Namespace) -> None:
             current = alias
             flags = f"{stop_flags} {args.infra}" if alias == args.gateway else stop_flags
             s.run(alias, f"{HOME}; {MEIVA} stop --yes {flags}")
-            if not s.dry_run:
-                status, phase = split_hold_text(s.run(alias, _STATUS, effect=False))
-                if (status, phase) != ("paused", "stopped"):
-                    raise FailedError(f"{alias}: stop left {status}/{phase}")
+            if not s.dry_run and not _stop_completed(_host_up_and_journal(s, alias)[1]):
+                raise FailedError(
+                    f"{alias}: stop exited 0 but its journal records no completed stop"
+                )
             stopped.append(alias)
     except FailedError as exc:
         if not s.dry_run:
@@ -584,11 +586,6 @@ def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
                 if macos
                 else f"{HOME}; {MEIVA} start {start_flags}",
             )
-            if (
-                not s.dry_run
-                and (hold := split_hold_text(s.run(alias, _STATUS, effect=False)))[0] not in _FREE
-            ):
-                raise FailedError(f"start left maintenance {hold}")
         except FailedError as exc:
             failure = _host_failure(s, alias, exc)
             failures.append(failure)

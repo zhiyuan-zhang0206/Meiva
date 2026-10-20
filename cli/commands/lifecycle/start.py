@@ -18,7 +18,6 @@ from base.cluster import session_name
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy import start_trace
 from base.deploy.lifecycle import start_serving
-from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.host.system.hostport import Host
@@ -29,7 +28,7 @@ from cli.commands._setup import SetupValues, missing_setup_message
 from cli.commands.converge.spec import ConvergeStep
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
 from cli.commands.lifecycle import root_readiness
-from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
+from cli.commands.lifecycle._exclusive_resources import StartDelegation, delegable_start
 from cli.commands.lifecycle.login_link import print_login_link
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.start_generation import record_running_sha as record_running_sha
@@ -249,13 +248,9 @@ class _Selection:
     reconcile: bool
 
 
-def _guard_start(
-    runtime: StartRuntime | None, operation: PauseOwnerSnapshot | None
-) -> tuple[StartRuntime, Path] | int:
-    """Refuse a start admission, a destroyed home or a disposable prod checkout."""
-    from base.deploy.maintenance import admission
-
-    admission.require_start_allowed(operation)
+# meiva:note
+# Refuse a destroyed home or a disposable prod checkout.
+def _guard_start(runtime: StartRuntime | None) -> tuple[StartRuntime, Path] | int:
     from base.paths import meiva_home
 
     if (meiva_home() / "destroy-intent.json").exists():
@@ -526,9 +521,8 @@ def readiness_verdict(launch: Any, wait: Any, *, ready_timeout: float) -> int | 
     return None
 
 
-@resume_after_start
+@delegable_start
 def cmd_start_body(
-    operation: PauseOwnerSnapshot | None,
     database_factory: OperatorDatabaseFactory,
     *,
     disabled_services: tuple[str, ...],
@@ -551,10 +545,9 @@ def cmd_start_body(
         raise ValueError("start requires its caller-owned PostgreSQL child retention")
     # Resolve the defining modules at the lifecycle operation boundary.
     import cli.commands.lifecycle.root_driver as _root_driver_commands
-    from base.deploy.maintenance import admission
 
     with start_trace.phase("admission"):
-        guarded = _guard_start(runtime, operation)
+        guarded = _guard_start(runtime)
     if isinstance(guarded, int):
         return guarded
     runtime, repo = guarded
@@ -613,14 +606,6 @@ def cmd_start_body(
 
     launch_failures.record(list(_critical_launch_failures(launch)))
 
-    # The exact maintenance generation stays held through readiness. Its
-    # authorized owner, or resume_after_start, alone may release admission.
-    from base.deploy.state.host_deploy_state import set_posture
-
-    set_posture(
-        database_factory(), "paused" if admission.held() else "idle", machine=command.machine.name()
-    )
-
     # Success requires real readiness for every launched service, frontend included.
     print("\n→ waiting for services to come up")
     with start_trace.phase("readiness wait"):
@@ -658,7 +643,6 @@ def cmd_start(
     only_services: tuple[str, ...],
     all_services: bool,
     runtime: StartRuntime | None = None,
-    operation: PauseOwnerSnapshot | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
@@ -677,9 +661,7 @@ def cmd_start(
         database_factory=database_factory, enabled=not boot_attempt
     ) as audit:
         code = cmd_start_body(
-            operation,
             database_factory,
-            command.machine,
             disabled_services=disabled_services,
             only_services=only_services,
             all_services=all_services,

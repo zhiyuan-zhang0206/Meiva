@@ -35,3 +35,6 @@ and the PgBouncer stop mode are what keep a stop from hanging.
 - A service kept running across a stop with its data plane stopped is refused by
   the data-plane stop, not by the loop.
 - Event-driven acceptance gates (`business_paused`) are separate and unchanged.
+
+Forward link (2026-10-20): the `business_paused` gate left unchanged here is deleted with the
+hold. See [delete the maintenance hold](../../../processes/2026-10-20-delete-maintenance-hold.md).

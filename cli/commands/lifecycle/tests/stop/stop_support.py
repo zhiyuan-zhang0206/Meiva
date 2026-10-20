@@ -28,10 +28,6 @@ import pytest
 import base.sessions.hosting as sessions_hosting
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 from base.cluster.machine import MachineIdentity
-from base.deploy.maintenance import pause_owner
-from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
-from base.deploy.state import host_deploy_state
-from base.deploy.tests.maintenance_factory import WHEN
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.posixproc import process_group_has_live_members
@@ -188,29 +184,9 @@ def assert_group_drained(pgid: int, *, timeout_s: float = 5.0) -> None:
         time.sleep(0.02)
 
 
-def drained() -> None:
-    pause_owner.begin_maintenance("local", WHEN)
-    pause_owner.change_maintenance(
-        "local", WHEN, MaintenanceHold(), MaintenanceHold(MaintenancePhase.DRAINED)
-    )
-
-
 def dependencies(monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity) -> None:
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_root_driver_commands, "root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-
-    def pause(
-        _db: object,
-        _bus: object,
-        _timeout: float,
-        *,
-        local_machine: MachineIdentity,
-    ) -> None:
-        del _db, _bus, _timeout
-        assert local_machine is machine
-        drained()
-
-    monkeypatch.setattr(command, "pause_agents", pause)
     machine.set(role="agent-runner")
     monkeypatch.setattr(
         command,
@@ -221,13 +197,7 @@ def dependencies(monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity) -
             SimpleNamespace(session=SERVICE_UNIT, requires_db=False),
         ],
     )
-    monkeypatch.setattr(command, "ops_quiescent", lambda _timeout: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(sessions_hosting, "hosting_supervised_session", lambda: None)
-
-    def set_posture(_db: object, _value: str, *, machine: str) -> None:
-        del _db, _value, machine
-
-    monkeypatch.setattr(host_deploy_state, "set_posture", set_posture)
 
 
 def record_root_stops(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:

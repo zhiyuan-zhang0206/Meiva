@@ -60,8 +60,8 @@ def test_a_host_stopped_before_the_window_stays_stopped(
 ) -> None:
     cluster, run = env
     cluster.hosts["mac"]["up"] = False
-    cluster.hosts["mac"]["hold"] = ("paused", "stopped")
     cluster.host_up["mac"] = False
+    cluster.journal["mac"] = {"operation": "stop", "complete": True, "result": {"rc": 0}}
     cluster.stop_fails["lin"] = 1
     assert run("down") == 1
     assert _started(cluster) == ["lin"]

@@ -29,6 +29,27 @@ and the matching GitHub Releases.
   label are gone. Forking starts from an agent row's context menu in the sidebar, which keeps
   its quick fork and fork-with-prompt entries
   ([card chrome](ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md)).
+- The maintenance hold is gone: `base/deploy/maintenance/`, `ops/agent_pause/`, the
+  `run/deploy-pause-owner.json` journal, the stop's drain/quiesce phases, the 503 on every
+  business route while a unit is stopping, the hold gates of the host, the schedule manager
+  and the ops server, the `--json` flag of `meiva status` (its only payload was the hold) and the
+  `maintenance_hold_overdue` / `agent_continuation_lost` events with their alert rules. A stop
+  clears the serving gate and stops the services in root's order; the agent host goes first
+  and settles running turns on its own SIGTERM exit, and the ops server drains the requests
+  it admitted before it exits. The fleet update judges a stop by `run/lifecycle-op.json`
+  and a start by `meiva start`'s exit code; a stored schedule script is rewritten only while
+  no agent host holds its instance lock. The `maintenance_hold_alert_after_s` and
+  `pause_lifecycle_wait_seconds` settings and the `maintenance` value of
+  `GET /api/cluster/status`'s `paused_reason` are removed
+  ([decision](docs/decisions/runtime/processes/2026-10-20-delete-maintenance-hold.md)).
+- The `host_deploy_state` per-host posture table is dropped (migration
+  `20261020T151143_drop-host-deploy-state`) with `base/deploy/state/` and
+  `ops/cluster_status/pause.py`: neither `meiva start` nor `meiva stop` writes a posture
+  any more. `paused` on `GET /api/cluster/status` and the roster means the serving gate has
+  not reached `serving` or the host's database snapshot failed, and its `paused_reason`
+  loses `business_pause` (`no_state` and `startup` remain). A pure gateway machine reads the
+  same serving gate
+  ([decision](docs/decisions/runtime/updates/release/2026-10-20-delete-host-deploy-state.md)).
 - The frontend pixel-regression apparatus is gone (user ruling 2026-10-20): the
   Visual baselines workflow, the screenshot regression suite with its goldens, the
   preview-gate matrix with its 44 captures, and the post-deploy visual gate. The
@@ -225,7 +246,7 @@ and the matching GitHub Releases.
   to run: once the unit serves, each failed agent's restart pointer is re-delivered with the
   hold's release, an agent whose pointer is gone is logged at ERROR and its owner told (alert
   row plus IM push), and the hold releases. `meiva start` is also the exit for a hold that never
-  stopped services. `meiva status` prints the maintenance hold, and `meiva status --json` prints
+  stopped services. `meiva status` prints the maintenance hold, and its `--json` flag prints
   only it as one JSON object (`{"hold": {...}}`)
   ([decision](docs/decisions/agents/graph/2026-10-04-delete-meiva-maintenance.md)).
 

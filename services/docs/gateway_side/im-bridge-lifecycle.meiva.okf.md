@@ -30,12 +30,10 @@ Teardown attempts every adapter, health server, database pool and pidfile even
 after a stop fault. Unknown cleanup faults are reported with the original body
 fault in a standard exception group; they do not turn failure into success.
 
-Startup restores account-bound selections and derived subscriptions while the
-unit's valid maintenance hold is still closed. This recovery must complete before
-normal `meiva start` can observe readiness and release the hold. Live selection
-changes, timeline acceptance and outbound dispatch retain their maintenance
-gates; restoring a subscription does not admit or send work. Invalid maintenance
-journals and unexpected restoration faults fail startup.
+Startup restores account-bound selections and derived subscriptions before the
+bridge reports ready; `meiva start` observes readiness only after this recovery
+completes. Restoring a subscription does not admit or send work. Unexpected
+restoration faults fail startup.
 
 Only explicit network failures and HTTP 429/502/503/504 retain their existing
 retry budgets. The inbound poll loops additionally keep network-class failures

@@ -1,17 +1,17 @@
-"""Verified native data-plane stop for an already drained maintenance hold.
-
-No force escalation of the pooler or Redis, no snapshots, no remote management. A Postgres
-fast shutdown that outlives its share of the budget is ended by an immediate shutdown
-(docs/decisions/data/database/2026-10-02-pg-stop-escalates-to-immediate.md). The stop semantics match
-what the preceding drain has already proven: the pooler gets SIGINT (safe
-shutdown — it disconnects clients and waits only for in-flight server
-transactions) and PostgreSQL native fast shutdown (disconnect idle sessions, roll
-back stragglers, checkpoint), so neither waits on idle client connections a
-paused runner may still hold (issue #2307). Redis saves its current in-memory
-data before shutdown. An explicit save=False is reserved for callers that
-already verified a final snapshot. PID disappearance is checked in addition to
-command completion; an uncertain result always leaves the hold set.
-"""
+# meiva:note
+# Verified native data-plane stop for a unit whose services have already stopped.
+#
+# No force escalation of the pooler or Redis, no snapshots, no remote management. A Postgres
+# fast shutdown that outlives its share of the budget is ended by an immediate shutdown
+# (docs/decisions/data/database/2026-10-02-pg-stop-escalates-to-immediate.md). The stop semantics match
+# what the preceding services stop has already proven: the pooler gets SIGINT (safe
+# shutdown — it disconnects clients and waits only for in-flight server
+# transactions) and PostgreSQL native fast shutdown (disconnect idle sessions, roll
+# back stragglers, checkpoint), so neither waits on idle client connections a
+# paused runner may still hold (issue #2307). Redis saves its current in-memory
+# data before shutdown. An explicit save=False is reserved for callers that
+# already verified a final snapshot. PID disappearance is checked in addition to
+# command completion; an uncertain result always fails the stop.
 
 from __future__ import annotations
 

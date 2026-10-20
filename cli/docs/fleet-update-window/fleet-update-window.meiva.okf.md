@@ -19,7 +19,7 @@ closing the silence only after `up` passes all verification.
 
 Each listed host is probed in its own shell before anything is touched. The
 probe uses `printf` because zsh's and dash's `echo` reinterprets backslashes,
-which once mangled a hold record carrying a quoted `$HOME`.
+which once mangled a record carrying a quoted `$HOME`.
 
 ## The leases and the failed stop
 
@@ -58,7 +58,7 @@ reporting its label and log path; its label is its own
 
 ## Contracts
 
-down refuses before touching anything — exit 2, no effects — when a listed host has uncommitted changes, a post-checkout hook, an active update marker or a maintenance hold that is neither free nor a completed stop, when the hosts disagree on HEAD, and when .python-version changes without --allow-python-change; the probe reads its facts through the host's own shell.
+down refuses before touching anything — exit 2, no effects — when a listed host has uncommitted changes, a post-checkout hook, an active update marker, when the hosts disagree on HEAD, and when .python-version changes without --allow-python-change; the probe reads its facts through the host's own shell, among them whether the host is already stopped: its last lifecycle operation (`run/lifecycle-op.json`) is a completed stop with rc 0 and no meiva-root is running. A stop counts only when `meiva stop` exits 0 and that journal then records it complete with rc 0; a start counts when `meiva start` exits 0, which it does only after readiness.
 
 Before anything stops — under --dry-run too — down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table refuses with the rows listed unless --allow-red-schedules.
 

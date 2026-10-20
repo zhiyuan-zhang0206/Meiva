@@ -9,7 +9,6 @@ import uuid
 from functools import partial
 from typing import Any, Literal
 
-from base.deploy.maintenance import admission
 from services.entrypoints.im_bridge import copy, notice_bridge, push_watchdog
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.cursor_store import CursorStore, PushWatermark
@@ -560,7 +559,6 @@ class IMBridgeCore(SpawnMenuMixin):
 
     async def restore_subscriptions(self) -> None:
         """Restore canonical selection and bootstrap the legacy JSON cache once."""
-        admission.snapshot()  # A valid startup hold permits recovery, an invalid journal does not.
         self._last_pushed.update(await asyncio.to_thread(self.cursor_store.load_push))
         legacy = {
             (channel, chat): agent

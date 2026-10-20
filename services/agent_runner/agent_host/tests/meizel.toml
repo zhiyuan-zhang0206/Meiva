@@ -1,7 +1,7 @@
 exports = ["host_policy.py", "lifecycle", "runtime"]
 
 [uses]
-"agent_host" = ["runtime", "test_maintenance_receipt_grading.py"]
+"agent_host" = ["runtime"]
 "circuit_breaker" = ["host_policy.py"]
 "dispatch" = ["host_policy.py", "runtime"]
 "history" = ["host_policy.py", "runtime"]
@@ -10,7 +10,6 @@ exports = ["host_policy.py", "lifecycle", "runtime"]
 "test_agent_host.py" = ["host_policy.py", "runtime"]
 "test_circuit_breaker.py" = ["circuit_breaker", "host_policy.py"]
 "test_circuit_breaker_audit.py" = ["host_policy.py"]
-"test_maintenance_prior_failure.py" = ["host_policy.py", "test_maintenance_receipt_grading.py"]
 "test_turn_dispatcher.py" = ["turn_dispatcher"]
 
 [debt.env-patch]
@@ -23,9 +22,6 @@ exports = ["host_policy.py", "lifecycle", "runtime"]
 "test_boot_sdk_posture.py#monkeypatch.setattr meiva.sdk_surface.process_context.bind_host_process" = 1
 "test_circuit_breaker.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 1
 "test_circuit_breaker_audit.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_standalone_async" = 1
-"test_maintenance_prior_failure.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 1
-"test_maintenance_receipt_grading.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 1
-"test_maintenance_receipt_grading.py#monkeypatch.setattr ops.agent_pause.publish_inbound_wake" = 2
 "test_turn_dispatcher.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S" = 6
 "test_turn_dispatcher.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.CLOCK_READ_TIMEOUT_S" = 1
 
@@ -38,7 +34,3 @@ exports = ["host_policy.py", "lifecycle", "runtime"]
 "runtime/shutdown/test_agent_host_shutdown.py -> agent_host/child_runtime_scenarios.py" = 1
 "runtime/test_agent_host_log_rotate.py -> agent_host/child_runtime_scenarios.py" = 3
 "runtime/test_resource_join.py -> agent_host/child_runtime_scenarios.py" = 1
-
-[debt.unresolved-patch]
-"test_maintenance_prior_failure.py#monkeypatch.setattr host._drive_turns" = 1
-"test_maintenance_prior_failure.py#monkeypatch.setattr host._runtime_for" = 1

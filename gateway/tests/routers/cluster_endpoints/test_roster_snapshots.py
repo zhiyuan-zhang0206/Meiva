@@ -95,7 +95,6 @@ def _gather(
             identity_log=IdentityMismatchLog(),
             snapshots=snaps,
             image=LOADED_IMAGE,
-            local_machine=local_machine,
         )
     )
 

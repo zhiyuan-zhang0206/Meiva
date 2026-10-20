@@ -25,8 +25,8 @@
 --   - `meiva_runner` is a separate LOGIN NOSUPERUSER role. It has SELECT over the
 --     public schema but may write only runner-local surfaces: inbound_messages
 --     (claiming and self-lifecycle); agents_meta and agents (process state and
---     its own label); machine_units, machines, and host_deploy_state (unit
---     registration and deploy posture); api_idempotency (runner /ops dedupe);
+--     its own label); machine_units and machines (unit registration);
+--     api_idempotency (runner /ops dedupe);
 --     agent_tasks, agent_pages, and agent_shell_ttls (SDK
 --     lifecycle); heartbeat_pause_log (pause history); and the LangGraph
 --     checkpoints, checkpoint_blobs, and checkpoint_writes (agent state).
@@ -1150,20 +1150,6 @@ COMMENT ON TABLE deployment_state IS
 
 COMMENT ON COLUMN deployment_state.min_code_version IS
     'Lowest code version (first-parent commit count of the process''s loaded commit) allowed to write; every gateway start raises it with GREATEST, every pooled session reads it and a lower process exits (decisions/2026-09-30-client-side-code-version-gate.md). Lowered only by hand after a rollback.';
-
--- ─────────────── host_deploy_state (R1 — Task #1021) ───────────────
--- Host-level deploy posture, one row per machine (replaces the cluster_paused
--- file, updating.flag and session probing; R1 wave, Task #1021). `posture` is
--- idle/paused. Owned by base/deploy/state/host_deploy_state.py.
-CREATE TABLE host_deploy_state (
-    machine                  TEXT PRIMARY KEY,
-    posture                  TEXT NOT NULL DEFAULT 'idle'
-                             CHECK (posture IN ('idle', 'paused')),
-    updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-COMMENT ON TABLE host_deploy_state IS
-    'Host-level deploy posture (idle/paused), one row per machine: written by meiva stop, pause, maintenance and start; read by the gateway 503 middleware, meiva status and the deploy window.';
 
 -- ─────────────── cluster_defaults ───────────────
 -- Cluster-level defaults a NEW agent's birth stamp reads. Singleton row; today it
@@ -2522,6 +2508,9 @@ INSERT INTO schema_migrations (name) VALUES ('20261002T044224_audit-events');
 INSERT INTO schema_migrations (name) VALUES ('20261002T153217_telemetry-events');
 -- Rewrites last_admission_outcome, which this baseline no longer has; the baseline already holds its result.
 INSERT INTO schema_migrations (name) VALUES ('20261001T055130_retire-restarting-and-publication-deferred');
+-- Alter and comment the per-host posture table, which this baseline no longer has; the baseline already holds the rest of their result.
+INSERT INTO schema_migrations (name) VALUES ('20261001T055030_drop-retired-deploy-and-watcher-storage');
+INSERT INTO schema_migrations (name) VALUES ('20261017T120000_meiva-rename');
 
 CREATE OR REPLACE FUNCTION mark_impersonation_terminal_notice() RETURNS trigger AS $$
 BEGIN

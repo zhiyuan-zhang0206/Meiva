@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Ops Surfaces (cluster admin + stats dashboard)
-description: The two read/act-on-a-live-cluster contracts worth stating in full — the ssh-free cluster admin endpoints (which deliberately bypass the paused-cluster guard) and the single-round-trip stats dashboard aggregate.
+description: The two read/act-on-a-live-cluster contracts worth stating in full — the ssh-free cluster admin endpoints and the single-round-trip stats dashboard aggregate.
 tags:
 - gateway
 - ops
@@ -11,9 +11,7 @@ tags:
 
 ## Cluster admin endpoints
 
-Gateway-only, for ssh-free ops on a deployed cluster. Both **bypass the
-maintenance-journal 503 guard** — deliberately: a held maintenance operation is exactly when
-that guard is on and exactly when you need to look.
+Gateway-only, for ssh-free ops on a deployed cluster.
 
 - **`GET /api/cluster/admin/events`** — query the unified `events` stream with `agent_id` /
   `service_only` (skips agent-process rows) / `level` / `since` (ISO timestamp) /

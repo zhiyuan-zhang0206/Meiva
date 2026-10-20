@@ -166,8 +166,8 @@ Related local commands:
   underneath a serving process: `down` stops every unit before it switches a
   checkout.
 - **Recover by rerunning the half.** After a failure, fix the cause and rerun
-  the whole half; both are idempotent. Unknown custody or a hold that is not a
-  completed stop needs diagnosis, not raw signals or hand-edited state.
+  the whole half; both are idempotent. Unknown custody or a host whose last stop is not a
+  completed one needs diagnosis, not raw signals or hand-edited state.
 - **Inspect the running implementation first.** A new mechanism cannot protect
   the deployment that introduces it. Respect any explicit CI-only or
   no-local-cluster constraint.

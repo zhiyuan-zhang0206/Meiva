@@ -16,7 +16,6 @@ from base.agents.messages.kwargs import NoteTag
 from base.agents.messages.lifecycle_text import restart_resume_note
 from base.db import Database
 from base.db.transaction import async_write_transaction
-from base.deploy.maintenance import admission
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -126,13 +125,13 @@ async def apply_hosted_lifecycle(
 
 
 # meiva:note
-# Admit one turn: the circuit breaker, the maintenance hold, then one UPDATE.
+# Admit one turn: the circuit breaker, then one UPDATE.
 #
 #     Only this machine's running or idling row is claimed; a terminated or foreign
 #     row yields None. The generation survives while the same host boot keeps the
 #     row and is minted fresh when the owner differs, so a new boot, or a restart
-#     that cleared the identity, starts a new incarnation. A held unit admits only
-#     a cohort member's pending command (the host runs it and nothing else).
+#     that cleared the identity, starts a new incarnation. A host that is exiting
+#     refuses new turns in process (`stop_admission`), not here.
 async def admit_hosted_runtime(
     pool: AsyncConnectionPool,
     agent_id: int,
@@ -145,7 +144,6 @@ async def admit_hosted_runtime(
 
     if not await admit_pending_wake(pool, agent_id):
         return None
-    held = admission.held()
     recorded: list[telemetry.Event] = []
     async with async_write_transaction(pool) as conn:
         claimed = await (
@@ -157,12 +155,9 @@ async def admit_hosted_runtime(
                 "last_admission_at = clock_timestamp(), "
                 "last_launch_failure_reason = NULL, last_launch_failure_at = NULL "
                 "FROM (SELECT id, status FROM agents_meta WHERE id = %s AND machine = %s "
-                "AND status IN ('running','idling') "
-                "AND (NOT %s OR EXISTS (SELECT 1 FROM inbound_messages i "
-                "WHERE i.agent_id = agents_meta.id AND i.kind IN ('restart','terminate') "
-                "AND i.status IN ('pending','claimed'))) FOR UPDATE) before "
+                "AND status IN ('running','idling') FOR UPDATE) before "
                 "WHERE m.id = before.id RETURNING m.runtime_generation, before.status",
-                (owner, owner, agent_id, machine, held),
+                (owner, owner, agent_id, machine),
             )
         ).fetchone()
         if claimed is None:

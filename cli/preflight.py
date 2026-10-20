@@ -9,8 +9,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from base.deploy.maintenance.state import MaintenancePhase
-
 
 def require_own_checkout(args_in: list[str], repo: Path) -> int | None:
     """Refuse every command from a checkout that is not the home's own.
@@ -38,14 +36,19 @@ def require_own_checkout(args_in: list[str], repo: Path) -> int | None:
     return 1
 
 
+# meiva:note
+# Whether this home's meiva-root is not running: a repeated stop needs no gateway fetch.
+#
+# The same machine fact `root_driver.require_root_absent` proves: the root's instance
+# lock is free.
 def unit_already_stopped() -> bool:
-    """Allow an idempotent cold stop without fetching the offline gateway."""
-    from base.deploy.maintenance.pause_owner import read_for_home
+    from base.native_process.root_control import instance_lock
+    from base.paths import root_run_dir
     from base.paths.home import resolve_meiva_home
 
-    current = read_for_home(resolve_meiva_home())
-    return (
-        current.status == "paused"
-        and current.maintenance is not None
-        and current.maintenance.phase == MaintenancePhase.STOPPED
-    )
+    try:
+        fd = instance_lock.acquire_instance_lock(root_run_dir(resolve_meiva_home()))
+    except instance_lock.AlreadyRunningError:
+        return False
+    instance_lock.release_instance_lock(fd)
+    return True
