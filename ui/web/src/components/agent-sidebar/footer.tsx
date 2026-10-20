@@ -341,21 +341,23 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
 
       <div className={cn("items-center gap-0.5", FLEX)}>
         <SidebarNavButton
+          href="/memory/graph"
           onClick={() => router.push("/memory/graph")}
           label={navT("memoryGraph")}
         >
           <NotebookText className="size-4" />
         </SidebarNavButton>
         <SidebarNavButton
+          href={fleetHref(activeAgentId)}
           onClick={() => router.push(fleetHref(activeAgentId))}
           label={navT("fleet")}
         >
           <Waypoints className="size-4" />
         </SidebarNavButton>
-        <SidebarNavButton onClick={() => router.push("/insights")} label={navT("insights")}>
+        <SidebarNavButton href="/insights" onClick={() => router.push("/insights")} label={navT("insights")}>
           <Activity className="size-4" />
         </SidebarNavButton>
-        <SidebarNavButton onClick={() => router.push("/control")} label={navT("control")}>
+        <SidebarNavButton href="/control" onClick={() => router.push("/control")} label={navT("control")}>
           <Settings className="size-4" />
         </SidebarNavButton>
         {/* Plugin-contributed entries come last, after the console's own;
@@ -371,10 +373,12 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
 function SidebarNavButton({
   onClick,
   label,
+  href,
   children,
 }: {
   onClick: () => void;
   label: string;
+  href: string;
   children: React.ReactNode;
 }) {
   return (
@@ -382,7 +386,7 @@ function SidebarNavButton({
       label={label}
       title={label}
       onClick={() => {
-        markNavIntent();
+        markNavIntent(href);
         onClick();
       }}
     >
