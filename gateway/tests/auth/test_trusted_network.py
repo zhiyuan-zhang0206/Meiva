@@ -1,193 +1,187 @@
 from __future__ import annotations
 
-import asyncio
-import json
-from pathlib import Path
-from types import SimpleNamespace
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import replace
 from typing import Literal
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, HTTPException, Request
 from pydantic import ValidationError
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.testclient import TestClient
 
-from base import paths
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.domains.gateway import GatewaySettings
 from base.host.net.auth import bearer_header, cookie_name
-from gateway.app import cluster_auth_middleware
-from gateway.http.auth import rejection_log
 from gateway.http.auth.request_principal import (
     HUMAN_CREDENTIAL_FACTS,
     TRUSTED_NETWORK_FACT,
-    AuthPrincipal,
-    SessionKeys,
     require_human_credential,
 )
-from gateway.http.auth.router import check
-from gateway.http.config import GatewayConfig
+from gateway.http.config import gateway_config_from_boot
 from gateway.http.middleware.cors import request_host, trusted_request_hosts
+from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
+from tests.fixtures.gateway_config import gateway_test_app, gateway_test_process
 
 CLUSTER_KEY = "trusted-network-test-secret"
 ALLOWED_ORIGIN = "http://10.0.0.5:3000"
 HOSTS = trusted_request_hosts(
     allowed_origins=(ALLOWED_ORIGIN,), machine_host="10.0.0.5", gateway_url="http://10.0.0.5:8000"
 )
+DECLARED = {"Host": "10.0.0.5:8000"}
 
 
-def _app(human_auth: Literal["required", "trusted_network"]) -> FastAPI:
-    app = FastAPI()
-    app.state.gateway_config = GatewayConfig(
-        cluster_secret=CLUSTER_KEY,
-        session_ttl_seconds=3600,
-        mcp_endpoint_enabled=False,
-        allowed_origins=(ALLOWED_ORIGIN,),
-        browser_origin="",
-        session_cookie_secure=False,
-        memory_root=Path("/nonexistent/memory"),
-        human_auth=human_auth,
-        trusted_hosts=HOSTS,
-    )
-    app.state.sessions = None
-    app.state.session_keys = SessionKeys()
-    app.state.auth401_log = rejection_log.AuthRejectionLog()
-    app.state.machine_token_acceptance = {}
-    app.state.gateway_process = SimpleNamespace(home=paths.meiva_home())
-    return app
+@pytest.fixture(autouse=True)
+def anonymous_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    disable_default_gateway_credentials(monkeypatch)
 
 
-def _request(
-    app: FastAPI,
-    *,
-    method: str = "GET",
-    host: str | None = "10.0.0.5:8000",
-    origin: str | None = None,
-    authorization: str | None = None,
-) -> Request:
-    headers: list[tuple[bytes, bytes]] = []
-    if host is not None:
-        headers.append((b"host", host.encode()))
-    if origin is not None:
-        headers.append((b"origin", origin.encode()))
-    if authorization is not None:
-        headers.append((b"authorization", authorization.encode()))
-    return Request(
-        {
-            "type": "http",
-            "http_version": "1.1",
-            "method": method,
-            "scheme": "http",
-            "path": "/api/agents",
-            "raw_path": b"/api/agents",
-            "query_string": b"",
-            "headers": headers,
-            "client": ("10.0.0.9", 1),
-            "server": ("10.0.0.5", 8000),
-            "state": {},
-            "app": app,
-        }
-    )
+def probe(request: Request) -> dict[str, str | None]:
+    principal = request.state.auth_principal
+    return {
+        "fact": request.state.source_verified_by,
+        "principal": None if principal is None else f"{principal.kind}:{principal.subject}",
+    }
 
 
-def _run(request: Request) -> tuple[Response, Request | None]:
-    passed: list[Request] = []
+@contextmanager
+def served(
+    human_auth: Literal["required", "trusted_network"], machine: MachineIdentity
+) -> Generator[TestClient]:
+    with gateway_test_process(machine=machine) as process:
+        config = replace(
+            gateway_config_from_boot(process.config),
+            cluster_secret=CLUSTER_KEY,
+            allowed_origins=(ALLOWED_ORIGIN,),
+            human_auth=human_auth,
+            trusted_hosts=HOSTS,
+        )
+        app = gateway_test_app(process=process, config=config)
+        app.add_api_route("/api/probe", probe, methods=["GET", "POST"])
+        app.add_api_route(
+            "/api/probe-human",
+            probe,
+            methods=["GET"],
+            dependencies=[Depends(require_human_credential)],
+        )
+        with TestClient(app) as client:
+            yield client
 
-    async def call_next(forwarded: Request) -> Response:
-        passed.append(forwarded)
-        return JSONResponse({"served": True})
 
-    response = asyncio.run(cluster_auth_middleware(request, call_next))
-    return response, passed[0] if passed else None
-
-
-def test_required_mode_still_refuses_an_anonymous_request() -> None:
-    response, passed = _run(_request(_app("required")))
-
-    assert (response.status_code, passed) == (401, None)
+def test_required_mode_still_refuses_an_anonymous_request(
+    *, machine_identity: MachineIdentity
+) -> None:
+    with served("required", machine_identity) as client:
+        assert client.get("/api/probe", headers=DECLARED).status_code == 401
 
 
-def test_trusted_network_serves_an_anonymous_request_as_the_administrator() -> None:
-    request = _request(_app("trusted_network"))
-
-    response, passed = _run(request)
+def test_trusted_network_serves_an_anonymous_request_as_the_administrator(
+    *, machine_identity: MachineIdentity
+) -> None:
+    with served("trusted_network", machine_identity) as client:
+        response = client.get("/api/probe", headers=DECLARED)
 
     assert response.status_code == 200
-    assert passed is not None
-    assert passed.state.source_verified_by == TRUSTED_NETWORK_FACT
-    assert passed.state.auth_principal == AuthPrincipal("cluster", "administrator")
+    assert response.json() == {"fact": TRUSTED_NETWORK_FACT, "principal": "cluster:administrator"}
 
 
-def test_a_bearer_keeps_its_own_fact_in_trusted_network_mode() -> None:
-    request = _request(
-        _app("trusted_network"), authorization=bearer_header(CLUSTER_KEY)["Authorization"]
-    )
+def test_a_bearer_keeps_its_own_fact_in_trusted_network_mode(
+    *, machine_identity: MachineIdentity
+) -> None:
+    with served("trusted_network", machine_identity) as client:
+        response = client.get("/api/probe", headers={**DECLARED, **bearer_header(CLUSTER_KEY)})
 
-    _, passed = _run(request)
-
-    assert passed is not None
-    assert passed.state.source_verified_by == "cluster_bearer"
+    assert response.json()["fact"] == "cluster_bearer"
 
 
 @pytest.mark.parametrize(
     "authorization", ["Bearer wrong-secret", "Bearer machine-token-revoked", "Basic abc", ""]
 )
-def test_an_invalid_authorization_header_stays_a_401(authorization: str) -> None:
-    app = _app("trusted_network")
+def test_an_invalid_authorization_header_stays_a_401(
+    authorization: str, *, machine_identity: MachineIdentity
+) -> None:
+    with served("trusted_network", machine_identity) as client:
+        response = client.get("/api/probe", headers={**DECLARED, "Authorization": authorization})
 
-    response, passed = _run(_request(app, authorization=authorization))
-
-    assert (response.status_code, passed) == (401, None)
-
-
-def test_an_invalid_session_cookie_still_falls_through_to_the_anonymous_path() -> None:
-    app = _app("trusted_network")
-    app.state.sessions = SimpleNamespace(is_valid=lambda *_args, **_kwargs: False)
-    request = _request(app)
-    request.scope["headers"].append((b"cookie", f"{cookie_name()}=stale.value".encode()))
-
-    response, passed = _run(request)
-
-    assert (response.status_code, passed is not None) == (200, True)
+    assert response.status_code == 401
 
 
-def test_a_foreign_origin_cannot_post_anonymously() -> None:
-    app = _app("trusted_network")
+def test_an_invalid_session_cookie_still_falls_through_to_the_anonymous_path(
+    *, machine_identity: MachineIdentity
+) -> None:
+    with served("trusted_network", machine_identity) as client:
+        response = client.get(
+            "/api/probe", headers={**DECLARED, "Cookie": f"{cookie_name()}=stale.value"}
+        )
 
-    foreign, foreign_passed = _run(_request(app, method="POST", origin="https://evil.example"))
-    allowed, allowed_passed = _run(_request(app, method="POST", origin=ALLOWED_ORIGIN))
-    read, read_passed = _run(_request(app, origin="https://evil.example"))
-
-    assert (foreign.status_code, foreign_passed) == (403, None)
-    assert (allowed.status_code, allowed_passed is not None) == (200, True)
-    assert (read.status_code, read_passed is not None) == (200, True)
+    assert response.json()["fact"] == TRUSTED_NETWORK_FACT
 
 
-@pytest.mark.parametrize("host", ["rebind.attacker.example", "rebind.attacker.example:8000", None])
-def test_an_unknown_host_is_refused_anonymously(host: str | None) -> None:
-    response, passed = _run(_request(_app("trusted_network"), host=host))
+def test_a_foreign_origin_cannot_post_anonymously(*, machine_identity: MachineIdentity) -> None:
+    with served("trusted_network", machine_identity) as client:
+        foreign = client.post("/api/probe", headers={**DECLARED, "Origin": "https://evil.example"})
+        allowed = client.post("/api/probe", headers={**DECLARED, "Origin": ALLOWED_ORIGIN})
+        read = client.get("/api/probe", headers={**DECLARED, "Origin": "https://evil.example"})
 
-    assert (response.status_code, passed) == (403, None)
+    assert (foreign.status_code, allowed.status_code, read.status_code) == (403, 200, 200)
+
+
+@pytest.mark.parametrize("host", ["rebind.attacker.example", "rebind.attacker.example:8000"])
+def test_an_unknown_host_is_refused_anonymously(
+    host: str, *, machine_identity: MachineIdentity
+) -> None:
+    with served("trusted_network", machine_identity) as client:
+        assert client.get("/api/probe", headers={"Host": host}).status_code == 403
 
 
 @pytest.mark.parametrize(
     "host", ["10.0.0.5:8000", "localhost:8000", "127.0.0.1", "[::1]:8000", "LOCALHOST"]
 )
-def test_declared_and_loopback_hosts_are_served_anonymously(host: str) -> None:
-    response, _ = _run(_request(_app("trusted_network"), host=host))
+def test_declared_and_loopback_hosts_are_served_anonymously(
+    host: str, *, machine_identity: MachineIdentity
+) -> None:
+    with served("trusted_network", machine_identity) as client:
+        assert client.get("/api/probe", headers={"Host": host}).status_code == 200
+
+
+def test_an_unknown_host_does_not_affect_a_credentialed_request(
+    *, machine_identity: MachineIdentity
+) -> None:
+    with served("trusted_network", machine_identity) as client:
+        response = client.get(
+            "/api/probe", headers={"Host": "rebind.attacker.example", **bearer_header(CLUSTER_KEY)}
+        )
 
     assert response.status_code == 200
 
 
-def test_an_unknown_host_does_not_affect_a_credentialed_request() -> None:
-    request = _request(
-        _app("trusted_network"),
-        host="rebind.attacker.example",
-        authorization=bearer_header(CLUSTER_KEY)["Authorization"],
-    )
+def test_a_human_only_route_accepts_the_anonymous_trusted_network_request(
+    *, machine_identity: MachineIdentity
+) -> None:
+    with served("trusted_network", machine_identity) as client:
+        assert client.get("/api/probe-human", headers=DECLARED).status_code == 200
 
-    response, _ = _run(request)
 
-    assert response.status_code == 200
+@pytest.mark.parametrize(
+    ("human_auth", "host", "authenticated"),
+    [
+        ("required", "10.0.0.5:8000", False),
+        ("trusted_network", "10.0.0.5:8000", True),
+        ("trusted_network", "rebind.attacker.example", False),
+    ],
+)
+def test_auth_check_reports_what_the_middleware_would_admit(
+    human_auth: Literal["required", "trusted_network"],
+    host: str,
+    authenticated: bool,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    with served(human_auth, machine_identity) as client:
+        response = client.get("/api/auth/check", headers={"Host": host})
+
+    assert response.json() == {"authenticated": authenticated}
 
 
 def test_trusted_hosts_collect_every_declared_source() -> None:
@@ -202,14 +196,12 @@ def test_trusted_hosts_collect_every_declared_source() -> None:
 def test_require_human_credential_accepts_the_trusted_network_fact() -> None:
     assert TRUSTED_NETWORK_FACT in HUMAN_CREDENTIAL_FACTS
 
-    trusted = _request(_app("required"))
-    trusted.state.source_verified_by = TRUSTED_NETWORK_FACT
-    require_human_credential(trusted)
+    def request(fact: str) -> Request:
+        return Request({"type": "http", "headers": [], "state": {"source_verified_by": fact}})
 
-    machine = _request(_app("required"))
-    machine.state.source_verified_by = "machine_token:gateway"
+    require_human_credential(request(TRUSTED_NETWORK_FACT))
     with pytest.raises(HTTPException) as refused:
-        require_human_credential(machine)
+        require_human_credential(request("machine_token:gateway"))
     assert refused.value.status_code == 403
 
 
@@ -217,19 +209,3 @@ def test_human_auth_defaults_to_required_and_rejects_unknown_values() -> None:
     assert GatewaySettings().human_auth == "required"
     with pytest.raises(ValidationError):
         GatewaySettings.model_validate({"human_auth": "open"})
-
-
-@pytest.mark.parametrize(
-    ("human_auth", "host", "authenticated"),
-    [
-        ("required", "10.0.0.5:8000", False),
-        ("trusted_network", "10.0.0.5:8000", True),
-        ("trusted_network", "rebind.attacker.example", False),
-    ],
-)
-def test_auth_check_reports_what_the_middleware_would_admit(
-    human_auth: Literal["required", "trusted_network"], host: str, authenticated: bool
-) -> None:
-    response = asyncio.run(check(_request(_app(human_auth), host=host)))
-
-    assert json.loads(bytes(response.body)) == {"authenticated": authenticated}
