@@ -12,7 +12,6 @@ from redis.exceptions import ResponseError
 
 from base.agents.observation import turn_progress as progress_module
 from base.agents.observation.turn_progress import TurnProgress
-from base.deploy.maintenance import admission as maintenance_admission
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import open_async_redis
 from base.events.live.tests.fakes import patch_async_redis
@@ -162,62 +161,6 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
     warnings = [record for record in caplog.records if record.name == host_daemon.host_log.name]
     assert len(warnings) == 2
     assert all("turn-progress heartbeat publish exceeded" in record.message for record in warnings)
-
-
-async def test_beat_skips_ownership_renewal_while_quiesced(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-
-    calls: list[str] = []
-    state = {"quiesced": True}
-
-    class FakeHost:
-        admission = _FakeAdmission()
-        turn_progress = TurnProgress()
-
-        async def renew_ownership(self) -> None:
-            calls.append("renew")
-
-    class FakeLiveness:
-        def beat(self) -> None:
-            calls.append("beat")
-
-    class FakeScheduler:
-        active_agents: frozenset[int] = frozenset()
-
-    async def _record_publish(
-        _bus: object,
-        _machine: str,
-        _agents: frozenset[int],
-        _progress: TurnProgress,
-    ) -> None:
-        calls.append("publish")
-
-    monkeypatch.setattr(maintenance_admission, "quiesced", lambda: state["quiesced"])
-    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", _record_publish)
-    monkeypatch.setattr(host_daemon, "LIVENESS_BEAT_STEP_S", 0.01)
-
-    task = asyncio.create_task(
-        host_daemon.beat_forever(
-            cast(host_daemon.Liveness, FakeLiveness()),
-            cast(host_daemon.AgentHost, FakeHost()),
-            cast(host_daemon.TurnScheduler, FakeScheduler()),
-            "runner-a",
-            EventBus.from_settings(),
-            read_alert_seconds=lambda: 30.0,
-        )
-    )
-    try:
-        await asyncio.sleep(0.05)
-        assert "renew" not in calls
-        assert calls.count("beat") >= 2
-        state["quiesced"] = False
-        await asyncio.sleep(0.05)
-        assert "renew" in calls
-    finally:
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
 
 
 async def test_progress_publish_propagates_cancellation_without_failure_warning(
@@ -571,7 +514,6 @@ async def test_unknown_renewal_error_exits_its_task_group(
         def beat(self) -> None:
             pass
 
-    monkeypatch.setattr(maintenance_admission, "quiesced", lambda: False)
     with pytest.raises(ExceptionGroup) as caught:
         async with asyncio.TaskGroup() as tasks:
             tasks.create_task(
@@ -630,7 +572,6 @@ async def test_three_database_renewal_failures_exit_host_heartbeat(
 
     monkeypatch.setattr(host_daemon, "LIVENESS_BEAT_STEP_S", 0.001)
     monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", publish)
-    monkeypatch.setattr(maintenance_admission, "quiesced", lambda: False)
     with pytest.raises(psycopg.OperationalError, match="offline"):
         await asyncio.wait_for(
             host_daemon.beat_forever(

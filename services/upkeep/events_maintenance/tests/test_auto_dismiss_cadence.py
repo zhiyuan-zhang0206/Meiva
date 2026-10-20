@@ -91,7 +91,6 @@ async def test_each_resolution_loop_owns_a_fresh_daily_scan(
     config = events_maintenance_config(
         process_config, events_auto_dismiss_enabled=True, events_auto_dismiss_days=1
     )
-    monkeypatch.setattr(daemon.admission, "quiesced", lambda: False)
     passes = 0
 
     async def execute_pass(

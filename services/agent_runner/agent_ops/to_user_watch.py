@@ -4,7 +4,6 @@ import stat
 from pathlib import Path
 from threading import Event
 
-from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.events.live.projection import ToUserChanged
 
@@ -51,8 +50,6 @@ async def watch_to_user(root: Path, bus: EventBus) -> None:
 
         while True:
             await asyncio.sleep(0.5)
-            if admission.quiesced():
-                continue
             current = await asyncio.to_thread(_snapshot, root, stopped)
             changed = {
                 int(name)

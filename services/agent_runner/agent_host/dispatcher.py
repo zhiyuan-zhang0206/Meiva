@@ -55,7 +55,6 @@ from typing import Protocol, cast
 
 from base.cluster import redis_channel_prefix
 from base.config import settings
-from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import retry_auth_failures_async
 from base.log import logger
@@ -513,7 +512,7 @@ class InboundWakeDispatcher:
         prefix = redis_channel_prefix(settings.data_plane.events_channel)  # ambient: S
         pattern = f"{prefix}{INBOUND_PATTERN_SUFFIX}"
         consecutive_failures = 0
-        while True:  # quiesce-exempt: the scan itself is gated by quiesced()
+        while True:
             redis = self._bus.open_async_redis()
             pubsub = None
             try:
@@ -619,10 +618,6 @@ class InboundWakeDispatcher:
     async def scan_once(self) -> None:
         """Wake every agent with new input or an explicit control; never cancel a turn."""
         if self._pending_scan is None:
-            return
-        if admission.quiesced():
-            # The operator owns stop-window cancellation; pending rows stay for
-            # the scan after the hold releases.
             return
         agent_ids = await self._pending_scan()
         raise_if_cancellation_pending()

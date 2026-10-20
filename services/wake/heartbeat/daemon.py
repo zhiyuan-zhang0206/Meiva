@@ -46,7 +46,6 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
-from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
@@ -602,8 +601,6 @@ async def dispatch_loop(
     while True:
         try:
             await sleep_with_liveness(liveness, step)
-            if admission.quiesced():
-                continue
             _sweep_backoff_resets(pool)
             reconcile_checkin_outcomes(
                 pool,
@@ -654,9 +651,8 @@ async def liveness_loop(
     failures = RoundFailureBudget("heartbeat liveness")
     while True:
         try:
-            if not admission.quiesced():
-                await run_liveness_pass(db, pool, bus)
-                failures.succeeded()
+            await run_liveness_pass(db, pool, bus)
+            failures.succeeded()
         except asyncio.CancelledError:
             raise
         except Exception as exc:

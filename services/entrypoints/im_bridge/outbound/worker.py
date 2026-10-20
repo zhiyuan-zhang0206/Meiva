@@ -1,7 +1,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from base.deploy.maintenance import admission
 from base.log import logger
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound.types import OutboundIntent, OutboundStatus
@@ -65,8 +64,6 @@ class IMOutboxWorker:
 
     async def run_once(self) -> None:
         """At most one active whole-send per daemon; old accounts remain queued."""
-        if admission.quiesced():
-            return
         async with self._serial:
             accounts: dict[str, str] = {}
             for channel, adapter in self.adapters.items():
@@ -81,8 +78,6 @@ class IMOutboxWorker:
             await asyncio.to_thread(self.store.mark_unavailable_accounts, accounts)
             streams = await asyncio.to_thread(self.store.pending_streams, accounts)
             for stream in streams:
-                if admission.quiesced():
-                    return
                 await self._dispatch(stream)
 
     async def _dispatch(self, stream: tuple[str, str, str]) -> None:

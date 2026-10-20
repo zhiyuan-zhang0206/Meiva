@@ -173,7 +173,6 @@ async def run_due_local_dump_restore(now: datetime, *, config: ConfigBoot, clock
 
 async def backup_loop(state: BackupState, *, config: ConfigBoot, clock: Clock) -> None:
     _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
-    # quiesce-exempt: pg_dump dials the direct URL read-only, not the pool; a held pause must not stop backups
     while True:
         now = clock.now()
         if not is_due(

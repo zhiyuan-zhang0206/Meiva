@@ -190,7 +190,6 @@ async def _await_worker_script(ws: Any, ids: Any, session_id: str) -> None:
     """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + WORKER_WAIT_S
-    # quiesce-exempt: bounded poll (WORKER_WAIT_S) of a local browser; no database
     while True:
         probe = await cdp_call(
             ws,

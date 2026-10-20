@@ -15,7 +15,6 @@ from collections.abc import Awaitable, Callable, Iterable
 import psycopg
 
 from base.daemon.loop_health import LoopProgress
-from base.deploy.maintenance import admission
 
 _log = logging.getLogger("base.daemon.round_loop")
 
@@ -79,33 +78,28 @@ async def sleep_with_progress(progress: LoopProgress, total_s: float) -> None:
         remaining -= step
 
 
+# meiva:note
+# Run `one_round` forever, `interval_s` apart. A callable `interval_s` is
+# read after each round, for a cadence the operator can change live.
+#
+# An unreachable database skips the round (the next one retries). Any other
+# exception ends the loop and, through the owning `TaskGroup`, the process:
+# the supervisor restarts it.
 async def run_rounds(
     name: str,
     progress: LoopProgress,
     interval_s: float | Callable[[], float],
     one_round: Callable[[], Awaitable[None]],
 ) -> None:
-    """Run `one_round` forever, `interval_s` apart. A callable `interval_s` is
-    read after each round, for a cadence the operator can change live.
-
-    A unit inside its stop window (`admission.quiesced()`) skips the round: every
-    round borrows the pool, and the window exists so a held unit stops doing
-    database work. Rounds resume on their own when `meiva start` releases the hold.
-
-    An unreachable database skips the round (the next one retries). Any other
-    exception ends the loop and, through the owning `TaskGroup`, the process:
-    the supervisor restarts it.
-    """
     while True:
-        if not admission.quiesced():
-            try:
-                await one_round()
-            except* psycopg.OperationalError as group:
-                progress.mark_error(str(group.exceptions[0]))
-                _log.warning("[%s] round skipped: database unavailable", name, exc_info=group)
-            else:
-                progress.beat()
-                progress.mark_success()
+        try:
+            await one_round()
+        except* psycopg.OperationalError as group:
+            progress.mark_error(str(group.exceptions[0]))
+            _log.warning("[%s] round skipped: database unavailable", name, exc_info=group)
+        else:
+            progress.beat()
+            progress.mark_success()
         await sleep_with_progress(progress, interval_s() if callable(interval_s) else interval_s)
 
 

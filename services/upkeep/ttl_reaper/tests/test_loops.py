@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Coroutine, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -15,7 +14,6 @@ from base.config import ConfigBoot, settings
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.ttl_reaper import cadence, daemon, remote, shells, sweep
@@ -319,56 +317,3 @@ def test_the_dispatch_deadline_covers_the_clients_full_retry_budget(
 
     assert shells.dispatch_deadline_s() >= 4 * 5.0
     assert shells.dispatch_deadline_s() < 4 * 30.0
-
-
-def _sweep_loop(
-    pool: ConnectionPool, progress: LoopProgress, database_gate: ProcessDbGate
-) -> Coroutine[Any, Any, None]:
-    return sweep.sweep_loop(
-        pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), progress
-    )
-
-
-def _remote_loop(
-    pool: ConnectionPool, progress: LoopProgress, database_gate: ProcessDbGate
-) -> Coroutine[Any, Any, None]:
-    return remote.remote_loop(
-        pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), progress
-    )
-
-
-class _FirstBeatProgress(LoopProgress):
-    def __init__(self) -> None:
-        super().__init__("test", 60.0)
-        self.first_beat = asyncio.Event()
-
-    def beat(self) -> None:
-        super().beat()
-        self.first_beat.set()
-
-
-@pytest.mark.parametrize("loop", [_sweep_loop, _remote_loop], ids=["sweep", "remote"])
-@pytest.mark.parametrize("quiesced", [True, False])
-async def test_a_quiesced_unit_borrows_no_connection(
-    monkeypatch: pytest.MonkeyPatch,
-    loop: Callable[[ConnectionPool, LoopProgress, ProcessDbGate], Coroutine[Any, Any, None]],
-    quiesced: bool,
-    database_gate: ProcessDbGate,
-) -> None:
-    # meiva:note
-    # The observation point is the loop's first beat, not a wall-clock sleep: a
-    # beat follows the quiesced decision in both branches (`run_rounds` beats after
-    # the round, `sleep_with_progress` beats before sleeping), so one beat proves
-    # the loop reached its first decision. A fixed 0.2 s sleep instead assumed a
-    # loaded runner schedules the round within that window — the 2026-10-18
-    # `[False-remote]` failure was the round simply not having run yet.
-    monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
-    pool = MagicMock()
-    progress = _FirstBeatProgress()
-    task = asyncio.create_task(loop(cast("ConnectionPool", pool), progress, database_gate))
-    try:
-        await asyncio.wait_for(progress.first_beat.wait(), timeout=30)
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-    assert bool(pool.mock_calls) is (not quiesced)

@@ -270,7 +270,6 @@ class RootHealthRounds:
         self._task = self._tasks.create_task(self._loop())
 
     async def _loop(self) -> None:
-        # quiesce-exempt: samples process diagnostics; no database
         while True:
             await self.run_round()
             await asyncio.sleep(self._interval_s)

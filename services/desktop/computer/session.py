@@ -112,7 +112,6 @@ class ScreenSession:
         queued = False
         deadline = loop.time() + self._queue_timeout_s
         try:
-            # quiesce-exempt: a bounded wait to acquire the computer session; no database
             while True:
                 async with self._state_lock:
                     verdict, queued = self._step(

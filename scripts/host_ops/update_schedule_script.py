@@ -59,14 +59,14 @@ def load_installed_runtime(home: Path, source: Path) -> None:
     require_admitted_runtime(home, code_root=source)
 
 
+# meiva:note
+# Check the old text and reuse the installed versioned writer.
+#
+# The caller holds the home's lifecycle mutex and stopped journal. Business
+# API writes are fenced and the schedule manager is stopped throughout this
+# precondition/read/write interval. Per-row commits are deliberate: after an
+# interruption, the prepared text is a no-op and any third text is refused.
 def replace_script(pool: Any, schedule_id: int, script: str, expected_sha256: str) -> str:
-    """Check the old text and reuse the installed versioned writer.
-
-    The caller holds the home's lifecycle mutex and stopped journal. Business
-    API writes are fenced and the schedule manager is quiesced throughout this
-    precondition/read/write interval. Per-row commits are deliberate: after an
-    interruption, the prepared text is a no-op and any third text is refused.
-    """
     # First-generation bootstrap must use the already installed versioned writer.
     # Calling a newly introduced public owner would require deploying it first.
     # This narrow coupling is covered on 44d and current source; no SQL is copied.

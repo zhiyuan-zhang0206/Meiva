@@ -29,7 +29,7 @@ from base.agents.upload_delivery.paths import agent_upload_dir
 from base.api_contracts.agent_contract import AgentNotFound
 from base.cluster.machine import MachineIdentity
 from base.db import Database
-from base.deploy.maintenance.admission import business_paused, quiesced
+from base.deploy.maintenance.admission import business_paused
 from base.events.live.bus import EventBus
 from gateway.http.middleware.stopping import is_stopping
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpTargetAbsent, dispatch_to_machine
@@ -107,11 +107,7 @@ class UploadRecovery:
     async def run(self) -> None:
         while not self.stopped.is_set():
             try:
-                if (
-                    not is_stopping()
-                    and not await self.native(business_paused, self.home)
-                    and not await self.native(quiesced)
-                ):
+                if not is_stopping() and not await self.native(business_paused, self.home):
                     await self.round()
             except Exception:
                 _log.exception(
@@ -159,11 +155,7 @@ class UploadRecovery:
             proof = await self.copy_proof(request)
             # Paused units finish their owned copy, but do not admit a fresh chat
             # while stop is certified. Retained pending intent retries after resume.
-            if (
-                self.stopped.is_set()
-                or await self.native(business_paused, self.home)
-                or await self.native(quiesced)
-            ):
+            if self.stopped.is_set() or await self.native(business_paused, self.home):
                 return
             inbound_id = await self.native(source.complete, self.pool, request, proof)
         except ClusterOpFailed as exc:

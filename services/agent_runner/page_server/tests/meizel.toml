@@ -2,7 +2,6 @@
 "page_server_daemon" = ["page_shell.py", "test_page_server_daemon.py"]
 "test_dead_pages.py" = ["slices.py"]
 "test_page_server_daemon.py" = ["page_shell.py"]
-"test_page_server_quiesced.py" = ["slices.py"]
 
 [debt.env-patch]
 "test_daemon_entry.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
@@ -19,7 +18,6 @@
 "test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon.init_gateway_process" = 1
 "test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon.install_graceful_shutdown" = 1
 "test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon.run" = 1
-"test_dead_pages.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 2
 "test_dead_pages.py#monkeypatch.setattr base.events.live.bus.EventBus.publish_best_effort" = 1
 "test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.daemon.Database.pool" = 1
 "test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.daemon.dead_pages.dead_pages_loop" = 1
@@ -43,9 +41,6 @@
 "test_page_server_daemon.py#monkeypatch.setattr services.agent_runner.page_server.daemon.row_matches_snapshot" = 2
 "test_page_server_daemon.py#monkeypatch.setattr services.agent_runner.page_server.daemon.server_is_healthy" = 2
 "test_page_server_occupants.py#monkeypatch.setattr services.agent_runner.page_server.daemon.psutil.process_iter" = 1
-"test_page_server_quiesced.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
-"test_page_server_quiesced.py#monkeypatch.setattr services.agent_runner.page_server.daemon.asyncio.sleep" = 1
-"test_page_server_quiesced.py#monkeypatch.setattr services.agent_runner.page_server.daemon.reconcile_once" = 1
 
 [debt.unresolved-patch]
 "test_daemon_entry.py#monkeypatch.setattr fields.page_server_health_port" = 2
