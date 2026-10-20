@@ -47,6 +47,28 @@ describe("nav timing", () => {
     expect(tracked).toEqual([]);
   });
 
+  it("performs a real location change when the router never commits", async () => {
+    vi.useFakeTimers();
+    const assign = vi.fn();
+    const realLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { pathname: "/", assign },
+    });
+    try {
+      markNavIntent("/control");
+      vi.advanceTimersByTime(1600);
+      expect(assign).toHaveBeenCalledWith("/control");
+      expect(tracked.at(-1)?.value).toMatch(/\|f=1$/);
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: realLocation,
+      });
+      vi.useRealTimers();
+    }
+  });
+
   it("reports click-to-commit, click-to-paint and the longest task", async () => {
     const { rerender } = render(<Reporter />);
     markNavIntent();

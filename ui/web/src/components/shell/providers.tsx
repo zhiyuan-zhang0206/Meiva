@@ -43,11 +43,6 @@ import { AlertsProvider } from "@/lib/notifications/use-alerts";
 //
 // AppConnectionBanner also rides that connection here at the root, so
 // disconnect/recovery chrome protects every page, not just the home view.
-function NavTimingReporter() {
-  useNavTimingReport();
-  return null;
-}
-
 export function createQueryClient(): QueryClient {
   return new QueryClient({
     queryCache: new QueryCache({
@@ -134,4 +129,9 @@ export function Providers({ children, nonce }: { children: React.ReactNode; nonc
       </QueryClientProvider>
     </NonceProvider>
   );
+}
+
+function NavTimingReporter() {
+  useNavTimingReport();
+  return null;
 }
