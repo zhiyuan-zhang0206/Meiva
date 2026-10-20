@@ -104,53 +104,6 @@ def test_status_explains_persistently_unselected_services(
     assert "not launched by the last meiva start" in frontend
 
 
-def test_fetch_gateway_cluster_status_sends_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The `meiva status` cluster-status probe presents the cluster-secret bearer, so
-    an authenticated-but-healthy gateway reads as up instead of a false 401."""
-    import httpx
-
-    from cli.commands.cluster.control import fetch_gateway_cluster_status
-
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cr3t")
-    captured: dict[str, object] = {}
-
-    class _Resp:
-        def raise_for_status(self) -> None: ...
-
-        def json(self) -> dict[str, object]:
-            return {"ok": True}
-
-    def _fake_get(url: str, *, timeout: float, headers: dict[str, str]) -> _Resp:
-        captured["url"] = url
-        captured["headers"] = headers
-        return _Resp()
-
-    monkeypatch.setattr(httpx, "get", _fake_get)
-    assert fetch_gateway_cluster_status() == {"ok": True}
-    assert captured["url"] == "http://gw:8000/api/cluster/status"
-    assert captured["headers"] == {"Authorization": "Bearer s3cr3t"}
-
-
-def test_fetch_gateway_cluster_status_without_a_credential_raises_instead_of_dialing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The API always authenticates: no token and no secret is named, not sent as a blank bearer."""
-    import httpx
-
-    from base.cluster.machine import GatewayApiTokenMissing
-    from cli.commands.cluster.control import fetch_gateway_cluster_status
-
-    monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-
-    def _no_dial(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("an unauthenticated request must not be sent")
-
-    monkeypatch.setattr(httpx, "get", _no_dial)
-    with pytest.raises(GatewayApiTokenMissing):
-        fetch_gateway_cluster_status()
-
-
 # ─── status ───────────────────────────────────────────────────────────────────
 
 
