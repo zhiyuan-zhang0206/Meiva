@@ -1,5 +1,5 @@
 {
   "browser_engine": "playwright-chromium 151.0.7922.34",
-  "captured_at": "2026-10-19T15:29:28.972099+00:00",
-  "runner": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39"
+  "captured_at": "2026-10-20T06:20:03.078546+00:00",
+  "runner": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39"
 }
