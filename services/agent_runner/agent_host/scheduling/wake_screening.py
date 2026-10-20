@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
@@ -27,7 +29,13 @@ __all__ = ["is_runnable", "read_stored_config"]
 # resurrect path, and a row born on a harness this release has no launcher for
 # has nothing this host could run it on. None is a fault of this host.
 # meiva:link base/agents/docs/harness.meiva.okf.md
-def is_runnable(machine: str, agent_id: int, stored: StoredConfig) -> bool:
+def is_runnable(
+    machine: str,
+    agent_id: int,
+    stored: StoredConfig,
+    *,
+    launchable: Collection[Harness] = LAUNCHABLE_HARNESSES,
+) -> bool:
     if stored.machine != machine:
         logger.debug(
             "hosted wake for agent {agent_id} belongs to machine {owner} — not ours",
@@ -48,7 +56,7 @@ def is_runnable(machine: str, agent_id: int, stored: StoredConfig) -> bool:
     # wakes reach it without one. Without a launcher the only loop this host
     # could run for a row is the built-in one, which is not what the row says.
     # meiva:link base/agents/docs/harness.meiva.okf.md
-    if Harness(stored.harness) not in LAUNCHABLE_HARNESSES:
+    if Harness(stored.harness) not in launchable:
         logger.debug(
             "hosted wake for agent {agent_id} ignored — harness {harness} has no launcher",
             agent_id=agent_id,
