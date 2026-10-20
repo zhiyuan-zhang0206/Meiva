@@ -361,7 +361,7 @@ async def test_concurrent_normal_acceptances_freeze_first_target_without_duplica
     snapshot = core.notice_bridge._unaccepted_notices()[0]
 
     def accept(_index: int) -> None:
-        asyncio.run(core.notice_bridge._accept_normal_notice(snapshot))
+        asyncio.run(core.notice_bridge._accept_normal_notice(snapshot, switches={}))
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         list(executor.map(accept, range(2)))

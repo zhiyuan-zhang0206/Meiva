@@ -63,6 +63,11 @@ and the matching GitHub Releases.
   stamped ones 28px. The footer now floats in the card's own bottom-right corner
   and takes no height, the stamp drops its brackets and renders one step smaller,
   and Copy's icon shrinks with it (user report 2026-10-21).
+- The Telegram notice bridge honors the user's per-category switches: a decision
+  notice under a switched-off `core.needs_input` is accepted (the poll cursor still
+  advances) but not pushed, so "turn notifications off" now means the same thing on
+  every transport. Its ambient FYI feed carries no notification category and is
+  unchanged ([notification spine](base/events/notifications/docs/notifications.meiva.okf.md)).
 - Collapsing or expanding the sidebar no longer tears the conversation down and
   rebuilds it. The columns group used to be swapped for a bare div, so the main
   subtree unmounted on every toggle: the list's height flashed and the reader's
