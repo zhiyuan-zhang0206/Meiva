@@ -18,9 +18,6 @@ import { useEffect, useRef } from "react";
 import { track } from "./telemetry";
 
 const SETTLE_MS = 400;
-// Longer than a commit takes anywhere we have measured (1.1 s at 12x CPU
-// throttle) and short enough that a stalled navigation still feels like a
-// navigation rather than a hang.
 const NAV_FALLBACK_MS = 1500;
 
 let intentAt: number | null = null;
@@ -59,7 +56,7 @@ function startWatching(): void {
       resources.observe({ entryTypes: ["resource"] });
     }
   } catch {
-    /* unsupported: the timing event simply carries zeros */
+    return;
   }
 }
 
