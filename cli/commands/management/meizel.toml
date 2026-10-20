@@ -9,6 +9,6 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 "schedule_verify_child.py" = "dry-runs the imports of a user-written schedule script and checks its syntax"
 
 [debt.private-name]
-"schedules_verify_read_rows.py -> schedules_verify.py#_read_schedule_rows" = 3
+"schedules_verify_read_rows.py -> schedules_verify.py#_read_schedule_rows" = 1
 "tests/test_schedules_cmd.py -> schedules_verify.py#_read_schedule_rows" = 2
 "tests/test_schedules_cmd.py -> schedules_verify.py#_report_verify" = 3
