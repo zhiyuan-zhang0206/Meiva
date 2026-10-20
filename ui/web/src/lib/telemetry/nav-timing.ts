@@ -68,7 +68,6 @@ function clearFallback(): void {
   fallbackTimer = null;
 }
 
-/** Stamp the moment a navigation was requested, and bound how long it may hang. */
 export function markNavIntent(href?: string): void {
   if (typeof window === "undefined") return;
   intentAt = performance.now();
@@ -95,7 +94,6 @@ export function formatNavTiming(commitMs: number, paintMs: number, taskMs: numbe
   return `c=${Math.round(commitMs)}|p=${Math.round(paintMs)}|t=${Math.round(taskMs)}`;
 }
 
-/** Report the pending navigation, if any, when the route changes. Mount once. */
 export function useNavTimingReport(): void {
   const pathname = usePathname();
   const previous = useRef<string | null>(null);
