@@ -1,22 +1,12 @@
 "use client";
 
-// Unified message-card system for the timeline. Every timeline item renders as
-// a MessageCard: a colored left-border container with a clickable CardHeader
-// (chevron + icon + title/summary + timestamp) and a collapsible body below it.
+// meiva:note
+// Unified message-card system for the timeline. Every timeline item renders as a MessageCard: a colored left-border box with a clickable CardHeader (chevron + icon + title/summary) and a collapsible body below it, plus a hover footer under the box that carries the item timestamp and Copy.
 //
-// messageCardConfig(item, colors) is the single source of the per-kind visual
-// mapping — icon, title, border/background color (color families resolved from
-// @/lib/timeline-colors; user-configurable via Display settings), which global
-// toggle governs its default
-// expanded state, and whether the header stamps a timestamp. It returns null for
-// the ephemeral system markers (compact_done / cancelled / error / unrecognized),
-// which render bare (no card, not collapsible) through their own renderers.
+// messageCardConfig(item, colors) is the single source of the per-kind visual mapping — icon, title, border/background color (color families resolved from @/lib/timeline-colors; user-configurable via Display settings), which global toggle governs its default expanded state, and whether the card stamps a timestamp in its hover footer. It returns null for the ephemeral system markers (compact_done / cancelled / error / unrecognized), which render bare (no card, not collapsible) through their own renderers.
 //
-// Four kinds carry a rich, dynamic header summary instead of a static title —
-// Thinking ("Thought for 8s"), Code (the SDK call histogram), Output ("ran in
-// 1s"), and the System prompt line count. Those summaries own their own icon and
-// live/error coloring, so the header renders the Summary component for them and a
-// plain icon + title for every other kind.
+// Four kinds carry a rich, dynamic header summary instead of a static title — Thinking ("Thought for 8s"), Code (the SDK call histogram), Output ("ran in 1s"), and the System prompt line count. Those summaries own their own icon and live/error coloring, so the header renders the Summary component for them and a plain icon + title for every other kind.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 
 import {
   Bot,
@@ -45,7 +35,6 @@ import {
 import { preloadPythonCodeHighlighter } from "@/components/content/python-code";
 import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
-import { useUserSettings } from "@/lib/state/use-user-settings";
 import { useThrottledStreaming } from "@/lib/timeline/use-throttled-streaming";
 import { cn } from "@/lib/format/utils";
 
@@ -53,7 +42,6 @@ import { classifyMarker, markerVisual } from "./markers";
 import { inboundKind } from "./model/runs";
 import { externalAgentName } from "@/lib/format/inbound-source";
 import { isLiveCode, isLiveExecution, isLiveReasoning, useNow } from "./model/reasoning-clock";
-import { ItemTimestamp } from "./timestamp";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 // Which of the four rich header summaries a card renders in place of a static
@@ -86,8 +74,10 @@ export interface CardConfig {
   // attached media (open by default — user ruling 2026-08-26; kept open when
   // the 2026-08-30 ruling folded it into the details block).
   readonly fixedDefault: boolean;
-  // Whether the header stamps the item timestamp (left-aligned after the title).
-  readonly headerTs: boolean;
+  // meiva:note
+  // Whether the card stamps the item's timestamp in its hover footer (right-aligned under the card, next to Copy).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  readonly showTimestamp: boolean;
 }
 
 function agentChatTitle(item: BackendTimelineItem): {
@@ -128,7 +118,7 @@ export function messageCardConfig(
         border: colors.system_prompt.border,
         bg: colors.system_prompt.bg ?? "",
         fixedDefault: false,
-        headerTs: false,
+        showTimestamp: false,
       };
     case "agent_reasoning":
       return {
@@ -138,7 +128,7 @@ export function messageCardConfig(
         border: colors.reasoning.border,
         bg: colors.reasoning.bg ?? "",
         fixedDefault: false,
-        headerTs: true,
+        showTimestamp: true,
       };
     case "agent_code":
       return {
@@ -149,7 +139,7 @@ export function messageCardConfig(
         border: colors.agent_code.border,
         bg: "bg-card",
         fixedDefault: false,
-        headerTs: true,
+        showTimestamp: true,
       };
     case "code_output":
       return {
@@ -159,7 +149,7 @@ export function messageCardConfig(
         border: colors.code_output.border,
         bg: colors.code_output.bg ?? "",
         fixedDefault: false,
-        headerTs: true,
+        showTimestamp: true,
       };
     case "agent_chat": {
       const chatTitle = agentChatTitle(item);
@@ -172,7 +162,7 @@ export function messageCardConfig(
         border: colors.agent_chat.border,
         bg: "bg-card",
         fixedDefault: true,
-        headerTs: true,
+        showTimestamp: true,
       };
     }
     case "attach":
@@ -188,7 +178,7 @@ export function messageCardConfig(
         border: colors.attach.border,
         bg: colors.attach.bg ?? "",
         fixedDefault: true,
-        headerTs: true,
+        showTimestamp: true,
       };
     case "inbound_chat": {
       // Inter-agent + system inbound default collapsed (secondary chatter — the
@@ -204,7 +194,7 @@ export function messageCardConfig(
           border: colors.inbound_agent.border,
           bg: colors.inbound_agent.bg ?? "",
           fixedDefault: false,
-          headerTs: true,
+          showTimestamp: true,
         };
       }
       if (kind === "external_agent") {
@@ -218,7 +208,7 @@ export function messageCardConfig(
           border: colors.inbound_agent.border,
           bg: colors.inbound_agent.bg ?? "",
           fixedDefault: false,
-          headerTs: true,
+          showTimestamp: true,
         };
       }
       if (kind === "human") {
@@ -230,7 +220,7 @@ export function messageCardConfig(
           border: colors.inbound_human.border,
           bg: colors.inbound_human.bg ?? "",
           fixedDefault: true,
-          headerTs: true,
+          showTimestamp: true,
         };
       }
       return {
@@ -241,7 +231,7 @@ export function messageCardConfig(
         border: colors.inbound_system.border,
         bg: colors.inbound_system.bg ?? "",
         fixedDefault: false,
-        headerTs: true,
+        showTimestamp: true,
       };
     }
     case "inbound_compact_summary":
@@ -253,7 +243,7 @@ export function messageCardConfig(
         border: colors.inbound_system.border,
         bg: colors.inbound_system.bg ?? "",
         fixedDefault: false,
-        headerTs: true,
+        showTimestamp: true,
       };
     case "inbound_compact_request":
       return {
@@ -264,7 +254,7 @@ export function messageCardConfig(
         border: colors.inbound_system.border,
         bg: colors.inbound_system.bg ?? "",
         fixedDefault: false,
-        headerTs: true,
+        showTimestamp: true,
       };
     case "system_marker": {
       const cls = classifyMarker(item.source);
@@ -283,7 +273,7 @@ export function messageCardConfig(
         // the labeled header conveys the event; the payload folds.
         fixedDefault: false,
         // Events keep their timestamp; standing context / guidance notes drop it.
-        headerTs: item.show_timestamp,
+        showTimestamp: item.show_timestamp,
       };
     }
   }
@@ -354,49 +344,41 @@ export const UNSTUCK_HEADER_CLS =
   HEADER_PANE_GEOMETRY_CLS + " " +
   "before:bg-transparent before:backdrop-blur-none";
 
+// meiva:note
+// The card frame and its hover footer. `footer` (timestamp, Copy) is a SIBLING of the card box, not part of it: the box keeps its own padding and border, and the footer takes its own line right-aligned just under it. It stays in the flow rather than floating, because `.timeline-item` carries content-visibility paint containment and would clip anything drawn past its box; reserving the line also means the card never jumps when the chrome appears. It is invisible and click-through until the pointer hovers the card or focus enters it, and a coarse pointer — with no hover to gate on — keeps it visible.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+const CARD_FOOTER_CLS = cn(
+  "mt-0.5 items-center justify-end gap-1.5",
+  "pointer-events-none opacity-0 transition-opacity motion-reduce:transition-none",
+  "group-hover/msgcard:pointer-events-auto group-hover/msgcard:opacity-100",
+  "group-focus-within/msgcard:pointer-events-auto group-focus-within/msgcard:opacity-100",
+  "pointer-coarse:pointer-events-auto pointer-coarse:opacity-100",
+  FLEX,
+);
+
 export function MessageCard({
   config,
-  actions,
+  footer,
   children,
 }: {
   config: CardConfig;
-  actions?: ReactNode;
+  // meiva:note
+  // Timestamp and Copy for the hover footer; omitted, the card mounts no footer and stays out of the named hover group.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  footer?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div
-      className={cn(
-        "rounded-r-sm relative",
-        actions ? "group/msgcard" : null,
-        config.bg,
-        config.cardText,
-      )}
-    >
-      <span
-        aria-hidden
-        data-testid="card-accent"
-        className={cn("pointer-events-none absolute top-0 left-0 h-7 w-0 rounded-full border-l-2", config.border)}
-      />
-      {children}
-      {actions ? (
-        <div className={cn("pointer-events-none absolute inset-x-0 bottom-0 z-10 justify-end p-1", FLEX)}>
-          <div
-            className={cn(
-              "pointer-events-none items-center gap-0.5 rounded-md px-0.5 py-0.5",
-              "opacity-0 transition-opacity",
-              "group-hover/msgcard:opacity-100 group-hover/msgcard:pointer-events-auto",
-              "group-hover/msgcard:bg-background/70 group-hover/msgcard:border group-hover/msgcard:border-border/40",
-              "focus-within:opacity-100 focus-within:pointer-events-auto",
-              "focus-within:bg-background/70 focus-within:border focus-within:border-border/40",
-              "pointer-coarse:hidden",
-              FLEX
-            )}
-          >
-            {actions}
-          </div>
-        </div>
-      ) : null}
+    <div className={cn("relative", footer ? "group/msgcard" : null)}>
+      <div className={cn("relative rounded-r-sm", config.bg, config.cardText)}>
+        <span
+          aria-hidden
+          data-testid="card-accent"
+          className={cn("pointer-events-none absolute top-0 left-0 h-7 w-0 rounded-full border-l-2", config.border)}
+        />
+        {children}
+      </div>
+      {footer ? <div className={CARD_FOOTER_CLS}>{footer}</div> : null}
     </div>
   );
 }
@@ -446,8 +428,6 @@ export const CardHeader = memo(function CardHeader({
   const t = useTranslations();
   const live = isLiveReasoning(item) || isLiveCode(item) || isLiveExecution(item);
   const now = useNow(live);
-  const { settings } = useUserSettings();
-  const showWeekday = settings["display.show_timestamp_weekday"] as boolean;
   const summaryPayload = useThrottledStreaming(
     item.payload,
     !!item.partial,
@@ -503,11 +483,6 @@ export const CardHeader = memo(function CardHeader({
       {/* No impersonation badge on purpose — the timeline does not surface the
           external takeover executor (user ruling 2026-09-16, task #3660). The
           item keeps its impersonation metadata for envelope semantics. */}
-      {config.headerTs ? (
-        <span className="max-w-full pl-2">
-          <ItemTimestamp iso={item.created_at ?? ""} showWeekday={showWeekday} />
-        </span>
-      ) : null}
     </button>
   );
 });

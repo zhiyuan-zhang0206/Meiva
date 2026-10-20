@@ -101,7 +101,7 @@ describe("messageCardConfig", () => {
     expect(cfg!.icon?.displayName).toBe("Paperclip");
     expect(cfg!.titleKey).toBe("timeline.attachedFiles");
     expect(cfg!.fixedDefault).toBe(true);
-    expect(cfg!.headerTs).toBe(true);
+    expect(cfg!.showTimestamp).toBe(true);
   });
 
   it("code_output → rich=output", () => {
@@ -239,7 +239,7 @@ describe("MessageCard", () => {
     border: "border-red-500",
     bg: "bg-red-50",
     fixedDefault: true,
-    headerTs: false,
+    showTimestamp: false,
   };
 
   it("marks the kind with a short accent at the header, not a full-height frame", () => {
@@ -256,21 +256,22 @@ describe("MessageCard", () => {
     expect(accent?.className).toContain("h-7");
   });
 
-  it("no actions prop → mounts no overlay DOM at all (not just hidden)", () => {
+  it("no footer → mounts no footer DOM at all and does not opt into the named hover group", () => {
     const { container, queryByText } = render(
       <MessageCard config={cfg}>
         <div>hello</div>
       </MessageCard>,
     );
     expect(queryByText("act")).toBeNull();
-    // The frame itself must not opt into the named hover group when there's
-    // nothing to reveal.
     expect(container.firstElementChild?.className).not.toContain("group/msgcard");
   });
 
-  it("actions prop → overlay renders, pinned inside the frame (relative/absolute), and opts the frame into group/msgcard", () => {
+  // meiva:note
+  // The footer is the card's OUTSIDE bottom-right band: a sibling of the card box, so the box keeps its own padding and background and the footer never overlaps the body. It takes its own line (content-visibility paint containment would clip a floating band) and is invisible and click-through until the pointer hovers the card or focus enters it.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  it("footer → sits outside and below the card box, right-aligned, hidden until hover or focus-within", () => {
     const { container, getByText } = render(
-      <MessageCard config={cfg} actions={<span>act</span>}>
+      <MessageCard config={cfg} footer={<span>act</span>}>
         <div>hello</div>
       </MessageCard>,
     );
@@ -278,24 +279,19 @@ describe("MessageCard", () => {
     const frame = container.firstElementChild;
     expect(frame?.className).toContain("relative");
     expect(frame?.className).toContain("group/msgcard");
-    // The overlay is absolutely positioned inside the frame, not a sibling
-    // that pushes layout — it must be a descendant of the frame div, and the
-    // strip itself must not capture pointer events (only the pill's hover/
-    // focus-visible state does).
-    const strip = frame?.querySelector(".absolute.inset-x-0.bottom-0");
-    expect(strip).toBeTruthy();
-    expect(strip?.className).toContain("pointer-events-none");
-    // The pill itself must ALSO default to pointer-events-none while
-    // invisible (opacity-0 alone does not disable hit-testing) — otherwise a
-    // tap in this corner on a touch device (no real :hover) would silently
-    // hit an unseen button. pointer-events-auto only switches on together
-    // with the same hover/focus-within variant that raises opacity.
-    const pill = strip?.firstElementChild;
-    expect(pill?.className).toContain("pointer-events-none");
-    expect(pill?.className).toContain("group-hover/msgcard:pointer-events-auto");
-    expect(pill?.className).toContain("focus-within:pointer-events-auto");
-    expect(pill?.className).toContain("pointer-coarse:hidden");
-    expect(pill?.className).not.toContain("pointer-coarse:opacity-100");
+    const band = getByText("act").parentElement;
+    const box = band?.previousElementSibling;
+    expect(box?.className).toContain("bg-red-50");
+    expect(box?.contains(band)).toBe(false);
+    expect(band?.className).not.toContain("absolute");
+    expect(band?.className).toContain("justify-end");
+    expect(band?.className).toContain("opacity-0");
+    expect(band?.className).toContain("pointer-events-none");
+    expect(band?.className).toContain("group-hover/msgcard:opacity-100");
+    expect(band?.className).toContain("group-hover/msgcard:pointer-events-auto");
+    expect(band?.className).toContain("group-focus-within/msgcard:opacity-100");
+    expect(band?.className).toContain("group-focus-within/msgcard:pointer-events-auto");
+    expect(band?.className).toContain("pointer-coarse:opacity-100");
   });
 });
 
@@ -304,33 +300,19 @@ describe("MessageCard", () => {
 // ---------------------------------------------------------------------------
 
 describe("CardHeader", () => {
-  it("keeps an event timestamp available in narrow headers", () => {
+  // meiva:note
+  // The item timestamp left the header when it moved to the card's hover footer, so the header carries only the toggle chrome; the stamp's own placement is asserted at the TimelineView level.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  it("carries no item timestamp — the stamp lives in the card's hover footer", () => {
     const event = item("system_marker", {
       source: "impersonation",
       created_at: "2026-10-06T13:39:25+00:00",
     });
-    const { getByText, getByTestId } = renderWithQuery(
+    const { container, getByTestId } = renderWithQuery(
       <CardHeader item={event} config={messageCardConfig(event)!} expanded={false} onToggle={noop} />,
     );
-    const timestamp = getByText(formatItemTime(event.created_at!, { showWeekday: true }));
-    // happy-dom does not evaluate responsive Tailwind CSS. Guard the hiding
-    // class responsible for the real narrow-panel regression explicitly.
-    expect(timestamp.parentElement?.classList.contains("hidden")).toBe(false);
-    expect(timestamp.parentElement?.classList.contains("sm:block")).toBe(false);
+    expect(container.textContent).not.toContain(formatItemTime(event.created_at!, { showWeekday: true }));
     expect(getByTestId("card-toggle").classList.contains("flex-wrap")).toBe(true);
-  });
-
-  it("does not add timestamps to standing notes or undated historical notes", () => {
-    const standing = item("system_marker", { source: "agent_id", show_timestamp: false });
-    const undated = item("system_marker", { source: "impersonation", created_at: null });
-    const { container } = renderWithQuery(
-      <>
-        <CardHeader item={standing} config={messageCardConfig(standing)!} expanded={false} onToggle={noop} />
-        <CardHeader item={undated} config={messageCardConfig(undated)!} expanded={false} onToggle={noop} />
-      </>,
-    );
-    expect(container.textContent).not.toContain(formatItemTime(standing.created_at!, { showWeekday: true }));
-    expect(container.querySelectorAll(".tabular-nums")).toHaveLength(0);
   });
 
   const baseItem = item("agent_chat", { payload: "test" });
