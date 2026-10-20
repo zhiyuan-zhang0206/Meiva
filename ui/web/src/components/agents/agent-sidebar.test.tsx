@@ -213,15 +213,14 @@ vi.mock("@/components/agents/agent-row", () => ({
   ),
 }));
 
-// SpawnButton stub — renders a simple button that calls onSpawn(); the
-// cross-machine picker is covered separately by spawn-button.test.tsx.
-// Keeps aria-label="Spawn agent" so existing sidebar tests (click Spawn
-// → onSpawn called) keep working.
-vi.mock("@/components/agents/spawn-button", () => ({
-  SpawnButton: ({ onSpawn }: { onSpawn: (machine?: string) => void }) => (
-    <button aria-label="Spawn agent" onClick={() => onSpawn()}>
-      Spawn
-    </button>
+// meiva:note
+// The sidebar only decides when the create form mounts; the form itself (the
+// harness -> model -> effort table) is covered by spawn-form.test.tsx. The stub
+// keeps aria-label="Spawn agent" so the sidebar tests stay about the sidebar.
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+vi.mock("@/components/agents/spawn-form", () => ({
+  SpawnForm: ({ onSpawn }: { onSpawn: (machine?: string) => void }) => (
+    <button aria-label="Spawn agent" onClick={() => onSpawn("test-host")}>spawn</button>
   ),
 }));
 

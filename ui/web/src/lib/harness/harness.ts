@@ -45,3 +45,22 @@ export function harnessRows(rows: HarnessAvailability[]): HarnessAvailability[] 
     launchable: harness === DEFAULT_HARNESS,
   });
 }
+
+// meiva:note
+// Which model providers a harness can run. An external bridge drives one
+// vendor's CLI, so it takes that vendor's models (its own DEFAULT_MODEL family);
+// the built-in runtime speaks every provider, which `null` records. This table
+// is the picker's cascade; the authoritative per-model matrix belongs in the
+// model registry once the bridges declare their support there.
+// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+export const HARNESS_PROVIDERS: Record<Harness, readonly string[] | null> = {
+  meiva: null,
+  claude_code: ["claude"],
+  codex: ["gpt"],
+  antigravity: ["gemini"],
+};
+
+export function harnessRunsProvider(harness: Harness, provider: string): boolean {
+  const providers = HARNESS_PROVIDERS[harness];
+  return providers === null || providers.includes(provider);
+}
