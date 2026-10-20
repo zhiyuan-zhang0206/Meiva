@@ -66,6 +66,14 @@ command claimed by a host that died before applying is claimed again by the
 replacement. Resurrection closes every older open command as superseded, so a
 restart or terminate queued in the previous life cannot act on the next.
 
+A restart that ends an unfinished turn also queues the note that continues it. The
+caller of `apply_hosted_lifecycle` states `resume_turn` (the claim found the agent
+mid-turn, not idle; see [[agent/graph/docs/turn-interrupts.meiva.okf.md]]), and the
+restart's transaction then inserts one pending `system_note` with
+`note_tag='lifecycle_restart'` and the restart's own source, so a restart is never
+done without the note that wakes the agent through the pending scan. Idle agents,
+terminates and the held-control path (no graph ran) queue none.
+
 Force terminate is not a command the host executes. The API writes
 `terminated` itself in one transaction and then asks the home host to cancel the
 running turn (`POST /cancel-turn`, best effort); the force's own terminate command

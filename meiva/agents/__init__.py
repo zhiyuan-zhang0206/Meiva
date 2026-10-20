@@ -625,8 +625,12 @@ def terminate(
 
 
 def restart(agent_id: int) -> RestartResult:
-    """The agent finishes its current turn, then comes back up as a fresh
-    process under the same id."""
+    """The agent comes back up as a fresh process under the same id and
+    continues a turn that was in progress.
+
+    A running step gets 10 seconds to finish. After that a model call is
+    dropped and running code is terminated, and the agent is told so when it
+    continues."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     return RestartResult(gateway_client.restart(agent_id))
 

@@ -62,7 +62,7 @@ from agent.graph._attach_drain import build_attach_message
 from agent.graph._attach_merge import merge_attachments
 from agent.graph.agent_traceback import format_full_traceback
 from agent.graph.exec._notes import merge_exec_notes
-from agent.graph.interrupt import subscribe_interrupt
+from agent.graph.interrupt import interrupt_halt, subscribe_interrupt
 from agent.graph.node_log import node_lifecycle
 from agent.graph.tool_calls import code_from_args, normalize_tool_calls
 from agent.messages import exec_output_message
@@ -544,6 +544,8 @@ async def _exec_single_call(
         "halted": halted,
         **plugin_state_update,
     }
+    if isinstance(result, ExecCancelled):
+        update.update(interrupt_halt(result.reason))
     if not compact_halt:
         # Attachments registered during this execute_code call are packed into
         # a media HumanMessage appended right after the exec output — the model

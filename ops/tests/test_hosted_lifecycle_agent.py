@@ -62,6 +62,7 @@ async def test_hosted_restart_leaves_shell_sessions_for_the_later_terminate(
             owner,
             kill_shell_sessions=lambda _aid, _cutoff: kills.append((_aid, None)),
             bus=event_bus,
+            resume_turn=False,
         )
         == "restart"
     )
@@ -84,6 +85,7 @@ async def test_hosted_apply_without_a_bound_killer_refuses_a_kill_request(
             aops_pool,
             owner,
             bus=event_bus,
+            resume_turn=False,
         )
     assert db_conn.execute(
         "SELECT i.status, m.status FROM inbound_messages i JOIN agents_meta m "

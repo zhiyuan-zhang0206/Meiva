@@ -24,6 +24,7 @@ class InterruptReason(StrEnum):
 
     USER = "user"
     SYSTEM = "system"
+    RESTART = "restart"
 
 
 class InboundKind(StrEnum):

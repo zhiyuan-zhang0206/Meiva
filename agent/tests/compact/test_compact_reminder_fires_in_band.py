@@ -509,6 +509,7 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
         aops_pool,
         old,
         bus=event_bus,
+        resume_turn=False,
     )
 
     assert cmd.goto == END
@@ -563,6 +564,7 @@ async def test_compact_in_same_batch_as_restart(
         aops_pool,
         old,
         bus=event_bus,
+        resume_turn=False,
     )
 
     assert cmd.goto == END

@@ -35,6 +35,7 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
                 aops_pool,
                 owner,
                 bus=event_bus,
+                resume_turn=False,
             )
             == "restart"
         )
@@ -50,6 +51,7 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
             aops_pool,
             owner,
             bus=event_bus,
+            resume_turn=False,
         )
         is None
     )

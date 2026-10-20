@@ -244,6 +244,7 @@ async def _terminate_native(
                     aops_pool,
                     owner,
                     bus=EventBus.from_settings(),
+                    resume_turn=False,
                 )
                 == "terminate"
             )

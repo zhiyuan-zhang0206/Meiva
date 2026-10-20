@@ -16,7 +16,9 @@ separate protocol and are not acquired or released by native maintenance.
 
 `ops.agent_pause` publishes the hold before locking native `agents_meta` rows.
 Hosted admission checks it at the row-lock boundary. Existing
-iterations run until an ordinary `restart` reaches claim. Lifecycle priority
+iterations run until an ordinary `restart` reaches claim, or interrupts the call or code
+run in flight once it has waited its grace
+([[agent/graph/docs/turn-interrupts.meiva.okf.md]]). Lifecycle priority
 preserves pending ordinary messages. A restart arriving after claim can allow
 one more iteration; this is not an instruction-level freeze.
 
@@ -59,8 +61,10 @@ reads validate the enum. There is no start phase: `meiva start` authorizes bring
 against the retained hold and releases it after actual readiness. Nested calls
 pass the authorized operation snapshot and verify its holder and acquisition time.
 
-`meiva start` releases the hold once the unit serves; its resume wakes every
-restart pointer. It does not replay the original graph or code execution. Pending
+`meiva start` releases the hold once the unit serves; its resume wakes the drained
+members, and a turn a restart ended mid-way is continued by the note that restart queued
+(a pending inbound the ordinary scan finds). It does not replay the original graph or
+code execution. Pending
 restart controls remain subject to resource and lifecycle gates; unknown compact
 or cancel attempts stay held. New ordinary execution requires fresh input.
 

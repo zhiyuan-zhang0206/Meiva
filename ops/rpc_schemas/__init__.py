@@ -197,8 +197,9 @@ class ResurrectAgentRequest(BaseModel):
 # `source` default "user" — frontend restart button does not need to
 # pass it; SDK paths pass f"agent:{my_id}". Written into the lifecycle
 # 'restart' inbound's source; the claim-side dispatch composes it into
-# the marker `[system ts] Restart was accepted from {source}` so the
-# agent knows who restarted it.
+# the marker `[system ts] Restart was accepted from {source}` (an idle
+# agent) or into the note that resumes its unfinished turn, so the agent
+# knows who restarted it.
 #
 # `config_overlay`, when nonempty, is validated before it reaches either
 # gateway or runner writes, merged into the persistent agent overlay, and

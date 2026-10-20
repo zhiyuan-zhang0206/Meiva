@@ -94,6 +94,7 @@ async def test_successor_records_the_drain_of_a_restart_the_original_host_execut
             aops_pool,
             incarnation,
             bus=event_bus,
+            resume_turn=False,
         )
         == "restart"
     )
@@ -374,6 +375,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
             aops_pool,
             incarnation,
             bus=event_bus,
+            resume_turn=False,
         )
         == "restart"
     )
@@ -517,6 +519,20 @@ async def _assert_cold_checkpoint_carries_the_exec_tool_result(
     )
 
 
+# meiva:note
+# The restart closed with its execution, before the model saw the result: the turn was
+# unfinished, so the apply queued the note that continues it and the agent owes one wake. The
+# successor runs the model on the checkpoint's tool result and does not run the effect again.
+async def _successor_continues_the_unfinished_turn(
+    successor: AgentHost, agent: int, calls: list[str], effect: Path
+) -> None:
+    assert agent in await successor.pending_inbound_wakes()
+    await successor.run_turn(agent)
+    assert calls == ["model", "before_exec", "after_exec", "model"]
+    assert effect.read_text() == "once"
+    assert agent not in await successor.pending_inbound_wakes()
+
+
 async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_receipt(
     redis_url: str,
     db_conn: psycopg.Connection[Any],
@@ -605,12 +621,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
             model_catalog=model_catalog,
             database_gate=database_gate,
         )
-        # meiva:note
-        # The restart closed with its execution: the idle agent owes no wake.
-        assert agent not in await successor.pending_inbound_wakes()
-        await successor.run_turn(agent)
-        assert calls == ["model", "before_exec", "after_exec"]
-        assert effect.read_text() == "once"
+        await _successor_continues_the_unfinished_turn(successor, agent, calls, effect)
         assert db_conn.execute(
             "SELECT status FROM inbound_messages WHERE id=%s", (hold.commands[agent],)
         ).fetchone() == ("done",)

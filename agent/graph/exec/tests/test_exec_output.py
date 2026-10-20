@@ -17,6 +17,7 @@ import pytest
 
 from agent.graph.exec.output import format_elapsed, wrap_code_output
 from agent.graph.exec.tests.output_inputs import CropConfig
+from base.agents.messages.inbound import InterruptReason
 from base.clock import SYSTEM_TIMERS, Clock
 from base.config import settings
 from meiva.tests.fixtures.pin_agent import pin_agent
@@ -58,6 +59,35 @@ def test_wrap_code_output_cancelled_marker(crop_config: CropConfig, output_clock
     ).text
     assert "[cancelled by user]" in out
     assert _TS in out
+    assert "part" in out
+
+
+@pytest.mark.parametrize(
+    ("reason", "marker"),
+    [
+        (InterruptReason.USER, "[cancelled by user]"),
+        (InterruptReason.SYSTEM, "[cancelled by system]"),
+        (InterruptReason.RESTART, "[interrupted by restart]"),
+    ],
+)
+def test_wrap_code_output_names_what_ended_the_run(
+    crop_config: CropConfig, output_clock: Clock, reason: InterruptReason, marker: str
+):
+    out = wrap_code_output(
+        "part\n",
+        agent_id=7,
+        cancelled=True,
+        cancel_reason=reason,
+        crop_config=crop_config,
+        clock=output_clock,
+        timeout_seconds=60,
+        max_chars=30_000,
+        timestamp=_TS,
+        elapsed_seconds=1.0,
+    ).text
+    header = out.splitlines()[0]
+    assert marker in header
+    assert sum(m in header for m in ("[cancelled by", "[interrupted by")) == 1
     assert "part" in out
 
 

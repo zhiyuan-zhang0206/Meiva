@@ -309,7 +309,16 @@ class TestTurnLoop:
         stub_host_transitions(monkeypatch, _flip)
         host, _, _ = wired(
             {1: Row(status="idling")},
-            {1: [{"exit_requested": False, "turn_idle": False, "restart_requested": True}]},
+            {
+                1: [
+                    {
+                        "exit_requested": False,
+                        "turn_idle": False,
+                        "restart_requested": True,
+                        "halted": True,
+                    }
+                ]
+            },
         )
 
         async def apply(pool: object, incarnation: RuntimeIncarnation, **_kwargs: object) -> str:
@@ -399,7 +408,16 @@ class TestTurnLoop:
         monkeypatch.setattr(invocation, "apply_hosted_lifecycle", apply)
         host, graph, _ = wired(
             {1: Row()},
-            {1: [{"exit_requested": False, "turn_idle": False, "restart_requested": True}]},
+            {
+                1: [
+                    {
+                        "exit_requested": False,
+                        "turn_idle": False,
+                        "restart_requested": True,
+                        "halted": True,
+                    }
+                ]
+            },
         )
         await asyncio.wait_for(host.run_turn(1), 2)
         assert len(graph.observations) == 1

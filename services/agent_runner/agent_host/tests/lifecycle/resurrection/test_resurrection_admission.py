@@ -328,6 +328,7 @@ async def restarted(
             pool,
             owner,
             bus=EventBus.from_settings(),
+            resume_turn=False,
         )
         == "restart"
     )

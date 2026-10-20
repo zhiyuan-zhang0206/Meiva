@@ -98,6 +98,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
             aops_pool,
             old,
             bus=event_bus,
+            resume_turn=False,
         )
         == "terminate"
     )

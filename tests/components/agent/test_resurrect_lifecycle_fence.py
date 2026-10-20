@@ -103,6 +103,7 @@ async def test_resurrect_supersedes_the_pending_terminate_it_would_replay(
             aops_pool,
             owner,
             bus=event_bus,
+            resume_turn=False,
         )
         is None
     )
@@ -136,6 +137,7 @@ async def test_a_command_created_after_the_resurrect_still_applies(
             aops_pool,
             owner,
             bus=event_bus,
+            resume_turn=False,
         )
         == "terminate"
     )

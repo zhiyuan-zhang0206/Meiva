@@ -63,3 +63,8 @@ The units were stopped in unit-id order, which happened to put `agent-host` firs
   longer cancels running turns.
 - A wake that arrives during the drain stays pending for the next host, as do
   chats arriving while the runner is down.
+
+Forward link (2026-10-20): the lifecycle pointer this decision relies on was removed with the
+host's self-fencing. A restart now interrupts what its turn is doing after a grace and resumes an
+unfinished turn from a queued note; see
+[the restart that interrupts and resumes](2026-10-20-restart-interrupts-after-a-grace-and-resumes-by-a-note.md).

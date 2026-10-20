@@ -6,11 +6,14 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted_cleanup import finish_termination
 from base import telemetry
 from base.agents.impersonation.replacement import end_for_replacement
+from base.agents.messages.kwargs import NoteTag
+from base.agents.messages.lifecycle_text import restart_resume_note
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.deploy.maintenance import admission
@@ -33,6 +36,13 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_async
 #     agent, since one death serves them all. Returns the executed kind, or None
 #     when the incarnation no longer owns the row or no command was claimed.
 #
+#     `resume_turn` says the restart ended a turn that was not finished (the claim
+#     that took it did not find the agent idle). The same transaction then queues
+#     the one pending note that continues that turn (`restart_resume_note`, source
+#     the restart's own), so the restart is never done without the note that wakes
+#     the agent: the pending scan finds it on this host or the next. An idle agent
+#     gets no note, and neither does a terminate.
+#
 #     When a terminate asked to take the agent's shell sessions with it, the
 #     row lock captures the next shell ID. After committing the termination,
 #     `kill_shell_sessions(agent_id, cutoff)` attempts only older sessions. The
@@ -43,6 +53,7 @@ async def apply_hosted_lifecycle(
     incarnation: RuntimeIncarnation,
     *,
     bus: EventBus,
+    resume_turn: bool,
     kill_shell_sessions: Callable[[int, int], None] | None = None,
 ) -> Literal["restart", "terminate"] | None:
     shell_cutoff: int | None = None
@@ -57,7 +68,7 @@ async def apply_hosted_lifecycle(
         if row is None:
             return None
         cursor = await conn.execute(
-            "SELECT id,kind FROM inbound_messages WHERE agent_id=%s "
+            "SELECT id,kind,source FROM inbound_messages WHERE agent_id=%s "
             "AND kind IN ('restart','terminate') AND status='claimed' "
             "ORDER BY id LIMIT 1 FOR UPDATE",
             (incarnation.agent_id,),
@@ -65,7 +76,7 @@ async def apply_hosted_lifecycle(
         command = await cursor.fetchone()
         if command is None:
             return None
-        command_id, lifecycle_kind = command
+        command_id, lifecycle_kind, command_source = command
         if lifecycle_kind == "restart":
             await conn.execute(
                 "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
@@ -81,6 +92,17 @@ async def apply_hosted_lifecycle(
                 "WHERE id=%s",
                 (command_id,),
             )
+            if resume_turn:
+                await conn.execute(
+                    "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
+                    "VALUES(%s,%s,'system_note',%s,%s)",
+                    (
+                        incarnation.agent_id,
+                        restart_resume_note(command_source),
+                        command_source,
+                        Jsonb({"note_tag": NoteTag.LIFECYCLE_RESTART.value}),
+                    ),
+                )
         elif lifecycle_kind == "terminate":
             closed = await conn.execute(
                 "UPDATE inbound_messages SET status='done' WHERE agent_id=%s AND kind='terminate' "

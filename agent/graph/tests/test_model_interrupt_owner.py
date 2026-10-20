@@ -5,7 +5,13 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import interrupt
-from agent.graph.interrupt import ModelInterruptedError, interruptible_model
+from agent.graph.interrupt import (
+    InterruptEvent,
+    ModelInterruptedError,
+    interrupt_halt,
+    interruptible_model,
+)
+from base.agents.messages.inbound import InterruptReason
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 
 
@@ -208,3 +214,29 @@ async def test_repeated_cancel_during_bounded_exit_still_hands_off_actual_task(
     with pytest.raises(ValueError) as observed:
         await service.aclose()
     assert observed.value is failure
+
+
+@pytest.mark.parametrize(
+    ("reason", "update"),
+    [
+        (InterruptReason.USER, {"halted": True}),
+        (InterruptReason.SYSTEM, {"halted": True}),
+        (InterruptReason.RESTART, {"halted": True, "interrupted_by_restart": True}),
+    ],
+)
+def test_an_interrupted_node_halts_and_only_a_restart_marks_the_turn_unfinished(
+    reason: InterruptReason, update: dict[str, bool]
+) -> None:
+    assert interrupt_halt(reason) == update
+
+
+async def test_the_interrupt_error_carries_the_reason_of_the_event_that_ended_the_call() -> None:
+    event = InterruptEvent()
+    event.set(InterruptReason.RESTART)
+
+    async def never() -> None:
+        await asyncio.Event().wait()
+
+    with pytest.raises(ModelInterruptedError) as raised:
+        await interruptible_model(never(), event)
+    assert raised.value.reason is InterruptReason.RESTART

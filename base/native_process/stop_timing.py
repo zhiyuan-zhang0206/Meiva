@@ -21,9 +21,27 @@ CLOCK_READ_TIMEOUT_S = 2.0
 # How long a SIGTERMed agent-host waits for its running turns to end at the restart each
 # was given, the restart writes included; a turn still running at the deadline falls
 # through to the cancel path. Registered in base/deploy/timing.py::CLOCKS like the bounds
-# above.
+# above. It must outlast a restart's interrupt grace, the interrupt poll and the unwind
+# that follows the abort, or the graceful exit would cancel a turn its own restart was
+# about to interrupt.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 HOST_GRACEFUL_EXIT_DRAIN_S = 30.0
+
+# meiva:note
+# How long a pending restart waits before it interrupts the model call or code run it finds
+# in flight: most code runs end well inside it, and a restart then takes effect at the
+# turn's next boundary without cutting anything short. Cancel and terminate interrupt at
+# once. The age is the restart row's own `created_at`, read by the interrupt watcher's poll
+# (`agent.db.pending_interrupt_reason`).
+# meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+RESTART_INTERRUPT_GRACE_S = 10.0
+
+# meiva:note
+# Poll cadence of the interrupt watcher: how soon an in-flight model call or code run
+# notices a durable cancel, terminate or (once past its grace) restart. The watcher reads
+# Postgres instead of sharing the claim node's Redis listener; see
+# agent/graph/interrupt.py.
+INTERRUPT_POLL_S = 2.0
 
 # meiva:note
 # The longest an agent-host's whole SIGTERM exit may run: the drain, then the scheduler's

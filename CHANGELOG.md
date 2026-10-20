@@ -25,6 +25,17 @@ and the matching GitHub Releases.
   A collapsed right panel's reopen control is pinned to the header bar's right edge instead of
   riding to the middle of a wide viewport with the centred conversation column
   ([home shell chrome](ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md)).
+- A restart interrupts the model call or code run its turn is in once it has waited 10
+  seconds (cancel and terminate still interrupt at once), and a restart that ends an
+  unfinished turn resumes it: the transaction that executes the restart queues a pending
+  `lifecycle_restart` system note, and the agent continues from its checkpoint when the next
+  wake claims it. An interrupted code run returns its output so far marked
+  `[interrupted by restart]`; a half-generated reply is dropped. External restarts, the
+  maintenance hold's, the SIGTERM graceful exit's and the agent's own `meiva.self.restart()`
+  resume alike; an idle agent only reads the acceptance marker, and a hard kill resumes
+  nothing. This replaces the lifecycle pointer the graceful exit relied on to wake the next
+  host
+  ([decision](docs/decisions/runtime/processes/2026-10-20-restart-interrupts-after-a-grace-and-resumes-by-a-note.md)).
 - The gateway `/mcp` endpoint is a thin forwarder onto the HTTP API (user ruling 2026-10-20):
   it authenticates like any API route (cluster bearer, session or `trusted_network`), each
   tool is one in-process request to its API route, and an API error becomes the tool error.

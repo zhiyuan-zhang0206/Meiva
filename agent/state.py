@@ -4,6 +4,7 @@
 # BaseAgentState (framework layer, static):
 #     messages         — cross-turn LLM history (guarded add_messages reducer: append-only invariant, task #1256)
 #     halted           — whether the current turn has ended
+#     interrupted_by_restart — a restart ended the model call or code run in flight, so `halted` marks an unfinished turn
 #     turn_active      — the current graph invocation is mid-turn (claim's turn boundary)
 #     exit_requested   — claim's END means process exit, not just turn over
 #     turn_idle        — hosted mode: claim found nothing and did not park, so the host ends the turn task
@@ -142,6 +143,14 @@ class BaseAgentState(BaseModel):
     """Identifiers of the skills whose body an exec child loaded this context window:
     `meiva.skills` appends through `meiva.state_update`; the skill-recall hook resets it on a compaction."""
     halted: bool = False
+    # meiva:note
+    # A restart's interrupt ended the model call or code run in flight and set `halted`, though
+    # the turn is unfinished. `halted` alone cannot say so: an agent that was never working
+    # (idle, or paused by a cancel) is halted too, and claim must resume the one and not the
+    # other. The interrupted node sets it (`interrupt_halt`), the claim that takes the restart
+    # reads it, and the host clears it with each invocation's input.
+    # meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+    interrupted_by_restart: bool = False
     # meiva:note
     # How many of `messages` the external harness has already received. Only a run whose
     # harness is not `meiva` reads or writes it: `init_context` sets it past the standing

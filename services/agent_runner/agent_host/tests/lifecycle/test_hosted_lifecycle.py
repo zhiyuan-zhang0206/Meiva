@@ -42,6 +42,7 @@ def _graph_blocked_until_released(
             "exit_requested": kind == "terminate",
             "restart_requested": kind == "restart",
             "turn_idle": False,
+            "halted": True,
         }
 
     graph = Mock()
@@ -169,7 +170,12 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
         inbound = insert_lifecycle_command(db_conn, agent_id, "terminate")
         graph = Mock()
         graph.ainvoke = AsyncMock(
-            return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
+            return_value={
+                "exit_requested": True,
+                "restart_requested": False,
+                "turn_idle": False,
+                "halted": True,
+            }
         )
         host = AgentHost(
             policy=configured_policy(),
@@ -345,7 +351,12 @@ async def _run_terminating_turn(
     async with hosted_scope() as resources:
         graph = Mock()
         graph.ainvoke = AsyncMock(
-            return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
+            return_value={
+                "exit_requested": True,
+                "restart_requested": False,
+                "turn_idle": False,
+                "halted": True,
+            }
         )
         host = AgentHost(
             policy=configured_policy(),

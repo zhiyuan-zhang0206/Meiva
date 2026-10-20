@@ -1,9 +1,11 @@
 # meiva:note
-# SIGTERM → a bounded drain that leaves every running turn a durable restart: close the
+# SIGTERM → a bounded drain that hands every running turn to a restart: close the
 # scheduler's admission, write one `system:restart` inbound per agent with a running turn
-# through the ordinary inbound writer, wait for those turns to settle at it, then let the
-# ordinary shutdown run. Idle agents get nothing; a turn past the budget is named and
-# cancelled, and its restart still wakes it on the next host.
+# through the ordinary inbound writer, wait for those turns to end at it, then let the
+# ordinary shutdown run. The restart takes effect at the turn's next boundary, or interrupts
+# the call or code run in flight once it has waited its grace; the host's apply then queues
+# the note that continues an unfinished turn, which the next host's pending scan wakes. Idle
+# agents get nothing; a turn past the budget is named and cancelled, and not resumed.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 
 from __future__ import annotations
@@ -40,7 +42,7 @@ class TurnTasks(Protocol):
 
 
 # meiva:note
-# The lifecycle command that carries one turn's continuation, and whether the exit wrote it.
+# The lifecycle command a running turn is handed to, and whether the exit wrote it.
 class OwedRestart(NamedTuple):
     inbound_id: int
     written: bool
@@ -161,8 +163,9 @@ class GracefulExit:
             owed = restarts.get(agent_id)
             logger.error(
                 "graceful exit: the turn of agent {agent_id} did not end within "
-                "{budget:g}s (last activity {idle_s}s ago); cancelling it — lifecycle "
-                "command {restart} wakes it on the next host",
+                "{budget:g}s (last activity {idle_s}s ago); cancelling it — the step it was "
+                "in is lost and the turn is not resumed; lifecycle command {restart} stays "
+                "for the next host",
                 event="host_exit_drain_timeout",
                 agent_id=agent_id,
                 budget=self._drain_s,
@@ -172,7 +175,7 @@ class GracefulExit:
         if not unsettled:
             logger.info(
                 "graceful exit: every turn it waited for has ended; a restart a turn ended "
-                "before reaching stays pending for the next host",
+                "before reaching stays pending and the next host takes it",
                 event="host_exit_drained",
                 turns=len(tasks),
             )

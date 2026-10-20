@@ -20,7 +20,9 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph import _init_context, interrupt
 from agent.graph.hooks import compact
-from agent.graph.interrupt import subscribe_interrupt
+from agent.graph.interrupt import (
+    subscribe_interrupt,
+)
 from agent.graph.llm_errors import LlmLedger
 from base.agents.messages.inbound import InterruptReason
 from base.clock import Clock
@@ -37,6 +39,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
@@ -51,18 +54,21 @@ _MAINTENANCE_PAYLOAD: dict[str, object] = {
 }
 
 
+# meiva:note
+# Queue a command that has already waited `waited_s` (a restart's grace runs from its row).
 def _insert(
     conn: psycopg.Connection,
     agent_id: int,
     kind: str,
     source: str = "user",
     payload: dict[str, object] | None = None,
+    waited_s: float = 0.0,
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-            "VALUES (%s, '', %s, %s, %s)",
-            (agent_id, kind, source, Jsonb(payload) if payload is not None else None),
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload, created_at) "
+            "VALUES (%s, '', %s, %s, %s, clock_timestamp() - make_interval(secs => %s))",
+            (agent_id, kind, source, Jsonb(payload) if payload is not None else None, waited_s),
         )
     conn.commit()
 
@@ -139,7 +145,8 @@ class TestHasPendingInterrupt:
     async def test_false_on_unmarked_maintenance_restart(
         self, db_conn, aops_pool: AsyncConnectionPool, *, machine_identity: MachineIdentity
     ):
-        # The drain waits for the turn boundary: a pending restart alone never
+        # meiva:note
+        # The drain waits for the turn boundary: a restart younger than its grace never
         # aborts in-flight work.
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         _insert(
@@ -155,6 +162,15 @@ class TestHasPendingInterrupt:
         )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         assert await has_pending_interrupt(aops_pool, tid) is False
+
+
+def _age_restarts(conn: psycopg.Connection, agent_id: int, seconds: float) -> None:
+    conn.execute(
+        "UPDATE inbound_messages SET created_at = clock_timestamp() - make_interval(secs => %s) "
+        "WHERE agent_id=%s AND kind='restart'",
+        (seconds, agent_id),
+    )
+    conn.commit()
 
 
 class TestSubscribeInterrupt:
@@ -426,12 +442,42 @@ class TestWatcherExitBounded:
         assert not any("retained by its service" in r["message"] for r in loguru_records)
 
 
+# meiva:note
+# A restart past its grace sets the watcher's event as a restart; claim still owns the row.
+@pytest.mark.flaky
+async def test_the_watcher_fires_with_the_restart_reason_and_leaves_the_command_pending(
+    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    tid = create_agent(db_conn)
+    _insert(db_conn, tid, "restart")
+    async with subscribe_interrupt(aops_pool, tid, resources=hosted_resources) as event:
+        await asyncio.sleep(0.2)
+        assert not event.is_set()
+        _age_restarts(db_conn, tid, RESTART_INTERRUPT_GRACE_S + 2)
+        await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
+        assert event.reason is InterruptReason.RESTART
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s", (tid,)
+    ).fetchall() == [("pending",)]
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected"),
+    [
+        ("cancel", {"halted": True}),
+        ("restart", {"halted": True, "interrupted_by_restart": True}),
+    ],
+)
 async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
+    kind: str,
+    expected: dict[str, bool],
 ) -> None:
     import json
     from unittest.mock import MagicMock
@@ -498,14 +544,14 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     )
     try:
         await asyncio.wait_for(started.wait(), timeout=3)
-        _insert(db_conn, tid, "cancel")
+        _insert(db_conn, tid, kind, waited_s=RESTART_INTERRUPT_GRACE_S + 2)
         result = await asyncio.wait_for(invocation, timeout=3)
     finally:
         invocation.cancel()
         await asyncio.gather(invocation, return_exceptions=True)
     assert settled.is_set()
     assert result.goto == "claim"
-    assert result.update == {"halted": True}
+    assert result.update == expected
     assert state.compact.version == 4
     assert state.context_reset.tail == []
     assert state.messages[0].content == "uncompacted original work " * 30

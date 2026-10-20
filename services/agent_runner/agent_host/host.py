@@ -388,10 +388,14 @@ class AgentHost:
         )
         if len(batch) > 1 or any(not item.durable_lifecycle for item in batch):
             raise RuntimeError("held control claim returned an unaccepted command")
+        # meiva:note
+        # No graph ran here, so nothing says whether the agent's last turn was finished;
+        # a held restart never queues a continuation.
         kind = await apply_hosted_lifecycle(
             self._control_pool,
             incarnation,
             bus=self._bus,
+            resume_turn=False,
             kill_shell_sessions=kill_terminating_agent_shells,
         )
         if kind is None:
@@ -655,6 +659,7 @@ class AgentHost:
                 "exit_requested": False,
                 "turn_idle": False,
                 "restart_requested": False,
+                "interrupted_by_restart": False,
             },
             graph=checkpoints.graph,
         )
