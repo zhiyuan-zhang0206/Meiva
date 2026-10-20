@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from base.lm.harness.codex.auth import session_env
 from base.lm.harness.codex.config import CodexConfig
 from base.lm.harness.codex.mapping import (
     approval_denial,
@@ -184,11 +185,10 @@ class CodexSession:
         self.agent_id = agent_id
         self._probe: ChildProbe = probe or PsutilChildProbe()
         self._registry = registry
-        self._environ = dict(environ) if environ is not None else None
         self._transport: AppServerTransport = transport or StdioAppServer(
             config.command(),
             cwd=config.cwd,
-            environ=self._environ,
+            environ=session_env(environ, api_key_mode=config.api_key_mode),
             request_timeout=config.startup_timeout_seconds,
         )
         self._events: asyncio.Queue[Any] = asyncio.Queue()

@@ -178,6 +178,17 @@ and the matching GitHub Releases.
   `meiva maintenance cancel` or `repair`; an unreadable journal is removed
   by hand ([decision](docs/decisions/runtime/updates/release/2026-09-30-remove-deployment-lease.md)).
 
+### Fixed
+- A codex session no longer hands its child the cluster's API key. The codex CLI
+  prefers `OPENAI_API_KEY` found in its environment over the ChatGPT login in
+  `~/.codex/auth.json`, so a key pinned for the cluster silently moved every codex
+  agent onto per-token billing with no plan quota. `base/lm/harness/codex/auth.py`
+  removes `OPENAI_API_KEY`, `CODEX_API_KEY` and `CODEX_ACCESS_TOKEN` from the
+  environment the transport spawns with — removed rather than blanked, because the
+  CLI asks whether the variable is present — and `CodexConfig.api_key_mode` is the
+  one explicit opt-in that keeps them
+  ([codex bridge](base/lm/harness/codex/docs/codex.meiva.okf.md)).
+
 ### Changed
 - `lint_meiva_okf` no longer reports `[[wikilinks]]` quoted inside inline code spans or
   fenced blocks (the same code-sample exemption `check_doc_references` applies): a sample
