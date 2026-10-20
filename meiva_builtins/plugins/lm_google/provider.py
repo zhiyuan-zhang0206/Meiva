@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
+from base.api_contracts.agent_contract import Harness
 from base.lm.compat.stop import StopSpec
 from base.lm.effort import validate_effort
 from base.lm.provider_api import (
@@ -122,6 +123,7 @@ PROVIDER = ProviderContribution(
     models={
         "gemini-3.8-flash": ModelSpec(
             provider="gemini",
+            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
             spawnable=True,
             context_window=1_048_576,
             knowledge_cutoff="2026-03",
@@ -133,6 +135,7 @@ PROVIDER = ProviderContribution(
         ),
         "gemini-3.7-flash": ModelSpec(
             provider="gemini",
+            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
             spawnable=True,
             superseded_by="gemini-3.8-flash",
             context_window=1_048_576,
@@ -143,6 +146,7 @@ PROVIDER = ProviderContribution(
         ),
         "gemini-3.5-flash": ModelSpec(
             provider="gemini",
+            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
             spawnable=True,
             superseded_by="gemini-3.8-flash",
             context_window=1_048_576,
@@ -155,6 +159,7 @@ PROVIDER = ProviderContribution(
         ),
         "gemini-flash-lite-latest": ModelSpec(
             provider="gemini",
+            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
             spawnable=True,
             context_window=1_048_576,
             knowledge_cutoff="2026-03",
@@ -164,6 +169,7 @@ PROVIDER = ProviderContribution(
         ),
         "gemini-3.1-pro-preview": ModelSpec(
             provider="gemini",
+            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
             spawnable=True,
             context_window=1_048_576,
             knowledge_cutoff="2025-01",
@@ -177,6 +183,7 @@ PROVIDER = ProviderContribution(
         ),
         "gemini-4-argon": ModelSpec(
             provider="gemini",
+            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
             spawnable=True,
             context_window=1_048_576,
             knowledge_cutoff="2026-03",

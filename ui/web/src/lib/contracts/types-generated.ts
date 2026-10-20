@@ -3201,6 +3201,7 @@ export interface components {
             reasoning_effort_options?: string[] | null;
             reasoning_effort_default?: string | null;
             superseded_by?: string | null;
+            harnesses: components["schemas"]["Harness"][];
         };
         ModelPricing: {
             input: number;

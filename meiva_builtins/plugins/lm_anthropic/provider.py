@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
+from base.api_contracts.agent_contract import Harness
 from base.lm.compat.stop import StopSpec
 from base.lm.effort import validate_effort
 from base.lm.provider_api import (
@@ -221,6 +222,7 @@ PROVIDER = ProviderContribution(
     models={
         "claude-sonnet-5": ModelSpec(
             provider="claude",
+            external_harnesses=frozenset({Harness.CLAUDE_CODE}),
             spawnable=True,
             # Display-only supersession: existing agent configs remain valid.
             superseded_by="claude-sonnet-5-5",
@@ -242,6 +244,7 @@ PROVIDER = ProviderContribution(
         ),
         "claude-sonnet-5-5": ModelSpec(
             provider="claude",
+            external_harnesses=frozenset({Harness.CLAUDE_CODE}),
             spawnable=True,
             context_window=1_000_000,
             max_output_tokens=128_000,
@@ -257,6 +260,7 @@ PROVIDER = ProviderContribution(
         ),
         "claude-haiku-5-5": ModelSpec(
             provider="claude",
+            external_harnesses=frozenset({Harness.CLAUDE_CODE}),
             spawnable=True,
             context_window=1_000_000,
             max_output_tokens=128_000,
@@ -270,6 +274,7 @@ PROVIDER = ProviderContribution(
         ),
         "claude-haiku-4-5-20251001": ModelSpec(
             provider="claude",
+            external_harnesses=frozenset({Harness.CLAUDE_CODE}),
             spawnable=True,
             superseded_by="claude-haiku-5-5",
             context_window=200_000,
@@ -290,6 +295,7 @@ PROVIDER = ProviderContribution(
         ),
         "claude-opus-5": ModelSpec(
             provider="claude",
+            external_harnesses=frozenset({Harness.CLAUDE_CODE}),
             spawnable=True,
             # Anthropic lists Opus 5 as Legacy and provides a 5.5 migration guide;
             # display only, config remains valid.
@@ -310,6 +316,7 @@ PROVIDER = ProviderContribution(
         ),
         "claude-opus-5-5": ModelSpec(
             provider="claude",
+            external_harnesses=frozenset({Harness.CLAUDE_CODE}),
             spawnable=True,
             context_window=1_000_000,
             max_output_tokens=128_000,
@@ -326,6 +333,7 @@ PROVIDER = ProviderContribution(
         ),
         "claude-fable-5": ModelSpec(
             provider="claude",
+            external_harnesses=frozenset({Harness.CLAUDE_CODE}),
             spawnable=True,
             superseded_by="claude-fable-5-1",
             context_window=1_000_000,
@@ -355,6 +363,7 @@ PROVIDER = ProviderContribution(
         ),
         "claude-fable-5-1": ModelSpec(
             provider="claude",
+            external_harnesses=frozenset({Harness.CLAUDE_CODE}),
             spawnable=True,
             context_window=1_000_000,
             max_output_tokens=128_000,

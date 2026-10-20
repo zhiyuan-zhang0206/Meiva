@@ -105,16 +105,19 @@ describe("DefaultModelPanel", () => {
         "deepseek-v4-pro": {
           provider: "deepseek",
           context_window: 128_000,
+          harnesses: ["meiva"],
           superseded_by: "deepseek-flash",
         },
         "deepseek-flash": {
           provider: "deepseek",
           context_window: 128_000,
+          harnesses: ["meiva"],
           superseded_by: null,
         },
         "deepseek-v4-legacy": {
           provider: "deepseek",
           context_window: 128_000,
+          harnesses: ["meiva"],
           superseded_by: "deepseek-flash",
         },
       },

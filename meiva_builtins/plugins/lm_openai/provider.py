@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
+from base.api_contracts.agent_contract import Harness
 from base.lm.compat.stop import StopCategory, StopSpec
 from base.lm.effort import validate_effort
 from base.lm.provider_api import (
@@ -126,6 +127,7 @@ PROVIDER = ProviderContribution(
     models={
         "gpt-6-astra": ModelSpec(
             provider="gpt",
+            external_harnesses=frozenset({Harness.CODEX}),
             spawnable=True,
             context_window=1_050_000,
             knowledge_cutoff="2026-04",
@@ -140,6 +142,7 @@ PROVIDER = ProviderContribution(
         ),
         "gpt-5.6-sol": ModelSpec(
             provider="gpt",
+            external_harnesses=frozenset({Harness.CODEX}),
             spawnable=True,
             # Display-superseded only; existing configs remain valid (2026-09-25).
             superseded_by="gpt-6-sol",
@@ -158,6 +161,7 @@ PROVIDER = ProviderContribution(
         ),
         "gpt-5.6-terra": ModelSpec(
             provider="gpt",
+            external_harnesses=frozenset({Harness.CODEX}),
             spawnable=True,
             context_window=1_050_000,
             knowledge_cutoff="2026-02",
@@ -169,6 +173,7 @@ PROVIDER = ProviderContribution(
         ),
         "gpt-5.6-luna": ModelSpec(
             provider="gpt",
+            external_harnesses=frozenset({Harness.CODEX}),
             spawnable=True,
             # Display-superseded only; existing configs remain valid (2026-09-25).
             superseded_by="gpt-6-luna",
@@ -180,6 +185,7 @@ PROVIDER = ProviderContribution(
         ),
         "gpt-6-sol": ModelSpec(
             provider="gpt",
+            external_harnesses=frozenset({Harness.CODEX}),
             spawnable=True,
             # Display-only supersession: existing agent configs remain valid.
             superseded_by="gpt-6.1-sol",
@@ -191,6 +197,7 @@ PROVIDER = ProviderContribution(
         ),
         "gpt-6.1-sol": ModelSpec(
             provider="gpt",
+            external_harnesses=frozenset({Harness.CODEX}),
             spawnable=True,
             context_window=1_050_000,
             knowledge_cutoff="2026-04",
@@ -201,6 +208,7 @@ PROVIDER = ProviderContribution(
         ),
         "gpt-6-luna": ModelSpec(
             provider="gpt",
+            external_harnesses=frozenset({Harness.CODEX}),
             spawnable=True,
             context_window=1_050_000,
             knowledge_cutoff="2026-05",

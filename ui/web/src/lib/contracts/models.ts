@@ -3,6 +3,8 @@
 // provider-grouped model list, one as a selectable dropdown, the other as
 // per-model visibility toggles.
 
+import { DEFAULT_HARNESS, type Harness } from "@/lib/harness/harness";
+
 import type { ModelsResponse } from "./types";
 
 // Display label for a provider key. `ModelsResponse.providers` is the
@@ -75,6 +77,23 @@ export function groupedModels(
       return [provider, orderedModels];
     })
     .filter(([, models]) => models.length > 0);
+}
+
+// meiva:note
+// Which harnesses run a model is the registry's answer (`ModelInfo.harnesses`),
+// not a table here: a model the backend assigns to another harness reaches that
+// harness's column with no frontend change. A catalog entry that predates the
+// field names no harness, so it reads as the built-in runtime alone — the only
+// loop that could ever have run it.
+// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+export function runsOnHarness(
+  modelsData: ModelsResponse | undefined,
+  model: string,
+  harness: Harness,
+): boolean {
+  const published = modelsData?.models[model]?.harnesses;
+  if (published === undefined) return harness === DEFAULT_HARNESS;
+  return published.includes(harness);
 }
 
 /**
