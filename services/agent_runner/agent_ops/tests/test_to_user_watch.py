@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 from redis.asyncio.client import PubSub
 
-from base.deploy.maintenance import pause_owner
 from base.events.live.bus import EventBus
 from base.events.live.projection import ToUserChanged
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
@@ -252,25 +251,3 @@ def test_production_scale_keeps_loop_responsive_and_stops(tmp_path: Path) -> Non
     assert sample["roots"] == 3688
     assert sample["max_loop_gap"] < 0.5, sample
     assert sample["elapsed"] < 5, sample
-
-
-@pytest.mark.asyncio
-async def test_unreadable_maintenance_hold_defers_changes_until_release(tmp_path: Path) -> None:
-    workspace = tmp_path / "7"
-    workspace.mkdir()
-    bus = RecordingBus()
-    hold = pause_owner.state_path()
-    hold.parent.mkdir(parents=True, exist_ok=True)
-    hold.write_text("invalid hold")
-    async with asyncio.TaskGroup() as group:
-        watcher = group.create_task(watch_to_user(tmp_path, bus))
-        try:
-            await asyncio.sleep(0.2)
-            (workspace / "to_user.md").write_text("Waiting for release")
-            await asyncio.sleep(0.6)
-            assert bus.events.empty()
-            hold.unlink()
-            assert await recorded_event(bus) == 7
-        finally:
-            watcher.cancel()
-            hold.unlink(missing_ok=True)

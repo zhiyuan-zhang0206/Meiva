@@ -12,7 +12,6 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from base.db.transaction import write_transaction
-from base.deploy.maintenance import admission
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound.types import (
     OutboundAccountMismatchError,
@@ -400,32 +399,6 @@ async def test_success_before_outcome_commit_failure_never_repeats_external_send
     store.accept("telegram", "bot", "chat", 7, [candidate(2, text="later")])
     await IMOutboxWorker(store, {"telegram": adapter}).run_once()
     assert adapter.sent == ["original", "later"]
-
-
-async def test_quiesce_between_streams_finishes_active_attempt_and_holds_new_claim(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    held = False
-    monkeypatch.setattr(admission, "quiesced", lambda: held)
-    store = IMOutboxStore(pool)
-    store.accept("telegram", "bot", "first", 7, [candidate(chat="first", text="first")])
-    store.accept("telegram", "bot", "second", 7, [candidate(chat="second", text="second")])
-    adapter = RecordingAdapter()
-    adapter.started, adapter.release = asyncio.Event(), asyncio.Event()
-    worker = IMOutboxWorker(store, {"telegram": adapter})
-    running = asyncio.create_task(worker.run_once())
-    await asyncio.wait_for(adapter.started.wait(), timeout=5)
-    held = True
-    adapter.release.set()
-    await asyncio.wait_for(running, timeout=5)
-    assert adapter.sent == ["first"]
-    assert [row[0] for row in statuses(pool)] == ["sent", "queued"]
-    await worker.run_once()
-    assert adapter.sent == ["first"]
-    held = False
-    await worker.run_once()
-    assert adapter.sent == ["first", "second"]
-    assert [row[0] for row in statuses(pool)] == ["sent", "sent"]
 
 
 @pytest.mark.parametrize("finish_fails", [False, True])

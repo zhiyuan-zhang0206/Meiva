@@ -464,7 +464,6 @@ async def expired_page_reaper(daemon: _PageDaemon, stop: asyncio.Event) -> None:
     Runs for the daemon's upstream connection like its watchdog; a pass that
     hits upstream death returns so the daemon exits.
     """
-    # quiesce-exempt: reaps expired browser pages; no database
     while not stop.is_set():
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(stop.wait(), timeout=PAGE_SWEEP_INTERVAL_S)

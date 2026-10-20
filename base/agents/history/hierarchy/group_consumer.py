@@ -77,15 +77,13 @@ async def run_blocking[**P, T](
     return await asyncio.get_running_loop().run_in_executor(executor, lambda: fn(*args, **kwargs))
 
 
+# meiva:note
+# One consumer's operation-time configuration and clock readers.
+#
+# Construction performs no reads. Grouping and chunk operations call these
+# inputs at their original decision and generation points.
 @dataclass(frozen=True)
 class UnderstandingReadInputs:
-    """One consumer's operation-time configuration and clock readers.
-
-    Construction performs no reads. Grouping and chunk operations call these
-    inputs at their original decision and generation points. `quiesced` is the
-    host's stop-window signal: while it holds, the live consumer claims nothing.
-    """
-
     enabled: Callable[[], bool]
     default_model: Callable[[], str]
     hierarchy_model: Callable[[], str]
@@ -96,7 +94,6 @@ class UnderstandingReadInputs:
     corrections: Callable[[], int]
     clock_factory: Callable[[], Clock]
     timestamps_enabled: Callable[[], bool]
-    quiesced: Callable[[], bool]
 
 
 class GroupingModels(Protocol):

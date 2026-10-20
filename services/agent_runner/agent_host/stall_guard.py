@@ -96,7 +96,6 @@ async def run_invocation_with_stall_guard(
     )
     service.retain_task(ctx.hosted_resources, invoke_task)
     try:
-        # quiesce-exempt: polls one turn's in-memory progress clock; no database
         while True:
             done, _pending = await asyncio.wait(
                 {invoke_task},

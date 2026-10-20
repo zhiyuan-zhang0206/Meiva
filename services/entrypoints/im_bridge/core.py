@@ -30,7 +30,6 @@ from services.entrypoints.im_bridge.timeline_acceptance import (
     register_adapter,
     restore_selection,
     selection_account,
-    sync_selection,
 )
 from services.entrypoints.im_bridge.timeline_acceptance import truncate as _truncate
 from services.entrypoints.im_bridge.types import (
@@ -356,7 +355,7 @@ class IMBridgeCore(SpawnMenuMixin):
         hold_selection(self, state)
 
     async def _sync_selection(self, state: ChatState) -> int | None:
-        return await sync_selection(self, state)
+        return await restore_selection(self, state)
 
     async def _cmd_switch_locked(
         self,
@@ -370,8 +369,6 @@ class IMBridgeCore(SpawnMenuMixin):
             # user ruling: /switch without an id is an error — the picker
             # lives on /list's tap-to-switch card, not here
             return Reply(copy.SWITCH_USAGE)
-        if admission.quiesced():
-            raise RuntimeError("IM switch acceptance is held during maintenance")
         replay_id = replay_id or uuid.uuid4().hex
         account = await selection_account(self, state, selection_admission)
         recovered = await asyncio.to_thread(
@@ -608,7 +605,6 @@ class IMBridgeCore(SpawnMenuMixin):
     ) -> None:
         _sse_reconnect_warn_after = 12
         failures = 0
-        # quiesce-exempt: an SSE reconnect loop against the gateway; a cursor is written only when an event arrives
         while True:
             agent_id = state.current_agent_id
             if agent_id is None:

@@ -2,7 +2,6 @@ exports = ["consumer_helpers.py"]
 
 [uses]
 "test_chunk_consumer.py" = ["consumer_helpers.py", "consumer_history.py"]
-"test_chunk_consumer_quiesced.py" = ["consumer_helpers.py"]
 "test_rebuild.py" = ["consumer_helpers.py"]
 
 [debt.first-party-patch]
@@ -16,11 +15,6 @@ exports = ["consumer_helpers.py"]
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.settle_chunk_job" = 1
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunks.INSERT_CALL_SQL" = 1
 "test_chunk_consumer.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 2
-"test_chunk_consumer_quiesced.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.POLL_SECONDS" = 1
-"test_chunk_consumer_quiesced.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.backlog" = 1
-"test_chunk_consumer_quiesced.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.claim_job" = 1
-"test_chunk_consumer_quiesced.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.claim_rebuild" = 1
-"test_chunk_consumer_quiesced.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 1
 "test_chunk_generate.py#monkeypatch.setattr base.config.settings.general.message_timestamp_weekday" = 1
 "test_chunk_generate.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
 "test_group.py#monkeypatch.setattr base.config.settings.general.message_timestamp_weekday" = 1

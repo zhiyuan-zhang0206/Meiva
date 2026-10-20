@@ -61,7 +61,6 @@ def read_inputs() -> gc.UnderstandingReadInputs:
         corrections=lambda: policy.understanding_group_corrections,
         clock_factory=lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
         timestamps_enabled=lambda: True,
-        quiesced=lambda: False,
     )
 
 

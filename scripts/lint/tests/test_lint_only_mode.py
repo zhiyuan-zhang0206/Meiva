@@ -27,7 +27,7 @@ from meizel import lint_common
 from meizel.language import no_script_sibling_imports
 from meizel.owners import clock_lattice
 from meizel.state import no_os_environ, turn_scoped_config
-from scripts.content_lint import lint_no_cjk, lint_no_tailnet, lint_quiesced_loops
+from scripts.content_lint import lint_no_cjk, lint_no_tailnet
 from scripts.lint import (
     async_no_sync_blocking,
     code_structure,
@@ -195,11 +195,6 @@ CASES = [
         "tests/test_a.py",
         "def test_x():\n    f(since='2026-09-06')\n",
         explicit_root=True,
-    ),
-    Case(
-        lint_quiesced_loops,
-        "services/x.py",
-        "import asyncio\n\n\nasync def f():\n    while True:\n        await asyncio.sleep(1)\n",
     ),
     Case(lint_no_cjk, "docs/a.md", f"{_CJK}\n", explicit_root=True),
     Case(

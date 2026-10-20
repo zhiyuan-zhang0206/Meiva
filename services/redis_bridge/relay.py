@@ -338,7 +338,6 @@ class RelayService:
                 row; an admitted connection clears the count.
         """
         delay_s = INITIAL_REBIND_DELAY_S
-        # quiesce-exempt: a TCP relay; no database
         while not self._stopped.is_set():
             listener: socket.socket | None = None
             try:

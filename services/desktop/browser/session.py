@@ -99,7 +99,6 @@ async def cdp_call(
     if session_id is not None:
         request["sessionId"] = session_id
     await ws.send(json.dumps(request))
-    # quiesce-exempt: bounded wait for one CDP reply to a local browser; no database
     while True:
         resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=_WS_TIMEOUT_S))
         if resp.get("id") == request_id:

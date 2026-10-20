@@ -7,4 +7,4 @@ exports = ["backends", "chunking.py", "config.py", "daemon.py", "embeddings", "p
 "memory_search_reconcile.py" = ["backends", "embeddings"]
 "patrol_status.py" = ["config.py"]
 "rerank.py" = ["backends", "chunking.py"]
-"tests" = ["backends", "chunking.py", "config.py", "daemon.py", "memory_search_reconcile.py", "patrol_status.py", "recall_regression.py", "rerank.py"]
+"tests" = ["backends", "chunking.py", "config.py", "daemon.py", "memory_search_reconcile.py", "recall_regression.py", "rerank.py"]

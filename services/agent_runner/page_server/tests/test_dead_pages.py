@@ -23,7 +23,6 @@ from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
@@ -54,7 +53,6 @@ def published(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         seen["wakes"].append((agent_id, inbound_id))
 
     monkeypatch.setattr(EventBus, "publish_best_effort", publish)
-    monkeypatch.setattr(admission, "quiesced", lambda: False)
     return seen
 
 
@@ -208,33 +206,6 @@ async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
     assert probed == [alive_port]
     assert not _closed(db_conn, agent, "alive") and not _closed(db_conn, agent, "serve-dead")
     assert _notices(db_conn, agent) == [] and published["events"] == []
-
-
-async def test_a_quiesced_unit_skips_the_round(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    pool: ConnectionPool,
-    published: dict[str, list[Any]],
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    agent = spawn_agent(
-        spawner="user",
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    _page(db_conn, agent, "dead", _free_port())
-    monkeypatch.setattr(admission, "quiesced", lambda: True)
-
-    await _round(pool, database_gate=database_gate)
-
-    assert not _closed(db_conn, agent, "dead")
 
 
 async def test_the_loop_scans_at_once_then_paces(
