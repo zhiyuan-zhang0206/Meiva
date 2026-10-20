@@ -386,6 +386,15 @@ def child_env(role: Literal["gateway", "runner"]) -> dict[str, str]:
     return env
 
 
+def process_environment() -> dict[str, str]:
+    # meiva:note
+    # The inherited environment, for a caller that must hand a child a modified view of it
+    # (the codex adapter drops credential variables before spawning). Reading os.environ
+    # lives here, with the other env owners, instead of in the caller.
+    # meiva:link base/host/env/docs/registry.meiva.okf.md
+    return dict(os.environ)
+
+
 def env_keep_set(role: ProcessRole) -> frozenset[str]:
     """The env-authority force families: keys whose unit-.env declaration must
     win over a polluted parent environment (cluster-scope aliases + machine

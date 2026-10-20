@@ -43,6 +43,7 @@ directly: the uniform surface is this adapter, not a shared wire protocol.
 | `transport.py` | `StdioAppServer`: JSON-RPC framing over the child's stdin/stdout, id correlation, server→client requests |
 | `mapping.py` | pure `ThreadItem` → event translation and usage extraction |
 | `config.py` | `CodexConfig` and the command line |
+| `auth.py` | the credential environment the child receives: which variables are removed, and the explicit opt-in that keeps them |
 
 `events.py`, `handoff.py`, `process.py` and `registry.py` are the shared bridge
 modules; this package does not restate them.
@@ -63,49 +64,23 @@ modules; this package does not restate them.
 Everything else (reasoning, plan, image, sub-agent, queue and rate-limit
 events) maps to nothing: the runtime does not model it.
 
-## Approvals
+## Execution policy
 
-An `untrusted`/`on-request` policy makes the server send requests the bridge
-must answer on the same pipe:
-
-| request | answer |
-|---|---|
-| `item/commandExecution/requestApproval` | `{"decision": "accept" \| "decline"}` |
-| `item/fileChange/requestApproval` | same vocabulary |
-| `applyPatchApproval` (legacy) | `{"decision": approved \| denied}` |
-| `item/permissions/requestApproval` | grants nothing (`{"permissions": {}, "scope": "turn"}`) |
-| `item/tool/requestUserInput` | empty answers |
-
-`approval_decision` is the single knob: `accept` (default) or `decline`. A
-declined request is recorded as `TurnCompleted.permission_denials`, so "the model
-said it did not run the command" is checkable rather than trusted.
-
-## Sandbox: why `danger-full-access`
-
-`codex` runs commands through bubblewrap. Ubuntu 24.04 ships
-`kernel.apparmor_restrict_unprivileged_userns=1`, so bwrap cannot create a user
-namespace and **every** command in `read-only` or `workspace-write` fails with
-`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` — the model sees a
-sandbox-start failure, not a command result.
-
-The bridge therefore defaults to `danger-full-access` and treats the workspace,
-not the sandbox flag, as the boundary. `workspace-write` works only on a host
-without that AppArmor restriction; on Ubuntu it degrades to "no command runs".
-
-`approval_policy` defaults to `never` for the same reason a headless bridge
-cannot park: nobody is at the prompt. With `danger-full-access` and `never`,
-`codex` never asks, and the bridge's approval path stays dormant until a caller
-opts into `untrusted`/`on-request`.
+The sandbox the child runs in, and the approvals the bridge answers when a caller
+turns them on, are [[base/lm/harness/codex/docs/execution-policy.meiva.okf.md|Execution
+policy]]: `danger-full-access` by default, with the approval path dormant unless a
+caller opts into it.
 
 ## Configuration
 
 | Field | Default | Reason |
 |---|---|---|
 | `model` | `None` | inherit the machine's `codex` config; pinning an id the account does not serve fails every turn |
-| `sandbox` | `danger-full-access` | see above: the only sandbox that runs on Ubuntu 24.04 |
+| `sandbox` | `danger-full-access` | the only sandbox that runs on Ubuntu 24.04 — see the [[base/lm/harness/codex/docs/execution-policy.meiva.okf.md|execution policy]] node |
 | `approval_policy` | `never` | headless: no prompt to park on |
 | `approval_decision` | `accept` | only consulted when the policy produces requests |
 | `binary` / `extra_args` | `codex` / `()` | the CLI on `PATH`; tests substitute a peer |
+| `api_key_mode` | `False` | off means the child gets no credential variables; on is the explicit choice of per-token billing |
 | `startup_timeout_seconds` | 120 | `initialize`/`thread/*` are local round trips; a wedged server is a fault |
 | `turn_timeout_seconds` | 900 | a wedged turn becomes an interrupt, never a silent hang |
 | `cancel_settle_seconds` | 5 | reaping is milliseconds; 5s tolerates load without hiding a leak |
@@ -143,6 +118,12 @@ client written against older docs fails outright.
 The adapter uses the **stable surface only** (105 client methods on 0.163.0); the
 experimental surface is not adopted.
 
-Authentication is the machine's `codex login` (ChatGPT subscription). The bridge
-never touches `OPENAI_API_KEY`: an API-key session has a different billing path
-and no plan quota, and a stale key must not outrank the stored login.
+Authentication is the machine's `codex login` (ChatGPT subscription). The CLI
+prefers an API key found in its environment over the login stored in
+`~/.codex/auth.json`, so an inherited key — a cluster-pinned one reaches every agent
+process — silently moves a subscribed session onto per-token billing with no plan
+quota. `auth.py` therefore *removes* `OPENAI_API_KEY`, `CODEX_API_KEY` and
+`CODEX_ACCESS_TOKEN` from the environment the session hands the transport. Removal,
+not an empty value: the CLI asks whether the variable is present, and an empty string
+is still present (the Claude CLI treats an empty value as absent, which is why that
+adapter blanks instead). `api_key_mode` is the one explicit way to keep the key.
