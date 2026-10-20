@@ -513,13 +513,11 @@ class GatewaySettings(EnvSettings):
             "HTTP at /mcp on the gateway. Off by default — an additive "
             "surface; the existing mcp-daemon path is unaffected either way. "
             "/mcp authenticates like the HTTP API and forwards every tool to "
-            "it, so it adds no authority; no config write sets the switch "
-            "(not the API, the ops op or `--local`): edit the gateway `.env` "
-            "on its host."
+            "it, so it adds no authority."
         ),
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": False,
+            "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
         },

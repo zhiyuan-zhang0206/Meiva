@@ -7,7 +7,6 @@ import httpx
 from fastapi import FastAPI, Request
 from mcp.server.mcpserver import Context
 
-from base.api_contracts.caller_identity import CallerIdentity
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.mcp_tool_contract import server_instructions, tool_description
 from gateway.http.middleware.error_envelope import error_response
@@ -88,11 +87,13 @@ def _register_tools(server: object, app: FastAPI) -> None:
         label: str | None = None,
         machine: str | None = None,
         config_overlay: dict[str, Any] | None = None,
+        prompt_source: str = _MESSAGE_SOURCE,
+        spawner: str = _SPAWNER,
     ) -> dict[str, Any]:
         body = {
             "prompt": prompt,
-            "prompt_source": _MESSAGE_SOURCE,
-            "spawner": _SPAWNER,
+            "prompt_source": prompt_source,
+            "spawner": spawner,
             "label": label,
             "machine": machine,
             "config": config_overlay,
@@ -112,12 +113,9 @@ def _register_tools(server: object, app: FastAPI) -> None:
         content: str,
         ctx: Context,
         *,
-        as_external_agent: bool = False,
+        source: str = _MESSAGE_SOURCE,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        source = _MESSAGE_SOURCE
-        if as_external_agent:
-            source = CallerIdentity(kind="external_agent", subject=_SPAWNER).source()
         return await _call_api(
             app,
             ctx,

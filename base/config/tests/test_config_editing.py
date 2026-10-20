@@ -230,7 +230,6 @@ def test_coerce_scalar_forms() -> None:
 _AUTHORITY_KEYS = {
     "cluster_secret": "MEIVA_CLUSTER_SECRET",
     "webhook_token": "MEIVA_ALERTS_WEBHOOK_TOKEN",
-    "mcp_endpoint_enabled": "MEIVA_MCP_ENDPOINT_ENABLED",
 }
 _OUTBOUND_CREDENTIALS = {
     "ANTHROPIC_API_KEY",

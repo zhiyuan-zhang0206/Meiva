@@ -196,24 +196,55 @@ def test_spawn_message_terminate_round_trip(db_conn: psycopg.Connection) -> None
     ]
 
 
-def test_send_message_defaults_to_the_user_and_can_speak_as_an_external_agent(
+def test_send_message_passes_the_declared_source_to_the_api(
     db_conn: psycopg.Connection,
 ) -> None:
     with gateway_test_client() as client:
         agent_id = _spawn(client)
         tool_call(client, "send_message", {"agent_id": agent_id, "content": "as the user"})
-        tool_call(
-            client,
-            "send_message",
-            {"agent_id": agent_id, "content": "as a peer", "as_external_agent": True},
+        peer = {"agent_id": agent_id, "content": "as a peer", "source": "external_agent:codex:r1"}
+        assert not tool_call(client, "send_message", peer)["result"].get("isError")
+        bad = tool_call(
+            client, "send_message", {"agent_id": agent_id, "content": "x", "source": "bogus"}
         )
+        direct = client.post(
+            f"/api/agents/{agent_id}/messages", json={"content": "x", "source": "bogus"}
+        )
+        envelope = _error_envelope(bad)
+        assert (envelope["status"], envelope["code"]) == (422, direct.json()["code"])
     rows = dict(
         db_conn.execute(
             "SELECT content, source FROM inbound_messages WHERE agent_id = %s", (agent_id,)
         ).fetchall()
     )
     assert rows["as the user"] == "user"
-    assert rows["as a peer"] == "external_agent:mcp"
+    assert rows["as a peer"] == "external_agent:codex:r1"
+    assert "x" not in rows
+
+
+def test_spawn_passes_prompt_source_and_spawner_to_the_api(db_conn: psycopg.Connection) -> None:
+    with gateway_test_client() as client:
+        spawned = tool_result(
+            tool_call(
+                client,
+                "spawn_agent_guarded_v1",
+                {
+                    "idempotency_key": "declared",
+                    "prompt": "goal",
+                    "prompt_source": "external_agent:codex",
+                    "spawner": "codex",
+                },
+            )
+        )
+        bad = tool_call(
+            client,
+            "spawn_agent_guarded_v1",
+            {"idempotency_key": "bad", "prompt": "goal", "prompt_source": "bogus"},
+        )
+    assert _error_envelope(bad)["status"] == 422
+    assert db_conn.execute(
+        "SELECT source FROM inbound_messages WHERE agent_id = %s", (spawned["id"],)
+    ).fetchall() == [("external_agent:codex",)]
 
 
 def test_idempotency_keys_reach_the_api() -> None:

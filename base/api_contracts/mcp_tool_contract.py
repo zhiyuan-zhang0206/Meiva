@@ -25,6 +25,8 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         acceptance does not prove execution or revive later work.
         Supply a standing objective in prompt. label names the agent in fleet
         views; machine selects its host. config_overlay overrides its settings.
+        prompt_source (default `user`) and spawner (default `mcp`) are declared
+        by you and validated by the API.
         No automatic retries are added.
         """,
     "send_message": """Send a message to a running agent — a new instruction, more context,
@@ -36,10 +38,13 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         Messaging an agent that has already terminated brings it back with its
         history intact.
 
-        By default the message reaches the agent as coming from the user. Pass
-        as_external_agent=true to deliver it as a message from an external
-        agent instead: use it when you collaborate with the agent beside the
-        user rather than speaking for the user. It adds no permissions.
+        `source` declares who the message is from and is passed to the API
+        unchanged, which validates it (see the legal sources in
+        `base/agents/messages/envelope.py:validate_source`). The default `user`
+        delivers it as the user; `external_agent:<subject>[:<instance>]`
+        delivers it as a message from that external agent, for when you
+        collaborate with the agent beside the user rather than speaking for the
+        user. A source is a self-declared label and adds no permissions.
 
         An optional idempotency_key identifies a retry of this exact message.
         """,
