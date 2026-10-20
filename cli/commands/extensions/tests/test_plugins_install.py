@@ -3,9 +3,7 @@ Run end-to-end, no network. `unit_home` isolates ~/.meiva.
 """
 
 import subprocess
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -20,7 +18,11 @@ from cli.commands.extensions.plugins import (
 )
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
+
+
+class RecordingGateway:
+    def put_extension(self, **_: object) -> None:
+        return
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -59,15 +61,12 @@ def test_install_skill_records_and_surfaces(
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
     assert (
-        cmd_plugins_install(
-            url, None, None, database_factory=operator_database, machine=command_machine
-        )
+        cmd_plugins_install(url, None, None, gateway=RecordingGateway(), machine=command_machine)
         == 0
     )
 
@@ -84,14 +83,11 @@ def test_install_disabled_skill_hidden_from_scanner(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
-    cmd_plugins_install(
-        url, None, None, database_factory=operator_database, machine=command_machine
-    )
+    cmd_plugins_install(url, None, None, gateway=RecordingGateway(), machine=command_machine)
     reg.register(
         reg.InstalledPackage(name="demo", type="skill", source=url, ref=None, enabled=False)
     )
@@ -102,21 +98,16 @@ def test_install_rejects_duplicate(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
     assert (
-        cmd_plugins_install(
-            url, None, None, database_factory=operator_database, machine=command_machine
-        )
+        cmd_plugins_install(url, None, None, gateway=RecordingGateway(), machine=command_machine)
         == 0
     )
     assert (
-        cmd_plugins_install(
-            url, None, None, database_factory=operator_database, machine=command_machine
-        )
+        cmd_plugins_install(url, None, None, gateway=RecordingGateway(), machine=command_machine)
         == 1
     )  # already installed
 
@@ -125,15 +116,12 @@ def test_install_rejects_unrecognized(
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
     url = _make_plugin_repo(tmp_path)
     assert (
-        cmd_plugins_install(
-            url, None, None, database_factory=operator_database, machine=command_machine
-        )
+        cmd_plugins_install(url, None, None, gateway=RecordingGateway(), machine=command_machine)
         == 1
     )
     assert "unrecognized package" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
@@ -144,7 +132,6 @@ def test_install_bare_mcp_package_signposts_mcp_install(
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -165,7 +152,7 @@ def test_install_bare_mcp_package_signposts_mcp_install(
             f"file://{repo}",
             None,
             None,
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 1
@@ -178,14 +165,11 @@ def test_uninstall_removes_dir_and_entry(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
-    cmd_plugins_install(
-        url, None, None, database_factory=operator_database, machine=command_machine
-    )
+    cmd_plugins_install(url, None, None, gateway=RecordingGateway(), machine=command_machine)
     assert cmd_plugins_uninstall("demo") == 0
     assert reg.get("demo") is None
     assert not (unit_home / "skills" / "demo").exists()
@@ -200,7 +184,6 @@ def test_installed_lists_entries(
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -210,7 +193,7 @@ def test_installed_lists_entries(
         _make_skill_repo(tmp_path, "demo"),
         None,
         None,
-        database_factory=operator_database,
+        gateway=RecordingGateway(),
         machine=command_machine,
     )
     assert cmd_plugins_installed() == 0
@@ -221,14 +204,11 @@ def test_upgrade_refetches(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo", description="v1")
-    cmd_plugins_install(
-        url, None, None, database_factory=operator_database, machine=command_machine
-    )
+    cmd_plugins_install(url, None, None, gateway=RecordingGateway(), machine=command_machine)
     # mutate the source repo + commit, then upgrade
     repo = tmp_path / "demo-src"
     (repo / "SKILL.md").write_text(
@@ -310,7 +290,6 @@ def _make_claude_code_plugin_repo(
 def test_install_claude_code_plugin_from_subdir_surfaces_skill(
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -320,7 +299,7 @@ def test_install_claude_code_plugin_from_subdir_surfaces_skill(
             url,
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 0
@@ -345,7 +324,6 @@ def test_install_claude_code_plugin_without_anything_refused(
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -355,7 +333,7 @@ def test_install_claude_code_plugin_without_anything_refused(
             url,
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 1
@@ -368,7 +346,6 @@ def test_install_claude_code_plugin_skills_only_surfaces(
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -379,7 +356,7 @@ def test_install_claude_code_plugin_skills_only_surfaces(
             url,
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 0
@@ -403,13 +380,12 @@ def test_install_claude_code_plugin_skills_only_surfaces(
 def test_upgrade_claude_code_plugin_skills_only(
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=True)
     cmd_plugins_install(
-        url, None, "plugins/pr-toolkit", database_factory=operator_database, machine=command_machine
+        url, None, "plugins/pr-toolkit", gateway=RecordingGateway(), machine=command_machine
     )
     # add a third skill to the source, commit, upgrade
     repo = tmp_path / "claude-code-src"
@@ -429,7 +405,6 @@ def test_install_claude_code_plugin_reports_contributions(
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -439,7 +414,7 @@ def test_install_claude_code_plugin_reports_contributions(
             url,
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 0
@@ -457,7 +432,6 @@ def test_install_claude_code_plugin_reports_contributions(
 def test_install_claude_code_plugin_with_bundled_mcp(
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -469,7 +443,7 @@ def test_install_claude_code_plugin_with_bundled_mcp(
             url,
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 0
@@ -485,7 +459,6 @@ def test_install_claude_code_plugin_with_bundled_mcp(
 def test_install_claude_code_plugin_mcp_only(
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -497,7 +470,7 @@ def test_install_claude_code_plugin_mcp_only(
             url,
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 0
@@ -516,7 +489,6 @@ def test_install_claude_code_plugin_mcp_only(
 def test_install_claude_code_plugin_commands_surface(
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -532,7 +504,7 @@ def test_install_claude_code_plugin_commands_surface(
             url,
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 0
@@ -550,13 +522,12 @@ def test_install_claude_code_plugin_commands_surface(
 def test_uninstall_claude_code_plugin_removes_plugin_dir(
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path)
     cmd_plugins_install(
-        url, None, "plugins/pr-toolkit", database_factory=operator_database, machine=command_machine
+        url, None, "plugins/pr-toolkit", gateway=RecordingGateway(), machine=command_machine
     )
     assert cmd_plugins_uninstall("pr-toolkit") == 0
     assert reg.get("pr-toolkit") is None
@@ -566,13 +537,12 @@ def test_uninstall_claude_code_plugin_removes_plugin_dir(
 def test_upgrade_claude_code_plugin_rematerializes(
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path)
     cmd_plugins_install(
-        url, None, "plugins/pr-toolkit", database_factory=operator_database, machine=command_machine
+        url, None, "plugins/pr-toolkit", gateway=RecordingGateway(), machine=command_machine
     )
     # add a third agent to the source, commit, upgrade
     repo = tmp_path / "claude-code-src"
@@ -594,7 +564,6 @@ def test_install_failure_mid_materialize_leaves_nothing(
     unit_home: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -615,7 +584,7 @@ def test_install_failure_mid_materialize_leaves_nothing(
             url,
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
 
@@ -629,7 +598,6 @@ def test_upgrade_failure_keeps_previous_version(
     unit_home: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -644,7 +612,7 @@ def test_upgrade_failure_keeps_previous_version(
             url,
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 0
@@ -701,7 +669,6 @@ def test_install_refuses_dot_prefixed_plugin_name(
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -727,7 +694,7 @@ def test_install_refuses_dot_prefixed_plugin_name(
             f"file://{repo}",
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 1
@@ -739,7 +706,6 @@ def test_install_refuses_dot_prefixed_plugin_name(
 def test_install_sweeps_stale_backup_residue(
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -758,7 +724,7 @@ def test_install_sweeps_stale_backup_residue(
             url,
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 0
@@ -772,7 +738,6 @@ def test_install_sweeps_stale_backup_residue(
 def test_uninstall_sweeps_stale_backup_residue(
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -783,7 +748,7 @@ def test_uninstall_sweeps_stale_backup_residue(
             url,
             None,
             "plugins/pr-toolkit",
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 0

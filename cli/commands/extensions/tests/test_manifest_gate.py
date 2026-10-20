@@ -9,9 +9,7 @@ legacy paths (covered by the existing install tests).
 
 import json
 import subprocess
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -24,7 +22,12 @@ from cli.commands.extensions.plugins import cmd_plugins_install
 from cli.commands.extensions.skill import cmd_skill_install
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
+
+
+class RecordingGateway:
+    def put_extension(self, **_: object) -> None:
+        return
+
 
 # Every test here installs a package, which records `local:<machine>` provenance
 # in the cluster registry — that needs a machine identity, which a bare
@@ -219,7 +222,6 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -228,7 +230,7 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
     (pkg / "meiva-plugin.json").write_text('{"apiVersion": 99}', encoding="utf-8")
     assert (
         cmd_plugins_install(
-            _git_repo(pkg), None, None, database_factory=operator_database, machine=command_machine
+            _git_repo(pkg), None, None, gateway=RecordingGateway(), machine=command_machine
         )
         == 1
     )
@@ -242,7 +244,6 @@ def test_plugins_install_accepts_manifest_with_valid_engines(
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -253,7 +254,7 @@ def test_plugins_install_accepts_manifest_with_valid_engines(
     _write_manifest(pkg, dict(GOOD_MANIFEST, name="pkg"))
     assert (
         cmd_plugins_install(
-            _git_repo(pkg), None, None, database_factory=operator_database, machine=command_machine
+            _git_repo(pkg), None, None, gateway=RecordingGateway(), machine=command_machine
         )
         == 1
     )
@@ -264,7 +265,6 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -276,7 +276,7 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
             str(pkg),
             None,
             None,
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 1
@@ -290,7 +290,6 @@ def test_skill_install_valid_manifest_proceeds(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -305,7 +304,7 @@ def test_skill_install_valid_manifest_proceeds(
             str(pkg),
             None,
             None,
-            database_factory=operator_database,
+            gateway=RecordingGateway(),
             machine=command_machine,
         )
         == 0
