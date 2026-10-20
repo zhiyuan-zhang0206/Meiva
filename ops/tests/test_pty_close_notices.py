@@ -361,6 +361,7 @@ def test_closure_receipt_stores_the_canonical_ops_status(db_conn: psycopg.Connec
 def test_notice_does_not_certify_background_process_absence() -> None:
     text = notices.content(_notice(survivors=((4242, "worker"),)))
     assert "was closed" in text
-    assert "Known processes observed" in text
-    assert "does not prove" in text
+    assert "Known processes observed after shell-session closure are still running" in text
+    assert "shell-session closure does not prove" in text
+    assert "terminal" not in text.lower()
     assert "another user" not in text

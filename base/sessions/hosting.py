@@ -69,12 +69,12 @@ def hosting_supervised_session() -> str | None:
     return _hosting_pty_session(lineage)
 
 
+# meiva:note
+# The persistent shell session whose shell is in `lineage`, if any.
+#
+# A stop closes every persistent shell session, so one run from a shell the
+# pty-sessions service holds would end itself mid-stop.
 def _hosting_pty_session(lineage: set[int]) -> str | None:
-    """The persistent shell session whose shell is in `lineage`, if any.
-
-    A stop closes every persistent terminal, so one run from a shell the
-    pty-sessions service holds would end itself mid-stop.
-    """
     try:
         sessions = client.list_sessions()
     except OSError:

@@ -124,7 +124,7 @@ def test_stop_records_notice_for_verified_closed_busy_session(
         (frozenset({"gateway", "agent-runner"}), True, True),
     ],
 )
-def test_notices_are_written_once_in_the_terminals_phase_before_the_data_plane_stops(
+def test_notices_are_written_once_in_the_shell_sessions_phase_before_the_data_plane_stops(
     roles: frozenset[str],
     direct: bool,
     stops_data_plane: bool,

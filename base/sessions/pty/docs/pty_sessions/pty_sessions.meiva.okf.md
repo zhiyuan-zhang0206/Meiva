@@ -38,7 +38,7 @@ Client side, in this package:
 - `paths.py` — the socket (`run/pty-sessions.sock`, or a fixed
   `/tmp/meiva-pty-<uid>/<digest>.sock` when the home is too long for `sun_path`),
   the instance lock, the ledger and the transcript locations.
-- `closure.py` — the one terminal closure, see below.
+- `closure.py` — the one closure, see below.
 - `process_groups.py` — bounded known-group signaling, see
   [[../session-kill.meiva.okf.md|session kill]].
 - `allocation_freeze.py` — the home's marker and allocation mutex. The marker
@@ -93,7 +93,7 @@ Creation, death, kill, signals and the operator freeze are in
 
 ## Closure and the ledger
 
-`close_all` runs the one terminal closure inside the service; a ledger lets the
+`close_all` runs the one closure inside the service; a ledger lets the
 next start sweep what a crashed service left running. Both are described in
 [[closure-and-ledger.meiva.okf.md|closure and ledger]]. `meiva stop` turns the
 closure's answer into owner notices (`ops/pty_close_notices.py`) and fails on a
@@ -120,7 +120,7 @@ untouched for operator inspection.
 Above it: `meiva.shell.sessions`, `meiva.watcher`, the gateway ScheduleManager, the
 page-server daemon (one `list` per reconcile pass), `ops.cluster_status`
 capture/kill, the worktree-removal guard (`base/deploy/git/worktree_guard.py`,
-read-only: it never creates a home) and `meiva stop`'s terminal closure
+read-only: it never creates a home) and `meiva stop`'s shell-session closure
 (`cli/commands/lifecycle/service_stop.py`). Every creation path crosses the same
 allocation lock.
 

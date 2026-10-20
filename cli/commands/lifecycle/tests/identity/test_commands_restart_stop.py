@@ -474,6 +474,10 @@ def test_stop_aborts_on_no(
     assert rc == 0
 
 
+# meiva:note
+# A confirmed force stop stops the services but keeps the pty-sessions service,
+# closes the shell sessions through it, then stops the service, and only then the
+# private data plane.
 def test_stop_proceeds_on_yes(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
@@ -481,9 +485,6 @@ def test_stop_proceeds_on_yes(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A confirmed force stop stops the services but keeps the pty-sessions service,
-    closes the terminals through it, then stops the service, and only then the
-    private data plane."""
     command_runtime.machine.set(role="gateway")
     events: list[str] = []
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")  # pyright: ignore[reportUnknownArgumentType] — untyped test double
@@ -491,10 +492,12 @@ def test_stop_proceeds_on_yes(
         _root_driver_commands,
         "stop_root_service_tree",
         lambda **kw: events.append(  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-            "root+terminal-service" if SERVICE_UNIT in kw["preserve"] else "root"
+            "root+shell-session-service" if SERVICE_UNIT in kw["preserve"] else "root"
         ),
     )
-    monkeypatch.setattr(_stop_commands, "force_close_terminals", lambda: events.append("terminals"))
+    monkeypatch.setattr(
+        _stop_commands, "force_close_shell_sessions", lambda: events.append("shell-sessions")
+    )
     monkeypatch.setattr(
         bringup,
         "stop_cluster_instance",
@@ -517,7 +520,7 @@ def test_stop_proceeds_on_yes(
         )
         == 0
     )
-    assert events == ["root+terminal-service", "terminals", "root", "infra"]
+    assert events == ["root+shell-session-service", "shell-sessions", "root", "infra"]
 
 
 def test_stop_revokes_serving_before_stopping_root(
@@ -648,12 +651,12 @@ def test_force_stop_keeping_the_browser_does_not_reap_its_chrome(
     assert calls == [
         {"preserve": frozenset({"browser", SERVICE_UNIT}), "force": True},
         {"preserve": frozenset({"browser"}), "force": True},
-    ], "the pty-sessions service outlives the services step and is stopped after the terminals"
+    ], "the pty-sessions service outlives the services step and is stopped after the shell sessions"
     assert helpers == [refuse_helper, refuse_helper]
     assert reaps == []
 
 
-def test_force_stop_keeping_shell_sessions_closes_no_terminals(
+def test_force_stop_keeping_shell_sessions_closes_no_shell_sessions(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_pipeline: Callable[[], EventPipeline],
@@ -661,8 +664,8 @@ def test_force_stop_keeping_shell_sessions_closes_no_terminals(
     command_runtime: CommandRuntime,
 ) -> None:
     # meiva:note
-    # `--keep-shell-sessions` keeps the terminals the service holds: one services step,
-    # no terminal closure, no second stop of the service.
+    # `--keep-shell-sessions` keeps the shell sessions the service holds: one services step,
+    # no shell-session closure, no second stop of the service.
     command_runtime.machine.set(role="gateway")
     calls: list[dict[str, object]] = []
 
@@ -674,9 +677,9 @@ def test_force_stop_keeping_shell_sessions_closes_no_terminals(
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", stop_tree)
 
     def closed() -> None:
-        raise AssertionError("a kept service's terminals must not be closed")
+        raise AssertionError("a kept service's shell sessions must not be closed")
 
-    monkeypatch.setattr(_stop_commands, "force_close_terminals", closed)
+    monkeypatch.setattr(_stop_commands, "force_close_shell_sessions", closed)
     monkeypatch.setattr(
         bringup,
         "stop_cluster_instance",
@@ -716,7 +719,7 @@ def test_force_stop_without_keeping_the_browser_reaps_its_chrome(
         assert kwargs["force"] is True
         preserve = kwargs["preserve"]
         assert isinstance(preserve, frozenset)
-        events.append("root+terminal-service" if SERVICE_UNIT in preserve else "root")
+        events.append("root+shell-session-service" if SERVICE_UNIT in preserve else "root")
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", stop_root)
     monkeypatch.setattr(_stop_commands, "reap_cluster_chrome", lambda: events.append("browser"))
@@ -742,7 +745,7 @@ def test_force_stop_without_keeping_the_browser_reaps_its_chrome(
         )
         == 0
     )
-    assert events == ["root+terminal-service", "browser", "root", "infra"]
+    assert events == ["root+shell-session-service", "browser", "root", "infra"]
 
 
 def test_reap_cluster_chrome_reports_pids_and_survives_a_failure(

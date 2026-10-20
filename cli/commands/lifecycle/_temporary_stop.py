@@ -20,7 +20,7 @@ from base.native_process.ownership import OwnedProcess, capture_tree, retain_pro
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.stop_waits import deadline_after, remaining, wait_for_exit
-from cli.commands.lifecycle.service_stop import close_terminals, stop_data_plane
+from cli.commands.lifecycle.service_stop import close_shell_sessions, stop_data_plane
 from services.supervision.roster import build_services
 
 
@@ -177,7 +177,7 @@ def require_unstarted_initialization() -> bool:
     """Positive first-start evidence that no application could have admitted work."""
     from base.paths import meiva_home, root_manifests_path
     from cli.commands.lifecycle.root_driver import require_root_absent
-    from cli.commands.lifecycle.service_stop import require_no_terminals
+    from cli.commands.lifecycle.service_stop import require_no_shell_sessions
     from cli.start_identity import read_intent
 
     intent = read_intent(meiva_home())
@@ -188,7 +188,7 @@ def require_unstarted_initialization() -> bool:
     if start_serving.state_path().exists() or root_manifests_path(meiva_home()).exists():
         raise RuntimeError("initialization journal conflicts with application launch evidence")
     require_root_absent()
-    require_no_terminals()
+    require_no_shell_sessions()
     return True
 
 
@@ -239,12 +239,12 @@ def refuse_hosted_stop() -> None:
     # meiva:note
     # An exec-domain leg is SIGKILLed with the call's process group as the tool
     # call returns, mid-drain (the 2026-09-12 stranding shape). A stop closes this
-    # unit's persistent terminals too, so no terminal can host it either.
+    # unit's persistent shell sessions too, so no shell session can host it either.
     if hosting_exec_domain() is not None:
         raise RuntimeError(
             "stop cannot run inside execute_code: the call's teardown SIGKILLs its "
             "process group as the call returns, stranding the stop mid-drain; a stop "
-            "closes this unit's persistent terminals too — run it from a shell no meiva "
+            "closes this unit's persistent shell sessions too — run it from a shell no meiva "
             "session hosts (e.g. a plain login shell)"
         )
     if hosting_supervised_session() is not None:
@@ -287,9 +287,8 @@ def _stop_selected(
             maintenance_reason=maintenance_reason,
         )
     # meiva:note
-    # The pty-sessions service outlives the services phase: it closes the terminals
+    # The pty-sessions service outlives the services phase: it closes the shell sessions
     # below. `--keep-shell-sessions` keeps the service and the shells it holds.
-    keep_terminals = keep_shell_sessions
     _timed_phase(
         phases,
         "services",
@@ -299,11 +298,11 @@ def _stop_selected(
     )
     if not keep_browser and "browser" not in preserved:
         _timed_phase(phases, "browser", lambda: stop_browser(deadline))
-    if not keep_terminals:
+    if not keep_shell_sessions:
         _timed_phase(
             phases,
-            "terminals",
-            lambda: close_terminals(
+            "shell-sessions",
+            lambda: close_shell_sessions(
                 deadline,
                 direct_db="gateway" in roles,
                 database_factory=database_factory,
@@ -355,9 +354,9 @@ def stop(
     # meiva:note
     # Stop the selected resources; agent-host settles the in-flight turns on its own SIGTERM.
     #
-    # Services and the data plane are never forced. Closing terminals (skipped
+    # Services and the data plane are never forced. Closing shell sessions (skipped
     # only with `keep_shell_sessions`) SIGKILLs what outlives its bounded grace
-    # (`service_stop.close_terminals`).
+    # (`service_stop.close_shell_sessions`).
     refuse_hosted_stop()
     roles, _selected, preserved = stop_plan(
         preserve_sessions=preserve_sessions,
@@ -369,7 +368,7 @@ def stop(
     data_plane = {None: "none on this host", True: "retained", False: "stopped"}[keep_infra]
     print(
         "[meiva stop] local services; "
-        f"terminals={'retained' if keep_shell_sessions else 'closed'}; "
+        f"shell_sessions={'retained' if keep_shell_sessions else 'closed'}; "
         f"data plane={data_plane}"
     )
     if not confirm_stop(require_confirmation=require_confirmation):
@@ -379,7 +378,7 @@ def stop(
     # meiva:note
     # Per-phase accounting: a failed stop names each phase and how much of the
     # shared budget it consumed, so the operator sees WHERE the budget went
-    # (services vs terminals vs data plane) — never a bare timeout (#2045).
+    # (services vs shell sessions vs data plane) — never a bare timeout (#2045).
     phases: list[tuple[str, float]] = []
     notes: list[str] = []  # what the report must say: a Postgres shutdown that was escalated
     clients: list[str] = []  # the pooler's clients still connected at its stop (reported only)

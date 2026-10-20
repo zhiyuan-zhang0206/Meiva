@@ -312,10 +312,11 @@ os.environ["MEIVA_GATEWAY_URL"] = "http://test-gateway.invalid:8000"
 # `settings.telegram` explicitly (cli/commands/cluster/tests/test_cluster_health.py does).
 os.environ["MEIVA_TELEGRAM_BOT_TOKEN"] = ""
 os.environ["MEIVA_TELEGRAM_OWNER_ID"] = "0"
-# Terminal/execution transport tests have no inherited desktop-helper route.
+# meiva:note
+# Shell-session and execution transport tests have no inherited desktop-helper route.
 # This switch does not disable mandatory macOS application-root ancestry:
 # _guard_permissions_helper_native_io forbids those native effects separately.
-# A terminal transport test can deliberately patch its own helper capability.
+# A shell-session transport test can deliberately patch its own helper capability.
 os.environ["MEIVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # The spawn-attribution marker rides a second channel the pin above cannot
 # close: the signed helper stamps MEIVA_PERMISSIONS_HELPER_PID (its own pid)

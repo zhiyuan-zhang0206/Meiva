@@ -66,6 +66,16 @@ and the matching GitHub Releases.
   ([timeline view](ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md)).
 
 ### Changed
+- `meiva stop` and `meiva restart` call shell sessions shell sessions, matching
+  `meiva.shell.sessions` and the `--keep-shell-sessions` / `--close-shell-sessions` flags, and no
+  longer call them terminals. The stop journal's phase and failing stage are `shell-sessions`
+  (was `terminals`), a surviving shell's `role` in the journal's survivor inventory is `shell` (was
+  `terminal`), the `[meiva stop]` plan line prints `shell_sessions=retained|closed`, and the
+  closure notice an owner agent reads says "shell-session closure". A journal an older build wrote
+  keeps its old names; nothing reads the stage or role back. The stop kernel's helpers are renamed to match
+  (`close_shell_sessions`, `force_close_shell_sessions`, `require_no_shell_sessions`,
+  `live_shell_sessions`, `await_no_shell_sessions`); the `pty-sessions` service, its socket and
+  `base/sessions/pty/` keep their names.
 - Which harness runs which models is the model registry's declaration, not a frontend table
   (user ruling 2026-10-20): `ModelSpec.external_harnesses` names the external harnesses that can
   run a model, `GET /api/models` publishes it per model as `harnesses` (built-in runtime first,

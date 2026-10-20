@@ -1,15 +1,15 @@
-"""The service's ledger of live shell identities, and the sweep of a crashed service's leftovers.
-
-The service is the only writer of ``$MEIVA_HOME/run/pty-sessions.json``: every
-live session's shell identity and any foreground leader explicitly captured at
-close or kill, rewritten atomically as sessions come and go. It
-exists for one reader, the next service start (or a stop that finds the service
-gone): a service that died uncleanly closed its masters. Hangup may end foreground
-work, but ignored hangup and background jobs can outlive it.
-The sweep attempts closure only for the identities the ledger names, each verified by
-birth before any signal, through the one terminal closure, and reports the busy
-ones it closed for local diagnostics.
-"""
+# meiva:note
+# The service's ledger of live shell identities, and the sweep of a crashed service's leftovers.
+#
+# The service is the only writer of ``$MEIVA_HOME/run/pty-sessions.json``: every
+# live session's shell identity and any foreground leader explicitly captured at
+# close or kill, rewritten atomically as sessions come and go. It
+# exists for one reader, the next service start (or a stop that finds the service
+# gone): a service that died uncleanly closed its masters. Hangup may end foreground
+# work, but ignored hangup and background jobs can outlive it.
+# The sweep attempts closure only for the identities the ledger names, each verified by
+# birth before any signal, through the one shell-session closure, and reports the busy
+# ones it closed for local diagnostics.
 
 from __future__ import annotations
 
@@ -94,16 +94,16 @@ def _has_live_process(target: closure.Target) -> bool:
     return any(_alive(identity) for identity in (target.shell, *target.members))
 
 
+# meiva:note
+# Attempt closure of the recorded known identities, retaining live shells for retry.
+#
+# A still-live recorded shell and its known groups are attempted; when the shell
+# is gone, only its recorded members are attempted. Known job-only survivors are
+# diagnostic evidence, not a shell-session-presence gate, so they do not retain a
+# ledger entry. The outcome also names recorded busy sessions whose shells the
+# crash already ended, so their owners can be notified without claiming that
+# unrecorded descendants disappeared.
 def sweep(path: Path) -> closure.Outcome:
-    """Attempt closure of the recorded known identities, retaining live shells for retry.
-
-    A still-live recorded shell and its known groups are attempted; when the shell
-    is gone, only its recorded members are attempted. Known job-only survivors are
-    diagnostic evidence, not a terminal-presence gate, so they do not retain a
-    ledger entry. The outcome also names recorded busy sessions whose shells the
-    crash already ended, so their owners can be notified without claiming that
-    unrecorded descendants disappeared.
-    """
     recorded = read(path)
     targets = [target for target in recorded if _has_live_process(target)]
     outcome = closure.Outcome()

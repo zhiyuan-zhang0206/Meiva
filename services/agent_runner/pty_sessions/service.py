@@ -385,7 +385,9 @@ class PtyService:
             deadline = time.monotonic() + _DRAIN_WAIT_S
             for s in closing:
                 if process_groups.live(s.shell):
-                    continue  # Outcome reports the known terminal survivor.
+                    # meiva:note
+                    # Outcome reports the known shell survivor.
+                    continue
                 if not s.wait_dead(max(0.0, deadline - time.monotonic())):
                     raise RuntimeError(f"session {s.name}: PTY teardown did not finish")
         finally:

@@ -16,8 +16,8 @@ tags:
 The primitives for ending a process Meiva started. Normal `stop`
 uses `cli/commands/lifecycle/service_stop.py`: deliver a verified graceful signal and
 wait for actual process exit without implicit escalation. Its shared deadline
-reports an incomplete stop if resources remain. Persistent terminals are the
-exception: a stop closes known shells/terminals with bounded known-group
+reports an incomplete stop if resources remain. Persistent shell sessions are the
+exception: a stop closes known shell sessions with bounded known-group
 signaling; job leftovers are diagnostic, while surviving shells fail closure
 ([[base/sessions/pty/docs/session-kill.meiva.okf.md|session kill]];
 docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md). Explicit force may use a
@@ -30,7 +30,7 @@ The lower-level escalating APIs below retain their own explicit contracts.
 
 `kill_session(name, graceful=...)` → `(ok, mode)` with mode in `{graceful, forced, noop}`. `mode` reports what **happened**, not what was requested: a graceful stop that had to escalate to the SIGKILL fallback returns `forced`, so the caller's escalation marker fires instead of a clean-stop one that hides a hard kill. Idempotent: an absent/dead session is a `noop`. `ok` means **the session is confirmed gone**, not "the kill command was accepted" — backends re-ask their own existence check after killing, because a kill that reports success it did not achieve turns a live-but-unbacked session into a service nothing starts (issue #1015). For the native service backend, `graceful=True` SIGTERMs only the top process and waits up to the timeout, then hard-kills the tree; `graceful=False` SIGKILLs children first so a parent cannot respawn a child mid-teardown. `expected=True` marks an operator-initiated transition (rollout/update/stop) so backends that escalate a kill log at INFO instead of WARNING/ERROR there.
 
-PTY success confirms the known shell/terminal closed; it never certifies every
+PTY success confirms the known shell session closed; it never certifies every
 background or detached process disappeared. Known survivors are diagnostics.
 
 Signal delivery follows the verified launch shape. POSIX launchers exec into
@@ -69,8 +69,8 @@ process is that session's leader, a captured descendant, or a group member, the
 birth pair the stop path itself revalidates, and the best-effort cmdline —
 plus the stop stage (the phase label) that hit the deadline. The services stop
 raises it as `StopIncompleteError` (a `TimeoutError`, so every existing catch
-keeps working). The terminal closure reports a process that outlived its
-SIGKILL the same way, at stage `terminals` (`close_terminals`).
+keeps working). The shell-session closure reports a process that outlived its
+SIGKILL the same way, at stage `shell-sessions` (`close_shell_sessions`).
 
 Reads are best-effort but never dishonest: a process that cannot be inspected
 is listed as unreadable rather than dropped, and a PID recycled since capture

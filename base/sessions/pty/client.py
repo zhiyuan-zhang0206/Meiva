@@ -87,10 +87,10 @@ class SessionInfo:
         )
 
 
+# meiva:note
+# A shell-session kill verdict; survivors name only known observed leftovers.
 @dataclass(frozen=True)
 class KillVerdict:
-    """A terminal kill verdict; survivors name only known observed leftovers."""
-
     mode: str
     interrupted: bool
     survivors: tuple[int, ...] = ()
@@ -240,8 +240,9 @@ def kill(name: str, *, graceful: bool) -> KillVerdict:
     )
 
 
+# meiva:note
+# Close known shell sessions best effort; no descendant-absence proof.
 def close_all(*, grace_s: float, kill_s: float) -> Outcome:
-    """Close known shells/terminals best effort; no descendant-absence proof."""
     data = request(
         "close_all",
         timeout=grace_s + 4 * kill_s + REQUEST_TIMEOUT_S,

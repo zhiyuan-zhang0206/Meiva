@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "PTY session kill — bounded best-effort closure"
-description: "Close the known shell and terminal with bounded signals to known shell/foreground groups; known leftovers are diagnostic, not proof of complete process disappearance."
+description: "Close the known shell session with bounded signals to known shell/foreground groups; known leftovers are diagnostic, not proof of complete process disappearance."
 tags:
 - base
 - pty
@@ -19,13 +19,13 @@ signal failures raise, and a known shell that survives fails closure.
 No host process-table scan, descendant walk, SIGSTOP freeze, session-id
 freshness inference or periodic member census is part of this contract.
 Background jobs, reparented descendants and detached processes may remain.
-Their absence is not certified by a successful terminal closure.
+Their absence is not certified by a successful shell-session closure.
 
 `interrupted` describes observed work interrupted by closure. An absent/dead
 session is an idempotent noop. Wire survivors list only known identities
 observed alive; an empty list never proves every process disappeared.
 `meiva stop` reports known job leftovers without failing solely on their behalf;
-a surviving shell still fails the stop. Owner notices describe shell/terminal
+a surviving shell still fails the stop. Owner notices describe shell-session
 closure and work interruption rather than complete process destruction.
 
 Residual host processes or OS stalls require agent/user investigation, with

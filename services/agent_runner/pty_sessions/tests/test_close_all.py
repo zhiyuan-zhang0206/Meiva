@@ -86,7 +86,7 @@ def test_a_job_that_ignores_termination_is_killed_after_its_grace(unit_home: Pat
 
 
 @pytest.mark.parametrize("background_exited", [False, True])
-def test_an_untracked_nohup_job_does_not_block_terminal_closure(
+def test_an_untracked_nohup_job_does_not_block_shell_session_closure(
     unit_home: Path, *, background_exited: bool
 ) -> None:
     name = "meiva-agent-987-shell-2049-nohup"
