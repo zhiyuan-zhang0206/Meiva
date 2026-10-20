@@ -100,6 +100,14 @@ export const TimelineView = memo(function TimelineView({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const historySpaceRef = useRef<HTMLDivElement>(null);
 
+  const stickyThresholds = useMemo(
+    () =>
+      typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches
+        ? TOUCH_STICKY_THRESHOLDS
+        : POINTER_STICKY_THRESHOLDS,
+    [],
+  );
+
   const pendingRestoreRef = useRef<SavedScroll | null>(scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
 
   const holdRestoredPositionRef = useRef(!!pendingRestoreRef.current && !pendingRestoreRef.current.followBottom);
@@ -138,8 +146,8 @@ export const TimelineView = memo(function TimelineView({
   useLayoutEffect(() => () => {
     const mem = scrollMemoryRef.current;
     const viewport = viewportRef.current;
-    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey);
-  }, [restoreInFlight]);
+    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, stickyThresholds);
+  }, [restoreInFlight, stickyThresholds]);
 
   const pendingAnchorRef = useRef<{ id: string; rank: number; frontId: string | null; docTop: number } | null>(null);
 
@@ -161,14 +169,6 @@ export const TimelineView = memo(function TimelineView({
     setActiveStuckHeaderId((prev) => (prev === topId ? prev : topId));
     setActiveStuckChildId((prev) => (prev === childId ? prev : childId));
   }, []);
-
-  const stickyThresholds = useMemo(
-    () =>
-      typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches
-        ? TOUCH_STICKY_THRESHOLDS
-        : POINTER_STICKY_THRESHOLDS,
-    [],
-  );
 
   const [controller] = useState<StickyController>(() =>
     createStickyController(stickyThresholds),
@@ -408,7 +408,7 @@ export const TimelineView = memo(function TimelineView({
       trimFollowing();
       const mem = scrollMemoryRef.current;
       if (mem && !restoreInFlight()) {
-        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey);
+        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, stickyThresholds);
       }
       stuckRafRef.current ??= requestAnimationFrame(() => {
         stuckRafRef.current = null;

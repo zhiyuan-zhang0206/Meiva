@@ -27,11 +27,13 @@ default. The viewport disables Chrome scroll anchoring (`overflow-anchor: none`)
 a net-neutral reflow can move scrollTop on its own, a third hand the follow rule
 cannot attribute; `overscroll-y-contain` keeps an exhausted vertical gesture out
 of page-level scroll without touching scrollTop. A pending bookmark restore
-lands before the pin, so the reader never sees the bottom first. The
-scroll-to-bottom button reads the measured distance to the bottom rather than
-the follow flag (a height change with no scroll event would otherwise leave it
-hidden). While a refresh is in flight it rests on the same ring the
-pull-to-load gesture uses and swaps to the arrow on hover or keyboard
+lands before the pin, so the reader never sees the bottom first, and a bookmark
+saved on the tail restores the newest message rather than a row's old pixel: a
+thread that grew while the reader was away returns to its end, not to the row
+they left. The scroll-to-bottom button reads the measured distance to the bottom
+rather than the follow flag (a height change with no scroll event would
+otherwise leave it hidden). While a refresh is in flight it rests on the same
+ring the pull-to-load gesture uses and swaps to the arrow on hover or keyboard
 focus, so waiting never hides that the control is still a button (user
 report 2026-10-19). Its smooth ride requests the stick instead of pinning, so the
 asynchronous ride survives, and growth mid-ride pins instantly because the

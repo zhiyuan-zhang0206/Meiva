@@ -301,16 +301,50 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(1200);
   });
 
-  it("keeps a former bottom follower at the last read item when new messages arrive", () => {
+  it("saves a reader on the tail as following the bottom", () => {
+    render(tabs(42, "agent-tail-save"));
+    act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
+    expect(readScrollMemory("agent-tail-save:agent:42")).toEqual({
+      contentKey: "42", scrollTop: 4400, followBottom: true,
+    });
+  });
+
+  it("returns a bottom follower to the newest message after messages arrived while away", () => {
     const { rerender } = render(tabs(42, "agent-new-tail"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     rerender(tabs(43, "agent-new-tail"));
     act(() => { height = 6000; });
     rerender(tabs(42, "agent-new-tail"));
-    expect(viewport().scrollTop).toBe(4400);
+    expect(viewport().scrollTop).toBe(5400);
     resize();
-    expect(viewport().scrollTop).toBe(4400);
-    expect(screen.getByTestId("scroll-to-bottom").className).toContain("opacity-100");
+    expect(viewport().scrollTop).toBe(5400);
+    expect(screen.getByTestId("scroll-to-bottom").className).toContain("opacity-0");
+  });
+
+  it("keeps following a returned bottom follower as the thread grows", () => {
+    const { rerender } = render(tabs(42, "agent-new-tail-growth"));
+    act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
+    rerender(tabs(43, "agent-new-tail-growth"));
+    act(() => { height = 6000; });
+    rerender(tabs(42, "agent-new-tail-growth"));
+    resize();
+    act(() => { height = 7000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(viewport().scrollTop).toBe(6400);
+  });
+
+  it("returns a parked reader to their item after messages arrived while away", () => {
+    const { rerender } = render(tabs(42, "agent-new-parked"));
+    act(() => { viewport().scrollTop = 4300; fireEvent.scroll(viewport()); });
+    expect(readScrollMemory("agent-new-parked:agent:42")).toEqual({
+      contentKey: "42", scrollTop: 4300, followBottom: false,
+      anchor: { itemId: "15.0", rank: 0, viewportTop: -100 },
+    });
+    rerender(tabs(43, "agent-new-parked"));
+    act(() => { height = 6000; });
+    rerender(tabs(42, "agent-new-parked"));
+    resize();
+    expect(viewport().scrollTop).toBe(4300);
+    expect(readingOffset("15.0")).toBe(-100);
   });
 
   it("retains scroll-loaded history and keeps it after a newer tail snapshot", () => {
