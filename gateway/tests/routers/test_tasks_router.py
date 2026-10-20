@@ -496,6 +496,26 @@ def _task_row(body: dict[str, Any], task_id: int) -> dict[str, Any]:
     return next(t for t in body["tasks"] if t["id"] == task_id)
 
 
+class TestGetOneTask:
+    def test_returns_the_full_row_the_hover_card_needs(self, db_conn: psycopg.Connection) -> None:
+        owner = make_agent(db_conn)
+        description = "d" * 301
+        results = "r" * 301
+        tid = make_task(db_conn, owner=owner, description=description, results=results)
+        with gateway_test_client() as client:
+            response = client.get(f"/api/tasks/{tid}")
+        assert response.status_code == 200
+        row = response.json()
+        assert set(row) == _TASK_FULL_FIELDS
+        assert row["description"] == description
+        assert row["results"] == results
+
+    def test_missing_task_is_404(self) -> None:
+        with gateway_test_client() as client:
+            response = client.get("/api/tasks/999999")
+        assert response.status_code == 404
+
+
 class TestGetTaskFields:
     def test_full_is_backward_compatible_and_summary_is_metadata_only(
         self, db_conn: psycopg.Connection
@@ -520,6 +540,21 @@ class TestGetTaskFields:
         assert set(summary_row) == _TASK_SUMMARY_FIELDS
         assert "description" not in summary_row
         assert "results" not in summary_row
+
+    def test_graph_projection_keeps_the_description_and_drops_results(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        owner = make_agent(db_conn)
+        description = "d" * 301
+        results = "r" * 301
+        tid = make_task(db_conn, owner=owner, description=description, results=results)
+        with gateway_test_client() as client:
+            graph = _list_tasks_ok(client, fields="graph")
+
+        row = _task_row(graph, tid)
+        assert "results" not in row
+        assert set(row) == _TASK_SUMMARY_FIELDS | {"description"}
+        assert row["description"] == description
 
     def test_summary_projection_selects_only_metadata_columns(self) -> None:
         pool = _TaskQueryRecordingPool()
