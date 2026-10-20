@@ -45,7 +45,6 @@ OKF viewer. Fleet graph keeps its route-local query.
 - **frontend_telemetry** (`POST /api/frontend-telemetry`) — user-modeling telemetry ingest: validates a batch of tracked frontend interactions (page/element/session_id/key/value, no free text) and emits one `frontend_interaction` event per accepted interaction into the unified stream (per-session rate-limit backstop)
 - **inventory** (`/api/inventory`) — cross-machine plugin + MCP enable/disable panel
 - **skills** (`/api/skills`) — read-only: this machine's `$MEIVA_HOME/skills/` load dir × install registry view (layer=core/plugin/machine/untracked, `modified_locally` drift flag). Unlike inventory, skills are **per-machine** (no cluster-shared rows)—no `?machine=` matrix, reports only this gateway's own
-- **extensions** (`PUT /api/extensions/{kind}/{name}`) — [[gateway/extensions/docs/registry.meiva.okf.md|registry]]
 - **packages** (`POST /api/keyed/v1/packages/draft`) — **install entry** for skill/plugin/MCP: `{kind, nl}` → fixed prompt to `meiva.skills.meiva_guide.packages.install` → spawn an installer agent, return `agent_id`. **Deliberately no URL/spec fields**—users can't judge candidate quality; candidate-finding, confirmation, install, test-agent verification, evaluation all happen in that agent's conversation. Same shape as guide/schedules draft (no DB row, no new state)
 - **guide** (`POST /api/keyed/v1/guide/draft`) — same-shaped ops entry: spawn an `meiva-guide` agent to handle natural-language ops requests
 
@@ -58,7 +57,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 - **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over `telemetry_events`
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — terminal session monitor (session backend proxy)
-- **tasks** (`/api/tasks` GET + `/api/tasks/{id}` PATCH) — [[task-patch-receipts.meiva.okf.md|task registry read + keyed partial update]] (no create; an owner reassignment notifies the new and, when live, previous owner); GET defaults to a full compatibility row or serves a metadata-only SQL projection with `fields=summary`; rows carry `priority` (`P0`..`P3`, validated, illegal 422)
+- **tasks** (`/api/tasks` GET, `/api/tasks/{id}` GET + PATCH) — [[task-patch-receipts.meiva.okf.md|task registry read + keyed partial update]] (no create; an owner reassignment notifies the new and, when live, previous owner); the list defaults to a full compatibility row or serves a SQL projection — `fields=summary` (metadata only) or `fields=graph` (summary plus `description`, never `results`) — and the single-task GET is the hover card's read of one full row, including `results`; rows carry `priority` (`P0`..`P3`, validated, illegal 422)
 - **memory** (`/api/memory/search`, `/refresh`, `/graph`) — [[memory.meiva.okf.md|shared checkout ownership and bounded search]]; a search stops when its client disconnects
 - **commands** (`/api/commands`) — slash command list acceptable by composer
 - **auth** (`/api/auth/login|logout|check|sessions`) — opaque server-side session login, validation, listing, and per-session revocation
