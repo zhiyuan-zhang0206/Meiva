@@ -49,6 +49,7 @@ import { Check, ChevronDown, Lock, Pencil, RefreshCw, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
+import { DeferredMount } from "@/components/app/deferred-mount";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -528,48 +529,50 @@ export default function ConfigPage() {
               </button>
             </h3>
             {!collapsed ? (
-              <div id={fieldsId} className="border border-border rounded-md divide-y divide-border">
-                {fields.map((field) => (
-                  <ConfigRow
-                    key={field.name}
-                    field={field}
-                    editable={isFieldEditable(field, selection)}
-                    highlighted={focusedField === field.name}
-                    remoteReadOnly={isRemote && field.scope !== "host"}
-                    fieldError={fieldErrors[field.name] ?? null}
-                    editingField={editingField}
-                    editValue={editValue}
-                    busy={toggleBool.isPending || saveText.isPending}
-                    onToggle={(v) => {
-                      // Drop any prior error on this field before retrying.
-                      setFieldErrors((prev) =>
-                        Object.fromEntries(
-                          Object.entries(prev).filter(([k]) => k !== field.name),
-                        ),
-                      );
-                      toggleBool.mutate({ name: field.name, value: v, machine: selection });
-                    }}
-                    onSelectEnum={(v) => {
-                      // Enum picks PUT immediately (like the bool toggle), no inline
-                      // edit step. Drop any prior error on this field before retrying.
-                      setFieldErrors((prev) =>
-                        Object.fromEntries(
-                          Object.entries(prev).filter(([k]) => k !== field.name),
-                        ),
-                      );
-                      saveText.mutate({ name: field.name, value: v, machine: selection });
-                    }}
-                    onStartEdit={() => startEdit(field)}
-                    onCancelEdit={cancelEdit}
-                    onEditValueChange={setEditValue}
-                    onCommitEdit={() => commitEdit(field)}
-                    onEditKeyDown={(e) => {
-                      if (e.key === "Enter") commitEdit(field);
-                      else if (e.key === "Escape") cancelEdit();
-                    }}
-                  />
-                ))}
-              </div>
+              <DeferredMount>
+                <div id={fieldsId} className="border border-border rounded-md divide-y divide-border">
+                  {fields.map((field) => (
+                    <ConfigRow
+                      key={field.name}
+                      field={field}
+                      editable={isFieldEditable(field, selection)}
+                      highlighted={focusedField === field.name}
+                      remoteReadOnly={isRemote && field.scope !== "host"}
+                      fieldError={fieldErrors[field.name] ?? null}
+                      editingField={editingField}
+                      editValue={editValue}
+                      busy={toggleBool.isPending || saveText.isPending}
+                      onToggle={(v) => {
+                        // Drop any prior error on this field before retrying.
+                        setFieldErrors((prev) =>
+                          Object.fromEntries(
+                            Object.entries(prev).filter(([k]) => k !== field.name),
+                          ),
+                        );
+                        toggleBool.mutate({ name: field.name, value: v, machine: selection });
+                      }}
+                      onSelectEnum={(v) => {
+                        // Enum picks PUT immediately (like the bool toggle), no inline
+                        // edit step. Drop any prior error on this field before retrying.
+                        setFieldErrors((prev) =>
+                          Object.fromEntries(
+                            Object.entries(prev).filter(([k]) => k !== field.name),
+                          ),
+                        );
+                        saveText.mutate({ name: field.name, value: v, machine: selection });
+                      }}
+                      onStartEdit={() => startEdit(field)}
+                      onCancelEdit={cancelEdit}
+                      onEditValueChange={setEditValue}
+                      onCommitEdit={() => commitEdit(field)}
+                      onEditKeyDown={(e) => {
+                        if (e.key === "Enter") commitEdit(field);
+                        else if (e.key === "Escape") cancelEdit();
+                      }}
+                    />
+                  ))}
+                </div>
+              </DeferredMount>
             ) : null}
           </div>
         );
