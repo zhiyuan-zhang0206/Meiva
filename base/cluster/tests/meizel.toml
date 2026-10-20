@@ -2,7 +2,6 @@
 "test_machines.py" = ["machines"]
 
 [debt.env-patch]
-"test_machine.py#monkeypatch.delenv os.environ.MEIVA_API_TOKEN" = 1
 "test_machine.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_machines.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_native_layout.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
