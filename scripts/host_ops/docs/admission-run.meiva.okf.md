@@ -63,6 +63,36 @@ job continuously and a second invented threshold would drift from the kernel.
 the macOS host showed 29.7 GB of swap with 6.77 GB of process RSS: that is stale
 paged-out data occupying disk, not live memory demand.
 
+## Who else is running
+
+A job priced against "the room right now" is blind to a peer that started a
+second earlier: on 2026-10-20 two Othello training arms (12.83 GiB and 10.87 GiB)
+were launched together on a 31 GiB host, each passing this check, and the kernel
+OOM-killed one of them 13 minutes in. So a job big enough to matter —
+`peak-mb x jobs >= 8 GiB` — makes itself visible to its peers:
+
+- **Reservation.** It writes `~/.meiva/admission/active/<pid>-<boot>.json` while
+  it runs, and a new start prices itself against
+  `MemAvailable - sum of live reservations`. Reservations count only where the
+  budget is memory (Linux); on macOS the swapfile a running job holds is already
+  missing from the volume's free space. Smaller jobs take no reservation: their
+  RSS is already inside `MemAvailable`, and reserving them too would count them
+  twice and keep small jobs off a busy host.
+- **Class lock.** The same size threshold takes `~/.meiva/admission/locks/<script>.lock`,
+  so one script runs one instance at a time across callers. A second start
+  **waits, naming the holder** (`waiting for run_pilot.py lock held by ... since
+  14:20:31`), and starts as soon as it is released.
+- **The cap is visible.** `--max-wait` (default 1800 s) bounds the wait; on
+  timeout the job starts anyway, marked `overcommitted`, with one line saying how
+  long it waited and who held the lock. `--no-wait` skips the wait and records
+  `wait_outcome=abandoned_by_operator`, distinct from a timeout.
+- **Staleness heals without a daemon.** A reservation or lock whose pid is gone,
+  or whose `boot_id` differs from the running boot, is void: the next start
+  prunes it on its way past.
+
+Waiting is not refusing — the job always starts. The difference is that a caller
+now sees *why* it is late instead of finding out later that its work was killed.
+
 ## Declaring a job
 
 `--peak-mb` is the peak RSS of one worker and is required the first time. After
