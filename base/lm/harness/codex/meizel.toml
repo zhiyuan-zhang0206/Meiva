@@ -1,8 +1,9 @@
-exports = ["config.py", "mapping.py", "session.py", "transport.py"]
+exports = ["auth.py", "config.py", "mapping.py", "session.py", "transport.py"]
 
 [uses]
 "__init__.py" = ["config.py", "session.py", "transport.py"]
 "config.py" = []
 "mapping.py" = ["transport.py"]
-"session.py" = ["config.py", "mapping.py", "transport.py"]
-"tests" = ["__init__.py", "mapping.py", "session.py", "transport.py"]
+"auth.py" = []
+"session.py" = ["auth.py", "config.py", "mapping.py", "transport.py"]
+"tests" = ["__init__.py", "auth.py", "config.py", "mapping.py", "session.py", "transport.py"]
