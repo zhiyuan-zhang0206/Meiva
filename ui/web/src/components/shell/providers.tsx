@@ -14,7 +14,8 @@ import { AuthProvider, notifySessionInvalid } from "@/lib/auth/auth-context";
 import { ApiError } from "@/lib/transport/api";
 import { NonceProvider } from "@/lib/auth/nonce-context";
 import { EventStreamProvider } from "@/lib/transport/useEventStream";
-import { useNavTimingReport } from "@/lib/telemetry/nav-timing";
+import { setNavFallbackMs, useNavTimingReport } from "@/lib/telemetry/nav-timing";
+import { useUserSettings } from "@/lib/state/use-user-settings";
 import { AlertsProvider } from "@/lib/notifications/use-alerts";
 
 // The inline script next-themes injects toggles .dark on <html> before
@@ -132,6 +133,8 @@ export function Providers({ children, nonce }: { children: React.ReactNode; nonc
 }
 
 function NavTimingReporter() {
+  const { settings } = useUserSettings();
   useNavTimingReport();
+  setNavFallbackMs(Number(settings["behavior.navFallbackMs"] ?? 0));
   return null;
 }

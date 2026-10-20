@@ -17,15 +17,13 @@ vi.mock("./telemetry", () => ({
     tracked.push({ element, key: opts.key, value: opts.value, page: opts.page }),
 }));
 
-import { formatNavTiming, markNavIntent, useNavTimingReport } from "./nav-timing";
+import { formatNavTiming, markNavIntent, setNavFallbackMs, useNavTimingReport } from "./nav-timing";
 
 function Reporter() {
   useNavTimingReport();
   return null;
 }
 
-// A rAF queue: the frame counter would recurse forever against a
-// run-immediately stub, so a test decides when a frame exists.
 const frames: FrameRequestCallback[] = [];
 function flushFrame() {
   const next = frames.shift();
@@ -63,7 +61,6 @@ describe("nav timing", () => {
     markNavIntent();
     pathname = "/control";
     rerender(<Reporter />);
-    // Frame 1 is the frame counter re-arming itself; frame 2 is the paint stamp.
     flushFrame();
     flushFrame();
     await new Promise((resolve) => setTimeout(resolve, 600));
@@ -72,6 +69,25 @@ describe("nav timing", () => {
     expect(nav[0].element).toBe("nav-timing");
     expect(nav[0].page).toBe("control");
     expect(nav[0].value).toMatch(/^c=\d+\|p=\d+\|t=\d+$/);
+  });
+
+  it("waits the configured time before falling back", () => {
+    vi.useFakeTimers();
+    const assign = vi.fn();
+    const realLocation = window.location;
+    Object.defineProperty(window, "location", { configurable: true, value: { pathname: "/", assign } });
+    try {
+      setNavFallbackMs(500);
+      markNavIntent("/control");
+      vi.advanceTimersByTime(400);
+      expect(assign).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(200);
+      expect(assign).toHaveBeenCalledWith("/control");
+    } finally {
+      Object.defineProperty(window, "location", { configurable: true, value: realLocation });
+      vi.useRealTimers();
+      setNavFallbackMs(2000);
+    }
   });
 
   it("performs a real location change when the router never commits", () => {
@@ -84,7 +100,7 @@ describe("nav timing", () => {
     });
     try {
       markNavIntent("/control");
-      vi.advanceTimersByTime(1600);
+      vi.advanceTimersByTime(2100);
       expect(assign).toHaveBeenCalledWith("/control");
       const fallback = tracked.find((e) => e.key === "fallback");
       expect(fallback?.value).toMatch(/\|f=1\|fr=\d+\|v=[01]$/);

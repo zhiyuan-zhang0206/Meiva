@@ -837,6 +837,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // surfaces stay untranslated. Default "en" — English UI until the user opts
   // into another locale in Display settings.
   "display.language": "en",
+  "behavior.navFallbackMs": 2000,
   "display.time_mode": "last_active",
   "display.show_terminated": false,
   "display.date_format": "relative",
