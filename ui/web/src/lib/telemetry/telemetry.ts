@@ -43,6 +43,7 @@ export type TelemetryElement =
   | "composer-send"
   | "composer-stop"
   | "fork"
+  | "nav-timing"
   | "page-view"
   | "restart"
   | "resurrect"

@@ -69,6 +69,14 @@ and the matching GitHub Releases.
   reader above it still returns to the item they were reading
   ([timeline view](ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md)).
 
+### Added
+- A navigation now reports its own timing from the browser that felt it: click to URL change,
+  click to first frame after it, and the longest main-thread task inside that window, as one
+  `nav-timing` telemetry event per route change. It exists because a report of "clicking Settings
+  took ten seconds" could not be reproduced in a fresh tab (100–250 ms there), so the numbers
+  have to come from the reporter's session
+  ([frontend state](ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md)).
+
 ### Changed
 - Which harness runs which models is the model registry's declaration, not a frontend table
   (user ruling 2026-10-20): `ModelSpec.external_harnesses` names the external harnesses that can
