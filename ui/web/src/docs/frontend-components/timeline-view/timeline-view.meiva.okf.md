@@ -17,12 +17,14 @@ During streaming each line is memoized `TimelineRow` + `React.memo` PythonCode/C
 ## Returning to an agent
 
 The page keys each mounted timeline by agent and scopes its in-memory bookmark
-by page-entry plus agent. A bookmark includes the visible message coordinate
-and viewport offset; work/detail expansion choices are retained under the same
-identity and Details mode. Returning materializes the prefix before restoring
-that anchor. A former bottom follower returns to its last read item, including
-when new messages arrived while away. Resize, tail repair and trim cannot move
-that bookmark until the reader scrolls or explicitly requests the bottom.
+by page-entry plus agent. A bookmark has one of two kinds: inside the bottom
+zone the reader was watching the tail, so it says "follow the bottom" and the
+return lands on the newest message however much arrived meanwhile; above it the
+reader keeps the visible message coordinate and viewport offset, and returning
+materializes the prefix before restoring that anchor. Work/detail expansion
+choices are retained under the same identity and Details mode. An item bookmark
+survives resize, tail repair and trim until the reader scrolls or explicitly
+requests the bottom; a tail bookmark follows the end as the thread grows.
 Sending still jumps to the latest message; a first visit starts at the bottom.
 
 The existing bottom button keeps one fixed footprint and its downward arrow.

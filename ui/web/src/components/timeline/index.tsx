@@ -135,12 +135,6 @@ export const TimelineView = memo(function TimelineView({
         : null;
   });
 
-  useLayoutEffect(() => () => {
-    const mem = scrollMemoryRef.current;
-    const viewport = viewportRef.current;
-    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey);
-  }, [restoreInFlight]);
-
   const pendingAnchorRef = useRef<{ id: string; rank: number; frontId: string | null; docTop: number } | null>(null);
 
   const prevLoadingOlderRef = useRef(loadingOlder);
@@ -173,6 +167,13 @@ export const TimelineView = memo(function TimelineView({
   const [controller] = useState<StickyController>(() =>
     createStickyController(stickyThresholds),
   );
+
+  useLayoutEffect(() => () => {
+    const mem = scrollMemoryRef.current;
+    const viewport = viewportRef.current;
+    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller);
+  }, [restoreInFlight, controller]);
+
   const isFollowing = useCallback(() => !holdRestoredPositionRef.current && controller.isSticky(), [controller]);
   const canonicalItemsRef = useRef(canonicalItems);
   const retainedItemsMaxRef = useRef(retainedItemsMax);
@@ -408,7 +409,7 @@ export const TimelineView = memo(function TimelineView({
       trimFollowing();
       const mem = scrollMemoryRef.current;
       if (mem && !restoreInFlight()) {
-        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey);
+        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller);
       }
       stuckRafRef.current ??= requestAnimationFrame(() => {
         stuckRafRef.current = null;

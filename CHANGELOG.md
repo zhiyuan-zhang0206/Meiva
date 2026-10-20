@@ -15,6 +15,15 @@ and the matching GitHub Releases.
   real-browser structural probes it shared (overflow, containment, occlusion,
   visibility) remain, unused by any pixel comparison.
 
+### Fixed
+- Switching agents no longer scrolls a conversation back up. A reader on the tail
+  was saved as a pixel bookmark of one row, so the return restored that row's old
+  offset — above the newest message by everything that arrived meanwhile, and
+  still there once the thread stopped streaming. A reader inside the bottom zone
+  is now saved as following the bottom and returns to the newest message; a
+  reader above it still returns to the item they were reading
+  ([timeline view](ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md)).
+
 ### Changed
 - The create popover is one table instead of three dropdowns: harness, then the models that
   harness runs, then the efforts that model publishes — each column narrows the next and the
