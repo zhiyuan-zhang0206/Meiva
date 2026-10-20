@@ -1,4 +1,4 @@
-exports = ["refresh.py"]
+exports = ["cluster_registry.py", "refresh.py"]
 
 [uses]
 "__init__.py" = ["refresh.py"]

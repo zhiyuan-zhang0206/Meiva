@@ -5424,6 +5424,71 @@
         }
       }
     },
+    "/api/extensions/{kind}/{name}": {
+      "put": {
+        "summary": "Put Extension",
+        "description": "Store one extension's tree as a content-addressed blob and upsert its\nregistry row in one transaction. 413 over the registry size cap; 422 on an\nundecodable or unsafe archive.",
+        "operationId": "put_extension_api_extensions__kind___name__put",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "skill",
+                "plugin",
+                "mcp"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtensionRegisterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionRegisterResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keyed/v1/packages/draft": {
       "post": {
         "summary": "Guarded Draft Package",
@@ -11917,6 +11982,68 @@
         ],
         "title": "EventsResponse",
         "description": "GET /api/events response — newest-first slice of the unified event\nstream (`ts DESC`, `id DESC` tiebreak so `limit`/`offset` paging is stable\nacross same-`ts` rows)."
+      },
+      "ExtensionRegisterRequest": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source",
+            "description": "'repo', a git URL, or 'local:<machine>' — where the content came from."
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Ref",
+            "description": "Commit or tag as installed, when the source is git."
+          },
+          "archive_b64": {
+            "type": "string",
+            "title": "Archive B64",
+            "description": "Base64 of the deterministic tar `registry.pack_tree` builds from the tree."
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "archive_b64"
+        ],
+        "title": "ExtensionRegisterRequest"
+      },
+      "ExtensionRegisterResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "skill",
+              "plugin",
+              "mcp"
+            ],
+            "title": "Kind"
+          },
+          "content_hash": {
+            "type": "string",
+            "title": "Content Hash",
+            "description": "Tree hash of the content the row now points at."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "content_hash"
+        ],
+        "title": "ExtensionRegisterResponse"
       },
       "FleetGraphEdge": {
         "properties": {

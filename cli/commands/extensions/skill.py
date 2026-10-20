@@ -33,11 +33,11 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
 from base.paths import meiva_home
+from cli.commands.extensions.skill_package import ExtensionGateway
 from cli.commands.extensions.skills_sync import Source
 
 _REFUSAL_ADVICE = (
@@ -56,7 +56,7 @@ def cmd_skill_install(
     accept_risk: bool = False,
     update_mode: str | None = None,
     check_every: str | None = None,
-    database_factory: DatabaseFactory,
+    gateway: ExtensionGateway,
     machine: MachineIdentity,
 ) -> int:
     """`meiva skill install <git-url-or-local-path> [--ref REF] [--path SUBDIR]
@@ -107,7 +107,7 @@ def cmd_skill_install(
                 accept_risk=accept_risk,
                 update_mode=update_mode,
                 check_every=interval,
-                database_factory=database_factory,
+                gateway=gateway,
                 machine=machine,
             )
         except SkillScanRefused as e:

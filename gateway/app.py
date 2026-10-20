@@ -61,14 +61,16 @@ from gateway.events import system as system_router
 from gateway.extensions import inventory as inventory_router
 from gateway.extensions import packages as packages_router
 from gateway.extensions import plugin_ui as plugin_ui_router
+from gateway.extensions import registry as extensions_registry_router
 from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
 from gateway.http.auth import rejection_log
 from gateway.http.auth import router as auth_router
-from gateway.http.auth.request_principal import SessionKeys
+from gateway.http.auth.request_principal import TRUSTED_NETWORK_FACT, SessionKeys
 from gateway.http.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
 from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from gateway.http.middleware import latency, pause_policy, runtime_metrics
+from gateway.http.middleware.cors import request_host
 from gateway.http.middleware.error_envelope import error_response, request_trace_middleware
 from gateway.http.middleware.error_handlers import (
     http_exception_handler,
@@ -239,6 +241,12 @@ async def lifespan(
             )
 
             app.state.started_at = time.time()
+            if app.state.gateway_config.human_auth == "trusted_network":
+                _log.warning(
+                    "gateway human_auth=trusted_network: the API does not authenticate human "
+                    "callers; any client that can reach the listener is served as the cluster "
+                    "administrator. Keep MEIVA_MACHINE_HOST on a trusted private network address."
+                )
             app.state.db = process.database()
             app.state.bus = EventBus(event_bus_config_from_config(process.config))
             db_pool: Any = app.state.db.pool(max_size=8)
@@ -399,6 +407,34 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
     return None if fact is None else (cookie_token, fact)
 
 
+# meiva:note
+# True for a state-changing request whose `Origin` is not an allowed browser origin.
+def _foreign_origin(request: Request, config: GatewayConfig) -> bool:
+    origin = request.headers.get("Origin")
+    return (
+        request.method in _STATE_CHANGING_METHODS
+        and origin is not None
+        and origin not in config.allowed_origins
+    )
+
+
+def _origin_refused() -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={"detail": "origin not allowed"},
+        headers={"Vary": "Origin"},
+    )
+
+
+# meiva:note
+# With `human_auth = trusted_network`, a request that presents no valid session cookie and
+# no Authorization header at all is served as the cluster administrator (fact `trusted_network`). A browser page is
+# the one way to reach that listener without the operator choosing to, so these anonymous
+# requests, and only these, also face the Origin and Host checks. An Authorization header
+# that does not verify is a client error and stays a 401, so a misconfigured machine fails
+# now instead of working silently until the mode is switched back. A stale session cookie
+# is not: a browser cannot clear it.
+# meiva:link gateway/http/auth/docs/web-sessions.meiva.okf.md
 async def cluster_auth_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
@@ -428,18 +464,8 @@ async def cluster_auth_middleware(
         cookie_token, session_fact = session
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
         request.state.source_verified_by = session_fact
-        origin = request.headers.get("Origin")
-
-        if (
-            request.method in _STATE_CHANGING_METHODS
-            and origin is not None
-            and origin not in config.allowed_origins
-        ):
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "origin not allowed"},
-                headers={"Vary": "Origin"},
-            )
+        if _foreign_origin(request, config):
+            return _origin_refused()
         now = time.monotonic()
         touch: SessionTouchThrottle = request.app.state.session_touch
         if touch.due(cookie_token, now, stale_after_s=config.session_ttl_seconds):
@@ -459,6 +485,15 @@ async def cluster_auth_middleware(
     if verified_by is not None:
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
         request.state.source_verified_by = verified_by
+        return await call_next(request)
+
+    if config.human_auth == "trusted_network" and request.headers.get("Authorization") is None:
+        if _foreign_origin(request, config):
+            return _origin_refused()
+        if request_host(request.headers.get("Host")) not in config.trusted_hosts:
+            return JSONResponse(status_code=403, content={"detail": "host not allowed"})
+        request.state.auth_principal = AuthPrincipal("cluster", "administrator")
+        request.state.source_verified_by = TRUSTED_NETWORK_FACT
         return await call_next(request)
 
     request.app.state.auth401_log.log(request)
@@ -546,6 +581,7 @@ def create_app(
         guide_router.router,
         inventory_router.router,
         skills_router.router,
+        extensions_registry_router.router,
         packages_router.router,
         metrics_router.router,
         events_router.router,

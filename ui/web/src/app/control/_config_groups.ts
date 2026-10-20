@@ -113,6 +113,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "MEIVA_SSE_DISCONNECT_POLL_SECONDS",
     "MEIVA_SSE_THROTTLE_RATE",
     "MEIVA_GATEWAY_RELOAD",
+    "MEIVA_GATEWAY_HUMAN_AUTH",
   ],
   "config-connection": [
     "MEIVA_GATEWAY_PORT",
