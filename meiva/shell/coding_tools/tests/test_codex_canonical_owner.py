@@ -16,6 +16,7 @@ from uuid import UUID
 import pytest
 
 from base.host.atomic_io import AtomicWriter
+from base.lm.harness.codex.auth import SECRET_ENV_NAMES
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 from base.sessions.pty.client import PtyClientConfig
@@ -87,12 +88,35 @@ def test_launch_runs_on_the_default_home_with_per_session_overrides(tmp_path: Pa
     argv = shlex.split(codex.codex_command(workspace).split(" && ", 1)[1])
 
     assert "CODEX_HOME" not in " ".join(argv)
-    assert argv[:3] == ["exec", "codex", "--dangerously-bypass-approvals-and-sandbox"]
+    assert argv[:3] == ["exec", "env", "-u"]
+    assert argv[3:9] == [
+        "OPENAI_API_KEY",
+        "-u",
+        "CODEX_API_KEY",
+        "-u",
+        "CODEX_ACCESS_TOKEN",
+        "codex",
+    ]
     overrides = [argv[i + 1] for i, arg in enumerate(argv) if arg == "-c"]
     assert overrides == [
         f'projects={{"{workspace.as_posix()}"={{trust_level="trusted"}}}}',
         "check_for_update_on_startup=false",
     ]
+
+
+def _dropped() -> str:
+    return "env " + " ".join(f"-u {name}" for name in SECRET_ENV_NAMES) + " "
+
+
+def test_both_codex_processes_start_without_the_inherited_key(tmp_path: Path) -> None:
+    owner = _owner(tmp_path)
+    workspace = Path(owner.key.workspace)
+
+    server = codex.app_server_command(owner, workspace, "unix:///tmp/probe.sock")
+    tui = codex.codex_command(workspace)
+
+    for command in (server, tui):
+        assert all(f"-u {name}" in command for name in SECRET_ENV_NAMES), command
 
 
 def test_launch_command_starts_a_new_session_unless_resuming(tmp_path: Path) -> None:
@@ -103,9 +127,9 @@ def test_launch_command_starts_a_new_session_unless_resuming(tmp_path: Path) -> 
     resumed = codex.codex_command(workspace, resume=session)
 
     assert fresh.startswith(f"cd {workspace} && ")
-    assert "exec codex --dangerously-bypass-approvals-and-sandbox" in fresh
+    assert f"exec {_dropped()}codex --dangerously-bypass" in fresh
     assert " resume " not in fresh
-    assert f"exec codex resume {session} --dangerously-bypass-approvals-and-sandbox" in resumed
+    assert f"exec {_dropped()}codex resume {session} --dangerously-bypass" in resumed
     assert "MEIVA_CALLER_IDENTITY" not in fresh
 
 
@@ -402,7 +426,8 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
         "verified",
     ]
     assert "codex app-server --listen" in sent[0]
-    assert sent[1].startswith("clear && ") and "exec codex --remote unix://" in sent[1]
+    assert sent[1].startswith("clear && ") and "exec env -u OPENAI_API_KEY" in sent[1]
+    assert "codex --remote unix://" in sent[1]
     assert sent[2] == prompt
     assert "tasks.md" not in sent[2] and "work.md" not in sent[2]
 
