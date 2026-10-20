@@ -558,21 +558,39 @@ class TestClusterEndpoints:
 
     def test_post_stopping_marks_machine(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """POST /api/cluster/stopping?machine=<name>&home=<home> retracts that unit."""
-        marked: list[tuple[str, str]] = []
+        marked: list[tuple[str, str, int | None, str | None]] = []
         from ops.cluster import operations as ops_mod
 
-        monkeypatch.setattr(
-            ops_mod,
-            "mark_stopping",
-            lambda _db, name, home: marked.append((name, home)),  # pyright: ignore[reportUnknownArgumentType]
-        )
+        def mark_stopping(
+            _db: object,
+            name: str,
+            home: str,
+            *,
+            maintenance_for_seconds: int | None = None,
+            maintenance_reason: str | None = None,
+        ) -> None:
+            marked.append((name, home, maintenance_for_seconds, maintenance_reason))
+
+        monkeypatch.setattr(ops_mod, "mark_stopping", mark_stopping)
         with gateway_test_client() as client:
             r = client.post(
                 "/api/cluster/stopping", params={"machine": "runner-a", "home": "~/.meiva"}
             )
-        assert r.status_code == 200
-        assert r.json() == {"machine": "runner-a"}
-        assert marked == [("runner-a", "~/.meiva")]
+            assert r.status_code == 200
+            assert r.json() == {"machine": "runner-a"}
+            assert marked == [("runner-a", "~/.meiva", None, None)]
+
+            windowed = client.post(
+                "/api/cluster/stopping",
+                params={
+                    "machine": "runner-b",
+                    "home": "~/.meiva",
+                    "maintenance_for_seconds": 2700,
+                    "maintenance_reason": "pgbouncer audit",
+                },
+            )
+        assert windowed.status_code == 200
+        assert marked[-1] == ("runner-b", "~/.meiva", 2700, "pgbouncer audit")
 
 
 # ─── admin events query ──────────────────────────────────────────────────────

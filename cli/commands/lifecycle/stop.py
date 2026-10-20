@@ -152,6 +152,8 @@ def force_stop(
     announce: bool,
     teardown_extras: bool,
     timeout: float,
+    maintenance_for_seconds: int | None = None,
+    maintenance_reason: str | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
@@ -191,7 +193,11 @@ def force_stop(
     start_serving.clear_serving()
 
     if announce:
-        _temporary_stop.announce_stopping(machine=machine)
+        _temporary_stop.announce_stopping(
+            machine=machine,
+            maintenance_for_seconds=maintenance_for_seconds,
+            maintenance_reason=maintenance_reason,
+        )
     deadline = deadline_after(timeout)
 
     # Explicit force interrupts the host process. Agent metadata/checkpoints
@@ -250,6 +256,8 @@ def do_stop(
     teardown_extras: bool,
     force: bool,
     timeout: float,
+    maintenance_for_seconds: int | None = None,
+    maintenance_reason: str | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
@@ -268,6 +276,8 @@ def do_stop(
             announce=announce,
             teardown_extras=teardown_extras,
             timeout=timeout,
+            maintenance_for_seconds=maintenance_for_seconds,
+            maintenance_reason=maintenance_reason,
             retained_children=retained_children,
             producer=producer,
             machine=machine,
@@ -282,6 +292,8 @@ def do_stop(
         announce=announce,
         teardown_extras=teardown_extras,
         timeout=timeout,
+        maintenance_for_seconds=maintenance_for_seconds,
+        maintenance_reason=maintenance_reason,
         retained_children=retained_children,
         database_factory=database_factory,
         producer=producer,
@@ -300,6 +312,8 @@ def cmd_stop(
     preserve_sessions: frozenset[str],
     force: bool,
     timeout: float,
+    maintenance_for_seconds: int | None = None,
+    maintenance_reason: str | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
@@ -323,6 +337,8 @@ def cmd_stop(
             teardown_extras=teardown_extras,
             force=force,
             timeout=timeout,
+            maintenance_for_seconds=maintenance_for_seconds,
+            maintenance_reason=maintenance_reason,
             retained_children=retained_children,
             database_factory=database_factory,
             producer=producer,

@@ -318,7 +318,10 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     for hook in ("stop_permissions_helper",):
         monkeypatch.setattr(_stop_extras, hook, lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    def announce(*, machine: MachineIdentity) -> None:
+    def announce(*, machine: MachineIdentity, **window: object) -> None:
+        # meiva:note
+        # An ordinary stop declares no maintenance window.
+        assert window == {"maintenance_for_seconds": None, "maintenance_reason": None}
         assert machine is command_runtime.machine
 
     monkeypatch.setattr(command, "announce_stopping", announce)
@@ -584,7 +587,10 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_shell_sessions_ar
     monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
 
-    def announce(*, machine: MachineIdentity) -> None:
+    def announce(*, machine: MachineIdentity, **window: object) -> None:
+        # meiva:note
+        # An ordinary stop declares no maintenance window.
+        assert window == {"maintenance_for_seconds": None, "maintenance_reason": None}
         assert machine is command_runtime.machine
 
     monkeypatch.setattr(command, "announce_stopping", announce)

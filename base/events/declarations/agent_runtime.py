@@ -114,6 +114,19 @@ class MachineProbeFailed(TypedDict):
     consecutive_failures: int
 
 
+# meiva:note
+# `machine_stopped_too_long` payload — services/wake/heartbeat/liveness.py: one
+# event per liveness pass (~60s) for each host whose announced stop is older
+# than the stopped-too-long threshold and outside a declared maintenance
+# window. `stopped_for_s` is how long it has been down, so the alert reports
+# the age without a second query. A host that never started
+# (`stopped_at IS NULL`) is not this signal.
+# meiva:link base/events/docs/events.meiva.okf.md
+class MachineStoppedTooLong(TypedDict):
+    machine: str
+    stopped_for_s: int
+
+
 class HeartbeatBackoffReset(TypedDict):
     """`heartbeat_backoff_reset` payload — services/wake/heartbeat/daemon.py.
 
@@ -240,6 +253,13 @@ EVENTS: dict[str, EventSpec] = {
         payload=MachineProbeFailed,
         tier="anomaly",
         site="services/wake/heartbeat/liveness.py:_record_probe (positional emit)",
+    ),
+    "machine_stopped_too_long": telemetry_event(
+        "machine_stopped_too_long",
+        "host stopped longer than its maintenance window — one event per liveness pass",
+        payload=MachineStoppedTooLong,
+        tier="anomaly",
+        site="services/wake/heartbeat/liveness.py:report_stopped_too_long (positional emit)",
     ),
     "dangling_tool_pairing_repaired": telemetry_event(
         "dangling_tool_pairing_repaired", "dangling tool pairing repaired", tier="anomaly"

@@ -6114,6 +6114,8 @@ export interface operations {
             query: {
                 machine: string;
                 home: string;
+                maintenance_for_seconds?: number | null;
+                maintenance_reason?: string | null;
             };
             header?: never;
             path?: never;

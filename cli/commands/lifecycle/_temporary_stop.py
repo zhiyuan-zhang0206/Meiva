@@ -277,6 +277,8 @@ def _drain_and_stop(
     teardown_extras: bool,
     notes: list[str],
     clients: list[str],
+    maintenance_for_seconds: int | None = None,
+    maintenance_reason: str | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
@@ -296,7 +298,11 @@ def _drain_and_stop(
     )
     start_serving.clear_serving()
     if announce:
-        announce_stopping(machine=machine)
+        announce_stopping(
+            machine=machine,
+            maintenance_for_seconds=maintenance_for_seconds,
+            maintenance_reason=maintenance_reason,
+        )
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None  # noqa: S101
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
@@ -369,6 +375,8 @@ def stop(
     announce: bool,
     teardown_extras: bool,
     timeout: float,
+    maintenance_for_seconds: int | None = None,
+    maintenance_reason: str | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
@@ -433,6 +441,8 @@ def stop(
             teardown_extras=teardown_extras,
             notes=notes,
             clients=clients,
+            maintenance_for_seconds=maintenance_for_seconds,
+            maintenance_reason=maintenance_reason,
             retained_children=retained_children,
             database_factory=database_factory,
             producer=producer,
@@ -474,7 +484,12 @@ def confirm_stop(*, require_confirmation: bool) -> bool:
     return True
 
 
-def announce_stopping(*, machine: MachineIdentity) -> None:
+def announce_stopping(
+    *,
+    machine: MachineIdentity,
+    maintenance_for_seconds: int | None = None,
+    maintenance_reason: str | None = None,
+) -> None:
     """Best-effort POST `/api/cluster/stopping` before local teardown.
 
     Stamps the stopping unit's `stopped_at` and recomputes the composed
@@ -493,9 +508,14 @@ def announce_stopping(*, machine: MachineIdentity) -> None:
         name = machine.name()
         home = str(meiva_home())
         url = f"{gateway_api_base(access.gateway_url)}/api/cluster/stopping"
+        params = {"machine": name, "home": home}
+        if maintenance_for_seconds is not None:
+            params["maintenance_for_seconds"] = str(maintenance_for_seconds)
+        if maintenance_reason is not None:
+            params["maintenance_reason"] = maintenance_reason
         resp = dial_post(
             url,
-            params={"machine": name, "home": home},
+            params=params,
             timeout=5.0,
             headers=gateway_auth_headers(access),
         )
