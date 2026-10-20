@@ -31,7 +31,6 @@ from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources, hosted_resources_settled
 from services.agent_runner.agent_host.db_recovery import database_phase
 
 _Graph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
@@ -157,8 +156,6 @@ async def settle_native_invocation(
     incarnation: RuntimeIncarnation,
     target: NativeWorkTarget | None,
     config: RunnableConfig,
-    *,
-    resources: HostedTurnResources | None,
 ) -> bool:
     """Settle only the original returned/unwound work before claiming another."""
     if target is None:
@@ -169,8 +166,6 @@ async def settle_native_invocation(
     marker, outcome = command
     if outcome is NativeCancelOutcome.APPLIED:
         return True
-    if not hosted_resources_settled(resources):
-        raise NativeWorkUncertainError("native continuation has unresolved owned resources")
     checkpoint_id = await cold_cancel_checkpoint(saver, marker)
     if checkpoint_id is None:
         async with async_write_transaction(pool) as conn:
@@ -186,7 +181,7 @@ async def settle_native_invocation(
         )
         await flush_checkpoint(saver, target.agent_id)
         checkpoint_id = await cold_cancel_checkpoint(saver, marker)
-    if checkpoint_id is None or not hosted_resources_settled(resources):
+    if checkpoint_id is None:
         raise NativeWorkUncertainError("native halt checkpoint has not durably settled")
     async with async_write_transaction(pool) as conn:
         await finish_native_cancel(
@@ -274,7 +269,6 @@ async def invoke_prepared_graph[T](
             relays,
             activate_accepted=False,
             incarnation=ctx.original_incarnation,
-            resources=ctx.hosted_resources,
             notes=notes,
             read_local_machine=lambda: ctx.require_machine().name(),
         )

@@ -10,7 +10,6 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.invocation.compact.source import produce_source
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     prepare_graph,
@@ -53,7 +52,6 @@ async def source(
         saver,
         work.agent_id,
         incarnation.owner,
-        HostedTurnResources(),
         catalog=model_catalog,
         llm_override=config_authority.runtime.lm.llm_override,
         default_reader=lambda _domain, field: config_authority.service_field_value(field),

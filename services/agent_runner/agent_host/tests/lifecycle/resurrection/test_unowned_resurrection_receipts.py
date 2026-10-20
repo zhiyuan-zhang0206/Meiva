@@ -65,7 +65,10 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
     assert not unowned_receipt(db_conn, force_receipt)
     with pytest.raises(ResurrectSettlementDeferredError):
         wake.resurrect_agent(
-            database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+            database,
+            event_bus,
+            aid,
+            resurrected_by="user",
         )
     assert status(db_conn, aid) == ("terminated", "hosted")
 
@@ -99,7 +102,6 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
         event_bus,
         resurrected,
         resurrected_by="user",
-        local_machine=machine_identity.name(),
     )
     ended, _, _, _ = create_agent_row(
         database,
@@ -162,7 +164,10 @@ async def test_released_resources_do_not_depend_on_superseded_restart_history(
         )
     db_conn.commit()
     wake.resurrect_agent(
-        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+        database,
+        event_bus,
+        aid,
+        resurrected_by="user",
     )
     admitted = await admit_hosted_incarnation(
         aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity

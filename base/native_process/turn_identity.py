@@ -5,22 +5,18 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Coroutine, Generator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import partial
-from pathlib import Path
 from typing import Any
 
 from base.log import logger
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 
 
+# meiva:note
+# The identity of one hosted turn Task within its service; never held by the model cache.
 @dataclass
 class HostedTurnResources:
-    """Actual unresolved domains held by one turn Task, never by the model cache."""
-
-    unresolved: dict[Path, object | None] = field(default_factory=dict[Path, object | None])
-    changed: asyncio.Event = field(default_factory=asyncio.Event)
-    completions: set[asyncio.Task[None]] = field(default_factory=set[asyncio.Task[None]])
     service: HostedServiceResources | None = None
 
     def require_service(self) -> HostedServiceResources:
@@ -28,14 +24,6 @@ class HostedTurnResources:
         if self.service is None:
             raise RuntimeError("hosted asynchronous resources require their service owner")
         return self.service
-
-    def complete(self, request: Path, expected: object | None) -> bool:
-        """Only the original resource owner may discharge its exact entry."""
-        if request not in self.unresolved or self.unresolved[request] is not expected:
-            return False
-        del self.unresolved[request]
-        self.changed.set()
-        return True
 
 
 class HostedServiceResources:
@@ -109,28 +97,8 @@ class HostedServiceResources:
             return
         self.failures.append((scope, error))
         logger.opt(exception=error).error(
-            "late hosted resource failure retained until service stop/join: {name}; "
-            "unresolved requests: {requests}",
-            name=name,
-            requests=[str(request) for request in scope.unresolved],
+            "late hosted resource failure retained until service stop/join: {name}", name=name
         )
-
-    def complete_later(
-        self, scope: HostedTurnResources, operation: Coroutine[Any, Any, None], *, name: str
-    ) -> None:
-        """Keep one original completion and its outcome after an invocation returns."""
-
-        async def observe() -> None:
-            try:
-                await operation
-            except asyncio.CancelledError:
-                raise
-            except BaseException as error:
-                self.record_failure(scope, error, name=name)
-
-        task = self.watch(observe(), name=name)
-        scope.completions.add(task)
-        task.add_done_callback(scope.completions.discard)
 
     @property
     def joined(self) -> bool:
@@ -184,8 +152,3 @@ class HostedServiceResources:
             raise errors[0]
         if errors:
             raise BaseExceptionGroup("late hosted resource failures", errors)
-
-
-def hosted_resources_settled(resources: HostedTurnResources | None) -> bool:
-    """Whether this exact turn scope has discharged every registered domain."""
-    return resources is None or not resources.unresolved

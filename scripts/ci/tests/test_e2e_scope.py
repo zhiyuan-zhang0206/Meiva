@@ -14,7 +14,7 @@ _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
 _UNIT_TESTS = [
     "base/lm/tests/test_catalog.py",
     "cli/commands/tests/helper.py",
-    "agent/graph/exec/tests/resources/test_resource_admission_exec.py",
+    "agent/graph/exec/tests/resources/test_output_pipe.py",
     "meizel/tests/test_roles.py",
     "scripts/ci/tests/conftest.py",
 ]

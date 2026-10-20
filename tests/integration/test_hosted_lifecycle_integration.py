@@ -32,7 +32,11 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     if applied:
         assert (
-            await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None)
+            await apply_hosted_lifecycle(
+                aops_pool,
+                owner,
+                bus=event_bus,
+            )
             == "restart"
         )
     with ConnectionPool[psycopg.Connection](
@@ -42,7 +46,14 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
             force_terminate_transaction, agent_id, pool, source="user"
         )
     later = insert_lifecycle_command(db_conn, agent_id, "restart")
-    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None) is None
+    assert (
+        await apply_hosted_lifecycle(
+            aops_pool,
+            owner,
+            bus=event_bus,
+        )
+        is None
+    )
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=database

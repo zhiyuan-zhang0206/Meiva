@@ -1,6 +1,5 @@
 import asyncio
 from dataclasses import replace
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -12,44 +11,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import (
     HostedServiceResources,
     HostedTurnResources,
-    hosted_resources_settled,
 )
-
-
-async def test_concurrent_turn_completion_cannot_discharge_another_owner() -> None:
-    path = Path("same-request")
-    first, second = HostedTurnResources(), HostedTurnResources()
-    first_owner, second_owner = object(), object()
-    first.unresolved[path], second.unresolved[path] = first_owner, second_owner
-    started = asyncio.Event()
-
-    async def complete_first() -> None:
-        await started.wait()
-        assert first.complete(path, first_owner)
-
-    async def inspect_second() -> None:
-        started.set()
-        await asyncio.sleep(0)
-        assert not second.complete(path, first_owner)
-        assert second.unresolved[path] is second_owner
-        assert not hosted_resources_settled(second)
-
-    await asyncio.gather(complete_first(), inspect_second())
-    assert hosted_resources_settled(first)
-    assert second.complete(path, second_owner)
-
-
-def test_late_completion_preserves_replaced_resource_evidence() -> None:
-    resources = HostedTurnResources()
-    path = Path("request")
-    prior, successor = object(), object()
-    resources.unresolved[path] = prior
-    resources.unresolved[path] = successor
-    assert not resources.complete(path, prior)
-    assert not resources.changed.is_set()
-    assert resources.unresolved[path] is successor
-    assert resources.complete(path, successor)
-    assert resources.changed.is_set()
 
 
 def test_copied_context_keeps_original_admission_and_cleanup_scope() -> None:
@@ -69,59 +31,44 @@ def test_copied_context_keeps_original_admission_and_cleanup_scope() -> None:
         MeivaContext(identity=AgentIdentity(17, True)).require_original_incarnation(17)
 
 
-async def test_late_failure_keeps_original_scope_without_cancelling_other_turns(
+async def test_late_failure_is_kept_without_cancelling_other_turns(
     loguru_records: list[dict[str, Any]],
 ) -> None:
     service = HostedServiceResources()
-    first, second = await service.turn(), await service.turn()
-    request, domain = Path("original-request"), object()
-    first.unresolved[request] = domain
+    first = await service.turn()
     failure = RuntimeError("late original completion failed")
     release, sibling_finished = asyncio.Event(), asyncio.Event()
-
-    async def fail_original() -> None:
-        await release.wait()
-        raise failure
 
     async def finish_sibling() -> None:
         await release.wait()
         await asyncio.sleep(0)
         sibling_finished.set()
 
-    service.complete_later(first, fail_original(), name="original-completion")
-    service.complete_later(second, finish_sibling(), name="next-turn-completion")
+    service.watch(finish_sibling(), name="next-turn-completion")
+    service.record_failure(first, failure, name="original-completion")
     release.set()
     await sibling_finished.wait()
     assert service.failures == [(first, failure)]
-    assert first.unresolved[request] is domain
-    assert not hosted_resources_settled(first)
     assert any("retained until service stop/join" in record["message"] for record in loguru_records)
     with pytest.raises(RuntimeError) as observed:
         await service.aclose()
     assert observed.value is failure
-    assert first.unresolved[request] is domain
 
 
 async def test_service_join_waits_for_the_actual_completion() -> None:
     service = HostedServiceResources()
-    scope = await service.turn()
-    request, domain = Path("request"), object()
-    scope.unresolved[request] = domain
+    await service.turn()
     release = asyncio.Event()
 
     async def complete_original() -> None:
         await release.wait()
-        assert scope.complete(request, domain)
 
-    service.complete_later(scope, complete_original(), name="actual-completion")
+    service.watch(complete_original(), name="actual-completion")
     joining = asyncio.create_task(service.aclose())
     await asyncio.sleep(0)
     assert not joining.done()
-    assert scope.unresolved[request] is domain
     release.set()
     await joining
-    assert hosted_resources_settled(scope)
-    assert not scope.completions
     with pytest.raises(RuntimeError, match="already closed"):
         await service.turn()
 
@@ -137,36 +84,29 @@ async def test_service_join_preserves_every_late_unknown_error() -> None:
     assert observed.value.exceptions == (first, second)
 
 
-async def test_uncooperative_completion_returns_bounded_without_discharge() -> None:
+async def test_uncooperative_completion_returns_bounded_without_joining() -> None:
     service = HostedServiceResources()
-    scope = await service.turn()
-    path, domain = Path("still-running"), object()
-    scope.unresolved[path] = domain
+    await service.turn()
     release = asyncio.Event()
 
     async def complete() -> None:
         await release.wait()
-        scope.complete(path, domain)
 
-    service.complete_later(scope, complete(), name="uncooperative-original")
+    service.watch(complete(), name="uncooperative-original")
     loop = asyncio.get_running_loop()
     started = loop.time()
     with pytest.raises(TimeoutError, match="uncooperative-original"):
         await service.aclose(deadline=started + 0.02)
     assert loop.time() - started < 0.5
     assert not service.joined
-    assert scope.unresolved[path] is domain
-    assert len(scope.completions) == 1
-    assert not next(iter(scope.completions)).done()
     release.set()
     await service.aclose()
     assert service.joined
-    assert not scope.unresolved
 
 
 async def test_join_tracks_completion_created_by_a_retained_turn_after_stop() -> None:
     service = HostedServiceResources()
-    scope = await service.turn()
+    await service.turn()
     turn_release, completion_release, created = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
     async def completion() -> None:
@@ -175,7 +115,7 @@ async def test_join_tracks_completion_created_by_a_retained_turn_after_stop() ->
     async def turn() -> None:
         with service.hold_turn(asyncio.current_task()):
             await turn_release.wait()
-            service.complete_later(scope, completion(), name="created-after-stop")
+            service.watch(completion(), name="created-after-stop")
             created.set()
 
     root = asyncio.create_task(turn(), name="original-turn")
@@ -201,7 +141,7 @@ async def test_unknown_and_join_timeout_preserve_both_results() -> None:
     async def pending() -> None:
         await release.wait()
 
-    service.complete_later(scope, pending(), name="pending")
+    service.watch(pending(), name="pending")
     with pytest.raises(ExceptionGroup) as observed:
         await service.aclose(deadline=asyncio.get_running_loop().time())
     assert observed.value.exceptions[0] is failure
@@ -216,7 +156,7 @@ async def test_unknown_and_join_timeout_preserve_both_results() -> None:
 
 async def test_repeated_join_cancel_keeps_new_completion_owned() -> None:
     service = HostedServiceResources()
-    scope = await service.turn()
+    await service.turn()
     turn_release, completion_release = asyncio.Event(), asyncio.Event()
 
     async def completion() -> None:
@@ -225,7 +165,7 @@ async def test_repeated_join_cancel_keeps_new_completion_owned() -> None:
     async def turn() -> None:
         with service.hold_turn(asyncio.current_task()):
             await turn_release.wait()
-            service.complete_later(scope, completion(), name="created-during-join-cancel")
+            service.watch(completion(), name="created-during-join-cancel")
             joining.cancel()
 
     root = asyncio.create_task(turn(), name="original-turn")
@@ -240,7 +180,6 @@ async def test_repeated_join_cancel_keeps_new_completion_owned() -> None:
     with pytest.raises(asyncio.CancelledError):
         await joining
     assert service.joined
-    assert not scope.completions
 
 
 async def test_same_exception_from_distinct_scopes_keeps_both_original_owners() -> None:

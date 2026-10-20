@@ -60,7 +60,6 @@ class TestResurrectAgent:
             agent_id,
             resurrected_by="user",
             prompt="resume work",
-            local_machine=machine_identity.name(),
         )
 
         assert returned == agent_id
@@ -98,7 +97,6 @@ class TestResurrectAgent:
             event_bus,
             agent_id,
             resurrected_by="user",
-            local_machine=machine_identity.name(),
         )
 
         assert returned == agent_id
@@ -133,7 +131,6 @@ class TestResurrectAgent:
             agent_id,
             resurrected_by="agent:42",
             prompt="resume work",
-            local_machine=machine_identity.name(),
         )
 
         rows = inbound_rows(db_conn, agent_id)
@@ -171,7 +168,6 @@ class TestResurrectAgent:
             agent_id,
             resurrected_by="user",
             prompt="catch up with #341",
-            local_machine=machine_identity.name(),
         )
 
         rows = inbound_rows(db_conn, agent_id)
@@ -200,7 +196,6 @@ class TestResurrectAgent:
                 9999,
                 resurrected_by="user",
                 prompt="test",
-                local_machine=machine_identity.name(),
             )
 
     @pytest.mark.parametrize(
@@ -241,7 +236,6 @@ class TestResurrectAgent:
                 agent_id,
                 resurrected_by="user",
                 prompt="test",
-                local_machine=machine_identity.name(),
             )
         assert inbound_count(db_conn, agent_id) == 0
 
@@ -293,7 +287,6 @@ class TestResurrectAgent:
                 agent_id,
                 resurrected_by="user",
                 prompt="test",
-                local_machine=machine_identity.name(),
             )
 
         monkeypatch.undo()
@@ -317,5 +310,4 @@ class TestResurrectAgent:
                 9999,
                 resurrected_by="user",
                 prompt="test",
-                local_machine=machine_identity.name(),
             )

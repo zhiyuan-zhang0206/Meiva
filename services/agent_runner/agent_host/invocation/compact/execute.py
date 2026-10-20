@@ -178,7 +178,11 @@ async def _finish_original(
     continuation.command = command
     if command.outcome in (CompactOutcome.APPLIED, CompactOutcome.REJECTED):
         return await close_terminal(
-            pool, saver, graph, incarnation, command, resources=ctx.hosted_resources
+            pool,
+            saver,
+            graph,
+            incarnation,
+            command,
         )
     if len(continuation.result.summary) < COMPACT_MIN_SUMMARY_CHARS:
         async with async_write_transaction(pool) as conn:
@@ -193,7 +197,11 @@ async def _finish_original(
         raise CompactHeldError("compact lost its original native closure pointer")
     if current.outcome in (CompactOutcome.APPLIED, CompactOutcome.REJECTED):
         return await close_terminal(
-            pool, saver, graph, incarnation, current, resources=ctx.hosted_resources
+            pool,
+            saver,
+            graph,
+            incarnation,
+            current,
         )
     return False
 

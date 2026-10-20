@@ -14,7 +14,6 @@ from loguru import logger
 from agent.graph.exec._child_boundary import result_from_payload
 from agent.graph.exec._result import ExecCrashed, ExecDone
 from agent.graph.exec._subprocess import run_in_subprocess
-from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.memory_pressure import PressureLevel
 from base.host.proc import kill_process_tree
@@ -184,7 +183,6 @@ class _CriticalOs:
 
 async def _run(tmp_path: Path, code: str, *, database_gate: ProcessDbGate) -> Any:
     result, _payload = await run_in_subprocess(
-        Database.from_settings(gate=database_gate),
         code,
         exec_context(424242),
         asyncio.Event(),

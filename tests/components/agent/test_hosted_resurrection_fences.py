@@ -23,9 +23,13 @@ from base.agents.incarnation.resources import (
     ResourceEvidenceError,
     ResourceProcess,
     decode_resources,
-    register_exec,
+    freeze_resources,
 )
-from base.agents.incarnation.tests.test_resources import exec_allocation_entry, force_incarnation
+from base.agents.incarnation.tests.test_resources import (
+    exec_allocation_entry,
+    force_incarnation,
+    plant_exec_allocation,
+)
 from base.agents.messages.inbound import InboundKind
 from base.api_contracts.agent_contract import ResurrectError
 from base.cluster.machine import MachineIdentity
@@ -96,7 +100,11 @@ async def _resurrected(
         item.id for item in await claim_inbound_batch(pool, aid, incarnation=old, work=None)
     ] == [command]
     assert (
-        await apply_hosted_lifecycle(pool, old, bus=EventBus.from_settings(), resources=None)
+        await apply_hosted_lifecycle(
+            pool,
+            old,
+            bus=EventBus.from_settings(),
+        )
         == "terminate"
     )
     resurrect_agent(
@@ -104,7 +112,6 @@ async def _resurrected(
         EventBus.from_settings(),
         aid,
         resurrected_by="user",
-        local_machine=machine_identity.name(),
     )
     row = db.execute("SELECT incarnation_resources FROM agents_meta WHERE id=%s", (aid,)).fetchone()
     assert row is not None
@@ -194,7 +201,7 @@ async def test_released_empty_resources_do_not_require_a_host_exit_probe(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    from base.agents.incarnation import exec_owner_recovery
+    from base.agents.incarnation import resources as resource_module
 
     aid, _command, owner, resources = await _resurrected(
         db_conn,
@@ -222,7 +229,7 @@ async def test_released_empty_resources_do_not_require_a_host_exit_probe(
         checked.append(identity)
         return False
 
-    monkeypatch.setattr(exec_owner_recovery, "process_ended", unresolved)
+    monkeypatch.setattr(resource_module, "process_ended", unresolved)
 
     successor = await admit_hosted_runtime(
         aops_pool, aid, machine_identity.name(), owner, expected_from="idling", db=database
@@ -251,7 +258,11 @@ async def test_crash_reap_resurrect_readmits_in_the_same_live_host(
         machine_identity=machine_identity,
     )
     assert (await stamp_turn_fatal(aops_pool, old)).applied
-    assert await settle_hosted_runtime(aops_pool, old, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        old,
+        bus=event_bus,
+    )
     db_conn.execute(
         "UPDATE agents_meta SET last_turn_fatal_at=now()-interval '16 minutes' WHERE id=%s",
         (old.agent_id,),
@@ -272,7 +283,6 @@ async def test_crash_reap_resurrect_readmits_in_the_same_live_host(
         event_bus,
         old.agent_id,
         resurrected_by="user",
-        local_machine=machine_identity.name(),
         trigger_inbound_id=trigger,
         trigger_inbound_kind=InboundKind.CHAT if fresh_chat else None,
     )
@@ -285,13 +295,17 @@ async def test_crash_reap_resurrect_readmits_in_the_same_live_host(
         db=database,
     )
     assert successor is not None and successor.generation != old.generation
-    assert not await settle_hosted_runtime(aops_pool, old, bus=event_bus, resources=None)
+    assert not await settle_hosted_runtime(
+        aops_pool,
+        old,
+        bus=event_bus,
+    )
     assert not (await stamp_turn_fatal(aops_pool, old)).applied
     with (
         pytest.raises(ResourceEvidenceError, match="lost its runtime incarnation"),
         db_conn.transaction(),
     ):
-        register_exec(db_conn, old, exec_allocation_entry())
+        freeze_resources(db_conn, old, 1)
     row = db_conn.execute(
         "SELECT status,runtime_generation,runtime_owner,last_turn_fatal_at,incarnation_resources "
         "FROM agents_meta WHERE id=%s",
@@ -367,7 +381,7 @@ async def test_resurrection_keeps_unresolved_exec_identity_for_receipt_recovery(
     )
     entry = exec_allocation_entry()
     with db_conn.transaction():
-        register_exec(db_conn, old, entry)
+        plant_exec_allocation(db_conn, old, entry)
         command = force_incarnation(db_conn, old)
     with pytest.raises(ResurrectError, match="exec resources remain unresolved"):
         resurrect_agent(
@@ -375,7 +389,6 @@ async def test_resurrection_keeps_unresolved_exec_identity_for_receipt_recovery(
             event_bus,
             old.agent_id,
             resurrected_by="user",
-            local_machine=machine_identity.name(),
         )
     row = db_conn.execute(
         "SELECT status,runtime_generation,runtime_owner,incarnation_resources,lifecycle_command_id "

@@ -26,7 +26,6 @@ from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.paths import meiva_home
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops.agents.resurrection_retry import (
     ResurrectSettlementDeferredError,
@@ -166,13 +165,10 @@ def _prepare_resurrect_attempt(
     prompt: str | None,
     trigger_inbound_id: int | None,
     trigger_inbound_kind: WakeTriggerKind | None,
-    local_machine: str,
 ) -> telemetry.Event:
     """Commit ordinary resurrection and its optional prompt before waking the host."""
-    from base.agents.incarnation.exec_owner_recovery import recover_local_resources
     from base.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_resurrect
 
-    recover_local_resources(db, agent_id, local_machine, home=meiva_home())
     with db.write_transaction() as conn, conn.cursor() as cur:
         # Task before agent: producers hold the task while inserting an inbound
         # whose foreign key can lock agents_meta. Keep the same lock order.
@@ -283,7 +279,6 @@ def resurrect_agent(
     prompt: str | None = None,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
-    local_machine: str,
 ) -> int:
     """Resume a terminated hosted incarnation for explicit or exact new input.
 
@@ -303,7 +298,6 @@ def resurrect_agent(
         prompt=prompt,
         trigger_inbound_id=trigger_inbound_id,
         trigger_inbound_kind=trigger_inbound_kind,
-        local_machine=local_machine,
     )
     telemetry.emit_prepared(prepared_event)
     logger.info(

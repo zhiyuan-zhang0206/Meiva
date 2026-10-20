@@ -171,7 +171,7 @@ async def test_late_unknown_is_visible_before_service_join_without_sibling_cance
         await entered.wait()
     assert not old_event.is_set()
     assert not service.failures
-    service.complete_later(await service.turn(), other_turn(), name="other-agent")
+    service.watch(other_turn(), name="other-agent")
     release.set()
     await sibling_alive.wait()
     assert service.failures == [(scope, failure)]

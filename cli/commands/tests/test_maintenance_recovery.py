@@ -91,7 +91,11 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
     )
     assert [item.id for item in batch] == [hold.commands[agent]]
     assert (
-        await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus, resources=None)
+        await apply_hosted_lifecycle(
+            aops_pool,
+            incarnation,
+            bus=event_bus,
+        )
         == "restart"
     )
     successor = AgentHost(
@@ -374,7 +378,11 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
     )
     assert len(batch) == 1
     assert (
-        await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus, resources=None)
+        await apply_hosted_lifecycle(
+            aops_pool,
+            incarnation,
+            bus=event_bus,
+        )
         == "restart"
     )
     monkeypatch.setattr(pause_owner, "change_maintenance", original)

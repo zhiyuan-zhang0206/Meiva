@@ -21,7 +21,7 @@ root of a process calls it once and passes the result down.
 A helper takes one of two forms. The **pure form** `H(home)` (`traces_dir`, `skills_dir`,
 `mcps_dir`, `install_registry_path`, `running_sha_path`, `launch_failures_path`, the run
 tree — `run_dir`, `exec_run_dir`, `root_run_dir`, `root_manifests_path`, the chrome, computer,
-permissions-helper, insights and MCP-daemon sockets, `insights_pidfile` — `quarantined_exec_requests_dir`
+permissions-helper, insights and MCP-daemon sockets, `insights_pidfile`
 and the `otel_collector_*` paths) derives a path from the home it is handed: it reads no
 environment and creates nothing, so a test hands in `tmp_path` and the process that binds a
 socket, takes a lock or writes a file creates the directory. The zero-argument

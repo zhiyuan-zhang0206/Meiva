@@ -117,7 +117,6 @@ def test_a_chat_queued_before_the_fence_cannot_resurrect(
             resurrected_by="system",
             trigger_inbound_id=row[0],
             trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
         )
 
 
@@ -197,7 +196,6 @@ def test_a_resurrection_records_its_audit_fact(
         resurrected_by="system",
         trigger_inbound_id=wake_id,
         trigger_inbound_kind=InboundKind.CHAT,
-        local_machine=machine_identity.name(),
     )
 
     assert [source for source, _ in _audit_rows(db_conn, agent_id, "resurrect")] == ["system"]

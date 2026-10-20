@@ -506,7 +506,11 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
         ),
         _config(tid),
     )
-    await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None)
+    await apply_hosted_lifecycle(
+        aops_pool,
+        old,
+        bus=event_bus,
+    )
 
     assert cmd.goto == END
     assert cmd.update is not None
@@ -561,7 +565,11 @@ async def test_compact_in_same_batch_as_restart(
         ),
         _config(tid),
     )
-    await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None)
+    await apply_hosted_lifecycle(
+        aops_pool,
+        old,
+        bus=event_bus,
+    )
 
     assert cmd.goto == END
     assert cmd.update is not None

@@ -102,7 +102,6 @@ class TestResurrectAgent:
             event_bus,
             agent_id,
             resurrected_by="user",
-            local_machine=machine_identity.name(),
         )
 
         with db_conn.cursor() as cur:
@@ -160,7 +159,6 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
-                local_machine=machine_identity.name(),
             )
 
         row = agents_row(db_conn, agent_id)
@@ -223,7 +221,6 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
-                local_machine=machine_identity.name(),
             )
 
         row = agents_row(db_conn, agent_id)
@@ -272,7 +269,6 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
-                local_machine=machine_identity.name(),
             )
 
         row = agents_row(db_conn, agent_id)
@@ -318,7 +314,6 @@ class TestResurrectAgent:
             resurrected_by="system",
             trigger_inbound_id=trigger_id,
             trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
         )
 
         assert returned == agent_id
@@ -369,7 +364,6 @@ class TestResurrectAgent:
             resurrected_by="system",
             trigger_inbound_id=compact_id,
             trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
-            local_machine=machine_identity.name(),
         )
 
         assert returned == agent_id
@@ -421,7 +415,6 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
                 trigger_inbound_kind=InboundKind.CHAT,
-                local_machine=machine_identity.name(),
             )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -437,7 +430,6 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
                 trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
-                local_machine=machine_identity.name(),
             )
 
         assert agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]
@@ -490,6 +482,5 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
                 trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
-                local_machine=machine_identity.name(),
             )
         assert agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]

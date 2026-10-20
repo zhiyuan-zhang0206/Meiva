@@ -20,6 +20,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
+from base.native_process.tests.host_pipe import live_host_control
 from meiva import boot
 from meiva.sdk_surface.installation import Installation
 from meiva.tests.fixtures.pin_agent import exec_context
@@ -80,21 +81,23 @@ def spawn_real_child(
             state=state,
             incarnation=None,
         )
-    proc = subprocess.run(
-        [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
-        capture_output=True,
-        text=True,
-        env=child_env(
-            tmp_path,
-            request_path,
-            result_path,
-            config_overlay=config_overlay,
-            birth_config=birth_config,
-            launcher_env=launcher_env,
-        ),
-        timeout=120,
-        check=False,
-    )
+    with live_host_control() as stdin:
+        proc = subprocess.run(
+            [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
+            stdin=stdin,
+            capture_output=True,
+            text=True,
+            env=child_env(
+                tmp_path,
+                request_path,
+                result_path,
+                config_overlay=config_overlay,
+                birth_config=birth_config,
+                launcher_env=launcher_env,
+            ),
+            timeout=120,
+            check=False,
+        )
     return proc, request_path, result_path
 
 

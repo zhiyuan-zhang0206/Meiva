@@ -298,7 +298,6 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
     # The parent receives this budget explicitly; the child ships raw chunks.
 
     result, _payload = await run_in_subprocess(
-        database,
         code="for i in range(20000): print('spam', i)\nprint('DONE_MARKER')",
         context=exec_context(1),
         cancel_event=asyncio.Event(),

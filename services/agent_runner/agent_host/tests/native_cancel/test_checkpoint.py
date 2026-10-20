@@ -1,5 +1,4 @@
 import asyncio
-from pathlib import Path
 from uuid import uuid4
 
 import psycopg
@@ -41,7 +40,12 @@ async def test_checkpoint_flush_ack_and_retained_terminal_receipt(
         )
     marker = NativeCancelMarker(command_id=accepted.command_id, target=target)
     assert await settle_native_invocation(
-        aops_pool, saver, graph, incarnation, target, config, resources=None
+        aops_pool,
+        saver,
+        graph,
+        incarnation,
+        target,
+        config,
     )
     cold = cold_reader(aops_pool)
     cold.serde = JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())
@@ -133,34 +137,6 @@ async def test_no_protected_command_never_adds_cold_startup_hold(
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     _graph, _saver, _config, _history = await prepare_graph(aops_pool, target.agent_id, 1, [])
     assert await recover_native_cancel(aops_pool, incarnation)
-
-
-async def test_empty_database_set_does_not_override_live_continuation_resource(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    tmp_path: Path,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    pool: ConnectionPool
-    from base.native_process.turn_identity import HostedTurnResources
-
-    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-    graph, saver, config, _history = await prepare_graph(aops_pool, target.agent_id, 1, [])
-    with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
-        accepted = await asyncio.to_thread(
-            accept_native_cancel, pool, "live-resource", target.agent_id, target
-        )
-    scope = HostedTurnResources(unresolved={tmp_path / "live-domain": object()})
-    original = await graph.aget_state(config)
-    with pytest.raises(NativeWorkUncertainError, match="unresolved"):
-        await settle_native_invocation(
-            aops_pool, saver, graph, incarnation, target, config, resources=scope
-        )
-    assert (await graph.aget_state(config)).config == original.config
-    assert db_conn.execute(
-        "SELECT outcome FROM native_cancel_commands WHERE id=%s", (accepted.command_id,)
-    ).fetchone() == ("accepted",)
 
 
 @pytest.mark.parametrize("missing", [True, False])

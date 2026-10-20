@@ -9,15 +9,14 @@ description: Nullable server-owned resource evidence and conservative schema ret
 `agents_meta.incarnation_resources` is separate from configuration. NULL means
 unknown, not an empty resource set. The additive migration does not initialize
 historical owners or grant resource admission. Actual admission must
-establish ownership and close any recorded exec allocations before creating
-a complete empty set; a dead PID, expired lease or absent file cannot discharge
-an exec allocation.
+establish ownership before creating a complete empty set.
 
-Registration and force acceptance must serialize on the same metadata row.
-An exec must be registered before its user-code permit; once force freezes the
-incarnation, no additional resource may be admitted. Exact request/domain
-evidence, not a caller-selected list, controls discharge. Execution and force
-deadlines are distinct, fixed authorities and cannot renew one another.
+An exec leaves no database evidence: nothing registers, attaches or discharges an
+allocation any more (see "Exec processes" below). The stored model still carries a
+`requests` map for values an earlier runtime wrote; a non-empty map refuses
+successor admission and resurrection until an operator clears it by hand. Force
+acceptance serializes on the metadata row and freezes the stored set
+(`freeze_resources`); a frozen set refuses same-owner admission.
 
 A retirement migration takes ACCESS EXCLUSIVE before checking evidence and
 retains that lock through DROP. Only entirely NULL, never-enabled storage can
@@ -33,8 +32,8 @@ owner, kind and per-agent PID are released, a successor may transfer the empty
 resource set under the same row lock as its ownership claim. Admission does not
 query historical restart or terminate receipts. A failed model turn can be reaped
 and resurrected in the same live shared host; it needs no synthetic lifecycle
-receipt and no host restart. Resurrection refuses unresolved exec allocations
-before releasing the identity, so exact receipt recovery retains its target.
+receipt and no host restart. Resurrection refuses a stored exec allocation
+before releasing the identity.
 
 An unreleased managed owner can be replaced only when its admission-captured
 host native birth is proven ended, with an empty, unfrozen resource set. A live
@@ -59,47 +58,18 @@ remain unknown and cannot become empty through admission.
 Admission runs under the least-privilege `meiva_runner` database identity, which
 holds no write privilege on `deployment_state`.
 
-Managed exec launches the fixed isolated read-only `agent.execution.domain_owner`
-entry (`-I -B -X utf8`) behind a permit gate, validates its captured launcher birth and
-direct root, and then registers and attaches the allocation atomically under the
-metadata lock. Only that committed transaction permits user code. Force winning
-before the transaction leaves no database allocation; the host closes the gated
-owner and requires its exact `host_eof` receipt before clearing the in-process
-scope. An ambiguous commit remains unresolved. The root is gated by
-`agent.execution.owner_child`; after the permit it rechecks the reserved payload digest
-and exact request/result paths. An allocation's `request_digest` is versioned: version 1 is the envelope's sha256 and
-refuses a mismatch; version 2 is the allocation identity and reports every payload
-condition (`matched`, `changed`, `missing`, `unreadable`, `symlink`, `oversize`)
-instead, recording it under `<exec dir>/<agent_id>/evidence/`. Classification uses
-`lstat` and never follows the entry. Payload integrity is detection, not authority;
-`resources.exec_identity_digest` owns the identity form.
+## Exec processes
 
-Neither child inherits the host's control write end. The managed host poll loop publishes pending output incrementally and sends
-keepalives while the owner remains live; completion flushes only the unpublished
-tail. Task cancellation closes the owner's control input but does not abandon an
-in-flight registration transaction or an attached allocation. The caller retains
-those tasks and consumes the exact terminal receipt before propagating cancellation;
-cancellation cannot abandon a completion consumer before resource ownership
-has been settled.
-The gated child's independent deadline and normal stop/result ownership:
-[[../../../../agent/execution/docs/gated-deadline.meiva.okf.md|gated child deadline]].
-The owner remains alive after host EOF, closes the managed domain, reaps its
-root, joins the output reader and exclusively publishes the terminal receipt.
-Request files live in exact domain subdirectories outside legacy age pruning.
-Missing/partial receipts and owner death without a receipt retain uncertainty.
-The native domain and close-grace constant live in `base.native_process.exec_domain`;
-the owner never imports `agent.graph` or its eager SDK/plugin initialization.
-Control is read nonblockingly by the owner loop itself, without a buffered-stdin
-daemon that could hold an interpreter shutdown lock. Partial/oversized records
-refuse; the original deadline still bounds reads.
-
-Existing local wake and admission paths recover only entries selected by the
-complete DB map. They verify the exact immutable context, request digest,
-owner/root receipt and ended owner before CAS discharge. Dead-host force
-completion additionally requires the admission-captured host PID/birth to have
-ended and the entire frozen set to be discharged. Same-user arbitrary code is
-not sandboxed; the guarantee is registered managed-domain closure, not every
-possible detached or breakaway process. Persistent sessions remain independent.
+The host launches each exec child directly (`agent.execution.child`, see
+[[agent/graph/exec/docs/exec.meiva.okf.md]]) as the leader of its own session and
+process group, and kills that group before it returns. The host keeps the write end of
+the child's stdin pipe until it has reaped the leader: when the host dies, the
+child reads end-of-file and kills its own group. A restarted agent host empties
+`run/exec` before it serves. A successor therefore needs no per-exec evidence from
+the database; the facts it relies on are the predecessor host's stored
+`host_process` (proven ended below) and lease expiry. Same-user arbitrary code is
+not sandboxed: the guarantee is the exec's process group, not every possible detached
+or breakaway process. Persistent sessions remain independent.
 
 Every `ResourceProcess` receipt requires explicit `starttime` and `boot_id`
 fields. Local Linux custody requires PID, exact kernel start ticks, and boot
@@ -108,12 +78,10 @@ boot UUID and exact stable kernel birth. Missing historical
 native fields refuse; they cannot become evidence that a host ended. A different
 recorded boot or exact native PID reuse proves the prior process ended without
 authorizing work on its replacement. Failed identity observation remains unknown.
-Fresh host and ready-handshake captures compare native births; database CAS and
-terminal receipts retain exact model equality, including the original timestamp.
-Same-incarnation admission preserves the stored receipt rather than rewriting its facts.
-
-Owner domain closure:
-[[domain-closure.meiva.okf.md|domain closure]].
+Fresh host captures compare native births; database CAS retains exact model equality,
+including the original timestamp. `resources.process_ended` is the one probe that turns
+a stored receipt into "this process ended". Same-incarnation admission preserves the
+stored receipt rather than rewriting its facts.
 
 Hosted admission retains the exact owner and resource fences. It does not
 produce a cross-generation work-transfer certificate or recover cancellation.

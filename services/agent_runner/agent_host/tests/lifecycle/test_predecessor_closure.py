@@ -344,7 +344,11 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
         for item in await claim_inbound_batch(aops_pool, aid, incarnation=incarnation, work=None)
     ] == [command]
     assert (
-        await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus, resources=None)
+        await apply_hosted_lifecycle(
+            aops_pool,
+            incarnation,
+            bus=event_bus,
+        )
         == "restart"
     )
 

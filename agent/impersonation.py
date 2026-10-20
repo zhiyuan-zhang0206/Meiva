@@ -38,7 +38,6 @@ from base.agents.observation.relay_supervision import terminate_relay as termina
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources, hosted_resources_settled
 
 
 async def native_status(
@@ -200,16 +199,12 @@ async def _activate_accepted(
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
     *,
-    resources: HostedTurnResources | None,
     notes: HandoffNotes,
     read_local_machine: Callable[[], str],
 ) -> dict[str, Any] | None:
     """Activate an accepted lease; None when the relay gate failed and native control resumes."""
     from base.agents.impersonation import activate
 
-    # Continuations and managed exec resources must settle before activation.
-    if not hosted_resources_settled(resources):
-        raise RuntimeError("cannot activate impersonation with unresolved native exec resources")
     await _handoff.ensure_start_marker(graph, session, notes=notes)
     # The bound relay must be live before the takeover stands. On failure
     # the lease is rolled back to 'rejected' with a loud reason and the
@@ -269,7 +264,6 @@ async def settle_checkpoint(
     *,
     activate_accepted: bool = True,
     incarnation: RuntimeIncarnation | None,
-    resources: HostedTurnResources | None,
     notes: HandoffNotes,
     read_local_machine: Callable[[], str],
 ) -> bool:
@@ -288,7 +282,6 @@ async def settle_checkpoint(
             session,
             incarnation,
             relays,
-            resources=resources,
             notes=notes,
             read_local_machine=read_local_machine,
         )

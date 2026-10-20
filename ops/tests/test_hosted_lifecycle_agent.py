@@ -94,7 +94,6 @@ async def test_hosted_restart_leaves_shell_sessions_for_the_later_terminate(
             owner,
             kill_shell_sessions=lambda _aid, _cutoff: kills.append((_aid, None)),
             bus=event_bus,
-            resources=None,
         )
         == "restart"
     )
@@ -113,7 +112,11 @@ async def test_hosted_apply_without_a_bound_killer_refuses_a_kill_request(
     command = _terminate_command(db_conn, agent_id, kill=True)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     with pytest.raises(RuntimeError, match="no killer is bound"):
-        await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None)
+        await apply_hosted_lifecycle(
+            aops_pool,
+            owner,
+            bus=event_bus,
+        )
     assert db_conn.execute(
         "SELECT i.applied_at, m.status FROM inbound_messages i JOIN agents_meta m "
         "ON m.id=i.agent_id WHERE i.id=%s",

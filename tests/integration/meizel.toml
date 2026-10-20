@@ -22,7 +22,6 @@
 "test_impersonation_notifications.py#monkeypatch.setattr cli.commands.agents.impersonation_adapters.emit_claude" = 2
 "test_impersonation_notifications.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.reserve_delivery" = 1
 "test_termination_shell_cleanup.py#monkeypatch.setattr agent.ownership.hosted_cleanup.publish_agent_updated" = 1
-"test_termination_shell_cleanup.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.exec_run_dir" = 2
 
 [debt.restricted-python]
 "test_schedule_runner_cleanup.py#python -c" = 1

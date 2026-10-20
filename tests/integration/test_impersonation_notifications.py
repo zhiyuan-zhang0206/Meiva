@@ -252,7 +252,9 @@ async def _terminate_native(
             assert _native_notices(db_conn, owner.agent_id) == []
             assert (
                 await apply_hosted_lifecycle(
-                    aops_pool, owner, bus=EventBus.from_settings(), resources=None
+                    aops_pool,
+                    owner,
+                    bus=EventBus.from_settings(),
                 )
                 == "terminate"
             )
@@ -318,7 +320,6 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         event_bus,
         owner.agent_id,
         resurrected_by="user",
-        local_machine=machine_identity.name(),
     )
     successor = await admit_hosted_runtime(
         aops_pool,
@@ -655,7 +656,6 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
         owner.agent_id,
         resurrected_by="user",
         prompt="Continue",
-        local_machine=machine_identity.name(),
     )
     ordered = db_conn.execute(
         "SELECT kind,payload->>'note_tag' FROM inbound_messages "

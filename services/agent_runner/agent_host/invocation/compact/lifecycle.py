@@ -17,7 +17,6 @@ from base.agents.inbox.native_restart import (
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources
 
 
 async def settle_original_restart(
@@ -28,7 +27,6 @@ async def settle_original_restart(
     drop_agent: Callable[[int], None],
     *,
     incarnation: RuntimeIncarnation | None = None,
-    resources: HostedTurnResources | None,
 ) -> bool:
     """Return whether this exact original invocation ended through restart.
 
@@ -64,7 +62,12 @@ async def settle_original_restart(
             raise CompactHeldError("interrupted compact restart requires inspection")
         await require_receiver(conn, command, incarnation)
     drop_agent(agent_id)
-    return await _apply_original(pool, bus, original, command_id, resources=resources)
+    return await _apply_original(
+        pool,
+        bus,
+        original,
+        command_id,
+    )
 
 
 async def _apply_original(
@@ -72,11 +75,12 @@ async def _apply_original(
     bus: EventBus,
     original: RuntimeIncarnation,
     command_id: int,
-    *,
-    resources: HostedTurnResources | None,
 ) -> bool:
     kind = await apply_hosted_lifecycle(
-        pool, original, bus=bus, expected_command_id=command_id, resources=resources
+        pool,
+        original,
+        bus=bus,
+        expected_command_id=command_id,
     )
     if kind != "restart":
         raise CompactHeldError("original compact restart remains incomplete")

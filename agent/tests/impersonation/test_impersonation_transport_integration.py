@@ -92,7 +92,6 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -176,7 +175,6 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -222,7 +220,6 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
         owner.agent_id,
         replacement_ctx.relays,
         incarnation=successor,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -278,7 +275,6 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -407,7 +403,6 @@ async def test_end_note_resumes_an_empty_queue(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -425,7 +420,6 @@ async def test_end_note_resumes_an_empty_queue(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -492,7 +486,6 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -533,7 +526,6 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=None,
         notes=handoff_notes(),
         read_local_machine=machine_identity.name,
     )

@@ -49,7 +49,6 @@ def test_direct_wake_rejects_control_kind_before_db_access(
             resurrected_by="system",
             trigger_inbound_id=1,
             trigger_inbound_kind=InboundKind.RESTART,  # type: ignore[arg-type] -- exercise raw boundary
-            local_machine=machine_identity.name(),
         )
     assert db.mock_calls == []
     assert bus.mock_calls == []

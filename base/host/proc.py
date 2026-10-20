@@ -55,40 +55,38 @@ _REAP_TIMEOUT_S = 5.0
 # drain the new hang — the whole defect one layer down.
 _DRAIN_TIMEOUT_S = 5.0
 
-# The entry modules an agent exec-domain session leader runs. Both exec spawn
-# shapes make their root the session leader (`start_new_session`): the
-# protocol-zero spawn runs `agent.execution.child` directly
-# (`agent/graph/exec/_subprocess.py::_spawn`), and the owned protocol spawns
-# `agent.execution.owner_child` as the root (`agent/execution/domain_owner.py`), which
-# runs the same payload via `runpy` in-process. Compared as whole argv
-# elements: the token is one exact argument, never a substring.
-EXEC_DOMAIN_SESSION_ENTRIES = frozenset({"agent.execution.child", "agent.execution.owner_child"})
+# meiva:note
+# The entry module an agent exec-domain session leader runs. The exec spawn
+# makes its root the session leader (`start_new_session`) and runs
+# `agent.execution.child` directly (`agent/graph/exec/_subprocess.py::spawn_exec_child`).
+# Compared as whole argv elements: the token is one exact argument, never a substring.
+EXEC_DOMAIN_SESSION_ENTRIES = frozenset({"agent.execution.child"})
 
 
+# meiva:note
+# The agent exec domain this process runs inside — the entry module of this
+# process's session leader (`agent.execution.child`), or
+# None when this process is not in an exec-domain session.
+#
+# Membership, not ancestry: the exec root calls setsid (its spawn passes
+# `start_new_session`), and `ExecProcessDomain.kill_and_reap()` SIGKILLs its process
+# group as the tool call returns, while `sh -c "nohup meiva … &"` reparents the
+# child out of any covered lineage WITHOUT leaving the session — the
+# 2026-09-12 stranding: a restart that passed the ancestry guard was
+# group-killed mid-drain and left the host paused. The session id is the
+# widest cheap probe: every member still shares it after reparenting, and a
+# member that re-arranged its process group (interactive job control) is
+# refused too — deliberately, because the leg is still tied to an ephemeral
+# call, not only to the kill that call performs. The env marker is not usable
+# for this: `cli.main` clears `MEIVA_PROCESS_PROFILE` before any dispatch
+# (`docs/decisions/runtime/config/2026-08-24-cli-full-settings-profile.md`) and session shells
+# carry the exec request/result files and agent id as well, so only the
+# session's identity discriminates (see `hosting_supervised_session` for the
+# hosted-service half of the same refusal).
+#
+# A session whose leader already exited reads as None — the argv evidence is
+# gone with it, and the domain's own teardown is already in flight by then.
 def hosting_exec_domain() -> str | None:
-    """The agent exec domain this process runs inside — the entry module of this
-    process's session leader (`agent.execution.child` / `agent.execution.owner_child`), or
-    None when this process is not in an exec-domain session.
-
-    Membership, not ancestry: the exec root calls setsid (its spawn passes
-    `start_new_session`), and `ExecProcessDomain.close()` SIGKILLs its process
-    group as the tool call returns, while `sh -c "nohup meiva … &"` reparents the
-    child out of any covered lineage WITHOUT leaving the session — the
-    2026-09-12 stranding: a restart that passed the ancestry guard was
-    group-killed mid-drain and left the host paused. The session id is the
-    widest cheap probe: every member still shares it after reparenting, and a
-    member that re-arranged its process group (interactive job control) is
-    refused too — deliberately, because the leg is still tied to an ephemeral
-    call, not only to the kill that call performs. The env marker is not usable
-    for this: `cli.main` clears `MEIVA_PROCESS_PROFILE` before any dispatch
-    (`docs/decisions/runtime/config/2026-08-24-cli-full-settings-profile.md`) and session shells
-    carry the exec request/result files and agent id as well, so only the
-    session's identity discriminates (see `hosting_supervised_session` for the
-    hosted-service half of the same refusal).
-
-    A session whose leader already exited reads as None — the argv evidence is
-    gone with it, and the domain's own teardown is already in flight by then.
-    """
     cmdline = process_cmdline(os.getsid(0))
     if cmdline is None:
         return None

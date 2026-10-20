@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from uuid import uuid4
 
 import psutil
@@ -8,12 +7,12 @@ import pytest
 from pydantic import ValidationError
 
 from base import native_process
-from base.agents.incarnation import exec_owner_recovery
-from base.agents.incarnation.exec_owner_recovery import process_ended
+from base.agents.incarnation import resources
 from base.agents.incarnation.resources import (
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
+    process_ended,
 )
 from base.native_process import ownership as proc_tree
 
@@ -70,7 +69,7 @@ def test_incomplete_linux_receipt_never_proves_absence(
     def no_observation(_pid: int) -> psutil.Process:
         raise AssertionError("incomplete evidence reached a PID observation")
 
-    monkeypatch.setattr(exec_owner_recovery.psutil, "Process", no_observation)
+    monkeypatch.setattr(resources.psutil, "Process", no_observation)
     assert not process_ended(original)
     with pytest.raises(ResourceEvidenceError, match="native evidence"):
         original.as_identity()
@@ -97,7 +96,7 @@ def test_another_boot_proves_prior_process_ended_without_adopting_pid(
     def no_observation(_pid: int) -> psutil.Process:
         raise AssertionError("prior boot must not inspect the replacement PID")
 
-    monkeypatch.setattr(exec_owner_recovery.psutil, "Process", no_observation)
+    monkeypatch.setattr(resources.psutil, "Process", no_observation)
     assert process_ended(original)
     with pytest.raises(ResourceEvidenceError, match="another boot"):
         original.as_identity()
@@ -155,52 +154,3 @@ def test_same_host_admission_keeps_original_receipt_after_clock_movement(
     linux_birth["birth"] += 60
     admitted = next_incarnation_resources(row, target, ResourceProcess.capture(psutil.Process()))
     assert admitted == state
-
-
-@pytest.mark.parametrize("changed", [None, "launcher_tick", "owner_tick", "root_tick", "ancestry"])
-def test_ready_handshake_uses_retained_native_launcher_and_child(
-    linux_birth: dict[str, float | int], monkeypatch: pytest.MonkeyPatch, changed: str | None
-) -> None:
-    from datetime import UTC, datetime, timedelta
-
-    from base.agents.incarnation import exec_owner_protocol
-    from base.agents.incarnation.exec_owner_protocol import OwnerReady, validate_native_ready
-    from base.agents.incarnation.resources import ExecAllocation
-
-    owner = ResourceProcess(pid=41, birth=100.0, starttime=70, boot_id=_BOOT)
-    child = ResourceProcess(pid=42, birth=100.0, starttime=71, boot_id=_BOOT)
-    launcher = owner
-    if changed == "launcher_tick":
-        launcher = launcher.model_copy(update={"starttime": 72})
-    if changed == "owner_tick":
-        owner = owner.model_copy(update={"starttime": 72})
-    if changed == "root_tick":
-        child = child.model_copy(update={"starttime": 72})
-    ready = OwnerReady(
-        allocation=ExecAllocation(
-            request=uuid4(),
-            domain=uuid4(),
-            request_digest="a" * 64,
-            deadline=datetime.now(UTC) + timedelta(seconds=30),
-            owner_process=owner,
-            root_process=child,
-        )
-    )
-    observed = {
-        41: ResourceProcess(pid=41, birth=500.0, starttime=70, boot_id=_BOOT),
-        42: ResourceProcess(pid=42, birth=500.0, starttime=71, boot_id=_BOOT),
-    }
-
-    def capture(process: psutil.Process) -> ResourceProcess:
-        return observed[process.pid]
-
-    def process(pid: int) -> SimpleNamespace:
-        return SimpleNamespace(pid=pid, ppid=lambda: 99 if changed == "ancestry" else 41)
-
-    monkeypatch.setattr(ResourceProcess, "capture", capture)
-    monkeypatch.setattr(exec_owner_protocol.psutil, "Process", process)
-    if changed is None:
-        validate_native_ready(ready, launcher)
-    else:
-        with pytest.raises(ValueError, match=r"birth changed|direct child"):
-            validate_native_ready(ready, launcher)

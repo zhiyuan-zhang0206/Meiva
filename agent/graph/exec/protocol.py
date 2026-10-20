@@ -1,30 +1,29 @@
-"""Exec-subprocess protocol — request/result envelopes and typed
-(de)serialization, shared by the parent (`agent/graph/exec/_subprocess.py`)
-and the child entry (`agent/execution/child.py`).
-
-Two envelope files per run, both under `<exec_dir>/<agent_id>/` and chmod 0600 (the
-snapshot carries the agent's full message history — same sensitivity as the
-logs it shares the home with):
-
-- request `<uuid>.json`: the code, the agent id (the attribution key the quarantine tooling in
-  `base/agents/incarnation/exec_request_evidence.py` reads), the description of the run's
-  `MeivaContext` (identity; `MeivaContext.describe`), the timeout, and the typed state snapshot.
-- result  `<uuid>.json`: the outcome kind, the state-update delta (plugin fields,
-  security findings, attachment registrations), the run's SDK-call tally, and — for a crash —
-  the child-formatted traceback text.
-
-Request leftovers are durable cleanup evidence and are never age-pruned;
-normal resource settlement removes them exactly.
-
-The envelope itself is plain JSON (cat-able for postmortem). The two typed
-payloads — the state snapshot (parent -> child) and the state-update delta
-(child -> parent) — ride as base64-wrapped `JsonPlusSerializer.dumps_typed`
-blobs: that is the serializer the LangGraph checkpointer already uses with
-`checkpoint_msgpack_allowlist`, so langchain messages, plugin pydantic models,
-and `set` deltas round-trip exactly. Verified in tests (AIMessage
-`usage_metadata` included; `convert_to_messages` would lose it — do not use
-that here).
-"""
+# meiva:note
+# Exec-subprocess protocol — request/result envelopes and typed
+# (de)serialization, shared by the parent (`agent/graph/exec/_subprocess.py`)
+# and the child entry (`agent/execution/child.py`).
+#
+# Two envelope files per run, both under `<exec_dir>/<agent_id>/` and chmod 0600 (the
+# snapshot carries the agent's full message history — same sensitivity as the
+# logs it shares the home with):
+#
+# - request `<uuid>.json`: the code, the agent id, the description of the run's
+#   `MeivaContext` (identity; `MeivaContext.describe`), the timeout, and the typed state snapshot.
+# - result  `<uuid>.json`: the outcome kind, the state-update delta (plugin fields,
+#   security findings, attachment registrations), the run's SDK-call tally, and — for a crash —
+#   the child-formatted traceback text.
+#
+# The parent deletes both files when the run ends; whatever a dead host left behind is
+# removed when the next agent host starts (`agent.process_boot.clear_exec_run_dir`).
+#
+# The envelope itself is plain JSON (cat-able for postmortem). The two typed
+# payloads — the state snapshot (parent -> child) and the state-update delta
+# (child -> parent) — ride as base64-wrapped `JsonPlusSerializer.dumps_typed`
+# blobs: that is the serializer the LangGraph checkpointer already uses with
+# `checkpoint_msgpack_allowlist`, so langchain messages, plugin pydantic models,
+# and `set` deltas round-trip exactly. Verified in tests (AIMessage
+# `usage_metadata` included; `convert_to_messages` would lose it — do not use
+# that here).
 
 from __future__ import annotations
 
@@ -59,13 +58,9 @@ RESULT_KINDS: frozenset[str] = frozenset({"done", "cancelled", "timed_out", "lif
 # anything larger means an agent stuffed a giant object into the delta.
 MAX_ENVELOPE_BYTES = 64 * 1024 * 1024
 
-# Stale result files older than this are pruned when the parent allocates a new
-# pair. Request/gate files are crash-stable resource evidence and are retained.
 # meiva:note
-# Age never removes request evidence here; a settled domain directory leaves
-# only through `base/agents/incarnation/exec_domain_cleanup.py`, which proves
-# settlement from the stored allocation set before it touches a directory.
-# meiva:link base/agents/incarnation/docs/exec-domain-cleanup.meiva.okf.md
+# Stale result files older than this are pruned when the parent allocates a new
+# pair. Request files are left for `agent.process_boot.clear_exec_run_dir` at the next agent host start.
 STALE_FILE_AGE_S = 3600.0
 
 # Subdir name when no agent id is established (container/eval mode).
@@ -191,18 +186,16 @@ def _agent_dir(exec_dir: Path, agent_id: int | None) -> Path:
     return d
 
 
+# meiva:note
+# Delete stale result envelopes and orphaned write temp files, never request files.
+#
+# A finished run removes its request and result together, so a leftover
+# ``req-*`` file belongs to a killed parent; `agent.process_boot.clear_exec_run_dir` removes it
+# when the next agent host starts. The `.*.tmp` siblings are the atomic-write
+# scratch files (_write_json): a live writer renames its own within
+# milliseconds, so anything a full cutoff old has no writer left — the
+# crash residue of task #3619 D-3. Bounded best-effort: two globs per spawn.
 def _prune_stale(agent_dir: Path) -> None:
-    """Delete stale result envelopes and orphaned write temp files, never
-    request/resource evidence.
-
-    Successful settlement removes each request and result together. A leftover
-    ``req-*`` file therefore represents uncertain cleanup
-    after a killed parent and must survive age-based hygiene so an exclusive
-    hosted boot can fail closed. The `.*.tmp` siblings are the atomic-write
-    scratch files (_write_json): a live writer renames its own within
-    milliseconds, so anything a full cutoff old has no writer left — the
-    crash residue of task #3619 D-3. Bounded best-effort: two globs per spawn.
-    """
     cutoff = time.time() - STALE_FILE_AGE_S
     for path in (*agent_dir.glob("*.json"), *agent_dir.glob(".*.tmp")):
         if path.name.startswith("req-"):
@@ -374,17 +367,16 @@ def _log_envelope_transfer(
     )
 
 
+# meiva:note
+# Write `envelope` as JSON, 0600, atomically replacing any file at `path`.
+#
+# The bytes land in a same-directory temp file first and become visible at
+# `path` only through the final rename, so a writer killed mid-write can
+# never leave a zero-byte or partial envelope behind (task #3619 D-3).
+# Owner-only from creation — `mkstemp`
+# opens 0600 before any content lands, and the rename keeps that inode's
+# mode, so no byte of message history ever sits at looser perms.
 def _write_json(path: Path, envelope: dict[str, Any]) -> None:
-    """Write `envelope` as JSON, 0600, atomically replacing any file at `path`.
-
-    The bytes land in a same-directory temp file first and become visible at
-    `path` only through the final rename, so a writer killed mid-write can
-    never leave a zero-byte or partial envelope behind (task #3619 D-3: a
-    0-byte request envelope used to defer hosted boot recovery forever — see
-    base/agents/incarnation/exec_request_evidence.py). Owner-only from creation — `mkstemp`
-    opens 0600 before any content lands, and the rename keeps that inode's
-    mode, so no byte of message history ever sits at looser perms.
-    """
     data = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
     fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     tmp = Path(raw_tmp)

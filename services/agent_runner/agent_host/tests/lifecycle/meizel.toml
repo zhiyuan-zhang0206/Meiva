@@ -15,7 +15,6 @@ exports = ["recovery_admission.py", "resurrection", "test_hosted_lifecycle.py", 
 "test_event_publisher_lifecycle.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.driver.run_compact" = 1
 "test_event_publisher_lifecycle.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.driver.settle_original_restart" = 1
 "test_hosted_force_quiescence.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S" = 1
-"test_hosted_force_terminate_close.py#monkeypatch.setattr base.native_process.exec_domain.ExecProcessDomain.close_confirmed" = 1
 "test_hosted_force_terminate_close.py#monkeypatch.setattr services.agent_runner.agent_host.host.admit_hosted_runtime" = 1
 "test_hosted_idle_recovery.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
 "test_hosted_idle_recovery.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1

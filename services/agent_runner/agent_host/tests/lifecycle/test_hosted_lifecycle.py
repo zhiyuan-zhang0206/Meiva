@@ -80,7 +80,11 @@ async def _assert_restart_observed_by_next_admission(
     agent_id: int,
     inbound: int,
 ) -> None:
-    assert not await settle_hosted_runtime(pool, old, bus=event_bus, resources=None)
+    assert not await settle_hosted_runtime(
+        pool,
+        old,
+        bus=event_bus,
+    )
     new = await admit_hosted_runtime(
         pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=database
     )
@@ -302,7 +306,11 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
         row.id
         for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     ] == [inbound]
-    assert await settle_hosted_runtime(aops_pool, owner, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        owner,
+        bus=event_bus,
+    )
     host = AgentHost(
         policy=configured_policy(),
         pool=aops_pool,

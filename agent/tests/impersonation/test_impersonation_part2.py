@@ -1,6 +1,5 @@
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock
@@ -28,7 +27,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 
@@ -174,7 +172,7 @@ def relays() -> RelaySupervision:
     return RelaySupervision()
 
 
-async def test_activation_waits_for_resource_closure(
+async def test_activation_is_skipped_when_not_requested(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
     database: Database,
@@ -186,21 +184,7 @@ async def test_activation_waits_for_resource_closure(
     )
     activate = Mock(return_value=_session())
     monkeypatch.setattr(agents_impersonation, "activate", activate)
-    read_local_machine = Mock(side_effect=AssertionError("identity read before resource closure"))
-    resources = HostedTurnResources(unresolved={Path("request"): object()})
-    with pytest.raises(RuntimeError, match="unresolved native exec"):
-        await impersonation.settle_checkpoint(
-            MagicMock(),
-            database,
-            event_bus,
-            42,
-            relays,
-            incarnation=incarnation,
-            resources=resources,
-            notes=_notes(),
-            read_local_machine=read_local_machine,
-        )
-    activate.assert_not_called()
+    read_local_machine = Mock(side_effect=AssertionError("identity read without activation"))
     assert not await impersonation.settle_checkpoint(
         MagicMock(),
         database,
@@ -209,7 +193,6 @@ async def test_activation_waits_for_resource_closure(
         relays,
         activate_accepted=False,
         incarnation=incarnation,
-        resources=resources,
         notes=_notes(),
         read_local_machine=read_local_machine,
     )

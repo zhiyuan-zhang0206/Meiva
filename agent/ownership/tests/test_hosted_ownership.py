@@ -53,7 +53,11 @@ async def test_hosted_incarnation_survives_idle_and_next_turn(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert first is not None
-    assert await settle_hosted_runtime(aops_pool, first, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        first,
+        bus=event_bus,
+    )
     second = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
@@ -74,7 +78,11 @@ async def test_live_other_host_owner_cannot_be_admitted(
     )
     assert first is not None
     if status == "idling":
-        assert await settle_hosted_runtime(aops_pool, first, bus=event_bus, resources=None)
+        assert await settle_hosted_runtime(
+            aops_pool,
+            first,
+            bus=event_bus,
+        )
     assert (
         await admit_hosted_runtime(
             aops_pool, agent_id, "host-test", uuid4(), expected_from=status, db=database
@@ -100,7 +108,11 @@ async def test_expired_owner_replacement_fences_old_settlement(
         aops_pool, agent_id, "host-test", uuid4(), expected_from="running", db=database
     )
     assert new is not None and new.generation != old.generation
-    assert not await settle_hosted_runtime(aops_pool, old, bus=event_bus, resources=None)
+    assert not await settle_hosted_runtime(
+        aops_pool,
+        old,
+        bus=event_bus,
+    )
 
 
 async def test_legacy_null_resource_row_waits_for_lease_expiry(
@@ -211,7 +223,11 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
         assert transferred.requests == {}
         assert transferred.host_process is not None
         assert transferred.host_process.pid == psutil.Process().pid
-        assert not await settle_hosted_runtime(aops_pool, old, bus=event_bus, resources=None)
+        assert not await settle_hosted_runtime(
+            aops_pool,
+            old,
+            bus=event_bus,
+        )
     finally:
         if old_host.poll() is None:
             old_host.kill()
@@ -248,7 +264,11 @@ async def test_owner_beat_renews_idle_but_not_other_owner(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert incarnation is not None
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+    )
     db_conn.execute("UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (agent_id,))
     db_conn.commit()
     await renew_hosted_owner(aops_pool, "host-test", uuid4())
@@ -307,7 +327,11 @@ async def test_stamp_turn_fatal_is_monotonic_and_cas_guarded(
     assert (await stamp_turn_fatal(aops_pool, incarnation)).applied
     assert _marker(db_conn, agent_id) == old_stamp
 
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+    )
     assert not (await stamp_turn_fatal(aops_pool, incarnation)).applied
 
     foreign = RuntimeIncarnation(agent_id, uuid4(), owner)
@@ -327,14 +351,22 @@ async def test_settle_never_touches_the_corpse_marker(
     assert incarnation is not None
 
     _set_marker(db_conn, agent_id, minutes_ago=30)
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+    )
     assert _marker(db_conn, agent_id) is not None
 
     assert await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     _set_marker(db_conn, agent_id, minutes_ago=None)
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+    )
     assert _marker(db_conn, agent_id) is None
 
 
@@ -370,7 +402,11 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
             aops_pool, agent_id, "host-test", _owner, expected_from="idling", db=database
         )
         assert incarnation is not None
-        await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
+        await settle_hosted_runtime(
+            aops_pool,
+            incarnation,
+            bus=event_bus,
+        )
         db_conn.execute(
             "UPDATE agents_meta SET status=%s, runtime_owner=%s WHERE id=%s",
             (status, row_owner, agent_id),
@@ -434,7 +470,11 @@ async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
     assert incarnation is not None
 
     assert await stamp_turn_fatal(aops_pool, incarnation)
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+    )
     assert _marker(db_conn, agent_id) is not None
 
     db_conn.execute("UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (agent_id,))
@@ -470,7 +510,11 @@ async def test_renew_hosted_owner_skips_crash_marked_rows(
             aops_pool, agent_id, "host-test", _owner, expected_from="idling", db=database
         )
         assert incarnation is not None
-        await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
+        await settle_hosted_runtime(
+            aops_pool,
+            incarnation,
+            bus=event_bus,
+        )
         if marked:
             _set_marker(db_conn, agent_id, minutes_ago=0)
         db_conn.execute("UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (agent_id,))

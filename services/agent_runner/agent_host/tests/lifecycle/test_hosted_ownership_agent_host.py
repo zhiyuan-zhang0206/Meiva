@@ -124,7 +124,11 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
     )
     assert original is not None
     if status == "idling":
-        assert await settle_hosted_runtime(aops_pool, original, bus=event_bus, resources=None)
+        assert await settle_hosted_runtime(
+            aops_pool,
+            original,
+            bus=event_bus,
+        )
     host = AgentHost(
         policy=configured_policy(),
         pool=aops_pool,

@@ -480,7 +480,6 @@ async def resume_native(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=ctx.hosted_resources,
         notes=handoff_notes(),
         read_local_machine=lambda: ctx.require_machine().name(),
     )

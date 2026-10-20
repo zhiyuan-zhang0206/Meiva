@@ -87,7 +87,6 @@ async def _drive_work(
         incarnation.owner,
         drop_agent,
         incarnation=incarnation,
-        resources=ctx.hosted_resources,
     )
     if restarted:
         return TurnOutcome(exited=False, crashed=False)

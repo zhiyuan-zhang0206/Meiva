@@ -94,7 +94,6 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     calls = 0
 
     async def interrupted_child(
-        _db: object,
         code: str,
         child_agent_id: int,
         cancel_event: asyncio.Event,
@@ -136,7 +135,7 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     with wrap_code_output cancelled=True + frontend Cancelled event."""
 
     async def _fake_cancelled(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
         return (ExecCancelled(output="partial work\n"), None)
 
@@ -173,7 +172,7 @@ async def test_exec_node_cancel_event_race_normal_completion(
     wrap_code_output format ('Code execution output:')."""
 
     async def _fake_normal(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
         return (ExecDone(output="hello\n"), None)
 
@@ -214,7 +213,7 @@ async def test_exec_node_timeout_path(
     LLM round reads the feedback and changes strategy."""
 
     async def _fake_timed_out(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
         return (ExecTimedOut(output="partial work\n"), None)
 
@@ -246,7 +245,7 @@ async def test_exec_node_timeout_empty_output(
     """timeout triggers and the thread has no output → (no output) marker still appears."""
 
     async def _fake_empty_timeout(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
         return (ExecTimedOut(output=""), None)
 
@@ -366,9 +365,7 @@ async def test_exec_node_dispatch_system_halt(
     clears)."""
     from base.agents.lifecycle import SystemHalt
 
-    async def _fake(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (ExecLifecycle(output="user prep work\n", exc=SystemHalt()), None)
 
     emitter = MagicMock()
@@ -399,9 +396,7 @@ async def test_exec_node_dispatch_agent_termination(
     """ExecLifecycle(AgentTermination) → halted=True + no envelope marker."""
     from meiva.self import AgentTermination
 
-    async def _fake(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (ExecLifecycle(output="", exc=AgentTermination()), None)
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
@@ -426,9 +421,7 @@ async def test_exec_node_dispatch_agent_restart(
     with AgentTermination path)."""
     from meiva.self import AgentRestart
 
-    async def _fake(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (ExecLifecycle(output="", exc=AgentRestart()), None)
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
@@ -449,9 +442,7 @@ async def test_exec_node_dispatch_ordinary_exception(
     """ExecCrashed → halted=False + event=exec_failed at INFO (agent
     trial-and-error is not an operator alert; metrics aggregate by event)."""
 
-    async def _fake(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (
             ExecCrashed(
                 output="Traceback...\nValueError: boom\n",
@@ -489,9 +480,7 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
         def __init__(self) -> None:
             super().__init__(0)
 
-    async def _fake(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (ExecLifecycle(output="", exc=_MysteryLifecycle()), None)
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]

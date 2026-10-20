@@ -22,7 +22,6 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log import logger
-from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.invocation.compact.lifecycle import settle_original_restart
 from services.agent_runner.agent_host.scheduling.wake_screening import read_stored_config
@@ -33,15 +32,12 @@ async def produce_source(
     saver: AsyncPostgresSaver,
     agent_id: int,
     owner: UUID,
-    resources: HostedTurnResources,
     *,
     catalog: ModelCatalog,
     llm_override: str,
     default_reader: Callable[[str, str], Any],
 ) -> None:
     """Called only after the actual turn task ended, inside its serialized pump."""
-    if resources.unresolved or any(not task.done() for task in resources.completions):
-        return
     model = await _source_model(
         pool, agent_id, catalog=catalog, llm_override=llm_override, default_reader=default_reader
     )
@@ -93,7 +89,6 @@ async def finish_compact_pump(
     saver: AsyncPostgresSaver,
     agent_id: int,
     owner: UUID,
-    resources: HostedTurnResources,
     *,
     catalog: ModelCatalog,
     llm_override: str,
@@ -106,7 +101,6 @@ async def finish_compact_pump(
             saver,
             agent_id,
             owner,
-            resources,
             catalog=catalog,
             llm_override=llm_override,
             default_reader=default_reader,
@@ -208,7 +202,6 @@ async def finish_force_and_compact(
     saver: AsyncPostgresSaver,
     agent_id: int,
     owner: UUID,
-    resources: HostedTurnResources,
     bus: EventBus,
     drop_agent: Callable[[int], None],
     *,
@@ -224,7 +217,6 @@ async def finish_force_and_compact(
         saver,
         agent_id,
         owner,
-        resources,
         catalog=catalog,
         llm_override=llm_override,
         default_reader=default_reader,
@@ -235,5 +227,4 @@ async def finish_force_and_compact(
         agent_id,
         owner,
         drop_agent,
-        resources=resources,
     )

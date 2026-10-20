@@ -336,7 +336,6 @@ def stub_host_transitions(
         bus: object,
         exited: bool,
         crashed: bool,
-        resources: object,
     ) -> TurnSettlement:
         if crashed:
             stamps.append(incarnation.agent_id)

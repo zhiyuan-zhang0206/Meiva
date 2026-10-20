@@ -233,15 +233,6 @@ def exec_run_dir(home: Path) -> Path:
     return run_dir(home) / "exec"
 
 
-# meiva:note
-# The managed exec owner's per-run directory (`agent/graph/exec/_owned_run.py`
-# writes it): one request id per subdirectory, holding the request envelope, the
-# owner messages, the result and the close receipt.
-# meiva:link base/agents/incarnation/docs/exec-domain-cleanup.meiva.okf.md
-def exec_domains_dir(home: Path, agent_id: int) -> Path:
-    return exec_run_dir(home) / str(agent_id) / "domains"
-
-
 def root_run_dir(home: Path) -> Path:
     """meiva-root supervisor runtime dir (`<home>/run/meiva-root`).
 
@@ -261,15 +252,6 @@ def root_manifests_path(home: Path) -> Path:
     (re)spawned, so the running tree's shape always matches this file at
     launch time."""
     return root_run_dir(home) / "manifests.json"
-
-
-def quarantined_exec_requests_dir(home: Path) -> Path:
-    """Per-unit quarantine for exec request envelopes (`<home>/quarantined-exec-requests`).
-
-    Stale evidence moved out of run/exec (base/agents/incarnation/exec_request_evidence.py): the
-    files stay for inspection beside their JSON receipt, one event subdirectory
-    per quarantine pass. Pure: the quarantine pass creates it."""
-    return home / "quarantined-exec-requests"
 
 
 def launch_failures_path(home: Path) -> Path:

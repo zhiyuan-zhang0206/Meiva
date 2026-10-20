@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from base.native_process.tests.host_pipe import live_host_control
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CHILD = str(Path(__file__).with_name("_boot_lite_child.py"))
 
@@ -71,15 +73,17 @@ def _clean_env(**overrides: str) -> dict[str, str]:
 def _spawn(
     *argv: str, env: dict[str, str] | None = None, timeout: float = 180
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603 — fixed argv, sys.executable owns the child
-        [sys.executable, "-B", *argv],
-        check=False,
-        cwd=_REPO_ROOT,
-        env=_clean_env(**(env or {})),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    with live_host_control() as stdin:
+        return subprocess.run(  # noqa: S603 — fixed argv, sys.executable owns the child
+            [sys.executable, "-B", *argv],
+            check=False,
+            cwd=_REPO_ROOT,
+            env=_clean_env(**(env or {})),
+            stdin=stdin,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
 
 
 def test_default_boot_is_lite_and_pydantic_settings_free() -> None:

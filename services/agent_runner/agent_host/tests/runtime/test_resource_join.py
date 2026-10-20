@@ -147,7 +147,7 @@ def exercise_unfinished_main() -> None:
         patch = pytest.MonkeyPatch()
         patch.setattr(host._clients, "close", lambda: marker.with_suffix(".clients").touch())
         service = host._resource_service
-        scope = await service.turn()
+        await service.turn()
         entered = asyncio.Event()
 
         async def uncooperative() -> None:
@@ -158,7 +158,7 @@ def exercise_unfinished_main() -> None:
                 except asyncio.CancelledError:
                     continue
 
-        service.complete_later(scope, uncooperative(), name="uncooperative-resource")
+        service.watch(uncooperative(), name="uncooperative-resource")
         await entered.wait()
         try:
             await host.aclose(resource_deadline=asyncio.get_running_loop().time() + 0.02)

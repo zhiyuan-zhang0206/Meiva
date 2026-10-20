@@ -87,7 +87,10 @@ async def test_resurrect_supersedes_the_pending_terminate_it_would_replay(
     _die(db_conn, agent_id)
 
     resurrect_agent(
-        database, event_bus, agent_id, resurrected_by="user", local_machine="claim-test"
+        database,
+        event_bus,
+        agent_id,
+        resurrected_by="user",
     )
 
     epoch = _epoch(db_conn, agent_id)
@@ -104,7 +107,14 @@ async def test_resurrect_supersedes_the_pending_terminate_it_would_replay(
     owner = await _admit(aops_pool, agent_id, db=database)
     batch = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     assert [item.kind for item in batch] == ["resurrect"]
-    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None) is None
+    assert (
+        await apply_hosted_lifecycle(
+            aops_pool,
+            owner,
+            bus=event_bus,
+        )
+        is None
+    )
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("running",)
@@ -150,14 +160,22 @@ async def test_a_command_created_after_the_resurrect_still_applies(
     _command(db_conn, agent_id, "terminate")
     _die(db_conn, agent_id)
     resurrect_agent(
-        database, event_bus, agent_id, resurrected_by="user", local_machine="claim-test"
+        database,
+        event_bus,
+        agent_id,
+        resurrected_by="user",
     )
     owner = await _admit(aops_pool, agent_id, db=database)
     newer = _command(db_conn, agent_id, "terminate")
     batch = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     assert [item.kind for item in batch] == ["terminate"]
     assert (
-        await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None) == "terminate"
+        await apply_hosted_lifecycle(
+            aops_pool,
+            owner,
+            bus=event_bus,
+        )
+        == "terminate"
     )
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
@@ -182,7 +200,10 @@ async def test_an_accepted_but_unapplied_command_is_superseded_not_deferred(
     _die(db_conn, agent_id)
 
     resurrect_agent(
-        database, event_bus, agent_id, resurrected_by="user", local_machine="claim-test"
+        database,
+        event_bus,
+        agent_id,
+        resurrected_by="user",
     )
 
     epoch = _epoch(db_conn, agent_id)
@@ -213,7 +234,10 @@ async def test_force_on_unadmitted_row_cannot_create_a_hosted_successor(
         )
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
         resurrect_agent(
-            database, event_bus, agent_id, resurrected_by="user", local_machine="claim-test"
+            database,
+            event_bus,
+            agent_id,
+            resurrected_by="user",
         )
     assert _command_row(db_conn, force) == ("pending", None, None)
     assert db_conn.execute(
@@ -240,7 +264,10 @@ async def test_refused_resurrect_leaves_no_fence_or_marker_for_the_retry(
 
     with pytest.raises(ResurrectSettlementDeferredError):
         resurrect_agent(
-            database, event_bus, agent_id, resurrected_by="user", local_machine="claim-test"
+            database,
+            event_bus,
+            agent_id,
+            resurrected_by="user",
         )
 
     assert db_conn.execute(
@@ -263,7 +290,10 @@ async def test_refused_resurrect_leaves_no_fence_or_marker_for_the_retry(
     db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
     db_conn.commit()
     resurrect_agent(
-        database, event_bus, agent_id, resurrected_by="user", local_machine="claim-test"
+        database,
+        event_bus,
+        agent_id,
+        resurrected_by="user",
     )
     assert (
         db_conn.execute(
@@ -290,7 +320,10 @@ async def test_reacceptance_is_idempotent_and_preserves_command_history(
     db_conn.commit()
     _die(db_conn, agent_id)
     resurrect_agent(
-        database, event_bus, agent_id, resurrected_by="user", local_machine="claim-test"
+        database,
+        event_bus,
+        agent_id,
+        resurrected_by="user",
     )
     epoch = _epoch(db_conn, agent_id)
     settled = _command_row(db_conn, stale[0])

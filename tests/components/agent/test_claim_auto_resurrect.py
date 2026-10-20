@@ -95,7 +95,12 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     old = meiva.context.original_incarnation
     assert old is not None
     assert (
-        await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None) == "terminate"
+        await apply_hosted_lifecycle(
+            aops_pool,
+            old,
+            bus=event_bus,
+        )
+        == "terminate"
     )
     assert db_conn.execute(
         "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (stop,)
@@ -105,7 +110,10 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
         db_conn, tid, "are you there?", source="user", bus=event_bus, database=database
     )
     resurrect_agent(
-        database, event_bus, tid, resurrected_by="user", local_machine=machine_identity.name()
+        database,
+        event_bus,
+        tid,
+        resurrected_by="user",
     )
     launch = db_conn.execute(
         "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='resurrect' "

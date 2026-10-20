@@ -1,17 +1,17 @@
-"""`ProcessControl`: the port for signalling processes and reading their groups and sessions.
-
-Signalling a process or a process group, and asking which group or session a pid belongs to,
-are the calls whose failure a test has to cause: a denied signal, a group that stays live after
-SIGKILL, a process that vanished between two reads. A component that does any of these takes
-`process_control: ProcessControl` as a required argument (no default) and calls it instead of
-`os.kill`, `os.killpg`, `os.getpgid` and `os.getsid`. The composition root passes
-`SYSTEM_PROCESS_CONTROL`; a test passes `FakeProcessControl` from
-`base/native_process/tests/fake_process_control.py`, or the system one when it signals a real
-child it started itself. A test never patches `os.kill` and its siblings.
-
-Observing who is in a group (psutil, `/proc`, libproc) is not signalling and stays in
-`group_closure` and `ownership`; the port holds only the four calls above.
-"""
+# meiva:note
+# `ProcessControl`: the port for signalling processes and reading their groups and sessions.
+#
+# Signalling a process or a process group, and asking which group or session a pid belongs to,
+# are the calls whose failure a test has to cause: a denied signal, a group that stays live after
+# SIGKILL, a process that vanished between two reads. A component that does any of these takes
+# `process_control: ProcessControl` as a required argument (no default) and calls it instead of
+# `os.kill`, `os.killpg`, `os.getpgid` and `os.getsid`. The composition root passes
+# `SYSTEM_PROCESS_CONTROL`; a test passes `FakeProcessControl` from
+# `base/native_process/tests/fake_process_control.py`, or the system one when it signals a real
+# child it started itself. A test never patches `os.kill` and its siblings.
+#
+# Observing who is in a group (psutil, `/proc`, libproc) is not signalling and stays in
+# `ownership`; the port holds only the four calls above.
 
 from __future__ import annotations
 

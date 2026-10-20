@@ -118,7 +118,10 @@ async def test_held_host_refuses_unaccepted_control_batch(
     monkeypatch.setattr(agent_host_host, "apply_hosted_lifecycle", apply)
     monkeypatch.setattr(agent_host_host, "settle_hosted_runtime", AsyncMock())
     with pytest.raises(RuntimeError, match="held control claim returned an unaccepted command"):
-        await host._run_held_controls(42, "idling", resources=None)
+        await host._run_held_controls(
+            42,
+            "idling",
+        )
     apply.assert_not_awaited()
 
 
@@ -148,7 +151,10 @@ async def test_held_controls_supervise_the_active_lease_relay(
     monkeypatch.setattr(db, "claim_inbound_batch", AsyncMock(return_value=[]))
     monkeypatch.setattr(agent_host_host, "apply_hosted_lifecycle", AsyncMock(return_value=None))
     monkeypatch.setattr(agent_host_host, "settle_hosted_runtime", AsyncMock())
-    await host._run_held_controls(42, "idling", resources=None)
+    await host._run_held_controls(
+        42,
+        "idling",
+    )
     supervise.assert_awaited_once_with(
         host._db,
         host._bus,
