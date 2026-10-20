@@ -40,7 +40,7 @@ from gateway.schemas.stats import StatsWindowHours
 # "can a session actually be started on it there" — a harness can be installed and
 # signed in and still not launchable, and the spawn form says so instead of
 # letting the choice look usable.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 class HarnessAvailability(BaseModel):
     harness: Harness
     status: HarnessStatus

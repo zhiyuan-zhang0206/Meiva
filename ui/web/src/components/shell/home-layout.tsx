@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 
 import {
@@ -8,7 +8,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { BAR_HEIGHT_PX, FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { panelLayoutStorage } from "@/lib/layout/panel-layout-storage";
 import { useClientReady } from "@/lib/layout/use-client-ready";
 import { cn } from "@/lib/format/utils";
@@ -47,18 +47,6 @@ const PANEL_INSPECTOR = "panel-inspector";
 // SSR-safe group-split storage (see lib/panel-layout-storage.ts).
 const HOME_SPLIT_STORAGE = panelLayoutStorage();
 
-// The painted divider starts below the 44px shared title bar and the 40px
-// column-title row. Its 89px bottom gap ends at the composer's measured top
-// edge (y=750 in the 839px acceptance viewport). The handle itself remains
-// full-height; only its `after` paint segment uses these insets.
-const HOME_DIVIDER_COLUMN_TITLE_ROW_HEIGHT_PX = 40;
-const HOME_DIVIDER_BOTTOM_INSET_PX = 89;
-const HOME_DIVIDER_LINE_CLASS =
-  "after:top-[var(--home-divider-line-top)] after:bottom-[var(--home-divider-line-bottom)]";
-const HOME_DIVIDER_LINE_STYLE = {
-  "--home-divider-line-top": `${BAR_HEIGHT_PX + HOME_DIVIDER_COLUMN_TITLE_ROW_HEIGHT_PX}px`,
-  "--home-divider-line-bottom": `${HOME_DIVIDER_BOTTOM_INSET_PX}px`,
-} as CSSProperties;
 
 interface Props {
   isNarrow: boolean;
@@ -69,8 +57,13 @@ interface Props {
   inspector: ReactNode;
 }
 
+// meiva:note
+// Both column dividers paint the handle's own full-height line: an inset segment
+// stopped above the composer and below the title bar, which read as a broken
+// line next to dividers that do run edge to edge (user report 2026-10-20).
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 function HomeDividerHandle() {
-  return <ResizableHandle className={HOME_DIVIDER_LINE_CLASS} style={HOME_DIVIDER_LINE_STYLE} />;
+  return <ResizableHandle />;
 }
 
 function DesktopMain({ main, inspector }: Pick<Props, "main" | "inspector">) {

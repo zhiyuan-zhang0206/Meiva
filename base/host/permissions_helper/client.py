@@ -651,7 +651,6 @@ class PermissionsHelperClient(StatefulCalls):
         a guess, and the fix is a launchd one, not a System Settings one.
         """
         deadline = time.monotonic() + settle_s
-        # quiesce-exempt: a bounded permission-grant wait; no database
         while True:
             try:
                 result = self.ping()
@@ -691,7 +690,6 @@ class PermissionsHelperClient(StatefulCalls):
         repair is its launchd job, not System Settings.
         """
         deadline = time.monotonic() + settle_s
-        # quiesce-exempt: a bounded permission-grant wait; no database
         while True:
             try:
                 result = self.ping()

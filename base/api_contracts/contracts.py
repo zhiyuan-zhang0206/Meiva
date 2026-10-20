@@ -321,6 +321,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("DELETE", "/api/schedules/{schedule_id}"): RouteContract(note="delete — repeats are harmless"),
     ("GET", "/api/notifications"): RouteContract(),
     ("GET", "/api/notifications/categories"): RouteContract(),
+    ("GET", "/api/notifications/audit"): RouteContract(note="read-only replay over a window"),
     ("POST", "/api/agents/{agent_id}/notifications"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         note=(
@@ -333,6 +334,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PUT", "/api/settings/{key}"): RouteContract(note="set one key — PUT is idempotent"),
     ("GET", "/api/agents/{agent_id}/shell/{session_id}"): RouteContract(),
     ("GET", "/api/skills"): RouteContract(),
+    ("PUT", "/api/extensions/{kind}/{name}"): RouteContract(
+        note="content-addressed blob plus name-keyed upsert — a replay stores the same content"
+    ),
     ("PUT", "/api/skills"): RouteContract(note="full replace — PUT is idempotent"),
     ("GET", "/api/agents/{agent_id}/messages"): RouteContract(
         note="raw checkpoint history — implicit requests return newest 100; start_index pages backward"
@@ -361,6 +365,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/system"): RouteContract(),
     ("GET", "/api/system/all"): RouteContract(),
     ("GET", "/api/tasks"): RouteContract(),
+    ("GET", "/api/tasks/{task_id}"): RouteContract(
+        note="read-only single task row with its results text — the hover card's read; 404 when no such task",
+    ),
     ("PATCH", "/api/tasks/{task_id}"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="task patch requires a key; immutable result shares the notification transaction",

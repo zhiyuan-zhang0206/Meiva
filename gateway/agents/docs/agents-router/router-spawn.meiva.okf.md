@@ -22,8 +22,11 @@ restart, resurrect and repair cannot move an agent onto another runtime. An
 unknown value fails schema validation with 422; nothing falls back to the default.
 A fork inherits its source's harness, and naming a different one returns 400
 `fork_harness_mismatch` with the source's value in the detail — the rule is
-enforced inside the birth transaction, not only here. See
-[[base/agents/docs/harness.meiva.okf.md|agent harness identity]].
+enforced inside the birth transaction, not only here. A harness no launcher can
+start yet is refused at the same boundary with 400
+`harness_not_launchable`: the receipt names no agent, because the transaction
+rolls back before the row exists. See
+[[base/agents/docs/harness/harness.meiva.okf.md|agent harness identity]].
 
 A fork must keep the source's effective config so its inherited context stays
 cache-valid: only ADDITIONS to `skills_to_inject_into_system_prompt` /

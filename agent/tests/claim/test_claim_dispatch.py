@@ -409,7 +409,13 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
     assert {p["inbound_id"] for p in committed} == {id1, id2}
 
 
-@pytest.mark.parametrize("kind", ["terminate", "restart_completed", "resurrect"])
+# meiva:note
+# A lifecycle kind (terminate / resurrect) does not publish InboundCommitted:
+# these are lifecycle markers, not user conversation, and the frontend does not
+# depend on a reload trigger (the timeline renders the lifecycle HumanMessage via
+# system_marker, outside the inbound_chat anchor sequence). The restart test
+# below covers a claim that neither appends a message nor publishes.
+@pytest.mark.parametrize("kind", ["terminate", "resurrect"])
 async def test_claim_lifecycle_kind_does_not_publish_committed(
     running_agent: Callable[[], int],
     kind: str,
@@ -419,12 +425,6 @@ async def test_claim_lifecycle_kind_does_not_publish_committed(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """lifecycle kind (terminate / restart_completed / resurrect) does **not** publish
-    InboundCommitted — they are lifecycle markers not user conversations; frontend does not
-    depend on reload trigger (timeline renders lifecycle HumanMessage via system_marker, not
-    part of the inbound_chat anchor sequence).
-
-    The restart test below (claim does not append message nor publish)."""
     tid = running_agent()
     insert_inbound_kind(db_conn, tid, "", kind, source="user")
 

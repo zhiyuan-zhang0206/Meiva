@@ -197,6 +197,10 @@ class TestRestart:
         assert source == "self"
         assert payload == {"config_overlay": {"auto_compact_fraction": 0.7}}
 
+    # meiva:note
+    # restart(config_overlay=) merges into agents_meta.config_overlay rather than
+    # replacing it: pre-existing keys survive, new keys are added. The inbound
+    # payload still carries only the this-restart diff, not the merged result.
     def test_restart_with_config_merges_into_overlay_column(
         self,
         redis_url: str,
@@ -209,13 +213,6 @@ class TestRestart:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """restart(config_overlay=) merges into agents_meta.config_overlay rather than
-        replacing it: pre-existing keys survive, new keys are added.
-
-        Also verifies the inbound payload still carries only the this-restart
-        diff (not the merged result) so the restart_completed marker shows the
-        right diff text.
-        """
         monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
@@ -584,62 +581,6 @@ class TestPauseHeartbeat:
             set_field("heartbeat_pause_max_seconds", original_limit)
         with pytest.raises(ValueError, match=r"at most"):
             meiva.self.pause_heartbeat(172800)
-
-
-class TestRestartCompletedMarker:
-    """`render_restart_completed_marker` payload rendering — PR-E adds `with config {…}` suffix."""
-
-    def test_marker_no_payload(self) -> None:
-        from agent.graph.claim.node import render_restart_completed_marker
-
-        msg = render_restart_completed_marker("self", None, timestamp_prefix=lambda: "")
-        assert "restarted by yourself" in msg
-        assert "with config" not in msg
-
-    def test_marker_with_overlay(self) -> None:
-        from agent.graph.claim.node import render_restart_completed_marker
-
-        msg = render_restart_completed_marker(
-            "self", {"config_overlay": {"auto_compact_fraction": 0.7}}, timestamp_prefix=lambda: ""
-        )
-        assert "restarted by yourself" in msg
-        assert "with config {auto_compact_fraction=0.7}" in msg
-
-    def test_marker_system_update_with_overlay(self) -> None:
-        """system:update source + overlay simultaneously — marker has updated wording + overlay diff."""
-        from agent.graph.claim.node import render_restart_completed_marker
-
-        msg = render_restart_completed_marker(
-            "system:update",
-            {"config_overlay": {"auto_compact_fraction": 0.5}},
-            timestamp_prefix=lambda: "",
-        )
-        assert "updated and restarted" in msg
-        assert "with config {auto_compact_fraction=0.5}" in msg
-
-    def test_marker_redacts_credential_like_overlay_keys(self) -> None:
-        """Credential-like overlay keys render as <redacted> — the marker lands in
-        the checkpoint / timeline / LLM context, so it must not carry a second
-        plaintext copy of a value like an api_key (2026-08-08 audit, P1-3)."""
-        from agent.graph.claim.node import render_restart_completed_marker
-
-        msg = render_restart_completed_marker(
-            "user",
-            {
-                "config_overlay": {
-                    "deepseek_api_key": "sk-secret-value",
-                    "auto_compact_fraction": 0.7,
-                    "cluster_secret": "hunter2",
-                }
-            },
-            timestamp_prefix=lambda: "",
-        )
-        assert "deepseek_api_key=<redacted>" in msg
-        assert "cluster_secret=<redacted>" in msg
-        assert "sk-secret-value" not in msg
-        assert "hunter2" not in msg
-        # non-sensitive keys still render their value
-        assert "auto_compact_fraction=0.7" in msg
 
 
 # peer terminate / restart withdrawn (2026-05-04) — agents can only send_message to

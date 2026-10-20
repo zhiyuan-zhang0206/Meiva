@@ -78,7 +78,6 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus, EventBusConfig
@@ -180,7 +179,6 @@ async def watch_plugins_for_restart() -> None:
     the drains run, then the supervisor restarts the host fresh.
     """
     baseline = plugins_fingerprint()
-    # quiesce-exempt: watches plugin file fingerprints; no database
     while True:
         await asyncio.sleep(PLUGINS_POLL_INTERVAL_S)
         now = plugins_fingerprint()
@@ -271,21 +269,15 @@ async def beat_forever(
     while True:
         require_helper_parent_chain()
         liveness.beat()
-        # Liveness stays unconditional; database work does not. A quiesced unit
-        # is between stop and resume — renewing here would keep agent-row
-        # leases alive across the whole window and add DB work the window
-        # exists to stop. The leases lapse with their TTL; the first beat after
-        # resume refreshes every row this host still owns.
-        if not admission.quiesced():
-            try:
-                await asyncio.wait_for(host.renew_ownership(), timeout=OWNERSHIP_RENEW_TIMEOUT_S)
-            except (TimeoutError, psycopg.OperationalError, PoolTimeout):
-                renewal_failures += 1
-                host_log.exception("[agent-host] database renewal failed (%s/3)", renewal_failures)
-                if renewal_failures >= 3:
-                    raise
-            else:
-                renewal_failures = 0
+        try:
+            await asyncio.wait_for(host.renew_ownership(), timeout=OWNERSHIP_RENEW_TIMEOUT_S)
+        except (TimeoutError, psycopg.OperationalError, PoolTimeout):
+            renewal_failures += 1
+            host_log.exception("[agent-host] database renewal failed (%s/3)", renewal_failures)
+            if renewal_failures >= 3:
+                raise
+        else:
+            renewal_failures = 0
         published = await publish_turn_progress_heartbeat(
             bus, machine, scheduler.active_agents, host.turn_progress
         )

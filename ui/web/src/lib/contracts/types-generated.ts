@@ -1471,6 +1471,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_notification_audit_api_notifications_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedules": {
         parameters: {
             query?: never;
@@ -1640,6 +1656,22 @@ export interface paths {
         };
         get: operations["get_skills_api_skills_get"];
         put: operations["update_skill_enabled_api_skills_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/extensions/{kind}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["put_extension_api_extensions__kind___name__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2159,6 +2191,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_task_api_tasks__task_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["patch_task_api_tasks__task_id__patch"];
+        trace?: never;
+    };
     "/api/tasks": {
         parameters: {
             query?: never;
@@ -2173,22 +2221,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{task_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch: operations["patch_task_api_tasks__task_id__patch"];
         trace?: never;
     };
     "/api/keyed/v1/task-assignments": {
@@ -2633,6 +2665,47 @@ export interface components {
             priority: components["schemas"]["Priority"];
             remind_interval_seconds?: number | null;
         };
+        AuditCandidates: {
+            category: string;
+            candidates: number;
+            delivered: number;
+            suppressed: number;
+            repeat_deliveries: number;
+        };
+        AuditDay: {
+            day: string;
+            by_category: {
+                [key: string]: number;
+            };
+            total: number;
+        };
+        AuditDelivered: {
+            total: number;
+            per_day: components["schemas"]["AuditDay"][];
+            per_category: {
+                [key: string]: number;
+            };
+            per_hour: number[];
+        };
+        AuditExplained: {
+            at: string;
+            category: string;
+            agent_id: number;
+            dedupe_key: string | null;
+            outcome: string;
+        };
+        AuditSimulation: {
+            variant: string;
+            delivered: number;
+            delta: number;
+            per_day: number;
+        };
+        AuditWindow: {
+            start: string;
+            end: string;
+            days: number;
+            timezone: string;
+        };
         AvailabilityReason: "unknown" | "host_unavailable" | "awaiting_admission" | "admission_refused" | "admitted" | "launch_unreachable" | "launch_rejected" | "launch_unknown";
         Body_upload_api_keyed_v1_agents__agent_id__uploads_post: {
             files: string[];
@@ -2940,6 +3013,16 @@ export interface components {
         EventsResponse: {
             meta: components["schemas"]["EventsMeta"];
             items: components["schemas"]["EventRow"][];
+        };
+        ExtensionRegisterRequest: {
+            source: string;
+            source_ref?: string | null;
+            archive_b64: string;
+        };
+        ExtensionRegisterResponse: {
+            name: string;
+            kind: "skill" | "plugin" | "mcp";
+            content_hash: string;
         };
         FleetGraphEdge: {
             from_agent: number;
@@ -3411,6 +3494,20 @@ export interface components {
             awaiting: components["schemas"]["NoticeItem"][];
             resolved_page: components["schemas"]["NoticeItem"][];
             next_cursor: components["schemas"]["NoticesCursor"] | null;
+        };
+        NotificationAuditResponse: {
+            window: components["schemas"]["AuditWindow"];
+            switches: {
+                [key: string]: boolean;
+            };
+            categories: string[];
+            sources: {
+                [key: string]: string;
+            };
+            delivered: components["schemas"]["AuditDelivered"];
+            candidates: components["schemas"]["AuditCandidates"][];
+            simulations: components["schemas"]["AuditSimulation"][];
+            explain?: components["schemas"]["AuditExplained"][] | null;
         };
         NotificationCategoriesResponse: {
             categories: components["schemas"]["NotificationCategoryItem"][];
@@ -4019,8 +4116,25 @@ export interface components {
             task: components["schemas"]["AssignmentTaskIn"];
             agent: components["schemas"]["AssignmentAgentIn"];
         };
+        TaskGraphRow: {
+            id: number;
+            parent_id: number | null;
+            title: string;
+            status: components["schemas"]["TaskStatus"];
+            owner: number | null;
+            owner_label?: string | null;
+            created_by: string;
+            created_at: string;
+            updated_at: string;
+            remind_interval_seconds?: number | null;
+            last_reminded_at?: string | null;
+            reminder_count: number;
+            priority: components["schemas"]["Priority"];
+            ghost: boolean;
+            description: string;
+        };
         TaskListResponse: {
-            tasks: (components["schemas"]["TaskRow"] | components["schemas"]["TaskSummaryRow"])[];
+            tasks: (components["schemas"]["TaskRow"] | components["schemas"]["TaskSummaryRow"] | components["schemas"]["TaskGraphRow"])[];
         };
         TaskRow: {
             id: number;
@@ -7034,6 +7148,40 @@ export interface operations {
             };
         };
     };
+    get_notification_audit_api_notifications_audit_get: {
+        parameters: {
+            query?: {
+                days?: number;
+                category?: string | null;
+                tz?: string | null;
+                now?: string | null;
+                simulate?: string[] | null;
+                explain?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationAuditResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_schedules_api_schedules_get: {
         parameters: {
             query?: never;
@@ -7494,6 +7642,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SkillView"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_extension_api_extensions__kind___name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "skill" | "plugin" | "mcp";
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExtensionRegisterRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionRegisterResponse"];
                 };
             };
             422: {
@@ -8594,14 +8776,13 @@ export interface operations {
             };
         };
     };
-    get_tasks_api_tasks_get: {
+    get_task_api_tasks__task_id__get: {
         parameters: {
-            query?: {
-                window?: string;
-                fields?: "full" | "summary";
-            };
+            query?: never;
             header?: never;
-            path?: never;
+            path: {
+                task_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -8611,7 +8792,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskListResponse"];
+                    "application/json": components["schemas"]["TaskRow"];
                 };
             };
             422: {
@@ -8647,6 +8828,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskRow"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tasks_api_tasks_get: {
+        parameters: {
+            query?: {
+                window?: string;
+                fields?: "full" | "summary" | "graph";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskListResponse"];
                 };
             };
             422: {

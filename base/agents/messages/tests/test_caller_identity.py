@@ -77,7 +77,7 @@ def test_structured_payload_preserves_other_fields_and_does_not_mutate_input() -
     assert caller_payload("external_agent:codex:run-42", result) == result
 
 
-@pytest.mark.parametrize("source", ["user", "agent:405", "system:update", "shell:123"])
+@pytest.mark.parametrize("source", ["user", "agent:405", "system:restart", "shell:123"])
 def test_non_external_sources_carry_no_invented_identity(source: str) -> None:
     assert caller_payload(source, None) is None
     assert caller_payload(source, {"inbound_id": 42}) == {"inbound_id": 42}

@@ -38,6 +38,19 @@ content without a `$` never imports the math chunk, and KaTeX output renders
 after the sanitizer — its inputs cannot produce injection and its trust and
 strict defaults stand.
 
+Display math needs help from two places, because `remark-math` treats a
+single-line `$$…$$` pair as *inline* math (only a fence on its own line, content
+below, is flow math). A recovery plugin reads the `$$` delimiters back from the
+source and promotes such a span to a `math` block, splitting the paragraph
+around it; the promoted node carries the `data` shape `mdast-util-math` uses,
+because `mdast-util-to-hast` has no handler for `math` and a bare node renders as
+its raw TeX text. The sanitizer keeps `language-math` on the `code` element so
+`rehype-katex` can replace the wrapping `pre` — without it a display formula
+keeps code-block chrome. A display formula wider than the column scrolls
+sideways (`.katex-display` overflow), and `.chat-md .katex` resets the
+container's `overflow-wrap:anywhere`, which otherwise breaks a formula
+mid-expression.
+
 Math renders through KaTeX only after a lazily loaded chunk: content without $ never imports remark-math / rehype-katex (the loader is the unit under test), content with $ upgrades to inline and display math once the deduplicated module promise resolves, and KaTeX runs after the sanitizer with throwOnError false — its inputs cannot produce injection and its trust/strict defaults stand A `$…$` pair that carries prose — CJK outside `\text{…}`, fullwidth punctuation, or an inline-code backtick — is not math: the span demotes to its literal `$…$` text, because remark-math pairs any two `$` on a line and a `$` written as a plain symbol would otherwise swallow the sentence up to the next one and paint it as a KaTeX error.
 
 ## Document anchors

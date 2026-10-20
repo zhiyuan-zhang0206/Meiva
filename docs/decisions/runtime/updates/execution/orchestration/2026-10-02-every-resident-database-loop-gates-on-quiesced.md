@@ -64,3 +64,6 @@ Forward link (2026-10-03): `meiva pause` was deleted; a stop with a different ke
 
 Forward: [decisions/2026-10-11-remove-starting-and-ready-maintenance-phases.md](../../../processes/shutdown/2026-10-11-remove-starting-and-ready-maintenance-phases.md)
 removes `in_stop_leg()`; the host dispatcher's turn scan now gates on `quiesced()`.
+
+Forward: [decisions/2026-10-20-stop-window-loop-gating-removed.md](2026-10-20-stop-window-loop-gating-removed.md)
+removes the gates, the lint and `admission.quiesced()`.

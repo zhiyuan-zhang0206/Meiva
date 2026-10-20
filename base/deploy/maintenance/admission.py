@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from base.deploy.maintenance import pause_owner
-from base.deploy.maintenance.state import CERTIFIED_PHASES, MaintenanceHold, MaintenancePhase
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 
 
 def snapshot() -> pause_owner.PauseOwnerSnapshot | None:
@@ -55,32 +55,6 @@ def business_paused(home: Path) -> bool:
         MaintenancePhase.STOPPING,
         MaintenancePhase.STOPPED,
     }
-
-
-# The stop window's phases: the drain has landed and the unit is stopping or
-# held stopped. `preparing`/`draining` stay live — an already-admitted turn may
-# still be counted down and must finish.
-
-
-def quiesced() -> bool:
-    """Whether this unit is inside its stop window (`drained` .. `stopped`).
-
-    Background loops consult this before doing database work: while a unit is
-    being stopped or held stopped, ownership renewals, turn scans, page
-    reconciliation and pool borrows must wait — the window's whole point is
-    that the unit stops doing database work until `meiva start` releases the
-    hold. `preparing`/`draining` read as NOT quiesced (in-flight continuations
-    must still run). An unreadable owner reads as quiesced: the same
-    refuse-new-work posture `snapshot` enforces by raising, held by background
-    loops instead of crashing them.
-    """
-    try:
-        current = snapshot()
-    except (RuntimeError, OSError):
-        return True
-    if current is None or current.maintenance is None:
-        return False
-    return current.maintenance.phase in CERTIFIED_PHASES
 
 
 def start_authorized(operation: pause_owner.PauseOwnerSnapshot | None) -> bool:

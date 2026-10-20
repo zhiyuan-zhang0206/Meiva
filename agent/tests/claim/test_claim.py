@@ -1,20 +1,20 @@
-"""claim node unit tests.
-
-claim node is the core dispatcher of the newly designed 6-Node topology — it decides
-state updates and routing based on inbound kind. These tests cover each kind case, using
-a real DB (adb_conn fixture) + mock LLM.
-
-Coverage includes:
-- dispatch of various kinds (chat / compact_summary / compact_request /
-  terminate / restart / restart_completed / resurrect / unknown)
-- short-path: first SELECT already has inbound, does not enter wait branch
-- long-await: first SELECT empty, agents.status switched 'idling' → wait → INSERT
-  wake up → take batch → switch back 'running'
-
-Not tested:
-- Redis pub/sub wake integration for ops_db AsyncConnection (tested in test_db.py)
-- auto-compact behavior (now a before_llm hook, tests in agent/tests/test_compact.py)
-"""
+# meiva:note
+# claim node unit tests.
+#
+# claim node is the core dispatcher of the newly designed 6-Node topology — it decides
+# state updates and routing based on inbound kind. These tests cover each kind case, using
+# a real DB (adb_conn fixture) + mock LLM.
+#
+# Coverage includes:
+# - dispatch of various kinds (chat / compact_summary / compact_request /
+#   terminate / restart / resurrect / unknown)
+# - short-path: first SELECT already has inbound, does not enter wait branch
+# - long-await: first SELECT empty, agents.status switched 'idling' → wait → INSERT
+#   wake up → take batch → switch back 'running'
+#
+# Not tested:
+# - Redis pub/sub wake integration for ops_db AsyncConnection (tested in test_db.py)
+# - auto-compact behavior (now a before_llm hook, tests in agent/tests/test_compact.py)
 
 from collections.abc import Callable
 from typing import cast
@@ -408,14 +408,9 @@ async def test_claim_fork_preserves_the_inherited_prefix(
 # - `_wait_for_batch`: empty batch retry loop + try/finally state machine rollback
 # - `_claim_node_impl`: dispatch boundary conditions, container mode, multi-step continue
 # - `claim_node`: outer wrapper does not swallow return + msg_count not skewed
-# Target ~15-20 actionable mutations killed; _render_restart_completed_marker's
-# ~70 string noise not covered.
 
 
 # ───────────── _by_who unit tests (case-sensitive dispatch) ─────────────
-
-
-# ───────────── _render_restart_completed_marker wording ───────────────
 
 
 # ───────────── _wait_for_batch state machine + retry loop ─────────────

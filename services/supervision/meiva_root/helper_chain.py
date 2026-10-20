@@ -40,7 +40,6 @@ class HelperChainWatch:
 
     async def run(self) -> None:
         broken_rounds = 0
-        # quiesce-exempt: meiva:ref services/supervision/meiva_root/docs/ancestry.meiva.okf.md#helper-ancestry-watch
         while not self._stop.is_set():
             if self._intact():
                 broken_rounds = 0

@@ -1,5 +1,7 @@
 {
   "status": "状态",
+  "sortId": "ID",
+  "sortActivity": "活跃",
   "sortBy": "排序",
   "loadingAgents": "加载 agent 中…",
   "statistics": "统计",
@@ -56,5 +58,9 @@
   "showSidebar": "展开侧栏",
   "hideSidebar": "收起侧栏",
   "showContextPanel": "展开共享上下文",
-  "hideContextPanel": "收起共享上下文"
+  "hideContextPanel": "收起共享上下文",
+  "sidebarSettings": "侧栏设置",
+  "view": "视图",
+  "display": "显示",
+  "emptyAgents": "还没有 agent。"
 }

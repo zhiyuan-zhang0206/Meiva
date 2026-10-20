@@ -8,7 +8,7 @@ from langchain_core.messages import AnyMessage, BaseMessage, RemoveMessage
 from langgraph.types import Command
 
 from agent import state as _state
-from agent.db import ClaimedInbound, finalize_claimed_inbounds
+from agent.db import finalize_claimed_inbounds
 from agent.graph.claim._batch import defer_chats_to_pending
 from agent.graph.claim._dispatch import BatchState
 from agent.graph.claim._routing import ClaimGoto, Routing
@@ -22,7 +22,6 @@ from agent.hooks.compact_events import emit_compact_finished
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
 from base.agents.context import MeivaContext
-from base.agents.messages.inbound import InboundKind
 from base.agents.messages.kwargs import MeivaMsgType, NoteTag, read_meiva_kwargs
 from base.events.live.projection import CompactDone, CompactionStatus
 
@@ -126,7 +125,6 @@ async def _compact_outcome(
                 "messages": transition["messages"],
                 "context_reset": transition["context_reset"],
                 "halted": halted,
-                "update_initiated": st.update_initiated,
                 "compact": state.compact.next_segment(),
             },
             goto=INIT_CONTEXT,
@@ -144,7 +142,6 @@ def _fallthrough_outcome(st: BatchState) -> _Outcome:
             update={
                 "messages": st.new_msgs,
                 "halted": halted,
-                "update_initiated": st.update_initiated,
             },
             goto=goto,
         ),
@@ -160,21 +157,10 @@ def _veto_reentry(routing: Routing, st: BatchState) -> bool:
     )
 
 
-def _idle_restart_gate(
-    state: _state.AgentState, batch: list[ClaimedInbound], st: BatchState
-) -> bool:
-    return (
-        state.halted
-        and not st.update_initiated
-        and all(it.kind == InboundKind.RESTART_COMPLETED for it in batch)
-    )
-
-
 async def decide(
     ctx: MeivaContext,
     state: _state.AgentState,
     agent_id: int,
-    batch: list[ClaimedInbound],
     st: BatchState,
     routing: Routing,
 ) -> _Outcome:
@@ -185,14 +171,6 @@ async def decide(
         return _Outcome(
             command=Command[ClaimGoto](
                 update={"messages": st.new_msgs, "halted": False},
-                goto=CLAIM,
-            )
-        )
-
-    if _idle_restart_gate(state, batch, st):
-        return _Outcome(
-            command=Command[ClaimGoto](
-                update={"messages": st.new_msgs, "halted": True},
                 goto=CLAIM,
             )
         )

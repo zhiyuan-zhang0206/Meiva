@@ -406,7 +406,7 @@ async def get_cluster_machines(
 # harness still appears — with the reason — instead of vanishing. A machine whose
 # runner predates this op, or a name no machine carries, is an error here, and the
 # form then shows the choice as unknown rather than as available.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 @router.get(
     "/api/cluster/machines/{name}/harnesses",
     response_model=list[HarnessAvailability],

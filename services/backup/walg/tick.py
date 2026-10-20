@@ -1,31 +1,30 @@
-"""The daily WAL-G tick (`meiva backup walg run`): back up, verify the chain, apply retention.
-
-One command, run once a day by the OS job and by hand. It is safe to run at any
-moment and any number of times:
-
-1. **Gates.** Key unset: nothing to do. Another tick holds the per-home lock: that run
-   is still going, nothing to do. A deploy window is open, or Postgres does not
-   accept connections: the tick is *skipped* (recorded, exit 0) rather than failed, so
-   a tick that happens to land inside a stop/start window does not become a day-long
-   alert. A skip leaves the outcome of the last real run untouched.
-2. **Preflight.** The pinned binary, the configuration and key pin, and one
-   `backup-list`, which proves the credentials and the prefix.
-3. **Recovery drill**, once a week (`drill.py`), before the backup, so that it restores
-   yesterday's backup: the one a lost host would need. A failed drill is recorded in
-   `drill` and never stops the backup.
-4. **Backup.** `backup-push` with `WALG_DELTA_MAX_STEPS=6`: WAL-G itself starts a new
-   full backup once the increment chain is six deep (a daily run therefore makes a
-   full backup every seventh time), and retries a failed full backup the next day
-   because the chain is still full. A backup that WAL-G reports done but that is not
-   in the list afterwards is a failure.
-5. **Verify.** `wal-verify integrity timeline --json`, JSON status only. A failure
-   here stops the tick before retention.
-6. **Retention.** `retain FULL 3`, guarded (see `retention.py`).
-
-The first failing step ends the run and is recorded with its name; the next day's
-tick starts from scratch. Every step's result is written to `state.json`, which the
-health probe reads (`probe.py`). Output goes through `report`, one line at a time.
-"""
+# meiva:note
+# The daily WAL-G tick (`meiva backup walg run`): back up, verify the chain, apply retention.
+#
+# One command, run once a day by the OS job and by hand. It is safe to run at any
+# moment and any number of times:
+#
+# 1. **Gates.** Key unset: nothing to do. Another tick holds the per-home lock: that run
+#    is still going, nothing to do. Postgres does not accept connections: the tick is
+#    *skipped* (recorded, exit 0) rather than failed, so a tick that happens to land
+#    inside a stop/start window does not become a day-long alert. A skip leaves the outcome of the last real run untouched.
+# 2. **Preflight.** The pinned binary, the configuration and key pin, and one
+#    `backup-list`, which proves the credentials and the prefix.
+# 3. **Recovery drill**, once a week (`drill.py`), before the backup, so that it restores
+#    yesterday's backup: the one a lost host would need. A failed drill is recorded in
+#    `drill` and never stops the backup.
+# 4. **Backup.** `backup-push` with `WALG_DELTA_MAX_STEPS=6`: WAL-G itself starts a new
+#    full backup once the increment chain is six deep (a daily run therefore makes a
+#    full backup every seventh time), and retries a failed full backup the next day
+#    because the chain is still full. A backup that WAL-G reports done but that is not
+#    in the list afterwards is a failure.
+# 5. **Verify.** `wal-verify integrity timeline --json`, JSON status only. A failure
+#    here stops the tick before retention.
+# 6. **Retention.** `retain FULL 3`, guarded (see `retention.py`).
+#
+# The first failing step ends the run and is recorded with its name; the next day's
+# tick starts from scratch. Every step's result is written to `state.json`, which the
+# health probe reads (`probe.py`). Output goes through `report`, one line at a time.
 
 from __future__ import annotations
 
@@ -97,14 +96,6 @@ def postgres_accepts_connections(target: PgTarget) -> bool:
             return True
     except psycopg.Error:
         return False
-
-
-def deploy_window_reason(db: Database) -> str | None:
-    """The sentence naming the open deploy window, or None."""
-    from ops.deploy_window import deploy_in_flight
-
-    window = deploy_in_flight(db)
-    return window.detail if window.active else None
 
 
 class StepFailedError(Exception):
@@ -304,17 +295,13 @@ def _record_failure(
     return 1
 
 
-def _skip_reason(db: Database, target: PgTarget) -> str | None:
-    window = deploy_window_reason(db)
-    if window is not None:
-        return f"a deploy window is open ({window})"
+def _skip_reason(target: PgTarget) -> str | None:
     if not postgres_accepts_connections(target):
         return "postgres is not accepting connections"
     return None
 
 
 def _locked_tick(
-    db: Database,
     report: Report,
     now: Callable[[], datetime],
     *,
@@ -334,7 +321,7 @@ def _locked_tick(
     except RuntimeError as exc:  # no locally owned Postgres to back up: a setup error
         return _record_failure(started, StepFailedError(STEP_PREFLIGHT, str(exc)), report, now)
     try:
-        reason = _skip_reason(db, target)
+        reason = _skip_reason(target)
     except RuntimeError as exc:  # the socket answers, but not as this home's Postgres
         return _record_failure(started, StepFailedError(STEP_PREFLIGHT, str(exc)), report, now)
     if reason is not None:
@@ -362,7 +349,6 @@ def _locked_tick(
 
 
 def run_tick(
-    db: Database,
     report: Report,
     *,
     now: Callable[[], datetime] = _now,
@@ -378,7 +364,6 @@ def run_tick(
     try:
         with file_lock(state.lock_path(), timeout_s=0):
             return _locked_tick(
-                db,
                 report,
                 now,
                 path_reader=path_reader,

@@ -152,6 +152,7 @@ template into a running cluster without a restart of the manager, run
   one-off change to a single schedule that is not in the manifest still goes
   through `meiva schedules update <name> --script-file <file>`.
 - **Verify in-store scripts when repo code moves.** `meiva schedules verify`
+  (needs the gateway: it reads the scripts through `GET /api/schedules`)
   checks every schedule's DB-embedded script — stopped rows included, built-in
   and agent-created alike — against the checkout it runs from: `py_compile`, a
   top-level-imports-only execution in the checkout's runner venv, a name-read

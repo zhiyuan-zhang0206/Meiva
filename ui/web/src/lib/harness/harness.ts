@@ -2,7 +2,7 @@ import type { components } from "@/lib/contracts/types-generated";
 
 // meiva:note
 // The runtime loop an agent is born on, fixed for its whole life: `meiva` is the built-in runtime, the others run the loop on an external CLI. The spawn form offers this choice and never changes it afterwards; a fork keeps its source's value. `launchable` is the platform's own answer to "can this machine actually start a session on it" - a harness can be installed (available) and still not launchable, and the UI says so rather than letting the choice look usable.
-// meiva:link base/agents/docs/harness.meiva.okf.md
+// meiva:link base/agents/docs/harness/harness.meiva.okf.md
 
 export type Harness = components["schemas"]["Harness"];
 

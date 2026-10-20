@@ -348,7 +348,6 @@ CREATE TABLE inbound_messages (
                    'cancel',            -- /api/cancel pause; in-flight llm/exec interrupts on it, claim halts to idle (agent stays alive, resumable)
                    'terminate',         -- meiva.terminate() / admin terminate; claim appends lifecycle marker + goto END
                    'restart',           -- meiva.restart() / admin restart; applied as a hosted lifecycle command (no message appended)
-                   'restart_completed', -- historical rows only (written by the retired respawn path); claim still renders the lifecycle marker
                    'resurrect',         -- INSERTed by resurrect_agent; after the new process is up, claim appends lifecycle marker
                    'fork',              -- INSERTed by spawn_agent on a fork; the new process's first claim appends an identity marker (you are now agent N, forked from agent:M)
                    'heartbeat',         -- INSERTed by heartbeat daemon; idle-agent nudge delivered as a system note
@@ -365,8 +364,7 @@ CREATE TABLE inbound_messages (
     -- claimed → pending so the same inbound is re-claimed and re-delivered.
     status     TEXT NOT NULL DEFAULT 'pending'
                CHECK (status IN ('pending', 'claimed', 'done')),
-    -- Optional JSONB. restart kind carries {"config_overlay": {...}};
-    -- restart_completed carries {"effective_config": {...}}. Other kinds leave NULL.
+    -- Optional JSONB. restart kind carries {"config_overlay": {...}}. Other kinds leave NULL.
     -- See future/plugin-system-redesign.md PR-E section.
     payload    JSONB,
     -- Server-owned ingress facts. Gateway writers fill these from the

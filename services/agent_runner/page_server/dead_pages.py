@@ -14,7 +14,6 @@ from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.transaction import write_transaction
-from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed
 from services.agent_runner.page_server.config import PageServerConfig
@@ -80,8 +79,6 @@ async def dead_pages_round(
     pool: ConnectionPool, _db: Database, host: str, progress: LoopProgress, bus: EventBus
 ) -> None:
     """Probe every open show page of this host and close the dead ones."""
-    if admission.quiesced():
-        return
     pages = await asyncio.to_thread(open_show_pages, pool, host)
     dead: dict[int, list[ShowPage]] = {}
 

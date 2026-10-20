@@ -151,7 +151,6 @@ def _prepare_cohort(
     deadline = time.monotonic() + bound
     started: float | None = None
     waited_on: tuple[int, ...] = ()
-    # quiesce-exempt: the stop command's own bounded prepare wait; it runs before the window opens
     while True:
         try:
             with db.connect() as conn:
@@ -194,7 +193,6 @@ def drain(
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("drain timeout must be finite and positive")
     deadline = time.monotonic() + timeout
-    # quiesce-exempt: the stop command's own bounded drain wait; it ends the moment the drain lands
     while True:
         hold = require_maintenance_hold(holder, at)
         if hold.phase == MaintenancePhase.PREPARING:

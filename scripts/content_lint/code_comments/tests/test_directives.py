@@ -4,7 +4,6 @@ import pytest
 
 from scripts.content_lint.code_comments.check import Repository, check
 from scripts.content_lint.code_comments.tests.cases import DOC, files, note, repository
-from scripts.content_lint.lint_quiesced_loops import violations_in_source
 
 RATIONALE = note(("The caller already proves the value.",), links=(DOC,))
 
@@ -146,35 +145,6 @@ def test_a_link_only_note_points_at_the_rationale_document(tmp_path: Path) -> No
         source_with(note((), links=(DOC,)), "def budget():\n    return call()  # noqa: S603\n"),
     )
     assert codes(repo) == []
-
-
-def test_a_bare_quiesce_marker_is_not_machine_syntax(tmp_path: Path) -> None:
-    loop = "    # quiesce-exempt\n    while True:\n        sleep(1)\n"
-    bound = repository(tmp_path / "bound", source_with(RATIONALE + "def loop():\n", loop))
-    assert codes(bound) == ["free-comment"]
-    unbound = repository(tmp_path / "unbound", {"pkg/core.py": "def loop():\n" + loop})
-    assert codes(unbound) == ["free-comment"]
-
-
-def test_a_quiesce_marker_with_its_own_reason_is_machine_syntax(tmp_path: Path) -> None:
-    repo = repository(
-        tmp_path,
-        source_with(
-            RATIONALE,
-            "def loop():\n    # quiesce-exempt: never touches the database\n"
-            "    while True:\n        sleep(1)\n",
-        ),
-    )
-    assert codes(repo) == []
-
-
-def test_the_stop_window_lint_keeps_its_own_marker_requirement() -> None:
-    marker = "    # quiesce-exempt: never touches the database\n"
-    loop = "    while True:\n        sleep(1)\n"
-    assert not violations_in_source("def budget():\n" + marker + loop)
-    assert violations_in_source("def budget():\n" + loop)
-    misplaced = "def budget():\n" + marker + "    value = 1\n" + loop
-    assert any("stale" in message for _, message in violations_in_source(misplaced))
 
 
 @pytest.mark.parametrize(

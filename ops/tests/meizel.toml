@@ -28,9 +28,6 @@ exports = ["pool_support.py"]
 "test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.random.uniform" = 2
 "test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.rpc_sleep" = 1
 "test_cluster_status_op.py#monkeypatch.setattr ops.cluster.operations.status_snapshot" = 1
-"test_deploy_window.py#monkeypatch.setattr base.cluster.machine_exclusions.list_excluded_machines" = 7
-"test_deploy_window.py#monkeypatch.setattr base.cluster.machines.list_all" = 2
-"test_deploy_window.py#monkeypatch.setattr ops.deploy_window.read_deploy_states" = 10
 "test_env_audit.py#monkeypatch.setattr base.config.admin.metadata.get_config_metadata" = 1
 "test_env_audit.py#monkeypatch.setattr base.config.config_registry.fields" = 3
 "test_env_audit.py#monkeypatch.setattr base.config.current_field_values" = 1
@@ -49,5 +46,4 @@ exports = ["pool_support.py"]
 "test_shell_kill_contract.py#monkeypatch.setattr ops.cluster_status.agent_shell_sessions" = 1
 
 [debt.unresolved-patch]
-"test_deploy_window.py#monkeypatch.setattr broken" = 1
 "test_pty_close_notices.py#monkeypatch.setattr database.connect" = 2

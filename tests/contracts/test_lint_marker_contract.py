@@ -130,4 +130,4 @@ def test_send_system_note_rejects_unknown_notetag_before_gateway() -> None:
             idempotency_key=str(uuid4()),
         )
     assert "task" in str(exc_info.value)
-    assert "heartbeat_pause" in str(exc_info.value)
+    assert "lifecycle_fork" in str(exc_info.value)

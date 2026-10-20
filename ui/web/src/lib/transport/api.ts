@@ -583,6 +583,12 @@ export const api = {
     );
   },
 
+  // meiva:note
+  // One task with its text columns: the Fleet card reads the compact list and
+  // fetches this row only for the task it is showing.
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  getTask: (id: number): Promise<TaskRow> => f(`/api/tasks/${id}`).then(ok<TaskRow>),
+
   getMemoryGraph: (): Promise<MemoryGraphResponse> => {
     return f("/api/memory/graph").then(ok<MemoryGraphResponse>);
   },

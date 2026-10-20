@@ -4716,6 +4716,125 @@
         }
       }
     },
+    "/api/notifications/audit": {
+      "get": {
+        "summary": "Get Notification Audit",
+        "operationId": "get_notification_audit_api_notifications_audit_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 7,
+              "title": "Days"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tz"
+            }
+          },
+          {
+            "name": "now",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Now"
+            }
+          },
+          {
+            "name": "simulate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Simulate"
+            }
+          },
+          {
+            "name": "explain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Explain"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationAuditResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/schedules": {
       "get": {
         "summary": "List Schedules",
@@ -5407,6 +5526,71 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SkillView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/extensions/{kind}/{name}": {
+      "put": {
+        "summary": "Put Extension",
+        "description": "Store one extension's tree as a content-addressed blob and upsert its\nregistry row in one transaction. 413 over the registry size cap; 422 on an\nundecodable or unsafe archive.",
+        "operationId": "put_extension_api_extensions__kind___name__put",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "skill",
+                "plugin",
+                "mcp"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtensionRegisterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionRegisterResponse"
                 }
               }
             }
@@ -7423,35 +7607,18 @@
         }
       }
     },
-    "/api/tasks": {
+    "/api/tasks/{task_id}": {
       "get": {
-        "summary": "Get Tasks",
-        "description": "Return the task registry, newest first.\n\n`fields=full` (the default) returns the compatibility projection. `fields=summary`\nreturns metadata only, selecting neither task text column. `window` (24h / 7d / 30d / all, default all) narrows the list by last activity\n(updated_at) on the backend, so the task graph's default 24-hour view never\npulls the full registry. A windowed list still carries every kept task's\nout-of-window ancestors flagged ghost=True (see _windowed_tasks); without\na window the full table is returned unchanged.\n\nNo pagination — the task registry is bounded (tasks are created by agents;\nclosed tasks are kept). Order by created_at DESC so the newest tasks\nsurface first in the Task Graph view.",
-        "operationId": "get_tasks_api_tasks_get",
+        "summary": "Get Task",
+        "operationId": "get_task_api_tasks__task_id__get",
         "parameters": [
           {
-            "name": "window",
-            "in": "query",
-            "required": false,
+            "name": "task_id",
+            "in": "path",
+            "required": true,
             "schema": {
-              "type": "string",
-              "pattern": "^(24h|7d|30d|all)$",
-              "default": "all",
-              "title": "Window"
-            }
-          },
-          {
-            "name": "fields",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "enum": [
-                "full",
-                "summary"
-              ],
-              "type": "string",
-              "default": "full",
-              "title": "Fields"
+              "type": "integer",
+              "title": "Task Id"
             }
           }
         ],
@@ -7461,7 +7628,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskListResponse"
+                  "$ref": "#/components/schemas/TaskRow"
                 }
               }
             }
@@ -7477,9 +7644,7 @@
             }
           }
         }
-      }
-    },
-    "/api/tasks/{task_id}": {
+      },
       "patch": {
         "summary": "Patch Task",
         "description": "Partially update a task; omitted fields stay unchanged.\n\nstatus, priority, title, description, and results are taken when non-null\n(status must be one of in_progress/done/cancelled and priority one of\nP0..P3 — both are shared enums, so pydantic 422s anything else; a title\ncolliding with another in_progress task's is rejected). owner reassigns to\nanother agent (an explicit null is rejected — a task cannot be released).\nremind_interval_seconds must be a positive number of seconds <= 24h (an explicit\nnull is rejected — reminders cannot be disabled). Any write resets the\nreminder counters, same as the SDK update path. An owner reassignment sends\nthe SDK-equivalent task system notes in the same database transaction.\n\nThe system root task is immutable: any PATCH targeting it is rejected with\n422 (mirrors the SDK update() guard), so the task-tree anchor can never be\nreassigned, completed, cancelled, or otherwise edited.\n\nA required Idempotency-Key commits an immutable response with the write.\nReusing that key with different fields returns 409; replay returns the original\ntask snapshot without another update or wake, even if the task later changes.\n\nA status change to done or cancelled is rejected with 422 while any direct\nchild remains in progress. Close or cancel those children first.",
@@ -7523,6 +7688,62 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TaskRow"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "summary": "Get Tasks",
+        "operationId": "get_tasks_api_tasks_get",
+        "parameters": [
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(24h|7d|30d|all)$",
+              "default": "all",
+              "title": "Window"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "full",
+                "summary",
+                "graph"
+              ],
+              "type": "string",
+              "default": "full",
+              "title": "Fields"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskListResponse"
                 }
               }
             }
@@ -9939,6 +10160,198 @@
         ],
         "title": "AssignmentTaskIn"
       },
+      "AuditCandidates": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "candidates": {
+            "type": "integer",
+            "title": "Candidates"
+          },
+          "delivered": {
+            "type": "integer",
+            "title": "Delivered"
+          },
+          "suppressed": {
+            "type": "integer",
+            "title": "Suppressed"
+          },
+          "repeat_deliveries": {
+            "type": "integer",
+            "title": "Repeat Deliveries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "candidates",
+          "delivered",
+          "suppressed",
+          "repeat_deliveries"
+        ],
+        "title": "AuditCandidates"
+      },
+      "AuditDay": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "title": "Day"
+          },
+          "by_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Category"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "by_category",
+          "total"
+        ],
+        "title": "AuditDay"
+      },
+      "AuditDelivered": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "per_day": {
+            "items": {
+              "$ref": "#/components/schemas/AuditDay"
+            },
+            "type": "array",
+            "title": "Per Day"
+          },
+          "per_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Per Category"
+          },
+          "per_hour": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Per Hour"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "per_day",
+          "per_category",
+          "per_hour"
+        ],
+        "title": "AuditDelivered"
+      },
+      "AuditExplained": {
+        "properties": {
+          "at": {
+            "type": "string",
+            "title": "At"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "dedupe_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe Key"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome"
+          }
+        },
+        "type": "object",
+        "required": [
+          "at",
+          "category",
+          "agent_id",
+          "dedupe_key",
+          "outcome"
+        ],
+        "title": "AuditExplained"
+      },
+      "AuditSimulation": {
+        "properties": {
+          "variant": {
+            "type": "string",
+            "title": "Variant"
+          },
+          "delivered": {
+            "type": "integer",
+            "title": "Delivered"
+          },
+          "delta": {
+            "type": "integer",
+            "title": "Delta"
+          },
+          "per_day": {
+            "type": "number",
+            "title": "Per Day"
+          }
+        },
+        "type": "object",
+        "required": [
+          "variant",
+          "delivered",
+          "delta",
+          "per_day"
+        ],
+        "title": "AuditSimulation"
+      },
+      "AuditWindow": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "title": "End"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "days",
+          "timezone"
+        ],
+        "title": "AuditWindow"
+      },
       "AvailabilityReason": {
         "type": "string",
         "enum": [
@@ -11880,6 +12293,68 @@
         ],
         "title": "EventsResponse",
         "description": "GET /api/events response — newest-first slice of the unified event\nstream (`ts DESC`, `id DESC` tiebreak so `limit`/`offset` paging is stable\nacross same-`ts` rows)."
+      },
+      "ExtensionRegisterRequest": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source",
+            "description": "'repo', a git URL, or 'local:<machine>' — where the content came from."
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Ref",
+            "description": "Commit or tag as installed, when the source is git."
+          },
+          "archive_b64": {
+            "type": "string",
+            "title": "Archive B64",
+            "description": "Base64 of the deterministic tar `registry.pack_tree` builds from the tree."
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "archive_b64"
+        ],
+        "title": "ExtensionRegisterRequest"
+      },
+      "ExtensionRegisterResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "skill",
+              "plugin",
+              "mcp"
+            ],
+            "title": "Kind"
+          },
+          "content_hash": {
+            "type": "string",
+            "title": "Content Hash",
+            "description": "Tree hash of the content the row now points at."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "content_hash"
+        ],
+        "title": "ExtensionRegisterResponse"
       },
       "FleetGraphEdge": {
         "properties": {
@@ -14887,6 +15362,76 @@
         "title": "NoticesFeed",
         "description": "GET /api/notices — the unified inbox feed (Task #1024, R4 layer 2,\ndecision Q1=A). One request carries the whole Inbox panel: the OPEN\nqueue split by kind (open = FYI notices that need no response, awaiting\n= require_response notices that ride the agent snapshot today) plus one\nkeyset page of the RESOLVED history.\n\nThe contract shape was chosen so a panel = one request = one hook:\nthe client no longer merges three independent pipes (agent snapshot +\n/api/notices/open + the resolved history). `next_cursor` is None when\n`resolved_page` is the last page (short page or exhausted); pass it back\nas before_at/before_id for the next strictly-older page."
       },
+      "NotificationAuditResponse": {
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/AuditWindow"
+          },
+          "switches": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Switches"
+          },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Categories"
+          },
+          "sources": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Sources"
+          },
+          "delivered": {
+            "$ref": "#/components/schemas/AuditDelivered"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/AuditCandidates"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "simulations": {
+            "items": {
+              "$ref": "#/components/schemas/AuditSimulation"
+            },
+            "type": "array",
+            "title": "Simulations"
+          },
+          "explain": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AuditExplained"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window",
+          "switches",
+          "categories",
+          "sources",
+          "delivered",
+          "candidates",
+          "simulations"
+        ],
+        "title": "NotificationAuditResponse"
+      },
       "NotificationCategoriesResponse": {
         "properties": {
           "categories": {
@@ -16270,8 +16815,7 @@
           }
         },
         "type": "object",
-        "title": "RestartAgentRequest",
-        "description": "POST /api/agents/{id}/restart request body — fully optional.\n\n`source` default \"user\" — frontend restart button does not need to\npass it; SDK paths pass f\"agent:{my_id}\". Written into the lifecycle\n'restart' inbound's source; the claim-side dispatch composes it into\nthe marker `[system ts] You have been restarted by {source}` so the\nagent knows who restarted it.\n\n`config_overlay`, when nonempty, is validated before it reaches either\ngateway or runner writes, merged into the persistent agent overlay, and\ncarried in the restart inbound payload for the completion marker."
+        "title": "RestartAgentRequest"
       },
       "RestartAgentResponse": {
         "properties": {
@@ -18807,6 +19351,119 @@
         ],
         "title": "TaskAssignmentIn"
       },
+      "TaskGraphRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "owner_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Label"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "remind_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remind Interval Seconds"
+          },
+          "last_reminded_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reminded At"
+          },
+          "reminder_count": {
+            "type": "integer",
+            "title": "Reminder Count",
+            "default": 0
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "ghost": {
+            "type": "boolean",
+            "title": "Ghost",
+            "default": false
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "title",
+          "status",
+          "owner",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "priority",
+          "description"
+        ],
+        "title": "TaskGraphRow"
+      },
       "TaskListResponse": {
         "properties": {
           "tasks": {
@@ -18817,6 +19474,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/TaskSummaryRow"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskGraphRow"
                 }
               ]
             },

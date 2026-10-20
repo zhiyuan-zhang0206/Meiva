@@ -205,31 +205,6 @@ class TestPendingScan:
 
         assert scheduler.woken == [23]
 
-    async def test_scan_defers_through_the_stop_window_and_runs_after_it(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The stop window leaves rows untouched; the scan runs once it closes."""
-        from base.deploy.maintenance import admission
-
-        state = {"quiesced": True}
-        monkeypatch.setattr(admission, "quiesced", lambda: state["quiesced"])
-        scanner_calls: list[int] = []
-        scheduler = ScanScheduler()
-
-        async def _pending() -> list[int]:
-            scanner_calls.append(1)
-            return [23]
-
-        disp = InboundWakeDispatcher(EventBus.from_settings(), scheduler, pending_scan=_pending)
-
-        await disp.scan_once()
-        assert scanner_calls == []
-        assert scheduler.woken == []
-
-        state["quiesced"] = False
-        await disp.scan_once()
-        assert scheduler.woken == [23]
-
 
 class TestStallRestartEscalation:
     """Task #2417, half 2: a stalled turn that refuses its bounded unwind must

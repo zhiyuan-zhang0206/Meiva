@@ -12,7 +12,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
 from agent.graph.claim.tests.claim_support import (
-    await_inbound_visible,
     insert_inbound_kind,
     make_runtime,
     thread_config,
@@ -21,7 +20,6 @@ from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fres
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import (
     _set_agent_status,
-    await_status,
     committed_publishes,
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
@@ -34,45 +32,6 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-
-
-async def test_claim_restart_completed_kind_appends_marker_and_continues(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-):
-    """Historical restart_completed inbound → claim appends
-    lifecycle marker 'You have been restarted by {source}' + goto BEFORE_LLM.
-    halted=False (mid-task before restart) → wakes up to resume interrupted work."""
-    tid = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
-    )
-
-    assert cmd.goto == "before_llm"
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
-    lifecycle = msgs[0]
-    assert isinstance(lifecycle, HumanMessage)
-    assert "You have been restarted by user" in lifecycle.content  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_restart"  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_system_note_kind_appends_system_note_and_continues(
@@ -222,7 +181,7 @@ async def test_claim_restart_while_idle_commits_halted_true(
     carrying 'no in-flight work before restart' across the restart boundary for the new process to read."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
+    insert_inbound_kind(db_conn, tid, "", "restart", source="system:restart")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
@@ -265,34 +224,6 @@ async def test_claim_restart_self_source_commits_halted_false(
     assert cmd.update["halted"] is False  # type: ignore[index]
 
 
-async def test_claim_restart_system_update_after_self_update_wakes(
-    running_agent: Callable[[], int],
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-):
-    """update_initiated=True in state (historical checkpoint from the removed
-    self:update path) + the rollout quiesce system:update restart → committed
-    halted must be False — an update-interrupted agent wakes after restart, not
-    silently idle."""
-    tid = running_agent()
-    _set_agent_status(db_conn, tid, "running")
-    insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")], halted=True, update_initiated=True),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
-    )
-
-    assert cmd.goto == END
-    assert cmd.update["halted"] is False  # type: ignore[index]
-
-
 async def test_claim_restart_preserves_chat_for_successor(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
@@ -307,7 +238,7 @@ async def test_claim_restart_preserves_chat_for_successor(
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
-    insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
+    insert_inbound_kind(db_conn, tid, "", "restart", source="system:restart")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
@@ -328,125 +259,6 @@ async def test_claim_restart_preserves_chat_for_successor(
     assert db_conn.execute(
         "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (tid,)
     ).fetchone() == ("pending", "hello")
-
-
-@pytest.mark.flaky  # poll await_status for claim_node status transition
-async def test_claim_second_restart_batched_with_restart_completed_exits_again(
-    running_agent: Callable[[], int],
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-):
-    """boot batch [restart_completed, restart] (user clicked restart again within the restart window) →
-    the second restart wins over wake: after committing marker, exits again via restart, idle preserved
-    (external + halted=True) → second restart remains silent."""
-    tid = running_agent()
-    _set_agent_status(db_conn, tid, "running")
-    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
-    restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
-    await await_inbound_visible(aops_pool, restart_id)
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
-    )
-
-    assert cmd.goto == END
-    assert cmd.update["halted"] is True  # type: ignore[index]
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    restart_messages = cast(list[AnyMessage], msgs)
-    assert (
-        len(restart_messages) == 1
-        and "Restart was accepted" in restart_messages[0].model_dump()["content"]
-    )
-    assert db_conn.execute(
-        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='restart_completed'", (tid,)
-    ).fetchone() == ("pending",)
-    await await_status(aops_pool, tid, "running")
-
-
-async def test_claim_restart_completed_while_idle_stays_silent(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-):
-    """halted=True (idle before restart, preserved from RESTART case) + batch has only
-    restart_completed → after committing lifecycle marker, goto CLAIM returns to waiting,
-    does **not** enter before_llm — idle agent does not burn an LLM call for 'knowing I was restarted'."""
-    tid = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
-    )
-
-    assert cmd.goto == "claim"
-    assert cmd.goto != "before_llm"
-    assert cmd.update["halted"] is True  # type: ignore[index]
-    # marker committed as usual — agent reads it the next time it truly wakes
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert "You have been updated and restarted" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
-    assert msgs[0].additional_kwargs.get("meiva_note_tag") == "lifecycle_restart"  # pyright: ignore[reportUnknownMemberType]
-
-
-async def test_claim_restart_completed_with_chat_cobatch_wakes(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    database: Database,
-    event_bus: EventBus,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-):
-    """halted=True but batch has chat in addition to restart_completed (user message that arrived
-    during agent downtime window) → wakes normally to before_llm, must not silently swallow the chat."""
-    tid = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
-    insert_inbound_message(
-        db_conn, tid, "are you back?", source="user", bus=event_bus, database=database
-    )
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
-    )
-
-    assert cmd.goto == "before_llm"
-    assert cmd.update["halted"] is False  # type: ignore[index]
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 2  # pyright: ignore[reportUnknownArgumentType]
-    assert "updated and restarted" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
-    assert "are you back?" in msgs[1].content  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_restart_kind_does_not_publish_committed(
@@ -473,144 +285,3 @@ async def test_claim_restart_kind_does_not_publish_committed(
         ),
     )
     assert committed_publishes(pub) == []
-
-
-async def test_claim_restart_completed_with_payload_overlay_preserves_args(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-):
-    """restart_completed inbound contains payload → claim passes both source + payload arguments
-    to _render_restart_completed_marker; source determines the marker wording, payload determines
-    'with config {...}' segment.
-
-    Lock down mutation that replaces source / payload args with None or skips them: losing source
-    misses the 'restarted by' wording, losing payload misses overlay diff segment."""
-    tid = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-            "VALUES (%s, '', 'restart_completed', 'user', "
-            '\'{"config_overlay": {"foo": "bar"}}\'::jsonb)',
-            (tid,),
-        )
-    db_conn.commit()
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
-    )
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    lifecycle = msgs[0]
-    assert isinstance(lifecycle, HumanMessage)
-    assert isinstance(lifecycle.content, str)  # pyright: ignore[reportUnknownMemberType]
-    text = lifecycle.content
-    # source 'user' was really passed (changing to None would lose the "by user" wording)
-    assert "restarted by user" in text
-    # payload was really passed (changing to None / removing arg would cause overlay segment to not appear)
-    assert "with config {foo='bar'}" in text
-
-
-async def test_claim_restart_self_source_sets_update_initiated(
-    running_agent: Callable[[], int],
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-):
-    """self source RESTART → update_initiated stays True, writing 'this agent
-    is in an update session' into Checkpoint (historical: only the removed
-    self:update path set it; self.restart preserves whatever was there)."""
-    tid = running_agent()
-    _set_agent_status(db_conn, tid, "running")
-    insert_inbound_kind(db_conn, tid, "", "restart", source="self")
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
-    )
-
-    assert cmd.goto == END
-    assert cmd.update["update_initiated"] is True  # type: ignore[index]
-
-
-async def test_claim_restart_completed_system_update_clears_update_initiated(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-):
-    """system:update RESTART_COMPLETED with current update_initiated=True → return
-    update_initiated becomes False, update session ends."""
-    tid = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    _set_agent_status(db_conn, tid, "running")
-    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")], update_initiated=True),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
-    )
-
-    assert cmd.goto == "before_llm"
-    assert cmd.update["update_initiated"] is False  # type: ignore[index]
-
-
-async def test_claim_restart_completed_non_system_update_preserves_update_initiated(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-):
-    """non-system:update RESTART_COMPLETED → update_initiated unchanged, flag not cleared."""
-    tid = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    _set_agent_status(db_conn, tid, "running")
-    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="self")
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")], update_initiated=True),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
-    )
-
-    assert cmd.goto == "before_llm"
-    assert cmd.update["update_initiated"] is True  # type: ignore[index]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, HttpUrl, JsonValue, field_validator
 from pydantic_settings import NoDecode
@@ -400,6 +400,29 @@ class GatewaySettings(EnvSettings):
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    human_auth: Literal["required", "trusted_network"] = Field(
+        default="required",
+        alias="MEIVA_GATEWAY_HUMAN_AUTH",
+        description=(
+            "How the gateway authenticates human-facing callers (the web UI login and an "
+            "operator's cluster-secret bearer). `required` (default): every request carries a "
+            "session cookie or a bearer. `trusted_network`: a request that presents neither is "
+            "served as the cluster administrator, so the API does not authenticate human "
+            "callers; set it only when the machine's MEIVA_MACHINE_HOST is a trusted private "
+            "network address (the gateway then listens on loopback and that address only). "
+            "Anonymous requests still face the browser-origin and Host-header checks. Machine "
+            "credentials, the data plane, webhook tokens and the /mcp endpoint's own tokens are "
+            "unchanged, and the cluster secret must still exist. The config API never writes "
+            "it (an authenticated caller must not switch authentication off)."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
         },

@@ -110,12 +110,20 @@ export function formatUptime(seconds: number): string {
 // meiva:note
 // Signed relative time in both directions: `in 4m` (future), `5m ago` (past), and `just now` under a minute; seconds through years. The one wording scheme every relative-time surface in the app uses, so a copy change belongs here rather than at a call site. An unparseable iso string yields an em dash.
 // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
-export function formatRelative(iso: string, now: Date = new Date()): string {
+export function formatRelative(
+  iso: string,
+  now: Date = new Date(),
+  { capitalize = false }: { capitalize?: boolean } = {},
+): string {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return "—";
   const deltaSec = Math.round((t - now.getTime()) / 1000);
   const mag = Math.abs(deltaSec);
-  if (mag < 60) return "just now";
+  // meiva:note
+  // `capitalize` is for a value that starts its own cell ("Just now, 10:17"),
+  // not for one that continues a sentence ("Updated just now"). Pass it there.
+  // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+  if (mag < 60) return capitalize ? "Just now" : "just now";
   const min = Math.floor(mag / 60);
   let span: string;
   if (min < 60) span = `${min}m`;

@@ -44,7 +44,7 @@ def test_a_harness_without_a_launcher_is_refused(
     # The shipped set grows as launchers land, so the refusal is driven through the
     # parameter rather than by betting on which harnesses still lack one: antigravity
     # was this test's example until the release that gave it a launcher.
-    # meiva:link base/agents/docs/harness.meiva.okf.md
+    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
     without_it = frozenset(LAUNCHABLE_HARNESSES - {Harness.ANTIGRAVITY})
     with pool, pytest.raises(ValueError, match="no launcher yet"):
         launch.validate_launch_row(

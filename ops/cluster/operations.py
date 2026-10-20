@@ -72,7 +72,7 @@ def cluster_status_op(
 # on the daemon's worker thread because a stalled network mount would still block
 # the event loop that serves spawn and lifecycle. The gateway caches one answer per
 # machine for 30 seconds, so a repeat read of the form does not reach this op.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def harness_probe_op(machine: str) -> HarnessProbeResult:
     return HarnessProbeResult(
         machine=machine,

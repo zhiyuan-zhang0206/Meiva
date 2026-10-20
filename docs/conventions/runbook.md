@@ -545,7 +545,7 @@ half, use the separate commands:
   read failures remain errors. The result is handed to the
   worktree as a rows file (`--rows-file`). NEW checks it through its own
   `meiva schedules verify --rows-file ... --no-notify` entry point under a throwaway
-  `MEIVA_HOME`, offline, never dialing the database and never calling its Python
+  `MEIVA_HOME`, offline, never dialing the gateway or the database and never calling its Python
   API directly (that signature changes between versions). A red row (a moved module, an undefined name, a call that no longer binds), or a check that
   could not run, refuses with exit 2, the rows listed and nothing stopped; fix the
   scripts and rerun, or give `--allow-red-schedules` to proceed (the rows then

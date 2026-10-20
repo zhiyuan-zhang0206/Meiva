@@ -35,10 +35,11 @@ import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol
 
-from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.packages.extensions.install_registry import IGNORED_NAMES, tree_hash
+from base.packages.extensions.registry import ExtensionKind
 from base.packages.skills import scan
 
 _COLLECTION_ROOTS = ("skills", ".claude/skills", ".agents/skills", ".meiva/skills")
@@ -47,6 +48,16 @@ _COLLECTION_ROOTS = ("skills", ".claude/skills", ".agents/skills", ".meiva/skill
 class SkillPackageError(ValueError):
     """The source tree holds no installable skill package, one of its SKILL.md
     files does not parse, or a package is already installed."""
+
+
+class ExtensionRegistryError(SkillPackageError):
+    pass
+
+
+class ExtensionGateway(Protocol):
+    def put_extension(
+        self, *, kind: ExtensionKind, name: str, root: Path, source: str, source_ref: str | None
+    ) -> None: ...
 
 
 class SkillScanRefused(SkillPackageError):  # noqa: N818 — reads as the outcome, not an error kind
@@ -210,59 +221,34 @@ def scan_report(root: Path, name: str, *, accept_risk: bool) -> tuple[str, list[
     return report, scan.rule_ids(critical)
 
 
+# meiva:note
+# Deliberately NOT best-effort. The cluster row is the authority the whole ownership model rests on
+# (docs/decisions/extensions/plugins/2026-08-21-extension-ownership-three-tiers.md), so an install
+# that cannot reach the cluster must not quietly become a machine-local one; the error tells the
+# operator to bring the cluster up and re-run. A local-path source is recorded as `local:<machine>`,
+# never as the path itself: the row is cluster-wide and a path means nothing on another machine.
+# `looks_like_local_path` is the classifier the install uses to decide whether to clone. `path`
+# is not carried: it locates the package within a source repo, a fact about how this machine
+# fetched it.
 def register_in_cluster(
     packages: list[SkillPackage],
     *,
     source: str | None,
     ref: str | None,
-    database_factory: DatabaseFactory,
+    gateway: ExtensionGateway,
     machine: MachineIdentity,
 ) -> None:
-    """Write every package to the cluster extension registry, or raise.
-
-    Deliberately NOT best-effort. The cluster row is the authority the whole
-    ownership model rests on (`docs/decisions/extensions/plugins/2026-08-21-extension-ownership-three-tiers.md`),
-    so an install that cannot reach the cluster must not quietly become a
-    machine-local one — that is the drift, not a degraded mode of avoiding it.
-    The operator's fix is to bring the cluster up and re-run, and the error says
-    so.
-
-    A LOCAL-PATH source is recorded as `local:<machine>`, never as the path
-    itself. The row is cluster-wide, and `/Users/someone/skills/foo` means
-    nothing on any other machine — storing it would put a machine-local fact in
-    a cluster table, which is the drift class this whole model removes. The
-    classifier is `_pkg_source.looks_like_local_path`, the same one the install
-    itself uses to decide whether to clone, so "is this local" cannot be
-    answered two ways. The design's `source` vocabulary is exactly
-    `'repo' | <git URL> | 'local:<machine>'`.
-
-    `path` is not carried: it locates the package WITHIN a source repo, which is
-    a fact about how this machine fetched it, and the cluster row is keyed by
-    name and addressed by content.
-    """
-    from base.packages.extensions import registry
-
     from ._pkg_source import looks_like_local_path
 
     origin = (
         f"local:{machine.name()}" if source is None or looks_like_local_path(source) else source
     )
     local = origin.startswith("local:")
-    # A git ref pins a remote source; it says nothing about a local directory.
     ref = None if local else ref
-    # The pool opens eagerly and owns worker threads; close it here rather
-    # than letting ConnectionPool.__del__ run at interpreter exit (it then
-    # joins its own worker and prints "cannot join current thread" noise).
-    with database_factory().pool() as pool:
-        for pkg in packages:
-            registry.register_tree(
-                pool,
-                root=pkg.root,
-                name=pkg.name,
-                kind="skill",
-                source=origin,
-                source_ref=ref,
-            )
+    for pkg in packages:
+        gateway.put_extension(
+            kind="skill", name=pkg.name, root=pkg.root, source=origin, source_ref=ref
+        )
 
 
 def install(
@@ -274,7 +260,7 @@ def install(
     accept_risk: bool = False,
     update_mode: str | None = None,
     check_every: int | None = None,
-    database_factory: DatabaseFactory,
+    gateway: ExtensionGateway,
     machine: MachineIdentity,
 ) -> list[tuple[Path, str]]:
     """Copy every package into the skills load dir and register it; return the
@@ -306,9 +292,7 @@ def install(
     # exactly the drift the registry exists to delete. The reverse gap (a row
     # whose content is not on this machine yet) is not a gap at all: it is what
     # materialization is for, on every machine including this one.
-    register_in_cluster(
-        packages, source=source, ref=ref, database_factory=database_factory, machine=machine
-    )
+    register_in_cluster(packages, source=source, ref=ref, gateway=gateway, machine=machine)
     dest_root.mkdir(parents=True, exist_ok=True)
     installed: list[tuple[Path, str]] = []
     for pkg, (report, accepted) in zip(packages, scanned, strict=True):

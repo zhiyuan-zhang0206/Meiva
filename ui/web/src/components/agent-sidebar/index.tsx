@@ -20,6 +20,11 @@ import { SidebarBody } from "./body";
 import { SidebarFooter } from "./footer";
 import { SidebarHeader } from "./header";
 import { SearchOverlay } from "./search-overlay";
+import { SidebarIconButton } from "./icon-button";
+import { SidebarSettingsPopover } from "./settings-popover";
+import { fleetHref } from "./links";
+import Link from "next/link";
+import { SpawnPopover } from "./spawn-popover";
 import type { DesktopProps, MobileProps, Props } from "./types";
 import { FLEX, FLEX_COL } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
@@ -149,7 +154,26 @@ export function AgentSidebar(props: Props) {
 
 function DesktopSidebar(props: DesktopProps) {
   const t = useTranslations("sidebar");
-  const { collapsed, onSearchOpen, onToggleCollapsed } = props;
+  const { collapsed, onSearchOpen, onToggleCollapsed, viewMode, onToggleViewMode, showTerminated, onToggleTerminated } = props;
+  // meiva:note
+  // The waiting count is a live signal, not a setting: it moved from the removed
+  // toolbar row to the header, next to the controls, and stays opt-in behind
+  // notification.awaiting_reply (quiet defaults).
+  // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+  const { settings } = useUserSettings();
+  const waiting = props.agents.reduce((n, a) => n + a.awaiting_response_count, 0);
+  const awaitingBadge =
+    settings["notification.awaiting_reply"] === true && waiting > 0 ? (
+      <Link
+        href={fleetHref(props.activeId)}
+        className="shrink-0 items-center gap-1 px-1 text-[11px] text-muted-foreground hover:text-foreground"
+        title={String(waiting)}
+        style={{ display: "inline-flex" }}
+      >
+        <span className="size-1.5 rounded-full bg-destructive" />
+        <span>{waiting}</span>
+      </Link>
+    ) : null;
 
   if (collapsed) return null;
 
@@ -172,21 +196,24 @@ function DesktopSidebar(props: DesktopProps) {
           <>
             {/* Search in the header (not inline in the body) — opens the
                 floating overlay, #723. */}
-            <button
-              onClick={onSearchOpen}
-              className="p-1 rounded hover:bg-sidebar-accent shrink-0"
-              aria-label={t("searchAgents")}
-            >
+            <SidebarIconButton label={t("searchAgents")} onClick={onSearchOpen}>
               <Search className="size-4" />
-            </button>
-            <button
+            </SidebarIconButton>
+            {awaitingBadge}
+            <SidebarSettingsPopover
+              viewMode={viewMode}
+              onToggleViewMode={onToggleViewMode}
+              showTerminated={showTerminated}
+              onToggleTerminated={onToggleTerminated}
+            />
+            <SpawnPopover variant="icon" onSpawn={props.onSpawn} />
+            <SidebarIconButton
+              label={t("hideSidebar")}
               onClick={onToggleCollapsed}
-              className="p-1 rounded hover:bg-sidebar-accent shrink-0"
-              aria-label={t("hideSidebar")}
-              data-testid="sidebar-collapse"
+              testid="sidebar-collapse"
             >
               <PanelLeft className="size-4" />
-            </button>
+            </SidebarIconButton>
           </>
         }
       />
@@ -202,7 +229,12 @@ function DesktopSidebar(props: DesktopProps) {
 
 function MobileSidebar(props: MobileProps) {
   const t = useTranslations("sidebar");
-  const { mobileOpen, onMobileClose, onSearchOpen } = props;
+  // meiva:note
+  // The drawer keeps the same four controls as the rail: the body is a list, so
+  // create and the display settings live in its header on every width. Without
+  // this the drawer lost both when the body's spawn bar and toolbar went away.
+  // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+  const { mobileOpen, onMobileClose, onSearchOpen, viewMode, onToggleViewMode, showTerminated, onToggleTerminated } = props;
   if (!mobileOpen) return null;
   return (
     <div className={cn("fixed inset-0 z-50", FLEX)}>
@@ -215,20 +247,19 @@ function MobileSidebar(props: MobileProps) {
         <SidebarHeader
           trailing={
             <>
-              <button
-                onClick={onSearchOpen}
-                className="p-1 rounded hover:bg-sidebar-accent shrink-0"
-                aria-label={t("searchAgents")}
-              >
+              <SidebarIconButton label={t("searchAgents")} onClick={onSearchOpen}>
                 <Search className="size-4" />
-              </button>
-              <button
-                onClick={onMobileClose}
-                className="p-1 rounded hover:bg-sidebar-accent shrink-0"
-                aria-label={t("closeSidebar")}
-              >
-                <X className="size-5" />
-              </button>
+              </SidebarIconButton>
+              <SidebarSettingsPopover
+                viewMode={viewMode}
+                onToggleViewMode={onToggleViewMode}
+                showTerminated={showTerminated}
+                onToggleTerminated={onToggleTerminated}
+              />
+              <SpawnPopover variant="icon" onSpawn={props.onSpawn} />
+              <SidebarIconButton label={t("closeSidebar")} onClick={onMobileClose}>
+                <X className="size-4" />
+              </SidebarIconButton>
             </>
           }
         />

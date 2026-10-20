@@ -305,7 +305,7 @@ def applied_capture(
         "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
         "WHERE m.id=ANY(%s) AND m.status='idling' AND m.runtime_owner IS NULL "
         f"AND m.runtime_generation IS NULL AND {DRAINED_RESOURCES} "
-        "AND i.kind='restart' AND i.source='system:maintenance' AND i.status='claimed' "
+        "AND i.kind='restart' AND i.source='system:restart' AND i.status='claimed' "
         "AND i.target_owner=%s "
         "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
         "AND i.payload->'maintenance'=%s",
@@ -457,7 +457,7 @@ def _restart(conn: psycopg.Connection, agent_id: int, holder: str, acquired_at: 
         return pending[0][0]
     row = conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,payload) "
-        "VALUES(%s,'restart','system:maintenance','',%s) RETURNING id",
+        "VALUES(%s,'restart','system:restart','',%s) RETURNING id",
         (agent_id, Jsonb({"maintenance": operation})),
     ).fetchone()
     assert row is not None  # noqa: S101

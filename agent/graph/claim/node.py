@@ -72,7 +72,6 @@ from ._dispatch import BatchState, dispatch_batch
 # keep working unchanged. New code should import from the submodule that owns them.
 from ._dispatch import by_who as by_who
 from ._dispatch import handle_heartbeat as handle_heartbeat
-from ._dispatch import render_restart_completed_marker as render_restart_completed_marker
 from ._present import publish_end_timeline_snapshot, publish_inbound_committed
 from ._routing import ClaimGoto, resolve_routing, route_target
 
@@ -169,16 +168,14 @@ async def claim_node_impl(
     routing = await resolve_routing(ctx, agent_id, batch)  # pyright: ignore[reportUnknownArgumentType]
 
     # ── Dispatch: run every item through its handler ──
-    st = BatchState(
-        update_initiated=state.update_initiated,
-    )
+    st = BatchState()
     await dispatch_batch(ctx, state, agent_id, batch, routing, st)  # pyright: ignore[reportUnknownArgumentType]
 
     # ── Display: tell the frontend which chat inbounds were committed ──
     await publish_inbound_committed(ctx, agent_id, st.committed_chat_ids)
 
     # ── Decide: post-dispatch decision → single Command ──
-    outcome = await decide(ctx, state, agent_id, batch, st, routing)  # pyright: ignore[reportUnknownArgumentType]
+    outcome = await decide(ctx, state, agent_id, st, routing)
 
     # ── END snapshot ──
     if outcome.publish_end_snapshot:

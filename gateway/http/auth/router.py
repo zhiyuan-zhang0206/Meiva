@@ -42,7 +42,7 @@ from gateway.http.auth.session_store import (
     ticket_mint,
 )
 from gateway.http.config import GatewayConfig
-from gateway.http.middleware.cors import session_cookie_secure
+from gateway.http.middleware.cors import request_host, session_cookie_secure
 from gateway.http.middleware.error_envelope import error_response
 
 router = APIRouter()
@@ -294,7 +294,14 @@ async def check(request: Request) -> JSONResponse:
         home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,
     )
-    return JSONResponse(content={"authenticated": fact is not None})
+    # meiva:note
+    # In the `trusted_network` mode a request the middleware would serve without a credential
+    # (a trusted `Host`) reports authenticated too, so the UI skips its login page.
+    anonymous_admitted = (
+        config.human_auth == "trusted_network"
+        and request_host(request.headers.get("Host")) in config.trusted_hosts
+    )
+    return JSONResponse(content={"authenticated": fact is not None or anonymous_admitted})
 
 
 def _sessions_that_authenticate(

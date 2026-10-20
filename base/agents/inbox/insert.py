@@ -47,7 +47,6 @@ def _lineage_event(kind: str, source: str) -> tuple[str | None, int | None]:
         "restart": "restart",
         "cancel": "cancel",
         "resurrect": "resurrect",
-        "restart_completed": "restart_completed",
         "fork": "fork",
     }
     event_type = _kind_to_event.get(kind)
@@ -69,6 +68,35 @@ def _lineage_event(kind: str, source: str) -> tuple[str | None, int | None]:
     return event_type, target_agent_id
 
 
+# meiva:note
+# UI / gateway call: INSERT one inbound; the agent's claim node
+# fetches and dispatches.
+#
+# Args:
+#     source: provenance tag — claim node reads it and goes
+#         through `base/agents/messages/envelope.py:wrap_inbound` envelope prefix to tell
+#         the agent who the message came from. The UI passes
+#         `'user'`; a peer agent passes `'agent:N'`.
+#     kind: default `'chat'` (user dialogue). Other valid values
+#         see `db/schema.sql` CHECK constraint: `'compact_summary'`
+#         / `'compact_request'` / `'cancel'` / `'terminate'` / `'restart'`
+#         / `'resurrect'`. Non-'chat' usually
+#         pairs with `content=''` (control signal without payload).
+#     payload: optional JSONB sidecar. For a multimodal chat inbound this
+#         carries `{"content_blocks": [...]}` (the OpenAI-shaped text/image
+#         blocks); the claim node reads it to build a native multimodal
+#         HumanMessage while `content` holds the text part for legacy /
+#         envelope / timeline readers. None leaves the column NULL.
+#
+# Returns:
+#     The newly inserted inbound id — the caller can use it to
+#     publish an `inbound_arrived` event for the web UI to show in
+#     real time (spec §5).
+#
+# This is the self-committing shape: the row commits here, then the
+# post-commit steps run. A writer that must keep several inbounds in one
+# transaction calls :func:`insert_inbound_message_in_transaction` instead and
+# owns its own commit and post-commit steps.
 def insert_inbound_message(
     db: psycopg.Connection,
     agent_id: int,
@@ -81,35 +109,6 @@ def insert_inbound_message(
     database: Database,
     bus: EventBus,
 ) -> int:
-    """UI / gateway call: INSERT one inbound; the agent's claim node
-    fetches and dispatches.
-
-    Args:
-        source: provenance tag — claim node reads it and goes
-            through `base/agents/messages/envelope.py:wrap_inbound` envelope prefix to tell
-            the agent who the message came from. The UI passes
-            `'user'`; a peer agent passes `'agent:N'`.
-        kind: default `'chat'` (user dialogue). Other valid values
-            see `db/schema.sql` CHECK constraint: `'compact_summary'`
-            / `'compact_request'` / `'cancel'` / `'terminate'` / `'restart'`
-            / `'restart_completed'` / `'resurrect'`. Non-'chat' usually
-            pairs with `content=''` (control signal without payload).
-        payload: optional JSONB sidecar. For a multimodal chat inbound this
-            carries `{"content_blocks": [...]}` (the OpenAI-shaped text/image
-            blocks); the claim node reads it to build a native multimodal
-            HumanMessage while `content` holds the text part for legacy /
-            envelope / timeline readers. None leaves the column NULL.
-
-    Returns:
-        The newly inserted inbound id — the caller can use it to
-        publish an `inbound_arrived` event for the web UI to show in
-        real time (spec §5).
-
-    This is the self-committing shape: the row commits here, then the
-    post-commit steps run. A writer that must keep several inbounds in one
-    transaction calls :func:`insert_inbound_message_in_transaction` instead and
-    owns its own commit and post-commit steps.
-    """
     with db.cursor() as cur:
         new_id, prepared_event = insert_inbound_message_in_transaction(
             cur, agent_id, content, source, kind=kind, payload=payload, provenance=provenance

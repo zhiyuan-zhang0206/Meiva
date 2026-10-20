@@ -89,17 +89,14 @@ def test_run_hands_the_tick_a_timestamping_reporter_and_returns_its_exit_code(
 ) -> None:
     database_for_url = operator_database.for_url
 
-    def fake_tick(_db: object, report: Any, **_inputs: object) -> int:
+    def fake_tick(report: Any, **_inputs: object) -> int:
         assert _inputs["database_for_url"] is database_for_url
         report("skipped: postgres is not accepting connections")
         return 1
 
     monkeypatch.setattr(walg_cmd.tick, "run_tick", fake_tick)
 
-    assert (
-        walg_cmd.cmd_walg_run(database_factory=operator_database, database_for_url=database_for_url)
-        == 1
-    )
+    assert walg_cmd.cmd_walg_run(database_for_url=database_for_url) == 1
 
     out = capsys.readouterr().out
     assert re.fullmatch(

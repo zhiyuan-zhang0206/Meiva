@@ -53,10 +53,7 @@ describes only itself (`base/cluster/record.py`).
   the roster is `status`.
 - `status`'s `code` column is a live per-host probe reading: the commit the
   answering process froze at, marked when it differs from the host's checkout
-  HEAD. There is no cluster pin or known-good column. The
-  roster carries no deploy-window verdict: `ops.deploy_window.deploy_in_flight()`
-  reads every machine's posture row, which does not belong on a read-only roster
-  GET.
+  HEAD. There is no cluster pin or known-good column.
 - There is no `cluster` verb for a stranded maintenance hold: read it with
   `meiva status` and end it with `meiva start`
   ([graceful maintenance](../../docs/conventions/operations/graceful-maintenance.md)).

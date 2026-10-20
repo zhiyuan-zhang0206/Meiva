@@ -81,7 +81,7 @@ def _pending_restart(
         db_conn,
         agent,
         "",
-        "system:maintenance",
+        "system:restart",
         kind="restart",
         payload=_MAINTENANCE_PAYLOAD,
         database=Database.from_settings(gate=database_gate),

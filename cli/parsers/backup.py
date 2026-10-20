@@ -12,9 +12,7 @@ def _h_backup_walg_check(_args: argparse.Namespace) -> int:
 def _h_backup_walg_run(_args: argparse.Namespace) -> int:
     from cli.commands.data_plane.walg import cmd_walg_run
 
-    return cmd_walg_run(
-        database_factory=_args.database_factory, database_for_url=_args.database_for_url
-    )
+    return cmd_walg_run(database_for_url=_args.database_for_url)
 
 
 def _h_backup_walg_drill(_args: argparse.Namespace) -> int:
