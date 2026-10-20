@@ -281,6 +281,7 @@ export const ForceGraph = memo(function ForceGraph({
   // while the cursor moves (the anchor is static).
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hoverCardRef = useRef<HTMLDivElement | null>(null);
+  const legendRef = useRef<HTMLDivElement | null>(null);
   // Cancel a pending grace hide if the whole graph unmounts mid-hover.
   useEffect(() => () => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -297,64 +298,105 @@ export const ForceGraph = memo(function ForceGraph({
       setCardScrollable(false);
       return;
     }
-    const card = hoverCardRef.current;
-    const container = containerRef.current;
-    if (!card || !container) return;
-    const rect = container.getBoundingClientRect();
-    const cardW = card.offsetWidth;
-    const cardH = card.offsetHeight;
-    const gap = 14;
-    const maxX = rect.width - 4;
-    const maxY = rect.height - 4;
-    const x = hovered.x - rect.left; // node's right edge
-    const y = hovered.y - rect.top; // node's top edge
-    const nodeLeft = hovered.flipX - rect.left;
-    const nodeBottom = y + hovered.h;
 
-    // A previous vertical placement may have capped the card's height — clear
-    // it so this run measures the uncapped card.
-    card.style.maxHeight = "";
-    card.style.overflowY = "";
-    setCardScrollable(false);
+    // meiva:note
+    // The card's content arrives after the hover (the full task is fetched on
+    // demand), so its box grows from a placeholder to the real height. A
+    // one-shot placement measured the placeholder and left the grown card
+    // hanging off the canvas (user report 2026-10-20); the observer below
+    // re-places it on every size change. Measuring the natural height while a
+    // cap is applied keeps that loop stable: a cap we wrote never reads back
+    // as a smaller card.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    const place = () => {
+      const card = hoverCardRef.current;
+      const container = containerRef.current;
+      if (!card || !container) return;
+      const rect = container.getBoundingClientRect();
+      const cardW = card.offsetWidth;
+      const cardH = card.style.maxHeight ? card.scrollHeight : card.offsetHeight;
+      const gap = 14;
+      const pad = 4;
+      const maxX = rect.width - pad;
+      const maxY = rect.height - pad;
+      const x = hovered.x - rect.left;
+      const y = hovered.y - rect.top;
+      const nodeLeft = hovered.flipX - rect.left;
+      const nodeBottom = y + hovered.h;
 
-    let left: number;
-    let top: number;
-    const fitsRight = x + gap + cardW <= maxX;
-    // Horizontal flip: anchor the card's RIGHT edge at the node's LEFT edge —
-    // the card ends up entirely on the node's other side.
-    const fitsLeft = nodeLeft - gap - cardW >= 4;
-    if (fitsRight || fitsLeft) {
-      left = fitsRight ? x + gap : nodeLeft - gap - cardW;
-      top = y + gap;
-      if (top + cardH > maxY) top = y - gap - cardH; // vertical flip beside
-    } else {
-      // Neither horizontal side fits (mid-band node on a narrow canvas):
-      // place the card above the node, else below, horizontally centered on
-      // the node (clamped into the canvas).
-      left = Math.max(4, Math.min((nodeLeft + x) / 2 - cardW / 2, maxX - cardW));
-      const fitsAbove = y - gap - cardH >= 4;
-      const fitsBelow = nodeBottom + gap + cardH <= maxY;
-      if (fitsAbove || fitsBelow) {
-        top = fitsAbove ? y - gap - cardH : nodeBottom + gap;
-      } else {
-        // Taller than the free vertical space: pin to the roomier side and
-        // cap the card's height there so it clears the node; the card body
-        // scrolls (style set below).
-        const aboveSpace = y - gap - 4;
-        const belowSpace = maxY - nodeBottom - gap;
-        if (aboveSpace >= belowSpace) {
-          top = 4;
-          card.style.maxHeight = `${aboveSpace}px`;
-        } else {
-          top = nodeBottom + gap;
-          card.style.maxHeight = `${belowSpace}px`;
+      // meiva:note
+      // Horizontal placement, tried in order: beside the node (right preferred,
+      // then a flip that ends the card on the node's other side), else centered
+      // above/below it when neither side has room.
+      // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+      const fitsRight = x + gap + cardW <= maxX;
+      const fitsLeft = nodeLeft - gap - cardW >= pad;
+      const beside = fitsRight || fitsLeft;
+      const left = beside
+        ? fitsRight
+          ? x + gap
+          : nodeLeft - gap - cardW
+        : Math.max(pad, Math.min((nodeLeft + x) / 2 - cardW / 2, maxX - cardW));
+
+      // meiva:note
+      // The view's legend sits in the canvas's bottom-right corner and is the one
+      // overlay the card must not bury: it is the only hint of what the node
+      // colours mean. When the card's column overlaps the legend, its floor is
+      // the legend's top edge.
+      // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+      let bottomLimit = maxY;
+      const legendBox = legendRef.current?.getBoundingClientRect();
+      if (legendBox) {
+        const legendLeft = legendBox.left - rect.left;
+        const legendRight = legendBox.right - rect.left;
+        if (left < legendRight && left + cardW > legendLeft) {
+          bottomLimit = Math.min(bottomLimit, legendBox.top - rect.top - gap);
         }
-        card.style.overflowY = "auto";
-        setCardScrollable(true);
       }
-    }
-    card.style.left = `${Math.max(4, left)}px`;
-    card.style.top = `${Math.max(4, top)}px`;
+
+      // meiva:note
+      // One vertical rule for both horizontal placements: beside the node the
+      // card hangs below it by default; centered on a narrow canvas it sits above
+      // the node, which keeps it off the message below (QA #990). When neither
+      // side holds it, pin to the roomier side and cap the height so the body
+      // scrolls instead of running off the canvas.
+      // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+      const belowTop = beside ? y + gap : nodeBottom + gap;
+      const aboveTop = y - gap - cardH;
+      const fitsBelow = belowTop + cardH <= bottomLimit;
+      const fitsAbove = aboveTop >= pad;
+      const preferAbove = !beside;
+      let top: number;
+      let cap = "";
+      if (preferAbove ? fitsAbove : fitsBelow) {
+        top = preferAbove ? aboveTop : belowTop;
+      } else if (preferAbove ? fitsBelow : fitsAbove) {
+        top = preferAbove ? belowTop : aboveTop;
+      } else {
+        const belowSpace = bottomLimit - belowTop;
+        const aboveSpace = y - gap - pad;
+        if (belowSpace >= aboveSpace) {
+          top = belowTop;
+          cap = `${Math.max(0, belowSpace)}px`;
+        } else {
+          top = pad;
+          cap = `${Math.max(0, aboveSpace)}px`;
+        }
+      }
+
+      card.style.left = `${Math.max(pad, left)}px`;
+      card.style.top = `${Math.max(pad, top)}px`;
+      if (card.style.maxHeight !== cap) card.style.maxHeight = cap;
+      const scrollable = cap !== "";
+      card.style.overflowY = scrollable ? "auto" : "";
+      setCardScrollable((current) => (current === scrollable ? current : scrollable));
+    };
+
+    place();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => place());
+    if (hoverCardRef.current) observer.observe(hoverCardRef.current);
+    return () => observer.disconnect();
   }, [hovered]);
 
   // User zoom/pan as an SVG transform on the content <g> (translate + scale),
@@ -732,7 +774,7 @@ export const ForceGraph = memo(function ForceGraph({
       ) : null}
 
       {legend != null ? (
-        <div className="pointer-events-none absolute bottom-3 right-3 rounded-md border border-border bg-background/80 px-3 py-1.5 text-[10px] text-muted-foreground backdrop-blur">
+        <div ref={legendRef} className="pointer-events-none absolute bottom-3 right-3 rounded-md border border-border bg-background/80 px-3 py-1.5 text-[10px] text-muted-foreground backdrop-blur">
           {legend}
         </div>
       ) : null}

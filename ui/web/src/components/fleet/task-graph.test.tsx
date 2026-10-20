@@ -1117,6 +1117,74 @@ describe("TaskGraph hover detail card", () => {
     }
   });
 
+  it("never lets the hover card run off the bottom of the canvas (user report 2026-10-20)", async () => {
+    // meiva:note
+    // The reported shape: a tall card on a node low in the canvas. The beside
+    // placement used to flip above only when the card fitted there, and
+    // otherwise left it running past the bottom edge, where the canvas clipped
+    // it (the legend sat right on top of that cut).
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    const { container } = render(
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
+    );
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+    const group = texts[0].closest("g")!;
+    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 900, height: 900 }),
+    );
+    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 100, y: 400, width: 36, height: 36 }),
+    );
+    const restore = mockCardSize(320, 509);
+    try {
+      fireEvent.mouseEnter(group);
+      const card = screen.getByRole("tooltip");
+      const top = parseFloat(card.style.top);
+      const cap = parseFloat(card.style.maxHeight || "0");
+      expect(card.style.overflowY).toBe("auto");
+      // meiva:note
+      // Pinned below the node and capped to the canvas floor (900 - 4): the body
+      // scrolls instead of the card being cut by the canvas edge.
+      expect(top).toBe(414);
+      expect(top + cap).toBeLessThanOrEqual(896);
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the legend readable: a card in its column stops above it", async () => {
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    const { container } = render(
+      wrapGraph(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />),
+    );
+    const texts = await waitFor(() => { const r = screen.getAllByText(/#2/); expect(r.length).toBeGreaterThan(0); return r; }, { timeout: 4000 });
+    const group = texts[0].closest("g")!;
+    const canvas = container.querySelector("svg[role='img']")!.parentElement!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 900, height: 900 }),
+    );
+    vi.spyOn(group, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 600, y: 450, width: 36, height: 36 }),
+    );
+    const legend = container.querySelector("[class*='bottom-3'][class*='right-3']")!;
+    vi.spyOn(legend, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 560, y: 700, width: 200, height: 30 }),
+    );
+    const restore = mockCardSize(320, 300);
+    try {
+      fireEvent.mouseEnter(group);
+      const card = screen.getByRole("tooltip");
+      // meiva:note
+      // 464 + 300 would still fit the canvas (896) but would bury the legend, so
+      // the card flips above the node instead.
+      expect(card.style.top).toBe("136px");
+      expect(parseFloat(card.style.top) + 300).toBeLessThan(700);
+    } finally {
+      restore();
+    }
+  });
+
   it("keeps the capped card open when the pointer moves from the node onto it", async () => {
     // QA #990 delta2: crossing the 14px gap between node and card must not
     // unmount the card before the pointer reaches it — the leave handler
