@@ -99,10 +99,15 @@ def test_status_explains_persistently_unselected_services(
 
 
 def test_fetch_gateway_cluster_status_sends_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The `meiva status` cluster-status probe presents the cluster-secret bearer, so
-    an authenticated-but-healthy gateway reads as up instead of a false 401."""
+    # meiva:note
+    # The `meiva status` cluster-status probe presents this process's gateway credential, so an
+    # authenticated-but-healthy gateway reads as up instead of a false 401. Which credential
+    # wins — a delivered machine token or the cluster secret — is base.cluster.machine's contract.
+    # meiva:link base/cluster/machine/docs/machine.meiva.okf.md
     import httpx
 
+    from base.cluster.machine import gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from cli.commands.cluster.control import fetch_gateway_cluster_status
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cr3t")
@@ -122,7 +127,7 @@ def test_fetch_gateway_cluster_status_sends_bearer(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(httpx, "get", _fake_get)
     assert fetch_gateway_cluster_status() == {"ok": True}
     assert captured["url"] == "http://gw:8000/api/cluster/status"
-    assert captured["headers"] == {"Authorization": "Bearer s3cr3t"}
+    assert captured["headers"] == gateway_auth_headers(gateway_access_from_settings())
 
 
 def test_fetch_gateway_cluster_status_without_a_credential_raises_instead_of_dialing(
