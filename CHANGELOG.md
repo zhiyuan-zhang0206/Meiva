@@ -16,6 +16,14 @@ and the matching GitHub Releases.
   visibility) remain, unused by any pixel comparison.
 
 ### Changed
+- One loading ring is ever on screen in the conversation, and it is whole: a
+  background refetch no longer spins the scroll-to-bottom button while the pull
+  strip is already spinning for an older-history load, and the pull ring scales
+  with the revealed strip instead of being sliced into a bar by its clipping.
+  The create popover's footer says "Spawn" when there is a single spawnable
+  host — the machine name is a deployment detail, not a label
+  ([sticky scroll](ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md),
+  [creation availability](ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md)).
 - The create popover is one table instead of three dropdowns: harness, then the models that
   harness runs, then the efforts that model publishes — each column narrows the next and the
   config the last spawn used is marked on entry. A click is only a pick until a spawn is issued,
