@@ -19,10 +19,14 @@ the title bar's PanelRight toggle, and the timeline takes the width until it is
 reopened. The panel itself is a lazy boundary, loaded when the right panel first
 renders.
 
-The inspector is the panel's secondary surface, not a peer tab: a small trigger at
-the end of the document bar lays it over the document (its own queries and ordered
-section list) and
-the same toggle swaps back. The document body stays mounted while hidden, so the
+The inspector is a mode over the right column, not a peer tab: the magnifier at
+the end of the document bar switches the column to the inspector (its own queries
+and ordered section list) and the same pressed button is the way out. The mode
+owns only that column — the agent rail stays mounted, because the mode changes
+what the panel shows, not whether navigation is reachable (user 2026-10-20). The
+bar keeps just the controls the mode uses: its name, the pressed magnifier and the
+column's collapse; the document's home, back and refresh read the body the mode
+hides, so they leave with it. The document body stays mounted while hidden, so the
 switch preserves reply drafts and the document reading position. Below the
 desktop breakpoint the shared context opens as a full-screen reading view from
 the header's To user action — available whenever an agent is selected — with a

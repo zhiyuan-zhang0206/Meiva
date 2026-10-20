@@ -179,6 +179,35 @@ describe("To user document bar", () => {
     expect(trigger.getAttribute("aria-label")).toBe("closeInspector");
   });
 
+  it("leaves only the mode's own controls in the bar while the inspector is on", () => {
+    // meiva:note
+    // The bar is the inspector mode's one control surface: the document's own
+    // navigation (home, back) and its refresh read the document body the mode
+    // hides, so they leave with it (user 2026-10-20).
+    // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+    show(document("# Status", "2026-10-17T06:00:00Z"), {
+      onInspect: vi.fn(),
+      onCollapse: vi.fn(),
+      inspecting: true,
+    });
+    expect(screen.queryByRole("button", { name: "home" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "refresh" })).toBeNull();
+    expect(screen.queryByTestId("document-status")).toBeNull();
+    expect(screen.getByTestId("open-inspector")).toBeTruthy();
+    expect(screen.getByTestId("context-panel-collapse")).toBeTruthy();
+  });
+
+  it("marks the inspector toggle with a selected background, not the hover wash", () => {
+    // meiva:note
+    // bg-accent is 97% lightness in the light theme — a pressed state painted
+    // with it reads as unpressed (user 2026-10-20).
+    // meiva:link ui/web/src/components/context/to-user-document.tsx
+    show(document("hello"), { onInspect: vi.fn(), inspecting: true });
+    const classes = screen.getByTestId("open-inspector").className.split(/\s+/);
+    expect(classes).toContain("bg-foreground/25");
+    expect(classes).not.toContain("bg-accent");
+  });
+
   it("does not repeat the panel title in the mobile reading view", () => {
     show(document("# Status"), { mobile: true });
     expect(screen.queryByText("sharedContext")).toBeNull();

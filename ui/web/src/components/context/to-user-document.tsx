@@ -87,21 +87,27 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   return (
     <section className={cn(FLEX, MIN_H_0, bodyHidden ? "shrink-0" : FLEX_1, FLEX_COL)} aria-label={t("title")}>
       <div data-testid="document-bar" className={cn("shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_WRAP_CLASS, FLEX)}>
-        <button title={t("home")} aria-label={t("home")} className="rounded p-1 hover:bg-accent" onClick={() => { if (references.length) show([], "push"); }}>
-          <House className="size-3.5" />
-        </button>
-        {references.length > 0 && <button title={t("back")} aria-label={t("back")} className="rounded p-1 hover:bg-accent" onClick={goBack}>
-          <ArrowLeft className="size-3.5" />
-        </button>}
+        {inspecting ? null : (
+          <>
+            <button title={t("home")} aria-label={t("home")} className="rounded p-1 hover:bg-accent" onClick={() => { if (references.length) show([], "push"); }}>
+              <House className="size-3.5" />
+            </button>
+            {references.length > 0 && <button title={t("back")} aria-label={t("back")} className="rounded p-1 hover:bg-accent" onClick={goBack}>
+              <ArrowLeft className="size-3.5" />
+            </button>}
+          </>
+        )}
         {!mobile && (
           <span className="shrink-0 whitespace-nowrap">{inspecting ? tInspector("title") : t("sharedContext")}</span>
         )}
-        <div data-testid="document-status" className={cn("shrink-0 items-center gap-1.5", FLEX)}>
-          {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at) })}</span>}
-          <button title={t("refresh")} aria-label={t("refresh")} onClick={() => { if (references.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
-            <RefreshCw className="size-3.5" />
-          </button>
-        </div>
+        {inspecting ? null : (
+          <div data-testid="document-status" className={cn("shrink-0 items-center gap-1.5", FLEX)}>
+            {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at) })}</span>}
+            <button title={t("refresh")} aria-label={t("refresh")} onClick={() => { if (references.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
+              <RefreshCw className="size-3.5" />
+            </button>
+          </div>
+        )}
         <div className={cn("ml-auto shrink-0 items-center", FLEX)}>
           {onInspect ? (
             <button
@@ -111,7 +117,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
               aria-label={inspecting ? tInspector("closeInspector") : tInspector("openInspector")}
               aria-pressed={inspecting}
               onClick={onInspect}
-              className={cn("rounded p-1 hover:bg-accent", inspecting && "bg-accent text-foreground")}
+              className={cn("rounded p-1 hover:bg-accent", inspecting && "bg-foreground/25 text-foreground")}
             >
               <ScanSearch className="size-3.5" />
             </button>
