@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
+from base.lm.harness.codex.auth import SECRET_ENV_NAMES
 from base.sessions import coding_session_owner
 from meiva.shell import sessions
 
@@ -48,6 +49,15 @@ from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
 from ._common import session_uuid as session_uuid
 from ._common import status as _owner_status
+
+# meiva:note
+# Both codex processes this module starts — the shared app server (which does the model
+# calls) and the TUI — otherwise inherit this agent's environment, where a cluster-pinned
+# OPENAI_API_KEY outranks the ChatGPT login in `~/.codex/auth.json` and bills per token.
+# `env -u` removes it rather than blanking it: the CLI asks whether the variable is
+# present. The names come from the adapter's one list, not a second copy.
+# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+_DROP_CREDENTIALS: str = "env " + " ".join(f"-u {name}" for name in SECRET_ENV_NAMES) + " "
 
 DEFAULT_TTL_SECONDS = 4 * 3600
 _SUPERVISOR_TTL_PADDING_SECONDS = 300
@@ -287,7 +297,7 @@ def app_server_command(
     return (
         f"(cd {shlex.quote(workspace.as_posix())} && "
         f"{launch_caller_assignment('codex', caller_instance)}"
-        f"exec codex app-server --listen {shlex.quote(endpoint)}"
+        f"exec {_DROP_CREDENTIALS}codex app-server --listen {shlex.quote(endpoint)}"
         ' -c approval_policy="never" -c sandbox_mode="danger-full-access"'
         f" {_config_overrides(workspace)}"
         f" > {shlex.quote(str(log_path))} 2>&1) & AP=${{!}}; "
@@ -364,7 +374,7 @@ def codex_command(
     return (
         f"{prefix}cd {shlex.quote(workspace.as_posix())} && "
         f"{launch_caller_assignment('codex', caller_instance)}"
-        f"exec codex {subcommand}{remote_flag}--dangerously-bypass-approvals-and-sandbox "
+        f"exec {_DROP_CREDENTIALS}codex {subcommand}{remote_flag}--dangerously-bypass-approvals-and-sandbox "
         f"{_config_overrides(workspace)}"
     )
 
