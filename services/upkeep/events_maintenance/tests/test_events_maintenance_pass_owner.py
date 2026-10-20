@@ -122,7 +122,6 @@ def _mock_service(
     monkeypatch.setattr(daemon, "resolution_loop", sibling)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", sibling)
     monkeypatch.setattr(daemon.Database, "pool", pool)
-    monkeypatch.setattr(daemon.admission, "quiesced", lambda: False)
 
     def build_config(entry_config: ConfigBoot) -> EventsMaintenanceConfig:
         assert entry_config is process_config

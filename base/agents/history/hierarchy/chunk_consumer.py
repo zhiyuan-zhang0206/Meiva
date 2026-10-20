@@ -585,17 +585,15 @@ class Consumer:
         async with asyncio.TaskGroup() as tg:
             last_sample = 0.0
             while True:
-                # A held unit claims nothing: the stop window is database-quiet.
-                if not self.inputs.quiesced():
-                    try:
-                        now = time.monotonic()
-                        if now - last_sample >= POLL_SECONDS:
-                            last_sample = now
-                            await self.emit_backlog()
-                        while await self.claim(tg):
-                            pass
-                    except Exception:
-                        logger.opt(exception=True).warning("understanding consumer poll failed")
+                try:
+                    now = time.monotonic()
+                    if now - last_sample >= POLL_SECONDS:
+                        last_sample = now
+                        await self.emit_backlog()
+                    while await self.claim(tg):
+                        pass
+                except Exception:
+                    logger.opt(exception=True).warning("understanding consumer poll failed")
                 self.finished.clear()
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self.finished.wait(), POLL_SECONDS)

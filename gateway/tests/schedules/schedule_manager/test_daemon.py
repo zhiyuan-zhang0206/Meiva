@@ -4,7 +4,6 @@ import asyncio
 import importlib.util
 from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -15,7 +14,6 @@ from base.config import ConfigBoot
 from base.daemon.loop_health import LivenessGroup
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.deploy.maintenance import admission
 from base.native_process.loaded_commit import LoadedCommit
 from services.wake.schedule_manager import daemon
 
@@ -167,25 +165,3 @@ async def test_a_foreign_checkout_refuses_to_supervise_schedules(
             database=lambda: database,
             image=LoadedCommit(Path(), None),
         )
-
-
-@pytest.mark.parametrize("quiesced", [True, False])
-async def test_a_quiesced_unit_polls_the_request_table_through_no_connection(
-    monkeypatch: pytest.MonkeyPatch, quiesced: bool
-) -> None:
-    monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
-
-    def no_reconcile(_self: object) -> None:
-        return None
-
-    monkeypatch.setattr(daemon.ScheduleManager, "reconcile", no_reconcile)
-    pool = MagicMock()
-    pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchall.return_value = []
-
-    task = asyncio.create_task(daemon.run_loops(pool, LivenessGroup()))
-    try:
-        await asyncio.sleep(0.3)
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-    assert bool(pool.connection.called) is (not quiesced)

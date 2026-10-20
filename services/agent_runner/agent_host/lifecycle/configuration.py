@@ -15,7 +15,6 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
-from base.deploy.maintenance import admission
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths.home import resolve_meiva_home
 from base.telemetry.process_logging import init_gateway_process
@@ -73,7 +72,6 @@ def understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
         corrections=lambda: config.view.agent.understanding_group_corrections,
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         timestamps_enabled=lambda: config.view.general.message_timestamps,
-        quiesced=admission.quiesced,
     )
 
 

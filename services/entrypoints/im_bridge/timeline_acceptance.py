@@ -7,7 +7,6 @@ from typing import Any
 
 from psycopg import Connection
 
-from base.deploy.maintenance import admission as maintenance
 from services.entrypoints.im_bridge.outbound.types import (
     OutboundIntent,
     TimelineAcceptance,
@@ -34,8 +33,6 @@ async def accept_timeline(
     switch_arg: str = "",
     selection_admission: SelectionAdmission | None = None,
 ) -> TimelineAcceptance:
-    if maintenance.quiesced():
-        return TimelineAcceptance((), None, blocked=True)
     adapter = (
         selection_admission.adapter
         if selection_admission is not None
@@ -92,20 +89,11 @@ def render_item(it: dict[str, Any], agent_id: int | None = None) -> str:
     return f"[{kind}] {payload}"
 
 
-async def sync_selection(core: Any, state: ChatState) -> int | None:
-    """Refresh a live selection only while business acceptance is open."""
-    if maintenance.quiesced():
-        raise RuntimeError("IM selection is held during maintenance")
-    return await restore_selection(core, state)
-
-
+# meiva:note
+# Rebuild account-bound runtime selection.
+#
+# Account-bound adapters cannot import a peer-only legacy selection.
 async def restore_selection(core: Any, state: ChatState) -> int | None:
-    """Rebuild account-bound runtime selection before startup releases its hold.
-
-    This restores subscriptions, not business admission: timeline acceptance and
-    dispatch retain their maintenance gates.
-    Account-bound adapters cannot import a peer-only legacy selection.
-    """
     adapter = core.adapters[state.channel]
     account = await adapter.outbound_account_id()
     if adapter.selection_requires_account_proof:

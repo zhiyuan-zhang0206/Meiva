@@ -21,7 +21,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
-from base.deploy.maintenance import admission
 from base.log import logger
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
@@ -55,23 +54,18 @@ async def emit_push_health_once(store: IMOutboxStore, config: ImBridgeConfig) ->
         )
 
 
+# meiva:note
+# Sample every configured leg each ``im_push_health_interval_seconds``.
+#
+# ``sleep`` is the loop's scheduling boundary: production uses
+# ``asyncio.sleep``; tests pass a fake that ends the loop.
 async def push_health_loop(
     store: IMOutboxStore,
     config: ImBridgeConfig,
     *,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> None:
-    """Sample every configured leg each ``im_push_health_interval_seconds``.
-
-    Rounds are skipped while a maintenance hold quiesces the unit, matching
-    the other resident loops: the hold already stops the send path, so a
-    sample taken then would read a stall the hold itself explains.
-
-    ``sleep`` is the loop's scheduling boundary: production uses
-    ``asyncio.sleep``; tests pass a fake that ends the loop.
-    """
 
     while True:
-        if not admission.quiesced():
-            await emit_push_health_once(store, config)
+        await emit_push_health_once(store, config)
         await sleep(config.im_push_health_interval_seconds)

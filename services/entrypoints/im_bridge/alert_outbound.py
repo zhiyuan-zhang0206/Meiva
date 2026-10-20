@@ -12,7 +12,6 @@ from psycopg_pool import PoolTimeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from base.db.transaction import write_transaction
-from base.deploy.maintenance import admission
 from base.log import logger
 from base.telemetry.alerts.native import AlertGroupOrigin, NativeAlertSourceError, load_native_group
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
@@ -167,7 +166,7 @@ class AlertOutboundBridge:
         group, previous = await asyncio.to_thread(self.store.lookup, group_id)
         if previous is not None:
             return previous
-        if not self.enabled or admission.quiesced():
+        if not self.enabled:
             raise AlertAcceptanceHeldError("native alert acceptance is paused")
         decisions = tuple(
             [
@@ -175,8 +174,6 @@ class AlertOutboundBridge:
                 for channel, adapter in sorted(self.adapters.items())
             ]
         )
-        if admission.quiesced():
-            raise AlertAcceptanceHeldError("native alert acceptance is paused")
         return await asyncio.to_thread(self.store.accept, group, decisions)
 
     @staticmethod
@@ -216,12 +213,10 @@ class AlertOutboundBridge:
         return AlertRecipientDecision(channel=channel, account_id=account, decision=reason)
 
     async def poll_once(self) -> None:
-        if not self.enabled or admission.quiesced():
+        if not self.enabled:
             return
         pending = await asyncio.to_thread(self.store.pending_after, self._scan_after)
         for group_id in pending:
-            if admission.quiesced():
-                return
             try:
                 await self.accept(group_id)
             except (

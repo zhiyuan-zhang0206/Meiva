@@ -22,7 +22,6 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.deploy.maintenance import admission
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -244,8 +243,6 @@ async def scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     last_sweep = 0.0
     while True:
         await round_loop.sleep_with_progress(progress, interval)
-        if admission.quiesced():
-            continue
         _, alerted = scan_once(pool, settings.daemon.delivery_watchdog_threshold_seconds, alerted)
         last_sweep = _maybe_sweep_stale_inbounds(
             pool,

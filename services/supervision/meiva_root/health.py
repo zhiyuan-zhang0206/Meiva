@@ -460,10 +460,9 @@ class HealthMonitor:
         return max(0.0, state.next_restart_at - monotonic())
 
     # meiva:note
-    # A quiesced tree holds every unit down, which resets its breaker, so the
+    # A stopped tree holds every unit down, which resets its breaker, so the
     # dependency probe stays idle for the whole stop window.
     async def _loop(self) -> None:
-        # quiesce-exempt: probes endpoints and processes; DB only while a breaker is open
         while True:
             await asyncio.sleep(self._config.interval_s)
             await self.run_round()

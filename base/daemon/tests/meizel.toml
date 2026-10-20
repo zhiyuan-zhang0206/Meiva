@@ -22,7 +22,6 @@ exports = ["fakes.py", "health_support.py"]
 "test_health_probe.py#monkeypatch.setattr base.daemon.health.probe_unit_home" = 3
 "test_health_probe.py#monkeypatch.setattr base.daemon.health.urllib.request.urlopen" = 1
 "test_health_probe.py#monkeypatch.setattr base.native_process.loaded_commit.capture_commit" = 3
-"test_round_loop.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
 
 [debt.stdlib-patch]
 "test_health_probe.py#monkeypatch.setattr urllib.request.urlopen" = 2
