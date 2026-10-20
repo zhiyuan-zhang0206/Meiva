@@ -17,7 +17,6 @@ from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity, MachineRoles
-from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.host.converge.accessibility import (
     clear_status as clear_accessibility_status,
 )
@@ -656,17 +655,14 @@ def cmd_converge(
     only_services: tuple[str, ...],
     disabled_services: tuple[str, ...],
     all_services: bool,
-    operation: PauseOwnerSnapshot | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
     """`meiva converge` — bring this host to the state the current code expects (idempotent)."""
-    from base.deploy.maintenance import admission
     from base.native_process.os_platform import raise_fd_limit
     from cli.commands import _repo
 
-    admission.require_start_allowed(operation)
     raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit
     repo = _repo.repo_root()
     roles = _repo.roles_or_none(machine=command.machine)

@@ -85,8 +85,6 @@ class ClosureNotice:
     reason: str
     closed_at: str
     survivors: tuple[tuple[int, str], ...] = ()
-    operation: str | None = None
-    acquired_at: str | None = None
 
     def dedup_key(self) -> str:
         raw = f"{self.machine}|{self.agent_id}|{self.session_id}|{self.shell_birth}"
@@ -103,15 +101,19 @@ class ClosureNotice:
             "reason": self.reason,
             "closed_at": self.closed_at,
         }
-        if self.operation is not None:
-            record["operation"] = self.operation
-        if self.acquired_at is not None:
-            record["acquired_at"] = self.acquired_at
         if self.survivors:
             record["survivors"] = [{"pid": pid, "name": name} for pid, name in self.survivors]
         return record
 
 
+# meiva:note
+# The notice for one closed busy session; None when not an agent shell.
+#
+# The caller guarantees the session was busy and that it closes it for
+# `reason`; `survivors` names, as (pid, command name), the session's
+# known processes observed alive once its shell is verified gone.
+# Returns None when the session name is not an agent-owned shell (the
+# canonical ``-agent-<id>-shell-<sid>`` shape).
 def closure_notice(
     *,
     machine: str,
@@ -119,20 +121,8 @@ def closure_notice(
     shell_pid: int,
     shell_birth: str,
     reason: str,
-    operation: str | None = None,
-    acquired_at: datetime | None = None,
     survivors: Sequence[tuple[int, str]] = (),
 ) -> ClosureNotice | None:
-    """The notice for one closed busy session; None when not an agent shell.
-
-    The caller guarantees the session was busy and that it closes it for
-    `reason`; `survivors` names, as (pid, command name), the session's
-    known processes observed alive once its shell is verified gone.
-    `operation` and `acquired_at` name the stop's maintenance hold; a sweep
-    after a crash has none.
-    Returns None when the session name is not an agent-owned shell (the
-    canonical ``-agent-<id>-shell-<sid>`` shape).
-    """
     match = AGENT_SHELL_RE.search(name)
     if match is None:
         return None
@@ -143,12 +133,6 @@ def closure_notice(
         name=name,
         shell_pid=shell_pid,
         shell_birth=shell_birth,
-        operation=operation,
-        acquired_at=None
-        if acquired_at is None
-        else acquired_at.astimezone(UTC).isoformat()
-        if acquired_at.tzinfo
-        else acquired_at.isoformat(),
         reason=reason,
         closed_at=datetime.now(UTC).isoformat(),
         survivors=tuple(survivors),
@@ -166,8 +150,6 @@ def notices_for(
     closed: Sequence[closure.ClosedSession],
     *,
     reason: str,
-    operation: str | None = None,
-    acquired_at: datetime | None = None,
     local_machine: str,
 ) -> list[ClosureNotice]:
     """One notice per closed busy session that is an agent shell, from this machine."""
@@ -179,8 +161,6 @@ def notices_for(
             shell_pid=session.shell.pid,
             shell_birth=shell_birth(session.shell),
             reason=reason,
-            operation=operation,
-            acquired_at=acquired_at,
             survivors=session.left,
         )
         for session in closed
@@ -211,11 +191,10 @@ def content(notice: ClosureNotice) -> str:
         # A stop observed work; a sweep only has the recorded identities.
         + (
             "interrupting a running task. "
-            if notice.operation
+            if notice.reason == STOP_REASON
             else "probably interrupting a running task. "
         )
-        + "Recreate the session if its work is still needed"
-        + (f" (operation {notice.operation})." if notice.operation else ".")
+        + "Recreate the session if its work is still needed."
     )
     if notice.survivors:
         left = ", ".join(f"pid {pid} ({shown_name(name)})" for pid, name in notice.survivors)

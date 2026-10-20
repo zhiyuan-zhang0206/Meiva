@@ -17,12 +17,7 @@ import cli.commands.lifecycle.root_driver as _root_driver_commands
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.db import Database
-from base.deploy.lifecycle import start_serving
-from base.deploy.maintenance import admission, pause_owner
-from base.deploy.maintenance.state import MaintenancePhase
-from base.deploy.state import host_deploy_state
-from base.deploy.tests.maintenance_factory import WHEN
-from base.deploy.tests.maintenance_factory import isolate as isolate
+from base.deploy.lifecycle import home_lifecycle_locks
 from base.host import proc
 from base.sessions.pty import client
 from base.sessions.pty.paths import SERVICE_UNIT
@@ -34,13 +29,12 @@ from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _stop_extras
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
-from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
+from cli.commands.lifecycle._exclusive_resources import StartDelegation, delegable_start
 from cli.commands.lifecycle.tests.stop.stop_support import (
     Launcher,
     PtyServiceProcess,
     busy_session,
     dependencies,
-    drained,
     record_root_stops,
 )
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
@@ -50,8 +44,7 @@ from cli.commands.lifecycle.tests.stop.stop_support import written as written
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from ops import agent_pause, pty_close_notices
-from ops.cluster_status import pause
+from ops import pty_close_notices
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -134,9 +127,6 @@ def test_keeping_shell_sessions_preserves_unselected_process_and_real_pty(
     assert client.has_session(name) and identity.live()
     assert pty_service.process is not None and pty_service.process.poll() is None
     assert [call["preserve"] for call in root_stops] == [{"browser", SERVICE_UNIT}]
-    current = admission.snapshot()
-    assert current is not None and current.maintenance is not None
-    assert current.maintenance.phase == MaintenancePhase.STOPPED
 
 
 def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane(
@@ -182,14 +172,7 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     def record(label: str) -> Callable[..., object]:
         return lambda *_args, **_kwargs: events.append(label)
 
-    def record_start(
-        operation: pause_owner.PauseOwnerSnapshot | None,
-        _database_factory: DatabaseFactory,
-        machine: MachineIdentity,
-        **kwargs: object,
-    ) -> int:
-        assert machine is command_runtime.machine
-        assert operation is None
+    def record_start(_database_factory: DatabaseFactory, **kwargs: object) -> int:
         assert (kwargs["only_services"], kwargs["disabled_services"]) == ((), ())
         assert (kwargs["all_services"], kwargs["reconcile"]) == (True, False)
         events.append("services-started")
@@ -251,14 +234,9 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     assert not client.has_session(name), "a restart closes the persistent shells"
     assert [notice.name for notice in written] == [name], "the busy session's owner is told"
     assert unowned.poll() is None
-    current = admission.snapshot()
-    assert current is not None and current.maintenance is not None
-    assert (
-        current.maintenance.phase == MaintenancePhase.STOPPED
-    )  # the start leg, not the stop, releases the hold
 
 
-def test_root_stop_refusal_keeps_hold_without_force(
+def test_root_stop_refusal_is_reported_without_force(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
@@ -287,10 +265,12 @@ def test_root_stop_refusal_keeps_hold_without_force(
     )
     assert service.poll() is None
     assert psutil.Process(service.pid).create_time() == before
-    assert admission.held()
 
 
-def test_full_stop_closes_real_idle_terminal_after_drain(
+# meiva:note
+# The services phase keeps the pty-sessions service; the terminals phase closes
+# the session through it; only then is the service itself stopped.
+def test_full_stop_closes_real_idle_terminal_before_the_service_stops(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
@@ -300,23 +280,26 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """The services phase keeps the pty-sessions service; the terminals phase closes
-    the session through it; only then is the service itself stopped."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
     root_stops: list[tuple[bool, list[str]]] = []
 
+    # meiva:note
+    # Whether the service was asked to stay, and the sessions it held at that moment.
     def record(**kwargs: Any) -> int:
-        """Whether the service was asked to stay, and the sessions it held at that moment."""
         root_stops.append(
             (SERVICE_UNIT in kwargs["preserve"], [info.name for info in client.list_sessions()])
         )
         return 0
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", record)
+
+    def no_helper(**_kw: object) -> None:
+        return None
+
     for hook in ("stop_permissions_helper",):
-        monkeypatch.setattr(_stop_extras, hook, lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_stop_extras, hook, no_helper)
 
     def announce(*, machine: MachineIdentity, **window: object) -> None:
         # meiva:note
@@ -351,61 +334,24 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     )
 
 
-def test_normal_start_releases_hold_only_after_successful_readiness(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
+def test_a_delegated_start_runs_its_child_after_the_start_lock_is_released(
+    home: Path, operator_database: OperatorDatabaseFactory
 ) -> None:
-    drained()
-    monkeypatch.setattr(host_deploy_state, "set_posture", MagicMock())
-    monkeypatch.setattr(agent_pause, "publish_inbound_wake", lambda _db, _bus, *_a: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
-
-    @resume_after_start
-    def start(
-        operation: pause_owner.PauseOwnerSnapshot | None,
-        _database_factory: DatabaseFactory,
-        result: int,
-    ) -> int:
-        admission.require_start_allowed(operation)
-        assert admission.held()
-        return result
-
-    assert start(None, operator_database, command_runtime.machine, 4) == 4
-    assert admission.held()
-    assert "hold released" not in capsys.readouterr().out
-    assert start(None, operator_database, command_runtime.machine, 0) == 0
-    assert not admission.held()
-    # The start's status snapshot still read paused; the release is reported.
-    assert "maintenance hold released" in capsys.readouterr().out
-
-
-def test_delegated_start_leaves_authorization_and_resume_with_child(
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
-) -> None:
-    drained()
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
-    unpause = MagicMock()
-    monkeypatch.setattr(pause, "unpause_local_cluster", unpause)
+    ran: list[bool] = []
 
     def child() -> int:
-        assert not admission.start_authorized(None)
-        assert admission.held()
+        # meiva:note
+        # The child takes the lock the start released; a held lock would time out here.
+        with home_lifecycle_locks.resource_lock(purpose="test:delegated-child", timeout_s=1):
+            ran.append(True)
         return 0
 
-    @resume_after_start
-    def start(
-        operation: pause_owner.PauseOwnerSnapshot | None, database_factory: DatabaseFactory
-    ) -> StartDelegation:
-        assert admission.start_authorized(operation)
+    @delegable_start
+    def start(_database_factory: DatabaseFactory) -> StartDelegation:
         return StartDelegation(child)
 
-    assert start(None, operator_database, command_runtime.machine) == 0
-    assert admission.held()
-    unpause.assert_not_called()
+    assert start(operator_database) == 0
+    assert ran == [True]
 
 
 def test_only_explicit_force_enters_legacy_force_stop(
@@ -459,7 +405,7 @@ def test_only_explicit_force_enters_legacy_force_stop(
     force.assert_called_once()
 
 
-def test_repeated_stop_needs_no_live_database_or_host(
+def test_repeated_stop_needs_no_live_database(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
@@ -468,19 +414,7 @@ def test_repeated_stop_needs_no_live_database_or_host(
     command_runtime: CommandRuntime,
 ) -> None:
     dependencies(monkeypatch, machine=command_runtime.machine)
-    drained()
-    admission.set_phase("local", WHEN, MaintenancePhase.STOPPING)
-    admission.set_phase("local", WHEN, MaintenancePhase.STOPPED)
-    monkeypatch.setattr(command, "pause_agents", agent_pause.pause_agents)
-    monkeypatch.setattr(
-        agent_pause, "host_identity", MagicMock(side_effect=AssertionError("host is down"))
-    )
     monkeypatch.setattr(Database, "connect", MagicMock(side_effect=AssertionError("DB is down")))
-    monkeypatch.setattr(
-        host_deploy_state,
-        "set_posture",
-        MagicMock(side_effect=AssertionError("DB is down")),
-    )
     assert (
         _restart_stop(
             timeout=1,
@@ -492,39 +426,6 @@ def test_repeated_stop_needs_no_live_database_or_host(
     )
 
 
-def test_two_stop_start_cycles_reuse_identity_not_old_operation(
-    db_url: str,
-    home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: OperatorDatabaseFactory,
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    dependencies(monkeypatch, machine=command_runtime.machine)
-    monkeypatch.setattr(command, "pause_agents", agent_pause.pause_agents)
-    command_runtime.machine.set(role="gateway", name="test-machine")
-    monkeypatch.setattr(host_deploy_state, "set_posture", MagicMock())
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
-    starts = resume_after_start(lambda _operation, _database_factory: 0)
-    holders: list[str | None] = []
-    for _ in range(2):
-        assert (
-            _restart_stop(
-                timeout=3,
-                database_factory=operator_database,
-                producer=operator_pipeline,
-                command_runtime=command_runtime,
-            )
-            == 0
-        )
-        holders.append(pause_owner.read().holder)
-        assert admission.held()
-        assert starts(None, operator_database, command_runtime.machine) == 0
-        assert not admission.held()
-    assert holders[0] != holders[1]
-
-
 def test_resource_stop_excludes_concurrent_start(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -533,7 +434,7 @@ def test_resource_stop_excludes_concurrent_start(
 ) -> None:
     from threading import Event, Thread
 
-    from cli.commands.lifecycle._pause_resume import exclusive_resources
+    from cli.commands.lifecycle._exclusive_resources import exclusive_resources
 
     entered, finish, start_finished = Event(), Event(), Event()
 
@@ -548,7 +449,7 @@ def test_resource_stop_excludes_concurrent_start(
     start = MagicMock(return_value=0)
 
     def waiting_start() -> None:
-        assert resume_after_start(start)(None, operator_database, command_runtime.machine) == 0
+        assert delegable_start(start)(operator_database) == 0
         start_finished.set()
 
     starter = Thread(target=waiting_start)
@@ -596,9 +497,6 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_shell_sessions_ar
     monkeypatch.setattr(command, "announce_stopping", announce)
     for hook in ("stop_permissions_helper",):
         monkeypatch.setattr(_stop_extras, hook, lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        command, "pause_agents", MagicMock(side_effect=AssertionError("force fabricated a drain"))
-    )
     root_calls = record_root_stops(monkeypatch)
     name = "meiva-agent-987-shell-2057-force"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
@@ -642,7 +540,6 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_shell_sessions_ar
     )
     assert client.has_session(name) is kept
     assert written == [], "force writes no owner notices"
-    assert not admission.held(), "force must not invent a durable flush receipt"
 
 
 # ── a failed data-plane stop is reported, never compensated ───────────────────
@@ -753,27 +650,3 @@ def test_stop_refused_inside_an_exec_domain(
                 producer=operator_pipeline,
                 command_runtime=command_runtime,
             )
-
-
-def test_nested_start_receives_the_exact_outer_operation_without_releasing_it(
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
-) -> None:
-    drained()
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
-    unpause = MagicMock()
-    monkeypatch.setattr(pause, "unpause_local_cluster", unpause)
-    operation = admission.authorized_start("local", WHEN)
-
-    @resume_after_start
-    def nested(
-        authority: pause_owner.PauseOwnerSnapshot | None, database_factory: DatabaseFactory
-    ) -> int:
-        assert authority is operation
-        admission.require_start_allowed(authority)
-        return 0
-
-    assert nested(operation, operator_database, command_runtime.machine) == 0
-    assert admission.held()
-    unpause.assert_not_called()

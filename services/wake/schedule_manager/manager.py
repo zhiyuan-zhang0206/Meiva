@@ -50,9 +50,10 @@ POLL_INTERVAL_S = 5.0
 PTY_FAILURE_LOG_INTERVAL_S = 60.0
 STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
 
+# meiva:note
 # One streak of failed convergence attempts for a schedule ends in a give-up after
-# this long. Two failures further apart than the gap (a maintenance hold or a
-# paused service sits between them) are not one streak.
+# this long. Two failures further apart than the gap (a stopped or paused service
+# sits between them) are not one streak.
 BLOCKED_GIVE_UP_AFTER_S = 600.0
 BLOCKED_STREAK_GAP_S = 60.0
 
@@ -117,18 +118,14 @@ class ScheduleManager:
 
     # ── control (the sync-request consumer calls this) ──────────────────────
 
+    # meiva:note
+    # Converge the current durable desired revision, preserving an applied run.
+    #
+    # Return False while the attempt is blocked (a surviving
+    # session, missing safe session provenance); the durable request stays
+    # queued for the next try. A blocked streak is bounded: once the manager
+    # gives up it returns True, so the request is consumed and not retried.
     def sync_one(self, schedule_id: int) -> bool:
-        """Converge the current durable desired revision, preserving an applied run.
-
-        Return False while held or while the attempt is blocked (a surviving
-        session, missing safe session provenance); the durable request stays
-        queued for the next try. A blocked streak is bounded: once the manager
-        gives up it returns True, so the request is consumed and not retried.
-        """
-        from base.deploy.maintenance import admission
-
-        if admission.held():
-            return False
         with self._lock:
             self._host_generation = self._read_host_generation()
             converged = self._sync_revision(schedule_id)
@@ -227,10 +224,6 @@ class ScheduleManager:
             self._reconcile_locked()
 
     def _reconcile_locked(self) -> None:
-        from base.deploy.maintenance import admission
-
-        if admission.held():
-            return
         self._host_generation = self._read_host_generation()
         if self._host_generation is None:
             self._note_host_generation_unknown()
@@ -476,10 +469,6 @@ class ScheduleManager:
             )
 
     def _launch(self, schedule_id: int) -> None:
-        from base.deploy.maintenance import admission
-
-        if admission.held():
-            return
         wanted = revisions.desired(self._pool, schedule_id)
         if wanted is None or not wanted.enabled:
             return

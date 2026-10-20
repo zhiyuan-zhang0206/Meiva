@@ -114,15 +114,15 @@ def _parents(paths: set[str]) -> dict[str, str | None]:
 def test_layered_document_parents_to_the_layered_overview() -> None:
     paths = {
         _ROOT,
-        "base/deploy/maintenance/docs/maintenance.meiva.okf.md",
-        "base/deploy/maintenance/docs/lifecycle-wait.meiva.okf.md",
+        "base/deploy/schema/docs/schema.meiva.okf.md",
+        "base/deploy/schema/docs/migrations.meiva.okf.md",
     }
     parents = _parents(paths)
-    assert parents["base/deploy/maintenance/docs/lifecycle-wait.meiva.okf.md"] == (
-        "base/deploy/maintenance/docs/maintenance.meiva.okf.md"
+    assert parents["base/deploy/schema/docs/migrations.meiva.okf.md"] == (
+        "base/deploy/schema/docs/schema.meiva.okf.md"
     )
     # Without an ancestor overview, this overview hangs off the apex.
-    assert parents["base/deploy/maintenance/docs/maintenance.meiva.okf.md"] == _ROOT
+    assert parents["base/deploy/schema/docs/schema.meiva.okf.md"] == _ROOT
 
 
 def test_layered_directory_without_overview_parents_to_root() -> None:

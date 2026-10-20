@@ -114,7 +114,6 @@ def test_stop_records_notice_for_verified_closed_busy_session(
     assert notice.session_id == 2044
     assert notice.name == name
     assert notice.machine
-    assert notice.operation
     assert "operator stop" in notice.reason
 
 

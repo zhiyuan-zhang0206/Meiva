@@ -316,7 +316,7 @@ class HealthMonitor:
     # observation (the monitor cannot tell a recovered database from one that never
     # failed) and on every unavailable-to-answering edge. The grant is a latch, not a
     # round's boolean: the rounds that cannot act on it — a terminal verdict, a
-    # startup grace, a maintenance gate — must not consume it, or a database that
+    # startup grace — must not consume it, or a database that
     # recovers in one of them costs a full capped interval. A database observed
     # failing withdraws the grant, and a unit that never held one keeps its cadence.
     async def _grant_dependency_recovery(self) -> None:

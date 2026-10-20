@@ -26,9 +26,9 @@ Operator inputs are described in [[cli/database/docs/database.meiva.okf.md]].
 |---------|----------|
 | `meiva init` | Once per home, Settings-free: records the machine name, capabilities, credentials, ports and (for a runner) the gateway join, publishes `.env`, and starts nothing. An interrupted init resumes with no flags; an initialized home is refused |
 | `meiva start` | Idempotent startup of an initialized home with a required service selection (`--all-services`, `--only-service` or `--disable-service`; never persisted). Admission, host convergence, storage/schema provisioning, root launch, readiness. Exit 0 ready, 4 readiness failed, 1 a step failed |
-| `meiva stop` | Drain, then a local stop in which every choice is required (all missing ones listed, exit 2): shell sessions, browser, extras, `--keep-service NAME`/`--keep-no-services`, `--mode`, `--timeout`, `--yes`/`--prompt`; `--keep-infra`/`--stop-infra` on a gateway only |
+| `meiva stop` | A local stop (the agent host settles running turns on its SIGTERM exit) in which every choice is required (all missing ones listed, exit 2): shell sessions, browser, extras, `--keep-service NAME`/`--keep-no-services`, `--mode`, `--timeout`, `--yes`/`--prompt`; `--keep-infra`/`--stop-infra` on a gateway only |
 | `meiva restart` | Stop + start with an explicit scope: `--only agent-host` (`--mode`, `--timeout`) or a start selection plus the shell-session, browser and extras choices, `--mode` and `--timeout`; the data plane stays up |
-| `meiva status` | status (including the maintenance hold, pg/redis and the end-to-end private-network Redis bridge view); `meiva status --json` prints only the hold as one JSON object, settings-lite |
+| `meiva status` | status (services, pg/redis, the end-to-end private-network Redis bridge view and an incomplete converge), settings-lite |
 | `meiva converge` | replays idempotent host wiring (symlink/PATH/dirs/plugin images and the macOS Redis bridge), usually via `meiva start`; it never touches the memory pool |
 | `meiva firewall status` / `meiva firewall sync` | macOS Application Firewall allowlist manifest: `status` renders each manifest purpose, glob, resolved path, and Allow/Block/Missing state; `sync` applies it (repair + prune stale rules). Unprivileged mutation was empirically verified on the macmini running macOS 15.3.1, then falls back to non-interactive `sudo -n` and finally reports the exact manual commands on platforms that still require elevation |
 
@@ -47,7 +47,7 @@ and its separate `down`/`up` recovery halves.
 Agent lifecycle, context reads, local operations, and package-management command
 groups are enumerated in [[cli/docs/operator-surfaces.meiva.okf.md]].
 
-Ordinary `meiva start` resumes the existing local maintenance hold after readiness. Durable
+Ordinary `meiva start` marks the home serving after readiness. Durable
 agent identity and work survive both stop and restart; live shell sessions survive
 either only with `--keep-shell-sessions`. See [operator procedure](../../docs/conventions/operations/graceful-maintenance.md).
 
@@ -86,7 +86,7 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 - **Two lifecycle entries**: `meiva init` owns identity, `meiva start` owns startup and restart; package acquisition does not create cluster identity or launch services.
 - **Ops-layer only**: not exposed to agents (they use the `meiva.*` SDK).
 - **Settings-independent**: `meiva init` and `meiva start`'s admission are specially routed in `main()` before settings-gated imports — no `base.config` (stdlib + `base.host.env.dotenv_boot`). `meiva config` uses only registry metadata and direct local files until a full Settings consumer needs the singleton, so a broken `.env` remains repairable. `meiva pty` is settings-lite and data-plane-independent.
-- **Cold stop**: normal stop loads the cluster configuration for native drain. Explicit force stop, or repeating a completed stop with no recorded failures, can skip gateway configuration fetch; the latter reads the existing pause journal before Settings bootstrap.
+- **Cold stop**: a normal stop of a running root loads the cluster configuration. Explicit force stop, or a stop of a home whose meiva-root is not running, can skip gateway configuration fetch; the latter reads the root's instance lock before Settings bootstrap.
 - **Migrations are not a command**: `cli/commands/lifecycle/migrations.py:cmd_migrations_apply` runs internally from `meiva start`.
 
 ## Entry Points

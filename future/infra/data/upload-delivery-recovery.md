@@ -22,10 +22,9 @@ acceptance, not remote readiness or agent execution.
   native chat identity/provenance/audit writer without commit or wake. Its own
   inbound-row identity disappears on deletion; upload needs retained evidence.
 - `gateway/app.py:lifespan`: owns background tasks and closes pools after task
-  shutdown. `gateway/http/middleware/stopping.py` exposes actual server shutdown;
-  `base/deploy/maintenance/admission.py` owns pause/quiesce decisions.
+  shutdown. `gateway/http/middleware/stopping.py` exposes actual server shutdown.
 - `services/agent_runner/agent_ops/daemon.py`: authenticated known-kind admission,
-  maintenance request/worker tracking; `dispatch_sync.py` owns blocking receivers.
+  request/worker tracking (`in_flight.py`); `dispatch_sync.py` owns blocking receivers.
 
 The existing Ops outbox loop is suitable mechanically, but the canonical roster
 (`services/supervision/roster/__init__.py`) starts Ops only for agent-runner capability. A pure
@@ -122,11 +121,11 @@ are immutable; status is an authenticated operator projection, not a rewritten
 
 ### Lifecycle and boundaries
 
-The lifespan stops admitting rounds on stopping/business pause, drains actual
+The lifespan stops admitting rounds on stopping, drains actual
 owned async HTTP and shielded DB/filesystem futures, then closes clients/pool.
 Do not cancel `to_thread` and pretend its native writer ended. Hard process death
 leaves fixed files/retained intent for recovery, never authorizes cleanup.
-Remote Ops keeps its existing maintenance admission and worker-future tracking.
+Remote Ops keeps its existing request and worker-future tracking.
 A slow copy must not starve unrelated intents or health: bounded batch/network
 attempts, not a new worker framework.
 
@@ -147,7 +146,7 @@ trace consumers/module moves and preserve silent-upload namespace/receipts.
 | source network cancellation / shutdown / multiple Gateway workers | no borrowed DB socket across RPC; drain actual futures; one inbound |
 | inbound before commit failure / commit response loss | atomic rollback or original retained IID/outcome |
 | accepted IID deleted / agent deleted / placement changes | no requeue; historical replay or fresh HOLD, never new home |
-| checksum/name/quota conflict / old unknown kind / maintenance hold | zero unauthorized effect, truthful status, no legacy fallback |
+| checksum/name/quota conflict / old unknown kind | zero unauthorized effect, truthful status, no legacy fallback |
 
 Run real PG17, hard-process and filesystem fault tests, actual Gateway lifespan
 and Ops dispatch/auth/maintenance consumers, plus silent-upload URL/MIME/native

@@ -100,15 +100,6 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
         assert machine is command_machine
         return frozenset({"gateway"}), frozenset(), frozenset()
 
-    def _fake_pause_agents(
-        _db: object,
-        _bus: object,
-        timeout: float = 0,
-        *,
-        local_machine: MachineIdentity,
-    ) -> None:
-        pytest.fail("unstarted home has no work to drain")
-
     def _fake_services_phase_action(
         *, preserved: frozenset[str], deadline: float, helper: HelperFactory
     ) -> Callable[[], object]:
@@ -136,7 +127,6 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
     monkeypatch.setattr(proc, "hosting_exec_domain", lambda: None)
     monkeypatch.setattr(sessions_hosting, "hosting_supervised_session", lambda: None)
     monkeypatch.setattr(stop, "stop_plan", _fake_stop_plan)
-    monkeypatch.setattr(stop, "pause_agents", _fake_pause_agents)
     monkeypatch.setattr(stop, "services_phase_action", _fake_services_phase_action)
     monkeypatch.setattr(stop, "stop_browser", _fake_stop_browser)
     monkeypatch.setattr(stop, "stop_extras", _fake_stop_extras)

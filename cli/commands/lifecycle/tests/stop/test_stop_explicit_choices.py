@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 
-from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline

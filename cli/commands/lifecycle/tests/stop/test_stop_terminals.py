@@ -23,7 +23,6 @@ import os
 import signal
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +30,6 @@ import psutil
 import pytest
 
 from base.cluster.machine import MachineIdentity
-from base.deploy.maintenance import admission
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import SERVICE_UNIT, ledger_path
 from base.sessions.pty.tests import pty_jobs as jobs
@@ -71,10 +69,6 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 _IDLE_PROMPT = "meiva-idle-shell>"
 
 pytestmark = pytest.mark.usefixtures("written")
-
-
-def _still_drained(_db: object, _bus: object, _timeout: float, **_kw: object) -> None:
-    """The retry re-enters the held stop; the drain stand-in only opens a fresh hold."""
 
 
 @pytest.mark.flaky
@@ -351,7 +345,6 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
         )
         == 1
     )
-    assert admission.held(), "the hold must survive an incomplete stop"
     assert stuck in capsys.readouterr().err
     assert [notice.name for notice in written] == [closed], "the closed session's notice was lost"
     assert "survivors" not in written[0].as_dict(), "nothing of the closed session survived"
@@ -359,7 +352,6 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
         "the service that holds the terminals is not stopped while the closure is incomplete"
     )
 
-    monkeypatch.setattr(command, "pause_agents", _still_drained)
     assert (
         entry.cmd_stop(
             require_confirmation=False,
@@ -423,7 +415,6 @@ def test_known_job_leftover_is_reported_without_failing_stop(
         )
         == 0
     )
-    assert admission.held(), "a successful stop still fences the stopped unit"
     assert psutil.pid_exists(job.pid)
     err = capsys.readouterr().err
     assert name in err
@@ -432,7 +423,6 @@ def test_known_job_leftover_is_reported_without_failing_stop(
     assert [notice.name for notice in written] == [name]
     assert written[0].survivors == ((job.pid, "python3"),)
 
-    monkeypatch.setattr(command, "pause_agents", _still_drained)
     assert (
         entry.cmd_stop(
             require_confirmation=False,
@@ -516,8 +506,6 @@ def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
     monkeypatch.setattr(strict, "await_no_terminals", settled)
     strict.close_terminals(
         time.monotonic() + remaining_s,
-        "stop-test",
-        datetime.now(UTC),
         direct_db=False,
         database_factory=operator_database,
         local_machine=command_machine,
@@ -567,8 +555,6 @@ def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
     monkeypatch.setattr(strict, "live_terminals", tearing_down)
     strict.close_terminals(
         time.monotonic() + 10,
-        "stop-test",
-        datetime.now(UTC),
         direct_db=False,
         database_factory=operator_database,
         local_machine=command_machine,
@@ -629,8 +615,6 @@ def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
 
     strict.close_terminals(
         time.monotonic() + 10,
-        "stop-test",
-        datetime.now(UTC),
         direct_db=False,
         database_factory=operator_database,
         local_machine=command_machine,
@@ -714,8 +698,6 @@ def test_operational_terminal_close_failure_is_not_best_effort_success(
         else:
             strict.close_terminals(
                 time.monotonic() + 1,
-                "stop-test",
-                datetime.now(UTC),
                 direct_db=False,
                 database_factory=operator_database,
                 local_machine=command_machine,

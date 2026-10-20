@@ -29,8 +29,7 @@ birth config, then current cluster config.
 - Reconcile retained pages and report desktop permission faults.
 
 A missing or terminated row is not scheduled as normal work. A fresh foreign
-runtime owner refuses admission. Maintenance holds also refuse ordinary work;
-only the accepted control path can complete its own drain.
+runtime owner refuses admission.
 
 ## Boot scopes
 

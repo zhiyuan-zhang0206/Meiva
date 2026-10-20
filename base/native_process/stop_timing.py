@@ -51,6 +51,21 @@ INTERRUPT_POLL_S = 2.0
 HOST_STOP_CEILING_S = 50.0
 
 # meiva:note
+# How long a SIGTERMed ops server waits for the requests it already admitted, and the executor
+# work they started, before it cancels them (services/agent_runner/agent_ops/in_flight.py).
+# New connections are refused from the moment SIGTERM arrives. Ops stops after the agent host,
+# so what is left comes from the gateway or a remote runner and is short; a request still
+# running at the deadline is named at ERROR and cancelled.
+# meiva:link services/agent_runner/agent_ops/daemon.py
+OPS_DRAIN_S = 15.0
+
+# meiva:note
+# The longest an ops server's whole SIGTERM exit may run: the drain, then the pool, the event
+# pipeline and the server close, which carry no bound of their own. The roster declares it as
+# the unit's stop ceiling, so root's TERM window derives from it.
+OPS_STOP_CEILING_S = 25.0
+
+# meiva:note
 # Root's TERM window for a unit that declares a shutdown ceiling is that ceiling plus this
 # margin (services/supervision/meiva_root_glue/manifests.py): the reap, the group-closure
 # read and scheduling all happen inside root's window, so a unit that closes exactly at its

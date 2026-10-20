@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from base.agents.to_user import ToUserReadRequest, read_resource
 from ops.to_user import owned_workspace
-from services.agent_runner.agent_ops import maintenance
+from services.agent_runner.agent_ops import in_flight
 
 
 def resource_response(body: bytes, *, pool: ConnectionPool, machine: str) -> tuple[int, bytes, str]:
@@ -30,18 +30,15 @@ async def resource_route(
     machine: str,
     executor: ThreadPoolExecutor,
     dispatch_sem: asyncio.Semaphore,
-    requests: maintenance.RequestTokens,
-    workers: maintenance.WorkerFutures,
+    requests: in_flight.RequestTokens,
+    workers: in_flight.WorkerFutures,
 ) -> tuple[int, bytes, str]:
 
-    async with dispatch_sem:
-        try:
-            with maintenance.admission("to_user_resource", requests=requests):
-                future = asyncio.get_running_loop().run_in_executor(
-                    executor,
-                    functools.partial(resource_response, body, pool=pool, machine=machine),
-                )
-                maintenance.track_worker(future, workers=workers)
-                return await asyncio.shield(future)
-        except RuntimeError:
-            return 503, b"The agent's machine is stopping", "text/plain"
+    with in_flight.admitted(requests=requests):
+        async with dispatch_sem:
+            future = asyncio.get_running_loop().run_in_executor(
+                executor,
+                functools.partial(resource_response, body, pool=pool, machine=machine),
+            )
+            in_flight.track_worker(future, workers=workers)
+            return await asyncio.shield(future)

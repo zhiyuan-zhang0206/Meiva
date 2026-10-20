@@ -472,16 +472,12 @@ def test_helper_diagnostics_are_macos_only(
             set(), database=_unused_database, machine=machine_identity
         )
     }
-    assert names == {"venv", "maintenance-hold"}
+    assert names == {"venv"}
     monkeypatch.setattr(probes, "is_macos", lambda: True)
     monkeypatch.setattr(
         probes,
         "settings",
-        SimpleNamespace(
-            services=SimpleNamespace(
-                permissions_helper_enabled=False, maintenance_hold_alert_after_s=1800
-            )
-        ),
+        SimpleNamespace(services=SimpleNamespace(permissions_helper_enabled=False)),
     )
     names = {
         check.name
@@ -489,50 +485,7 @@ def test_helper_diagnostics_are_macos_only(
             set(), database=_unused_database, machine=machine_identity
         )
     }
-    assert names == {"venv", "brew-pin", "maintenance-hold", "permissions-helper"}
-
-
-@pytest.mark.parametrize("role", ["gateway", "agent-runner"])
-def test_every_root_watches_its_maintenance_hold_with_the_configured_age(
-    monkeypatch: pytest.MonkeyPatch,
-    events: _Events,
-    tmp_path: Path,
-    role: str,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    from datetime import UTC, datetime
-
-    from base.deploy.maintenance import pause_owner
-
-    monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
-    monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
-    monkeypatch.setattr(probes, "is_macos", lambda: False)
-    monkeypatch.setattr(
-        probes,
-        "settings",
-        SimpleNamespace(
-            services=SimpleNamespace(maintenance_hold_alert_after_s=60),
-            data_plane=SimpleNamespace(is_remote=True),
-            observability=SimpleNamespace(observability_url=""),
-        ),
-    )
-    machine_identity.set(role=role)
-    check = next(
-        check
-        for check in probes.build_diagnostics(
-            set(), database=_unused_database, machine=machine_identity
-        )
-        if check.name == "maintenance-hold"
-    )
-    assert check.report is not None
-    pause_owner.begin_maintenance("meiva-restart-3", datetime(2026, 10, 12, tzinfo=UTC))
-    result = check.probe()
-    assert not result.alive
-    check.report(result)
-    assert [
-        event["holder"] for event in events if event.get("event") == "maintenance_hold_overdue"
-    ] == ["meiva-restart-3"]
+    assert names == {"venv", "brew-pin", "permissions-helper"}
 
 
 def test_station_no_credential_is_unknown_and_does_not_send(

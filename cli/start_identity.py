@@ -284,7 +284,6 @@ def _holds_resources(home: Path) -> bool:
             "redis",
             "pgbouncer",
             "deploy-state.json",
-            "run/deploy-pause-owner.json",
         )
     )
 

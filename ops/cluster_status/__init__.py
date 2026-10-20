@@ -70,13 +70,14 @@ class ClusterStatus(BaseModel):
     serve_gateway: bool
     serve_agent_runner: bool
     serve_observability_station: bool = False
-    # Status only: an unreadable deploy state, business pause, native admission
-    # hold, or startup not yet serving — the compound reads true whenever this
-    # host cannot claim readiness, whichever clause fired. Does not alter the
-    # business HTTP middleware's DB-posture policy.
+    # meiva:note
+    # Status only: an unreadable deploy state, business pause, or startup not
+    # yet serving — the compound reads true whenever this host cannot claim
+    # readiness, whichever clause fired.
     paused: bool
+    # meiva:note
     # Which clause of the `paused` verdict fired — the first true one, in the
-    # verdict's own order: no_state / business_pause / maintenance / startup.
+    # verdict's own order: no_state / business_pause / startup.
     # None when not paused. Splitting it apart keeps a failed start's parked
     # serving gate (`startup`) legible from a deliberate pause, instead of one
     # opaque bool that a consumer can only guess at.
@@ -460,30 +461,26 @@ def read_resource_sample() -> ResourceSample | None:
         return None
 
 
+# meiva:note
+# The first true clause of the `paused` verdict, in its own clause order.
+#
+# `no_state` (the deploy state was unreadable or absent), then a deliberate
+# `business_pause` posture, then `startup` (the serving gate has not reached
+# `serving` — a start is in flight, or a failed start parked it and recovery
+# stays gated). None when no clause fired. `state` is the snapshot's
+# already-read row, so this adds no central-DB dial of its own.
 def _paused_reason(
     db: Database,
     state: base.deploy.state.host_deploy_state.HostDeployState | None,
     *,
     local_machine: MachineIdentity,
 ) -> PausedReason | None:
-    """The first true clause of the `paused` verdict, in its own clause order.
-
-    `no_state` (the deploy state was unreadable or absent), then a deliberate
-    `business_pause` posture, then a native `maintenance` admission hold, then
-    `startup` (the serving gate has not reached `serving` — a start is in
-    flight, or a failed start parked it and recovery stays gated). None when no
-    clause fired. `state` is the snapshot's already-read row, so this adds no
-    central-DB dial of its own.
-    """
     from base.deploy.lifecycle import start_serving
-    from base.deploy.maintenance import admission
 
     if state is None:
         return "no_state"
     if cluster_pause.is_paused(db, state, machine_name=local_machine.name):
         return "business_pause"
-    if admission.held():
-        return "maintenance"
     if not start_serving.is_serving():
         return "startup"
     return None

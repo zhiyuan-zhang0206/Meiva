@@ -25,7 +25,6 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.app import (
     cluster_auth_middleware,
-    cluster_pause_middleware,
 )
 from gateway.http.auth import rejection_log
 from gateway.http.config import gateway_config_from_boot
@@ -486,22 +485,6 @@ def test_auth401_emit_aggregate_event(emitted_events: EmittedEvents) -> None:
     assert [(e.category, e.event_name, e.attributes) for e in emitted_events] == [
         ("telemetry", "auth401_rejected", {"count": 17})
     ]
-
-
-def test_cluster_pause_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pause short-circuits remain retriable 503 responses with Retry-After."""
-    import gateway.app as gateway_app
-
-    async def paused(_request: Request) -> bool:
-        return True
-
-    async def call_next(_request: Request) -> Response:
-        raise AssertionError("pause middleware must short-circuit")
-
-    monkeypatch.setattr(gateway_app, "cluster_is_paused", paused)
-    response = asyncio.run(cluster_pause_middleware(_request(), call_next))
-    _assert_envelope(response, status=503, code="cluster_updating", retryable=True)
-    assert response.headers["retry-after"] == "30"
 
 
 def test_error_envelope_schema_round_trips_and_omits_unset_reason() -> None:

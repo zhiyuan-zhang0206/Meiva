@@ -14,7 +14,7 @@ from base.cluster import frontend_service_cmd
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.config import settings
 from base.daemon.health import DaemonProbe, probe_home
-from base.native_process.stop_timing import HOST_STOP_CEILING_S
+from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
 from base.paths import meiva_home, otel_collector_binary, otel_collector_config
 from services.supervision.roster import plugin_services
 from services.supervision.roster.healthz import (
@@ -327,6 +327,10 @@ def build_services() -> tuple[ServiceSpec, ...]:
             module="services.agent_runner.agent_ops.daemon",
             capabilities=AGENT_RUNNER,
             requires_db=True,  # assert_schema_current at boot; serves DB-backed ops calls
+            # meiva:note
+            # SIGTERM drains the requests ops already admitted (`agent_ops.in_flight`) for up
+            # to the budget, then closes: root must wait at least that long.
+            stop_ceiling_s=OPS_STOP_CEILING_S,
         ),
         # browser: config/capability-gated (MEIVA_BROWSER_ENABLED + display/Chrome/npx).
         # CDP exposes HTTP at /json/version, so probe via curl_url (not tcp_port).

@@ -8,8 +8,8 @@ tags: [agent-lifecycle, concurrency]
 # Impersonation relay supervision
 
 `supervise_relay` is the native supervision seam, called from two places: the
-claim gate (native loop paused or resuming) and the held-controls pass
-(services/agent_runner/agent_host/host.py `_apply_held_controls`) while an active lease
+claim gate (native loop paused or resuming) and the lease-controls pass
+(services/agent_runner/agent_host/host.py `_apply_lease_controls`) while an active lease
 parks the agent outside the graph — the dispatcher's pending scan wakes rows
 with an open lease periodically, pull-based from the database, so supervision
 does not depend on wake delivery. Executor authority is separate from relay

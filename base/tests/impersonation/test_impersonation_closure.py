@@ -34,11 +34,8 @@ def test_closure_restores_six_native_owners(
     local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import reap_impersonations
     from base.db import pool
-    from base.deploy.maintenance.cohort import RuntimeRow, classify
-    from base.deploy.maintenance.state import MaintenanceHold
 
     host = uuid4()
-    owners: list[int] = []
     for _ in range(6):
         original = create_native_owner(db_conn, local_machine=local_machine)
         owner = RuntimeIncarnation(original.agent_id, original.generation, host)
@@ -88,13 +85,6 @@ def test_closure_restores_six_native_owners(
             (owner.agent_id,),
         ).fetchone() == (owner.generation, host)
         db_conn.commit()
-        owners.append(owner.agent_id)
-    rows = db_conn.execute(
-        "SELECT id,status,runtime_owner,runtime_generation FROM agents_meta WHERE id=ANY(%s)",
-        (owners,),
-    ).fetchall()
-    hold = classify([RuntimeRow(*row) for row in rows], MaintenanceHold(), host, set())
-    assert set(hold.commands) == set(owners)
 
 
 @pytest.mark.parametrize("guard", ["consistent", "unowned", "terminated", "machine", "requested"])

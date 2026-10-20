@@ -18,7 +18,6 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import start_serving
-from base.deploy.maintenance import admission
 from base.deploy.state import host_deploy_state
 from base.deploy.state.host_deploy_state import HostDeployState
 from base.host import resource_sample
@@ -503,32 +502,30 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
 
 
 @pytest.mark.parametrize(
-    ("posture", "held_flag", "serving", "expected_paused", "expected_reason"),
+    ("posture", "serving", "expected_paused", "expected_reason"),
     [
         # A failed start parked the serving gate at `starting` while the DB
         # posture is idle — the exact misread behind task #3404 (paused=true
         # read like a deliberate pause). The reason must name the gate.
-        ("idle", False, False, True, "startup"),
+        ("idle", False, True, "startup"),
         # Deliberate posture pause.
-        ("paused", False, True, True, "business_pause"),
-        # Clause order: posture outranks a hold, a hold outranks the gate.
-        ("paused", True, True, True, "business_pause"),
-        ("idle", True, True, True, "maintenance"),
-        ("idle", True, False, True, "maintenance"),
+        ("paused", True, True, "business_pause"),
+        # meiva:note
+        # Clause order: posture outranks the gate.
+        ("paused", False, True, "business_pause"),
+        # meiva:note
         # No readable deploy state is the verdict's first clause — it outranks
-        # every other cause, including a hold and a parked gate.
-        (None, False, True, True, "no_state"),
-        (None, False, False, True, "no_state"),
-        (None, True, True, True, "no_state"),
+        # every other cause, including a parked gate.
+        (None, True, True, "no_state"),
+        (None, False, True, "no_state"),
         # No clause fired.
-        ("idle", False, True, False, None),
+        ("idle", True, False, None),
     ],
 )
 def test_status_snapshot_paused_reason_names_the_first_true_clause(
     monkeypatch: pytest.MonkeyPatch,
     snapshot_dependencies: HostDeployState,
     posture: str | None,
-    held_flag: bool,
     serving: bool,
     expected_paused: bool,
     expected_reason: str | None,
@@ -550,7 +547,6 @@ def test_status_snapshot_paused_reason_names_the_first_true_clause(
         return state
 
     monkeypatch.setattr(host_deploy_state, "read", _read_state)
-    monkeypatch.setattr(admission, "held", lambda: held_flag)
     monkeypatch.setattr(start_serving, "is_serving", lambda: serving)
     monkeypatch.setattr(resource_sample, "resource_sample", lambda: _RESOURCE)
 

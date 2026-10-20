@@ -31,4 +31,4 @@ agent data. Impersonation is an independent identity protocol.
 - [[process-lifecycle/reentry-paths.meiva.okf.md]] — restart and resurrection
 - [[agent/startup/docs/admission.meiva.okf.md]] — ownership fencing
 - [[agent/docs/sessions.meiva.okf.md]] — persistent shell resources
-- [[base/deploy/maintenance/docs/maintenance.meiva.okf.md]] — cluster stop/restart
+- [[services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md]] — cluster stop/restart settle running turns

@@ -152,15 +152,8 @@ def test_cmd_restart_calls_stop_then_start(
         order.append("stop")
         return 0
 
-    def fake_cmd_start_body(
-        operation: object,
-        database_factory: Callable[[], Any],
-        machine: MachineIdentity,
-        **kwargs: object,
-    ) -> int:
-        assert operation is None
+    def fake_cmd_start_body(database_factory: Callable[[], Any], **kwargs: object) -> int:
         assert database_factory is operator_database
-        assert machine is command_runtime.machine
         assert kwargs["producer"] is operator_pipeline
         from cli.start_runtime import StartRuntime
 
@@ -230,12 +223,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
 
-    def start_result(
-        operation: object,
-        database_factory: Callable[[], Any],
-        machine: MachineIdentity,
-        **kwargs: object,
-    ) -> int:
+    def start_result(database_factory: Callable[[], Any], **kwargs: object) -> int:
         assert database_factory is operator_database
         assert kwargs["producer"] is operator_pipeline
         return 0
@@ -316,7 +304,7 @@ def test_cmd_restart_short_circuits_on_stop_failure(
     monkeypatch.setattr(
         _start_commands,
         "cmd_start_body",
-        lambda _operation, _database_factory, _machine, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+        lambda _database_factory, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     rc = _stop_commands.cmd_restart(
         retained_children=[],
@@ -366,14 +354,8 @@ def test_cmd_restart_aborts_when_preflight_fails(
     monkeypatch.setattr(
         _start_commands,
         "cmd_start_body",
-        lambda _operation, _database_factory, _machine, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+        lambda _database_factory, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-
-    def release_pause(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
-        assert database_factory is operator_database
-        assert machine is command_runtime.machine
-
-    monkeypatch.setattr(_stop_commands, "release_self_heal_pause", release_pause)
 
     rc = _stop_commands.cmd_restart(
         retained_children=[],
@@ -428,14 +410,8 @@ def test_cmd_restart_aborts_when_start_readiness_fails(
     monkeypatch.setattr(
         _start_commands,
         "cmd_start_body",
-        lambda _operation, _database_factory, _machine, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+        lambda _database_factory, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-
-    def release_pause(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
-        assert database_factory is operator_database
-        assert machine is command_runtime.machine
-
-    monkeypatch.setattr(_stop_commands, "release_self_heal_pause", release_pause)
 
     rc = _stop_commands.cmd_restart(
         retained_children=[],

@@ -32,3 +32,6 @@ two predicates with identical membership alive.
 
 Forward link: replaces the "`drained` .. `ready`" window and the stop-leg scan predicate of
 [the stop window contract](2026-09-12-stop-window-contract.md).
+
+Forward link (2026-10-20): the remaining phases and the journal itself are deleted. See
+[delete the maintenance hold](../2026-10-20-delete-maintenance-hold.md).

@@ -1,9 +1,5 @@
-"""`/api/cluster/*` endpoint + 503 middleware + handler unit tests.
-
-Middleware short-circuits SDK paths only during the journal's stop/start window;
-native drain keeps those dependencies available. Session
-backends are recorded, while local drain uses the private test database.
-"""
+# meiva:note
+# `/api/cluster/*` endpoint and handler unit tests.
 
 from __future__ import annotations
 
@@ -14,8 +10,6 @@ from typing import Any
 import psycopg
 import pytest
 
-import base.sessions.backend as sessions_backend
-import gateway.app as gateway_app
 import gateway.cluster.status as gateway_cluster_status
 from base import cluster
 from base.cluster.machine import MachineIdentity
@@ -26,9 +20,6 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.git import cluster_drift, running_sha
 from base.deploy.lifecycle.start_serving import RootBirth
-from base.deploy.maintenance import admission, pause_owner
-from base.deploy.maintenance.state import MaintenancePhase
-from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process import loaded_commit
 from base.native_process.loaded_commit import LoadedCommit
@@ -36,8 +27,7 @@ from base.native_process.root_control import client as root_client
 from gateway.app import openapi_schema
 from gateway.cluster import router
 from gateway.events import telemetry_rows
-from gateway.tests.agents.gateway_auth import without_credentials
-from ops import agent_pause, cluster_status
+from ops import cluster_status
 from ops.cluster_status import pause as cluster_pause
 from tests.fixtures.gateway_config import gateway_test_client
 
@@ -69,21 +59,14 @@ def fake_flag(
     simulating the pause with a file. The fixture is about "the process agrees on
     one paused signal", not which storage (the old-signal sweep, PR5, retired the
     real flag file).
-    The gateway middleware reads the local journal through the async
-    `gateway.app.cluster_is_paused`, so its bound name uses an async stand-in;
-    the status/cluster routers still read the sync `is_paused`."""
+    The status/cluster routers read the sync `is_paused`."""
     flag = tmp_path / "cluster_paused"
-
-    async def _paused(_request: object) -> bool:
-        return flag.exists()
 
     def _snapshot_paused(
         _db: object, _state: object = None, *, machine_name: Callable[[], str]
     ) -> bool:
         assert machine_name == machine_identity.name
         return flag.exists()
-
-    monkeypatch.setattr(gateway_app, "cluster_is_paused", _paused)
 
     def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
         assert machine_name == machine_identity.name
@@ -113,34 +96,16 @@ def pinned_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cluster, "session_name", lambda svc: f"meiva-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
 
 
-# ─── middleware 503 mode ──────────────────────────────────────────────────────
+# meiva:note
+# ─── status ───────────────────────────────────────────────────────────────────
 
 
-class TestPauseMiddleware:
-    def test_sdk_path_returns_503_when_paused(self, fake_flag: Path) -> None:
-        fake_flag.write_text("")
-        with gateway_test_client() as client:
-            r = client.get("/api/agents")
-        assert r.status_code == 503
-        assert "updating" in r.json()["detail"]
-        assert r.headers.get("Retry-After") == "30"
-
-    def test_paused_503_carries_cors_headers(self, fake_flag: Path) -> None:
-        """A 503 short-circuited by the pause middleware still carries the CORS
-        headers — CORSMiddleware is the OUTERMOST middleware, so a browser
-        caller sees the real 503 instead of "Failed to fetch" (#187)."""
-        fake_flag.write_text("")
-        with gateway_test_client() as client:
-            allowed_origin = client.app.state.gateway_config.allowed_origins[0]  # type: ignore[union-attr]
-            r = client.get("/api/agents", headers={"Origin": allowed_origin})
-        assert r.status_code == 503
-        assert r.headers["access-control-allow-origin"] == allowed_origin
-        assert r.headers["access-control-allow-credentials"] == "true"
-
-    def test_cluster_status_bypasses_503(
+class TestClusterStatusEndpoint:
+    # meiva:note
+    # `/api/cluster/status` answers 200 and reports the posture of a pure gateway.
+    def test_cluster_status_reports_a_paused_posture(
         self, fake_flag: Path, set_machine_identity: MachineIdentitySetter
     ) -> None:
-        """`/api/cluster/status` still returns 200 while paused — it is the observability + control path."""
         fake_flag.write_text("")
         machine: MachineIdentity = set_machine_identity(role="gateway", name="test-mc")
         with gateway_test_client(machine=machine) as client:
@@ -148,226 +113,25 @@ class TestPauseMiddleware:
         assert r.status_code == 200
         body = r.json()
         assert body["paused"] is True
+        # meiva:note
         # The pure-gateway local snapshot resolves paused from the posture row
         # alone; the breakdown names that single cause (task #3404).
         assert body["paused_reason"] == "business_pause"
         assert body["machine_name"] == "test-mc"
         assert body["serve_gateway"] is True
         assert body["serve_agent_runner"] is False
+        # meiva:note
         # Retired updater projections are absent from the live status wire.
         assert "current_orchestration" not in body
         assert "last_updater_outcome" not in body
-
-    def test_no_503_when_unpaused(self, fake_flag: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Flag absent → middleware does not block; /api/agents follows normal business path."""
-        # flag absent by default
-        with gateway_test_client() as client:
-            r = client.get("/api/agents")
-        # just not 503 (business logic may return 200 / other, but must not be our paused middleware)
-        assert r.status_code != 503
-
-    def test_alerts_webhook_bypasses_503(self, fake_flag: Path) -> None:
-        """The alert webhook must land during a rollout window — a
-        503 there exhausts Grafana's retries and the alert is lost. The 401
-        (no webhook token configured in this test env) proves the request
-        reached the router instead of the pause short-circuit."""
-        fake_flag.write_text("")
-        with gateway_test_client() as client:
-            r = without_credentials(client).post(
-                "/api/alerts",
-                json={"status": "firing", "alerts": []},
-            )
-        assert r.status_code == 401
-
-    def test_alerts_panel_still_503_when_paused(self, fake_flag: Path) -> None:
-        """Only the webhook bypasses the pause — the read/stream paths stay
-        503 like every other path (read-only, not needed mid-rollout)."""
-        fake_flag.write_text("")
-        with gateway_test_client() as client:
-            r = client.get("/api/alerts")
-        assert r.status_code == 503
-
-    def test_openapi_disabled(self, fake_flag: Path) -> None:
-        """FastAPI metadata (`/openapi.json` / `/docs` / `/redoc`) is turned off
-        at app construction so it can't leak the full route schema. Unpaused
-        the route is FastAPI 404; paused, /api/cluster/* is the only bypass
-        and metadata returns 503 along with everything else (correct — there's
-        nothing to serve and no caller depends on this path)."""
-        with gateway_test_client() as client:
-            r = client.get("/openapi.json")
-        assert r.status_code == 404
-
-    def test_other_agent_paths_still_503_when_paused(self, fake_flag: Path) -> None:
-        """Only the agent SELF-REPORT paths bypass the pause — an externally
-        initiated terminate stays 503 (business logic, not a drain signal)."""
-
-    def test_alwk_does_not_claim_while_paused(
-        self, fake_flag: Path, db_conn: psycopg.Connection
-    ) -> None:
-        """Middleware order (audit P2-1): a paused cluster 503s BEFORE dedup
-        engages — a pause-window ALWK request must not leave a placeholder
-        row. The old registration order ran dedup first, so every
-        pause-window request claimed then 503'd (an INSERT+DELETE per
-        request, and a bricked key if the process died inside the window)."""
-        with db_conn.cursor() as cur:
-            cur.execute("INSERT INTO agents (label) VALUES ('pause-order') RETURNING id")
-            row = cur.fetchone()
-            assert row is not None
-            aid = row[0]
-            cur.execute("INSERT INTO agents_meta (id, status) VALUES (%s, 'running')", (aid,))
-        db_conn.commit()
-        fake_flag.write_text("")
-        with gateway_test_client() as client:
-            r = client.post(
-                f"/api/agents/{aid}/messages",
-                json={"content": "during pause", "source": "user"},
-                headers={"Idempotency-Key": "key-pause-order"},
-            )
-        assert r.status_code == 503
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT count(*) FROM api_idempotency WHERE key = %s", ("key-pause-order",))
-            row = cur.fetchone()
-            assert row is not None and row[0] == 0, "dedup must not claim while paused"
-        fake_flag.write_text("")
-        with gateway_test_client() as client:
-            r = client.post("/api/agents/123/terminate", json={"source": "user"})
-        assert r.status_code == 503
 
 
 # ─── handler business logic ───────────────────────────────────────────────────
 
 
-class _FakeSessionBackend:
-    """Record every service and orchestration session operation without spawning."""
-
-    def __init__(self) -> None:
-        self.killed: list[str] = []
-        self.spawned: list[str] = []
-        self.spawn_calls: list[tuple[str, str, object]] = []
-        self.alive_answer: bool | list[bool] = False
-        self.alive_by_name: dict[str, bool] = {}
-        self.spawn_ok = True
-        self.spawn_ok_by_name: dict[str, bool] = {}
-
-    def _alive(self, name: str) -> bool:
-        if name in self.alive_by_name:
-            return self.alive_by_name[name]
-        if isinstance(self.alive_answer, list):
-            return self.alive_answer.pop(0)
-        return self.alive_answer
-
-    def has_session(self, name: str) -> bool:
-        return self._alive(name)
-
-    def kill_session(
-        self, name: str, *, graceful: bool = False, expected: bool = False, **_: object
-    ) -> tuple[bool, str]:
-        self.killed.append(name)
-        return True, "stub"
-
-    def new_session(self, name: str, cmd: str, cwd: object, *, env: object, **_: object) -> bool:
-        self.spawned.append(name)
-        self.spawn_calls.append((name, cmd, cwd))
-        return self.spawn_ok_by_name.get(name, self.spawn_ok)
-
-    def list_sessions(self, prefix: str = "") -> list[str]:
-        return []
-
-
-@pytest.fixture
-def pause_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeSessionBackend:
-    backend = _FakeSessionBackend()
-    monkeypatch.setattr(sessions_backend, "get_backend", lambda: backend)
-    monkeypatch.setattr(agent_pause, "host_running", lambda: False)
-    return backend
-
-
-class TestPauseAgents:
-    @pytest.fixture(autouse=True)
-    def _private_pause_owner(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
-        monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
-
-    def test_completed_drain_keeps_sdk_requests_and_services_available(
-        self,
-        pause_backend: _FakeSessionBackend,
-        database: Database,
-        event_bus: EventBus,
-        *,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        """Phase A may finish while a peer still needs this gateway's SDK API."""
-        pause_backend.alive_answer = True
-
-        agent_pause.pause_agents(database, event_bus, local_machine=machine_identity)
-
-        current = admission.snapshot()
-        assert current is not None and current.maintenance is not None
-        assert current.maintenance.phase == MaintenancePhase.DRAINED
-        with gateway_test_client() as client:
-            assert client.get("/api/agents").status_code == 200
-        assert not cluster_pause.is_paused(database, machine_name=machine_identity.name)
-        assert pause_backend.killed == []
-        assert pause_backend.has_session("meiva-test-agent-host")
-
-    def test_idempotent_when_session_missing(
-        self,
-        pause_backend: _FakeSessionBackend,
-        database: Database,
-        event_bus: EventBus,
-        *,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        """Repeated Phase A reuses the same drain without starting services."""
-        agent_pause.pause_agents(database, event_bus, local_machine=machine_identity)
-        first = pause_owner.read()
-        agent_pause.pause_agents(database, event_bus, local_machine=machine_identity)
-        assert pause_owner.read() == first
-        assert first.maintenance is not None and first.maintenance.phase == MaintenancePhase.DRAINED
-        assert pause_backend.killed == pause_backend.spawned == []
-
-
-class TestUnpauseLocalCluster:
-    @pytest.fixture(autouse=True)
-    def _private_pause_owner(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
-        monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
-
-    def test_unpause_restores_posture_and_releases_admission(
-        self,
-        pause_backend: _FakeSessionBackend,
-        database: Database,
-        event_bus: EventBus,
-        *,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        from base.deploy.state.host_deploy_state import set_posture
-
-        agent_pause.pause_agents(database, event_bus, local_machine=machine_identity)
-        set_posture(database, "paused", machine=machine_identity.name())
-        assert cluster_pause.is_paused(database, machine_name=machine_identity.name)
-
-        cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
-
-        assert not cluster_pause.is_paused(database, machine_name=machine_identity.name)
-        assert not admission.held()
-        assert pause_backend.spawned == pause_backend.killed == []
-
-    def test_missing_pause_and_repeated_resume_do_not_start_services(
-        self,
-        pause_backend: _FakeSessionBackend,
-        database: Database,
-        event_bus: EventBus,
-        *,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
-        cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
-        assert not cluster_pause.is_paused(database, machine_name=machine_identity.name)
-        assert pause_backend.spawned == pause_backend.killed == []
-
-
 class TestRetiredDeploymentEndpoints:
+    # meiva:note
+    # The retired update and recovery routes do not exist over HTTP.
     @pytest.mark.parametrize(
         ("method", "path"),
         [
@@ -378,15 +142,7 @@ class TestRetiredDeploymentEndpoints:
             ("POST", "/api/cluster/recover"),
         ],
     )
-    def test_removed_ingress_cannot_dispatch_or_pause(
-        self, monkeypatch: pytest.MonkeyPatch, method: str, path: str
-    ) -> None:
-        """The retired update and recovery routes do not exist over HTTP."""
-
-        def forbidden(_db: object, _bus: object, *_args: object, **_kwargs: object) -> None:
-            pytest.fail("retired HTTP ingress reached the old updater")
-
-        monkeypatch.setattr(agent_pause, "pause_agents", forbidden)
+    def test_removed_ingress_cannot_dispatch(self, method: str, path: str) -> None:
         with gateway_test_client() as client:
             assert client.request(method, path).status_code == 404
         assert path not in openapi_schema()["paths"]

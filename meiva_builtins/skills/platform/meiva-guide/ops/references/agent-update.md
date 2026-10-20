@@ -116,7 +116,7 @@ The log names the failed `down` or `up` phase. Fix the cause and rerun that half
 through an external job/login shell. After repairing and completing `down`,
 run `up`; an `up` failure needs only `up`, not another outage. Follow the
 runbook and `docs/conventions/operations/graceful-maintenance.md` for incomplete
-stops or maintenance holds. Do not blindly resubmit the full `run`.
+stops. Do not blindly resubmit the full `run`.
 
 Once the job has finished and its result is recorded, unload its own label with
 `launchctl bootout "gui/$(id -u)/$(cat "$UPDATE_DIR/label")"`. Retain the receipt

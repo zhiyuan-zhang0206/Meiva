@@ -29,7 +29,6 @@ exports = ["agents", "extensions", "test_agents_endpoints.py", "test_idempotency
 "test_agents_endpoints.py#monkeypatch.setattr services.derived.memory_indexer.backends.factory.get_backend" = 1
 "test_agents_endpoints.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.factory.get_provider" = 1
 "test_error_envelope.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 5
-"test_error_envelope.py#monkeypatch.setattr gateway.app.cluster_is_paused" = 1
 "test_error_envelope.py#monkeypatch.setattr gateway.http.auth.rejection_log.time.monotonic" = 2
 "test_error_envelope.py#monkeypatch.setattr gateway.http.middleware.error_envelope.telemetry.capture_trace_ids" = 1
 "test_idempotency.py#monkeypatch.setattr base.lm.factory.model_supports_vision" = 2

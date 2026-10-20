@@ -2664,7 +2664,7 @@ export interface components {
             serve_agent_runner: boolean;
             serve_observability_station: boolean;
             paused: boolean;
-            paused_reason?: ("no_state" | "business_pause" | "maintenance" | "startup") | null;
+            paused_reason?: ("no_state" | "business_pause" | "startup") | null;
             head_sha?: string | null;
             running_sha?: string | null;
             schema_mismatch?: components["schemas"]["SchemaMismatchStatus"] | null;
@@ -3098,7 +3098,7 @@ export interface components {
             up_since_at: string;
             online: boolean;
             paused: boolean | null;
-            paused_reason?: ("no_state" | "business_pause" | "maintenance" | "startup") | null;
+            paused_reason?: ("no_state" | "business_pause" | "startup") | null;
             description?: string | null;
             stopped_at?: string | null;
             is_staging: boolean;

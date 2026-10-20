@@ -14,7 +14,7 @@ The service that supervises the `schedules` table: one session `meiva-schedule-<
 Two resident sequential loops under one `TaskGroup` (`services/wake/schedule_manager/daemon.py`, on `base/daemon/round_loop.py`). A loop that raises cancels its sibling and ends the process; the supervisor restarts it. Each loop reports its own progress to `/healthz`.
 
 - **`reconcile`** (`manager.py`) — every 5 s.
-- **`requests`** (`requests.py`) — every second, converges each queued `schedule_sync_requests` row to its latest desired revision (adopt a matching live execution; officially reap a predecessor before replacement), then deletes it only if unchanged. A maintenance hold leaves work queued; a failed reap or uncertain live provenance does too, for a bounded window (ten minutes of one failure streak), then the manager records the schedule as an error, emits `schedule_convergence_abandoned` and consumes the request. A consumed launch attempt is terminal for that revision, even if its outcome is unknown. See [[gateway/schedules/docs/schedule-convergence.meiva.okf.md]] for transactional receipts and advisory ownership.
+- **`requests`** (`requests.py`) — every second, converges each queued `schedule_sync_requests` row to its latest desired revision (adopt a matching live execution; officially reap a predecessor before replacement), then deletes it only if unchanged. A failed reap or uncertain live provenance leaves work queued, for a bounded window (ten minutes of one failure streak), then the manager records the schedule as an error, emits `schedule_convergence_abandoned` and consumes the request. A consumed launch attempt is terminal for that revision, even if its outcome is unknown. See [[gateway/schedules/docs/schedule-convergence.meiva.okf.md]] for transactional receipts and advisory ownership.
 
 ## State that moved from memory to the row
 | was (gateway, in memory) | now |
@@ -27,7 +27,7 @@ Still in memory, deliberately: the set of schedules whose stale same-name surviv
 
 ## Key Dependencies
 - `base.sessions.backend` — the host's PTY session backend; the service must run on the gateway host.
-- `base.deploy.lifecycle.start_serving`, `base.deploy.maintenance.admission` — launches proceed only while serving and not under a maintenance hold.
+- `base.deploy.lifecycle.start_serving` — launches proceed only while the home is serving.
 - `gateway/schedules/session_control.py` — the API side of the request queue and the log capture.
 
 ## Entry Points

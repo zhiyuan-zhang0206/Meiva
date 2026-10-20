@@ -41,7 +41,6 @@
 "test_commands_restart_stop.py#monkeypatch.setattr cli.commands.lifecycle.stop.do_stop" = 6
 "test_commands_restart_stop.py#monkeypatch.setattr cli.commands.lifecycle.stop.force_close_terminals" = 2
 "test_commands_restart_stop.py#monkeypatch.setattr cli.commands.lifecycle.stop.reap_cluster_chrome" = 2
-"test_commands_restart_stop.py#monkeypatch.setattr cli.commands.lifecycle.stop.release_self_heal_pause" = 2
 "test_commands_restart_stop.py#monkeypatch.setattr services.desktop.browser.orphan.reap_cluster_chrome" = 3
 "test_root_driver_signals.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.birth_matches" = 1
 "test_root_driver_signals.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.capture" = 2

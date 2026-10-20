@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-"""Version a script during certified maintenance using the installed runtime.
-
-This file may be copied from a reviewed revision and run outside the installed
-checkout. All application imports come from --source, never from this file's
-checkout. The existing installed schedule writer owns the transaction, version
-snapshot and deferred convergence request; this adapter never launches a session.
-"""
+# meiva:note
+# Version a script while no agent host serves the home, using the installed runtime.
+#
+# This file may be copied from a reviewed revision and run outside the installed
+# checkout. All application imports come from --source, never from this file's
+# checkout. The existing installed schedule writer owns the transaction, version
+# snapshot and deferred convergence request; this adapter never launches a session.
 
 from __future__ import annotations
 
@@ -22,19 +22,13 @@ def script_sha256(script: str) -> str:
     return hashlib.sha256(script.encode("utf-8")).hexdigest()
 
 
-def require_stopped_hold() -> Any:
-    """Require a healthy certified stop; a retained live root is allowed."""
-    from base.deploy.maintenance import admission
-    from base.deploy.maintenance.state import MaintenancePhase
+# meiva:note
+# Refuse while an agent host serves `home`: it holds the host's instance lock.
+def require_agent_host_stopped(home: Path) -> None:
+    from services.agent_runner.agent_host.lifecycle.instance import host_serving
 
-    current = admission.snapshot()
-    if (
-        current is None
-        or current.maintenance is None
-        or current.maintenance.phase != MaintenancePhase.STOPPED
-    ):
-        raise RuntimeError("script repair requires a stopped maintenance hold")
-    return current
+    if host_serving(home):
+        raise RuntimeError("script repair requires the agent host to be stopped")
 
 
 def load_installed_runtime(home: Path, source: Path) -> None:
@@ -62,10 +56,9 @@ def load_installed_runtime(home: Path, source: Path) -> None:
 # meiva:note
 # Check the old text and reuse the installed versioned writer.
 #
-# The caller holds the home's lifecycle mutex and stopped journal. Business
-# API writes are fenced and the schedule manager is stopped throughout this
-# precondition/read/write interval. Per-row commits are deliberate: after an
-# interruption, the prepared text is a no-op and any third text is refused.
+# The caller holds the home's lifecycle mutex and has proved no agent host serves
+# the home. Per-row commits are deliberate: after an interruption, the prepared
+# text is a no-op and any third text is refused.
 def replace_script(pool: Any, schedule_id: int, script: str, expected_sha256: str) -> str:
     # First-generation bootstrap must use the already installed versioned writer.
     # Calling a newly introduced public owner would require deploying it first.
@@ -88,10 +81,11 @@ def replace_script(pool: Any, schedule_id: int, script: str, expected_sha256: st
     return "updated"
 
 
+# meiva:note
+# Run one script-only edit while no agent host serves `home`.
 def repair_script(
     *, home: Path, source: Path, schedule_id: int, script: str, expected_sha256: str
 ) -> str:
-    """Run one script-only edit without releasing or progressing maintenance."""
     load_installed_runtime(home, source)
     from base.db import Database
     from base.db.code_version_gate import ProcessDbGate
@@ -107,11 +101,9 @@ def repair_script(
     gate = ProcessDbGate(version=version.get, process=process_name())
 
     with resource_lock(purpose="operator.update_schedule_script"):
-        before = require_stopped_hold()
+        require_agent_host_stopped(home)
         with Database.from_settings(gate=gate).pool() as pool:
             result = replace_script(pool, schedule_id, script, expected_sha256)
-        if require_stopped_hold() != before:
-            raise RuntimeError("maintenance generation changed during script repair")
     return result
 
 

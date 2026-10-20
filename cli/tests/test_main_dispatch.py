@@ -387,29 +387,39 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     start and normal stop need the real cluster configuration."""
     import os as _os
 
+    from base.native_process.root_control import instance_lock
+    from base.paths import root_run_dir
+
     # The no-op parser admits its own home; initialization is exercised by start-gate tests.
     def admitted(home: Path) -> None:
         assert home == tmp_path.resolve()
 
     monkeypatch.setattr(start_identity, "require_initialized", admitted)
-    for verb in ("status", "cluster", "agents", "config", "logs"):
-        env = {"PATH": "/usr/bin", "MEIVA_HOME": str(tmp_path)}
-        monkeypatch.setattr(_os, "environ", env)
-        monkeypatch.setattr(
-            _parsers, "build_parser", _ignoring_retention(lambda v=verb: _noop_parser(v))
-        )
-        assert _main.main([verb]) == 0
-        assert env.get("MEIVA_CONFIG_FETCH") == "skip", f"{verb} must be settings-lite"
 
-    # Starting and graceful draining both need data-plane configuration.
-    for verb in ("start", "stop"):
+    def dispatch(verb: str) -> dict[str, str]:
         env = {"PATH": "/usr/bin", "MEIVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)
         monkeypatch.setattr(
-            _parsers, "build_parser", _ignoring_retention(lambda v=verb: _noop_parser(v))
+            _parsers, "build_parser", _ignoring_retention(lambda: _noop_parser(verb))
         )
         assert _main.main([verb]) == 0
-        assert "MEIVA_CONFIG_FETCH" not in env
+        return env
+
+    for verb in ("status", "cluster", "agents", "config", "logs"):
+        assert dispatch(verb).get("MEIVA_CONFIG_FETCH") == "skip", f"{verb} must be settings-lite"
+
+    # meiva:note
+    # Starting and a stop of a running meiva-root both need data-plane configuration.
+    root_lock = instance_lock.acquire_instance_lock(root_run_dir(tmp_path.resolve()))
+    try:
+        for verb in ("start", "stop"):
+            assert "MEIVA_CONFIG_FETCH" not in dispatch(verb)
+    finally:
+        instance_lock.release_instance_lock(root_lock)
+
+    # meiva:note
+    # A stop with no meiva-root running needs none: repeating it works while the gateway is down.
+    assert dispatch("stop").get("MEIVA_CONFIG_FETCH") == "skip"
 
 
 def _noop_parser(verb: str) -> argparse.ArgumentParser:

@@ -116,11 +116,12 @@ runtime-admission decision are deleted.
 
 The replacement must preserve one transaction for runtime ownership and resource
 admission. A fresh metadata INSERT may stamp `ResourceBirth`; an existing agent
-requires explicit predecessor and allocation closure. Maintenance drain must
-verify the complete recorded resource set, never treat NULL as an empty set.
-Retain the existing database-row-before-local-file lock order. A held-operation
-continuation is bound to the exact maintenance owner, timestamp, frozen cohort
-command and database target generation; it cannot mint a successor incarnation.
+requires explicit predecessor and allocation closure. A drain must verify the
+complete recorded resource set, never treat NULL as an empty set.
+Retain the existing database-row-before-local-file lock order. (Done: the
+maintenance hold, its cohort and the held-operation continuation are deleted; a stop
+settles running turns through the agent host's own SIGTERM exit, see the
+[decision](../../../docs/decisions/runtime/processes/2026-10-20-delete-maintenance-hold.md).)
 
 At the one-time cutover, inventory all old writers and independent execution
 domains, close their native custody and fence stale database credentials where

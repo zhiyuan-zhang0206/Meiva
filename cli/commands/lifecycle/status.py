@@ -27,7 +27,6 @@ from cli.commands.converge import incomplete
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.bringup import print_data_plane_status
 from cli.commands.data_plane.config import data_plane_config_from_settings
-from cli.commands.lifecycle.hold_report import print_hold_section
 from cli.commands.probe import print_service_row
 from services.supervision.roster import build_services
 from services.supervision.roster.service_spec import ServiceSpec
@@ -35,8 +34,8 @@ from services.supervision.roster.spec import services_for_capabilities_annotated
 
 
 # meiva:note
-# A converge that aborted leaves a marker in this home; print it beside the
-# maintenance hold, because the services may be up while one step never applied.
+# A converge that aborted leaves a marker in this home; print it first,
+# because the services may be up while one step never applied.
 # meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
 def print_converge_section(home: Path) -> None:
     recorded = incomplete.read_incomplete(home)
@@ -95,7 +94,6 @@ def cmd_status(
     print(
         f"[meiva status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n"
     )
-    print_hold_section()
     print_converge_section(meiva_home())
     print()
     services_to_show = _status_roster(roles, machine=machine, host=host)

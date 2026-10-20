@@ -10,20 +10,10 @@
     "test_service_probe_ports.py",
     "test_session_naming.py",
 ]
-"agent.tests.agent_tests" = [
-    "test_maintenance_recovery.py",
-]
 "base.deploy.tests.db_authority_tests" = [
     "test_single_box.py",
-]
-"base.paths.tests.homes" = [
-    "test_maintenance_recovery.py",
-]
-"base.packages.tests.model_catalog" = [
-    "test_maintenance_recovery.py",
 ]
 "meiva.tests.fixtures.sdk" = [
     "test_commands_register.py",
     "test_external_skills.py",
-    "test_maintenance_recovery.py",
 ]
