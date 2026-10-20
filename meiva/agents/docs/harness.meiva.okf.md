@@ -63,4 +63,4 @@ spends no quota. A sign-in it cannot prove is reported as `unknown`, never as a
 guess.
 
 The stored column and the birth rule:
-[[base/agents/docs/harness.meiva.okf.md|agent harness identity]].
+[[base/agents/docs/harness/harness.meiva.okf.md|agent harness identity]].

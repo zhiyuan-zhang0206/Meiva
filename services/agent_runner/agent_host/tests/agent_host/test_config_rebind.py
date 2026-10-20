@@ -668,7 +668,7 @@ class TestRunnability:
         # the enum names has an adapter today, so the gate is given the set a release
         # without one would carry rather than a name that happens to lack it; the
         # wake path itself is covered by the other cases in this class.
-        # meiva:link base/agents/docs/harness.meiva.okf.md
+        # meiva:link base/agents/docs/harness/harness.meiva.okf.md
         stored = StoredConfig(
             machine="macmini",
             status="idling",

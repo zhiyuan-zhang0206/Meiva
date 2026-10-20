@@ -29,7 +29,7 @@ DEFAULT_HARNESS = Harness.MEIVA
 # because the graph routes its turns to `harness_turn`, whose bridge opens an
 # adapter session; removing a value retires its launcher and leaves rows born on
 # it inert, which is the rollback.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 LAUNCHABLE_HARNESSES: frozenset[Harness] = frozenset(
     {Harness.MEIVA, Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY}
 )
@@ -53,7 +53,7 @@ class _LoginEvidence:
 # Install directories a user-level CLI lands in even when the process PATH is
 # trimmed. Agents start without the interactive shell profile, so a missing PATH
 # entry alone is not proof that the harness is absent.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 _FALLBACK_BIN_DIRS = (
     ".local/bin",
     ".npm-global/bin",
@@ -82,7 +82,7 @@ def coerce_harness(value: str | Harness | None) -> Harness:
 # neither run nor move onto another loop, and only a force terminate could end
 # it. A fork inherits its source's harness, so a source that never got a
 # launcher is refused by the same rule instead of copying the dead value.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def _require_launchable(
     harness: Harness, fork_from: int | None, launchable: Collection[Harness]
 ) -> Harness:
@@ -107,7 +107,7 @@ def _require_launchable(
 # a different one is refused here, inside the birth transaction, so a caller that
 # skipped request validation still cannot fork across harnesses; omitting the
 # value inherits the source's.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def resolve_birth_harness(
     cur: psycopg.Cursor[Any],
     requested: str | Harness | None,
@@ -182,7 +182,7 @@ def _iso_timestamp(value: object) -> datetime | None:
 # access-token expiry only schedules a refresh, so reading it as a logout would
 # mark an idle machine unavailable. `_session_deadline` takes such a deadline and
 # `_renewable_credential` reports a renewable one as the age of the stored token.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def _session_deadline(deadline: datetime | None, *, where: str) -> _LoginEvidence:
     if deadline is None:
         return _LoginEvidence(
@@ -226,7 +226,7 @@ def _claude_credentials(record: object) -> _LoginEvidence:
 # stores and whose refresh token has not expired. An account named in
 # `~/.claude.json` is not that evidence — the record outlives the login — so on its
 # own it reads `unknown`, as does a missing or unreadable store.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def _claude_code_login(home: Path) -> _LoginEvidence:
     credentials = home / ".claude" / ".credentials.json"
     if credentials.is_file():
@@ -250,7 +250,7 @@ def _claude_code_login(home: Path) -> _LoginEvidence:
 # be more than a guess, so the token set is the evidence and the reason carries the
 # age. A missing or unreadable file reads `unknown`; a file holding no token reads
 # `unavailable`.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def _codex_login(home: Path) -> _LoginEvidence:
     where = "~/.codex/auth.json"
     auth = home / ".codex" / "auth.json"
@@ -277,7 +277,7 @@ def _codex_login(home: Path) -> _LoginEvidence:
 # holding only that file and a fresh token, `agy -p` still answered "authentication
 # required". Reading it would report that machine available, so the probe asks for the
 # CLI's own file and nothing else.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 _ANTIGRAVITY_SESSION_FILE = ".gemini/antigravity-cli/antigravity-oauth-token"
 
 
@@ -298,7 +298,7 @@ def _antigravity_session(record: object, where: str) -> _LoginEvidence:
 # `available`, and its expiry is reported as age — the CLI renews from the refresh
 # token, so a past access expiry is not a logout. No file, or one that cannot be read,
 # is `unknown`.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def _antigravity_login(home: Path) -> _LoginEvidence:
     token_file = home / _ANTIGRAVITY_SESSION_FILE
     if token_file.is_file():
@@ -380,7 +380,7 @@ def _probe_external(
 # The probe reads the filesystem only: no command runs, so it cannot hang on a
 # login prompt, spend quota or start a session. A sign-in it cannot prove is
 # reported as unknown rather than guessed either way.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def probe_local_harnesses(
     home: Path | None = None,
     path_env: str | None = None,

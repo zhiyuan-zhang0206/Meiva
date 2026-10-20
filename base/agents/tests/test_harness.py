@@ -223,7 +223,7 @@ def _no_cursor() -> psycopg.Cursor[Any]:
 # Every declared harness has a launcher today, so the refusal is driven by handing
 # the rule a narrower set: membership is what decides, and this pins the moment a
 # launcher is retired or a harness is declared before one.
-# meiva:link base/agents/docs/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def test_a_harness_outside_the_launchable_set_is_refused() -> None:
     with pytest.raises(HarnessNotLaunchable) as refusal:
         resolve_birth_harness(

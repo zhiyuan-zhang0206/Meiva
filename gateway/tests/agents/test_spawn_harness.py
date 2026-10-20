@@ -48,7 +48,7 @@ def _spawn(client: TestClient, body: dict[str, object]) -> int:
     # that gave antigravity its launcher removed that example, so the row is reached
     # the ordinary way; the refused-launch receipt keeps its own coverage in
     # `tests/lifecycle/test_spawn_forward.py` and `tests/test_agents_endpoints.py`.
-    # meiva:link base/agents/docs/harness.meiva.okf.md
+    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
     response = spawn_via_http(client, {"spawner": "user", **body})
     assert response.status_code == 201, response.text
     return int(response.json()["id"])
