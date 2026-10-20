@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -302,3 +303,144 @@ class TestLinuxReaders:
         assert event["psi_some_avg10"] == 1.25
         assert event["gpu_max_used_mib"] == 3712.0
         assert event["gpu_total_mib"] == 8188.0
+
+
+class TestReservations:
+    def _entry(
+        self, tmp_path: Path, *, pid: int, peak_mb: float, jobs: int = 1, boot: str | None = None
+    ) -> Path:
+        directory = tmp_path / "active"
+        directory.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "pid": pid,
+            "boot_id": boot if boot is not None else admission.current_boot_id(),
+            "script": "run_pilot.py",
+            "peak_mb": peak_mb,
+            "jobs": jobs,
+            "started_at": "2026-10-20T14:20:31+08:00",
+        }
+        path = directory / f"{pid}.json"
+        path.write_text(json.dumps(entry))
+        return path
+
+    def test_a_live_reservation_is_subtracted_from_memory_room(self, tmp_path: Path) -> None:
+        self._entry(tmp_path, pid=os.getpid(), peak_mb=5120)
+
+        live = admission.live_reservations(tmp_path)
+
+        assert admission.reserved_gib(live) == pytest.approx(5.0)
+
+    def test_a_dead_process_is_pruned_and_stops_counting(self, tmp_path: Path) -> None:
+        path = self._entry(tmp_path, pid=999_999_999, peak_mb=5120)
+
+        assert admission.live_reservations(tmp_path) == []
+        assert not path.exists()
+
+    def test_another_boot_is_pruned(self, tmp_path: Path) -> None:
+        path = self._entry(tmp_path, pid=os.getpid(), peak_mb=5120, boot="some-older-boot")
+
+        assert admission.live_reservations(tmp_path) == []
+        assert not path.exists()
+
+    # meiva:note
+    # 20 GiB free - 5 GiB reserved - 12 GiB reserve = 3 GiB for 4 GiB/worker x 2.0 = 8 GiB.
+    def test_room_is_reduced_before_the_plan_is_made(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._entry(tmp_path, pid=os.getpid(), peak_mb=5120)
+        recorder = _Recorder()
+        code = admission.main(
+            ["--peak-mb", "4096", "--", "python", "eval.py", "--jobs", "2"],
+            budget_reader=lambda: admission.Reading(
+                free_gib=20.0, source="memory", unstable=False, detail="MemAvailable"
+            ),
+            pressure_reader=lambda: 1,
+            psi_reader=lambda: None,
+            gpu_reader=lambda: None,
+            executor=recorder,
+            home=tmp_path,
+        )
+
+        assert code == 0
+        assert "jobs 2->1" in capsys.readouterr().out
+        assert recorder.calls == [["python", "eval.py", "--jobs", "1"]]
+
+
+class TestClassLock:
+    def _holder(self, tmp_path: Path, pid: int) -> Path:
+        path = admission.lock_path(tmp_path, "run_pilot.py")
+        path.write_text(
+            json.dumps(
+                {
+                    "pid": pid,
+                    "boot_id": admission.current_boot_id(),
+                    "script": "run_pilot.py",
+                    "peak_mb": 11264,
+                    "jobs": 1,
+                    "started_at": "2026-10-20T14:20:31+08:00",
+                }
+            )
+        )
+        return path
+
+    def test_a_big_job_waits_for_its_class_and_names_the_holder(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._holder(tmp_path, os.getpid())
+        sleeps: list[float] = []
+
+        outcome, waited = admission.wait_for_lock(
+            admission.lock_path(tmp_path, "run_pilot.py"),
+            {"pid": os.getpid(), "boot_id": admission.current_boot_id(), "script": "run_pilot.py"},
+            max_wait=0.0,
+            sleep=sleeps.append,
+        )
+
+        assert outcome == "timeout"
+        assert waited >= 0
+
+    def test_a_stale_lock_is_taken_over(self, tmp_path: Path) -> None:
+        path = self._holder(tmp_path, 999_999_999)
+
+        outcome, _ = admission.wait_for_lock(
+            path,
+            {"pid": os.getpid(), "boot_id": admission.current_boot_id(), "script": "run_pilot.py"},
+            max_wait=0.0,
+            sleep=lambda _s: None,
+        )
+
+        assert outcome == "acquired"
+
+    def test_no_wait_records_the_operators_choice(self, tmp_path: Path) -> None:
+        self._holder(tmp_path, os.getpid())
+
+        _lock, reservation, status = admission.hold(
+            script="run_pilot.py",
+            peak_mb=11264,
+            jobs=1,
+            home=tmp_path,
+            events=tmp_path / "events.jsonl",
+            max_wait=1800.0,
+            no_wait=True,
+        )
+        try:
+            assert status["wait_outcome"] == "abandoned_by_operator"
+            assert reservation is not None and reservation.exists()
+        finally:
+            admission.release((None, reservation, status))
+
+    def test_a_job_below_the_big_job_line_takes_no_lock_and_no_reservation(
+        self, tmp_path: Path
+    ) -> None:
+        lock, reservation, status = admission.hold(
+            script="small.py",
+            peak_mb=600,
+            jobs=2,
+            home=tmp_path,
+            events=tmp_path / "events.jsonl",
+            max_wait=1800.0,
+            no_wait=False,
+        )
+
+        assert (lock, reservation) == (None, None)
+        assert status["wait_outcome"] == "none"

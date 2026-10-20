@@ -1,12 +1,8 @@
 exports = ["check_worktree_remove.py", "onboarding"]
 
 [uses]
-"tests" = [
-    "admission_run.py",
-    "guard_editable_venv.py",
-    "host_memory_sample.py",
-    "update_schedule_script.py",
-]
+"admission_run.py" = ["admission_ledger.py"]
+"tests" = ["admission_run.py", "guard_editable_venv.py", "host_memory_sample.py", "update_schedule_script.py"]
 
 [external]
 "update_schedule_script.py" = "compiles a user-written schedule script before replacing the stored copy"
