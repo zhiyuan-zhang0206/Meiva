@@ -39,6 +39,12 @@ and the matching GitHub Releases.
   ([timeline view](ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md)).
 
 ### Changed
+- A force graph of 200+ nodes settles in time-budgeted slices instead of one React render per
+  physics tick: every live tick committed a fresh position map, and every commit repainted the
+  whole SVG, so the preview's 1,949-node Fleet graph spent 4.4 s of main-thread time in its first
+  six seconds at 4x CPU throttle (profile: native layout/style/paint, not JavaScript). Smaller
+  graphs keep the live settle
+  ([Fleet view](ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md)).
 - One loading ring is ever on screen in the conversation, and it is whole: a
   background refetch no longer spins the scroll-to-bottom button while the pull
   strip is already spinning for an older-history load, and the pull ring scales

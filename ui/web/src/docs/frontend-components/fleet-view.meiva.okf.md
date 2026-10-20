@@ -22,6 +22,22 @@ Full-screen supervision plane: judge 10-20 agents without opening any conversati
 - **TaskKanban** (`task-kanban.tsx`) — task board (owner column shows agent label, stale-while-error retains last data).
 - **ForceControls** (`force-controls.tsx`) — shared force-directed slider panel for Graph View / Task Graph; `useForceParams` DB-backed (`display.graph_force_params`, `useDebouncedSetting` throttles writes). **One tuning for both canvases** (2026-08-05): the Task Graph reads the same `display.graph_force_params` key as the Agent Graph — a separate `.v2` key was never populated, so the task graph fell back to `FORCE_DEFAULTS` whose weak repulsion + strong center pull let disconnected subtrees drift apart (tiny/cramped). Edge styling is a single gray for every kind (lineage + message), distinguished by opacity/width only.
 
+## Layout timing on a large graph
+
+A graph of 200 nodes or more (`layoutOptions` in `force-graph.tsx`) settles in
+manual, time-budgeted slices instead of the live d3 timer: the simulation steps
+under a per-frame budget and commits positions explicitly, twice early and then
+every 32 slices. Below that threshold the live settle stays, because a small
+graph animating into place is the point of it.
+
+The reason is the render, not the physics. Each live tick commits a new position
+map through React state, and each commit repaints the whole SVG: the preview's
+1,949-node graph spent **4.4 s of main-thread time in its first six seconds** at
+4x CPU throttle, and the profile attributed 4.6 s to native layout/style/paint
+with only tens of milliseconds in JavaScript. `useForceLayout`'s manual path was
+built for the memory graph earlier (task #4008); this is the same treatment for
+the two Fleet canvases.
+
 ## Relationship to Other Nodes
 
 - [[ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md|Frontend Components]] — the catalog this surface was split out of; the conversation view and settings/auth components live there.
