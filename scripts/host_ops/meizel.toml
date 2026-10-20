@@ -2,6 +2,7 @@ exports = ["check_worktree_remove.py", "fleet_update_keep.py", "onboarding"]
 
 [uses]
 "tests" = [
+    "admission_run.py",
     "fleet_update_keep.py",
     "guard_editable_venv.py",
     "host_memory_sample.py",
