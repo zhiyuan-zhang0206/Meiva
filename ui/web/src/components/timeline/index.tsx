@@ -47,9 +47,6 @@ interface Props {
 
   turnActive?: boolean;
 
-  onFork?: (() => void) | null;
-  forkPending?: boolean;
-
   hasMoreOlder?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: () => void;
@@ -67,8 +64,6 @@ export const TimelineView = memo(function TimelineView({
   scrollMemoryKey,
   streamingCode = false,
   turnActive = false,
-  onFork,
-  forkPending,
   hasMoreOlder = false,
   loadingOlder = false,
   onLoadOlder,
@@ -645,8 +640,6 @@ export const TimelineView = memo(function TimelineView({
     if (!detailsModeLoading) rememberTimelineExpansion(scrollMemoryKey, { mode: effectiveDetailsMode, items: overrides, turns: turnOverrides });
   }, [scrollMemoryKey, effectiveDetailsMode, detailsModeLoading, overrides, turnOverrides]);
 
-  const lastAgentChatIdx = items.findLastIndex((item) => item.kind === "agent_chat");
-
   const renderRow = (
     item: BackendTimelineItem,
     index: number,
@@ -671,10 +664,9 @@ export const TimelineView = memo(function TimelineView({
           config={null}
           streaming={streaming}
           expanded={false}
-          showActions={false}
+          copyable={false}
           isStuck={false}
           onToggle={toggleExpanded}
-          onFork={null} forkPending={false}
         />
       );
     }
@@ -687,9 +679,8 @@ export const TimelineView = memo(function TimelineView({
       : config.fixedDefault;
     const expanded = overrides.has(item.item_id) ? !defaultExpanded : defaultExpanded;
 
-    const showActions = expanded && !item.partial;
+    const copyable = expanded && !item.partial;
 
-    const isForkRow = index === lastAgentChatIdx;
     return (
       <TimelineRow
         key={renderKey}
@@ -698,13 +689,11 @@ export const TimelineView = memo(function TimelineView({
         config={config}
         streaming={streaming}
         expanded={expanded}
-        showActions={showActions}
+        copyable={copyable}
 
         stickyHeader={isPrimary ? false : "nested"}
         isStuck={!isPrimary && activeStuckChildId === item.item_id}
         onToggle={toggleExpanded}
-        onFork={isForkRow ? onFork ?? null : null}
-        forkPending={isForkRow ? forkPending ?? false : false}
       />
     );
   };

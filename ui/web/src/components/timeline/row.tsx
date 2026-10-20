@@ -9,7 +9,8 @@ import { memo, useCallback } from "react";
 import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
-import { CopyButton, ForkButton } from "./buttons";
+import { CopyButton } from "./buttons";
+import { ItemTimestamp } from "./timestamp";
 import { type CardConfig, CardHeader, MessageCard, messageCardConfig } from "./card";
 import { ItemView } from "./item";
 import { ItemErrorBoundary } from "./item-error-boundary";
@@ -40,25 +41,18 @@ export function cardConfigFor(
   return config;
 }
 
-// One timeline row, memoized so an unchanged item skips its entire subtree
-// (card container + header summary scan + body) on every streaming chunk.
-// Every prop is either a primitive or a reference stable across commits for an
-// unchanged item: `item` (store-preserved ref), `config` (WeakMap cache),
-// `expanded`/`streaming`/`showActions` (booleans), `onToggle` (parent's stable
-// useCallback), and `onFork`/`forkPending` (inert — null/false — for every row
-// except the single fork row). config === null is the ephemeral system marker,
-// which renders bare (no card, not collapsible).
+// meiva:note
+// One timeline row, memoized so an unchanged item skips its entire subtree (card container + header summary scan + body) on every streaming chunk. Every prop is either a primitive or a reference stable across commits for an unchanged item: `item` (store-preserved ref), `config` (WeakMap cache), `expanded`/`streaming`/`copyable` (booleans) and `onToggle` (parent's stable useCallback). config === null is the ephemeral system marker, which renders bare (no card, not collapsible).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
 export const TimelineRow = memo(function TimelineRow({
   item,
   config,
   streaming,
   expanded,
-  showActions,
+  copyable,
   stickyHeader = false,
   isStuck,
   onToggle,
-  onFork,
-  forkPending,
   timelineSource = "canonical",
   displayRank,
 }: {
@@ -66,7 +60,10 @@ export const TimelineRow = memo(function TimelineRow({
   config: CardConfig | null;
   streaming: boolean;
   expanded: boolean;
-  showActions: boolean;
+  // meiva:note
+  // The body is expanded and settled, so Copy joins the timestamp in the card's hover footer.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  copyable: boolean;
   /** Where this row's header pins while expanded: `"top"` below the HeaderBar
    *  (top-level message cards) or `"nested"` under its expanded work block's
    *  header (work-block children, task #3215; see runs.classifyItem). false
@@ -75,8 +72,6 @@ export const TimelineRow = memo(function TimelineRow({
   /** The header is currently pinned at the sticky line (task #3136). */
   isStuck: boolean;
   onToggle: (id: string, kind: BackendTimelineItem["kind"]) => void;
-  onFork: (() => void) | null;
-  forkPending: boolean;
   timelineSource?: "buffer" | "canonical";
   displayRank?: number;
 }) {
@@ -98,25 +93,20 @@ export const TimelineRow = memo(function TimelineRow({
     );
   }
 
-  // Built inside the memoized row (not passed in from the parent's per-render
-  // `renderRow` closure) so the JSX element stays a fresh object only when
-  // THIS row's own props change — passing it down from renderRow would
-  // recreate the node on every TimelineView render and defeat TimelineRow's
-  // memo for every row, not just this one. Fork sits left of copy; copy is
-  // always the rightmost action (row is `justify-end`, so DOM order = visual
-  // left-to-right order).
+  // meiva:note
+  // Built inside the memoized row (not passed in from the parent's per-render `renderRow` closure) so the JSX element stays a fresh object only when THIS row's own props change — passing it down from renderRow would recreate the node on every TimelineView render and defeat TimelineRow's memo for every row, not just this one.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
   //
-  // Skip the card-level CopyButton for kinds that already render their own
-  // per-block copy button inside the item body (agent_code via PythonCode,
-  // code_output via EnvelopeContent showCopy) — the card-level button would
-  // copy the same payload and overlap visually with the body-level one.
+  // meiva:note
+  // Skip the card-level CopyButton for kinds that already render their own per-block copy button inside the item body (agent_code via PythonCode, code_output via EnvelopeContent showCopy) — the card-level button would copy the same payload and overlap visually with the body-level one.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   const hasInternalCopy = item.kind === "agent_code" || item.kind === "code_output";
-  const actions = showActions ? (
-    <>
-      {onFork ? <ForkButton onFork={onFork} pending={forkPending} /> : null}
-      {!hasInternalCopy ? <CopyButton text={item.payload} /> : null}
-    </>
-  ) : null;
+  // meiva:note
+  // The card's hover footer carries the timestamp when the kind stamps one and Copy when the row is expanded, settled, and has no body-level copy of its own. Either half can stand alone; with neither, no footer is mounted at all.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  const stamp = config.showTimestamp && item.created_at ? <ItemTimestamp iso={item.created_at} /> : null;
+  const copy = copyable && !hasInternalCopy ? <CopyButton text={item.payload} /> : null;
+  const footer = stamp || copy ? <>{stamp}{copy}</> : null;
 
   // Sticky only while expanded — a collapsed row has nothing to scroll under
   // its header. The level decides the scan bucket + the pin line: a work
@@ -142,7 +132,7 @@ export const TimelineRow = memo(function TimelineRow({
           derivation parses the payload too, so a malformed payload must
           not escape the per-item fallback. */}
       <ItemErrorBoundary resetKey={item.payload}>
-        <MessageCard config={config} actions={actions}>
+        <MessageCard config={config} footer={footer}>
           <CardHeader
             item={item}
             config={config}

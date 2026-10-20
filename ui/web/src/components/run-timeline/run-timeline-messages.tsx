@@ -57,11 +57,9 @@ function PartRow({ item }: { item: BackendTimelineItem }) {
       config={config}
       streaming={false}
       expanded={expanded}
-      showActions
+      copyable
       isStuck={false}
       onToggle={() => setExpanded((open) => !open)}
-      onFork={null}
-      forkPending={false}
     />
   );
 }
