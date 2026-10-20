@@ -1,25 +1,61 @@
-// useClientReady — "is this frame shaped by the client, not the server
-// snapshot?" The home layout's placeholder gate keys on it so a hydrating
-// load keeps the SSR-safe frame (placeholder) while a client-side navigation
-// renders its real frame in the first commit.
+// meiva:note
+// The mount queue is the unit under test: two waiting subtrees take two idle
+// slices, so a page fills in over frames instead of in one commit.
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
 
-import { render } from "@testing-library/react";
-import { renderToString } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useClientReady } from "./use-client-ready";
+import { useDeferredMount } from "./use-client-ready";
 
-function Probe() {
-  return <span data-testid="ready">{String(useClientReady())}</span>;
+const idle: IdleRequestCallback[] = [];
+
+function Probe({ id }: { id: string }) {
+  const mounted = useDeferredMount();
+  return mounted ? <span data-testid={id}>{id}</span> : null;
 }
 
-describe("useClientReady", () => {
-  it("is false through SSR (the server snapshot)", () => {
-    expect(renderToString(<Probe />)).toContain(">false<");
+async function slice() {
+  await act(async () => {
+    const next = idle.shift();
+    next?.({ didTimeout: false, timeRemaining: () => 5 });
+    await Promise.resolve();
+  });
+}
+
+describe("useDeferredMount", () => {
+  beforeEach(() => {
+    idle.length = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    vi.stubGlobal("requestIdleCallback", (cb: IdleRequestCallback) => {
+      idle.push(cb);
+      return idle.length;
+    });
+    vi.stubGlobal("cancelIdleCallback", () => undefined);
   });
 
-  it("is true on a client mount, in the first render", () => {
-    const { getByTestId } = render(<Probe />);
-    expect(getByTestId("ready").textContent).toBe("true");
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("releases one waiting subtree per idle slice", async () => {
+    render(
+      <>
+        <Probe id="first" />
+        <Probe id="second" />
+      </>,
+    );
+
+    expect(idle).toHaveLength(1);
+    await slice();
+    expect(screen.queryByTestId("first")).toBeTruthy();
+    expect(screen.queryByTestId("second")).toBeNull();
+
+    await slice();
+    expect(screen.queryByTestId("second")).toBeTruthy();
   });
 });
