@@ -290,7 +290,7 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
             )}
           >
             <Plus className="size-3.5" />
-            <span>{t("spawnOn")} {single.name}</span>
+            <span>{t("spawn")}</span>
           </button>
         ) : (
           <>
