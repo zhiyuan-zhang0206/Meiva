@@ -22,7 +22,18 @@ def test_oauth_blanks_both_credential_variables() -> None:
     )
     assert env["ANTHROPIC_API_KEY"] == ""
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == ""
-    assert "PATH" not in env
+    assert env["PATH"] == "/bin", "the caller's environment view still rides along"
+
+
+# meiva:note
+# The bridge hands each session a registration handle; a tool the CLI spawns needs it
+# to attach as the agent it belongs to. A live turn found it dropped here, so its own
+# Bash could not say which agent it was.
+# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+def test_the_registration_handle_reaches_the_cli() -> None:
+    env = build_env({"MEIVA_HARNESS_HANDLE": "handle-1", "MEIVA_HOME": "/home"}, AuthConfig())
+    assert env["MEIVA_HARNESS_HANDLE"] == "handle-1"
+    assert env["MEIVA_HOME"] == "/home"
 
 
 def test_api_key_mode_passes_exactly_one_secret() -> None:
