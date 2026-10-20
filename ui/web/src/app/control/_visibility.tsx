@@ -72,6 +72,45 @@ export function useInView(): [(node: Element | null) => void, boolean] {
   return [setRef, inView];
 }
 
+// meiva:note
+// Whether this section has EVER come within one screen of the viewport. Unlike
+// useInView it starts false and never flips back, so it answers "is it worth
+// mounting this body at all yet" - Control's nine bodies are 7874 nodes and the
+// config form alone is 6629 of them, which on a slow client costs about ten
+// seconds even spread over idle slices (user report 2026-10-20: the total is
+// what hurts, not the size of one commit). A section outside the margin stays
+// unmounted until the reader scrolls near it.
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+const NEAR_MARGIN = "100% 0px 100% 0px";
+
+export function useEverNearViewport(): [(node: Element | null) => void, boolean] {
+  const [near, setNear] = useState(false);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
+  const setRef = useCallback((node: Element | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    if (node === null) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setNear(true);
+            observer.disconnect();
+            observerRef.current = null;
+            return;
+          }
+        }
+      },
+      { rootMargin: NEAR_MARGIN },
+    );
+    observer.observe(node);
+    observerRef.current = observer;
+  }, []);
+
+  return [setRef, near];
+}
+
 /** Provide a fixed visibility to children (used by the section wrapper). */
 export function SectionVisibilityProvider({
   visible,
