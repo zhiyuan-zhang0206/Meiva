@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from collections.abc import Generator
@@ -257,3 +258,59 @@ def test_a_normal_transaction_after_a_restore_is_not_terminated(db_url: str) -> 
         conn.commit()
 
     assert row == ("0",), "the restore's transaction budget must not outlive its transaction"
+
+
+# meiva:note
+# A connection whose restore never gets an answer: the async twin of a backend
+# that is stopped, black-holed or wedged before it next runs. No server timer can
+# end this wait — only the client deadline can.
+class _SilentAsyncConnection:
+    def __init__(self) -> None:
+        self.executed = 0
+
+    async def execute(self, statement: str, params: Any = None, **kwargs: Any) -> None:
+        self.executed += 1
+        await asyncio.sleep(3600)
+
+
+# meiva:note
+# The deadline is the client's own timer, and it reports as such: a restore that
+# outlives it raises RestoreAbandonedError (a TimeoutError, so existing retry-on-stall
+# callers keep working) and logs one event naming `client_deadline` — the
+# distinction the 2026-10-17 investigation needed and did not have.
+async def test_the_client_deadline_abandons_a_restore_that_is_never_answered(
+    events: list[dict[str, Any]],
+) -> None:
+    conn = _SilentAsyncConnection()
+    restore: Any = connections.restore_pooled_session_async
+
+    started = time.monotonic()
+    with pytest.raises(connections.RestoreAbandonedError):
+        await restore(conn, gate=_Gate(), budget_seconds=30.0, client_deadline_seconds=0.2)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 5.0, "the client deadline must end the wait, not the test timeout"
+    assert conn.executed == 1
+    (reported,) = [event for event in events if event.get("event") == "db_pool_restore_timeout"]
+    assert reported["ended_by"] == "client_deadline"
+    assert reported["budget_ms"] == 200
+    assert reported["elapsed_ms"] >= 100
+
+
+# meiva:note
+# Falsification for the guard: a TimeoutError raised by the restore itself is not
+# this deadline's verdict and must keep its own meaning (no event, no rebranding).
+async def test_a_timeout_raised_by_the_restore_keeps_its_own_meaning(
+    events: list[dict[str, Any]],
+) -> None:
+    class _Raising(_SilentAsyncConnection):
+        async def execute(self, statement: str, params: Any = None, **kwargs: Any) -> None:
+            raise TimeoutError("something else timed out")
+
+    restore: Any = connections.restore_pooled_session_async
+
+    with pytest.raises(TimeoutError) as caught:
+        await restore(_Raising(), gate=_Gate(), budget_seconds=30.0, client_deadline_seconds=5.0)
+
+    assert not isinstance(caught.value, connections.RestoreAbandonedError)
+    assert [event for event in events if event.get("event") == "db_pool_restore_timeout"] == []

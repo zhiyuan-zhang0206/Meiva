@@ -1,5 +1,6 @@
 """Postgres connection guards, URLs, direct connects, and sync + async pools."""
 
+import asyncio
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -181,6 +182,32 @@ PG_POOLED_RESTORE_WITH_MIN_SQL: LiteralString = (
 )
 
 
+# meiva:note
+# The client-side deadline is the only timer that survives a backend which is not
+# running: statement_timeout and transaction_timeout are enforced by the backend
+# at its own CHECK_FOR_INTERRUPTS, so a stopped, black-holed or I/O-wedged backend
+# leaves the borrower waiting with no timer at all (2026-10-17: 18-56 s per
+# borrow). It sits strictly above the statement budget so a server timer that was
+# about to fire cleanly still fires first; see
+# `db_pool_restore_client_deadline_seconds` for why they must not be equal.
+def restore_client_deadline_seconds(client_deadline_seconds: float | None = None) -> float:
+    from base.config import settings
+
+    if client_deadline_seconds is None:
+        client_deadline_seconds = settings.data_plane.db_pool_restore_client_deadline_seconds
+    return client_deadline_seconds
+
+
+# meiva:note
+# Raised when a restore ran past its client deadline. It is a TimeoutError so a
+# caller that already treats a timed-out borrow as a retryable stall keeps doing
+# so; the pool counts any check failure as a failed connection and replaces it,
+# which is why no explicit close() is attempted here (the pool owns disposal and
+# a wedged protocol may not close promptly).
+class RestoreAbandonedError(TimeoutError):
+    pass
+
+
 def restore_pooled_session(
     conn: psycopg.Connection, *, gate: ProcessDbGate, budget_seconds: float | None = None
 ) -> None:
@@ -243,8 +270,10 @@ def restore_pooled_session(
 # One db_pool_restore_timeout event per restore that blew its budget, naming the
 # budget that ended it: `statement_timeout` cancels the statement and leaves the
 # connection usable, `transaction_timeout` terminates the session (the pool
-# replaces it). psycopg_pool treats either as a failed check and retries against
-# its own deadline, so the borrower stops waiting out the stall.
+# replaces it), and `client_deadline` is the client abandoning a restore whose
+# backend never answered — the only one of the three that works while the backend
+# is not running. psycopg_pool treats every one as a failed check and retries
+# against its own deadline, so the borrower stops waiting out the stall.
 def _log_restore_timeout(
     started: float, *, budget_ms: int, gate: ProcessDbGate, ended_by: str
 ) -> None:
@@ -262,8 +291,18 @@ def _log_restore_timeout(
     )
 
 
+# meiva:note
+# Unlike the sync twin, this one also arms the client-side deadline: the server's
+# two timers run inside the backend, so they cannot end a wait on a backend that
+# is stopped, black-holed or wedged before it next runs. The task is cancelled in
+# this same event loop at the deadline and the connection is abandoned
+# (`RestoreAbandonedError`), which the pool sees as a failed check.
 async def restore_pooled_session_async(
-    conn: psycopg.AsyncConnection, *, gate: ProcessDbGate, budget_seconds: float | None = None
+    conn: psycopg.AsyncConnection,
+    *,
+    gate: ProcessDbGate,
+    budget_seconds: float | None = None,
+    client_deadline_seconds: float | None = None,
 ) -> None:
     """Async twin of `restore_pooled_session`: `async_pool()`'s per-borrow check.
 
@@ -272,21 +311,36 @@ async def restore_pooled_session_async(
     a connection whose check raises), same name and code-version read.
     """
     statement, budget_ms = restore_budget_statement(budget_seconds)
+    deadline = restore_client_deadline_seconds(client_deadline_seconds)
     started = time.monotonic()
+    guard = asyncio.timeout(deadline)
     try:
-        await conn.execute(statement, prepare=False)
-        name = (gate.application_name(),)
-        read_due = gate.min_read_due()
-        if read_due:
-            async with conn.cursor(row_factory=tuple_row) as cur:
-                await cur.execute(PG_POOLED_RESTORE_WITH_MIN_SQL, name)
-                row = await cur.fetchone()
-            if row is None:
-                raise RuntimeError("the restore statement returned no row")
-            gate.observe_minimum(int(row[2]))
-        else:
-            await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
-        await conn.commit()
+        async with guard:
+            await conn.execute(statement, prepare=False)
+            name = (gate.application_name(),)
+            read_due = gate.min_read_due()
+            if read_due:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    await cur.execute(PG_POOLED_RESTORE_WITH_MIN_SQL, name)
+                    row = await cur.fetchone()
+                if row is None:
+                    raise RuntimeError("the restore statement returned no row")
+                gate.observe_minimum(int(row[2]))
+            else:
+                await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
+            await conn.commit()
+    # meiva:note
+    # Only this guard's own deadline is ours: a TimeoutError the restore raised for
+    # another reason keeps its original meaning.
+    except TimeoutError:
+        if not guard.expired():
+            raise
+        _log_restore_timeout(
+            started, budget_ms=int(deadline * 1000), gate=gate, ended_by="client_deadline"
+        )
+        raise RestoreAbandonedError(
+            f"session restore abandoned after its {deadline:.3f}s client deadline"
+        ) from None
     except psycopg.errors.QueryCanceled:
         _log_restore_timeout(started, budget_ms=budget_ms, gate=gate, ended_by="statement_timeout")
         raise
