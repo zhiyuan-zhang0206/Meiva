@@ -58,10 +58,10 @@ for the external CLIs), because the same model costs differently depending on
 which loop runs it: a subscription pays nothing per token, so a per-million-token
 price beside the model name would describe a cost the user is not incurring. For
 a metered harness the model row carries the three numbers that decide it —
-non-cached input, cached input (cache read), output — as `in / cache / out` in
-USD per million tokens under the column header, with the declared 5-minute and
+non-cached input, cached input (cache read), output, in USD per million tokens,
+with no legend line above the column (user 2026-10-20); the declared 5-minute and
 1-hour cache-write rates and the vendor reference TPS (with its source and check
-date) on hover. Standard and Fast service IDs have separate catalog entries and
+date) are on hover. Standard and Fast service IDs have separate catalog entries and
 prices. Absent reliable absolute vendor figures say so instead of
 showing a blank column; relative speed multipliers and cluster measurements
 never stand in for the vendor figure.

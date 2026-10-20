@@ -9,7 +9,6 @@
   "spawnOn": "在以下机器创建",
   "spawn": "创建",
   "model": "模型",
-  "priceColumns": "输入 / 缓存 / 输出，USD 每百万 token",
   "reasoningEffort": "Effort",
   "spawnAgent": "创建 agent",
   "hostUnavailable": "Agent host 不可用",
