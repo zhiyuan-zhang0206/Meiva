@@ -35,6 +35,7 @@ import { FLEX, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 import { fleetHref } from "./links";
+import { SidebarIconButton } from "./icon-button";
 
 /** Shared by the expanded footer and collapsed rail. */
 export const STATS_POPOVER_CLASS =
@@ -375,15 +376,9 @@ function SidebarNavButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      className="p-1.5 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
-    >
+    <SidebarIconButton label={label} title={label} onClick={onClick}>
       {children}
-    </button>
+    </SidebarIconButton>
   );
 }
 

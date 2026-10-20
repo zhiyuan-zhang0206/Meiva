@@ -120,33 +120,42 @@
 
 .dark {
   color-scheme: dark;
-  /* Dark mode is a neutral gray surface, not black (user ruling 2026-10-18):
-     oklch(0.145) read as pure black against the muted/foreground tokens. */
-  --theme-color: #222222;
-  --background: oklch(0.25 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  /* meiva:note
+     Warm graphite (user picks, 2026-10-19). The conversation canvas is the
+     DARKEST surface and the sidebar sits one small step above it: content is the
+     quiet field the eye reads, chrome recedes into it. Cards and popovers rise
+     above the canvas instead, so depth still comes from lightness rather than
+     heavier borders: canvas < sidebar < card < popover. The canvas-to-sidebar
+     step is deliberately tiny (1.06:1) - a wider gap reads as two competing
+     surfaces (user report 2026-10-19). Chroma stays at 0.005 so nothing reads
+     yellow. Text pairs: foreground 15.6:1, muted-foreground 8.0:1 on the
+     canvas; 11.7:1 and 6.0:1 on a popover.
+     meiva:link ui/web/src/docs/frontend-components/palette.meiva.okf.md */
+  --theme-color: #1e1d1b;
+  --background: #1e1d1b;
+  --foreground: #f9f6f2;
+  --card: #2b2a27;
+  --card-foreground: #f9f6f2;
+  --popover: #35332f;
+  --popover-foreground: #f9f6f2;
+  --primary: #e5dfd6;
+  --primary-foreground: #1a1918;
+  --secondary: #2f2d2a;
+  --secondary-foreground: #f9f6f2;
+  --muted: #2f2d2a;
+  --muted-foreground: #b5b2ae;
+  --accent: #3a3835;
+  --accent-foreground: #f9f6f2;
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  /* ops panel chart series — the dark-surface pair of the light block above
+  --border: #3f3d3a;
+  --input: #4d4a47;
+  --ring: #90887c;
+  --chart-1: #d9d7d5;
+  --chart-2: #a6a4a1;
+  --chart-3: #82807d;
+  --chart-4: #5d5a57;
+  --chart-5: #3a3835;
+  /* ops panel chart series - the dark-surface pair of the light block above
      (same hues, re-tuned for contrast on dark). Keep the two in sync. */
   --series-1: #3987e5;
   --series-2: #d95926;
@@ -164,14 +173,14 @@
   --strip-compact: rgb(56 189 248 / 68%);
   --strip-prompt: rgb(129 140 248 / 55%);
   --strip-other: rgb(113 113 122 / 55%);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar: #232220;
+  --sidebar-foreground: #f9f6f2;
+  --sidebar-primary: #e5dfd6;
+  --sidebar-primary-foreground: #1a1918;
+  --sidebar-accent: #333130;
+  --sidebar-accent-foreground: #f9f6f2;
+  --sidebar-border: #3f3d3a;
+  --sidebar-ring: #90887c;
   /* syntax highlight (VSCode Dark+) */
   --syntax-keyword: #c586c0;
   --syntax-string: #ce9178;
@@ -293,6 +302,15 @@
     @apply border border-border px-2 py-1 text-left [overflow-wrap:normal];
   }
   .chat-md th { @apply bg-muted font-semibold; }
+  /* Math keeps its own spacing: the container's overflow-wrap:anywhere would
+     otherwise break a formula mid-expression (the 2026-10-20 phone report had
+     \frac and \left( split across three lines). A display formula wider than
+     the column scrolls sideways instead of wrapping or pushing the message
+     wider than the viewport. */
+  .chat-md .katex { @apply [overflow-wrap:normal] [white-space:nowrap]; }
+  .chat-md .katex-display {
+    @apply my-2 max-w-full overflow-x-auto overflow-y-hidden [overflow-wrap:normal];
+  }
   .chat-md hr { @apply my-3 border-border; }
   .chat-md sup { @apply align-super text-[0.75em] leading-none; }
   .chat-md sup a { @apply no-underline; }

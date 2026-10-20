@@ -93,13 +93,21 @@ vi.mock("@/lib/agents/sidebar", async () => {
       viewMode: state.sidebarViewMode,
       setViewMode: state.setSidebarViewMode,
     }),
-    // Sort is now DB-backed; its persistence is covered in lib/sidebar.test.ts.
-    // Here we only exercise the sort-bar UI (reorder on click), so back it with
-    // plain local state — reactive, no persistence to reason about.
-    useSidebarSort: () => {
-      const [sort, setSort] = React.useState(actual.SIDEBAR_SORT_DEFAULT);
-      return { sort, setSort };
-    },
+    // meiva:note
+    // Sort is DB-backed (its persistence is covered in lib/sidebar.test.ts);
+    // here only the reorder-on-click UI matters. The stub is shared across
+    // consumers because the list and the settings popover read one store in the
+    // app: a per-hook useState gave each its own copy, so a key clicked in the
+    // popover never reordered the list.
+    // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+    useSidebarSort: () => ({
+      sort: React.useSyncExternalStore(
+        sortStore.subscribe,
+        () => sortStore.value ?? actual.SIDEBAR_SORT_DEFAULT,
+        () => sortStore.value ?? actual.SIDEBAR_SORT_DEFAULT,
+      ),
+      setSort: (next: typeof actual.SIDEBAR_SORT_DEFAULT) => sortStore.set(next),
+    }),
   };
 });
 
@@ -225,12 +233,37 @@ vi.mock("@/components/ui/scroll-area", () => ({
   ),
 }));
 
+// meiva:note
 // R4 layer 4: AgentSidebar mounts the desktop rail vs the mobile drawer by
 // breakpoint (single source — useBreakpoint). Default to desktop; the
-// mobile-drawer tests flip the mock.
-const { bpMock } = vi.hoisted(() => ({
-  bpMock: vi.fn(() => ({ tier: "xl", isNarrow: false, isLarge: true })),
-}));
+// mobile-drawer tests flip the mock. The block also carries the shared sort
+// store: one value behind a subscription, not a per-hook useState, because the
+// list and the settings popover read the same store in the app and a stub with
+// two independent copies silently swallows the popover's writes.
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+const { bpMock, sortStore } = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    bpMock: vi.fn(() => ({ tier: "xl", isNarrow: false, isLarge: true })),
+    sortStore: {
+      value: null as null | { key: string; dir: "asc" | "desc" },
+      subscribe: (cb: () => void) => {
+        listeners.add(cb);
+        return () => {
+          listeners.delete(cb);
+        };
+      },
+      set(next: { key: string; dir: "asc" | "desc" }) {
+        this.value = next;
+        for (const cb of listeners) cb();
+      },
+      reset() {
+        this.value = null;
+        listeners.clear();
+      },
+    },
+  };
+});
 vi.mock("@/lib/layout/breakpoint", () => ({ useBreakpoint: () => bpMock() }));
 
 vi.mock("@/components/ui/button", () => ({
@@ -348,6 +381,7 @@ beforeEach(() => {
   state.isLoading = false;
   state.searchQuery = "";
   state.userSettings = {};
+  sortStore.reset();
   bpMock.mockReturnValue({ tier: "xl", isNarrow: false, isLarge: true });
 });
 
@@ -404,9 +438,13 @@ describe("DesktopSidebar collapse/expand", () => {
     expect(aside?.className).toContain("flex-col");
   });
 
-  it("click Spawn (expanded header) → onSpawn is called", () => {
+  it("header + opens the create form, and the form's Spawn button calls onSpawn", () => {
     wrap(<AgentSidebar {...handlers} />);
-    // The expanded SidebarHeader also exposes the Spawn aria-label
+    // meiva:note
+    // Two steps on purpose: the + only reveals the form (machine / model /
+    // effort / harness), and the form's own Spawn button is what spawns.
+    // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+    fireEvent.click(screen.getByTestId("sidebar-create"));
     fireEvent.click(screen.getByLabelText("Spawn agent"));
     expect(handlers.onSpawn).toHaveBeenCalled();
   });
@@ -443,6 +481,16 @@ describe("MobileSidebar open/close", () => {
     fireEvent.click(screen.getByLabelText("Close sidebar"));
     expect(state.setMobileSidebarOpen).toHaveBeenCalledWith(false);
   });
+
+  it("drawer header keeps create + display settings (the body is only a list)", () => {
+    state.mobileSidebarOpen = true;
+    state.agents = [makeAgent({ agent_id: 1 })];
+    wrap(<AgentSidebar {...handlers} />);
+    expect(screen.getByTestId("sidebar-settings")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("sidebar-create"));
+    fireEvent.click(screen.getByLabelText("Spawn agent"));
+    expect(handlers.onSpawn).toHaveBeenCalled();
+  });
 });
 
 describe("SidebarBody empty / tree / spawning placeholder", () => {
@@ -450,6 +498,26 @@ describe("SidebarBody empty / tree / spawning placeholder", () => {
     wrap(<AgentSidebar {...handlers} />);
     // Empty state renders no ul / row
     expect(screen.queryByTestId("row-1")).toBeNull();
+  });
+
+  it("empty roster → the body says so and offers a full-width create button", () => {
+    wrap(<AgentSidebar {...handlers} />);
+    expect(screen.getByText("No agents yet.")).toBeTruthy();
+    // meiva:note
+    // Nothing mounts before the click: the CTA is the only create control in
+    // the body, and it opens the same form as the header's +.
+    // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+    expect(screen.queryByLabelText("Spawn agent")).toBeNull();
+    fireEvent.click(screen.getByTestId("sidebar-create-cta"));
+    expect(screen.getByLabelText("Spawn agent")).toBeTruthy();
+  });
+
+  it("the list body carries no spawn bar and no display toolbar", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    wrap(<AgentSidebar {...handlers} />);
+    expect(screen.queryByLabelText("Spawn agent")).toBeNull();
+    expect(screen.queryByText("Show terminated")).toBeNull();
+    expect(screen.queryByText("Tree")).toBeNull();
   });
 
   it("agents non-empty → renders tree (one row per agent)", () => {
@@ -1023,15 +1091,25 @@ describe("Tree render depth (sub-agent indent)", () => {
   });
 });
 
-describe("terminated toggle", () => {
+describe("terminated toggle (behind the sidebar settings popover)", () => {
+  // meiva:note
+  // The display toolbar that sat under the tree is gone: the archive toggle now
+  // lives in the settings popover, so every case opens it first.
+  // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+  const openSettings = () => fireEvent.click(screen.getByTestId("sidebar-settings"));
+  const toggle = (name: "Show terminated agents" | "Hide terminated agents") =>
+    screen.getByRole("button", { name });
+
   it("archive is reachable without preloading terminated agents", () => {
     state.agents = [makeAgent({ agent_id: 1, status: "idling" })];
     wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByLabelText("Show terminated agents")).toBeTruthy();
-    expect(screen.queryByLabelText("Hide terminated agents")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show terminated agents" })).toBeNull();
+    openSettings();
+    expect(toggle("Show terminated agents")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Hide terminated agents" })).toBeNull();
   });
 
-  it("showTerminated=false → toggle shows no count, terminated rows hidden, live row stays", () => {
+  it("showTerminated=false → toggle reads 'Show terminated agents', terminated rows hidden, live row stays", () => {
     state.agents = [
       makeAgent({ agent_id: 1, status: "idling" }),
       makeAgent({ agent_id: 2, status: "terminated" }),
@@ -1039,7 +1117,8 @@ describe("terminated toggle", () => {
     ];
     state.showTerminated = false;
     wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByText("Show terminated")).toBeTruthy();
+    openSettings();
+    expect(toggle("Show terminated agents").textContent).not.toMatch(/\d/);
     expect(screen.getByTestId("row-1")).toBeTruthy();
     expect(screen.queryByTestId("row-2")).toBeNull();
     expect(screen.queryByTestId("row-3")).toBeNull();
@@ -1052,7 +1131,8 @@ describe("terminated toggle", () => {
     ];
     state.showTerminated = true;
     wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByText("Hide history")).toBeTruthy();
+    openSettings();
+    expect(toggle("Hide terminated agents")).toBeTruthy();
     await waitFor(() => expect(screen.getByTestId("row-2")).toBeTruthy());
   });
 
@@ -1063,8 +1143,9 @@ describe("terminated toggle", () => {
     ];
     state.userSettings["display.show_terminated"] = "true";
     wrap(<AgentSidebar {...handlers} />);
+    openSettings();
 
-    expect(screen.getByText("Show terminated")).toBeTruthy();
+    expect(toggle("Show terminated agents")).toBeTruthy();
     expect(screen.queryByTestId("row-2")).toBeNull();
   });
 
@@ -1072,7 +1153,8 @@ describe("terminated toggle", () => {
     state.agents = [makeAgent({ agent_id: 2, status: "terminated" })];
     state.showTerminated = false;
     wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByText("Show terminated")).toBeTruthy();
+    openSettings();
+    expect(toggle("Show terminated agents")).toBeTruthy();
     expect(screen.queryByTestId("row-2")).toBeNull();
   });
 
@@ -1080,17 +1162,20 @@ describe("terminated toggle", () => {
     state.agents = [makeAgent({ agent_id: 2, status: "terminated" })];
     state.showTerminated = false;
     wrap(<AgentSidebar {...handlers} />);
-    fireEvent.click(screen.getByLabelText("Show terminated agents"));
+    openSettings();
+    fireEvent.click(toggle("Show terminated agents"));
     expect(state.setSetting).toHaveBeenCalledWith("display.show_terminated", true);
   });
 
-  it("toggle button carries no title tooltip (aria-label covers a11y)", () => {
+  it("toggle button carries no title tooltip (the visible label covers a11y)", () => {
     state.agents = [makeAgent({ agent_id: 2, status: "terminated" })];
     state.showTerminated = false;
     wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByLabelText("Show terminated agents").getAttribute("title")).toBeNull();
+    openSettings();
+    expect(toggle("Show terminated agents").getAttribute("title")).toBeNull();
   });
 });
+
 
 describe("agent tree: live child of a terminated parent mounts on the nearest visible ancestor (#312 regression)", () => {
   // Real roster shape behind the #312 orphan report: 228 (alive, user) ->
@@ -1123,43 +1208,29 @@ describe("agent tree: live child of a terminated parent mounts on the nearest vi
 });
 
 describe("Flat view mode", () => {
-  it("renders the sort icon button (collapsed to a single icon, #723r2)", () => {
+  it("sort lives behind the sidebar settings button, not in a toolbar", () => {
     state.sidebarViewMode = "flat";
     state.agents = [makeAgent({ agent_id: 1 }), makeAgent({ agent_id: 2 })];
     wrap(<AgentSidebar {...handlers} />);
-    // Toolbar no longer has a "Sort:" label or 3 inline key buttons - only one icon button
-    expect(screen.queryByText("Sort:")).toBeNull();
-    expect(screen.queryByText("active")).toBeNull();
-    expect(screen.getByLabelText("Sort by id descending")).toBeTruthy();
+    expect(screen.queryByLabelText("Sort by id descending")).toBeNull();
+    fireEvent.click(screen.getByTestId("sidebar-settings"));
+    expect(screen.getByText("ID")).toBeTruthy();
   });
 
   it("sort popover: opening shows the three keys; clicking the active key flips direction", () => {
     state.sidebarViewMode = "flat";
     state.agents = [makeAgent({ agent_id: 2 }), makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
-    fireEvent.click(screen.getByLabelText("Sort by id descending"));
+    fireEvent.click(screen.getByTestId("sidebar-settings"));
     expect(screen.getByText("Sort by")).toBeTruthy();
-    expect(screen.getByText("id")).toBeTruthy();
-    expect(screen.getByText("active")).toBeTruthy();
-    expect(screen.getByText("status")).toBeTruthy();
-    fireEvent.click(screen.getByText("id"));
-    // Clicking the same key again flips the direction -> aria-label updates to ascending
-    expect(screen.getByLabelText("Sort by id ascending")).toBeTruthy();
-  });
-
-  it("toolbar keeps flex-wrap as a backstop (sort is now a single icon)", () => {
-    state.sidebarViewMode = "flat";
-    state.agents = [makeAgent({ agent_id: 1 }), makeAgent({ agent_id: 2 })];
-    wrap(<AgentSidebar {...handlers} />);
-    const sortBtn = screen.getByLabelText("Sort by id descending");
-    const toolbarRow = sortBtn.closest("div.border-b");
-    expect(toolbarRow?.className).toContain("flex-wrap");
-  });
-
-  it("spawn bar container allows its contents to shrink (min-w-0)", () => {
-    wrap(<AgentSidebar {...handlers} />);
-    const spawnBar = screen.getByLabelText("Spawn agent").closest("div.border-b");
-    expect(spawnBar?.className).toContain("min-w-0");
+    expect(screen.getByText("ID")).toBeTruthy();
+    expect(screen.getByText("Activity")).toBeTruthy();
+    expect(screen.getByText("Status")).toBeTruthy();
+    fireEvent.click(screen.getByText("ID"));
+    // meiva:note
+    // Clicking the active key again flips the direction; the row shows the arrow.
+    // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+    expect(screen.getByText("ID").closest("button")?.textContent).toContain("↑");
   });
 
   it("renders agents as flat list when viewMode=flat", () => {
@@ -1181,8 +1252,8 @@ describe("Flat view mode", () => {
     expect(rows[1].getAttribute("data-testid")).toBe("row-1");
     // Clicking the already-active "id" reverses to ascending (via the
     // sort popover — the keys are no longer inline in the toolbar).
-    fireEvent.click(screen.getByLabelText("Sort by id descending"));
-    fireEvent.click(screen.getByText("id"));
+    fireEvent.click(screen.getByTestId("sidebar-settings"));
+    fireEvent.click(screen.getByText("ID"));
     rows = screen.getAllByTestId(/^row-/);
     expect(rows[0].getAttribute("data-testid")).toBe("row-1");
     expect(rows[1].getAttribute("data-testid")).toBe("row-2");
@@ -1190,13 +1261,12 @@ describe("Flat view mode", () => {
 });
 
 describe("Header layout + search overlay (task #723)", () => {
-  it("expanded header: Meiva left, search before collapse (rightmost)", () => {
+  it("expanded header: search, settings, create, collapse - one row, four icons", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
     const header = screen.getByText("Meiva").closest("header")!;
     const labels = Array.from(header.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
-    expect(labels.filter(Boolean)).toEqual(["Search agents", "Hide sidebar"]);
-    expect(screen.getByText("Meiva")).toBeTruthy();
+    expect(labels.filter(Boolean)).toEqual(["Search agents", "Sidebar settings", "Create agent", "Hide sidebar"]);
   });
 
   it("clicking the search button opens the floating overlay", () => {
@@ -1318,17 +1388,21 @@ describe("Search is overlay-only (task #750: sidebar list is NOT filtered)", () 
 });
 
 describe("agent status quick toggle (display.show_agent_status)", () => {
-  it("defaults off → toolbar shows the 'Show agent status' toggle", () => {
+  const openSettings = () => fireEvent.click(screen.getByTestId("sidebar-settings"));
+
+  it("defaults off → the settings popover offers the 'Show agent status' toggle", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
-    const btn = screen.getByLabelText("Show agent status");
+    openSettings();
+    const btn = screen.getByRole("button", { name: "Show agent status" });
     expect(btn.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("click toggle (off) → setSetting('display.show_agent_status', true)", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
-    fireEvent.click(screen.getByLabelText("Show agent status"));
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Show agent status" }));
     expect(state.setSetting).toHaveBeenCalledWith("display.show_agent_status", true);
   });
 
@@ -1336,7 +1410,8 @@ describe("agent status quick toggle (display.show_agent_status)", () => {
     state.userSettings = { "display.show_agent_status": true };
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
-    const btn = screen.getByLabelText("Hide agent status");
+    openSettings();
+    const btn = screen.getByRole("button", { name: "Hide agent status" });
     expect(btn.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(btn);
     expect(state.setSetting).toHaveBeenCalledWith("display.show_agent_status", false);

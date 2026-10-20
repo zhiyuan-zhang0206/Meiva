@@ -147,7 +147,7 @@ export function OpenNoticeDetail({
             <>
               <span aria-hidden className="text-[10px] text-muted-foreground">·</span>
               <span className="text-[10px] text-muted-foreground">
-                {formatRelative(notice.created_at)}, {formatAbsolute(notice.created_at)}
+                {formatRelative(notice.created_at, undefined, { capitalize: true })}, {formatAbsolute(notice.created_at)}
               </span>
             </>
           ) : null}

@@ -1,6 +1,10 @@
+// meiva:note
+// LaTeX is loaded on demand, and the recovery plugin runs before the prose
+// guard: a promoted `$$` span is a block node the guard never inspects.
 // meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
 import type { PluggableList } from "unified";
 
+import remarkDisplayMathRecovery from "@/lib/markdown/remark-display-math-recovery";
 import remarkMathProseGuard from "@/lib/markdown/remark-math-prose-guard";
 
 export interface MarkdownMath {
@@ -15,7 +19,7 @@ const defaultImport = async (): Promise<MarkdownMath> => {
     import("katex/dist/katex.min.css"),
   ]);
   return {
-    remark: [remarkMath.default, remarkMathProseGuard],
+    remark: [remarkMath.default, remarkDisplayMathRecovery, remarkMathProseGuard],
     rehype: [[rehypeKatex.default, { throwOnError: false }]],
   };
 };
