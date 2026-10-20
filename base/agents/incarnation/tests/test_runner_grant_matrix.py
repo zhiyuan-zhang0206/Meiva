@@ -2,19 +2,10 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
-
 import psycopg
 import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
-from psycopg import sql
-from psycopg.types.json import Jsonb
 
-from base.agents.incarnation.native_restart_models import (
-    NativeRestartAcceptance,
-    NativeRestartRequest,
-)
-from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.incarnation.tests.test_runner_role import (
     assert_alert_writes_denied,
     exercise_impersonation_entry_grants,
@@ -379,136 +370,6 @@ def test_understanding_queue_insert_grant_reaches_a_cluster_born_before_the_entr
         exercise_understanding_queue_grants(conn, 880_040)
 
 
-@pytest.mark.parametrize("refresh", [False, True])
-def test_runner_accepts_and_projects_original_restart_receipt_without_delete_grants(
-    runner_db: str, refresh: bool
-) -> None:
-    """Actual source UPDATE projects APPLIED/OBSERVED using the runner login."""
-    grant_runner(runner_db)
-    with psycopg.connect(runner_db, autocommit=True) as conn:
-        row = conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
-        assert row is not None
-        agent_id = row[0]
-        conn.execute("INSERT INTO agents_meta(id,status) VALUES(%s,'idling')", (agent_id,))
-        target = NativeWorkTarget(
-            protocol=1,
-            work_id=uuid4(),
-            agent_id=agent_id,
-            machine="runner-test",
-            generation=uuid4(),
-            owner=uuid4(),
-        )
-        row = conn.execute(
-            "INSERT INTO inbound_messages(agent_id,content,kind,source,status,claimed_at,target_generation,target_owner) "
-            "VALUES(%s,'','restart','user','claimed',now(),%s,%s) RETURNING id",
-            (agent_id, target.generation, target.owner),
-        ).fetchone()
-        assert row is not None
-        command_id = row[0]
-        acceptance = NativeRestartAcceptance(
-            command_id=command_id, target=target, config_overlay=None
-        )
-    with psycopg.connect(runner_url(runner_db), autocommit=True) as conn:
-        conn.execute(
-            "INSERT INTO native_restart_commands(operation_key,command_id,agent_id,work_id,"
-            "target_generation,target_owner,request_hash,request,acceptance) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (
-                "runner-restart",
-                command_id,
-                agent_id,
-                target.work_id,
-                target.generation,
-                target.owner,
-                "0" * 64,
-                Jsonb(NativeRestartRequest(target=target).model_dump(mode="json")),
-                Jsonb(acceptance.model_dump(mode="json")),
-            ),
-        )
-    if refresh:
-        with psycopg.connect(runner_db, autocommit=True) as conn:
-            conn.execute("REVOKE UPDATE ON native_restart_commands FROM meiva_runner")
-    if refresh:
-        with (
-            psycopg.connect(runner_url(runner_db), autocommit=True) as conn,
-            pytest.raises(psycopg.errors.InsufficientPrivilege),
-        ):
-            conn.execute("UPDATE inbound_messages SET applied_at=now() WHERE id=%s", (command_id,))
-        grant_runner(runner_db)
-    with psycopg.connect(runner_url(runner_db), autocommit=True) as conn:
-        conn.execute("UPDATE inbound_messages SET applied_at=now() WHERE id=%s", (command_id,))
-        assert conn.execute(
-            "SELECT outcome,applied_at IS NOT NULL,observed_at IS NULL FROM native_restart_commands WHERE command_id=%s",
-            (command_id,),
-        ).fetchone() == ("applied", True, True)
-        conn.execute(
-            "UPDATE inbound_messages SET observed_at=now(),status='done' WHERE id=%s", (command_id,)
-        )
-        assert conn.execute(
-            "SELECT outcome,observed_at IS NOT NULL FROM native_restart_commands WHERE command_id=%s",
-            (command_id,),
-        ).fetchone() == ("observed", True)
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            conn.execute("DELETE FROM native_restart_commands WHERE command_id=%s", (command_id,))
-
-
-def test_runner_writes_native_work_copy_and_cancel_ack_with_domain_limits(runner_db: str) -> None:
-    """The remote runner unit's login can perform only the audited native DML."""
-    grant_runner(runner_db)
-    work_id, cancel_id = uuid4(), uuid4()
-    with psycopg.connect(runner_db, autocommit=True) as conn:
-        conn.execute(
-            "INSERT INTO native_cancel_commands(id,work_id,agent_id,operation_key,request,acceptance) "
-            "VALUES(%s,%s,1,'runner-cancel','{}','{}')",
-            (cancel_id, work_id),
-        )
-    with psycopg.connect(runner_url(runner_db), autocommit=True) as conn:
-        conn.execute(
-            "INSERT INTO native_graph_work(id,agent_id,machine,generation,owner,protocol,phase) "
-            "VALUES(%s,1,'runner-test',%s,%s,1,'preparing')",
-            (work_id, uuid4(), uuid4()),
-        )
-        conn.execute("UPDATE native_graph_work SET phase='active' WHERE id=%s", (work_id,))
-        conn.execute(
-            "UPDATE native_cancel_commands SET outcome='applied',checkpoint_id='original-checkpoint',"
-            "settled_at=now() WHERE id=%s",
-            (cancel_id,),
-        )
-        conn.execute(
-            "UPDATE native_graph_work SET phase='settled',ended_at=now(),settled_checkpoint_id='original-checkpoint' "
-            "WHERE id=%s",
-            (work_id,),
-        )
-        conn.execute(
-            "INSERT INTO upload_delivery_copies(batch_id,unit_home,agent_id,request,manifest,storage_machine,storage_directory) "
-            "VALUES('fixed-batch','/unit',1,'{}','{}','runner-test','/Downloads/MeivaAgent-1')"
-        )
-        conn.execute(
-            "UPDATE upload_delivery_copies SET ready_at=now() WHERE batch_id='fixed-batch'"
-        )
-        assert conn.execute(
-            "SELECT phase,ended_at IS NOT NULL FROM native_graph_work WHERE id=%s", (work_id,)
-        ).fetchone() == ("settled", True)
-        assert conn.execute(
-            "SELECT outcome,checkpoint_id FROM native_cancel_commands WHERE id=%s", (cancel_id,)
-        ).fetchone() == ("applied", "original-checkpoint")
-        assert conn.execute(
-            "SELECT ready_at IS NOT NULL FROM upload_delivery_copies WHERE batch_id='fixed-batch'"
-        ).fetchone() == (True,)
-        for table in ("native_graph_work", "native_cancel_commands", "upload_delivery_copies"):
-            with pytest.raises(psycopg.errors.InsufficientPrivilege):
-                conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(table)))
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            conn.execute("INSERT INTO native_cancel_commands(id) VALUES(gen_random_uuid())")
-        for table in ("upload_delivery_batches", "agent_creation_snapshots"):
-            with pytest.raises(psycopg.errors.InsufficientPrivilege):
-                conn.execute(sql.SQL("INSERT INTO {} DEFAULT VALUES").format(sql.Identifier(table)))
-
-
-# meiva:note
-# The runner writes one column of the delivery log — the mark that its live event
-# was published — and the grant is column-scoped, so a delivery's subject or body
-# stays the spine's to write even when the runner is the one announcing.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 def test_runner_marks_a_delivery_but_cannot_rewrite_it(runner_db: str) -> None:
     grant_runner(runner_db)
     with psycopg.connect(runner_db, autocommit=True) as conn:

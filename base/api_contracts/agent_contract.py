@@ -123,6 +123,11 @@ class RestartResult(StrEnum):
     ALREADY_TERMINATED = "already_terminated"
 
 
+class CancelResult(StrEnum):
+    CANCELLED = "cancelled"
+    NOT_RUNNING = "not_running"
+
+
 class ResurrectResult(StrEnum):
     SPAWNED = "spawned"
     ALREADY_ALIVE = "already_alive"

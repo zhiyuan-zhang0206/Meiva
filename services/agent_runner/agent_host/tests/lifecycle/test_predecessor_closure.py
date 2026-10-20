@@ -51,7 +51,6 @@ def retired(generation: UUID, owner: UUID, *, open_request: bool = False) -> dic
         "generation": str(generation),
         "owner": str(owner),
         "host_process": {"pid": 4242, "birth": 1758900000.25},
-        "frozen_by": None,
         "requests": requests,
     }
 
@@ -75,17 +74,15 @@ def _drained(
     )
     before = retired(uuid4(), uuid4(), **resources)
     receipt = db.execute(
-        "INSERT INTO inbound_messages(agent_id,kind,source,content,payload,status,claimed_at,"
-        "applied_at,target_generation,target_owner) VALUES(%s,'restart','system:restart',"
-        "'',%s,'claimed',now(),now(),%s,%s) RETURNING id",
-        (aid, Jsonb(_DRAIN), before["generation"], before["owner"]),
+        "INSERT INTO inbound_messages(agent_id,kind,source,content,payload,status,claimed_at) "
+        "VALUES(%s,'restart','system:restart','',%s,'done',now()) RETURNING id",
+        (aid, Jsonb({**_DRAIN, "lifecycle_release": True})),
     ).fetchone()
     assert receipt is not None
     db.execute(
         "UPDATE agents_meta SET status='idling',runtime_kind=NULL,runtime_generation=NULL,"
-        "runtime_owner=NULL,lease_expires_at=NULL,lifecycle_command_id=%s,"
-        "incarnation_resources=%s WHERE id=%s",
-        (receipt[0], Jsonb(before), aid),
+        "runtime_owner=NULL,lease_expires_at=NULL,incarnation_resources=%s WHERE id=%s",
+        (Jsonb(before), aid),
     )
     db.commit()
     return aid, receipt[0], before
@@ -206,7 +203,6 @@ async def test_closed_form_is_admitted_exactly_once(
     assert (admitted.generation, admitted.owner) == (successor.generation, successor.owner)
     assert admitted.host_process is not None
     assert admitted.requests == {}
-    assert admitted_row[0]["lifecycle_command_id"] is None
     assert admitted_row[1]["status"] == "done"
 
     assert (
@@ -236,7 +232,6 @@ async def test_released_closed_form_does_not_need_a_historical_receipt(
         local_machine=machine_identity,
     )
     closed_form(db_conn, aid, before)
-    db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (aid,))
     db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (receipt,))
     db_conn.commit()
     assert (
@@ -265,16 +260,14 @@ def _resurrected(
     )
     before = retired(uuid4(), uuid4())
     receipt = db.execute(
-        "INSERT INTO inbound_messages(agent_id,kind,source,content,status,claimed_at,applied_at,"
-        "observed_at,target_generation,target_owner) VALUES(%s,'terminate','user','','done',"
-        "now(),now(),now(),%s,%s) RETURNING id",
-        (aid, before["generation"], before["owner"]),
+        "INSERT INTO inbound_messages(agent_id,kind,source,content,status,claimed_at) "
+        "VALUES(%s,'terminate','user','','done',now()) RETURNING id",
+        (aid,),
     ).fetchone()
     assert receipt is not None
     db.execute(
         "UPDATE agents_meta SET status='idling',runtime_kind=NULL,runtime_generation=NULL,"
-        "runtime_owner=NULL,lease_expires_at=NULL,lifecycle_command_id=NULL,"
-        "incarnation_resources=%s WHERE id=%s",
+        "runtime_owner=NULL,lease_expires_at=NULL,incarnation_resources=%s WHERE id=%s",
         (Jsonb(before), aid),
     )
     db.commit()
@@ -308,7 +301,7 @@ async def test_a_resurrected_row_never_readmitted_is_admitted_after_release(
     assert (admitted.generation, admitted.owner) == (successor.generation, successor.owner)
 
 
-async def test_admitted_successor_drains_with_its_complete_recorded_set(
+async def test_admitted_successor_drains_with_an_empty_recorded_set(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -340,8 +333,7 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
     assert row is not None
     command = row[0]
     assert [
-        item.id
-        for item in await claim_inbound_batch(aops_pool, aid, incarnation=incarnation, work=None)
+        item.id for item in await claim_inbound_batch(aops_pool, aid, incarnation=incarnation)
     ] == [command]
     assert (
         await apply_hosted_lifecycle(
@@ -362,14 +354,13 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
 
     monkeypatch.setattr(admission, "pending_command", pending)
     monkeypatch.setattr(admission, "record_drained", record)
-    await record_drained(aops_pool, incarnation.owner, aid)
+    await record_drained(aops_pool, aid)
     assert recorded == [(aid, command)]
     hold = MaintenanceHold(MaintenancePhase.DRAINED, {aid: command}, drained=(aid,))
     operation = _DRAIN["maintenance"]
     assert applied_capture(
         db_conn,
         hold,
-        incarnation.owner,
         operation["holder"],
         datetime.fromisoformat(operation["acquired_at"]),
     ) == {aid}
@@ -380,13 +371,10 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (aid,)
     ).fetchone()
     assert resources is not None
-    for changed in (
-        resources[0] | {"frozen_by": command},
-        resources[0] | {"owner": str(uuid4())},
-    ):
-        db_conn.execute(
-            "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s", (Jsonb(changed), aid)
-        )
-        with pytest.raises(RuntimeError, match="drained restart pointer"):
-            verify_drained(db_conn, hold)
-        db_conn.rollback()
+    undrained = resources[0] | {"requests": {str(uuid4()): {}}}
+    db_conn.execute(
+        "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s", (Jsonb(undrained), aid)
+    )
+    with pytest.raises(RuntimeError, match="executed restart"):
+        verify_drained(db_conn, hold)
+    db_conn.rollback()

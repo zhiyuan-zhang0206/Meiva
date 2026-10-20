@@ -90,10 +90,8 @@ from agent.state_channels import (
     SkillRecallState,
     memory_state_merge,
 )
-from base.agents.compaction.models import CompactMarker
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.checkpoint_serializer import CheckpointSerializer
-from base.agents.incarnation.native_work_models import NativeCancelMarker, NativeWorkTarget
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.packages.plugins.extensions import (
     PLUGIN_WRITABLE_BASE_FIELDS,
@@ -153,10 +151,6 @@ class BaseAgentState(BaseModel):
     # undelivered, and never the ones already in the harness transcript.
     # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
     harness_cursor: int = 0
-    native_work: NativeWorkTarget | None = None
-    native_cancel: NativeCancelMarker | None = None
-    native_compact: CompactMarker | None = None
-    """Native invocation identity and exact committed halt attribution; not prompt content."""
     turn_active: bool = False
     """This invocation is mid-turn (claim routed work). One invocation = one
     turn: a claim pass that finds nothing to do with this set ends the

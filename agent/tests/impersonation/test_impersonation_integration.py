@@ -74,7 +74,7 @@ async def test_consent_exec_inbox_release_and_resume(
     first = await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=scope, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=scope),
     )
     assert first["turn_idle"]
     assert (
@@ -118,7 +118,7 @@ async def test_consent_exec_inbox_release_and_resume(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=scope, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=scope),
     )
     await flush_checkpoint(saver, agent_id)
     assert len(model_calls) == 1
@@ -151,7 +151,7 @@ async def test_consent_exec_inbox_release_and_resume(
     resumed = await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=scope, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=scope),
     )
     await flush_checkpoint(saver, agent_id)
     assert resumed["handoff__total"] == 7
@@ -204,7 +204,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     assert not model_calls
     assert (
@@ -246,7 +246,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     assert not model_calls
     await flush_checkpoint(saver, owner.agent_id)
@@ -278,7 +278,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     assert len(model_calls) == 1
     assert_handoff_precedes_queued_input(model_calls[0].messages)
@@ -381,7 +381,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert await settle_checkpoint(
@@ -469,7 +469,7 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     await graph.ainvoke(
         reset,
         config,
-        context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
+        context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert await settle_checkpoint(

@@ -17,7 +17,6 @@ import functools
 import hashlib
 import json
 import logging
-import re
 import signal
 import time
 from collections.abc import Callable
@@ -30,7 +29,6 @@ from pydantic import ValidationError
 
 from base import paths
 from base.agents.context.clients import ClientSet
-from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.api_contracts.agent_contract import MeivaAgentError, ResurrectRefused
 from base.api_contracts.launch_retry import LaunchReconcileRequest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -293,31 +291,6 @@ async def dispatch_idempotent_pass(
     host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
 
-    if (
-        kind == "lifecycle"
-        and isinstance(payload.get("path"), str)
-        and re.fullmatch(r"/api/agents/[1-9][0-9]*/restart-work", payload["path"])
-    ):
-        try:
-            operation = NativeRestartOperation.model_validate(payload.get("body"))
-        except ValidationError:
-            return OpStatus.FAILED, {"error": "invalid guarded restart envelope"}
-        if operation.operation_key != key:
-            return OpStatus.FAILED, {"error": "guarded restart envelope identity differs"}
-        return await _dispatch(
-            kind,
-            payload,
-            active_ops=active_ops,
-            workers=workers,
-            pool=pool,
-            executor=executor,
-            catalog=catalog,
-            authority=authority,
-            database=database,
-            image=image,
-            local_machine=local_machine,
-            host=host,
-        )
     request_hash = hashlib.sha256(
         json.dumps([kind, payload], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     ).hexdigest()

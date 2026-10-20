@@ -53,9 +53,8 @@ def _claim(conn: psycopg.Connection[Any], message: int) -> None:
 def _resolve_lifecycle_command(conn: psycopg.Connection[Any], command: int) -> None:
     conn.execute(
         "UPDATE inbound_messages SET status='done', claimed_at=COALESCE(claimed_at, "
-        "clock_timestamp()), target_generation=%s, target_owner=%s, applied_at=clock_timestamp(), "
-        "observed_at=clock_timestamp() WHERE id=%s",
-        (uuid4(), uuid4(), command),
+        "clock_timestamp()) WHERE id=%s",
+        (command,),
     )
 
 
@@ -357,8 +356,8 @@ def test_parked_claimed_ordinary_work_is_consumed_not_redelivered(
         hold.phase == MaintenancePhase.DRAINING and hold.parked == (agent,) and hold.commands == {}
     )
     assert db_conn.execute(
-        "SELECT status,applied_at FROM inbound_messages WHERE id=%s", (message,)
-    ).fetchone() == ("done", None)
+        "SELECT status FROM inbound_messages WHERE id=%s", (message,)
+    ).fetchone() == ("done",)
     [event] = emitted_events
     assert event.event_name == "pause_orphan_claim_settled"
     attributes = event.attributes

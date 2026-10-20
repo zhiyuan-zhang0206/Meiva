@@ -1,8 +1,6 @@
-exports = ["ownership_support.py", "test_lifecycle_intent.py"]
+exports = ["ownership_support.py"]
 
 [uses]
-"test_hosted_completion.py" = ["ownership_support.py", "test_lifecycle_intent.py"]
-"test_lifecycle_intent.py" = ["ownership_support.py"]
 
 [debt.first-party-patch]
 "test_hosted_ownership.py#monkeypatch.setattr agent.ownership.corpse_reap.publish_agent_updated" = 1

@@ -72,9 +72,6 @@ SIGNALS: dict[str, Signal] = {
         "im_feishu_owner_seed_failed", "meiva-ops", "0s", "warning"
     ),
     "meiva-ops-im-push-stall": Signal("im_push_health", "meiva-ops", "2m", "warning"),
-    "meiva-ops-lifecycle-pointer-stuck": Signal(
-        "lifecycle_pointer_stuck", "meiva-ops-slow", "0s", "warning", 0
-    ),
     "meiva-ops-delivery-stalled": Signal("delivery_stalled", "meiva-ops", "1m", "warning"),
     "meiva-ops-db-pool-acquire-slow": Signal("db_pool_acquire_slow", "meiva-ops", "2m", "warning"),
     "meiva-ops-root-unit-restart-failed": Signal(

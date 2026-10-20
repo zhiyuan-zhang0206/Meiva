@@ -1,40 +1,40 @@
-"""Interrupt-in-node RAII.
-
-When entering an interruptible section (the LLM stream or code execution), the
-node uses `async with subscribe_interrupt(...) as event:` to get an
-asyncio.Event; the context manager spawns a background task that watches for a
-durable interrupt inbound (kind 'cancel'/'terminate') for this agent and sets
-the event the moment one is queued. The node races its work vs `event.wait()`
-and aborts when the event fires.
-
-Durability is the whole point. The signal is a real `inbound_messages` row
-(retained native cancel inbounds or the terminate path), detected via a
-short DB poll. A signal that lands while no node is interruptible is NOT lost:
-it stays a pending row and the next claim pass dispatches it. This node only
-*aborts* the current action; the semantic dispatch (cancel -> halt to idle,
-terminate -> goto END) stays in the claim node, the single owner of inbound
-semantics.
-
-The watcher polls `inbound_messages` on a short cadence (`INTERRUPT_POLL_S`)
-instead of sharing the agent's Redis inbound listener with the claim node's
-idle wait. Sharing was the root cause of a lost-wake class of incidents: the
-watcher's cancellation could be swallowed in the cancel-vs-completion race,
-leaving an orphan holding the listener's `_wait_lock` (and its connection) for
-up to a full wait cycle while every pub/sub wake for fresh inbounds went
-unheard — the agent then only woke via the claim loop's 30s SELECT recheck,
-which is the user-visible "message stuck ~30s" symptom (2026-08-02, agent
-2476, live incident: 30.06s pickup). A polling watcher borrows its explicit interrupt pool. Its original service
-retains a cancellation-lost poll until it returns; stop prevents a later poll
-result from setting the old event. Finite caller return does not close its pool.
-
-Cancel latency trades from "instant (pub/sub)" to "≤ one poll interval" — 2s
-is well inside what a pause/terminate UI action tolerates, and the claim
-path's instant wake is untouched.
-
-Container/eval mode has no inbound queue (pool None); subscribe_interrupt then
-yields an event that never fires, so the wrapped action runs uninterruptibly —
-matching the pre-existing no-cancel behavior there.
-"""
+# meiva:note
+# Interrupt-in-node RAII.
+#
+# When entering an interruptible section (the LLM stream or code execution), the
+# node uses `async with subscribe_interrupt(...) as event:` to get an
+# asyncio.Event; the context manager spawns a background task that watches for a
+# durable interrupt inbound (kind 'cancel'/'terminate') for this agent and sets
+# the event the moment one is queued. The node races its work vs `event.wait()`
+# and aborts when the event fires.
+#
+# Durability is the whole point. The signal is a real `inbound_messages` row
+# (a pending cancel inbound or the terminate path), detected via a
+# short DB poll. A signal that lands while no node is interruptible is NOT lost:
+# it stays a pending row and the next claim pass dispatches it. This node only
+# *aborts* the current action; the semantic dispatch (cancel -> halt to idle,
+# terminate -> goto END) stays in the claim node, the single owner of inbound
+# semantics.
+#
+# The watcher polls `inbound_messages` on a short cadence (`INTERRUPT_POLL_S`)
+# instead of sharing the agent's Redis inbound listener with the claim node's
+# idle wait. Sharing was the root cause of a lost-wake class of incidents: the
+# watcher's cancellation could be swallowed in the cancel-vs-completion race,
+# leaving an orphan holding the listener's `_wait_lock` (and its connection) for
+# up to a full wait cycle while every pub/sub wake for fresh inbounds went
+# unheard — the agent then only woke via the claim loop's 30s SELECT recheck,
+# which is the user-visible "message stuck ~30s" symptom (2026-08-02, agent
+# 2476, live incident: 30.06s pickup). A polling watcher borrows its explicit interrupt pool. Its original service
+# retains a cancellation-lost poll until it returns; stop prevents a later poll
+# result from setting the old event. Finite caller return does not close its pool.
+#
+# Cancel latency trades from "instant (pub/sub)" to "≤ one poll interval" — 2s
+# is well inside what a pause/terminate UI action tolerates, and the claim
+# path's instant wake is untouched.
+#
+# Container/eval mode has no inbound queue (pool None); subscribe_interrupt then
+# yields an event that never fires, so the wrapped action runs uninterruptibly —
+# matching the pre-existing no-cancel behavior there.
 
 import asyncio
 import contextlib
@@ -46,11 +46,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import pending_interrupt_reason
 from agent.graph.node_log import awaiter_chain_lines
-from agent.ownership.native_cancel import observe_bound_cancel
-from base.agents.incarnation.native_work_models import NativeCancelMarker, NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.log import logger
-from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 
 
@@ -64,17 +61,10 @@ class InterruptEvent(asyncio.Event):
     def __init__(self) -> None:
         super().__init__()
         self.reason = InterruptReason.USER
-        self.native_cancel: NativeCancelMarker | None = None
 
-    def set(
-        self,
-        reason: InterruptReason = InterruptReason.USER,
-        *,
-        native_cancel: NativeCancelMarker | None = None,
-    ) -> None:
+    def set(self, reason: InterruptReason = InterruptReason.USER) -> None:
         if not self.is_set():
             self.reason = reason
-            self.native_cancel = native_cancel
             super().set()
 
 
@@ -127,9 +117,6 @@ async def watch_for_interrupt(
     event: InterruptEvent,
     agent_id: int,
     stop: asyncio.Event,
-    *,
-    incarnation: RuntimeIncarnation | None,
-    work: NativeWorkTarget | None,
 ) -> None:
     """Set `event` as soon as a pending cancel/terminate row exists for agent_id.
 
@@ -147,12 +134,7 @@ async def watch_for_interrupt(
     watcher holds no shared resource, even that lingering poll is harmless.
     """
     while not stop.is_set():
-        marker = await observe_bound_cancel(pool, agent_id, incarnation=incarnation, work=work)
-        if marker is not None:
-            if not stop.is_set():
-                event.set(InterruptReason.USER, native_cancel=marker)
-            return
-        reason = await pending_interrupt_reason(pool, agent_id, incarnation=incarnation, work=work)
+        reason = await pending_interrupt_reason(pool, agent_id)
         if reason is not None:
             if not stop.is_set():
                 event.set(reason)
@@ -189,18 +171,10 @@ class _InterruptWatch:
         self.late = False
         self.retained_at = 0.0
 
-    async def run(
-        self,
-        pool: AsyncConnectionPool,
-        *,
-        incarnation: RuntimeIncarnation | None,
-        work: NativeWorkTarget | None,
-    ) -> None:
+    async def run(self, pool: AsyncConnectionPool) -> None:
         cancelled = False
         try:
-            await watch_for_interrupt(
-                pool, self.event, self.agent_id, self.stop, incarnation=incarnation, work=work
-            )
+            await watch_for_interrupt(pool, self.event, self.agent_id, self.stop)
         except asyncio.CancelledError:
             cancelled = True
             raise
@@ -275,8 +249,6 @@ async def subscribe_interrupt(
     pool: AsyncConnectionPool | None,
     agent_id: int,
     *,
-    incarnation: RuntimeIncarnation | None,
-    work: NativeWorkTarget | None,
     resources: HostedTurnResources | None,
 ) -> AsyncGenerator[InterruptEvent]:
     """RAII watch for a durable interrupt (cancel/terminate) on this agent.
@@ -299,10 +271,7 @@ async def subscribe_interrupt(
         raise RuntimeError("a database interrupt watcher requires its explicit service resources")
     service = resources.require_service()
     owned = _InterruptWatch(resources, agent_id)
-    watcher = service.watch(
-        owned.run(pool, incarnation=incarnation, work=work),
-        name=f"interrupt-watcher-{agent_id}",
-    )
+    watcher = service.watch(owned.run(pool), name=f"interrupt-watcher-{agent_id}")
     primary: BaseException | None = None
     try:
         yield owned.event

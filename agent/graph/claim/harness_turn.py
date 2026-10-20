@@ -109,8 +109,6 @@ async def harness_turn_node(
         async with subscribe_interrupt(
             ctx.ops_pool,
             agent_id,
-            incarnation=ctx.original_incarnation,
-            work=ctx.native_work,
             resources=ctx.hosted_resources,
         ) as cancel_event:
             turn = await interruptible_model(

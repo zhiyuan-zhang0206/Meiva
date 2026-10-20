@@ -38,12 +38,11 @@ def test_resurrect_brings_back_terminated_agent(
             (agent_id,),
         ).fetchone()
         command = conn.execute(
-            "SELECT status,applied_at IS NOT NULL,observed_at IS NOT NULL "
-            "FROM inbound_messages WHERE agent_id=%s AND kind='terminate'",
+            "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='terminate'",
             (agent_id,),
         ).fetchall()
     assert original is not None and original[0] is not None
-    assert command == [("done", True, True)]
+    assert command == [("done",)]
     if explicit:
         monkeypatch.setenv(API_TOKEN_ENV, current_credentials().gateway_token)
         with ThreadPoolExecutor(max_workers=1) as executor:
@@ -71,7 +70,7 @@ def test_resurrect_brings_back_terminated_agent(
     def successor_processed_wake() -> tuple[bool, object]:
         with psycopg.connect(settings.data_plane.db_url) as conn:
             row = conn.execute(
-                "SELECT status,runtime_generation,lifecycle_command_id FROM agents_meta WHERE id=%s",
+                "SELECT status,runtime_generation FROM agents_meta WHERE id=%s",
                 (agent_id,),
             ).fetchone()
             chats = conn.execute(
@@ -88,7 +87,6 @@ def test_resurrect_brings_back_terminated_agent(
             and row[0] == "idling"
             and row[1] is not None
             and row[1] != original[0]
-            and row[2] is None
             and resurrect == (1,)
             and chats in ([("claimed", True)], [("done", True)])
         ):

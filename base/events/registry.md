@@ -159,7 +159,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events | — |
 | `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events | — |
 | `memory_search_rerank` | memory-search rerank skipped candidate notes it could not read; they are ranked out of this search | anomaly | — | — | events | — |
-| `native_compact_proof_gap` | the actual serialized host could not establish compact source or uncertainty closure; pending intent remains held, carrying agent_id and bounded error_type without payload | anomaly | — | — | events | — |
 | `impersonation_event_log_incomplete` | an impersonation event log cannot complete on its own (ended lease with an open source, or a failed capture source); re-emitted every reaper pass while it holds | anomaly | condition, lease_id, lease_machine, pending_reason, session | — | events | — |
 | `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events | — |
 | `host_stale_running_settle_failed` | the hosted beat could not settle stale running rows this round — logged with the traceback and retried on the next beat; the rows stay running until a settle succeeds | anomaly | — | — | events | — |
@@ -202,14 +201,11 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `inbound_reconcile` | claimed inbounds consumed after interruption | noise | — | — | events | — |
 | `pause_lifecycle_wait` | preparation bounded-waited in-flight work it did not author | anomaly | waited_s, outcome, agents | — | events | — |
 | `pause_orphan_claim_settled` | preparation consumed (marked done, never redelivered) an ordinary claim whose runtime is gone | anomaly | agent, message_id, age_s | — | events | — |
-| `host_turn_force_terminated` | this hosted turn ended on its own incarnation's applied force terminate (e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate command was applied but not yet observed, the turn's fail-closed guard read refused, and the pump's own boundary observes the command; not a failure | observation | — | — | events | — |
-| `host_held_wake_force_terminated` | a held-controls wake stopped quietly because its incarnation's applied force terminate landed — the pump's boundary owns the command's observation, so the wake had nothing left to do; not a failure | observation | — | — | events | — |
 | `brew_pin` | the brew-pin assertion could not judge this host: brew list (--pinned) raised or exited non-zero, so the installed and pinned sets are unknown, not empty | anomaly | — | — | events | — |
 | `launchd_retirement` | launchctl print still lists a job after its bootout; the retired job keeps running the code it was loaded with while its plist is already gone | anomaly | — | — | events | — |
 | `im_push_failed` | an IM bridge outbound send failed after its single retry (failures = the adapter's consecutive-failure count) | anomaly | channel, failures | — | events | — |
 | `im_feishu_owner_seed_failed` | the feishu owner chat could not be restored at bridge boot; feishu notifications are blind until the user messages the bot | anomaly | reason, chats | — | events | — |
 | `im_push_health` | one per-channel IM bridge push-health sample: age of the last delivered push and pending deliveries, consumed by the leg-staleness alert rule | observation | channel, last_ok_age_s, pending | — | events | — |
-| `native_cancel_uncertain` | native cancel recovery lacks exact execution or certified stop proof; the supported consumer holds new work | anomaly | agent_id, work_id | — | events | — |
 | `agent_continuation_lost` | an agent's turn failed while its continuation was owed to a draining maintenance hold; its interrupted work may be lost | anomaly | failure_category, holder, reason | — | events | — |
 | `node_enter` | LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only | noise | — | — | file | — |
 | `node_exit` | LangGraph node exited | noise | count, nodes | — | events | — |
@@ -329,7 +325,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `service_start_unready` | a non-critical service missed its readiness window at meiva start | anomaly | service | — | events | — |
 | `boot_retries_exhausted` | the boot-time meiva start failed through its whole attempt budget and is no longer retried | anomaly | attempts, exit_code | — | events | — |
 | `schedule_verify_failed` | meiva schedules verify found in-store schedule scripts that fail dry-import, an undefined-name read or call-signature binding, or the sweep itself failed | anomaly | checked, red, tool_error, detail | — | events | — |
-| `lifecycle_pointer_stuck` | the TTL reaper's hourly scan found agents_meta.lifecycle_command_id pointing at a lifecycle command that nothing will settle on its own: one sitting at done (an out-of-band torn write, task #3678) or an applied force-terminate still unobserved an hour after it was applied (its original host crashed or its machine was decommissioned). Every resurrect of the named agent(s) defers until an operator settles the command | anomaly | count, samples | — | events | — |
 | `throwaway_pg_reap` | pg_ctl stop failed for an orphaned throwaway Postgres whose data directory is deleted next; a surviving postmaster would keep writing into the removed directory | anomaly | — | — | events | — |
 
 ## 4. Log (bare logs, category=log)

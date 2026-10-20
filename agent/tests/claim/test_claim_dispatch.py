@@ -131,7 +131,7 @@ async def test_claim_inbound_batch_stamps_claimed_at(
     db_conn.commit()
 
     rows = await claim_inbound_batch(
-        aops_pool, tid, incarnation=meiva.context.require_original_incarnation(tid), work=None
+        aops_pool, tid, incarnation=meiva.context.require_original_incarnation(tid)
     )
     by_id = {r.id: r for r in rows}
     assert set(by_id) == {term_id}

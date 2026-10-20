@@ -21,7 +21,6 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
-from base.agents.incarnation.hosted_force import original_host_force
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -224,13 +223,6 @@ async def _terminate_native(
     ) as ops_pool:
         if mode == "force":
             force_terminate_transaction(owner.agent_id, ops_pool, source="user")
-            assert await original_host_force(
-                aops_pool,
-                owner.agent_id,
-                owner.owner,
-                local_machine,
-                quiescent=True,
-            )
         else:
             terminate_id, _cutoff = enqueue_termination_inbounds(
                 Database.from_settings(gate=database_gate),
@@ -246,7 +238,7 @@ async def _terminate_native(
                 assert "Termination was accepted" in str(accepted.update)
             else:
                 batch = await claim_inbound_batch(
-                    aops_pool, owner.agent_id, lifecycle_only=True, incarnation=owner, work=None
+                    aops_pool, owner.agent_id, lifecycle_only=True, incarnation=owner
                 )
                 assert [item.id for item in batch] == [terminate_id]
             assert _native_notices(db_conn, owner.agent_id) == []

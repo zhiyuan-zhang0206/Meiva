@@ -188,11 +188,11 @@ def test_session_survives_agent_host_and_gateway_restarts(
     def applied() -> tuple[bool, object]:
         with psycopg.connect(settings.data_plane.db_url) as conn:
             row = conn.execute(
-                "SELECT applied_at FROM inbound_messages WHERE agent_id = %s "
+                "SELECT status FROM inbound_messages WHERE agent_id = %s "
                 "AND kind = 'restart' ORDER BY id DESC LIMIT 1",
                 (agent,),
             ).fetchone()
-        return bool(row and row[0] is not None), row
+        return bool(row and row[0] == "done"), row
 
     poll_until(applied, timeout=30.0, interval=0.3, what="agent restart applied")
     usable("agent-restart")

@@ -56,8 +56,6 @@ async def race_stream_vs_cancel(
     async with subscribe_interrupt(
         ctx.ops_pool,
         agent_id,
-        incarnation=ctx.original_incarnation,
-        work=ctx.native_work,
         resources=ctx.hosted_resources,
     ) as cancel_event:
         try:

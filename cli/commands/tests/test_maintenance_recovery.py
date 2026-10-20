@@ -47,7 +47,7 @@ from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 
-async def test_successor_cannot_sign_original_host_final_cleanup(
+async def test_successor_records_the_drain_of_a_restart_the_original_host_executed(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
@@ -87,7 +87,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         acquired_at=WHEN,
     )
     batch = await claim_inbound_batch(
-        aops_pool, agent, lifecycle_only=True, incarnation=incarnation, work=None
+        aops_pool, agent, lifecycle_only=True, incarnation=incarnation
     )
     assert [item.id for item in batch] == [hold.commands[agent]]
     assert (
@@ -109,11 +109,11 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         catalog=model_catalog,
         commands=CommandCatalog(skills=list),
     )
+    # meiva:note
+    # The restart executed and closed in one transaction, so whichever host
+    # looks next finds the agent released: a crash of the original host during
+    # the drain leaves nothing to wait for.
     await successor.run_turn(agent)
-    current = admission.snapshot()
-    assert current is not None and current.maintenance is not None
-    assert current.maintenance.drained == ()
-    await old.run_turn(agent)
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.drained == (agent,)
@@ -169,11 +169,9 @@ async def test_journal_write_failure_before_or_after_commit_keeps_same_restart(
         acquired_at=WHEN,
     )
     rows = db_conn.execute(
-        "SELECT id,target_owner,target_generation FROM inbound_messages "
-        "WHERE agent_id=%s AND kind='restart'",
-        (agent,),
+        "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='restart'", (agent,)
     ).fetchall()
-    assert rows == [(hold.commands[agent], None, None)]
+    assert rows == [(hold.commands[agent],)]
     if committed:
         assert committed[0][0] == hold.commands[agent]
 
@@ -202,7 +200,7 @@ def test_unowned_idle_intent_is_preserved_without_restart_or_termination(
     cohort.verify_drained(db_conn, hold)
 
 
-async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
+async def test_cold_idle_resume_makes_no_model_call(
     redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -317,9 +315,8 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
     await successor.run_turn(agent)
     model.assert_not_awaited()
     assert db_conn.execute(
-        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s",
-        (hold.commands[agent],),
-    ).fetchone() == ("done", True)
+        "SELECT status FROM inbound_messages WHERE id=%s", (hold.commands[agent],)
+    ).fetchone() == ("done",)
     cold = await AsyncPostgresSaver(aops_pool).aget_tuple(config)
     assert cold is not None and cold.checkpoint["channel_values"]["halted"] is True
 
@@ -374,7 +371,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
             acquired_at=WHEN,
         )
     batch = await claim_inbound_batch(
-        aops_pool, agent, lifecycle_only=True, incarnation=incarnation, work=None
+        aops_pool, agent, lifecycle_only=True, incarnation=incarnation
     )
     assert len(batch) == 1
     assert (
@@ -613,14 +610,15 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
             model_catalog=model_catalog,
             database_gate=database_gate,
         )
-        assert agent in await successor.pending_inbound_wakes()
+        # meiva:note
+        # The restart closed with its execution: the idle agent owes no wake.
+        assert agent not in await successor.pending_inbound_wakes()
         await successor.run_turn(agent)
         assert calls == ["model", "before_exec", "after_exec"]
         assert effect.read_text() == "once"
         assert db_conn.execute(
-            "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s",
-            (hold.commands[agent],),
-        ).fetchone() == ("done", True)
+            "SELECT status FROM inbound_messages WHERE id=%s", (hold.commands[agent],)
+        ).fetchone() == ("done",)
         after = await AsyncPostgresSaver(aops_pool).aget_tuple(config)
         assert after is not None and after.checkpoint["channel_values"]["halted"] is True
     finally:

@@ -19,26 +19,6 @@ from base.cluster.machine.tests.gateway_stubs import (
 )
 from cli.commands.agents import control as _agents
 
-TARGET = {
-    "agent_id": 5,
-    "work_id": "00000000-0000-4000-8000-000000000001",
-    "machine": "local",
-    "generation": "00000000-0000-4000-8000-000000000002",
-    "owner": "00000000-0000-4000-8000-000000000003",
-    "protocol": 1,
-}
-_COMPACT_TARGET = {
-    "protocol": 1,
-    "observation_id": "00000000-0000-4000-8000-000000000004",
-    "source": {**TARGET, "agent_id": 7},
-    "checkpoint_id": "source",
-    "checkpoint_ns": "",
-    "messages_version": "1",
-    "compact_channel_version": None,
-    "segment_version": 0,
-    "model": "gpt-5.6-sol",
-}
-
 
 class _FakeResp:
     def __init__(self, payload: object, status_code: int = 200) -> None:
@@ -214,18 +194,10 @@ def test_agents_ls_preserves_http_error_behavior(monkeypatch: pytest.MonkeyPatch
 def test_agents_cancel_posts_to_cancel_route(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def observe(*_args: object, **_kwargs: object) -> _FakeResp:
-        return _FakeResp(TARGET)
-
-    monkeypatch.setattr(httpx, "get", observe)
-    seen = _patch_post(monkeypatch, {"target": TARGET, "command_id": TARGET["work_id"]})
+    seen = _patch_post(monkeypatch, {"status": "cancelled"})
     assert _agents.cmd_agents_cancel(5) == 0
-    assert seen["url"] == "http://gw:8000/api/keyed/v1/agents/5/cancel-work"
-    assert isinstance(seen["headers"], dict)
-    assert seen["headers"]["Idempotency-Key"]
-    assert seen["headers"]["Idempotency-Scope"] == "principal-v1"
-    assert seen["json"] == TARGET
-    assert "cancel accepted" in capsys.readouterr().out
+    assert seen["url"] == "http://gw:8000/api/agents/5/cancel"
+    assert "agent 5 cancel: cancelled" in capsys.readouterr().out
 
 
 def test_agents_restart_posts(
@@ -428,18 +400,10 @@ def test_agents_terminate_renders_the_shell_session_kill(
 def test_agents_compact_posts_to_the_compact_route(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def observe(*_args: object, **_kwargs: object) -> _FakeResp:
-        return _FakeResp(_COMPACT_TARGET)
-
-    monkeypatch.setattr(httpx, "get", observe)
-    seen = _patch_post(monkeypatch, {"target": _COMPACT_TARGET, "command_id": TARGET["work_id"]})
+    seen = _patch_post(monkeypatch, {"inbound_id": 31})
     assert _agents.cmd_agents_compact(7) == 0
-    assert seen["url"] == "http://gw:8000/api/keyed/v1/agents/7/compact-history"
-    assert isinstance(seen["headers"], dict)
-    assert seen["headers"]["Idempotency-Key"]
-    assert seen["headers"]["Idempotency-Scope"] == "principal-v1"
-    assert seen["json"] == _COMPACT_TARGET
-    assert "compact accepted" in capsys.readouterr().out
+    assert seen["url"] == "http://gw:8000/api/agents/7/compact"
+    assert "compact requested: inbound 31" in capsys.readouterr().out
 
 
 def test_agents_compact_parser_dispatches() -> None:

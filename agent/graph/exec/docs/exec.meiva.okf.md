@@ -53,7 +53,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a di
 
 ## Notes
 
-- Hosted force and exec cleanup: [[hosted-quiescence.meiva.okf.md]].
+- Hosted turn cancel and exec cleanup: [[hosted-turn-cancel.meiva.okf.md]].
 - Process bootstrap ownership: [[bootstrap.meiva.okf.md]].
 - Long-running operations should not go through `execute_code`: one-time long commands use `meiva.shell.run_background` (auto-reports on completion), interactive/long-lived processes use `meiva.shell.sessions` persistent sessions
 

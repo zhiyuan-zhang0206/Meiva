@@ -10,7 +10,7 @@ Read failures propagate: a failed read must never degrade into a wake the
 policy forbids.
 """
 
-from base.agents.incarnation.lifecycle_acceptance import is_system_notice_source
+from base.agents.incarnation.lifecycle_commands import is_system_notice_source
 from base.api_contracts.agent_contract import AgentNotFound
 from base.db import Database
 

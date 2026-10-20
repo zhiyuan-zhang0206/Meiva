@@ -15,6 +15,7 @@ from base.api_contracts.agent_contract import AgentLaunchFailed as AgentLaunchFa
 from base.api_contracts.agent_contract import AgentNotFound as AgentNotFound
 from base.api_contracts.agent_contract import (
     AgentStatus,
+    CancelResult,
     Harness,
     RestartResult,
     ResurrectResult,
@@ -46,13 +47,11 @@ from meiva.agents import peers
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 
-from . import compaction as compaction
-from . import work as work
-
 __all_for_meiva__ = [
     "AgentDirectoryPage",
     "AgentRow",
     "AgentStatus",
+    "CancelResult",
     "CommandInfo",
     "Harness",
     "HarnessAvailability",
@@ -66,8 +65,9 @@ __all_for_meiva__ = [
     "ShellSessionsKill",
     "TerminateOutcome",
     "TerminateResult",
+    "cancel",
     "commands",
-    "compaction",
+    "compact",
     "get_ancestors",
     "get_last_message",
     "get_launch_attempt",
@@ -82,7 +82,6 @@ __all_for_meiva__ = [
     "send_message",
     "spawn",
     "terminate",
-    "work",
 ]
 
 
@@ -634,6 +633,24 @@ def restart(agent_id: int) -> RestartResult:
     process under the same id."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     return RestartResult(gateway_client.restart(agent_id))
+
+
+def cancel(agent_id: int) -> CancelResult:
+    """Cancel the agent's running turn; the agent stays alive and idles.
+
+    `cancelled` means a running turn was cancelled, `not_running` that there
+    was none. The next input starts a fresh turn."""
+    agent_id = coerce_typed(agent_id, "agent_id", int)
+    return CancelResult(gateway_client.cancel(agent_id))
+
+
+def compact(agent_id: int) -> None:
+    """Queue a compaction of the agent's history for its next turn.
+
+    Returns once the request is durable; the summary is generated and applied
+    by the agent itself, and no result is reported back."""
+    agent_id = coerce_typed(agent_id, "agent_id", int)
+    gateway_client.compact(agent_id)
 
 
 def resurrect(agent_id: int, prompt: str) -> ResurrectResult:

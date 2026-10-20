@@ -234,9 +234,9 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     command = insert_inbound_message(
         db_conn, aid, "", "self", kind="terminate", bus=event_bus, database=database
     )
-    assert [
-        item.id for item in await claim_inbound_batch(aops_pool, aid, incarnation=old, work=None)
-    ] == [command]
+    assert [item.id for item in await claim_inbound_batch(aops_pool, aid, incarnation=old)] == [
+        command
+    ]
     assert (
         await apply_hosted_lifecycle(
             aops_pool,
@@ -266,10 +266,9 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     )
     assert successor is not None and successor.generation != old.generation
     with pytest.raises(RuntimeOwnershipLostError):
-        await claim_inbound_batch(aops_pool, aid, incarnation=old, work=None)
+        await claim_inbound_batch(aops_pool, aid, incarnation=old)
     assert {
-        item.kind
-        for item in await claim_inbound_batch(aops_pool, aid, incarnation=successor, work=None)
+        item.kind for item in await claim_inbound_batch(aops_pool, aid, incarnation=successor)
     } == {
         "chat",
         "resurrect",

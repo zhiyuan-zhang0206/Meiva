@@ -1,26 +1,17 @@
-"""The owned invocation context: event lifecycle, compact continuation, then ordinary work."""
+# meiva:note
+# The owned invocation context: the event publisher's lifecycle around one hosted turn.
 
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from psycopg_pool import AsyncConnectionPool
-
 from base.agents.context import MeivaContext
-from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph
-from services.agent_runner.agent_host.invocation.compact.execute import run_compact
-from services.agent_runner.agent_host.invocation.compact.lifecycle import settle_original_restart
 from services.agent_runner.agent_host.runtime import TurnOutcome
 
 
 async def drive_context(
-    pool: AsyncConnectionPool,
-    saver: AsyncPostgresSaver,
-    graph: CompactGraph,
     agent_id: int,
     ctx: MeivaContext,
     invoke: Callable[[int, MeivaContext], Awaitable[TurnOutcome]],
-    drop_agent: Callable[[int], None],
 ) -> TurnOutcome:
     """The publisher and explicit context belong to this invocation, not a cached runtime."""
     publisher = ctx.event_publisher
@@ -31,7 +22,7 @@ async def drive_context(
         async with asyncio.TaskGroup() as tasks:
             await publisher.start(tasks)
             try:
-                outcome = await _drive_work(pool, saver, graph, agent_id, ctx, invoke, drop_agent)
+                outcome = await invoke(agent_id, ctx)
             except BaseException as primary:
                 invocation_error = primary
                 try:
@@ -59,35 +50,3 @@ async def drive_context(
         ):
             raise invocation_error from None
         raise
-
-
-async def _drive_work(
-    pool: AsyncConnectionPool,
-    saver: AsyncPostgresSaver,
-    graph: CompactGraph,
-    agent_id: int,
-    ctx: MeivaContext,
-    invoke: Callable[[int, MeivaContext], Awaitable[TurnOutcome]],
-    drop_agent: Callable[[int], None],
-) -> TurnOutcome:
-    """Run compact continuation and ordinary work in the admitted context."""
-    incarnation = ctx.require_original_incarnation(agent_id)
-    if not await run_compact(
-        pool,
-        saver,
-        graph,
-        incarnation,
-        ctx,
-    ):
-        return TurnOutcome(exited=False, crashed=False, native_held=True)
-    restarted = await settle_original_restart(
-        pool,
-        ctx.require_bus(),
-        agent_id,
-        incarnation.owner,
-        drop_agent,
-        incarnation=incarnation,
-    )
-    if restarted:
-        return TurnOutcome(exited=False, crashed=False)
-    return await invoke(agent_id, ctx)

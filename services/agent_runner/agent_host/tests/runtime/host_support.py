@@ -15,8 +15,6 @@ from pydantic import BaseModel, ConfigDict, Field
 import services.agent_runner.agent_host.host as agent_host_host
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.context import MeivaContext
-from base.agents.incarnation import hosted_force
-from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -98,40 +96,8 @@ class _FakeConn:
             return _FakeCursor(None)
         if sql == "SELECT id FROM agents_meta WHERE id=%s FOR UPDATE":
             return _FakeCursor((params[0],) if params[0] in self._pool.rows else None)
-        if sql == (
-            "SELECT i.id FROM agents_meta m JOIN inbound_messages i "
-            "ON i.id=m.lifecycle_command_id WHERE m.id=%s "
-            "AND m.runtime_generation=%s AND m.runtime_owner=%s "
-            "AND i.agent_id=m.id AND i.target_generation=%s AND i.target_owner=%s "
-            "AND i.kind IN ('restart','terminate') AND i.status='claimed' "
-            "AND i.applied_at IS NULL"
-        ):
-            # Legacy graph-return cases carry one synthetic claimed command.
-            return _FakeCursor((params[0],) if params[0] in self._pool.rows else None)
-        if sql == (
-            "SELECT 1 FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant owner SQL
-            "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
-            "WHERE m.id=%s AND i.id=%s AND i.kind='restart' "
-            "AND i.status='claimed' AND i.applied_at IS NOT NULL "
-            "AND i.target_owner=%s "
-            "AND i.observed_at IS NULL AND m.runtime_owner IS NULL "
-            f"AND {DRAINED_RESOURCES}"
-        ):
+        if sql.startswith("SELECT 1 FROM agents_meta m JOIN inbound_messages i"):
             # A failed orchestration turn has no certified maintenance receipt.
-            return _FakeCursor(None)
-        compact_pending = (
-            "SELECT acceptance,outcome,attempt_id,execution,result,attempt_provider "
-            "FROM native_compact_commands WHERE agent_id=%s AND released_at IS NULL"
-        )
-        compact_closed = (
-            "SELECT c.acceptance,c.outcome,c.attempt_id,c.execution,c.result,c.attempt_provider "
-            "FROM native_compact_commands c JOIN agents_meta m ON m.id=c.agent_id "
-            "JOIN native_graph_work w ON w.id=m.native_work_id "
-            "WHERE m.id=%s AND c.execution->>'work_id'=w.id::text "
-            "AND c.released_at IS NOT NULL AND w.phase='settled' AND w.ended_at IS NOT NULL"
-        )
-        if sql in (compact_pending, compact_pending + " FOR UPDATE", compact_closed):
-            # These orchestration agents have no guarded compact command.
             return _FakeCursor(None)
         if sql == (
             "SELECT machine, status, harness, config_overlay, birth_config "
@@ -318,7 +284,6 @@ def stub_host_transitions(
 ) -> list[int]:
     import services.agent_runner.agent_host.host as host_mod
     from base.native_process.runtime_incarnation import RuntimeIncarnation
-    from services.agent_runner.agent_host.invocation import native_work
 
     stamps: list[int] = []
 
@@ -344,11 +309,6 @@ def stub_host_transitions(
         return TurnSettlement(stamp=TurnFatalStamp(applied=crashed), settled=not exited)
 
     monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
-    # These orchestration fixtures expose no managed native-work capability.
-    # Strong command/checkpoint/transfer facts use actual PG tests in native_cancel/.
-    monkeypatch.setattr(host_mod, "recover_native_cancel", AsyncMock(return_value=True))
-    monkeypatch.setattr(native_work, "prepare_native_invocation", AsyncMock(return_value=None))
-    monkeypatch.setattr(native_work, "settle_checkpoint", AsyncMock(return_value=False))
     monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
     return stamps
 
@@ -423,13 +383,6 @@ def wired(
 
     monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", _apply_lifecycle)
     monkeypatch.setattr(invocation, "apply_hosted_lifecycle", _apply_lifecycle)
-
-    async def _no_force(*_args: object, **_kwargs: object) -> bool:
-        # These cache/context fixtures carry no force command. Real owner/pointer
-        # settlement and refusal are covered by test_hosted_force_quiescence.
-        return False
-
-    monkeypatch.setattr(hosted_force, "original_host_force", _no_force)
 
     machine_identity.set(name="this-box")
 

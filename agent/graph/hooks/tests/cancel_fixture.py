@@ -6,8 +6,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.hooks import compact
 from agent.graph.interrupt import InterruptEvent
-from base.agents.incarnation.native_work_models import NativeWorkTarget
-from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 
 
@@ -18,8 +16,6 @@ def install_cancel_event(monkeypatch: pytest.MonkeyPatch, event: InterruptEvent)
         _pool: AsyncConnectionPool | None,
         _agent_id: int,
         *,
-        incarnation: RuntimeIncarnation | None,
-        work: NativeWorkTarget | None,
         resources: HostedTurnResources | None,
     ) -> AsyncGenerator[InterruptEvent]:
         yield event

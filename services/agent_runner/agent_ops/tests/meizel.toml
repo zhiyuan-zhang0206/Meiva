@@ -4,7 +4,6 @@ exports = ["child_graceful_stop.py"]
 "daemon" = ["child_daemon_exit.py", "child_graceful_stop.py", "test_daemon.py"]
 "test_daemon_part2.py" = ["child_daemon_exit.py"]
 "test_dispatch_lifecycle.py" = ["test_daemon.py"]
-"test_native_restart.py" = ["test_request_identity.py"]
 
 [debt.first-party-patch]
 "child_daemon_exit.py#assignment services.agent_runner.agent_ops.daemon.init_gateway_process" = 1
@@ -43,7 +42,6 @@ exports = ["child_graceful_stop.py"]
 "test_daemon_status.py#monkeypatch.setattr ops.cluster.operations.cluster_status_op" = 2
 "test_daemon_status.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon._dispatch" = 1
 "test_dispatch_lifecycle.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon.lifecycle.lifecycle_op" = 5
-"test_native_restart.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon._dispatch" = 1
 "test_op_status.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon.DEDUP_WAIT_ATTEMPTS" = 1
 "test_op_status.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon._sleep" = 1
 "test_operations_config_agent_ops.py#monkeypatch.setattr ops.host_config.config_read_op" = 1

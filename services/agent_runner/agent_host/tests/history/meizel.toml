@@ -1,8 +1,5 @@
 exports = ["test_hosted_compact_failure.py"]
 
-[uses]
-"compaction" = ["test_hosted_compact_failure.py"]
-
 [debt.first-party-patch]
 "test_checkpoint_parent_guard.py#monkeypatch.setattr base.config.settings.agent.checkpoint_interval" = 2
 "test_hosted_checkpoint_diagnostics.py#monkeypatch.setattr base.config.settings.agent.checkpoint_interval" = 1

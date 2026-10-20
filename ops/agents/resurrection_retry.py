@@ -26,14 +26,35 @@ from ops.rpc_schemas import OpFailure
 _REMOTE_REFUSAL = f"{ResurrectRefused.__name__}: "
 
 
-class ResurrectSettlementDeferredError(ResurrectError):
-    """The original hosted lifecycle command has not yet settled."""
+# meiva:note
+# Recorded exec resources of the retained identity remain unresolved.
+class ResurrectSettlementDeferredError(ResurrectError): ...
 
 
 class ResurrectTriggerStaleError(ResurrectError):
     """The exact pending wake no longer qualifies; the local op returns a no-op."""
 
 
+# meiva:note
+# Require retained hosted authority, proven non-admission or an unowned end.
+#
+#     Release a retained hosted identity only after its exec set is closed;
+#     otherwise recovery must retain that identity to discharge its receipts. Every other
+#     accepted row has all runtime identity fields empty and resurrects as a
+#     fresh hosted birth, returned as None, in two cases:
+#
+#     - the runtime never admitted it: the fresh-INSERT birth marker is still
+#       unconsumed, so no predecessor allocation exists;
+#     - `unowned_termination` names this life's force receipt
+#       (`base.agents.incarnation.lifecycle_commands.record_unowned_termination`): this runtime
+#       ended the row while no incarnation owned it, and its own lifecycle had
+#       left it unowned. Resurrection restores the state that force ended;
+#       admission still decides the successor.
+#
+#     NULL resources are unknown, not proof of either. Historical process/unknown
+#     rows, incomplete identities, unowned rows without a receipt (including
+#     legacy ones this runtime ended) and resources the current model cannot
+#     decode need explicit cutover reconciliation.
 def hosted_resurrection_target(
     agent_id: int,
     *,
@@ -44,26 +65,6 @@ def hosted_resurrection_target(
     resources: object,
     unowned_termination: int | None,
 ) -> RuntimeIncarnation | None:
-    """Require retained hosted authority, proven non-admission or an unowned end.
-
-    Release a retained hosted identity only after its exec set is closed;
-    otherwise recovery must retain that identity to discharge its receipts. Every other
-    accepted row has all runtime identity fields empty and resurrects as a
-    fresh hosted birth, returned as None, in two cases:
-
-    - the runtime never admitted it: the fresh-INSERT birth marker is still
-      unconsumed, so no predecessor allocation exists;
-    - `unowned_termination` names this life's force receipt
-      (`base.agents.incarnation.lifecycle_acceptance.record_unowned_termination`): this runtime
-      ended the row while no incarnation owned it, and its own lifecycle had
-      left it unowned. Resurrection restores the state that force ended;
-      admission still decides the successor.
-
-    NULL resources are unknown, not proof of either. Historical process/unknown
-    rows, incomplete identities, unowned rows without a receipt (including
-    legacy ones this runtime ended) and resources the current model cannot
-    decode need explicit cutover reconciliation.
-    """
     try:
         state = None if resources is None else decode_resources(resources)
     except ResourceShapeError:

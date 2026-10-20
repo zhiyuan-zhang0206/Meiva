@@ -7,8 +7,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
-from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
-from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
+from agent.ownership.tests.ownership_support import admit_owner, agent_row, insert_lifecycle_command
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS, Database
 from base.db.code_version_gate import ProcessDbGate
@@ -16,11 +15,11 @@ from base.events.live.bus import EventBus
 from ops.lifecycle.termination import force_terminate_transaction
 
 
-@pytest.mark.parametrize("applied", [False, True])
+@pytest.mark.parametrize("executed", [False, True])
 async def test_hosted_force_cannot_be_undone_by_prior_restart(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    applied: bool,
+    executed: bool,
     database: Database,
     event_bus: EventBus,
     *,
@@ -29,8 +28,8 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     first = insert_lifecycle_command(db_conn, agent_id, "restart")
-    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
-    if applied:
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
+    if executed:
         assert (
             await apply_hosted_lifecycle(
                 aops_pool,
@@ -61,13 +60,12 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
         is None
     )
     assert db_conn.execute(
-        "SELECT status,applied_at IS NOT NULL,observed_at,payload->'lifecycle_result'->>'reason' "
-        "FROM inbound_messages WHERE id=%s",
+        "SELECT status,payload->'lifecycle_result'->>'reason' FROM inbound_messages WHERE id=%s",
         (first,),
-    ).fetchone() == ("done", applied, None, "force_terminate")
+    ).fetchone() == ("done", None if executed else "force_terminate")
     assert db_conn.execute(
         "SELECT id,status FROM inbound_messages WHERE id IN (%s,%s) ORDER BY id", (force, later)
-    ).fetchall() == [(force, "pending" if applied else "claimed"), (later, "pending")]
+    ).fetchall() == [(force, "done"), (later, "pending")]
     assert db_conn.execute(
-        "SELECT status,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == ("terminated", None if applied else force)
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("terminated",)

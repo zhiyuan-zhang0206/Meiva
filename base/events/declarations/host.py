@@ -78,12 +78,6 @@ class ImpersonationEventLogIncomplete(TypedDict):
 
 
 EVENTS: dict[str, EventSpec] = {
-    "native_compact_proof_gap": telemetry_event(
-        "native_compact_proof_gap",
-        "the actual serialized host could not establish compact source or uncertainty closure; "
-        "pending intent remains held, carrying agent_id and bounded error_type without payload",
-        tier="anomaly",
-    ),
     "impersonation_event_log_incomplete": telemetry_event(
         "impersonation_event_log_incomplete",
         "an impersonation event log cannot complete on its own (ended lease with an "
@@ -392,28 +386,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=PauseOrphanClaimSettled,
         tier="anomaly",
         site="base/deploy/maintenance/cohort.py:_emit_orphan_settlements",
-    ),
-    # The force-termination quiet close (task #4180): an externally commanded
-    # force terminate (delivery-watchdog wedge recovery / CLI force / machine
-    # pause) of the turn's own incarnation stops through the classification
-    # instead of the crash path — the applied command awaits its observation
-    # by the pump's own boundary; no corpse marker, no error event, no
-    # failure receipt.
-    "host_turn_force_terminated": telemetry_event(
-        "host_turn_force_terminated",
-        "this hosted turn ended on its own incarnation's applied force terminate "
-        "(e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate "
-        "command was applied but not yet observed, the turn's fail-closed guard "
-        "read refused, and the pump's own boundary observes the command; not a "
-        "failure",
-        tier="observation",
-    ),
-    "host_held_wake_force_terminated": telemetry_event(
-        "host_held_wake_force_terminated",
-        "a held-controls wake stopped quietly because its incarnation's applied "
-        "force terminate landed — the pump's boundary owns the command's "
-        "observation, so the wake had nothing left to do; not a failure",
-        tier="observation",
     ),
     "brew_pin": telemetry_event(
         "brew_pin",

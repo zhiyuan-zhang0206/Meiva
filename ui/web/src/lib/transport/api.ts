@@ -26,14 +26,12 @@ import type { ToUserDocument, NoticesFeed,
   AlertsResponse,
   AlertsWindow,
   ResolveNoticeIn,
-  NativeWorkTarget,
-  NativeCancelAcceptance,
   RetryLaunchAccepted,
   ClusterStatus,
   CommandItem,
   ContentBlock,
-  CompactTarget,
-  CompactAcceptance,
+  CancelAgentResponse,
+  CompactAgentResponse,
   ConfigView,
   ConfigWriteResult,
   WireFleetGraph,
@@ -472,19 +470,11 @@ export const api = {
     ).then(ok<{ status: string }>);
   },
 
-  observeCompact: (agentId: number): Promise<CompactTarget> =>
-    f(`/api/keyed/v1/agents/${agentId}/compact-target`).then(ok<CompactTarget>),
+  compact: (agentId: number): Promise<CompactAgentResponse> =>
+    f(`/api/agents/${agentId}/compact`, POST).then(ok<CompactAgentResponse>),
 
-  compact: (target: CompactTarget, operationKey: string): Promise<CompactAcceptance> =>
-    f(`/api/keyed/v1/agents/${target.source.agent_id}/compact-history`, keyedJson(target, operationKey))
-      .then(ok<CompactAcceptance>),
-
-  observeWork: (agentId: number): Promise<NativeWorkTarget> =>
-    f(`/api/keyed/v1/agents/${agentId}/native-work`).then(ok<NativeWorkTarget>),
-
-  cancel: (target: NativeWorkTarget, operationKey: string): Promise<NativeCancelAcceptance> =>
-    f(`/api/keyed/v1/agents/${target.agent_id}/cancel-work`, keyedJson(target, operationKey))
-      .then(ok<NativeCancelAcceptance>),
+  cancel: (agentId: number): Promise<CancelAgentResponse> =>
+    f(`/api/agents/${agentId}/cancel`, POST).then(ok<CancelAgentResponse>),
 
   getAgentRoster: (signal?: AbortSignal): Promise<AgentRoster> =>
     f("/api/agents/roster", { signal }).then(ok<WireAgentRoster>).then((roster) => ({

@@ -21,7 +21,6 @@
 "test_rejected_model_config.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.boot_agent_scope" = 2
 "test_rejected_model_config.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 4
 "test_rejected_model_config.py#monkeypatch.setattr services.agent_runner.agent_host.settlement.reconcile_inbounds_after_turn" = 1
-"test_run_turn_task_owner.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.source.finish_force_and_compact" = 2
 
 [debt.stdlib-patch]
 "child_runtime_scenarios.py#assignment os.open" = 2

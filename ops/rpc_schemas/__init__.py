@@ -17,6 +17,7 @@ from base.agents.messages.envelope import validate_source
 from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
 from base.api_contracts.agent_contract import (
+    CancelResult,
     Harness,
     HarnessStatus,
     RestartResult,
@@ -241,6 +242,24 @@ class RestartAgentResponse(BaseModel):
     """
 
     status: RestartResult
+
+
+# meiva:note
+# POST /api/agents/{id}/compact response: the durable `compact_request` inbound.
+#
+#     The request is queued, not applied; the agent summarizes at its next turn.
+class CompactAgentResponse(BaseModel):
+    inbound_id: int
+
+
+# meiva:note
+# POST /api/agents/{id}/cancel response.
+#
+#     `cancelled`: the agent's running turn was cancelled; the agent stays alive,
+#         idles, and takes its next input as a fresh turn.
+#     `not_running`: no turn was running, so there was nothing to cancel.
+class CancelAgentResponse(BaseModel):
+    status: CancelResult
 
 
 class ResurrectAgentResponse(BaseModel):

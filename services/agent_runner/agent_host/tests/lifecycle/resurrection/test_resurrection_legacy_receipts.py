@@ -201,7 +201,8 @@ def test_an_unowned_end_without_this_lifes_receipt_still_refuses(
     )
     receipts = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='terminate' "
-        "AND id > COALESCE((SELECT last_resurrect_inbound_id FROM agents_meta WHERE id=%s), 0) "
+        "AND id > COALESCE((SELECT max(id) FROM inbound_messages WHERE agent_id=%s "
+        "AND kind='resurrect'), 0) "
         "AND payload ? 'unowned_termination'",
         (aid, aid),
     ).fetchone()

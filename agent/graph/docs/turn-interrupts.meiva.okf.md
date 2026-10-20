@@ -7,17 +7,17 @@ tags: []
 
 # Interrupting a turn: cancel and terminate
 
-Public cancel uses the dedicated native command tied to one observed graph
-work UUID, not the generic inbound queue. The two-second interrupt watcher
-checks that exact work's command; claim preserves co-queued chat, and the host
-settles the command only after committed halt/checkpoint and resource-closure
-proof. See [[base/agents/incarnation/docs/native-work-cancel.meiva.okf.md]].
+Public cancel (`POST /api/agents/{id}/cancel`) is not an inbound: it asks the
+home host to cancel the running turn Task, so the in-flight node is cancelled
+where it awaits and the turn ends without a claim pass. The agent stays alive
+and idle and its next input starts a fresh turn. See
+[[agent/graph/exec/docs/hosted-turn-cancel.meiva.okf.md]].
 
-Terminate remains a durable inbound. The same DB poll in
-`agent/graph/interrupt.py` observes it during LLM/exec, halts and returns to
-claim; claim routes termination to `END` while cancel keeps the agent alive and
-idle. Retained native cancel envelopes follow the existing history/claim
-contract, but there is no public `/api/cancel` producer.
+Terminate remains a durable inbound. The two-second DB poll in
+`agent/graph/interrupt.py` observes a pending cancel/terminate row during
+LLM/exec, halts and returns to claim; claim routes termination to `END` while a
+`kind='cancel'` inbound keeps the agent alive and idle. No public route writes a
+`cancel` row today; the consumer remains for external controllers.
 
 A terminate **yields to a message the death decision did not see**: a chat
 co-batched with a self-initiated terminate (`meiva.self.terminate()` — the chat

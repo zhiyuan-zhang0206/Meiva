@@ -107,8 +107,6 @@ this path. Guarded generation freezes the original available model and rejects
 unavailable-model fallback. Callers must also suppress their own retry
 loops; this construction contract cannot prove exactly-once external vendor
 execution or recover a response that was lost before durable storage.
-The manual compact consumer and its proof boundary are documented in
-[[base/agents/compaction/docs/manual-compact/manual-compact.meiva.okf.md]].
 
 Known declaration violations raise their typed registration error. Unexpected
 Python errors from import, contribution, installation or final construction

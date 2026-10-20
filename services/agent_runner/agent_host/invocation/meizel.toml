@@ -1,6 +1,4 @@
-exports = ["checkpoints.py", "compact", "driver.py", "native_work.py"]
+exports = ["checkpoints.py", "driver.py"]
 
 [uses]
-"__init__.py" = ["checkpoints.py", "compact", "native_work.py"]
-"compact" = ["native_work.py"]
-"driver.py" = ["compact"]
+"__init__.py" = ["checkpoints.py"]

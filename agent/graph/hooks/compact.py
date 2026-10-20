@@ -313,8 +313,6 @@ async def auto_compact_for_llm(
         async with subscribe_interrupt(
             runtime.context.ops_pool,
             agent_id,
-            incarnation=runtime.context.original_incarnation,
-            work=runtime.context.native_work,
             resources=runtime.context.hosted_resources,
         ) as interrupted:
             summary = await interruptible_model(

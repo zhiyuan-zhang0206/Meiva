@@ -103,8 +103,8 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
         == "terminate"
     )
     assert db_conn.execute(
-        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (stop,)
-    ).fetchone() == ("done", True)
+        "SELECT status FROM inbound_messages WHERE id=%s", (stop,)
+    ).fetchone() == ("done",)
     db_conn.commit()
     insert_inbound_message(
         db_conn, tid, "are you there?", source="user", bus=event_bus, database=database

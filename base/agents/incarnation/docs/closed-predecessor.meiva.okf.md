@@ -16,19 +16,16 @@ No runtime path parses or converts it. Hosted admission records
 value, and resurrection refuses with `runtime_cutover_required`.
 
 The closed-predecessor form is the incarnation a retired value named, with no
-host identity, no freeze and an empty set; rows converted from the retired
+host identity and an empty set; rows converted from the retired
 shape carry it. Once the metadata row has released runtime ownership, the
 ordinary admission transaction replaces this empty set with its own incarnation.
-Historical lifecycle receipts are not admission credentials. A pending applied
-restart is still observed by its successor for command completion, but retaining
-that history is not required to transfer resources. A row that still has an owner
+Historical lifecycle receipts are not admission credentials. A row that still has an owner
 does not qualify merely because its resources are empty or an old receipt exists;
 same-owner continuation also requires the recorded host identity.
 
-A drained restart leaves NULL or the complete, empty, unfrozen set of exactly
-the incarnation it released (`DRAINED_RESOURCES`). The host drain receipt,
-preparation retry and drain certification accept both; any other set is not
-drained.
+A drained restart leaves NULL or a complete, empty set (`DRAINED_RESOURCES`).
+The host drain receipt, preparation retry and drain certification accept both;
+any other set is not drained.
 
 A terminated row that was never admitted resurrects as a fresh hosted birth
 only when that is proven: no runtime identity and the fresh-INSERT birth

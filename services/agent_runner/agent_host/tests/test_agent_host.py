@@ -47,8 +47,7 @@ class TestPendingInboundBackstop:
         candidates = await host.pending_inbound_wakes()
 
         assert candidates == [17, 23]
-        assert pool.params == ("this-box", host._owner)
-        assert "m.runtime_owner=%s" in pool.sql
+        assert pool.params == ("this-box",)
         assert "m.status IN ('idling','running')" in pool.sql
         assert "m.machine=%s" in pool.sql
         assert "pending.status='pending'" in pool.sql

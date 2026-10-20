@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -70,16 +70,10 @@ class _Redis:
 
 
 async def _drive(
-    monkeypatch: pytest.MonkeyPatch,
     publisher: AgentEventPublisher,
     invoke: Callable[[int, MeivaContext], Awaitable[TurnOutcome]],
 ) -> TurnOutcome:
-    monkeypatch.setattr(driver, "run_compact", AsyncMock(return_value=True))
-    monkeypatch.setattr(driver, "settle_original_restart", AsyncMock(return_value=False))
     return await driver.drive_context(
-        MagicMock(),
-        MagicMock(),
-        MagicMock(),
         42,
         MeivaContext(
             event_publisher=publisher,
@@ -87,7 +81,6 @@ async def _drive(
             original_incarnation=RuntimeIncarnation(42, uuid4(), uuid4()),
         ),
         invoke,
-        MagicMock(),
     )
 
 
@@ -119,7 +112,7 @@ async def test_unknown_worker_error_reaches_invocation_owner(
         finally:
             cancelled.set()
 
-    owner = asyncio.create_task(_drive(monkeypatch, publisher, invoke))
+    owner = asyncio.create_task(_drive(publisher, invoke))
     try:
         done, _ = await asyncio.wait({owner}, timeout=0.5)
         assert owner in done, "unknown worker failures must interrupt their owner"
@@ -147,7 +140,7 @@ async def test_invocation_failure_and_worker_cleanup_failure_are_both_visible(
         redis.release.set()
         raise primary
 
-    owner = asyncio.create_task(_drive(monkeypatch, publisher, invoke))
+    owner = asyncio.create_task(_drive(publisher, invoke))
     try:
         done, _ = await asyncio.wait({owner}, timeout=0.5)
         assert owner in done
@@ -184,7 +177,7 @@ async def test_invocation_exit_joins_worker_with_bounded_drain(
             await release.wait()
         return TurnOutcome(exited=False, crashed=False)
 
-    owner = asyncio.create_task(_drive(monkeypatch, publisher, invoke))
+    owner = asyncio.create_task(_drive(publisher, invoke))
     try:
         await redis.entered.wait()
         if cancel:
@@ -218,7 +211,7 @@ async def test_known_transport_error_recovers_without_interrupting_invocation(
         publisher.emit("second")
         return TurnOutcome(exited=False, crashed=False)
 
-    assert not (await _drive(monkeypatch, publisher, invoke)).crashed
+    assert not (await _drive(publisher, invoke)).crashed
     assert redis.attempts == 2
     assert redis.disconnects == 1
     assert publisher._task is None
@@ -241,7 +234,7 @@ async def test_parallel_invocations_keep_their_event_identity_and_queues(
         ctx.event_publisher.emit("two")
         return TurnOutcome(exited=False, crashed=False)
 
-    await asyncio.gather(*(_drive(monkeypatch, publisher, invoke) for publisher in publishers))
+    await asyncio.gather(*(_drive(publisher, invoke) for publisher in publishers))
     assert first.published == [("first", "one"), ("first", "two")]
     assert second.published == [("second", "one"), ("second", "two")]
     assert all(publisher._task is None for publisher in publishers)
@@ -259,7 +252,7 @@ async def test_invocation_failure_keeps_its_original_type_without_worker_failure
         raise primary
 
     with pytest.raises(RuntimeError) as caught:
-        await _drive(monkeypatch, publisher, invoke)
+        await _drive(publisher, invoke)
     assert caught.value is primary
     assert redis.published == [("events", "event")]
     assert publisher._task is None

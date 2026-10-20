@@ -286,17 +286,6 @@ class BootRetriesExhausted(TypedDict):
     exit_code: int
 
 
-class LifecyclePointerStuck(TypedDict):
-    """`lifecycle_pointer_stuck` payload — services/upkeep/ttl_reaper/lifecycle_fences.py.
-
-    One row per hourly scan that found stuck pointers: ``count`` agents are
-    affected, ``samples`` lists up to five of their ids.
-    """
-
-    count: int
-    samples: str
-
-
 class ScheduleVerifyFailed(TypedDict):
     """`schedule_verify_failed` payload — cli/commands/management/schedules_verify.py.
 
@@ -598,17 +587,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=ScheduleVerifyFailed,
         tier="anomaly",
         site="cli/commands/management/schedules_verify.py:_report_verify telemetry.emit",
-    ),
-    "lifecycle_pointer_stuck": telemetry_event(
-        "lifecycle_pointer_stuck",
-        "the TTL reaper's hourly scan found agents_meta.lifecycle_command_id pointing at a lifecycle "
-        "command that nothing will settle on its own: one sitting at done (an out-of-band torn write, "
-        "task #3678) or an applied force-terminate still unobserved an hour after it was applied (its "
-        "original host crashed or its machine was decommissioned). Every resurrect of the named "
-        "agent(s) defers until an operator settles the command",
-        payload=LifecyclePointerStuck,
-        tier="anomaly",
-        site="services/upkeep/ttl_reaper/lifecycle_fences.py:scan_stuck_lifecycle_pointers_blocking telemetry.emit",
     ),
     "lifecycle_request": audit_event(
         "lifecycle_request",

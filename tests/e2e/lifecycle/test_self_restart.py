@@ -15,12 +15,13 @@ from tests.e2e.fixture_environment import E2EEnv
 def _evidence(agent_id: int) -> tuple[tuple[Any, ...] | None, list[tuple[Any, ...]]]:
     with psycopg.connect(settings.data_plane.db_url) as conn:
         row = conn.execute(
-            "SELECT status,runtime_generation,lifecycle_command_id FROM agents_meta WHERE id=%s",
+            "SELECT status,runtime_generation,incarnation_resources->>'generation' "
+            "FROM agents_meta WHERE id=%s",
             (agent_id,),
         ).fetchone()
         commands = conn.execute(
-            "SELECT target_generation,status,applied_at IS NOT NULL,observed_at IS NOT NULL "
-            "FROM inbound_messages WHERE agent_id=%s AND kind='restart' AND source='self'",
+            "SELECT status FROM inbound_messages "
+            "WHERE agent_id=%s AND kind='restart' AND source='self'",
             (agent_id,),
         ).fetchall()
     return row, commands
@@ -38,9 +39,10 @@ def test_self_restart_admits_successor_and_answers_on_same_agent(e2e_env: E2EEnv
     def restart_applied() -> tuple[bool, object]:
         nonlocal original_generation
         row, commands = _evidence(agent_id)
-        reached = bool(row and row[0] == "idling" and len(commands) == 1 and commands[0][2])
+        reached = bool(row and row[0] == "idling" and commands == [("done",)] and row[1] is None)
         if reached:
-            original_generation = commands[0][0]
+            assert row is not None
+            original_generation = UUID(row[2])
         return reached, {"agent": row, "commands": commands}
 
     poll_until(
@@ -67,8 +69,7 @@ def test_self_restart_admits_successor_and_answers_on_same_agent(e2e_env: E2EEnv
             and row[0] == "idling"
             and row[1] is not None
             and row[1] != original_generation
-            and row[2] is None
-            and commands == [(original_generation, "done", True, True)]
+            and commands == [("done",)]
             and chats in ([("claimed", True)], [("done", True)])
         ):
             response = httpx.get(

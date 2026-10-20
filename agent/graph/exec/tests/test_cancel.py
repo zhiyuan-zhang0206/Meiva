@@ -120,9 +120,9 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     assert f"[cancelled by {expected}]" in message.content
     assert "external side effect already happened" in message.content
     assert db_conn.execute(
-        "SELECT status,claimed_at,applied_at,observed_at FROM inbound_messages WHERE id=%s",
+        "SELECT status,claimed_at FROM inbound_messages WHERE id=%s",
         (command[0],),
-    ).fetchone() == ("pending", None, None, None)
+    ).fetchone() == ("pending", None)
 
 
 async def test_exec_node_cancel_event_returns_cancelled_command(

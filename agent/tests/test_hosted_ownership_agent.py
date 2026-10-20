@@ -88,7 +88,7 @@ async def test_hosted_status_changes_publish_agent_updated(
         db_conn, agent_id, "", "user", "terminate", bus=event_bus, database=database
     )
     publish.reset_mock()
-    await claim_inbound_batch(aops_pool, agent_id, incarnation=incarnation, work=None)
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=incarnation)
     assert (
         await apply_hosted_lifecycle(
             aops_pool,
@@ -114,7 +114,7 @@ async def test_hosted_restart_releases_before_new_incarnation(
     insert_inbound_message(
         db_conn, agent_id, "", "user", "restart", bus=event_bus, database=database
     )
-    await claim_inbound_batch(aops_pool, agent_id, incarnation=first, work=None)
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=first)
     assert (
         await apply_hosted_lifecycle(
             aops_pool,

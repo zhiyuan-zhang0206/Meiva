@@ -364,6 +364,22 @@ def restart(agent_id: int, *, source: str | None = None) -> str:
     return resp.json()["status"]
 
 
+# meiva:note
+# POST /api/agents/{id}/cancel → status string (`cancelled` / `not_running`).
+def cancel(agent_id: int) -> str:
+    resp = _transport.post(f"/api/agents/{agent_id}/cancel", {}, context=_ctx(None))
+    _transport.raise_from_response(resp)
+    return resp.json()["status"]
+
+
+# meiva:note
+# POST /api/agents/{id}/compact → the queued `compact_request` inbound id.
+def compact(agent_id: int) -> int:
+    resp = _transport.post(f"/api/agents/{agent_id}/compact", {}, context=_ctx(None))
+    _transport.raise_from_response(resp)
+    return resp.json()["inbound_id"]
+
+
 def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) -> str:
     """POST /api/agents/{id}/resurrect -> status string.
 

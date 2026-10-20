@@ -5,5 +5,5 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "exec_domain.py" = ["process_control.py"]
 "ownership.py" = ["__init__.py", "pidfd.py"]
 "root_control" = ["ownership.py"]
-"tests" = ["__init__.py", "child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "loaded_commit.py", "os_platform.py", "ownership.py", "pidfd.py", "process_control.py", "runtime_incarnation.py", "turn_identity.py"]
+"tests" = ["__init__.py", "child_env.py", "code_version.py", "evidence.py", "loaded_commit.py", "os_platform.py", "ownership.py", "pidfd.py", "process_control.py", "runtime_incarnation.py", "turn_identity.py"]
 "turn_identity.py" = ["stop_timing.py"]

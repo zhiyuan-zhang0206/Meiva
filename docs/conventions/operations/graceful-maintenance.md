@@ -120,7 +120,7 @@ read the existing local journal and finish without fetching an offline
 gateway. An incomplete, corrupt or failed journal does not enable this
 exception; the first normal drain needs the actual cluster configuration.
 
-Cold native admission consumes the saved lifecycle pointers and checkpoints.
+Cold native admission consumes the saved checkpoints.
 Idle agents remain idle; pending work can continue; terminated agents remain
 terminated. Successful drain preserves completed tool results. No lifecycle
 command can guarantee exactly-once external effects if a process crashes after

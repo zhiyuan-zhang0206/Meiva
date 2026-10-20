@@ -1,23 +1,19 @@
 ---
 type: doc
 title: Guarded lifecycle write surfaces
-description: Required keys and observed targets for native lifecycle commands.
+description: Required keys and observed targets for the keyed launch retry.
 tags: [gateway, idempotency]
 ---
 
 # Guarded lifecycle writes
 
-These routes require principal-v1 credential scope and a caller key. Retired
-unversioned cancel, compact and retry-launch ingress has no fallback.
+This route requires principal-v1 credential scope and a caller key. Retired
+unversioned retry-launch ingress has no fallback. Cancel and compact are plain
+unkeyed requests ([[gateway/agents/docs/control-acceptance.meiva.okf.md]]).
 
 | Method and route | Retry policy | Effect / evidence |
 |---|---|---|
 | `POST /api/keyed/v1/agents/{agent_id}/retry-launch` | keyed | required principal-scoped key and observed prior attempt fix one new launch identity |
-| `POST /api/keyed/v1/agents/{agent_id}/cancel-work` | keyed | required principal-scoped key and exact observed native work target |
-| `POST /api/keyed/v1/agents/{agent_id}/compact-history` | keyed | required principal-scoped key and exact observed closed history target |
-| `POST /api/keyed/v1/agents/{agent_id}/compact-history` | keyed | [[base/agents/compaction/docs/manual-compact/manual-compact.meiva.okf.md|guarded manual compact owner]] |
 
-Acceptance is historical command identity; native status establishes application.
-Same-intent recovery retains the original key and target. Current consumers:
-[[gateway/agents/docs/control-acceptance.meiva.okf.md]] and
+Same-intent recovery retains the original key and target. Current consumer:
 [[gateway/agents/docs/launch-retry.meiva.okf.md]].

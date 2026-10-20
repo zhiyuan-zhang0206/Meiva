@@ -26,22 +26,6 @@ class RouteContract:
 
 
 ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
-    ("GET", "/api/keyed/v1/agents/{agent_id}/compact-target"): RouteContract(),
-    ("GET", "/api/keyed/v1/agents/{agent_id}/compact-commands/{command_id}"): RouteContract(),
-    ("POST", "/api/keyed/v1/agents/{agent_id}/compact-history"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="original source receipt; durable prepared result and cold application proof are separate",
-    ),
-    ("GET", "/api/keyed/v1/agents/{agent_id}/native-work"): RouteContract(),
-    ("GET", "/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}"): RouteContract(),
-    ("POST", "/api/keyed/v1/agents/{agent_id}/restart-work"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="original ACTIVE restart acceptance and exact lifecycle execution proof",
-    ),
-    ("POST", "/api/keyed/v1/agents/{agent_id}/cancel-work"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="original managed work receipt and checkpoint/resource execution proof",
-    ),
     ("PATCH", "/api/agents/{agent_id}"): RouteContract(note="label patch — CAS update"),
     ("GET", "/api/models"): RouteContract(),
     ("GET", "/api/agents"): RouteContract(note="bounded agent directory page"),
@@ -220,6 +204,13 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/restart"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         note="a repeat dispatches another restart; HTTP intent has no durable receipt",
+    ),
+    ("POST", "/api/agents/{agent_id}/cancel"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="a repeat cancels whatever turn is running then; the HTTP intent names no turn",
+    ),
+    ("POST", "/api/agents/{agent_id}/compact"): RouteContract(
+        Idempotency.NON_IDEMPOTENT, note="a repeat queues another compact request"
     ),
     ("GET", "/api/agents/{agent_id}/sessions"): RouteContract(
         note="read-only: the agent's sessions with their understanding coverage and build estimate"

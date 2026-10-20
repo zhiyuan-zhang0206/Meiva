@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from dataclasses import replace
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import httpx
@@ -137,6 +137,12 @@ class TestAgentsEntries:
         [
             pytest.param(lambda: agents.terminate(("7",)), "agent_id must be int", id="terminate"),  # pyright: ignore[reportArgumentType]
             pytest.param(lambda: agents.restart(("7",)), "agent_id must be int", id="restart"),  # pyright: ignore[reportArgumentType]
+            pytest.param(
+                lambda: agents.cancel(cast(Any, ("7",))), "agent_id must be int", id="cancel"
+            ),
+            pytest.param(
+                lambda: agents.compact(cast(Any, ("7",))), "agent_id must be int", id="compact"
+            ),
             pytest.param(
                 lambda: agents.get_status(("7",)),  # pyright: ignore[reportArgumentType]
                 "agent_id must be int",

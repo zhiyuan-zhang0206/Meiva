@@ -6,19 +6,17 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from psycopg_pool import ConnectionPool
 
+from agent.ownership.hosted_cleanup import release_browser_pages
 from base.agents.inbox.insert import insert_inbound_message
-from base.agents.incarnation.native_restart_models import (
-    NativeRestartAccepted,
-    NativeRestartOperation,
-    NativeRestartRefused,
-)
 from base.agents.messages.inbound import WakeTriggerKind
 from base.api_contracts.agent_contract import (
     AgentStatus,
+    CancelResult,
     InvalidModelConfig,
     MachinePaused,
     RestartResult,
@@ -95,6 +93,7 @@ from ops.lifecycle.termination import (
     publish_force_terminate_inbound as publish_force_terminate_inbound,
 )
 from ops.rpc_schemas import (
+    CancelAgentResponse,
     RestartAgentRequest,
     RestartAgentResponse,
     ResurrectAgentRequest,
@@ -107,6 +106,17 @@ from ops.rpc_schemas.terminate import ShellSessionsKill
 _log = logging.getLogger(__name__)
 
 
+# meiva:note
+# Local-target graceful or force terminate. Caller handles cross-machine.
+#
+#     `body.kill_all_shell_sessions` also kills the agent's shell sessions on
+#     this, its home machine (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md).
+#     A force terminate kills them right after its row commits, and so does a
+#     terminate that finds the agent already terminated. A graceful terminate of
+#     a live agent only records the request on its terminate command: the home
+#     runtime attempts older sessions after the termination commits, after the
+#     agent's last step (`agent.ownership.hosted.apply_hosted_lifecycle`). The
+#     response's `shell_sessions` reports which of the two happened.
 async def terminate_agent_op(
     db: Database,
     bus: EventBus,
@@ -114,23 +124,12 @@ async def terminate_agent_op(
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
 ) -> TerminateAgentResponse:
-    """Local-target graceful or force terminate. Caller handles cross-machine.
-
-    `body.kill_all_shell_sessions` also kills the agent's shell sessions on
-    this, its home machine (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md).
-    A force terminate kills them right after its fence commits, and so does a
-    terminate that finds the agent already terminated. A graceful terminate of
-    a live agent only records the request on its terminate command: the home
-    runtime attempts older sessions after the termination commits, after the
-    agent's last step (`agent.ownership.hosted.apply_hosted_lifecycle`). The
-    response's `shell_sessions` reports which of the two happened.
-
-    """
     if body.force:
-        _old_status, pid, killed_page_names, command_id, cutoff = await asyncio.to_thread(
+        _old_status, pid, killed_page_names, _command_id, cutoff = await asyncio.to_thread(
             terminate_force_blocking, db, bus, agent_id, body, db_pool
         )
-        await cancel_hosted_turn_best_effort(agent_id, command_id)
+        await cancel_hosted_turn_best_effort(agent_id)
+        await release_browser_pages(agent_id)
         for page_name in killed_page_names:
             await publish_page_closed(bus, agent_id, page_name)
         _log.info(
@@ -139,7 +138,8 @@ async def terminate_agent_op(
             body.source,
             pid,
         )
-        # Neither HTTP delivery nor Task.cancel proves resource quiescence.
+        # meiva:note
+        # The row is terminated; cancelling the running turn is best effort.
         return TerminateAgentResponse(
             status=TerminateResult.ENQUEUED,
             shell_sessions=await _kill_shell_sessions_now(
@@ -193,33 +193,60 @@ async def _kill_shell_sessions_now(
     return ShellSessionsKill(when=ShellSessionKillTiming.NOW, killed=killed)
 
 
-async def cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> None:
-    """Accelerate a hosted force-terminate by cancelling the agent's turn task.
-
-    Dials the local agent-host's loopback health port (`POST /cancel-turn`);
-    the host cancels the turn with its bounded unwind and reports a
-    C-call-blocked straggler instead of hanging. A transport or HTTP-status failure
-    is logged at WARNING with the exception and swallowed. The durable force pointer stays unobserved until
-    the original host actually settles; a dead host is not child-exit proof.
-    """
+# meiva:note
+# Cancel the agent's running turn on this machine's agent host.
+#
+#     Dials the local agent-host's loopback health port (`POST /cancel-turn`);
+#     the host cancels the turn task with its bounded unwind and answers whether
+#     one was running. The agent's row is not touched.
+async def cancel_hosted_turn(agent_id: int) -> bool:
     import httpx
 
     from base.daemon.endpoints import ServiceEndpoints
 
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+        resp = await client.post(
+            f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('agent_host').health_port}/cancel-turn",
+            json={"agent_id": agent_id},
+        )
+        resp.raise_for_status()
+    return bool(resp.json()["cancelled"])
+
+
+# meiva:note
+# Accelerate a force terminate by cancelling the agent's turn task.
+#
+#     The terminated row is already committed, so a transport or HTTP-status
+#     failure is logged at WARNING with the exception and swallowed: a turn that
+#     keeps running ends at its next ownership check.
+async def cancel_hosted_turn_best_effort(agent_id: int) -> None:
+    import httpx
+
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
-            resp = await client.post(
-                f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('agent_host').health_port}/cancel-turn",
-                json={"agent_id": agent_id, "command_id": command_id},
-            )
-            resp.raise_for_status()
+        await cancel_hosted_turn(agent_id)
     except httpx.HTTPError:
         _log.warning(
-            "hosted turn-cancel call for agent %s failed (non-fatal; the durable "
-            "force command remains accepted; quiescence is not confirmed)",
+            "hosted turn-cancel call for agent %s failed (non-fatal; the agent is "
+            "terminated and its running turn ends at the next ownership check)",
             agent_id,
             exc_info=True,
         )
+
+
+# meiva:note
+# Local-target cancel of the running turn; the agent stays alive and idles.
+#
+#     `cancel` asks the home agent host to cancel the turn (`cancel_hosted_turn`).
+#     Unknown agents raise; a host that cannot be reached raises too, because the
+#     caller asked for a stop and must not be told nothing happened.
+async def cancel_agent_op(
+    db: Database, agent_id: int, *, cancel: Callable[[int], Awaitable[bool]]
+) -> CancelAgentResponse:
+    await asyncio.to_thread(get_agent_status, db, agent_id)
+    cancelled = await cancel(agent_id)
+    return CancelAgentResponse(
+        status=CancelResult.CANCELLED if cancelled else CancelResult.NOT_RUNNING
+    )
 
 
 def terminate_force_blocking(
@@ -492,10 +519,15 @@ async def restart_agent_op(
 _LIFECYCLE_PATH = re.compile(
     r"^/api/agents/(?P<id>\d+)/"
     r"(?P<action>terminate|resurrect-explicit|"
-    r"resurrect-if-pending-work|restart|restart-work)$"
+    r"resurrect-if-pending-work|restart|cancel)$"
 )
 
 
+# meiva:note
+# Dispatch terminate, restart, cancel and explicit or exact-pending-input resurrection.
+#
+#     Retired billing recovery and crash-harvest paths fail validation without effects.
+#     Unknown paths raise ValueError, which the ops server exposes as a failed result.
 async def lifecycle_op(
     db: Database,
     bus: EventBus,
@@ -506,17 +538,7 @@ async def lifecycle_op(
     catalog: ModelCatalog,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
-) -> (
-    TerminateAgentResponse
-    | ResurrectAgentResponse
-    | RestartAgentResponse
-    | NativeRestartAccepted
-    | NativeRestartRefused
-):
-    """Dispatch terminate, restart and explicit or exact-pending-input resurrection.
-
-    Retired billing recovery and crash-harvest paths fail validation without effects.
-    Unknown paths raise ValueError, which the ops server exposes as a failed result."""
+) -> TerminateAgentResponse | ResurrectAgentResponse | RestartAgentResponse | CancelAgentResponse:
     m = _LIFECYCLE_PATH.match(path)
     if m is None:
         raise ValueError(f"lifecycle path not recognized: {path!r}")
@@ -528,12 +550,8 @@ async def lifecycle_op(
         raise ValueError(
             f"trigger inbound is only valid for resurrect-if-pending-work, not {action!r}"
         )
-    if action == "restart-work":
-        from ops.lifecycle.native_restart import restart_native_work_op
-
-        return await restart_native_work_op(
-            db, bus, agent_id, NativeRestartOperation.model_validate(body), db_pool, catalog=catalog
-        )
+    if action == "cancel":
+        return await cancel_agent_op(db, agent_id, cancel=cancel_hosted_turn)
     if action == "terminate":
         return await terminate_agent_op(
             db, bus, agent_id, TerminateAgentRequest.model_validate(body), db_pool
