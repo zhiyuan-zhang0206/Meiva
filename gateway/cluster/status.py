@@ -53,8 +53,7 @@ from gateway.cluster.schemas import (
 from gateway.cluster.snapshots import Snapshot, read_all
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as cluster_rpc
-from ops.cluster_status import ClusterStatus, check_pidfile
-from ops.cluster_status.pause import is_paused as cluster_is_paused
+from ops.cluster_status import ClusterStatus, check_pidfile, serving_gate_reason
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 
 router = APIRouter()
@@ -339,6 +338,19 @@ def _status_from_snapshot(
     )
 
 
+# meiva:note
+# Probe an agent-runner now, by POSTing a `status_probe` op to its ops server.
+#
+# The machine is reached at its meiva-ops server (services/agent_runner/agent_ops), which
+# dispatches `status_probe` via `ops.cluster.operations.cluster_status_op` in-process and
+# returns the snapshot. Same path the heartbeat liveness pass uses. The local
+# machine is no special case — its ops server is dialed at its registered
+# localhost URL, keeping one uniform probe path.
+#
+# Online == the ops server responded within the timeout. Paused comes from the
+# host's own `status_probe` snapshot. Nothing is remembered: a down host
+# costs this dial its full budget every time, which is why the default read does
+# not come here.
 async def probe_agent_runner(
     identity_log: roster_probe.IdentityMismatchLog,
     name: str,
@@ -350,19 +362,6 @@ async def probe_agent_runner(
     *,
     is_staging: bool = False,
 ) -> MachineStatus:
-    """Probe an agent-runner now, by POSTing a `status_probe` op to its ops server.
-
-    The machine is reached at its meiva-ops server (services/agent_runner/agent_ops), which
-    dispatches `status_probe` via `ops.cluster.operations.cluster_status_op` in-process and
-    returns the snapshot. Same path the heartbeat liveness pass uses. The local
-    machine is no special case — its ops server is dialed at its registered
-    localhost URL, keeping one uniform probe path.
-
-    Online == the ops server responded within the timeout. Paused comes from the
-    host's local `cluster_is_paused()` snapshot. Nothing is remembered: a down host
-    costs this dial its full budget every time, which is why the default read does
-    not come here.
-    """
     row_args = (name, role, gateway_url, up_since_at, description, stopped_at)
     if gateway_url is None:
         # The roster row is the address authority for this fan-out. Do not let
@@ -412,6 +411,11 @@ def _local_resource_sample() -> ResourceSample | None:
         return None
 
 
+# meiva:note
+# Sync lightweight row for a local machine without the agent-runner
+# capability (pure gateway) — via to_thread: the serving gate (file read),
+# prod-source HEAD (git rev-parse subprocess), the frozen process commit and
+# the psutil resource snapshot must not run on the event loop.
 def _local_machine_status_blocking(
     db: Database,
     name: str,
@@ -423,13 +427,8 @@ def _local_machine_status_blocking(
     *,
     is_staging: bool = False,
     image: LoadedCommit,
-    local_machine: MachineIdentity,
 ) -> MachineStatus:
-    """Sync lightweight row for a local machine without the agent-runner
-    capability (pure gateway) — via to_thread: the paused flag (file read),
-    prod-source HEAD (git rev-parse subprocess), the frozen process commit and
-    the psutil resource snapshot must not run on the event loop."""
-    paused = cluster_is_paused(db, machine_name=local_machine.name)
+    paused_reason = serving_gate_reason()
     return MachineStatus(
         name=name,
         serve_gateway="gateway" in role,
@@ -438,10 +437,8 @@ def _local_machine_status_blocking(
         gateway_url=url or "",
         up_since_at=up_since,
         online=True,
-        paused=paused,
-        # This row resolves paused from the posture row alone, so a true verdict
-        # here has exactly one possible cause.
-        paused_reason="business_pause" if paused else None,
+        paused=paused_reason is not None,
+        paused_reason=paused_reason,
         description=description,
         stopped_at=stopped_at,
         is_staging=is_staging,
@@ -460,7 +457,6 @@ async def gather_cluster_status(
     identity_log: roster_probe.IdentityMismatchLog,
     image: LoadedCommit,
     snapshots: Mapping[str, Snapshot] | None = None,
-    local_machine: MachineIdentity,
 ) -> list[MachineStatus]:
     """The roster of the given machines.
 
@@ -504,7 +500,6 @@ async def gather_cluster_status(
                     stopped_at,
                     is_staging=is_staging,
                     image=image,
-                    local_machine=local_machine,
                 )
             )
         else:
@@ -584,7 +579,6 @@ def get_cluster_status(
                 identity_log=identity_log,
                 snapshots=snapshots,
                 image=image,
-                local_machine=local_machine,
             )
         )
         if rows
@@ -596,7 +590,7 @@ def get_cluster_status(
         current_serve_gateway=("gateway" in local_machine.role()),
         current_serve_agent_runner=("agent-runner" in local_machine.role()),
         current_serve_observability_station=("observability-station" in local_machine.role()),
-        current_paused=cluster_is_paused(db, machine_name=local_machine.name),
+        current_paused=serving_gate_reason() is not None,
         machines=machines,
     )
 
@@ -647,9 +641,7 @@ def _compute_system_status(request: Request) -> SystemStatus:
                 current_serve_observability_station=(
                     "observability-station" in request.app.state.machine.role()
                 ),
-                current_paused=cluster_is_paused(
-                    request.app.state.db, machine_name=request.app.state.machine.name
-                ),
+                current_paused=serving_gate_reason() is not None,
                 machines=[],
             )
         except Exception:

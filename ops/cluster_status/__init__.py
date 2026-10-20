@@ -1,16 +1,16 @@
-"""This host's snapshot in the multi-machine view.
-
-Assembles `ClusterStatus` from local probes — pidfiles for the daemons, the
-session backends' records for the services and the agents' persistent shells,
-the database's local agent identities — and
-answers the one endpoint that stays readable while the cluster is paused.
-
-  Observability: GET /api/cluster/status — bypasses 503 mode, always
-    returns this host's state directly.
-
-The `schema_mismatch` submodule supplies the snapshot's read-only migration
-diagnosis.
-"""
+# meiva:note
+# This host's snapshot in the multi-machine view.
+#
+# Assembles `ClusterStatus` from local probes — pidfiles for the daemons, the
+# session backends' records for the services and the agents' persistent shells,
+# the database's local agent identities — and
+# answers the cluster's observability endpoint.
+#
+#   Observability: GET /api/cluster/status — always returns this host's state
+#     directly.
+#
+# The `schema_mismatch` submodule supplies the snapshot's read-only migration
+# diagnosis.
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from typing import Any
 from pydantic import BaseModel
 
 import base.cluster
-import base.deploy.state.host_deploy_state
 from base.api_contracts.agent_contract import ShellKillMode
 from base.api_contracts.status import PausedReason, SchemaMismatchStatus
 from base.clock import Clock
@@ -35,7 +34,6 @@ from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
 from base.sessions.page_session import is_page_label
-from ops.cluster_status import pause as cluster_pause
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
 
@@ -71,16 +69,16 @@ class ClusterStatus(BaseModel):
     serve_agent_runner: bool
     serve_observability_station: bool = False
     # meiva:note
-    # Status only: an unreadable deploy state, business pause, or startup not
-    # yet serving — the compound reads true whenever this host cannot claim
-    # readiness, whichever clause fired.
+    # Status only: an unreadable database snapshot or a serving gate that has
+    # not reached `serving` — the compound reads true whenever this host cannot
+    # claim readiness, whichever clause fired.
     paused: bool
     # meiva:note
     # Which clause of the `paused` verdict fired — the first true one, in the
-    # verdict's own order: no_state / business_pause / startup.
-    # None when not paused. Splitting it apart keeps a failed start's parked
-    # serving gate (`startup`) legible from a deliberate pause, instead of one
-    # opaque bool that a consumer can only guess at.
+    # verdict's own order: no_state / startup. None when not paused. Splitting it
+    # apart keeps a failed start's parked serving gate (`startup`) legible from a
+    # failed database read, instead of one opaque bool that a consumer can only
+    # guess at.
     paused_reason: PausedReason | None = None
     # This host's prod-source HEAD commit (`$MEIVA_HOME/source`), or None when it
     # cannot be read (no prod source / git unavailable); threaded to the roster so
@@ -409,14 +407,14 @@ def collect_sessions() -> tuple[list[SessionInfo], int, int]:
     return sessions, count_agent_shells(sessions), len(sessions)
 
 
-def read_deploy_snapshot(
+# meiva:note
+# Read the agent count and schema diagnosis through one snapshot-local connection.
+#
+# The first element says whether the read succeeded: a host whose database
+# snapshot failed cannot claim readiness.
+def read_db_snapshot(
     db: Database, pool: Any | None, *, local_machine: MachineIdentity
-) -> tuple[
-    base.deploy.state.host_deploy_state.HostDeployState | None,
-    int,
-    SchemaMismatchStatus | None,
-]:
-    """Read deploy state, agents, and schema through one snapshot-local connection."""
+) -> tuple[bool, int, SchemaMismatchStatus | None]:
     try:
         connection = (
             db.connect(autocommit=True)
@@ -424,7 +422,6 @@ def read_deploy_snapshot(
             else pool.connection(timeout=_POOL_BORROW_TIMEOUT_S)
         )
         with connection as conn:
-            state = base.deploy.state.host_deploy_state.read(db, local_machine.name(), conn=conn)
             agent_count = (
                 count_local_agents(conn, local_machine=local_machine.name())
                 if ("agent-runner" in local_machine.role())
@@ -433,14 +430,15 @@ def read_deploy_snapshot(
             schema_status = schema_mismatch_status(
                 db, conn=conn, local_machine=local_machine.name()
             )
-        return state, agent_count, schema_status
-    except Exception as exc:  # status degrades when the central DB is unavailable
-        # Deploy state and agent count share one bounded connection. During a
-        # data-plane outage the snapshot remains readable with no deploy claim
-        # and the existing zero-count default.
-        _log.warning("deploy-state snapshot read failed; using degraded status", exc_info=True)
+        return True, agent_count, schema_status
+    except Exception as exc:
+        # meiva:note
+        # Status degrades when the central DB is unavailable. The agent count and schema
+        # diagnosis share one bounded connection. During a data-plane outage the snapshot
+        # remains readable with no readiness claim and the existing zero-count default.
+        _log.warning("database snapshot read failed; using degraded status", exc_info=True)
         return (
-            None,
+            False,
             0,
             SchemaMismatchStatus(
                 kind="unavailable",
@@ -462,28 +460,25 @@ def read_resource_sample() -> ResourceSample | None:
 
 
 # meiva:note
-# The first true clause of the `paused` verdict, in its own clause order.
+# `startup` while this host's serving gate has not reached `serving`, else None.
 #
-# `no_state` (the deploy state was unreadable or absent), then a deliberate
-# `business_pause` posture, then `startup` (the serving gate has not reached
-# `serving` — a start is in flight, or a failed start parked it and recovery
-# stays gated). None when no clause fired. `state` is the snapshot's
-# already-read row, so this adds no central-DB dial of its own.
-def _paused_reason(
-    db: Database,
-    state: base.deploy.state.host_deploy_state.HostDeployState | None,
-    *,
-    local_machine: MachineIdentity,
-) -> PausedReason | None:
+# A start is in flight, a stop has begun, or a failed start parked the gate and
+# recovery stays gated. A local fact: no database read.
+def serving_gate_reason() -> PausedReason | None:
     from base.deploy.lifecycle import start_serving
 
-    if state is None:
+    return None if start_serving.is_serving() else "startup"
+
+
+# meiva:note
+# The first true clause of the `paused` verdict, in its own clause order.
+#
+# `no_state` (the database snapshot read failed), then `startup` (see
+# `serving_gate_reason`). None when neither fired.
+def _paused_reason(*, db_ok: bool) -> PausedReason | None:
+    if not db_ok:
         return "no_state"
-    if cluster_pause.is_paused(db, state, machine_name=local_machine.name):
-        return "business_pause"
-    if not start_serving.is_serving():
-        return "startup"
-    return None
+    return serving_gate_reason()
 
 
 def _supervisor_online() -> bool | None:
@@ -525,13 +520,11 @@ def status_snapshot(
     # of those independent operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
         resource_future = executor.submit(read_resource_sample)
-        state, agent_count, schema_status = read_deploy_snapshot(
-            db, pool, local_machine=local_machine
-        )
+        db_ok, agent_count, schema_status = read_db_snapshot(db, pool, local_machine=local_machine)
         resource = resource_future.result()
     # One source of truth for the pair: `paused` is exactly "a clause fired",
     # so the bool can never drift from its reason.
-    paused_reason = _paused_reason(db, state, local_machine=local_machine)
+    paused_reason = _paused_reason(db_ok=db_ok)
     return ClusterStatus(
         machine_name=local_machine.name(),
         serve_gateway=("gateway" in local_machine.role()),

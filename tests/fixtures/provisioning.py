@@ -161,7 +161,6 @@ _PER_TEST_TRUNCATE_TABLES = (
     "machine_probe",
     "machine_status_snapshot",
     "machine_units",
-    "host_deploy_state",
     "schedules",
     "schedule_versions",
     "schedule_runs",

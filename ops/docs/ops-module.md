@@ -74,11 +74,12 @@ the transaction, row-lock and native shell-session checks.
 Cluster identity remains the installed home path, resolved before runtime
 configuration construction.
 
-The host status snapshot's `paused` field includes startup that has not reached
-`start-serving` readiness, in addition to the business DB posture; `paused_reason`
-names the first true clause (`no_state` / `business_pause` / `startup`), so a failed
-start that parked the serving gate reads apart from a deliberate pause. A missing DB
-snapshot cannot claim ready. The responding
+The host status snapshot's `paused` field is true whenever the host cannot claim
+readiness: its serving gate has not reached `start-serving` (a start in flight, a stop
+that has begun, or a failed start that parked the gate), or its database snapshot
+failed. `paused_reason` names the first true clause (`no_state` / `startup`), so a
+failed start that parked the serving gate reads apart from an unreadable database.
+A missing DB snapshot cannot claim ready. The responding
 ops process SHA and source checkout SHA remain read-only status metadata;
 these fields do not certify every sibling daemon's running code.
 

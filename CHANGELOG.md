@@ -42,6 +42,14 @@ and the matching GitHub Releases.
   `pause_lifecycle_wait_seconds` settings and the `maintenance` value of
   `GET /api/cluster/status`'s `paused_reason` are removed
   ([decision](docs/decisions/runtime/processes/2026-10-20-delete-maintenance-hold.md)).
+- The `host_deploy_state` per-host posture table is dropped (migration
+  `20261020T151143_drop-host-deploy-state`) with `base/deploy/state/` and
+  `ops/cluster_status/pause.py`: neither `meiva start` nor `meiva stop` writes a posture
+  any more. `paused` on `GET /api/cluster/status` and the roster means the serving gate has
+  not reached `serving` or the host's database snapshot failed, and its `paused_reason`
+  loses `business_pause` (`no_state` and `startup` remain). A pure gateway machine reads the
+  same serving gate
+  ([decision](docs/decisions/runtime/updates/release/2026-10-20-delete-host-deploy-state.md)).
 - The frontend pixel-regression apparatus is gone (user ruling 2026-10-20): the
   Visual baselines workflow, the screenshot regression suite with its goldens, the
   preview-gate matrix with its 44 captures, and the post-deploy visual gate. The

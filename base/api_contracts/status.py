@@ -19,12 +19,13 @@ from pydantic import (
 
 from base.host.resource_sample import ResourceSample
 
+# meiva:note
 # Why a host's status snapshot reads `paused` — the first true clause of the
 # paused verdict, in the verdict's own order (ops/cluster_status/__init__.py::_paused_reason):
-#   no_state       — the deploy state read failed or its row is absent
-#   business_pause — host_deploy_state.posture reads "paused"
-#   startup        — the serving gate has not reached `serving`
-PausedReason = Literal["no_state", "business_pause", "startup"]
+#   no_state — the database snapshot read failed
+#   startup  — the serving gate has not reached `serving` (a start is in flight, a stop
+#              has begun, or a failed start parked it)
+PausedReason = Literal["no_state", "startup"]
 
 
 SchemaMismatchKind = Literal[
@@ -83,8 +84,7 @@ class MachineStatus(BaseModel):
     paused: bool | None  # None = unknown (probe failed)
     # meiva:note
     # Which clause of the host's paused verdict fired, when known (no_state /
-    # business_pause / startup — see
-    # ops/cluster_status/__init__.py::_paused_reason). None = not paused, or the row
+    # startup — see ops/cluster_status/__init__.py::_paused_reason). None = not paused, or the row
     # carries no verdict to decompose (probe failed / abnormal-state row).
     paused_reason: PausedReason | None = None
     description: str | None = None  # free-text machine metadata; NULL when unset

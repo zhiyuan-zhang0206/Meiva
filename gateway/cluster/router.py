@@ -41,8 +41,7 @@ from gateway.events import telemetry_rows
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
 from ops.cluster import operations as _ops
 from ops.cluster import rpc as cluster_rpc
-from ops.cluster_status import ClusterStatus
-from ops.cluster_status.pause import is_paused as cluster_is_paused
+from ops.cluster_status import ClusterStatus, serving_gate_reason
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from ops.rpc_schemas import OpKind
 
@@ -50,23 +49,22 @@ router = APIRouter()
 _log = logging.getLogger(__name__)
 
 
+# meiva:note
+# Sync local snapshot for a pure gateway (no ops server) — via to_thread:
+# the serving gate (file), orchestration liveness (session probe) and the
+# prod-source HEAD (git rev-parse) are all child-process / disk reads that
+# must not run on the event loop.
 def _local_snapshot_blocking(
     db: Database, *, image: LoadedCommit, local_machine: MachineIdentity
 ) -> ClusterStatus:
-    """Sync local snapshot for a pure gateway (no ops server) — via to_thread:
-    paused flag (file), orchestration liveness (session probe) and the
-    prod-source HEAD (git rev-parse) are all child-process / disk reads that
-    must not run on the event loop."""
-    paused = cluster_is_paused(db, machine_name=local_machine.name)
+    paused_reason = serving_gate_reason()
     return ClusterStatus(
         machine_name=local_machine.name(),
         serve_gateway=("gateway" in local_machine.role()),
         serve_agent_runner=("agent-runner" in local_machine.role()),
         serve_observability_station=("observability-station" in local_machine.role()),
-        paused=paused,
-        # This local snapshot resolves paused from the posture row alone, so a
-        # true verdict here has exactly one possible cause.
-        paused_reason="business_pause" if paused else None,
+        paused=paused_reason is not None,
+        paused_reason=paused_reason,
         head_sha=prod_source_head_sha(),
         # This gateway process's own frozen commit — not a disk bookmark, so a
         # gateway that outlived a checkout advance reports the old commit and the
@@ -108,7 +106,6 @@ async def _roster_statuses(
         identity_log=identity_log,
         snapshots=found,
         image=image,
-        local_machine=local_machine,
     )
 
 

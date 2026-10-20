@@ -90,7 +90,9 @@ class ClusterPanel(BaseModel):
     current_serve_gateway: bool
     current_serve_agent_runner: bool
     current_serve_observability_station: bool = False
-    current_paused: bool  # whether the current gateway is paused (local is_paused())
+    # meiva:note
+    # Whether the current gateway's serving gate has not reached `serving`.
+    current_paused: bool
     machines: list[MachineStatus]
 
 

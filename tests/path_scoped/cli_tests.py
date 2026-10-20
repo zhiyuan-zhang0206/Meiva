@@ -1,10 +1,7 @@
-"""Shared fixtures for the CLI tests (registered by `tests/fixtures/path_scopes.py`).
-
-Orchestration tests record the local hold/resume seam while updating the
-actual host posture. Without that posture effect, a fake recovery would leave
-later gateway requests behind a stale 503 gate. Production service and OS job
-boundaries remain guarded by the root fixtures.
-"""
+# meiva:note
+# Shared fixtures for the CLI tests (registered by `tests/fixtures/path_scopes.py`).
+#
+# Production service and OS job boundaries remain guarded by the root fixtures.
 
 from __future__ import annotations
 

@@ -3,14 +3,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 
-import gateway.cluster.status as gateway_cluster_status
 from base import cluster
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import MachineIdentitySetter
@@ -25,10 +23,8 @@ from base.native_process import loaded_commit
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.root_control import client as root_client
 from gateway.app import openapi_schema
-from gateway.cluster import router
 from gateway.events import telemetry_rows
 from ops import cluster_status
-from ops.cluster_status import pause as cluster_pause
 from tests.fixtures.gateway_config import gateway_test_client
 
 
@@ -48,34 +44,17 @@ def fake_admin_events(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
     return {"calls": calls, "rows": rows}
 
 
+# meiva:note
+# This case's serving gate: kept under its tmp dir and already at `serving`.
 @pytest.fixture
-def fake_flag(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine_identity: MachineIdentity
-) -> Path:
-    """A tmp file standing in for the paused posture row, controllable by the tests.
+def serving_gate(serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from base.deploy.lifecycle import start_serving
 
-    R1 (Task #1021) moved `is_paused` to the host_deploy_state posture row; the
-    readers' bound names are shimmed to the file's existence so this suite keeps
-    simulating the pause with a file. The fixture is about "the process agrees on
-    one paused signal", not which storage (the old-signal sweep, PR5, retired the
-    real flag file).
-    The status/cluster routers read the sync `is_paused`."""
-    flag = tmp_path / "cluster_paused"
+    def run_dir(_home: Path) -> Path:
+        return tmp_path
 
-    def _snapshot_paused(
-        _db: object, _state: object = None, *, machine_name: Callable[[], str]
-    ) -> bool:
-        assert machine_name == machine_identity.name
-        return flag.exists()
-
-    def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
-        assert machine_name == machine_identity.name
-        return flag.exists()
-
-    monkeypatch.setattr(router, "cluster_is_paused", paused)
-    monkeypatch.setattr(gateway_cluster_status, "cluster_is_paused", paused)
-    monkeypatch.setattr(cluster_pause, "is_paused", _snapshot_paused)
-    return flag
+    monkeypatch.setattr(start_serving, "run_dir", run_dir)
+    start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
 
 
 @pytest.fixture(autouse=True)
@@ -102,21 +81,25 @@ def pinned_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
 
 class TestClusterStatusEndpoint:
     # meiva:note
-    # `/api/cluster/status` answers 200 and reports the posture of a pure gateway.
-    def test_cluster_status_reports_a_paused_posture(
-        self, fake_flag: Path, set_machine_identity: MachineIdentitySetter
+    # `/api/cluster/status` answers 200 for a pure gateway and reads its serving gate:
+    # a stop clears the gate, and the machine reports `startup` from then on.
+    @pytest.mark.usefixtures("serving_gate")
+    def test_a_pure_gateway_reports_startup_once_a_stop_has_begun(
+        self, set_machine_identity: MachineIdentitySetter
     ) -> None:
-        fake_flag.write_text("")
+        from base.deploy.lifecycle import start_serving
+
         machine: MachineIdentity = set_machine_identity(role="gateway", name="test-mc")
         with gateway_test_client(machine=machine) as client:
+            serving = client.get("/api/cluster/status").json()
+            start_serving.clear_serving()
             r = client.get("/api/cluster/status")
+        assert serving["paused"] is False
+        assert serving["paused_reason"] is None
         assert r.status_code == 200
         body = r.json()
         assert body["paused"] is True
-        # meiva:note
-        # The pure-gateway local snapshot resolves paused from the posture row
-        # alone; the breakdown names that single cause (task #3404).
-        assert body["paused_reason"] == "business_pause"
+        assert body["paused_reason"] == "startup"
         assert body["machine_name"] == "test-mc"
         assert body["serve_gateway"] is True
         assert body["serve_agent_runner"] is False
@@ -149,23 +132,18 @@ class TestRetiredDeploymentEndpoints:
 
 
 class TestStatusSnapshot:
-    def test_snapshot_reflects_flag_and_role(
+    @pytest.mark.usefixtures("serving_gate")
+    def test_snapshot_reflects_the_serving_gate_and_role(
         self,
-        serving_root: RootBirth,
-        fake_flag: Path,
         set_machine_identity: MachineIdentitySetter,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         *,
         machine_identity: MachineIdentity,
     ) -> None:
         from base.deploy.lifecycle import start_serving
-        from base.deploy.state import host_deploy_state
 
-        monkeypatch.setattr(start_serving, "run_dir", lambda _home: fake_flag.parent)  # pyright: ignore[reportUnknownArgumentType]
         set_machine_identity(role="agent-runner", name="runner-a")
-        host_deploy_state.set_posture(database, "idle", machine=machine_identity.name())
-        start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
+        # meiva:note
         # unpaused
         snap = cluster_status.status_snapshot(
             database,
@@ -176,14 +154,16 @@ class TestStatusSnapshot:
         assert snap.serve_gateway is False
         assert snap.serve_agent_runner is True
         assert snap.paused is False
-        # paused
-        fake_flag.write_text("")
+        # meiva:note
+        # a stop clears the gate
+        start_serving.clear_serving()
         snap2 = cluster_status.status_snapshot(
             database,
             image=LoadedCommit(source_root=Path(__file__).parent, sha=None),
             local_machine=machine_identity,
         )
         assert snap2.paused is True
+        assert snap2.paused_reason == "startup"
 
     def test_snapshot_includes_head_sha(
         self,
@@ -271,7 +251,6 @@ class TestStatusSnapshot:
     @pytest.mark.parametrize("online", [True, False, None])
     def test_supervisor_status_preserves_unavailable_inspection(
         self,
-        fake_flag: Path,
         set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
         online: bool | None,
@@ -279,7 +258,6 @@ class TestStatusSnapshot:
         *,
         machine_identity: MachineIdentity,
     ) -> None:
-        del fake_flag
         set_machine_identity(role="agent-runner", name="test-host")
 
         def inspect_root(*, home: Path) -> object | None:
