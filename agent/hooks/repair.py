@@ -1,56 +1,56 @@
-"""Built-in repair hook: restore valid tool_use/tool_result pairing after a crash.
-
-A hard cancel (SIGTERM / restart / stop kill / OOM -> asyncio.CancelledError)
-can kill the process after the AIMessage(tool_use) was committed but before
-exec_node wrote the paired tool_result. Resuming from that checkpoint sends an
-API-invalid message list (tool_use with no following tool_result), which
-Anthropic-compat providers reject with 400 on every turn (agent 167 2026-06-06;
-agents 236/238 2026-07-13).
-
-The converse crash shape happened to agent 5333 (2026-08-31): a ToolMessage
-tool_result reached the checkpoint without its carrying AIMessage(tool_use).
-LangChain normalization strips a synthetic replacement tool_use from the wire
-payload, so synthesizing the missing pair leaves the request invalid. Drop the
-orphan result instead: it carries no model-visible request, so its removal loses
-nothing the model can honestly observe; the interrupted turn is absent.
-
-The repair runs only as a before_llm hook (registered here), on every turn after
-claim. It sees the materialized graph state, including a dangling AIMessage that
-survives only in `checkpoint_writes` (a pending write) when the shutdown's
-consolidating checkpoint `aput` failed: pregel materializes that write only when
-the graph resumes, by which point claim has appended restart_completed /
-resurrect / reminder inbounds and buried the dangling tool_use mid-history (the
-2026-07-13 shape that wedged 236/238 in a permanent per-turn 400 retry loop for
-18h). There is no separate boot-time pass: a claim-stage compact_request that
-summarizes a still-dangling history fails that one compaction and aborts the
-turn, and the next turn's hook repairs the history.
-
-The synthetic tool_result records the missing result without inventing an
-execution outcome. Effects may already exist, so the agent must inspect state
-before retrying. This repairs history shape without masking model errors.
-
-Shape contract: detection treats an unpaired tool_call as a crash artifact,
-because every live path preserves pairing — exec always writes a ToolMessage,
-syntax_fix supplies its own ToolMessage when it skips exec, and the llm node's
-silent-idle branches bypass exec only when tool_calls is empty. A future hook
-that intentionally withholds a tool_result would be reinterpreted as a crash
-and handed a synthetic [interrupted] result — keep the pairing invariant when
-extending the hook surface.
-
-Every repair returns one REMOVE_ALL_MESSAGES rebuild: the original AIMessage
-and any synthetic [interrupted] ToolMessage therefore share one messages-channel
-value and one checkpoint blob. A bare tail append can be committed separately
-from its tool_use during kill/n-step-save interleavings, recreating the 5333
-orphan shape this repair removes.
-
-Pairing is global by tool_call id: each preceding tool_use has exactly one kept
-ToolMessage anywhere later in the history. Physical adjacency is retained only
-for newly synthesized results; a non-adjacent kept real result remains valid.
-
-Automatic compaction runs inside the LLM node, after the repair hook update
-commits. Its summarization request therefore sees the repaired tool pairing,
-even when cancellation damage and the compaction threshold occur together.
-"""
+# meiva:note
+# Built-in repair hook: restore valid tool_use/tool_result pairing after a crash.
+#
+# A hard cancel (SIGTERM / restart / stop kill / OOM -> asyncio.CancelledError)
+# can kill the process after the AIMessage(tool_use) was committed but before
+# exec_node wrote the paired tool_result. Resuming from that checkpoint sends an
+# API-invalid message list (tool_use with no following tool_result), which
+# Anthropic-compat providers reject with 400 on every turn (agent 167 2026-06-06;
+# agents 236/238 2026-07-13).
+#
+# The converse crash shape happened to agent 5333 (2026-08-31): a ToolMessage
+# tool_result reached the checkpoint without its carrying AIMessage(tool_use).
+# LangChain normalization strips a synthetic replacement tool_use from the wire
+# payload, so synthesizing the missing pair leaves the request invalid. Drop the
+# orphan result instead: it carries no model-visible request, so its removal loses
+# nothing the model can honestly observe; the interrupted turn is absent.
+#
+# The repair runs only as a before_llm hook (registered here), on every turn after
+# claim. It sees the materialized graph state, including a dangling AIMessage that
+# survives only in `checkpoint_writes` (a pending write) when the shutdown's
+# consolidating checkpoint `aput` failed: pregel materializes that write only when
+# the graph resumes, by which point claim has appended resurrect /
+# reminder inbounds and buried the dangling tool_use mid-history (the
+# 2026-07-13 shape that wedged 236/238 in a permanent per-turn 400 retry loop for
+# 18h). There is no separate boot-time pass: a claim-stage compact_request that
+# summarizes a still-dangling history fails that one compaction and aborts the
+# turn, and the next turn's hook repairs the history.
+#
+# The synthetic tool_result records the missing result without inventing an
+# execution outcome. Effects may already exist, so the agent must inspect state
+# before retrying. This repairs history shape without masking model errors.
+#
+# Shape contract: detection treats an unpaired tool_call as a crash artifact,
+# because every live path preserves pairing — exec always writes a ToolMessage,
+# syntax_fix supplies its own ToolMessage when it skips exec, and the llm node's
+# silent-idle branches bypass exec only when tool_calls is empty. A future hook
+# that intentionally withholds a tool_result would be reinterpreted as a crash
+# and handed a synthetic [interrupted] result — keep the pairing invariant when
+# extending the hook surface.
+#
+# Every repair returns one REMOVE_ALL_MESSAGES rebuild: the original AIMessage
+# and any synthetic [interrupted] ToolMessage therefore share one messages-channel
+# value and one checkpoint blob. A bare tail append can be committed separately
+# from its tool_use during kill/n-step-save interleavings, recreating the 5333
+# orphan shape this repair removes.
+#
+# Pairing is global by tool_call id: each preceding tool_use has exactly one kept
+# ToolMessage anywhere later in the history. Physical adjacency is retained only
+# for newly synthesized results; a non-adjacent kept real result remains valid.
+#
+# Automatic compaction runs inside the LLM node, after the repair hook update
+# commits. Its summarization request therefore sees the repaired tool pairing,
+# even when cancellation damage and the compaction threshold occur together.
 
 from collections.abc import Sequence
 from datetime import UTC, datetime

@@ -40,7 +40,6 @@ export const NOTE_SOURCES = new Set([
   "history_dump",
   "silent_idle_continue",
   "heartbeat",
-  "heartbeat_pause",
   "security",
   "context",
   "agent_id",

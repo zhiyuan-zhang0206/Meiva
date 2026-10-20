@@ -45,22 +45,6 @@ def test_by_who_self_prefix_does_not_match_self():
     assert by_who("self:other") == "self:other"
 
 
-def test_render_restart_completed_marker_plain_self_unchanged():
-    from agent.graph.claim.node import render_restart_completed_marker
-
-    text = render_restart_completed_marker("self", timestamp_prefix=lambda: "")
-    assert "restarted by yourself" in text
-    assert "updated" not in text
-
-
-def test_render_restart_completed_marker_external_source_unchanged():
-    from agent.graph.claim.node import render_restart_completed_marker
-
-    text = render_restart_completed_marker("user", timestamp_prefix=lambda: "")
-    assert "restarted by user" in text
-    assert "updated" not in text
-
-
 async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     redis_url: str,
     db_conn: psycopg.Connection,

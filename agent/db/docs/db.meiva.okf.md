@@ -18,9 +18,8 @@ or a blocked graph invocation.
 
 - **Durable queue**: `inbound_messages` holds work and native lifecycle commands.
   Claim dispatch handles chat, summaries, compaction, heartbeat, cancel,
-  terminate, restart, resurrection and identity markers. Historical
-  `restart_completed` messages remain readable; new restarts are observed by
-  the successor admission.
+  terminate, restart, resurrection and identity markers. Restarts are observed
+  by the successor admission.
 - **Ownership**: claim locks metadata before inbound rows and validates the
   admitted generation, owner and lease. A stale or missing owner cannot claim
   another incarnation's work.

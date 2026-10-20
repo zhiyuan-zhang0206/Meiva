@@ -210,7 +210,6 @@ class TestAiMessageItems:
             NoteTag.AGENT_REPLY,
             NoteTag.SILENT_IDLE_CONTINUE,
             NoteTag.SECURITY,
-            NoteTag.HEARTBEAT_PAUSE,
             NoteTag.CONTEXT,
             NoteTag.AGENT_ID,
             NoteTag.PROJECT_SKILLS,

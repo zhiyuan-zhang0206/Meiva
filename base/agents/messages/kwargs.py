@@ -48,7 +48,6 @@ class NoteTag(StrEnum):
     LIFECYCLE_RESURRECT = "lifecycle_resurrect"
     LIFECYCLE_FORK = "lifecycle_fork"
     HEARTBEAT = "heartbeat"
-    HEARTBEAT_PAUSE = "heartbeat_pause"
     SECURITY = "security"
     CONTEXT = "context"
     AGENT_ID = "agent_id"
