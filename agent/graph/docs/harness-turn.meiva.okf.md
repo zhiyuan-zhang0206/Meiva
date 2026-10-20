@@ -110,6 +110,12 @@ Each completed turn logs the same `llm_usage` row the built-in loop logs, with
 stay comparable in one place. A turn whose provider reported no tokens logs
 nothing.
 
+Accounting never decides whether a reply survives: the turn has finished by the
+time its row is written, so usage a price book refuses — a provider reporting
+cache reads outside the prompt, a model missing from the catalog — logs
+`harness_usage_log_failed` and leaves the reply in the window. The gap belongs in
+the log, not in answers the user already paid for.
+
 ## What this slice does not do
 
 Streaming deltas to the timeline, tool-call timeline items and explicit `/compact`

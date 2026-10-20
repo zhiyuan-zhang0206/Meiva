@@ -180,6 +180,31 @@ async def test_a_turn_logs_usage_under_the_harness(loguru_records: LogRecords) -
     assert extras["usage_kind"] == "agent"
 
 
+# meiva:note
+# Usage accounting is best effort: the turn has already finished when it is logged, so
+# an unpriced bill must leave a hole in a row, never take the reply with it. The usage
+# here carries more cache reads than prompt tokens, which is exactly what `quote`
+# rejects — the shape a provider produces when the adapter misreports its fields.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+async def test_an_unpriceable_usage_keeps_the_reply_and_reports_the_gap(
+    loguru_records: LogRecords,
+) -> None:
+    engine = FakeEngine(
+        reply="done",
+        usage=Usage(input_tokens=8, output_tokens=3, cache_read_input_tokens=99),
+    )
+    state = AgentState(messages=[inbound("do it", 7)], harness_cursor=0)
+
+    command = await harness_turn_node(state, runtime(engine), config())
+
+    assert command.update is not None
+    assert [message.content for message in command.update["messages"]] == ["done"]
+    warned = loguru_records.events("harness_usage_log_failed")
+    assert len(warned) == 1
+    assert warned[0]["extra"]["agent_id"] == 6984
+    assert loguru_records.events("llm_usage") == []
+
+
 async def test_the_handoff_turn_lands_as_its_own_message(loguru_records: LogRecords) -> None:
     opening = HarnessTurn(
         turn_id="t0",

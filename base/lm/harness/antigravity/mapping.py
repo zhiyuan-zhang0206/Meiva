@@ -102,6 +102,12 @@ def assistant_text(update: dict[str, Any], *, turn_id: str, text: str) -> Assist
     return AssistantText(turn_id=turn_id, text=text)
 
 
+# meiva:note
+# `input_tokens` is the whole prompt here too: the CLI's recorded `total_tokens`
+# is input + output, with `cache_read_tokens` inside the input figure rather than
+# beside it. Stated so the next reader does not add the cache count twice; see
+# `Usage` in `base/lm/harness/events.py`.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
 def parse_usage(payload: Any) -> Usage:
     usage = _mapping(payload)
     output = _int(usage.get("output_tokens"))

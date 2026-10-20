@@ -62,6 +62,12 @@ def is_final_answer(item: Mapping[str, object]) -> bool:
     return phase is None or phase == "final_answer"
 
 
+# meiva:note
+# `inputTokens` already totals the prompt: `cachedInputTokens` is a subset of it,
+# as the CLI's own `total_tokens` (input + output) shows, so nothing is added here.
+# The other two adapters translate into the same shape; see `Usage` in
+# `base/lm/harness/events.py`.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
 def usage_from(params: Mapping[str, object]) -> Usage:
     last = as_object(as_object(params.get("tokenUsage")).get("last"))
     if not last:

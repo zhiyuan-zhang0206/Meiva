@@ -154,13 +154,23 @@ _HANDLERS = {
 }
 
 
+# meiva:note
+# Anthropic reports `input_tokens` as what was billed at the full rate: the
+# uncached remainder. `cache_read_input_tokens` and `cache_creation_input_tokens`
+# are charged separately and sit outside it, so the turn's total input is their
+# sum — a live turn read as 8 in, 17391 cache-read, 6621 cache-write, which is a
+# 24020-token prompt. Reporting the remainder alone understates the prompt and
+# trips the pricing invariant that cached tokens cannot exceed input.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
 def _usage(raw: Any) -> Usage:
     data = _as_dict(raw)
+    cache_read = _int_or_zero(data.get("cache_read_input_tokens"))
+    cache_creation = _int_or_zero(data.get("cache_creation_input_tokens"))
     return Usage(
-        input_tokens=_int_or_zero(data.get("input_tokens")),
+        input_tokens=_int_or_zero(data.get("input_tokens")) + cache_read + cache_creation,
         output_tokens=_int_or_zero(data.get("output_tokens")),
-        cache_creation_input_tokens=_int_or_zero(data.get("cache_creation_input_tokens")),
-        cache_read_input_tokens=_int_or_zero(data.get("cache_read_input_tokens")),
+        cache_creation_input_tokens=cache_creation,
+        cache_read_input_tokens=cache_read,
     )
 
 
