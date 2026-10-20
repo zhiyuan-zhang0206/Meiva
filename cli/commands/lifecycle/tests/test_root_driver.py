@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -712,32 +714,39 @@ def test_seed_wait_reports_a_keeper_that_stopped_restarting_root(
 
 
 # meiva:note
-# Root's `down` answers once the unit has exited; record each call and its return.
-class _RecordingRoot:
-    def __init__(self, events: list[str]) -> None:
+# A root whose units exit on their own time: `down` signals the unit, which finishes its
+# exit on another thread, and the reply comes only once the exit has happened, as root's
+# own `down` replies after the child is reaped. Every call and exit is time-stamped.
+class _AsyncExitRoot:
+    def __init__(self, events: list[tuple[str, float]], exit_s: float) -> None:
         self._events = events
+        self._exit_s = exit_s
+
+    def _exit(self, unit_id: str, exited: threading.Event) -> None:
+        time.sleep(self._exit_s)
+        self._events.append((f"exited {unit_id}", time.monotonic()))
+        exited.set()
 
     def down(self, unit_id: str) -> dict[str, Any]:
-        self._events.append(f"down {unit_id}")
-        self._events.append(f"exited {unit_id}")
+        self._events.append((f"down {unit_id}", time.monotonic()))
+        exited = threading.Event()
+        threading.Thread(target=self._exit, args=(unit_id, exited), daemon=True).start()
+        assert exited.wait(timeout=10)
         return {"ok": True}
 
     def force_down(self, unit_id: str) -> dict[str, Any]:
         raise AssertionError(f"a graceful stop force-stopped {unit_id}")
 
 
-def test_the_agent_host_stops_and_exits_before_any_other_unit() -> None:
-    events: list[str] = []
-    units = {"alpha-sidecar", "gateway", "agent-host", "ops", "browser-mcp"}
+def test_no_unit_goes_down_before_the_agent_host_has_exited() -> None:
+    events: list[tuple[str, float]] = []
+    order = ["agent-host", "gateway", "alpha-sidecar", "ops"]
+    root = _AsyncExitRoot(events, exit_s=0.2)
     driver.down_units(
-        units,
-        deadline=float("inf"),
-        force=False,
-        client_for=lambda _remaining_s: _RecordingRoot(events),
+        order, deadline=float("inf"), force=False, client_for=lambda _remaining_s: root
     )
-    assert events[:2] == ["down agent-host", "exited agent-host"]
-    assert events[2::2] == [f"down {unit}" for unit in sorted(units - {"agent-host"})]
-
-
-def test_the_stop_order_needs_no_agent_host() -> None:
-    assert driver.unit_stop_order({"ops", "gateway"}) == ["gateway", "ops"]
+    names = [name for name, _ in events]
+    assert names[:2] == ["down agent-host", "exited agent-host"]
+    assert [name for name in names if name.startswith("down ")] == [f"down {u}" for u in order]
+    agent_host_exit = dict(events)["exited agent-host"]
+    assert all(at >= agent_host_exit for name, at in events[2:] if name.startswith("down "))

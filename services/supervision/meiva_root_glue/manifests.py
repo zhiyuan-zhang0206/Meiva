@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import cast, get_args
 
 from base.cluster.machine import MachineRole
+from base.native_process.stop_timing import STOP_MARGIN_S
 from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.manifest import (
     ManifestError,
@@ -62,13 +63,16 @@ from services.supervision.roster.service_spec import ServiceSpec
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# Root's TERM window for a unit that declares a shutdown ceiling is that ceiling
-# plus this margin: the reap, the group-closure read and scheduling all happen
-# inside root's window, so a unit that closes exactly at its own bound must
-# still finish before root gives up on it.
-STOP_MARGIN_S = 5.0
 
 _KNOWN_CAPABILITIES = frozenset(get_args(MachineRole))
+
+# meiva:note
+# Declared first, so it is stopped first: root's whole-tree stop and `meiva stop` both go
+# down the units in declaration order, and the agent-host's graceful exit still runs
+# turns that call ops and the gateway and writes their restarts to the data plane.
+# Startup is concurrent, so the position changes nothing at start.
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+STOPS_FIRST = "agent-host"
 
 # G6b attach values for classes that spawn at RUNTIME (never static manifest
 # rows — see the module docstring). Kept here so the spawn slice (W1.3) has
@@ -123,7 +127,7 @@ def build_units(
     chosen = tuple(build_services()) if specs is None else tuple(specs)
     caps = _validated_capabilities(capabilities)
     units: list[dict[str, object]] = []
-    for spec in chosen:
+    for spec in sorted(chosen, key=lambda spec: spec.session != STOPS_FIRST):
         if not (spec.capabilities & caps):
             continue
         unit: dict[str, object] = {

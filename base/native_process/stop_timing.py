@@ -18,14 +18,30 @@ CANCEL_UNWIND_TIMEOUT_S = 5.0
 CLOCK_READ_TIMEOUT_S = 2.0
 
 # meiva:note
-# How long a SIGTERMed agent-host waits for its running turns to settle at the restart
-# each was given; a turn still running at the deadline falls through to the cancel path.
-# Registered in base/deploy/timing.py::CLOCKS like the bounds above.
+# How long a SIGTERMed agent-host waits for its running turns to end at the restart each
+# was given, the restart writes included; a turn still running at the deadline falls
+# through to the cancel path. Registered in base/deploy/timing.py::CLOCKS like the bounds
+# above.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
-HOST_GRACEFUL_EXIT_DRAIN_S = 40.0
+HOST_GRACEFUL_EXIT_DRAIN_S = 30.0
 
 # meiva:note
-# The longest an agent-host's whole SIGTERM exit may run: the drain, then the cancel
-# unwind and its clock read, then resource join and ownership release. The roster
-# declares it as the unit's stop ceiling, so root's TERM window derives from it.
-HOST_STOP_CEILING_S = 55.0
+# How long the host's stop waits for its ownership release (services/agent_runner/
+# agent_host/host.py). With Postgres unreachable the release would otherwise wait out the
+# control pool's 30 s acquire timeout; a release that cannot land leaves the leases to
+# expire by TTL.
+RELEASE_OWNER_TIMEOUT_S = 3.0
+
+# meiva:note
+# The longest an agent-host's whole SIGTERM exit may run: the drain, then the scheduler's
+# cancel unwind and clock read, the resource join (one more unwind bound), the ownership
+# release, and the unbounded rest (runtimes, pools, health server) in what is left. The
+# roster declares it as the unit's stop ceiling, so root's TERM window derives from it.
+HOST_STOP_CEILING_S = 50.0
+
+# meiva:note
+# Root's TERM window for a unit that declares a shutdown ceiling is that ceiling plus this
+# margin (services/supervision/meiva_root_glue/manifests.py): the reap, the group-closure
+# read and scheduling all happen inside root's window, so a unit that closes exactly at its
+# own bound must still finish before root gives up on it.
+STOP_MARGIN_S = 5.0

@@ -34,11 +34,6 @@ _WIRING_REF = "services.supervision.meiva_root_glue.glue:build_wiring"
 _ROOT_READY_TIMEOUT_S = 30.0
 # Unit stop windows accumulate in dependency order.
 _ROOT_STOP_TIMEOUT_S = 90.0
-# meiva:note
-# Stopped before every other unit: its graceful exit still runs turns that call ops
-# and the gateway, and writes their restarts to the data plane.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
-AGENT_HOST_UNIT = "agent-host"
 READY_POLL_INTERVAL_S = 0.5
 poll_sleep = time.sleep  # a named seam tests can patch (the _probe pattern)
 
@@ -694,17 +689,13 @@ def stop_dormant_helper_root(deadline: float, *, helper: HelperFactory | None) -
     require_root_absent()
 
 
-def unit_stop_order(unit_ids: Iterable[str]) -> list[str]:
-    ids = set(unit_ids)
-    rest = sorted(ids - {AGENT_HOST_UNIT})
-    return [AGENT_HOST_UNIT, *rest] if AGENT_HOST_UNIT in ids else rest
-
-
 # meiva:note
+# Units go down one at a time in root's declaration order, the order root's own
+# whole-tree stop uses, so the agent-host the manifest declares first is stopped first.
 # Root answers `down` only once the unit has exited (or been killed at the end of its
-# TERM window), so stopping one unit at a time in `unit_stop_order` stops nothing else
-# while the agent-host drains. `client_for(remaining_s)` returns a root client bounded
-# by the time left.
+# TERM window), so nothing else is stopped while the agent-host drains.
+# `client_for(remaining_s)` returns a root client bounded by the time left.
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 def down_units(
     unit_ids: Iterable[str],
     *,
@@ -712,7 +703,7 @@ def down_units(
     force: bool,
     client_for: Callable[[float], Any],
 ) -> None:
-    for unit_id in unit_stop_order(unit_ids):
+    for unit_id in unit_ids:
         remaining_s = deadline - time.monotonic()
         if remaining_s <= 0:
             raise RootDriverError("service stop deadline expired; custody retained")
@@ -749,7 +740,7 @@ def stop_root_service_tree(
     units = root_units(status)
     require_root_owner(status, helper=helper)
     preserved = set(units) & preserve
-    stop_ids = unit_stop_order(set(units) - preserved)
+    stop_ids = [unit_id for unit_id in units if unit_id not in preserved]
     if not stop_ids and preserved:
         print("  meiva-root: every unit is preserved — tree left running")
         return

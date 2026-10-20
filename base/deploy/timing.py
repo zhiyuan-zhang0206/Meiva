@@ -182,6 +182,16 @@ CLOCKS: dict[str, Clock] = {
         lambda: stop.HOST_STOP_CEILING_S,
         "the agent-host's whole SIGTERM exit; root's TERM window for the unit derives from it",
     ),
+    "RELEASE_OWNER_TIMEOUT_S": Clock(
+        "stop",
+        lambda: stop.RELEASE_OWNER_TIMEOUT_S,
+        "how long the agent-host's stop waits for its hosted ownership release",
+    ),
+    "STOP_MARGIN_S": Clock(
+        "stop",
+        lambda: stop.STOP_MARGIN_S,
+        "root's TERM window for a unit with a declared shutdown ceiling: ceiling plus this margin",
+    ),
 }
 
 
@@ -240,17 +250,19 @@ CONSTRAINTS: list[Constraint] = [
     ),
     Constraint(
         "<",
-        "HOST_GRACEFUL_EXIT_DRAIN_S + CANCEL_UNWIND_TIMEOUT_S + CLOCK_READ_TIMEOUT_S",
+        "HOST_GRACEFUL_EXIT_DRAIN_S + 2 * CANCEL_UNWIND_TIMEOUT_S + CLOCK_READ_TIMEOUT_S "
+        "+ RELEASE_OWNER_TIMEOUT_S",
         "HOST_STOP_CEILING_S",
-        "a drain that times out still has its cancel unwind, clock read, resource join "
-        "and ownership release inside the host's stop ceiling",
+        "a drain that times out still has the scheduler's cancel unwind and clock read, the "
+        "resource join and the ownership release inside the host's stop ceiling, with room "
+        "left for the runtime, pool and health-server closes that carry no bound of their own",
     ),
     Constraint(
         "<",
-        "HOST_STOP_CEILING_S",
+        "HOST_STOP_CEILING_S + STOP_MARGIN_S",
         "ROOT_HEALTH_INTERVAL_S",
-        "root's TERM window for the agent-host (ceiling plus margin) may not exceed "
-        "the health round a replacement stop runs inside",
+        "root's TERM window for the agent-host (its ceiling plus the margin) stays inside "
+        "the health round a replacement stop runs inside, with slack rather than equality",
     ),
     # --- wedged family ---
     Constraint(

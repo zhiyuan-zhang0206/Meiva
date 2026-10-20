@@ -22,11 +22,12 @@ The units were stopped in unit-id order, which happened to put `agent-host` firs
 1. **The host performs the hold's guarantee on SIGTERM.** Once its dispatcher
    serves, SIGTERM closes the scheduler's admission, writes one `kind='restart'`,
    `source='system:restart'` inbound per agent with a running turn task through the
-   ordinary inbound writer, and waits up to `HOST_GRACEFUL_EXIT_DRAIN_S` (40 s) for
+   ordinary inbound writer, and waits up to `HOST_GRACEFUL_EXIT_DRAIN_S` (30 s, writes included) for
    those turns to settle at it. The existing claim priority, checkpoint flush,
    lifecycle apply and ownership release do the rest; the applied restart's pointer
    is what the next host wakes. Then the ordinary shutdown runs and the process
-   exits 0. Idle agents get nothing.
+   exits 0. Idle agents get nothing, and an agent that already has an unfinished
+   restart or terminate keeps that one instead of getting a second.
 2. **Every running turn is owed a restart, not only admitted ones.** A turn still
    before admission may, once admitted, observe an older restart pointer; a fresh
    restart is the only thing that puts one back. No admission flag is added to the
@@ -35,15 +36,19 @@ The units were stopped in unit-id order, which happened to put `agent-host` firs
    the cancel path.** The restart is already durable, so the next host wakes the
    agent anyway; the cut-short step is lost as in a crash. A crash or SIGKILL writes
    nothing: no restart is fabricated on the crash path.
-4. **The host's stop ceiling is a lattice clock.** `HOST_STOP_CEILING_S` (55 s)
-   covers the drain plus the cancel unwind, clock read, resource join and release;
-   the roster declares it as the agent-host's `stop_ceiling_s`, so root's TERM window
-   (ceiling + 5 s margin) is derived from it. Root caps any unit's window at its
-   60 s health round, which is why the drain is 40 s and not the several minutes a
+4. **The host's stop ceiling is a lattice clock.** `HOST_STOP_CEILING_S` (50 s)
+   covers the drain plus the cancel unwind, clock read, resource join and release
+   (45 s together) and leaves room for the closes without a bound of their own; the
+   roster declares it as the agent-host's `stop_ceiling_s`, so root's TERM window
+   (ceiling + `STOP_MARGIN_S`, 55 s) is derived from it. The lattice requires both
+   sums to stay strictly below their bound. Root caps any unit's window at its 60 s
+   health round, which is why the drain is 30 s and not the several minutes a
    hold-driven stop allowed.
-5. **The agent-host is stopped explicitly first.** `stop_root_service_tree` downs the
-   agent-host before any other unit and continues only after root reports it
-   exited; its draining turns still call ops and the gateway.
+5. **The agent-host is stopped explicitly first.** The generated manifest declares it
+   first, and both root's whole-tree stop and `meiva stop` go down the units in
+   declaration order, one at a time, continuing only after root reports each unit
+   exited; its draining turns still call ops and the gateway. The order has that one
+   source; startup is concurrent and unaffected.
 6. **The hold stays for now.** Both mechanisms work side by side: a stop that runs
    the hold drains turns before the host is signalled, and the host then has nothing
    to drain. Removing the hold is a later change.

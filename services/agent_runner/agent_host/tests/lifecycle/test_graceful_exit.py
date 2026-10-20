@@ -13,14 +13,22 @@ import sys
 from functools import partial
 from typing import Any
 
+import psutil
 import psycopg
 import pytest
 from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import build_graph
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceProcess,
+    decode_resources,
+)
+from base.agents.observation.turn_progress import TurnProgress
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -38,6 +46,7 @@ from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.lifecycle.graceful_exit import (
     RESTART_SOURCE,
     GracefulExit,
+    OwedRestart,
     write_exit_restart,
 )
 from services.agent_runner.agent_host.scheduling.pending_wakes import scan_rows
@@ -45,6 +54,20 @@ from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.lifecycle import blocking_model
 
 _ACCEPTED = f"Restart was accepted from {RESTART_SOURCE}"
+
+
+def _exited_process() -> ResourceProcess:
+    process = subprocess.Popen(
+        ["/bin/sleep", "60"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        identity = ResourceProcess.capture(psutil.Process(process.pid))
+    finally:
+        process.kill()
+        process.wait(timeout=5)
+    return identity
 
 
 async def _dispatch_forever() -> None:
@@ -103,6 +126,32 @@ class _Cluster:
             "FROM inbound_messages WHERE agent_id=%s AND kind='restart' AND source=%s ORDER BY id",
             (agent_id, RESTART_SOURCE),
         ).fetchall()
+
+    def lifecycle_commands(self, agent_id: int) -> list[tuple[Any, ...]]:
+        self.conn.commit()
+        return self.conn.execute(
+            "SELECT id,kind,source,status,applied_at IS NOT NULL FROM inbound_messages "
+            "WHERE agent_id=%s AND kind IN ('restart','terminate') ORDER BY id",
+            (agent_id,),
+        ).fetchall()
+
+    # meiva:note
+    # Record, as a SIGKILLed host leaves it, host-process evidence of a process that exited.
+    def host_was_killed(self, agent_id: int) -> None:
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone()
+        assert row is not None
+        resources = decode_resources(row[0])
+        assert isinstance(resources, IncarnationResources)
+        assert resources.host_process is not None and not resources.requests
+        dead = resources.model_copy(update={"host_process": _exited_process()})
+        self.conn.execute(
+            "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
+            (Jsonb(dead.model_dump(mode="json")), agent_id),
+        )
+        self.conn.commit()
 
     def row(self, agent_id: int) -> tuple[Any, ...]:
         self.conn.commit()
@@ -221,7 +270,7 @@ async def test_sigterm_settles_an_in_flight_turn_at_its_restart_and_the_next_hos
     await second.close()
 
 
-async def test_a_turn_past_the_drain_budget_is_named_and_still_woken_by_the_next_host(
+async def test_a_turn_past_the_drain_budget_is_named_and_still_continued_by_the_next_host(
     cluster: _Cluster, loguru_records: LogRecords
 ) -> None:
     agent_id, gate, first = await cluster.in_flight_turn(drain_s=0.5)
@@ -240,12 +289,114 @@ async def test_a_turn_past_the_drain_budget_is_named_and_still_woken_by_the_next
     assert await cluster.woken_by_a_new_host(agent_id)
 
     # meiva:note
-    # Then the cancel path the daemon falls back to.
+    # A killed host never releases its lease. Its stored host-process evidence names a
+    # process that has exited, so the successor admits at once, as after a real SIGKILL
+    # with no exec request open. Its first claim takes the restart before any model step,
+    # applies it, and leaves the pointer for the host after.
+    cluster.host_was_killed(agent_id)
+    second = await cluster.host(drain_s=30)
+    await asyncio.wait_for(second.host.run_turn(agent_id), 30)
+    assert cluster.restarts(agent_id) == [(restart, "claimed", True, False)]
+    assert cluster.row(agent_id) == ("idling", None, restart)
+    assert gate.calls == 1
+    assert any(_ACCEPTED in str(m.content) for m in await second.messages(agent_id))
+
+    # meiva:note
+    # The killed host's own cleanup, run here only to end the test, is fenced off the row.
     await first.close()
-    assert gate.calls == 1 and not gate.release.is_set()
-    assert cluster.restarts(agent_id) == [(restart, "pending", False, False)]
-    assert cluster.lease_released(agent_id)
-    assert await cluster.woken_by_a_new_host(agent_id)
+    assert cluster.row(agent_id) == ("idling", None, restart)
+    await second.close()
+
+
+async def test_an_unfinished_lifecycle_command_is_kept_instead_of_adding_a_restart(
+    cluster: _Cluster, loguru_records: LogRecords
+) -> None:
+    agent_id, gate, first = await cluster.in_flight_turn(drain_s=30)
+    operator = insert_inbound_message(
+        cluster.conn,
+        agent_id,
+        "",
+        source="user",
+        kind="restart",
+        database=cluster.database,
+        bus=cluster.bus,
+    )
+    serving = first.serve()
+    first.graceful.request()
+    async with asyncio.timeout(10):
+        while not loguru_records.events("host_exit_draining"):
+            await asyncio.sleep(0.05)
+    gate.release.set()
+    await asyncio.wait_for(serving, 30)
+    await first.close()
+
+    [draining] = loguru_records.events("host_exit_draining")
+    assert (draining["extra"]["written"], draining["extra"]["reused"]) == (0, 1)
+    assert cluster.lifecycle_commands(agent_id) == [(operator, "restart", "user", "claimed", True)]
+    assert cluster.row(agent_id) == ("idling", None, operator)
+
+
+class _Turns:
+    def __init__(self, tasks: dict[int, asyncio.Task[None]]) -> None:
+        self._tasks = tasks
+
+    def task_for(self, agent_id: int) -> asyncio.Task[None] | None:
+        return self._tasks.get(agent_id)
+
+    def stop_admission(self) -> frozenset[int]:
+        return frozenset(self._tasks)
+
+
+async def _drain_with(
+    write_restart: Any, *, drain_s: float
+) -> tuple[dict[int, asyncio.Task[None]], float]:
+    tasks = {agent: asyncio.create_task(_dispatch_forever()) for agent in (1, 2)}
+    graceful = GracefulExit(
+        turns=_Turns(tasks), progress=TurnProgress(), write_restart=write_restart, drain_s=drain_s
+    )
+    graceful.request()
+    started = asyncio.get_running_loop().time()
+    try:
+        await asyncio.wait_for(graceful.drain(), drain_s + 5)
+    finally:
+        for task in tasks.values():
+            task.cancel()
+    return tasks, asyncio.get_running_loop().time() - started
+
+
+async def test_a_failed_restart_write_is_named_and_the_turn_still_waited_for(
+    loguru_records: LogRecords,
+) -> None:
+    async def write_restart(agent_id: int) -> OwedRestart:
+        if agent_id == 1:
+            raise psycopg.OperationalError("database went away")
+        return OwedRestart(20, written=True)
+
+    await _drain_with(write_restart, drain_s=0.2)
+    [failed] = loguru_records.events("host_exit_restart_failed")
+    assert failed["level"].name == "ERROR" and failed["extra"]["agent_id"] == 1
+    assert "database went away" in failed["extra"]["reason"]
+    assert {
+        r["extra"]["agent_id"]: r["extra"]["restart"]
+        for r in loguru_records.events("host_exit_drain_timeout")
+    } == {1: None, 2: 20}
+
+
+async def test_restart_writes_share_the_drain_deadline(loguru_records: LogRecords) -> None:
+    async def write_restart(agent_id: int) -> OwedRestart:
+        await asyncio.Event().wait()
+        raise AssertionError(f"the write for agent {agent_id} never returns")
+
+    _, elapsed = await _drain_with(write_restart, drain_s=0.3)
+    assert elapsed < 2
+    assert sorted(
+        r["extra"]["agent_id"] for r in loguru_records.events("host_exit_restart_failed")
+    ) == [1, 2]
+    assert all(
+        r["extra"]["reason"] == "the drain deadline passed first"
+        for r in loguru_records.events("host_exit_restart_failed")
+    )
+    assert len(loguru_records.events("host_exit_drain_timeout")) == 2
 
 
 async def test_an_idle_agent_gets_no_restart(cluster: _Cluster, loguru_records: LogRecords) -> None:
@@ -259,7 +410,7 @@ async def test_an_idle_agent_gets_no_restart(cluster: _Cluster, loguru_records: 
     assert cluster.restarts(agent_id) == []
     assert gate.calls == 0
     assert cluster.row(agent_id) == ("idling", None, None)
-    assert [r["extra"]["restarts"] for r in loguru_records.events("host_exit_draining")] == [0]
+    assert [r["extra"]["written"] for r in loguru_records.events("host_exit_draining")] == [0]
     assert len(loguru_records.events("host_exit_drained")) == 1
 
 
