@@ -195,7 +195,7 @@ def test_force_termination_retries_command_before_message(
         return result
 
     monkeypatch.setattr(termination, "insert_termination_pair", _fail_after_pair)
-    old_status, _, _, terminate_id, _cutoff = termination.force_terminate_transaction(
+    old_status, _, terminate_id, _cutoff = termination.force_terminate_transaction(
         running_agent_id,
         db_pool,
         source="user",
@@ -209,13 +209,12 @@ def test_force_termination_retries_command_before_message(
     assert failed_pair
     assert old_status.value == "running"
     assert rows == [
-        (terminate_id, "", "terminate", "pending"),
+        (terminate_id, "", "terminate", "done"),
         (rows[1][0], "final force note", "chat", "pending"),
     ]
     assert db_conn.execute(
-        "SELECT status,last_force_terminate_inbound_id FROM agents_meta WHERE id=%s",
-        (running_agent_id,),
-    ).fetchone() == ("terminated", terminate_id)
+        "SELECT status FROM agents_meta WHERE id=%s", (running_agent_id,)
+    ).fetchone() == ("terminated",)
 
 
 def _terminate_payloads(db_conn: psycopg.Connection, agent_id: int) -> list[object]:
@@ -255,7 +254,7 @@ class TestKillAllShellSessions:
             calls.append(agent_id)
             return [0, 3]
 
-        async def _noop_cancel(_aid: int, _command_id: int) -> None:
+        async def _noop_cancel(_aid: int) -> None:
             return None
 
         monkeypatch.setattr(lifecycle, "kill_agent_shells", _kill)
@@ -507,7 +506,7 @@ class TestKillAllShellSessions:
         def _fail(_aid: int, *, before_session_index: int) -> list[int]:
             raise RuntimeError("failed to kill shell session(s) [2]")
 
-        async def _noop_cancel(_aid: int, _command_id: int) -> None:
+        async def _noop_cancel(_aid: int) -> None:
             return None
 
         monkeypatch.setattr(lifecycle, "kill_agent_shells", _fail)
@@ -575,7 +574,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     backend = PtySessionBackend(config=PtyClientConfig())
     replacement = session_name(f"agent-{running_agent_id}-shell-3-replacement")
 
-    async def _allocate_after_acceptance(_aid: int, _command_id: int) -> None:
+    async def _allocate_after_acceptance(_aid: int) -> None:
         row = db_conn.execute(
             "UPDATE agents_meta SET session_index=session_index+1 WHERE id=%s "
             "RETURNING session_index-1",

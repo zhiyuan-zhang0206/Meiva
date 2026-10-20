@@ -1,11 +1,9 @@
 [uses]
 "test_context_binding.py" = ["test_exec_child.py"]
 "test_exec_child_signals.py" = ["test_exec_child.py"]
-"test_exec_owner_entry.py" = ["_owner_host_child.py", "_owner_import_child.py"]
 "test_exec_slot.py" = ["test_exec_child.py"]
 "test_lazy_child_imports.py" = ["child_lazy_imports.py"]
 "test_lazy_child_telemetry.py" = ["child_lazy_telemetry.py"]
-"test_resource_admission.py" = ["test_exec_owner_entry.py"]
 "test_telemetry_otlp_exit_delivery_agent.py" = ["child_external_cli.py"]
 
 [debt.env-patch]
@@ -18,7 +16,6 @@
 "test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_EXEC_REQUEST_FILE" = 1
 "test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_EXEC_RESULT_FILE" = 1
 "test_exec_child.py#patch.dict os.environ" = 1
-"test_resource_admission.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
 "child_external_cli.py#assignment agent.extensions.plugin_state_codec.load_snapshot" = 1
@@ -45,9 +42,6 @@
 "test_exec_child_signals.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 1
 "test_exec_slot.py#assignment meiva.state" = 4
 "test_exec_slot.py#assignment meiva.state_update" = 1
-
-[debt.private-name]
-"test_resource_admission.py -> test_exec_owner_entry.py#_start" = 1
 
 [debt.unresolved-patch]
 "test_delta_read_compat_agent.py#monkeypatch.setattr saver.aget_delta_channel_history" = 1

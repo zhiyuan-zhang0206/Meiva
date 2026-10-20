@@ -33,8 +33,7 @@ uses the provider's implicit caching through the ordinary model API.
 
 Core owns total deadlines, cancellation, stream-stall recovery and usage
 accounting. It has no explicit CachedContent lifecycle or cache-stale retry.
-Compaction invokes once per caller attempt; guarded generation additionally
-requires the provider's single-attempt construction contract.
+Compaction invokes once per caller attempt.
 
 ## Current ownership
 

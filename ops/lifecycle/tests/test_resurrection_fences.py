@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import psycopg
 import pytest
-from psycopg_pool import AsyncConnectionPool
 
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind
@@ -23,7 +22,6 @@ from ops.lifecycle.tests.resurrection_setup import (
     hosted_agent,
     inbound_rows,
     noop,
-    settle_hosted_force,
 )
 from ops.tests.pool_support import make_test_pool
 
@@ -33,7 +31,6 @@ class TestResurrectAgent:
         self,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
-        aops_pool: AsyncConnectionPool,
         database: Database,
         event_bus: EventBus,
         *,
@@ -63,7 +60,8 @@ class TestResurrectAgent:
             force_mark_terminated(database, event_bus, agent_id, pool)
             with db_conn.cursor() as cur:
                 cur.execute(
-                    "SELECT status_changed_at, last_force_terminate_inbound_id "
+                    "SELECT status_changed_at, (SELECT max(id) FROM inbound_messages "
+                    "WHERE agent_id = agents_meta.id AND kind = 'terminate') "
                     "FROM agents_meta WHERE id = %s",
                     (agent_id,),
                 )
@@ -80,7 +78,8 @@ class TestResurrectAgent:
 
         with db_conn.cursor() as cur:
             cur.execute(
-                "SELECT status_changed_at, last_force_terminate_inbound_id "
+                "SELECT status_changed_at, (SELECT max(id) FROM inbound_messages "
+                "WHERE agent_id = agents_meta.id AND kind = 'terminate') "
                 "FROM agents_meta WHERE id = %s",
                 (agent_id,),
             )
@@ -95,14 +94,11 @@ class TestResurrectAgent:
         assert repeated_agent_row[1] > first_agent_row[1]
         assert repeated_page_row[0] == first_page_row[0]
 
-        await settle_hosted_force(db_conn, aops_pool, agent_id, local_machine=machine_identity)
-
         resurrect_agent(
             database,
             event_bus,
             agent_id,
             resurrected_by="user",
-            local_machine=machine_identity.name(),
         )
 
         with db_conn.cursor() as cur:
@@ -117,7 +113,6 @@ class TestResurrectAgent:
         self,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
-        aops_pool: AsyncConnectionPool,
         database: Database,
         event_bus: EventBus,
         *,
@@ -150,8 +145,6 @@ class TestResurrectAgent:
         with make_test_pool() as pool:
             force_mark_terminated(database, event_bus, agent_id, pool)
 
-        await settle_hosted_force(db_conn, aops_pool, agent_id, local_machine=machine_identity)
-
         with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
             resurrect_agent(
                 database,
@@ -160,7 +153,6 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
-                local_machine=machine_identity.name(),
             )
 
         row = agents_row(db_conn, agent_id)
@@ -223,7 +215,6 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
-                local_machine=machine_identity.name(),
             )
 
         row = agents_row(db_conn, agent_id)
@@ -272,7 +263,6 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
-                local_machine=machine_identity.name(),
             )
 
         row = agents_row(db_conn, agent_id)
@@ -318,7 +308,6 @@ class TestResurrectAgent:
             resurrected_by="system",
             trigger_inbound_id=trigger_id,
             trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
         )
 
         assert returned == agent_id
@@ -369,7 +358,6 @@ class TestResurrectAgent:
             resurrected_by="system",
             trigger_inbound_id=compact_id,
             trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
-            local_machine=machine_identity.name(),
         )
 
         assert returned == agent_id
@@ -421,7 +409,6 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
                 trigger_inbound_kind=InboundKind.CHAT,
-                local_machine=machine_identity.name(),
             )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -437,7 +424,6 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
                 trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
-                local_machine=machine_identity.name(),
             )
 
         assert agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]
@@ -446,7 +432,6 @@ class TestResurrectAgent:
         self,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
-        aops_pool: AsyncConnectionPool,
         database: Database,
         event_bus: EventBus,
         *,
@@ -480,8 +465,6 @@ class TestResurrectAgent:
         with make_test_pool() as pool:
             force_mark_terminated(database, event_bus, agent_id, pool)
 
-        await settle_hosted_force(db_conn, aops_pool, agent_id, local_machine=machine_identity)
-
         with pytest.raises(ResurrectTriggerStaleError):
             resurrect_agent(
                 database,
@@ -490,6 +473,5 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
                 trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
-                local_machine=machine_identity.name(),
             )
         assert agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]

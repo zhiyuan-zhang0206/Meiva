@@ -905,53 +905,11 @@
         }
       }
     },
-    "/api/keyed/v1/agents/{agent_id}/native-work": {
-      "get": {
-        "summary": "Native Work",
-        "description": "Expose only eligible ACTIVE work backed by actual managed-owner evidence.",
-        "operationId": "native_work_api_keyed_v1_agents__agent_id__native_work_get",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "exclusiveMaximum": 9223372036854775808,
-              "exclusiveMinimum": 0,
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NativeWorkTarget"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/keyed/v1/agents/{agent_id}/cancel-work": {
+    "/api/agents/{agent_id}/cancel": {
       "post": {
-        "summary": "Native Cancel",
-        "description": "Accept one exact work intent; acceptance does not prove checkpoint execution.",
-        "operationId": "native_cancel_api_keyed_v1_agents__agent_id__cancel_work_post",
+        "summary": "Post Agent Cancel",
+        "description": "Cancel the agent's running turn without terminating the agent.\n\nThe request is forwarded to the home runner, whose host cancels the running\nturn task. The agent stays alive and idles; its next input starts a fresh\nturn. `cancelled` means a running turn was cancelled; `not_running` means\nthere was none. An unreachable home runner is an error, not `not_running`.",
+        "operationId": "post_agent_cancel_api_agents__agent_id__cancel_post",
         "parameters": [
           {
             "name": "agent_id",
@@ -959,29 +917,17 @@
             "required": true,
             "schema": {
               "type": "integer",
-              "exclusiveMaximum": 9223372036854775808,
-              "exclusiveMinimum": 0,
               "title": "Agent Id"
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NativeWorkTarget"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NativeCancelAcceptance"
+                  "$ref": "#/components/schemas/CancelAgentResponse"
                 }
               }
             }
@@ -999,11 +945,11 @@
         }
       }
     },
-    "/api/keyed/v1/agents/{agent_id}/restart-work": {
+    "/api/agents/{agent_id}/compact": {
       "post": {
-        "summary": "Native Restart",
-        "description": "Accept the original ACTIVE restart once through its dedicated executor.",
-        "operationId": "native_restart_api_keyed_v1_agents__agent_id__restart_work_post",
+        "summary": "Post Agent Compact",
+        "description": "Ask the agent to compact its history at its next turn.\n\nInserts a `compact_request` inbound and wakes the host; the agent summarizes and\nreplaces its history when it next claims input. The response says the request\nis durable, not that the summary was applied. A terminated agent returns 409.",
+        "operationId": "post_agent_compact_api_agents__agent_id__compact_post",
         "parameters": [
           {
             "name": "agent_id",
@@ -1011,113 +957,6 @@
             "required": true,
             "schema": {
               "type": "integer",
-              "exclusiveMaximum": 9223372036854775808,
-              "exclusiveMinimum": 0,
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NativeRestartRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NativeRestartAcceptance"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}": {
-      "get": {
-        "summary": "Native Restart Status",
-        "description": "Observe retained original execution facts; no mutable current-owner inference.",
-        "operationId": "native_restart_status_api_keyed_v1_agents__agent_id__restart_commands__command_id__get",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "exclusiveMaximum": 9223372036854775808,
-              "exclusiveMinimum": 0,
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "command_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "exclusiveMaximum": 9223372036854775808,
-              "exclusiveMinimum": 0,
-              "title": "Command Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NativeRestartProgress"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/keyed/v1/agents/{agent_id}/compact-target": {
-      "get": {
-        "summary": "Guarded Compact Target",
-        "description": "Observe only actual new-host quiescent, closed-resource source evidence.",
-        "operationId": "guarded_compact_target_api_keyed_v1_agents__agent_id__compact_target_get",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "exclusiveMaximum": 9223372036854775808,
-              "exclusiveMinimum": 0,
               "title": "Agent Id"
             }
           }
@@ -1128,111 +967,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CompactTarget"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/keyed/v1/agents/{agent_id}/compact-history": {
-      "post": {
-        "summary": "Guarded Compact History",
-        "description": "Accept the original observed history; 202 is not summary/application success.",
-        "operationId": "guarded_compact_history_api_keyed_v1_agents__agent_id__compact_history_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "exclusiveMaximum": 9223372036854775808,
-              "exclusiveMinimum": 0,
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CompactTarget"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CompactAcceptance"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/keyed/v1/agents/{agent_id}/compact-commands/{command_id}": {
-      "get": {
-        "summary": "Guarded Compact Command",
-        "description": "Inspect current execution evidence independently of immutable acceptance.",
-        "operationId": "guarded_compact_command_api_keyed_v1_agents__agent_id__compact_commands__command_id__get",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "exclusiveMaximum": 9223372036854775808,
-              "exclusiveMinimum": 0,
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "command_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Command Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CompactStatus"
+                  "$ref": "#/components/schemas/CompactAgentResponse"
                 }
               }
             }
@@ -8146,16 +7881,6 @@
         "title": "Acceptance",
         "description": "Historical source acceptance; not copy readiness or agent execution."
       },
-      "AdmissionOutcome": {
-        "type": "string",
-        "enum": [
-          "admitted",
-          "maintenance_hold",
-          "resource_fence",
-          "admission_guard_refused"
-        ],
-        "title": "AdmissionOutcome"
-      },
       "AgentActivity": {
         "properties": {
           "active_seconds": {
@@ -8224,16 +7949,6 @@
               }
             ],
             "title": "Evidence At"
-          },
-          "admission_outcome": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AdmissionOutcome"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "type": "object",
@@ -8268,33 +7983,10 @@
           "status": {
             "$ref": "#/components/schemas/AgentStatus"
           },
-          "pid": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pid"
-          },
           "spawned_at": {
             "type": "string",
             "format": "date-time",
             "title": "Spawned At"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
           },
           "last_active_at": {
             "type": "string",
@@ -8412,9 +8104,7 @@
           "spawner",
           "fork_source_agent_id",
           "status",
-          "pid",
           "spawned_at",
-          "started_at",
           "last_active_at",
           "last_inbound_at",
           "label",
@@ -8650,18 +8340,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Spawned At"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
           },
           "shells": {
             "items": {
@@ -9108,18 +8786,6 @@
             ],
             "title": "Machine Probe Valid Until"
           },
-          "runtime_lease_expires_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Runtime Lease Expires At"
-          },
           "runtime_owner": {
             "type": "string",
             "const": "unknown",
@@ -9128,8 +8794,7 @@
           }
         },
         "type": "object",
-        "title": "AgentObservation",
-        "description": "Machine reachability is not proof of runtime ownership.\n\nThis compatibility slice has no generation/owner binding. A fresh lease\nalone, or a PID, must not invent one. UI uses absolute deadlines."
+        "title": "AgentObservation"
       },
       "AgentRoster": {
         "properties": {
@@ -9191,33 +8856,10 @@
           "status": {
             "$ref": "#/components/schemas/AgentStatus"
           },
-          "pid": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pid"
-          },
           "spawned_at": {
             "type": "string",
             "format": "date-time",
             "title": "Spawned At"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
           },
           "last_active_at": {
             "type": "string",
@@ -9333,9 +8975,7 @@
           "fork_source_agent_id",
           "fork_source_checkpoint_id",
           "status",
-          "pid",
           "spawned_at",
-          "started_at",
           "last_active_at",
           "last_inbound_at",
           "label",
@@ -10234,7 +9874,6 @@
           "unknown",
           "host_unavailable",
           "awaiting_admission",
-          "admission_refused",
           "admitted",
           "launch_unreachable",
           "launch_rejected",
@@ -10698,6 +10337,26 @@
         "title": "BuildResponse",
         "description": "POST /api/agents/{agent_id}/understanding/build response.\n\n`build_id` and `rebuild_id` are None for a dry run, which writes nothing. `queued` counts the jobs\nnewly on the queue, `merged` those of the same stretch already live. `jobs` may be empty\n(everything chosen is covered): the rebuild of the upper levels is still queued."
       },
+      "CancelAgentResponse": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/CancelResult"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "CancelAgentResponse"
+      },
+      "CancelResult": {
+        "type": "string",
+        "enum": [
+          "cancelled",
+          "not_running"
+        ],
+        "title": "CancelResult"
+      },
       "ChoiceQuestion": {
         "properties": {
           "type": {
@@ -10936,204 +10595,18 @@
         "title": "CommandItem",
         "description": "One composer command, as surfaced in the `/`-autocomplete: name +\ndescription + `instruction_hint` (placeholder for the single natural-language\ninstruction typed after the name). The body is intentionally absent —\nexpansion happens server-side in the agent's claim node, so the template\nnever reaches the browser."
       },
-      "CompactAcceptance": {
+      "CompactAgentResponse": {
         "properties": {
-          "command_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Command Id"
-          },
-          "target": {
-            "$ref": "#/components/schemas/CompactTarget"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "command_id",
-          "target"
-        ],
-        "title": "CompactAcceptance",
-        "description": "Original business acceptance, never proof of application or provider completion."
-      },
-      "CompactOutcome": {
-        "type": "string",
-        "enum": [
-          "accepted",
-          "prepared",
-          "applying",
-          "applied",
-          "noop",
-          "rejected",
-          "uncertain"
-        ],
-        "title": "CompactOutcome"
-      },
-      "CompactStatus": {
-        "properties": {
-          "acceptance": {
-            "$ref": "#/components/schemas/CompactAcceptance"
-          },
-          "outcome": {
-            "$ref": "#/components/schemas/CompactOutcome"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "checkpoint_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Checkpoint Id"
-          },
-          "recovery_checkpoint_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recovery Checkpoint Id"
-          },
-          "attempt_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Attempt Id"
-          },
-          "attempt_provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Attempt Provider"
-          },
-          "execution": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NativeWorkTarget"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "result_available": {
-            "type": "boolean",
-            "title": "Result Available"
-          },
-          "continuation_released": {
-            "type": "boolean",
-            "title": "Continuation Released"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "acceptance",
-          "outcome",
-          "reason",
-          "checkpoint_id",
-          "recovery_checkpoint_id",
-          "attempt_id",
-          "attempt_provider",
-          "execution",
-          "result_available",
-          "continuation_released"
-        ],
-        "title": "CompactStatus"
-      },
-      "CompactTarget": {
-        "properties": {
-          "protocol": {
+          "inbound_id": {
             "type": "integer",
-            "title": "Protocol"
-          },
-          "observation_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Observation Id"
-          },
-          "source": {
-            "$ref": "#/components/schemas/NativeWorkTarget"
-          },
-          "checkpoint_id": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Checkpoint Id"
-          },
-          "checkpoint_ns": {
-            "type": "string",
-            "maxLength": 0,
-            "title": "Checkpoint Ns"
-          },
-          "messages_version": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Messages Version"
-          },
-          "compact_channel_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Compact Channel Version"
-          },
-          "segment_version": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Segment Version"
-          },
-          "model": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Model"
+            "title": "Inbound Id"
           }
         },
-        "additionalProperties": false,
         "type": "object",
         "required": [
-          "protocol",
-          "observation_id",
-          "source",
-          "checkpoint_id",
-          "checkpoint_ns",
-          "messages_version",
-          "compact_channel_version",
-          "segment_version",
-          "model"
+          "inbound_id"
         ],
-        "title": "CompactTarget",
-        "description": "A new host's retained observation of actual ended, resource-closed work."
+        "title": "CompactAgentResponse"
       },
       "ConfigAuditView": {
         "properties": {
@@ -14413,217 +13886,6 @@
         ],
         "title": "ModelsResponse",
         "description": "GET /api/models — model picker source for the spawn UI."
-      },
-      "NativeCancelAcceptance": {
-        "properties": {
-          "command_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Command Id"
-          },
-          "target": {
-            "$ref": "#/components/schemas/NativeWorkTarget"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "command_id",
-          "target"
-        ],
-        "title": "NativeCancelAcceptance",
-        "description": "Immutable command acceptance; it does not claim execution completed."
-      },
-      "NativeRestartAcceptance": {
-        "properties": {
-          "command_id": {
-            "type": "integer",
-            "exclusiveMaximum": 9.223372036854776e+18,
-            "exclusiveMinimum": 0.0,
-            "title": "Command Id"
-          },
-          "target": {
-            "$ref": "#/components/schemas/NativeWorkTarget"
-          },
-          "config_overlay": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config Overlay"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "command_id",
-          "target",
-          "config_overlay"
-        ],
-        "title": "NativeRestartAcceptance",
-        "description": "The original source command, not a claim that restart executed."
-      },
-      "NativeRestartOutcome": {
-        "type": "string",
-        "enum": [
-          "accepted",
-          "applied",
-          "observed",
-          "superseded",
-          "uncertain"
-        ],
-        "title": "NativeRestartOutcome"
-      },
-      "NativeRestartProgress": {
-        "properties": {
-          "acceptance": {
-            "$ref": "#/components/schemas/NativeRestartAcceptance"
-          },
-          "outcome": {
-            "$ref": "#/components/schemas/NativeRestartOutcome"
-          },
-          "applied_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Applied At"
-          },
-          "observed_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Observed At"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NativeRestartReason"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "acceptance",
-          "outcome",
-          "applied_at",
-          "observed_at",
-          "reason"
-        ],
-        "title": "NativeRestartProgress",
-        "description": "Retained execution facts copied by the original source transaction."
-      },
-      "NativeRestartReason": {
-        "type": "string",
-        "enum": [
-          "target_replaced",
-          "resurrect",
-          "force_terminate",
-          "invalid_source_transition",
-          "source_command_unavailable"
-        ],
-        "title": "NativeRestartReason"
-      },
-      "NativeRestartRequest": {
-        "properties": {
-          "target": {
-            "$ref": "#/components/schemas/NativeWorkTarget"
-          },
-          "source": {
-            "type": "string",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Source",
-            "default": "user"
-          },
-          "config_overlay": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config Overlay"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "target"
-        ],
-        "title": "NativeRestartRequest",
-        "description": "Validate shape without consulting mutable overlay configuration on replay."
-      },
-      "NativeWorkTarget": {
-        "properties": {
-          "work_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Work Id"
-          },
-          "agent_id": {
-            "type": "integer",
-            "exclusiveMaximum": 9.223372036854776e+18,
-            "exclusiveMinimum": 0.0,
-            "title": "Agent Id"
-          },
-          "machine": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Machine"
-          },
-          "generation": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Generation"
-          },
-          "owner": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Owner"
-          },
-          "protocol": {
-            "type": "integer",
-            "const": 1,
-            "title": "Protocol"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "work_id",
-          "agent_id",
-          "machine",
-          "generation",
-          "owner",
-          "protocol"
-        ],
-        "title": "NativeWorkTarget",
-        "description": "The immutable original work and actual hosted owner observed by a caller."
       },
       "NeighborRow": {
         "properties": {

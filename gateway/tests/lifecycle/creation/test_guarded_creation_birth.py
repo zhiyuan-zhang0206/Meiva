@@ -47,7 +47,7 @@ def test_historical_birth_never_wakes_later_work(
     assert first.status_code == 201, first.text
     agent_id = first.json()["id"]
     statements: dict[str, LiteralString] = {
-        "admitted": "UPDATE agents_meta SET last_admission_at=now(), last_admission_outcome='admitted' WHERE id=%s",
+        "admitted": "UPDATE agents_meta SET last_admission_at=now() WHERE id=%s",
         "terminated": "UPDATE agents_meta SET status='terminated' WHERE id=%s",
         "deleted": "DELETE FROM agents_meta WHERE id=%s",
         "placed": "UPDATE agents_meta SET machine='later-placement' WHERE id=%s",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, NotRequired, TypedDict
+from typing import Literal, TypedDict
 
 from base.events.vocabulary import EventSpec, telemetry_event
 
@@ -36,21 +36,6 @@ class HostDispatcherScanFailed(TypedDict):
     backoff_s: float
 
 
-class HostAdmissionRefused(TypedDict):
-    """`host_admission_refused` payload — agent/ownership/hosted.py::_record_admission_refusal.
-
-    One event per refusal recorded with durable row state: `outcome` is the
-    AdmissionOutcome the channel recorded, `reason` the evidence classification
-    (successor-closure / receipt-less / fences / dead-owner / other) and
-    `detail` the operator-facing evidence text when the refusal produced one.
-    The stream stays complete; the alerting layer picks the pathological shapes.
-    """
-
-    outcome: str
-    reason: str
-    detail: NotRequired[str]
-
-
 class ImpersonationTerminalNoticeFailed(TypedDict):
     """`impersonation_terminal_notice_failed` payload — agent/impersonation.py.
 
@@ -78,12 +63,6 @@ class ImpersonationEventLogIncomplete(TypedDict):
 
 
 EVENTS: dict[str, EventSpec] = {
-    "native_compact_proof_gap": telemetry_event(
-        "native_compact_proof_gap",
-        "the actual serialized host could not establish compact source or uncertainty closure; "
-        "pending intent remains held, carrying agent_id and bounded error_type without payload",
-        tier="anomaly",
-    ),
     "impersonation_event_log_incomplete": telemetry_event(
         "impersonation_event_log_incomplete",
         "an impersonation event log cannot complete on its own (ended lease with an "
@@ -97,12 +76,6 @@ EVENTS: dict[str, EventSpec] = {
         "hosted boot settle restored rows a previous host instance left running "
         "without a task (crash / kill -9); carries n = rows settled",
         tier="noise",
-    ),
-    "host_stale_running_settle_failed": telemetry_event(
-        "host_stale_running_settle_failed",
-        "the hosted beat could not settle stale running rows this round — logged with the "
-        "traceback and retried on the next beat; the rows stay running until a settle succeeds",
-        tier="anomaly",
     ),
     "host_dispatcher_subscribed": telemetry_event(
         "host_dispatcher_subscribed",
@@ -317,8 +290,7 @@ EVENTS: dict[str, EventSpec] = {
         "host_abort_reconcile_skipped",
         "the settled hosted turn abort skipped the immediate inbound reconcile "
         "(fail-closed) — the claimed rows are left to the next cold admission. "
-        "Carries the reason: the turn's resources never fully settled "
-        "(resources_unsettled), or the runtime ownership was already replaced "
+        "Carries the reason: the runtime ownership was already replaced "
         "(ownership_lost — the replacement disposes the rows)",
         tier="noise",
     ),
@@ -334,8 +306,7 @@ EVENTS: dict[str, EventSpec] = {
         "host_turn_reconcile_skipped",
         "the finished hosted turn skipped the immediate inbound reconcile "
         "(fail-closed) — the claimed rows are left to the next cold admission. "
-        "Carries the reason: the turn's resources never fully settled "
-        "(resources_unsettled), or the runtime ownership was already replaced "
+        "Carries the reason: the runtime ownership was already replaced "
         "(ownership_lost — the replacement disposes the rows)",
         tier="noise",
     ),
@@ -353,16 +324,6 @@ EVENTS: dict[str, EventSpec] = {
         "reason. Nothing retries it: the external controller learns the lease ended "
         "only on its next relay call",
         payload=ImpersonationTerminalNoticeFailed,
-        tier="anomaly",
-    ),
-    "host_admission_refused": telemetry_event(
-        "host_admission_refused",
-        "a hosted admission attempt was refused with durable row state — carries the "
-        "outcome, its evidence reason code and the operator-facing detail, so a "
-        "successor-closure wedge like the 2026-10-15 block is visible from the stream "
-        "instead of only from host logs; recorded completely, the alerting layer picks "
-        "the pathological shapes",
-        payload=HostAdmissionRefused,
         tier="anomaly",
     ),
     "host_admission_wait_exceeded": telemetry_event(
@@ -394,28 +355,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=PauseOrphanClaimSettled,
         tier="anomaly",
         site="base/deploy/maintenance/cohort.py:_emit_orphan_settlements",
-    ),
-    # The force-termination quiet close (task #4180): an externally commanded
-    # force terminate (delivery-watchdog wedge recovery / CLI force / machine
-    # pause) of the turn's own incarnation stops through the classification
-    # instead of the crash path — the applied command awaits its observation
-    # by the pump's own boundary; no corpse marker, no error event, no
-    # failure receipt.
-    "host_turn_force_terminated": telemetry_event(
-        "host_turn_force_terminated",
-        "this hosted turn ended on its own incarnation's applied force terminate "
-        "(e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate "
-        "command was applied but not yet observed, the turn's fail-closed guard "
-        "read refused, and the pump's own boundary observes the command; not a "
-        "failure",
-        tier="observation",
-    ),
-    "host_held_wake_force_terminated": telemetry_event(
-        "host_held_wake_force_terminated",
-        "a held-controls wake stopped quietly because its incarnation's applied "
-        "force terminate landed — the pump's boundary owns the command's "
-        "observation, so the wake had nothing left to do; not a failure",
-        tier="observation",
     ),
     "brew_pin": telemetry_event(
         "brew_pin",

@@ -4,7 +4,6 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from base.agents.incarnation.resources import ResourceBirth
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -44,7 +43,6 @@ def test_reassigned_task_refuses_delayed_home_wake(
     pin_agent(actor)
     owner = terminated(
         db_conn,
-        ResourceBirth(birth=uuid4()).model_dump(mode="json"),
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
@@ -70,9 +68,8 @@ def test_reassigned_task_refuses_delayed_home_wake(
             resurrected_by="system",
             trigger_inbound_id=selected[0][1],
             trigger_inbound_kind=InboundKind.SYSTEM_NOTE,
-            local_machine=machine_identity.name(),
         )
-    assert status(db_conn, owner)[0] == "terminated"
+    assert status(db_conn, owner) == "terminated"
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect'", (owner,)
     ).fetchone() == (0,)

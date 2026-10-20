@@ -228,7 +228,6 @@ function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentInspectLiv
     heartbeat: { interval_s: 300, next_at: null, paused_until: null, heartbeat_pending: false, last_pause: null },
     notice: null,
     spawned_at: "2026-06-14T12:00:00Z",
-    started_at: "2026-06-14T12:00:05Z",
     ...overrides,
   };
 }
@@ -1037,20 +1036,12 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
 describe("InspectorPanel birth (cell in the merged Liveness section, Task #1195)", () => {
   it("birth cell shows relative + absolute, anchored to spawned_at", async () => {
     const spawned = "2026-06-14T12:00:00Z";
-    for (const started of ["2026-06-14T12:00:05Z", "2026-07-30T09:00:00Z"]) {
-      cleanup();
-      getAgentInspectLive.mockResolvedValue(
-        liveFixture({ spawned_at: spawned, started_at: started }),
-      );
-      render(<InspectorPanel agentId={1} />);
-      await waitFor(() => expect(screen.getByText("Birth")).toBeTruthy());
-      expect(
-        screen.getByText(`${formatRelative(spawned)}, ${formatAbsolute(spawned)}`),
-      ).toBeTruthy();
-      expect(
-        screen.queryByText(`${formatRelative(started)}, ${formatAbsolute(started)}`),
-      ).toBeNull();
-    }
+    getAgentInspectLive.mockResolvedValue(liveFixture({ spawned_at: spawned }));
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Birth")).toBeTruthy());
+    expect(
+      screen.getByText(`${formatRelative(spawned)}, ${formatAbsolute(spawned)}`),
+    ).toBeTruthy();
   });
 });
 
@@ -1362,9 +1353,7 @@ function rosterFixture(overrides: Partial<WireAgentCard> = {}): AgentRoster {
       spawner: "user",
       fork_source_agent_id: null,
       status: "idling",
-      pid: null,
       spawned_at: "2026-06-14T12:00:00Z",
-      started_at: "2026-06-14T12:00:05Z",
       last_active_at: "2026-06-14T12:00:05Z",
       last_inbound_at: "2026-06-14T12:00:05Z",
       label: null,

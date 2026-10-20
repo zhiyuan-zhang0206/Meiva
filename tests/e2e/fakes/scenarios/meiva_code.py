@@ -166,7 +166,7 @@ def _restart_applied(agent_id: int | None) -> bool:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM inbound_messages WHERE agent_id = %s AND kind = 'restart' "
-            "AND applied_at IS NOT NULL LIMIT 1",
+            "AND status = 'done' LIMIT 1",
             (agent_id,),
         )
         return cur.fetchone() is not None

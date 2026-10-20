@@ -18,7 +18,12 @@ from typing import Any
 from langgraph.types import Command
 
 from agent.graph._callbacks import RedisStreamHandler
-from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
+from agent.graph.interrupt import (
+    ModelInterruptedError,
+    interrupt_halt,
+    interruptible_model,
+    subscribe_interrupt,
+)
 from agent.graph.llm_errors import (
     LLMStreamError,
     classify_and_log_provider_error,
@@ -56,13 +61,11 @@ async def race_stream_vs_cancel(
     async with subscribe_interrupt(
         ctx.ops_pool,
         agent_id,
-        incarnation=ctx.original_incarnation,
-        work=ctx.native_work,
         resources=ctx.hosted_resources,
     ) as cancel_event:
         try:
             await interruptible_model(stream_coro, cancel_event)
-        except ModelInterruptedError:
+        except ModelInterruptedError as interrupted:
             # Notify frontend the turn was aborted — the SSE Cancelled event
             # resets turn-active state and drops the still-streaming partial
             # bubble. emit() is non-blocking (best-effort live view).
@@ -89,7 +92,7 @@ async def race_stream_vs_cancel(
                 body="discarded partial generation",
                 event="llm_cancelled",
             )
-            return Command[LlmGoto](update={"halted": True}, goto=AFTER_EXEC)
+            return Command[LlmGoto](update=interrupt_halt(interrupted.reason), goto=AFTER_EXEC)
 
         except LLMStreamError:
             raise

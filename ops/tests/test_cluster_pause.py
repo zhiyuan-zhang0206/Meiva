@@ -229,9 +229,8 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
         agent_pause, "host_identity", lambda: HostIdentity(owner, frozenset({agent}))
     )
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_kind,runtime_owner,"
-        "runtime_generation,lease_expires_at) VALUES(%s,'running',%s,'hosted',"
-        "%s,%s,clock_timestamp()+interval '1 minute')",
+        "INSERT INTO agents_meta(id,status,machine,runtime_owner,runtime_generation) "
+        "VALUES(%s,'running',%s,%s,%s)",
         (agent, machine_identity.name(), owner, generation),
     )
     db_conn.commit()
@@ -244,11 +243,12 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
     assert current.maintenance.phase == MaintenancePhase.DRAINING
     assert current.maintenance.drained == ()
     command = current.maintenance.commands[agent]
-    # Issue #2159: the timeout names per-agent delivery state, row fences and
+    # meiva:note
+    # Issue #2159: the timeout names per-agent delivery state, the row owner and
     # the live host's view instead of the bare agent list the operator had.
     message = str(raised.value)
-    assert f"agent {agent}: command {command} pending, applied=no" in message
-    assert "lease_fresh=yes" in message and "resources_settled=yes" in message
+    assert f"agent {agent}: command {command} pending; row running" in message
+    assert f"owner={owner}" in message
     assert "host active=yes" in message
     assert db_conn.execute(
         "SELECT kind,status FROM inbound_messages WHERE id=%s", (command,)
@@ -257,51 +257,6 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
         "SELECT status,runtime_owner,runtime_generation FROM agents_meta WHERE id=%s", (agent,)
     ).fetchone() == ("running", owner, generation)
     assert posture == [] and local_runtime.has_answer and local_runtime.killed == []
-
-
-def test_stall_report_names_the_predecessor_owner_fence(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-    event_bus: EventBus,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """An unowned row must be reported as the predecessor's fence, not guessed at.
-
-    The drain's agent list said nothing about WHY a successor boot (this host)
-    was not consuming a row left by its predecessor; the report must name the
-    owner mismatch, which is the fence that requires explicit resolution.
-    """
-    from base.deploy.maintenance.state import MaintenanceHold
-    from ops.agent_pause import stall_report
-    from ops.agent_pause.probe import HostIdentity
-
-    agent = create_agent(db_conn)
-    predecessor, successor, generation = uuid4(), uuid4(), uuid4()
-    command = insert_inbound_message(
-        db_conn, agent, "", "system:restart", kind="restart", bus=event_bus, database=database
-    )
-    db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_kind,runtime_owner,"
-        "runtime_generation,lease_expires_at) VALUES(%s,'idling',%s,'hosted',"
-        "%s,%s,clock_timestamp()+interval '1 minute')",
-        (agent, machine_identity.name(), predecessor, generation),
-    )
-    db_conn.commit()
-    monkeypatch.setattr(agent_pause, "host_running", lambda: True)
-    monkeypatch.setattr(agent_pause, "host_identity", lambda: HostIdentity(successor, frozenset()))
-
-    report = stall_report(
-        database,
-        MaintenanceHold(MaintenancePhase.DRAINING, {agent: command}),
-        [agent],
-        local_machine=machine_identity,
-    )
-
-    assert f"owner={predecessor}" in report
-    assert f"not the live boot {successor}" in report
-    assert "successor host cannot certify its predecessor flushed" in report
 
 
 def test_unpause_changes_no_service_sessions(

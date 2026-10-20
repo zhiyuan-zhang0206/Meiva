@@ -93,10 +93,8 @@ next start.
 The existing home-local journal survives a CLI crash, host reboot and an
 offline database. An incomplete drain or stop retains the hold and reports
 failure. A drain that hits its deadline reports every unfinished agent — its
-restart command's delivery state, the row's owner/lease/resource facts, the
-agent's last activity and the live host's view — and names the predecessor-owner
-fence explicitly when a successor boot is looking at a row its predecessor left:
-that one is ended by `meiva start`, never a retry loop. A rollout's own pause no longer defers the held
+restart command's delivery state, the row's owner, the
+agent's last activity and the live host's view. A rollout's own pause no longer defers the held
 continuation it requires, so the ordinary update drain consumes and certifies.
 For ordinary local maintenance, retry the command or run `meiva start` to restore
 services and release the hold after readiness succeeds. A failed start keeps
@@ -120,7 +118,7 @@ read the existing local journal and finish without fetching an offline
 gateway. An incomplete, corrupt or failed journal does not enable this
 exception; the first normal drain needs the actual cluster configuration.
 
-Cold native admission consumes the saved lifecycle pointers and checkpoints.
+Cold native admission consumes the saved checkpoints.
 Idle agents remain idle; pending work can continue; terminated agents remain
 terminated. Successful drain preserves completed tool results. No lifecycle
 command can guarantee exactly-once external effects if a process crashes after
@@ -175,13 +173,7 @@ deployment is not protected by the new protocol itself**: establish and verify
 the one-time cutover procedure against the actual running version before
 switching it to the new lifecycle.
 
-Cold preparation can retain an expired owned idle row only when its native
-consumers are absent, resources are empty and the latest persisted checkpoint
-is a complete halted END. Nothing is written: historical leases, identity,
-messages, checkpoints and lifecycle acknowledgements are preserved.
-An expired lease alone, unfinished lifecycle/graph work or an uncertain
-checkpoint still refuses; queued ordinary messages remain available for resume.
-Preparation consumes orphaned ordinary claims on non-cold parked agents (marks
+Preparation consumes orphaned ordinary claims on parked agents (marks
 them done; they are never redelivered) and bounded-waits unfinished lifecycle
 commands. Maintenance-authored commands still refuse immediately. See the
 [preparation consumption and wait contract](../../../base/deploy/maintenance/docs/lifecycle-wait.meiva.okf.md)
@@ -209,7 +201,7 @@ readiness.
 `meiva start` over a hold in any phase brings the unit's services up (a unit whose
 services are already running is left as it is), then releases the hold. It does
 not retract restarts already issued (durable per-agent intents): members not yet
-at their boundary still complete that restart, with its cold recovery, on
+at their boundary still complete that restart, on
 admission.
 
 A turn that fails while its continuation is still owed to the hold is logged at
@@ -302,11 +294,10 @@ service supervision cannot reinterpret a planned stop as an unexpected crash.
 The ordinary root boot unit owns replacement applications. Data-plane and persistent-terminal
 custody are separate and must be reconciled explicitly.
 
-Host startup and successor admission reconcile proven-dead hosted agent owners
-through `agent.ownership.hosted.settle_stale_running_rows` and the ordinary
-incarnation protocol. Releasing a hold does not itself prove resource closure
-or replay arbitrary external effects. Missing or unreadable evidence remains
-an unresolved operation.
+Host startup settles its machine's `running` rows to `idling`
+(`agent.ownership.hosted.settle_running_rows_at_start`; one host per machine) and
+the next admission takes each agent under the new boot. Releasing a hold does not
+replay arbitrary external effects.
 
 For a drill that intentionally stops the message plane, keep its progress and
 recovery access outside that plane. Record the captured operation, process

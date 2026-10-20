@@ -3,11 +3,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-import services.agent_runner.agent_host.host as agent_host_host
 from agent import process_boot
 from base.agents.context.clients import ClientSet
 from base.clock import SYSTEM_TIMERS, Timers
@@ -71,8 +70,6 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
         db=Database.from_settings(gate=database_gate),
         commands=CommandCatalog(skills=list),
     )
-    release = AsyncMock()
-    monkeypatch.setattr(agent_host_host, "release_hosted_owner", release)
     try:
         clients.event_pipeline().enqueue(event())
         with pytest.raises(TypeError) as writer_observed:
@@ -85,7 +82,6 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
             await host.aclose()
         assert observed.value is (resource_error if native_failure else writer_error)
         assert host.resources_joined
-        release.assert_awaited_once()
         assert clients.event_pipeline() is pipe
         if native_failure:
             assert any(str(writer_error) in note for note in resource_error.__notes__)

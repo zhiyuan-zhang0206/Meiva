@@ -148,13 +148,12 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
 def test_a_phase_is_claimed_once_per_interval(
     db_conn: psycopg.Connection, pool: ConnectionPool
 ) -> None:
-    assert cadence.claim_due(pool, cadence.STUCK_POINTER_SCAN, 3600.0) is True
-    assert cadence.claim_due(pool, cadence.STUCK_POINTER_SCAN, 3600.0) is False
     assert cadence.claim_due(pool, cadence.FIRE_LOG_PRUNE, 3600.0) is True
+    assert cadence.claim_due(pool, cadence.FIRE_LOG_PRUNE, 3600.0) is False
 
-    _backdate(db_conn, cadence.STUCK_POINTER_SCAN, 3601.0)
-    assert cadence.claim_due(pool, cadence.STUCK_POINTER_SCAN, 3600.0) is True
-    assert cadence.claim_due(pool, cadence.STUCK_POINTER_SCAN, 3600.0) is False
+    _backdate(db_conn, cadence.FIRE_LOG_PRUNE, 3601.0)
+    assert cadence.claim_due(pool, cadence.FIRE_LOG_PRUNE, 3600.0) is True
+    assert cadence.claim_due(pool, cadence.FIRE_LOG_PRUNE, 3600.0) is False
 
 
 def test_a_claim_survives_a_restart(
@@ -171,18 +170,13 @@ def test_a_claim_survives_a_restart(
 
 
 def _count_slow_phases(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
-    calls = {"prune": 0, "stuck": 0}
+    calls = {"prune": 0}
 
     def prune(_pool: object) -> int:
         calls["prune"] += 1
         return 0
 
-    def stuck(_pool: object) -> int:
-        calls["stuck"] += 1
-        return 0
-
     monkeypatch.setattr(sweep, "prune_schedule_fire_log_blocking", prune)
-    monkeypatch.setattr(sweep, "scan_stuck_lifecycle_pointers_blocking", stuck)
     return calls
 
 
@@ -197,12 +191,11 @@ async def test_slow_phases_run_once_per_cadence_not_once_per_round(
 
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
-    assert calls == {"prune": 1, "stuck": 1}
+    assert calls == {"prune": 1}
 
-    _backdate(db_conn, cadence.STUCK_POINTER_SCAN, 7200.0)
-    _backdate(db_conn, cadence.FIRE_LOG_PRUNE, 7200.0)
+    _backdate(db_conn, cadence.FIRE_LOG_PRUNE, 90000.0)
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
-    assert calls == {"prune": 1, "stuck": 2}
+    assert calls == {"prune": 2}
 
 
 async def test_a_restarted_sweep_does_not_rerun_phases_it_already_ran(
@@ -210,10 +203,10 @@ async def test_a_restarted_sweep_does_not_rerun_phases_it_already_ran(
 ) -> None:
     calls = _count_slow_phases(monkeypatch)
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
-    assert calls == {"prune": 1, "stuck": 1}
+    assert calls == {"prune": 1}
 
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
-    assert calls == {"prune": 1, "stuck": 1}
+    assert calls == {"prune": 1}
 
 
 async def test_the_remote_round_reaps_shells(

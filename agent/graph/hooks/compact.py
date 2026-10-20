@@ -12,7 +12,12 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
+from agent.graph.interrupt import (
+    ModelInterruptedError,
+    interrupt_halt,
+    interruptible_model,
+    subscribe_interrupt,
+)
 from agent.graph.prompt.compaction import compact_contract
 from agent.hooks import Hook
 from agent.hooks.compact_anchor import SummaryText, closing_of, closing_request_of
@@ -313,8 +318,6 @@ async def auto_compact_for_llm(
         async with subscribe_interrupt(
             runtime.context.ops_pool,
             agent_id,
-            incarnation=runtime.context.original_incarnation,
-            work=runtime.context.native_work,
             resources=runtime.context.hosted_resources,
         ) as interrupted:
             summary = await interruptible_model(
@@ -327,11 +330,11 @@ async def auto_compact_for_llm(
                 ),
                 interrupted,
             )
-    except ModelInterruptedError:
+    except ModelInterruptedError as interrupt:
         emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.REPLACED)
         if publisher is not None:
             publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
-        return {"halted": True, "goto": CLAIM}
+        return {**interrupt_halt(interrupt.reason), "goto": CLAIM}
     except BaseException:
         emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.FAILURE)
         raise

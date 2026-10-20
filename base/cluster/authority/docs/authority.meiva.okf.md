@@ -36,16 +36,11 @@ Both groups hold `CONNECT` (PUBLIC loses it) and `USAGE` on `public`.
 create; `groups.ensure_groups` re-runs the point-in-time `ALL` grants after a
 migration. A login's privileges equal its group's.
 
-The runner matrix grants `INSERT, UPDATE` on `native_graph_work` for hosted
-work preparation and closure, and on `upload_delivery_copies` and
-`native_restart_commands` for native Ops acceptance. The original lifecycle
-source trigger also locks and updates the restart receipt when a runner updates
-`inbound_messages`. Native cancel acceptance remains Gateway-owned; runners
-have `UPDATE` on `native_cancel_commands` for the checkpoint ACK. `SELECT`
-comes from the existing public table read surface. These retained domains grant
-no runner DELETE; upload source acceptance and draft birth snapshots stay
-Gateway-written. The normal post-migration/start-path grant refresh covers
-clusters provisioned earlier.
+The runner matrix grants `INSERT, UPDATE` on `upload_delivery_copies` for native
+Ops acceptance. `SELECT` comes from the existing public table read surface. These
+retained domains grant no runner DELETE; upload source acceptance and draft birth
+snapshots stay Gateway-written. The normal post-migration/start-path grant refresh
+covers clusters provisioned earlier.
 
 `groups.vacuum_or_fail` turns PostgreSQL 17's VACUUM skip warning (missing
 `MAINTAIN`) into a failure.

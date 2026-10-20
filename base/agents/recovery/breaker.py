@@ -86,14 +86,15 @@ async def admit_pending_wake(pool: AsyncConnectionPool, agent_id: int) -> bool:
     async with async_write_transaction(pool) as conn:
         row = await (
             await conn.execute(
-                "SELECT permanent_reject_streak,lifecycle_command_id FROM agents_meta "
-                "WHERE id=%s FOR UPDATE",
+                "SELECT permanent_reject_streak,EXISTS (SELECT 1 FROM inbound_messages "
+                "WHERE agent_id=agents_meta.id AND kind IN ('restart','terminate') "
+                "AND status='claimed') FROM agents_meta WHERE id=%s FOR UPDATE",
                 (agent_id,),
             )
         ).fetchone()
         if row is None:
             return False
-        if row[0] < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS or row[1] is not None:
+        if row[0] < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS or row[1]:
             return True
         fresh = await (
             await conn.execute(

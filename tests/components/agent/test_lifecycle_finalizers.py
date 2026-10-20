@@ -2,8 +2,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
-from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
+from agent.ownership.tests.ownership_support import admit_owner, agent_row, insert_lifecycle_command
 from base.agents.inbox.insert import insert_inbound_message
 from base.config import settings
 from base.db import Database
@@ -12,7 +11,7 @@ from base.events.live.bus import EventBus
 from services.wake.delivery_watchdog.daemon import dead_letter_stale_claimed
 
 
-async def test_generic_dead_letter_leaves_fixed_command_claimed(
+async def test_generic_dead_letter_leaves_a_claimed_command_claimed(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database: Database,
@@ -24,8 +23,7 @@ async def test_generic_dead_letter_leaves_fixed_command_claimed(
     incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     command_id = insert_lifecycle_command(db_conn, agent_id, "restart")
     assert [
-        i.id
-        for i in await claim_inbound_batch(aops_pool, agent_id, incarnation=incarnation, work=None)
+        i.id for i in await claim_inbound_batch(aops_pool, agent_id, incarnation=incarnation)
     ] == [command_id]
     chat_id = insert_inbound_message(
         db_conn, agent_id, "old chat", "cli", bus=event_bus, database=database
@@ -47,7 +45,3 @@ async def test_generic_dead_letter_leaves_fixed_command_claimed(
         "SELECT id,status FROM inbound_messages WHERE agent_id=%s ORDER BY id",
         (agent_id,),
     ).fetchall() == [(command_id, "claimed"), (chat_id, "done")]
-    assert db_conn.execute(
-        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s",
-        (agent_id,),
-    ).fetchone() == (command_id,)

@@ -349,10 +349,8 @@ def activate(
     db: Database, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation
 ) -> dict[str, Any]:
     """Called only after native exec drains AND its checkpoint flush completes."""
-    from base.agents.incarnation.resources import IncarnationResources, decode_resources
-
     with db.write_transaction() as conn:
-        meta = require_native(conn, incarnation)
+        require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
         was_open = lease["status"] in OPEN
         lease = expire(conn, lease)
@@ -374,10 +372,6 @@ def activate(
                 incarnation.owner,
             ):
                 raise ImpersonationError("Activation belongs to another native incarnation")
-            if meta["incarnation_resources"] is not None:
-                resources = decode_resources(meta["incarnation_resources"])
-                if not isinstance(resources, IncarnationResources) or resources.requests:
-                    raise ImpersonationError("The native agent's resources have not drained")
             conn.execute(
                 "UPDATE agent_impersonations SET status='active',activated_at=clock_timestamp(),"
                 "expires_at=clock_timestamp()+ttl_seconds*interval '1 second' WHERE id=%s",
@@ -405,7 +399,7 @@ def native_status(
     with db.connect() as conn:
         row = conn.execute(
             "SELECT runtime_generation=%s AND runtime_owner=%s "
-            "AND status IN ('running','idling') AND lease_expires_at>clock_timestamp(),"
+            "AND status IN ('running','idling'),"
             "EXISTS(SELECT 1 FROM agent_impersonations WHERE agent_id=%s AND "
             "(status IN ('requested','accepted','active') OR delta_version>applied_version OR (automatic AND handoff_applied_at IS NULL))) "
             "FROM agents_meta WHERE id=%s",

@@ -20,11 +20,6 @@ unregistered types outright.
 # starts from this set.
 STATIC_CHECKPOINT_MSGPACK_TYPES: frozenset[tuple[str, str]] = frozenset(
     {
-        ("base.agents.compaction.models", "CompactMarker"),
-        ("base.agents.compaction.models", "CompactAcceptance"),
-        ("base.agents.compaction.models", "CompactTarget"),
-        ("base.agents.incarnation.native_work_models", "NativeWorkTarget"),
-        ("base.agents.incarnation.native_work_models", "NativeCancelMarker"),
         ("agent.state_channels", "AttachState"),
         ("agent.state_channels", "AttachEntry"),
         ("agent.state_channels", "CompactState"),

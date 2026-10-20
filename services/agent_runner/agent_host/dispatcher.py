@@ -296,18 +296,15 @@ class TurnScheduler:
                 ):
                     self._start(agent_id)
 
-    async def cancel_exact_force(
-        self, agent_id: int, command_id: int, validate: Callable[[int, int], Awaitable[bool]]
-    ) -> bool:
-        """Capture a Task before validating force; a later Task is never cancelled."""
+    # meiva:note
+    # Cancel the agent's running turn task, bounded by the unwind timeout.
+    #
+    #         False when no turn is running. The cancelled turn leaves the agent's
+    #         row to the caller: the task unwinds, the settle boundary idles the row,
+    #         and the next wake starts a fresh turn.
+    async def cancel_turn(self, agent_id: int) -> bool:
         task = self._tasks.get(agent_id)
-        if not await validate(agent_id, command_id):
-            return False
         if task is None:
-            # Only the original host's normal serialized pump can prove idle.
-            self.wake(agent_id)
-            return False
-        if self._tasks.get(agent_id) is not task:
             return False
         task.cancel()
         await self._await_unwind({agent_id: task})

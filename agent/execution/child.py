@@ -557,7 +557,41 @@ def _format_current_traceback(exc: BaseException) -> str:
     return "".join(traceback.format_exception(exc))
 
 
+# meiva:note
+# Blocks on the host's end of the control pipe for the life of the process. The host spawns
+# this process with a pipe on stdin and keeps the write end until it has reaped it, so
+# end-of-file means the host is gone (or is closing a reaped child) and this process group
+# dies; a process that is not a group leader kills only itself, never the host's group. The
+# thread never stops or joins: its only exit is the kill, and the interpreter does not wait
+# for a daemon thread.
+class _HostDeathWatch(threading.Thread):
+    def __init__(self, control: int) -> None:
+        super().__init__(name="exec-host-death-watch", daemon=True)
+        self._control = control
+
+    def run(self) -> None:
+        with contextlib.suppress(OSError):
+            while os.read(self._control, 4096):
+                pass
+        if os.getpgrp() == os.getpid():
+            os.killpg(os.getpgrp(), signal.SIGKILL)
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+# meiva:note
+# Arm the host-death watch before anything else. User code keeps /dev/null as stdin; the
+# control pipe moves to a duplicate that only the watch reads. The group is this process's
+# own session group, so its descendants die with it unless they left the group.
+def die_with_host() -> None:
+    control = os.dup(0)
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, 0)
+    os.close(devnull)
+    _HostDeathWatch(control).start()
+
+
 def run_as_entry() -> None:
+    die_with_host()
     from base.log import prepare_process_logging
 
     prepare_process_logging()

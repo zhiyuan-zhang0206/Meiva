@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import NamedTuple
-from uuid import UUID
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -23,44 +22,39 @@ class ReapedCorpse(NamedTuple):
     agent_id: int
 
 
+# meiva:note
+# Terminate crash-marked idling corpses whose grace window has elapsed.
+#
+# The positive death signal is the row's own `last_turn_fatal_at` (stamped
+# firsthand by this host when the turn died), never staleness alone — an
+# unmarked idling row is a live agent and is never touched. Idling-only:
+# a `running` row has a live invocation (or claim park) in flight. The
+# incarnation CAS already happened at stamp time, so the mark names exactly
+# the generation that died; a row woken in the grace window either completes
+# a turn (clears the mark) or parks and keeps it.
+#
+# Returns the reaped agents; mounted frontends are refreshed best-effort
+# after the durable flip.
+#
+# Scope is this machine's rows: a host restart mints a fresh owner UUID, so
+# a corpse marked under a predecessor boot is reaped like any other, and
+# there is one host per machine.
 async def reap_crash_corpses(
     pool: AsyncConnectionPool,
     machine: str,
-    owner: UUID,
     *,
     bus: EventBus,
 ) -> list[ReapedCorpse]:
-    """Terminate crash-marked idling corpses whose grace window has elapsed.
-
-    The positive death signal is the row's own `last_turn_fatal_at` (stamped
-    firsthand by this host when the turn died), never staleness alone — an
-    unmarked idling row is a live agent and is never touched. Idling-only:
-    a `running` row has a live invocation (or claim park) in flight. The
-    incarnation CAS already happened at stamp time, so the mark names exactly
-    the generation that died; a row woken in the grace window either completes
-    a turn (clears the mark) or parks and keeps it.
-
-    Returns the reaped agents; mounted frontends are refreshed best-effort
-    after the durable flip.
-
-    Owner scope is lease-qualified, not owner-only: a host restart mints a
-    fresh owner UUID, so a corpse marked under a predecessor instance would
-    otherwise hang offline forever (never adopted, never reaped). A row whose
-    lease is live is protected — it belongs to some live host's beat — while
-    an ownerless or lease-expired row is dead-or-abandoned and fair game.
-    """
     async with async_write_transaction(pool) as conn:
         rows = await (
             await conn.execute(
                 "UPDATE agents_meta SET status = 'terminated', "
-                "termination_source = 'reaper', lease_expires_at = NULL "
-                "WHERE machine = %s AND runtime_kind = 'hosted' AND status = 'idling' "
+                "termination_source = 'reaper' "
+                "WHERE machine = %s AND status = 'idling' "
                 "AND last_turn_fatal_at IS NOT NULL "
                 "AND last_turn_fatal_at <= now() - make_interval(secs => %s) "
-                "AND (runtime_owner = %s OR lease_expires_at IS NULL "
-                "OR lease_expires_at <= now()) "
                 "RETURNING id",
-                (machine, CORPSE_REAP_GRACE_S, owner),
+                (machine, CORPSE_REAP_GRACE_S),
             )
         ).fetchall()
         reaped: list[ReapedCorpse] = []

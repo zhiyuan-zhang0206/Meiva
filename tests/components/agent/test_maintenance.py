@@ -35,9 +35,9 @@ def test_maintenance_parks_a_never_admitted_birth_without_consuming_its_marker(
         authority=config_authority,
         catalog=model_catalog,
     )
-    query = "SELECT incarnation_resources FROM agents_meta WHERE id=%s"
+    query = "SELECT last_admission_at FROM agents_meta WHERE id=%s"
     marker = db_conn.execute(query, (agent,)).fetchone()
-    assert marker is not None and marker[0]["state"] == "unadmitted"
+    assert marker == (None,)
     db_conn.commit()
     pause_owner.begin_maintenance("move", WHEN)
     hold = cohort.prepare(
@@ -63,7 +63,6 @@ async def test_admission_waiting_on_real_row_lock_cannot_escape_published_hold(
                 agent,
                 machine_identity.name(),
                 uuid4(),
-                expected_from="idling",
                 db=database,
             )
         )
@@ -89,7 +88,7 @@ async def test_admission_waiting_on_real_row_lock_cannot_escape_published_hold(
     assert row == (None, None, "idling")
 
 
-async def test_original_idle_cohort_preserves_pending_messages_and_rejects_successor(
+async def test_original_idle_cohort_preserves_pending_messages_and_admits_only_its_members(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
@@ -98,10 +97,14 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
 ) -> None:
     agent, owner = maintenance_agent(db_conn, machine_name=machine_identity.name()), uuid4()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent, machine_identity.name(), owner, expected_from="idling", db=database
+        aops_pool, agent, machine_identity.name(), owner, db=database
     )
     assert incarnation is not None
-    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
+    assert await settle_hosted_runtime(
+        aops_pool,
+        incarnation,
+        bus=event_bus,
+    )
     message = insert_inbound_message(
         db_conn, agent, "pending work", "user", bus=event_bus, database=database
     )
@@ -124,11 +127,17 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
         )
         == hold
     )
+    parked = maintenance_agent(db_conn, machine_name=machine_identity.name())
+    # meiva:note
+    # A cohort member with its restart pending is admitted so the host can execute the
+    # command; an agent outside the cohort stays refused for the whole hold.
     assert (
-        await admit_hosted_runtime(
-            aops_pool, agent, machine_identity.name(), uuid4(), expected_from="idling", db=database
-        )
+        await admit_hosted_runtime(aops_pool, parked, machine_identity.name(), uuid4(), db=database)
         is None
+    )
+    assert (
+        await admit_hosted_runtime(aops_pool, agent, machine_identity.name(), uuid4(), db=database)
+        is not None
     )
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (message,)

@@ -75,9 +75,8 @@ def native_checkpoint(
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
-        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
-        "clock_timestamp()+interval '10 minutes')",
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner) "
+        "VALUES(%s,'idling',%s,%s,%s)",
         (agent_id, machine_identity.name(), owner.generation, owner.owner),
     )
     db_conn.commit()
@@ -196,8 +195,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     )
     peer_id = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,lease_expires_at) "
-        "VALUES(%s,'idling',%s,clock_timestamp()+interval '10 minutes')",
+        "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'idling',%s)",
         (peer_id, machine_identity.name()),
     )
     db_conn.commit()
@@ -267,8 +265,7 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
     owner, _ = native_checkpoint
     peer_id = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,lease_expires_at) "
-        "VALUES(%s,'idling',%s,clock_timestamp()+interval '10 minutes')",
+        "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'idling',%s)",
         (peer_id, machine_identity.name()),
     )
     db_conn.commit()

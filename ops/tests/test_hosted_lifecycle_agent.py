@@ -1,47 +1,15 @@
-from uuid import uuid4
-
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
-from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
-from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
+from agent.ownership.hosted import apply_hosted_lifecycle
+from agent.ownership.tests.ownership_support import admit_owner, agent_row, insert_lifecycle_command
 from base.config import settings
-from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from ops import cluster_status
-
-
-async def test_stale_unapplied_pointer_closes_without_retargeting(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    database: Database,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    agent_id = agent_row(db_conn)
-    old = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-    first = insert_lifecycle_command(db_conn, agent_id, "restart")
-    await claim_inbound_batch(aops_pool, agent_id, incarnation=old, work=None)
-    db_conn.execute(
-        "UPDATE agents_meta SET lease_expires_at=now()-interval '1 second' WHERE id=%s", (agent_id,)
-    )
-    db_conn.commit()
-    new = await admit_hosted_runtime(
-        aops_pool, agent_id, "claim-test", uuid4(), expected_from="running", db=database
-    )
-    assert new is not None
-    second = insert_lifecycle_command(db_conn, agent_id, "restart")
-    assert [
-        row.id for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=new, work=None)
-    ] == [second]
-    assert db_conn.execute(
-        "SELECT status,applied_at,target_generation FROM inbound_messages WHERE id=%s", (first,)
-    ).fetchone() == ("done", None, old.generation)
 
 
 def _terminate_command(
@@ -87,14 +55,14 @@ async def test_hosted_restart_leaves_shell_sessions_for_the_later_terminate(
     insert_lifecycle_command(db_conn, agent_id, "restart")
     _terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch)
-    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     assert (
         await apply_hosted_lifecycle(
             aops_pool,
             owner,
             kill_shell_sessions=lambda _aid, _cutoff: kills.append((_aid, None)),
             bus=event_bus,
-            resources=None,
+            resume_turn=False,
         )
         == "restart"
     )
@@ -111,11 +79,16 @@ async def test_hosted_apply_without_a_bound_killer_refuses_a_kill_request(
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     command = _terminate_command(db_conn, agent_id, kill=True)
-    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
+    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     with pytest.raises(RuntimeError, match="no killer is bound"):
-        await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None)
+        await apply_hosted_lifecycle(
+            aops_pool,
+            owner,
+            bus=event_bus,
+            resume_turn=False,
+        )
     assert db_conn.execute(
-        "SELECT i.applied_at, m.status FROM inbound_messages i JOIN agents_meta m "
+        "SELECT i.status, m.status FROM inbound_messages i JOIN agents_meta m "
         "ON m.id=i.agent_id WHERE i.id=%s",
         (command,),
-    ).fetchone() == (None, "running")
+    ).fetchone() == ("claimed", "running")

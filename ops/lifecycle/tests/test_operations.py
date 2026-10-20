@@ -282,7 +282,6 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
             {"config_overlay": {"definitely_not_a_config_field": "x"}},
             stub_pool,
             catalog=build_model_catalog(),  # type: ignore[arg-type]
-            local_machine=machine_identity.name(),
         )
 
 
@@ -302,7 +301,6 @@ async def test_resurrect_agent_op_alive_returns_already_alive(
         event_bus,
         9,
         ResurrectAgentRequest(prompt="test"),
-        local_machine=machine_identity.name(),
     )
     assert resp.status == "already_alive"
 
@@ -336,7 +334,6 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
         ResurrectAgentRequest(resurrected_by="system"),
         trigger_inbound_id=123,
         trigger_inbound_kind=InboundKind.CHAT,
-        local_machine=machine_identity.name(),
     )
     assert resp.status == "already_alive"
 
@@ -391,7 +388,6 @@ async def test_lifecycle_op_parses_path_to_terminate(
         {"source": "user"},
         stub_pool,
         catalog=build_model_catalog(),  # type: ignore[arg-type]
-        local_machine=machine_identity.name(),
     )
     # lifecycle_op now returns the per-action response model (not its dict form).
     assert result.status == "enqueued"
@@ -415,7 +411,6 @@ async def test_lifecycle_op_unparseable_path_raises(
             {},
             stub_pool,
             catalog=build_model_catalog(),  # type: ignore[arg-type]
-            local_machine=machine_identity.name(),
         )
 
 
@@ -436,7 +431,6 @@ async def test_guarded_resurrect_path_requires_trigger(
             {"resurrected_by": "system"},
             stub_pool,
             catalog=build_model_catalog(),  # type: ignore[arg-type]
-            local_machine=machine_identity.name(),
         )
 
 
@@ -460,7 +454,6 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
             trigger_inbound_id=99,
             trigger_inbound_kind=InboundKind.CHAT,
             catalog=build_model_catalog(),
-            local_machine=machine_identity.name(),
         )
 
 
@@ -486,9 +479,7 @@ async def test_explicit_resurrect_dispatches_manual_op(
         *,
         trigger_inbound_id: int | None = None,
         trigger_inbound_kind: str | None = None,
-        local_machine: str,
     ) -> ResurrectAgentResponse:
-        del local_machine
         captured.update(
             agent_id=agent_id,
             resurrected_by=body.resurrected_by,
@@ -506,7 +497,6 @@ async def test_explicit_resurrect_dispatches_manual_op(
         {"resurrected_by": "user"},
         stub_pool,
         catalog=build_model_catalog(),  # type: ignore[arg-type]
-        local_machine=machine_identity.name(),
     )
 
     assert result.status == "spawned"

@@ -10,4 +10,3 @@
 "test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.open_host_pools" = 1
 "test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.process_clients" = 1
 "test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.remove_pidfile" = 2
-"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.host.release_hosted_owner" = 1

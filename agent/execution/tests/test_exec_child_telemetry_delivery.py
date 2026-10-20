@@ -19,6 +19,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
+from base.native_process.tests.host_pipe import live_host_control
 from meiva.sdk_surface import process_context
 from meiva.tests.fixtures.pin_agent import exec_context
 
@@ -92,14 +93,16 @@ def _spawn(
         }
     )
     env.pop("MEIVA_LOG_DIR", None)
-    proc = subprocess.run(
-        [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=180,
-        check=False,
-    )
+    with live_host_control() as stdin:
+        proc = subprocess.run(
+            [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
+            stdin=stdin,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=180,
+            check=False,
+        )
     return proc, result_path
 
 

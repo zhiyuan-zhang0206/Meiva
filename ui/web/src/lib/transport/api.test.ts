@@ -2,8 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { keyedHeaders, newOperationKey } from "./operation-key";
-import type { NativeWorkTarget, CompactTarget } from "../contracts/types";
+import { keyedHeaders } from "./operation-key";
 
 import { ApiError, api, MessageDeliveryUnknownError } from "./api";
 import { track } from "../telemetry/telemetry";
@@ -16,15 +15,6 @@ interface FetchCall {
 }
 
 const GATEWAY_TELEMETRY_KEY_PATTERN = /^[a-z0-9._-]{1,128}$/;
-
-const workTarget: NativeWorkTarget = {
-  agent_id: 8, work_id: "work", machine: "local", generation: "generation", owner: "owner", protocol: 1,
-};
-const compactTarget: CompactTarget = {
-  protocol: 1, observation_id: "observed", source: { ...workTarget, agent_id: 5 },
-  checkpoint_id: "source", checkpoint_ns: "", messages_version: "1",
-  compact_channel_version: null, segment_version: 0, model: "gpt-5.6-sol",
-};
 
 let calls: FetchCall[];
 
@@ -485,21 +475,14 @@ describe("agent label / messages / cancel", () => {
     ]);
   });
 
-  it("cancel submits the original observed work", async () => {
-    await api.cancel(workTarget, "cancel-operation");
-    expect(new Headers(calls[0].init?.headers).get("Idempotency-Key")).toBe("cancel-operation");
-    expect(new Headers(calls[0].init?.headers).get("Idempotency-Scope")).toBe("principal-v1");
-    expect(calls[0].url).toMatch(/\/api\/keyed\/v1\/agents\/8\/cancel-work$/);
-    expect(calls[0].init?.method).toBe("POST");
-    expect(JSON.parse(calls[0].init?.body as string)).toEqual(workTarget);
-  });
-
-  it("compact submits the original closed source", async () => {
-    await api.compact(compactTarget, "compact-operation");
-    expect(new Headers(calls[0].init?.headers).get("Idempotency-Key")).toBe("compact-operation");
-    expect(JSON.parse(calls[0].init?.body as string)).toEqual(compactTarget);
-    expect(calls[0].url).toMatch(/\/api\/keyed\/v1\/agents\/5\/compact-history$/);
-    expect(calls[0].init?.method).toBe("POST");
+  it("cancel and compact post to the agent without a key or a body", async () => {
+    await api.cancel(8);
+    await api.compact(5);
+    expect(calls.map((call) => [call.init?.method, call.url.replace(/^.*\/api/, "/api")])).toEqual([
+      ["POST", "/api/agents/8/cancel"],
+      ["POST", "/api/agents/5/compact"],
+    ]);
+    expect(new Headers(calls[0].init?.headers).get("Idempotency-Key")).toBeNull();
   });
 });
 
@@ -923,16 +906,14 @@ it("submits distinct business operations on private HTTP without randomUUID", as
   const getRandomValues = crypto.getRandomValues.bind(crypto);
   vi.stubGlobal("crypto", { getRandomValues });
   await api.spawnAgent();
-  await api.cancel(workTarget, newOperationKey());
-  await api.compact(compactTarget, newOperationKey());
   await api.createSchedule({ name: "daily", script: "pass", command: "python schedule.py", enabled: true });
   await api.updateSchedule(17, { enabled: false });
   await api.startSchedule(17);
   await api.stopSchedule(17);
   await api.restartSchedule(17);
   const keys = calls.map((call) => new Headers(call.init?.headers).get("Idempotency-Key"));
-  expect(keys).toHaveLength(8);
-  expect(new Set(keys).size).toBe(8);
+  expect(keys).toHaveLength(6);
+  expect(new Set(keys).size).toBe(6);
   for (const key of keys) {
     expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   }

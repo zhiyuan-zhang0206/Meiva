@@ -308,10 +308,8 @@ class TestListAgents:
                         "fork_source_agent_id": fork_source_agent_id,
                         "machine": "mini",
                         "spawned_at": "2026-09-17T00:00:00Z",
-                        "started_at": None,
                         "last_active_at": "2026-09-17T00:00:00Z",
                         "last_inbound_at": "2026-09-17T00:00:00Z",
-                        "pid": None,
                         "heartbeat_paused_until": None,
                     }
                 ],
@@ -351,7 +349,6 @@ class TestListAgents:
         assert row.spawner == f"agent:{meiva.self.AGENT_ID}"
         assert row.fork_source_agent_id is None
         assert row.label == "test-agent"
-        assert row.pid is None
         assert row.spawned_at is not None and row.last_active_at is not None
         assert row.machine
         assert f"#{agent_id}" in str(row)

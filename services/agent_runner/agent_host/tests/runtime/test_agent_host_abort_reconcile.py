@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
@@ -9,7 +8,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host import settlement as settlement_mod
 
 
@@ -46,11 +44,10 @@ def _incarnation(agent_id: int = 42) -> RuntimeIncarnation:
     return RuntimeIncarnation(agent_id, uuid4(), uuid4())
 
 
-async def _run_pass(
-    incarnation: RuntimeIncarnation, *, resources: HostedTurnResources | None = None
-) -> None:
+async def _run_pass(incarnation: RuntimeIncarnation) -> None:
     await settlement_mod.reconcile_inbounds_after_abort(
-        cast(AsyncConnectionPool[Any], object()), incarnation, resources=resources
+        cast(AsyncConnectionPool[Any], object()),
+        incarnation,
     )
 
 
@@ -64,17 +61,6 @@ async def test_pass_runs_under_the_aborts_own_incarnation(reconcile_spy: _Reconc
     assert len(reconcile_spy.calls) == 1
     assert reconcile_spy.calls[0][1] == 42
     assert reconcile_spy.bound == [incarnation]
-
-
-async def test_unresolved_turn_resources_skip(
-    reconcile_spy: _ReconcileSpy,
-    loguru_records: list[dict[str, Any]],
-) -> None:
-    resources = HostedTurnResources()
-    resources.unresolved[Path("hosted-resource/still-held")] = None
-    await _run_pass(_incarnation(), resources=resources)
-    assert reconcile_spy.calls == []
-    assert [r["extra"]["reason"] for r in _skips(loguru_records)] == ["resources_unsettled"]
 
 
 async def test_replaced_runtime_is_a_logged_noop(

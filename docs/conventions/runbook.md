@@ -805,34 +805,15 @@ Event publication and payloads belong to
 [the live event bus](../../base/events/live/docs/live/live.meiva.okf.md);
 interrupt and control belong to [the agent graph](../../agent/graph/docs/graph.meiva.okf.md).
 
-**Lifecycle command residue:** a force-terminate whose original host died before
-observing it is never settled by a successor boot or a sweep. The agent stays
-terminated with `agents_meta.lifecycle_command_id` set, `meiva agents resurrect`
-refuses ("outstanding hosted lifecycle command has not settled"), and the
-`lifecycle_pointer_stuck` alert fires from the hourly TTL-reaper scan. The
-operator settles it by hand: first inspect the agent's leftover exec request
-envelopes (`python -m base.agents.incarnation.exec_request_evidence --agent <id>`;
-quarantine only what the report proves disposable), then, in one transaction, mark
-the command observed (`status='done'`, `observed_at` set, only while it is still
-`claimed`, applied and unobserved) and clear the pointer and `lease_expires_at`. Never flip the command to
-`done` without clearing the pointer — that is exactly the torn shape the
-commit-time guard rejects (task #3678) — and never clear the pointer without
-settling the command, which only makes the failure invisible.
-
 ### Exec run-directory hygiene
 
-`run/exec/<agent>/domains/<request>/` holds one managed exec run until its owner
-settles it. Inspect and remove the settled leftovers with
-`python -m base.agents.incarnation.exec_domain_cleanup --agent <id>`: it reports
-by default, `--all-agents` covers the whole home, and `--delete` is the only
-destructive switch. A directory is removable only when the agent's stored
-allocation set no longer holds its request, no live process names its envelope,
-and it is past the retention margin; everything else is retained with its reason.
-
-Never glob the run tree yourself. An unrelated pass that deletes a live request
-envelope wedges the run it belonged to (issue #5362), and a cross-agent glob
-reaches every run on the machine. See
-[exec domain directory cleanup](../../base/agents/incarnation/docs/exec-domain-cleanup.meiva.okf.md).
+`run/exec/<agent>/` holds one request and one result file for each running exec.
+The agent host deletes both once the exec's process group is closed, and it empties
+the whole `run/exec` tree before it starts serving. Every exec child of the previous
+host has by then killed its own group: it reads end-of-file on the control pipe the
+dead host held. Nothing in this tree needs cleaning by hand. Do not delete files
+there while a host runs: removing a live request envelope fails the exec it
+belongs to.
 
 
 

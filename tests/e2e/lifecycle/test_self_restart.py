@@ -15,12 +15,12 @@ from tests.e2e.fixture_environment import E2EEnv
 def _evidence(agent_id: int) -> tuple[tuple[Any, ...] | None, list[tuple[Any, ...]]]:
     with psycopg.connect(settings.data_plane.db_url) as conn:
         row = conn.execute(
-            "SELECT status,runtime_generation,lifecycle_command_id FROM agents_meta WHERE id=%s",
+            "SELECT status,runtime_generation FROM agents_meta WHERE id=%s",
             (agent_id,),
         ).fetchone()
         commands = conn.execute(
-            "SELECT target_generation,status,applied_at IS NOT NULL,observed_at IS NOT NULL "
-            "FROM inbound_messages WHERE agent_id=%s AND kind='restart' AND source='self'",
+            "SELECT status FROM inbound_messages "
+            "WHERE agent_id=%s AND kind='restart' AND source='self'",
             (agent_id,),
         ).fetchall()
     return row, commands
@@ -33,14 +33,43 @@ def test_self_restart_admits_successor_and_answers_on_same_agent(e2e_env: E2EEnv
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
     page.fill('[data-testid="composer-input"]', "\u91cd\u542f")
     page.click('[data-testid="composer-send"]')
+
     original_generation: UUID | None = None
 
-    def restart_applied() -> tuple[bool, object]:
+    def original_turn_admitted() -> tuple[bool, object]:
+        # meiva:note
+        # The window between admission and the exec requesting the restart is the only
+        # time the original generation is observable.
         nonlocal original_generation
         row, commands = _evidence(agent_id)
-        reached = bool(row and row[0] == "idling" and len(commands) == 1 and commands[0][2])
-        if reached:
-            original_generation = commands[0][0]
+        if row and row[1] is not None:
+            if commands:
+                raise AssertionError(
+                    f"the original generation was never observed: {row}, {commands}"
+                )
+            original_generation = row[1]
+        return original_generation is not None, {"agent": row, "commands": commands}
+
+    poll_until(
+        original_turn_admitted,
+        timeout=60,
+        interval=0.02,
+        what=f"agent {agent_id} admits the turn that restarts it",
+    )
+    assert original_generation is not None
+
+    def restart_applied() -> tuple[bool, object]:
+        row, commands = _evidence(agent_id)
+        # meiva:note
+        # The restart releases the runtime identity and queues the note that resumes the
+        # turn it ended, so the successor admits at once and mints a fresh generation.
+        reached = bool(
+            row
+            and row[0] == "idling"
+            and row[1] is not None
+            and row[1] != original_generation
+            and commands == [("done",)]
+        )
         return reached, {"agent": row, "commands": commands}
 
     poll_until(
@@ -49,8 +78,6 @@ def test_self_restart_admits_successor_and_answers_on_same_agent(e2e_env: E2EEnv
         interval=0.2,
         what=f"agent {agent_id} applies its self restart",
     )
-    assert original_generation is not None
-
     page.fill('[data-testid="composer-input"]', "continue after verified restart")
     page.click('[data-testid="composer-send"]')
 
@@ -67,8 +94,7 @@ def test_self_restart_admits_successor_and_answers_on_same_agent(e2e_env: E2EEnv
             and row[0] == "idling"
             and row[1] is not None
             and row[1] != original_generation
-            and row[2] is None
-            and commands == [(original_generation, "done", True, True)]
+            and commands == [("done",)]
             and chats in ([("claimed", True)], [("done", True)])
         ):
             response = httpx.get(

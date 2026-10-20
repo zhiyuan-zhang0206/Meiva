@@ -13,10 +13,6 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
-from base.native_process.turn_identity import (
-    HostedTurnResources,
-    hosted_resources_settled,
-)
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.stall_guard import HostRestartRequiredError
@@ -34,8 +30,6 @@ async def close_hosted_turn(
     bus: EventBus,
     incarnation: RuntimeIncarnation,
     outcome: TurnOutcome,
-    *,
-    resources: HostedTurnResources | None,
 ) -> None:
     """Settle the finished turn, then dispose its claimed rows (the abort
     pass, or a finished turn's own pass).
@@ -49,7 +43,6 @@ async def close_hosted_turn(
         bus=bus,
         exited=outcome.exited,
         crashed=outcome.crashed,
-        resources=resources,
     )
     if outcome.failure_report is not None:
         if settlement.stamp is not None and settlement.stamp.applied and settlement.settled:
@@ -61,19 +54,20 @@ async def close_hosted_turn(
                 agent_id=incarnation.agent_id,
             )
     if outcome.aborted:
-        await reconcile_inbounds_after_abort(pool, incarnation, resources=resources)
-    elif not outcome.crashed and not outcome.truncated and not outcome.native_held:
-        # A truncated turn (an applied force terminate of its incarnation)
-        # skips the pass too: the successor boundary that observes the force
-        # owns its claimed rows.
-        await reconcile_inbounds_after_turn(pool, incarnation, resources=resources)
+        await reconcile_inbounds_after_abort(
+            pool,
+            incarnation,
+        )
+    elif not outcome.crashed:
+        await reconcile_inbounds_after_turn(
+            pool,
+            incarnation,
+        )
 
 
 async def reconcile_inbounds_after_abort(
     pool: AsyncConnectionPool,
     incarnation: RuntimeIncarnation,
-    *,
-    resources: HostedTurnResources | None,
 ) -> None:
     """Consume an aborted turn's claims under its original owner lock.
 
@@ -83,15 +77,6 @@ async def reconcile_inbounds_after_abort(
     old work.
     """
     agent_id = incarnation.agent_id
-    if not hosted_resources_settled(resources):
-        logger.warning(
-            "host abort reconcile skipped: turn resources unresolved — "
-            "the next cold admission disposes the claimed rows",
-            event="host_abort_reconcile_skipped",
-            agent_id=agent_id,
-            reason="resources_unsettled",
-        )
-        return
     try:
         async with database_phase():
             await consume_claimed_inbounds(
@@ -116,8 +101,6 @@ async def reconcile_inbounds_after_abort(
 async def reconcile_inbounds_after_turn(
     pool: AsyncConnectionPool,
     incarnation: RuntimeIncarnation,
-    *,
-    resources: HostedTurnResources | None,
 ) -> None:
     """Dispose the finished turn's claimed inbounds at its settlement point.
 
@@ -127,18 +110,6 @@ async def reconcile_inbounds_after_turn(
     serialize this pass against another claim.
     """
     agent_id = incarnation.agent_id
-    if not hosted_resources_settled(resources):
-        # Expected fail-closed path (the event declares tier="noise"): the
-        # claimed rows wait for the next cold admission, so this is INFO, not
-        # a WARNING-level anomaly (2026-10-03 triage).
-        logger.info(
-            "turn inbound reconcile skipped: turn resources unresolved — "
-            "the next cold admission disposes the claimed rows",
-            event="host_turn_reconcile_skipped",
-            agent_id=agent_id,
-            reason="resources_unsettled",
-        )
-        return
     try:
         async with database_phase():
             await consume_claimed_inbounds(pool, agent_id, incarnation=incarnation)
@@ -173,25 +144,4 @@ async def wait_shielded_task[T](task: asyncio.Task[T]) -> bool:
             await asyncio.wait({task}, timeout=remaining)
         except asyncio.CancelledError:
             cancelled = True
-    return cancelled
-
-
-async def wait_retained_resources(resources: HostedTurnResources) -> bool:
-    """Wait finitely for known resources; uncertainty never authorizes a new turn."""
-    cancelled = False
-    deadline = asyncio.get_running_loop().time() + CANCEL_UNWIND_TIMEOUT_S
-    while resources.unresolved:
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            raise HostRestartRequiredError("hosted resources did not close before the deadline")
-        resources.changed.clear()
-        try:
-            async with asyncio.timeout(remaining):
-                await resources.changed.wait()
-        except asyncio.CancelledError:
-            cancelled = True
-        except TimeoutError as exc:
-            raise HostRestartRequiredError(
-                "hosted resources did not close before the deadline"
-            ) from exc
     return cancelled

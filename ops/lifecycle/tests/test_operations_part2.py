@@ -40,14 +40,12 @@ def stub_pool() -> object:
     return object()
 
 
+# meiva:note
+# Hosted force-terminate: no process to SIGKILL — the terminated row is written in
+#     one transaction and the turn cancel is asked of the host after it commits.
 async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
     monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
-    """Hosted force-terminate: no process to SIGKILL — the DB fence runs with
-    kill_process=False and the turn-cancel acceleration fires after the
-    transaction. The durable terminate inbound inserted by the fence is the
-    captured: dict[str, object] = {}
-    correctness mechanism; the cancel only accelerates a wedged turn."""
     from base.api_contracts.agent_contract import AgentStatus
 
     captured: dict[str, object] = {}
@@ -58,15 +56,15 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
         aid: int,
         _body: object,
         _pool: object,
-    ) -> tuple[AgentStatus, int | None, list[str], int, int]:
+    ) -> tuple[AgentStatus, list[str], int, int]:
         captured["agent_id"] = aid
-        return AgentStatus.RUNNING, None, [], 91, 0
+        return AgentStatus.RUNNING, [], 91, 0
 
     monkeypatch.setattr(lifecycle, "terminate_force_blocking", _fake_force_blocking)
-    cancelled: list[tuple[int, int]] = []
+    cancelled: list[int] = []
 
-    async def _fake_cancel(aid: int, command_id: int) -> None:
-        cancelled.append((aid, command_id))
+    async def _fake_cancel(aid: int) -> None:
+        cancelled.append(aid)
 
     monkeypatch.setattr(lifecycle, "cancel_hosted_turn_best_effort", _fake_cancel)
 
@@ -85,7 +83,7 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
     assert resp.status == "enqueued"
     assert resp.shell_sessions is None
     assert captured == {"agent_id": 9}
-    assert cancelled == [(9, 91)]
+    assert cancelled == [9]
 
 
 @pytest.mark.asyncio

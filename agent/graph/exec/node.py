@@ -62,7 +62,7 @@ from agent.graph._attach_drain import build_attach_message
 from agent.graph._attach_merge import merge_attachments
 from agent.graph.agent_traceback import format_full_traceback
 from agent.graph.exec._notes import merge_exec_notes
-from agent.graph.interrupt import subscribe_interrupt
+from agent.graph.interrupt import interrupt_halt, subscribe_interrupt
 from agent.graph.node_log import node_lifecycle
 from agent.graph.tool_calls import code_from_args, normalize_tool_calls
 from agent.messages import exec_output_message
@@ -134,19 +134,20 @@ async def exec_node(
         return await _exec_node_impl(state, runtime, config)
 
 
+# meiva:note
+# Graph-level exec node timeout — defense-in-depth above the per-code-block
+# exec_timeout_seconds. If the inner deadline misses a cancellable framework
+# hang, this outer shield requests cancellation and surfaces a timeout after
+# the exec's process group is killed and reaped. It is not an independent hard
+# bound on an OS kill/reap call that itself wedges. (The interrupt
+# subscription sits outside this wait_for and is bounded by its own watcher
+# exit timeout.)
 async def _exec_with_node_shield(
     coro: Awaitable[tuple[ExecResult, ResultPayload | None]],
     agent_id: int,
     *,
     read_timeout: Callable[[], float],
 ) -> tuple[ExecResult, ResultPayload | None]:
-    """Graph-level exec node timeout — defense-in-depth above the per-code-block
-    exec_timeout_seconds. If the inner deadline misses a cancellable framework
-    hang, this outer shield requests cancellation and surfaces a timeout after
-    the owned process-resource barrier finishes. It is not an independent hard
-    bound on an OS close/reap call that itself wedges. (The interrupt
-    subscription sits outside this wait_for and is bounded by its own watcher
-    exit timeout.)"""
     try:
         return await asyncio.wait_for(coro, timeout=read_timeout())
     except TimeoutError:
@@ -199,13 +200,10 @@ async def run_agent_code(
     async with subscribe_interrupt(
         ctx.ops_pool,
         agent_id,
-        incarnation=ctx.original_incarnation,
-        work=ctx.native_work,
         resources=ctx.hosted_resources,
     ) as cancel_event:
         outcome = await _exec_with_node_shield(
             run_in_subprocess(
-                ctx.require_db(),
                 code,
                 ctx,
                 cancel_event,
@@ -546,6 +544,8 @@ async def _exec_single_call(
         "halted": halted,
         **plugin_state_update,
     }
+    if isinstance(result, ExecCancelled):
+        update.update(interrupt_halt(result.reason))
     if not compact_halt:
         # Attachments registered during this execute_code call are packed into
         # a media HumanMessage appended right after the exec output — the model

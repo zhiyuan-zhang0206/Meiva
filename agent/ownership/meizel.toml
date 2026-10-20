@@ -1,8 +1,6 @@
-exports = ["corpse_reap.py", "hosted.py", "hosted_cleanup.py", "hosted_completion.py", "inbound.py", "lifecycle_intent.py", "native_cancel.py", "tests"]
+exports = ["corpse_reap.py", "hosted.py", "hosted_cleanup.py", "inbound.py", "tests"]
 
 [uses]
 "corpse_reap.py" = ["hosted_cleanup.py"]
-"hosted.py" = ["hosted_claim.py", "hosted_cleanup.py", "lifecycle_intent.py"]
-"lifecycle_intent.py" = ["inbound.py"]
-"native_cancel.py" = ["inbound.py"]
-"tests" = ["corpse_reap.py", "hosted.py", "hosted_cleanup.py", "hosted_completion.py", "lifecycle_intent.py"]
+"hosted.py" = ["hosted_cleanup.py"]
+"tests" = ["corpse_reap.py", "hosted.py", "hosted_cleanup.py"]

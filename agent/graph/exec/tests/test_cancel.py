@@ -53,6 +53,7 @@ from agent.state import AgentState
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.projection import EVENT_ADAPTER
+from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.native_process.turn_identity import HostedTurnResources
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
@@ -69,32 +70,41 @@ _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 # ---------------------------------------------------------------------------
 
 
+# meiva:note
+# A restart that has waited its grace ends the run, says so, and marks the turn unfinished so
+# the claim that takes it resumes the turn instead of idling the agent.
 @pytest.mark.parametrize(
-    ("source", "expected"),
-    [("user", "user"), ("agent:9", "system")],
+    ("kind", "source", "waited_s", "marker", "unfinished"),
+    [
+        ("cancel", "user", 0, "[cancelled by user]", False),
+        ("cancel", "agent:9", 0, "[cancelled by system]", False),
+        ("restart", "user", RESTART_INTERRUPT_GRACE_S + 1, "[interrupted by restart]", True),
+    ],
 )
 async def test_exec_node_preserves_durable_interrupt_attribution(
     hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    kind: str,
     source: str,
-    expected: str,
+    waited_s: float,
+    marker: str,
+    unfinished: bool,
     database_gate: ProcessDbGate,
 ) -> None:
     """The real watcher aborts once, preserves partial output, and leaves claim its command."""
     agent_id = create_agent(db_conn)
     command = db_conn.execute(
-        "INSERT INTO inbound_messages(agent_id,kind,source,content) "
-        "VALUES(%s,'cancel',%s,'') RETURNING id",
-        (agent_id, source),
+        "INSERT INTO inbound_messages(agent_id,kind,source,content,created_at) "
+        "VALUES(%s,%s,%s,'',clock_timestamp() - make_interval(secs => %s)) RETURNING id",
+        (agent_id, kind, source, waited_s),
     ).fetchone()
     assert command is not None
     db_conn.commit()
     calls = 0
 
     async def interrupted_child(
-        _db: object,
         code: str,
         child_agent_id: int,
         cancel_event: asyncio.Event,
@@ -118,12 +128,14 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     assert result.goto == "after_exec"
     assert result.update["halted"] is True
     message = cast(ToolMessage, result.update["messages"][0])
-    assert f"[cancelled by {expected}]" in message.content
+    assert marker in message.content
+    assert cast(dict[str, object], result.update).get("interrupted_by_restart", False) is unfinished
+    assert (kind == "restart") == ("cancelled by" not in message.content)
     assert "external side effect already happened" in message.content
     assert db_conn.execute(
-        "SELECT status,claimed_at,applied_at,observed_at FROM inbound_messages WHERE id=%s",
+        "SELECT status,claimed_at FROM inbound_messages WHERE id=%s",
         (command[0],),
-    ).fetchone() == ("pending", None, None, None)
+    ).fetchone() == ("pending", None)
 
 
 async def test_exec_node_cancel_event_returns_cancelled_command(
@@ -136,7 +148,7 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     with wrap_code_output cancelled=True + frontend Cancelled event."""
 
     async def _fake_cancelled(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
         return (ExecCancelled(output="partial work\n"), None)
 
@@ -173,7 +185,7 @@ async def test_exec_node_cancel_event_race_normal_completion(
     wrap_code_output format ('Code execution output:')."""
 
     async def _fake_normal(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
         return (ExecDone(output="hello\n"), None)
 
@@ -214,7 +226,7 @@ async def test_exec_node_timeout_path(
     LLM round reads the feedback and changes strategy."""
 
     async def _fake_timed_out(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
         return (ExecTimedOut(output="partial work\n"), None)
 
@@ -246,7 +258,7 @@ async def test_exec_node_timeout_empty_output(
     """timeout triggers and the thread has no output → (no output) marker still appears."""
 
     async def _fake_empty_timeout(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
         return (ExecTimedOut(output=""), None)
 
@@ -366,9 +378,7 @@ async def test_exec_node_dispatch_system_halt(
     clears)."""
     from base.agents.lifecycle import SystemHalt
 
-    async def _fake(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (ExecLifecycle(output="user prep work\n", exc=SystemHalt()), None)
 
     emitter = MagicMock()
@@ -399,9 +409,7 @@ async def test_exec_node_dispatch_agent_termination(
     """ExecLifecycle(AgentTermination) → halted=True + no envelope marker."""
     from meiva.self import AgentTermination
 
-    async def _fake(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (ExecLifecycle(output="", exc=AgentTermination()), None)
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
@@ -426,9 +434,7 @@ async def test_exec_node_dispatch_agent_restart(
     with AgentTermination path)."""
     from meiva.self import AgentRestart
 
-    async def _fake(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (ExecLifecycle(output="", exc=AgentRestart()), None)
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
@@ -449,9 +455,7 @@ async def test_exec_node_dispatch_ordinary_exception(
     """ExecCrashed → halted=False + event=exec_failed at INFO (agent
     trial-and-error is not an operator alert; metrics aggregate by event)."""
 
-    async def _fake(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (
             ExecCrashed(
                 output="Traceback...\nValueError: boom\n",
@@ -489,9 +493,7 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
         def __init__(self) -> None:
             super().__init__(0)
 
-    async def _fake(
-        _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (ExecLifecycle(output="", exc=_MysteryLifecycle()), None)
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]

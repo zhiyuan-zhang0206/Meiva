@@ -43,7 +43,7 @@ def test_closure_restores_six_native_owners(
         original = create_native_owner(db_conn, local_machine=local_machine)
         owner = RuntimeIncarnation(original.agent_id, original.generation, host)
         db_conn.execute(
-            "UPDATE agents_meta SET runtime_owner=%s,runtime_kind='hosted' WHERE id=%s",
+            "UPDATE agents_meta SET runtime_owner=%s WHERE id=%s",
             (host, owner.agent_id),
         )
         db_conn.commit()
@@ -53,11 +53,6 @@ def test_closure_restores_six_native_owners(
             database_gate=database_gate,
             local_machine=local_machine,
         )
-        before = db_conn.execute(
-            "SELECT runtime_kind,lease_expires_at FROM agents_meta WHERE id=%s",
-            (owner.agent_id,),
-        ).fetchone()
-        assert before is not None
         db_conn.execute(
             "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s WHERE id=%s",
             (uuid4(), uuid4(), owner.agent_id),
@@ -89,16 +84,13 @@ def test_closure_restores_six_native_owners(
                 assert reap_impersonations(reaper_pool, database, event_bus) == 1
                 assert reap_impersonations(reaper_pool, database, event_bus) == 0
         assert db_conn.execute(
-            "SELECT runtime_generation,runtime_owner,runtime_kind,"
-            "lease_expires_at FROM agents_meta WHERE id=%s",
+            "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s",
             (owner.agent_id,),
-        ).fetchone() == (owner.generation, host, *before)
+        ).fetchone() == (owner.generation, host)
         db_conn.commit()
         owners.append(owner.agent_id)
     rows = db_conn.execute(
-        "SELECT id,status,runtime_kind,runtime_owner,runtime_generation,"
-        "lease_expires_at>clock_timestamp(),pid,incarnation_resources FROM agents_meta "
-        "WHERE id=ANY(%s)",
+        "SELECT id,status,runtime_owner,runtime_generation FROM agents_meta WHERE id=ANY(%s)",
         (owners,),
     ).fetchall()
     hold = classify([RuntimeRow(*row) for row in rows], MaintenanceHold(), host, set())

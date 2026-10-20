@@ -1,14 +1,11 @@
-exports = ["guarded_compact_support.py", "host_policy.py", "lifecycle", "managed_work.py", "native_cancel", "runtime"]
+exports = ["host_policy.py", "lifecycle", "runtime"]
 
 [uses]
 "agent_host" = ["runtime", "test_maintenance_receipt_grading.py"]
 "circuit_breaker" = ["host_policy.py"]
 "dispatch" = ["host_policy.py", "runtime"]
-"guarded_compact_support.py" = ["host_policy.py"]
-"history" = ["host_policy.py", "managed_work.py", "runtime"]
+"history" = ["host_policy.py", "runtime"]
 "lifecycle" = ["host_policy.py", "runtime"]
-"native_cancel" = ["history", "host_policy.py", "managed_work.py", "runtime"]
-"native_restart" = ["managed_work.py", "native_cancel", "runtime"]
 "runtime" = ["host_policy.py"]
 "test_agent_host.py" = ["host_policy.py", "runtime"]
 "test_circuit_breaker.py" = ["circuit_breaker", "host_policy.py"]
@@ -43,6 +40,5 @@ exports = ["guarded_compact_support.py", "host_policy.py", "lifecycle", "managed
 "runtime/test_resource_join.py -> agent_host/child_runtime_scenarios.py" = 1
 
 [debt.unresolved-patch]
-"guarded_compact_support.py#monkeypatch.setattr host._runtime_for" = 1
 "test_maintenance_prior_failure.py#monkeypatch.setattr host._drive_turns" = 1
 "test_maintenance_prior_failure.py#monkeypatch.setattr host._runtime_for" = 1

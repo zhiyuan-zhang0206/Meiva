@@ -10,11 +10,10 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-import services.agent_runner.agent_host.host as agent_host_host
 from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
 from base.clock import SYSTEM_TIMERS, Timers
@@ -95,7 +94,6 @@ async def test_original_error_joins_before_clients_and_pools_close(
     host._resource_service.record_failure(scope, failure, name="original")
     events: list[str] = []
     monkeypatch.setattr(host._clients, "close", lambda: events.append("clients"))
-    monkeypatch.setattr(agent_host_host, "release_hosted_owner", AsyncMock())
 
     async def close_pools(*_args: object) -> None:
         events.append("pools")
@@ -147,7 +145,7 @@ def exercise_unfinished_main() -> None:
         patch = pytest.MonkeyPatch()
         patch.setattr(host._clients, "close", lambda: marker.with_suffix(".clients").touch())
         service = host._resource_service
-        scope = await service.turn()
+        await service.turn()
         entered = asyncio.Event()
 
         async def uncooperative() -> None:
@@ -158,7 +156,7 @@ def exercise_unfinished_main() -> None:
                 except asyncio.CancelledError:
                     continue
 
-        service.complete_later(scope, uncooperative(), name="uncooperative-resource")
+        service.watch(uncooperative(), name="uncooperative-resource")
         await entered.wait()
         try:
             await host.aclose(resource_deadline=asyncio.get_running_loop().time() + 0.02)

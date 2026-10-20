@@ -55,14 +55,8 @@ from agent.impersonation_handoff import resume_note_pending
 from agent.messages import has_conversation
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.ownership.inbound import RuntimeOwnershipLostError
-from agent.ownership.native_cancel import (
-    activate_routed_work,
-    halt_for_native_cancel,
-    observe_bound_cancel,
-)
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.agents.incarnation.native_work_models import NativeCancelPendingError
 
 from ._decide import decide
 from ._dispatch import BatchState, dispatch_batch
@@ -113,11 +107,6 @@ async def claim_node_impl(
         return Command[ClaimGoto](update={"halted": False}, goto=route_target(ctx, BEFORE_LLM))
 
     agent_id = agent_id_from_config(config)
-    marker = await observe_bound_cancel(
-        ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation, work=ctx.native_work
-    )
-    if marker is not None:
-        return Command[ClaimGoto](update=halt_for_native_cancel(marker), goto=END)
     control = await claim_gate(state, agent_id, ctx)
     if control is not None:
         return control  # pyright: ignore[reportReturnType]
@@ -125,10 +114,8 @@ async def claim_node_impl(
     # ── First SELECT: try uncontended claim before pub/sub wait ──
     try:
         batch = await claim_inbound_batch(
-            ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation, work=ctx.native_work
+            ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation
         )
-    except NativeCancelPendingError as exc:
-        return Command[ClaimGoto](update=halt_for_native_cancel(exc.marker), goto=END)
     except RuntimeOwnershipLostError:
         return Command[ClaimGoto](update={"exit_requested": True}, goto=END)
     if not batch:
@@ -150,21 +137,12 @@ async def claim_node_impl(
             # The host owns the idle agent and its subscription. End this
             # invocation; the dispatcher creates another task on the next wake.
             return Command[ClaimGoto](update={"turn_active": False, "turn_idle": True}, goto=END)
-        await activate_routed_work(
-            ctx.ops_pool,
-            state.native_work,
-            incarnation=ctx.original_incarnation,
-            work=ctx.native_work,
-        )
         return Command[ClaimGoto](
             update={"halted": False, "turn_active": True},
             goto=route_target(ctx, BEFORE_LLM),
         )
 
     # ── Routing: resolve winner once ──
-    await activate_routed_work(
-        ctx.ops_pool, state.native_work, incarnation=ctx.original_incarnation, work=ctx.native_work
-    )
     routing = await resolve_routing(ctx, agent_id, batch)  # pyright: ignore[reportUnknownArgumentType]
 
     # ── Dispatch: run every item through its handler ──
@@ -200,6 +178,10 @@ async def claim_node_impl(
     # branch, which never flips the row).
     update["exit_requested"] = (st.next_goto == END) and not st.restart_requested
     update["restart_requested"] = st.restart_requested
+    if state.interrupted_by_restart:
+        # meiva:note
+        # The claim that takes the restart has read the mark; it describes one interrupt.
+        update["interrupted_by_restart"] = False
     return Command[ClaimGoto](update=update, goto=route_target(ctx, outcome.command.goto))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportArgumentType]
 
 

@@ -149,10 +149,6 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
     chat = insert_inbound_message(
         db_conn, agent, "Leave queued work untouched", "user", bus=event_bus, database=database
     )
-    original = db_conn.execute(
-        "SELECT runtime_owner,runtime_generation FROM agents_meta WHERE id=%s", (agent,)
-    ).fetchone()
-    assert original is not None
     db_conn.commit()
     pause_owner.begin_maintenance("after-crash", WHEN)
     hold = cohort.prepare(
@@ -177,14 +173,12 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
         "SELECT status FROM inbound_messages WHERE id=%s", (chat,)
     ).fetchone() == ("pending",)
     assert db_conn.execute(
-        "SELECT status,applied_at IS NOT NULL,observed_at,target_owner,target_generation "
-        "FROM inbound_messages WHERE id=%s",
-        (hold.commands[agent],),
-    ).fetchone() == ("claimed", True, None, *original)
+        "SELECT status FROM inbound_messages WHERE id=%s", (hold.commands[agent],)
+    ).fetchone() == ("done",)
     assert db_conn.execute(
-        "SELECT runtime_owner,runtime_generation,incarnation_resources FROM agents_meta WHERE id=%s",
+        "SELECT runtime_owner,runtime_generation FROM agents_meta WHERE id=%s",
         (agent,),
-    ).fetchone() == (None, None, None)
+    ).fetchone() == (None, None)
 
 
 async def _assert_tail_still_durable(
@@ -248,9 +242,9 @@ async def test_prior_tail_flush_outage_ends_the_restart_once_and_the_stop_fails_
     assert admission.require_operation("failed-flush", WHEN).maintenance == hold
     await _assert_tail_still_durable(aops_pool, config, tail)
     assert db_conn.execute(
-        "SELECT status,applied_at,payload->'lifecycle_result' FROM inbound_messages WHERE id=%s",
+        "SELECT status,payload->'lifecycle_result' FROM inbound_messages WHERE id=%s",
         (hold.commands[agent],),
-    ).fetchone() == ("done", None, {"outcome": "failed", "reason": "continuation_failed"})
+    ).fetchone() == ("done", {"outcome": "failed", "reason": "continuation_failed"})
     for _scan in range(3):
         assert await host.pending_inbound_wakes() == []
     await host.run_turn(agent)

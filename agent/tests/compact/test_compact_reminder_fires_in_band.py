@@ -501,25 +501,25 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
                 make_runtime(aops_pool, database_gate=database_gate).context,
                 original_incarnation=old,
                 hosted_resources=None,
-                native_work=None,
             )
         ),
         _config(tid),
     )
-    await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None)
+    await apply_hosted_lifecycle(
+        aops_pool,
+        old,
+        bus=event_bus,
+        resume_turn=False,
+    )
 
     assert cmd.goto == END
     assert cmd.update is not None
     assert "context_reset" not in cmd.update
     assert state.messages == initial_msgs
     assert db_conn.execute(
-        "SELECT kind,status,applied_at IS NOT NULL,observed_at IS NOT NULL FROM inbound_messages "
-        "WHERE agent_id=%s ORDER BY id",
+        "SELECT kind,status FROM inbound_messages WHERE agent_id=%s ORDER BY id",
         (tid,),
-    ).fetchall() == [
-        ("compact_summary", "pending", False, False),
-        ("terminate", "done", True, True),
-    ]
+    ).fetchall() == [("compact_summary", "pending"), ("terminate", "done")]
 
 
 async def test_compact_in_same_batch_as_restart(
@@ -556,32 +556,32 @@ async def test_compact_in_same_batch_as_restart(
                 make_runtime(aops_pool, database_gate=database_gate).context,
                 original_incarnation=old,
                 hosted_resources=None,
-                native_work=None,
             )
         ),
         _config(tid),
     )
-    await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None)
+    await apply_hosted_lifecycle(
+        aops_pool,
+        old,
+        bus=event_bus,
+        resume_turn=False,
+    )
 
     assert cmd.goto == END
     assert cmd.update is not None
     assert "context_reset" not in cmd.update
     assert state.messages == initial_msgs
     rows = db_conn.execute(
-        "SELECT id,kind,status,applied_at IS NOT NULL,observed_at FROM inbound_messages "
-        "WHERE agent_id=%s ORDER BY id",
+        "SELECT id,kind,status FROM inbound_messages WHERE agent_id=%s ORDER BY id",
         (tid,),
     ).fetchall()
-    assert [row[1:] for row in rows] == [
-        ("compact_summary", "pending", False, None),
-        ("restart", "claimed", True, None),
-    ]
+    assert [row[1:] for row in rows] == [("compact_summary", "pending"), ("restart", "done")]
     summary_id, restart_id = rows[0][0], rows[1][0]
     successor = await admit_owner(aops_pool, tid, database_gate=database_gate)
     assert successor.generation != old.generation
     assert db_conn.execute(
-        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (restart_id,)
-    ).fetchone() == ("done", True)
+        "SELECT status FROM inbound_messages WHERE id=%s", (restart_id,)
+    ).fetchone() == ("done",)
     resumed = await claim_node(
         state,
         Runtime(
@@ -589,7 +589,6 @@ async def test_compact_in_same_batch_as_restart(
                 make_runtime(aops_pool, database_gate=database_gate).context,
                 original_incarnation=successor,
                 hosted_resources=None,
-                native_work=None,
             )
         ),
         _config(tid),

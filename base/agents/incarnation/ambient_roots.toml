@@ -1,6 +1,3 @@
-# The only modules here that may build the `db` handle from the live settings; the rest takes it
-# from them.
-db = ["exec_domain_cleanup.py", "exec_request_evidence.py"]
-
-# This package takes the `bus` handle and builds none.
+# This package takes the `db` and `bus` handles and builds neither.
+db = []
 bus = []

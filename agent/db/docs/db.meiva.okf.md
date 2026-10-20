@@ -27,8 +27,9 @@ or a blocked graph invocation.
   the same owner lock. Interrupted claimed chats are consumed, never requeued;
   successful completion is distinguished from unknown execution. Reconciliation
   never acknowledges a lifecycle command using missing checkpoint evidence.
-- **Interrupt peek**: `pending_interrupt_reason` reads pending external cancel or
-  terminate commands so an in-flight operation can abort. It retains user/system attribution from the first matching inbound;
+- **Interrupt peek**: `pending_interrupt_reason` reads pending external cancel,
+  terminate and (once past `RESTART_INTERRUPT_GRACE_S`, by its own `created_at`) restart
+  commands so an in-flight operation can abort. It retains user/system/restart attribution from the first matching inbound;
   `has_pending_interrupt` projects presence for backoff/ownership consumers.
   Claim remains the authority for dispatch and acknowledgement.
 - **Wake delivery**: queue writers publish a Redis wake after durable insertion.

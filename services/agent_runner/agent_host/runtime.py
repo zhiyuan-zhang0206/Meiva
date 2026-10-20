@@ -249,35 +249,23 @@ def admit_stored_model(
     return True
 
 
+# meiva:note
+# How one hosted invocation ended, as the settle boundary needs it.
+#
+#     `crashed` stamps the corpse marker: fatal LLM classes + unclassified
+#     exceptions — every path where the turn died without completing work. A
+#     no-work park (crash-fresh halted claim, open circuit breaker) ends
+#     `turn_idle` with `crashed` False, and the settle deliberately leaves the
+#     marker untouched, so the park cannot relabel a corpse healthy.
+#
+#     `aborted` marks the fatal-abort settlement: the turn's failure was written
+#     into the flushed checkpoint (`settle_turn_failure`) before this outcome was
+#     returned, so the checkpoint is durable and the settle boundary may
+#     reconcile the abort's claimed inbounds. Unclassified exceptions end
+#     `crashed` without it — their checkpoint was never settled.
 class TurnOutcome:
-    """How one hosted invocation ended, as the settle boundary needs it.
-
-    `crashed` stamps the corpse marker: fatal LLM classes + unclassified
-    exceptions — every path where the turn died without completing work. A
-    no-work park (crash-fresh halted claim, open circuit breaker) ends
-    `turn_idle` with `crashed` False, and the settle deliberately leaves the
-    marker untouched, so the park cannot relabel a corpse healthy.
-
-    `aborted` marks the fatal-abort settlement: the turn's failure was written
-    into the flushed checkpoint (`settle_turn_failure`) before this outcome was
-    returned, so the checkpoint is durable and the settle boundary may
-    reconcile the abort's claimed inbounds. Unclassified exceptions end
-    `crashed` without it — their checkpoint was never settled.
-
-    `native_held` skips inbound repair when an accepted native cancel lacks
-    checkpoint/resource proof. It never labels that proof gap a healthy abort.
-
-    `truncated` marks a deliberate external end of the turn, classified bound
-    to the turn's own incarnation: an applied force terminate (task #4180; the
-    watchdog wedge recovery / a CLI force / a machine pause, whose command
-    awaits its observation by this pump's boundary). `crashed` stays False —
-    no corpse marker is stamped — and the settle boundary skips the abort
-    reconcile: the successor boundary that observes the force owns the claimed
-    rows.
-    """
-
     # A hosted failure report is awaited only after its own durable settlement.
-    __slots__ = ("aborted", "crashed", "exited", "failure_report", "native_held", "truncated")
+    __slots__ = ("aborted", "crashed", "exited", "failure_report")
 
     def __init__(
         self,
@@ -285,15 +273,11 @@ class TurnOutcome:
         exited: bool,
         crashed: bool,
         aborted: bool = False,
-        truncated: bool = False,
-        native_held: bool = False,
         failure_report: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.exited = exited
         self.crashed = crashed
         self.aborted = aborted
-        self.truncated = truncated
-        self.native_held = native_held
         self.failure_report = failure_report
 
 

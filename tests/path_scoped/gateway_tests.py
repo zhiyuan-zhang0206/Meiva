@@ -153,7 +153,6 @@ def _local_lifecycle_in_process(
                     json_body,
                     _runner_pool(),
                     catalog=active_catalog,
-                    local_machine=machine_identity.name(),
                 )  # pyright: ignore[reportUnknownArgumentType]
             ).model_dump(mode="json")  # pyright: ignore[reportUnknownArgumentType]
 

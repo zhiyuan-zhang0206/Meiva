@@ -1,9 +1,3 @@
-[debt.env-patch]
-"test_resource_admission_exec.py#patch.dict os.environ" = 1
-
-[debt.first-party-patch]
-"test_resource_admission_exec.py#monkeypatch.setattr agent.graph.exec._owned_run.register_attached" = 1
-
 [debt.stdlib-patch]
 "_envelope_crash_child.py#assignment os.fsync" = 1
 "_envelope_crash_child.py#assignment os.replace" = 1

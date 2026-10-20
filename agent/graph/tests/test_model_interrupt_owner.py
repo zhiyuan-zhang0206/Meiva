@@ -5,7 +5,13 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import interrupt
-from agent.graph.interrupt import ModelInterruptedError, interruptible_model
+from agent.graph.interrupt import (
+    InterruptEvent,
+    ModelInterruptedError,
+    interrupt_halt,
+    interruptible_model,
+)
+from base.agents.messages.inbound import InterruptReason
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 
 
@@ -85,9 +91,7 @@ def _pool() -> AsyncConnectionPool:
 async def test_database_subscription_refuses_an_unowned_watcher(missing_scope: bool) -> None:
     scope = None if missing_scope else HostedTurnResources()
     with pytest.raises(RuntimeError, match="service"):
-        async with interrupt.subscribe_interrupt(
-            _pool(), 1, incarnation=None, work=None, resources=scope
-        ):
+        async with interrupt.subscribe_interrupt(_pool(), 1, resources=scope):
             pytest.fail("an unowned watcher must not start")
 
 
@@ -103,9 +107,7 @@ async def test_inflight_unknown_reaches_caller_with_original_identity(
 
     monkeypatch.setattr(interrupt, "watch_for_interrupt", fail)
     with pytest.raises(ValueError) as observed:
-        async with interrupt.subscribe_interrupt(
-            _pool(), 1, incarnation=None, work=None, resources=scope
-        ) as event:
+        async with interrupt.subscribe_interrupt(_pool(), 1, resources=scope) as event:
             await event.wait()
     assert observed.value is original
     assert not service.failures
@@ -129,9 +131,7 @@ async def test_primary_and_watcher_cleanup_unknown_both_survive(
 
     monkeypatch.setattr(interrupt, "watch_for_interrupt", fail_cleanup)
     with pytest.raises(RuntimeError) as observed:
-        async with interrupt.subscribe_interrupt(
-            _pool(), 1, incarnation=None, work=None, resources=scope
-        ):
+        async with interrupt.subscribe_interrupt(_pool(), 1, resources=scope):
             await entered.wait()
             raise primary
     assert observed.value is primary
@@ -165,13 +165,11 @@ async def test_late_unknown_is_visible_before_service_join_without_sibling_cance
 
     monkeypatch.setattr(interrupt, "watch_for_interrupt", late_failure)
     monkeypatch.setattr(interrupt, "WATCHER_EXIT_TIMEOUT_S", 0.02)
-    async with interrupt.subscribe_interrupt(
-        _pool(), 1, incarnation=None, work=None, resources=scope
-    ) as old_event:
+    async with interrupt.subscribe_interrupt(_pool(), 1, resources=scope) as old_event:
         await entered.wait()
     assert not old_event.is_set()
     assert not service.failures
-    service.complete_later(await service.turn(), other_turn(), name="other-agent")
+    service.watch(other_turn(), name="other-agent")
     release.set()
     await sibling_alive.wait()
     assert service.failures == [(scope, failure)]
@@ -200,9 +198,7 @@ async def test_repeated_cancel_during_bounded_exit_still_hands_off_actual_task(
             raise failure from None
 
     async def invoke() -> None:
-        async with interrupt.subscribe_interrupt(
-            _pool(), 1, incarnation=None, work=None, resources=scope
-        ):
+        async with interrupt.subscribe_interrupt(_pool(), 1, resources=scope):
             await entered.wait()
 
     monkeypatch.setattr(interrupt, "watch_for_interrupt", late_failure)
@@ -218,3 +214,29 @@ async def test_repeated_cancel_during_bounded_exit_still_hands_off_actual_task(
     with pytest.raises(ValueError) as observed:
         await service.aclose()
     assert observed.value is failure
+
+
+@pytest.mark.parametrize(
+    ("reason", "update"),
+    [
+        (InterruptReason.USER, {"halted": True}),
+        (InterruptReason.SYSTEM, {"halted": True}),
+        (InterruptReason.RESTART, {"halted": True, "interrupted_by_restart": True}),
+    ],
+)
+def test_an_interrupted_node_halts_and_only_a_restart_marks_the_turn_unfinished(
+    reason: InterruptReason, update: dict[str, bool]
+) -> None:
+    assert interrupt_halt(reason) == update
+
+
+async def test_the_interrupt_error_carries_the_reason_of_the_event_that_ended_the_call() -> None:
+    event = InterruptEvent()
+    event.set(InterruptReason.RESTART)
+
+    async def never() -> None:
+        await asyncio.Event().wait()
+
+    with pytest.raises(ModelInterruptedError) as raised:
+        await interruptible_model(never(), event)
+    assert raised.value.reason is InterruptReason.RESTART

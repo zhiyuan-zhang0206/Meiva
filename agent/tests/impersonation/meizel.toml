@@ -77,7 +77,6 @@ exports = ["external_attachment.py"]
 "test_impersonation_part2.py -> test_impersonation.py#_notes" = 1
 
 [debt.restricted-python]
-"conftest.py#python -c" = 1
 "test_impersonation_transport.py#python -c" = 2
 
 [debt.third-party-patch]

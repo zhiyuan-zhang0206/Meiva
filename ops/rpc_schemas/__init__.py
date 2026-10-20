@@ -17,6 +17,7 @@ from base.agents.messages.envelope import validate_source
 from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
 from base.api_contracts.agent_contract import (
+    CancelResult,
     Harness,
     HarnessStatus,
     RestartResult,
@@ -196,8 +197,9 @@ class ResurrectAgentRequest(BaseModel):
 # `source` default "user" — frontend restart button does not need to
 # pass it; SDK paths pass f"agent:{my_id}". Written into the lifecycle
 # 'restart' inbound's source; the claim-side dispatch composes it into
-# the marker `[system ts] Restart was accepted from {source}` so the
-# agent knows who restarted it.
+# the marker `[system ts] Restart was accepted from {source}` (an idle
+# agent) or into the note that resumes its unfinished turn, so the agent
+# knows who restarted it.
 #
 # `config_overlay`, when nonempty, is validated before it reaches either
 # gateway or runner writes, merged into the persistent agent overlay, and
@@ -241,6 +243,24 @@ class RestartAgentResponse(BaseModel):
     """
 
     status: RestartResult
+
+
+# meiva:note
+# POST /api/agents/{id}/compact response: the durable `compact_request` inbound.
+#
+#     The request is queued, not applied; the agent summarizes at its next turn.
+class CompactAgentResponse(BaseModel):
+    inbound_id: int
+
+
+# meiva:note
+# POST /api/agents/{id}/cancel response.
+#
+#     `cancelled`: the agent's running turn was cancelled; the agent stays alive,
+#         idles, and takes its next input as a fresh turn.
+#     `not_running`: no turn was running, so there was nothing to cancel.
+class CancelAgentResponse(BaseModel):
+    status: CancelResult
 
 
 class ResurrectAgentResponse(BaseModel):

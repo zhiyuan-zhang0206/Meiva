@@ -5,34 +5,23 @@ from dataclasses import dataclass
 from functools import partial
 
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation import settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
-from agent.ownership.hosted_completion import (
-    completed_hosted_lifecycle_kind,
-    pending_hosted_lifecycle_id,
-)
+from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import MeivaContext
 from base.agents.impersonation.notes import HandoffNotes
-from base.agents.inbox.native_restart import original_guarded_restart_id
-from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
-from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
-from services.agent_runner.agent_host.invocation.compact.lifecycle import apply_hosted_lifecycle
-from services.agent_runner.agent_host.invocation.native_work import (
-    settle_native_invocation,
-)
 from services.agent_runner.agent_host.runtime import TurnOutcome
 
 
@@ -43,10 +32,32 @@ class PendingWorkResult:
     result: dict[str, object]
     checkpoint_flushed: bool = False
     trace_attached: bool = False
-    lifecycle_command_id: int | None = None
-    native_work: NativeWorkTarget | None = None
-    native_settled: bool = False
-    native_cancelled: bool = False
+
+
+# meiva:note
+# Settle a pending external handoff checkpoint, without activating a new lease.
+async def settle_handoff_before_invocation(
+    graph: CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState],
+    ctx: MeivaContext,
+    agent_id: int,
+    *,
+    db: Database,
+    bus: EventBus,
+    relays: RelaySupervision,
+    notes: HandoffNotes,
+) -> None:
+    async with database_phase():
+        await settle_checkpoint(
+            graph,
+            db,
+            bus,
+            agent_id,
+            relays,
+            activate_accepted=False,
+            incarnation=ctx.original_incarnation,
+            notes=notes,
+            read_local_machine=lambda: ctx.require_machine().name(),
+        )
 
 
 async def finish_pending_failure(
@@ -56,27 +67,10 @@ async def finish_pending_failure(
     ctx: MeivaContext,
     config: RunnableConfig,
     pending: PendingTurnFailure,
-    *,
-    native_work: NativeWorkTarget | None = None,
 ) -> TurnOutcome:
     """Finish the original abort's durable writes without another invocation."""
     async with database_phase():
         await settle_turn_failure(graph, checkpointer, config, ctx, agent_id, pending)
-        if native_work is not None:
-            incarnation = ctx.require_original_incarnation(agent_id)
-            if ctx.ops_pool is None or not isinstance(checkpointer, AsyncPostgresSaver):
-                raise RuntimeError(
-                    "native failure settlement requires the original saver and incarnation"
-                )
-            await settle_native_invocation(
-                ctx.ops_pool,
-                checkpointer,
-                graph,
-                incarnation,
-                native_work,
-                config,
-                resources=ctx.hosted_resources,
-            )
         await attach_trace_checkpoint_ref(graph, ctx, agent_id)
     return TurnOutcome(
         exited=False,
@@ -88,31 +82,6 @@ async def finish_pending_failure(
     )
 
 
-async def returned_lifecycle_request(
-    pool: AsyncConnectionPool,
-    agent_id: int,
-    pending: PendingWorkResult,
-    *,
-    incarnation: RuntimeIncarnation | None,
-) -> bool:
-    """An exact guarded receipt may survive a cancel return with legacy flags clear."""
-    if not pending.checkpoint_flushed or not pending.native_settled:
-        raise RuntimeError("returned lifecycle selection requires durable work settlement")
-    if pending.lifecycle_command_id is None and pending.native_work is not None:
-        async with pool.connection() as conn:
-            pending.lifecycle_command_id = await original_guarded_restart_id(
-                conn, pending.native_work
-            )
-    requested = bool(pending.result["exit_requested"] or pending.result["restart_requested"])
-    if pending.lifecycle_command_id is None and requested:
-        if incarnation is not None:
-            incarnation.require_agent(agent_id)
-        if incarnation is None:
-            raise RuntimeError("hosted lifecycle return has no admitted incarnation")
-        pending.lifecycle_command_id = await pending_hosted_lifecycle_id(pool, incarnation)
-    return pending.lifecycle_command_id is not None or requested
-
-
 async def finish_completed_invocation(
     pool: AsyncConnectionPool,
     checkpoints: TurnCheckpoints,
@@ -121,6 +90,7 @@ async def finish_completed_invocation(
     pending: PendingWorkResult,
     drop_agent: Callable[[int], None],
     kill_shell_sessions: Callable[[int, int], None],
+    wake_resumed: Callable[[int], object],
     *,
     db: Database,
     bus: EventBus,
@@ -133,49 +103,42 @@ async def finish_completed_invocation(
         if not pending.checkpoint_flushed:
             await flush_checkpoint(checkpoints.saver, agent_id)
             pending.checkpoint_flushed = True
-        if not pending.native_settled:
-            incarnation = ctx.require_original_incarnation(agent_id)
-            pending.native_cancelled = await settle_native_invocation(
-                pool,
-                checkpoints.saver,
-                checkpoints.graph,
-                incarnation,
-                pending.native_work,
-                {"configurable": {"thread_id": str(agent_id)}},
-                resources=ctx.hosted_resources,
-            )
-            pending.native_settled = True
         if not pending.trace_attached:
             await attach_trace_checkpoint_ref(checkpoints.graph, ctx, agent_id)
             pending.trace_attached = True
-    if await returned_lifecycle_request(
-        pool, agent_id, pending, incarnation=ctx.original_incarnation
-    ):
+    if pending.result["exit_requested"] or pending.result["restart_requested"]:
         incarnation = ctx.require_original_incarnation(agent_id)
         drop_agent(agent_id)
+        # meiva:note
+        # After a restart claim `halted` is the claim's verdict on the agent it found:
+        # set, it was idle; clear, its turn was unfinished and the apply queues the note
+        # that continues it. Nothing else reads the turn's progress here.
+        # meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+        resume_turn = bool(pending.result["restart_requested"]) and not pending.result["halted"]
         async with database_phase():
-            if pending.lifecycle_command_id is None:
-                return TurnOutcome(exited=False, crashed=False)
             kind = await apply_hosted_lifecycle(
                 pool,
                 incarnation,
                 bus=bus,
+                resume_turn=resume_turn,
                 kill_shell_sessions=kill_shell_sessions,
-                expected_command_id=pending.lifecycle_command_id,
-                resources=ctx.hosted_resources,
             )
-            if kind is None:
-                kind = await completed_hosted_lifecycle_kind(
-                    pool, incarnation, pending.lifecycle_command_id
-                )
         logger.info(
             "hosted lifecycle return settled",
             agent_id=agent_id,
             generation=str(incarnation.generation),
             command_kind=kind,
         )
+        if kind == "restart" and resume_turn:
+            # meiva:note
+            # The apply committed the note that continues the turn. This host's scheduler
+            # starts that turn as soon as this one ends, instead of the pending scan finding
+            # it up to its interval later. A host that is exiting refuses the wake and the
+            # next host's scan takes the note.
+            # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+            wake_resumed(agent_id)
         return TurnOutcome(exited=kind == "terminate", crashed=False)
-    if pending.native_cancelled or pending.result["turn_idle"]:
+    if pending.result["turn_idle"]:
         async with database_phase():
             await settle_checkpoint(
                 checkpoints.graph,
@@ -184,7 +147,6 @@ async def finish_completed_invocation(
                 agent_id,
                 relays,
                 incarnation=ctx.original_incarnation,
-                resources=ctx.hosted_resources,
                 notes=notes,
                 read_local_machine=lambda: ctx.require_machine().name(),
             )

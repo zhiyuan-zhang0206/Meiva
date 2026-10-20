@@ -25,11 +25,8 @@ GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events")
 
 _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("SELECT, UPDATE", ("inbound_messages", "agents_meta")),
-    ("INSERT, UPDATE", ("native_graph_work", "upload_delivery_copies", "native_restart_commands")),
-    ("UPDATE", ("native_cancel_commands",)),
+    ("INSERT, UPDATE", ("upload_delivery_copies",)),
     ("INSERT", ("inbound_messages",)),
-    ("INSERT", ("native_compact_observations",)),
-    ("UPDATE", ("native_compact_commands",)),
     ("INSERT, UPDATE, SELECT", ("machine_units",)),
     ("INSERT, UPDATE", ("machines", "host_deploy_state")),
     ("INSERT, UPDATE, DELETE", ("api_idempotency",)),

@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 import psycopg
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
@@ -31,6 +32,19 @@ def insert(conn: psycopg.Connection, agent_id: int) -> int:
     return row[0]
 
 
+def insert_lifecycle_command(
+    conn: psycopg.Connection, agent_id: int, kind: str, payload: dict[str, object] | None = None
+) -> int:
+    row = conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
+        "VALUES (%s,'',%s,'user',%s) RETURNING id",
+        (agent_id, kind, Jsonb(payload) if payload is not None else None),
+    ).fetchone()
+    conn.commit()
+    assert row is not None
+    return row[0]
+
+
 async def admit_owner(
     pool: AsyncConnectionPool, agent_id: int, database_gate: ProcessDbGate
 ) -> RuntimeIncarnation:
@@ -39,7 +53,6 @@ async def admit_owner(
         agent_id,
         "claim-test",
         uuid4(),
-        expected_from="idling",
         db=Database.from_settings(gate=database_gate),
     )
     assert owner is not None

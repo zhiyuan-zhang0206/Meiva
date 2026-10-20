@@ -53,9 +53,8 @@ def _claim(conn: psycopg.Connection[Any], message: int) -> None:
 def _resolve_lifecycle_command(conn: psycopg.Connection[Any], command: int) -> None:
     conn.execute(
         "UPDATE inbound_messages SET status='done', claimed_at=COALESCE(claimed_at, "
-        "clock_timestamp()), target_generation=%s, target_owner=%s, applied_at=clock_timestamp(), "
-        "observed_at=clock_timestamp() WHERE id=%s",
-        (uuid4(), uuid4(), command),
+        "clock_timestamp()) WHERE id=%s",
+        (command,),
     )
 
 
@@ -73,12 +72,13 @@ async def _live_member(
         agent,
         machine_identity.name(),
         owner,
-        expected_from="idling",
         db=Database.from_settings(gate=database_gate),
     )
     assert incarnation is not None
     assert await settle_hosted_runtime(
-        aops_pool, incarnation, bus=EventBus.from_settings(), resources=None
+        aops_pool,
+        incarnation,
+        bus=EventBus.from_settings(),
     )
     return agent
 
@@ -355,8 +355,8 @@ def test_parked_claimed_ordinary_work_is_consumed_not_redelivered(
         hold.phase == MaintenancePhase.DRAINING and hold.parked == (agent,) and hold.commands == {}
     )
     assert db_conn.execute(
-        "SELECT status,applied_at FROM inbound_messages WHERE id=%s", (message,)
-    ).fetchone() == ("done", None)
+        "SELECT status FROM inbound_messages WHERE id=%s", (message,)
+    ).fetchone() == ("done",)
     [event] = emitted_events
     assert event.event_name == "pause_orphan_claim_settled"
     attributes = event.attributes
@@ -560,9 +560,7 @@ def test_parked_claim_guards_agree_on_waitability(
     hold = MaintenanceHold(parked=(agent,))
 
     with pytest.raises(cohort.LifecycleCollisionError) as collision_guard:
-        cohort.refuse_inflight_lifecycle(
-            db_conn, hold, frozenset[int](), holder="move", acquired_at=WHEN
-        )
+        cohort.refuse_inflight_lifecycle(db_conn, hold, holder="move", acquired_at=WHEN)
     with pytest.raises(cohort.LifecycleCollisionError) as resolved_guard:
         cohort.require_resolved(db_conn, hold)
     assert collision_guard.value.waitable and resolved_guard.value.waitable
@@ -582,9 +580,7 @@ def test_parked_claim_guards_agree_on_waitability(
     db_conn.commit()
 
     with pytest.raises(cohort.LifecycleCollisionError) as collision_refused:
-        cohort.refuse_inflight_lifecycle(
-            db_conn, hold, frozenset[int](), holder="move", acquired_at=WHEN
-        )
+        cohort.refuse_inflight_lifecycle(db_conn, hold, holder="move", acquired_at=WHEN)
     with pytest.raises(cohort.LifecycleCollisionError) as resolved_refused:
         cohort.require_resolved(db_conn, hold)
     assert not collision_refused.value.waitable and not resolved_refused.value.waitable

@@ -1,6 +1,7 @@
 exports = ["helpers.py"]
 
 [uses]
+"test_cancel_turn_route.py" = ["helpers.py"]
 "test_scan_and_slots.py" = ["helpers.py", "scan_setup.py"]
 "test_subscription_recovery.py" = ["helpers.py", "scan_setup.py"]
 

@@ -186,7 +186,6 @@ class AgentInspectLive(BaseModel):
     observation: AgentObservation | None = None
     shells_available: bool | None = None
     spawned_at: datetime
-    started_at: datetime | None = None
     shells: list[ShellInfo]
     config_overlay: dict[str, Any]
     notice: OpenNotice | None = None

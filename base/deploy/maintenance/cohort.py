@@ -1,10 +1,10 @@
-"""Durable restart cohort for an already admitted hosted runner.
-
-Preparation and admission serialize on the existing agents_meta row lock.
-The local journal is published first; a native admission that obtains its row
-after publication must either belong to this cohort's original host owner or
-refuse. No lifecycle target, acknowledgement, or checkpoint is invented here.
-"""
+# meiva:note
+# Durable restart cohort for an already admitted hosted runner.
+#
+# Preparation and admission serialize on the existing agents_meta row lock.
+# The local journal is published first; once it is held, admission lets through
+# only a cohort member's pending restart. No lifecycle target, acknowledgement, or
+# checkpoint is invented here.
 
 from datetime import datetime
 from typing import NamedTuple
@@ -15,8 +15,6 @@ from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 
 from base import telemetry
-from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
-from base.agents.incarnation.resources import ResourceBirth, decode_resources
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 
@@ -40,6 +38,20 @@ class LifecycleCollisionError(RuntimeError):
         self.waitable = waitable
 
 
+# meiva:note
+# Freeze the original runnable set and enqueue one restart per member.
+#
+# A failure leaves the hold in place. Repeating preparation resumes the
+# same cohort and finds already committed commands by the exact operation.
+# Terminated agents never enter the cohort. A previous lifecycle operation
+# requires separate resolution. Ordinary orphan claims
+# on parked agents are consumed (marked done, never redelivered)
+# before the collision guards run.
+#
+# An unfinished agent lifecycle command belonging to another actor raises
+# ``LifecycleCollisionError`` before the cohort is frozen; the caller may
+# bounded-wait and retry, and the retry re-verifies everything under the
+# same row locks (task #3591).
 def prepare(
     conn: psycopg.Connection,
     *,
@@ -47,22 +59,7 @@ def prepare(
     host_owner: UUID | None,
     holder: str,
     acquired_at: datetime,
-    host_absent: bool = False,
 ) -> MaintenanceHold:
-    """Freeze the original runnable set and enqueue one restart per member.
-
-    A failure leaves the hold in place. Repeating preparation resumes the
-    same cohort and finds already committed commands by the exact operation.
-    Terminated agents never enter the cohort. A previous lifecycle operation,
-    stale/unknown runtime requires separate resolution. Ordinary orphan claims
-    on non-cold parked agents are consumed (marked done, never redelivered)
-    before the collision guards run.
-
-    An unfinished agent lifecycle command belonging to another actor raises
-    ``LifecycleCollisionError`` before the cohort is frozen; the caller may
-    bounded-wait and retry, and the retry re-verifies everything under the
-    same row locks (task #3591).
-    """
     current = admission.require_operation(holder, acquired_at)
     hold = current.maintenance
     assert hold is not None  # noqa: S101
@@ -74,24 +71,15 @@ def prepare(
         conn.execute("SET TRANSACTION READ WRITE")
         conn.execute("SET LOCAL lock_timeout='5s'")
         rows = conn.execute(
-            "SELECT id,status,runtime_kind,runtime_owner,runtime_generation,"
-            "lease_expires_at>clock_timestamp(),pid,incarnation_resources FROM agents_meta "
+            "SELECT id,status,runtime_owner,runtime_generation FROM agents_meta "
             "WHERE machine=%s AND status<>'terminated' ORDER BY id FOR UPDATE",
             (machine,),
         ).fetchall()
-        if host_absent:
-            from base.deploy.maintenance.cold import require_cold_end
-
-            for values in rows:
-                row = RuntimeRow(*values)
-                if row.retired_intent():
-                    require_cold_end(conn, row.agent_id)
-        applied = applied_capture(conn, hold, host_owner, holder, acquired_at)
+        applied = applied_capture(conn, hold, holder, acquired_at)
         captured = classify([RuntimeRow(*row) for row in rows], hold, host_owner, applied)
-        cold = _cold_agents([RuntimeRow(*row) for row in rows], host_owner, host_absent=host_absent)
-        settled = _settle_orphan_claims(conn, captured, cold)
-        refuse_inflight_lifecycle(conn, captured, cold, holder=holder, acquired_at=acquired_at)
-        require_resolved(conn, captured, cold=cold)
+        settled = _settle_orphan_claims(conn, captured)
+        refuse_inflight_lifecycle(conn, captured, holder=holder, acquired_at=acquired_at)
+        require_resolved(conn, captured)
         if captured != hold:
             pause_owner.change_maintenance(holder, acquired_at, hold, captured)
             hold = captured
@@ -107,59 +95,28 @@ def prepare(
 class RuntimeRow(NamedTuple):
     agent_id: int
     status: str
-    kind: str | None
     owner: UUID | None
     generation: UUID | None
-    fresh: bool | None
-    pid: int | None
-    resources: object
 
+    # meiva:note
+    # An idle agent owned by nobody or by a host boot other than the one being
+    # restarted.
+    #
+    # A departed host boot leaves its idle agents with the owner; the next wake
+    # re-admits them under the new boot's generation. Nothing is running for a
+    # parked agent, so maintenance leaves it untouched.
     def parked_idle(self, host_owner: UUID | None) -> bool:
-        """An idle agent with nothing running for it and no live lease, owned by nobody
-        or by a host other than the one being restarted.
-
-        A departed host leaves its idle agents with the owner, an expired or
-        released lease and an admitted-but-empty resource set; the next wake
-        re-admits them under the ordinary admission fences, which prove the
-        previous host gone. Anything with work in flight (a running turn, a
-        native process, an exec allocation, a live lease) is not parked.
-        """
         return (
             self.status == "idling"
-            and self.kind in (None, "hosted")
             and (self.owner is None or self.owner != host_owner)
             and (self.owner is None) == (self.generation is None)
-            and self.fresh is not True
-            and self.pid is None
-            and self._holds_no_work()
-        )
-
-    def _holds_no_work(self) -> bool:
-        if self.resources is None:
-            return True
-        state = decode_resources(self.resources)
-        if isinstance(state, ResourceBirth):
-            return True
-        return not state.requests and state.frozen_by is None
-
-    def retired_intent(self) -> bool:
-        return (
-            self.status == "idling"
-            and self.fresh is False
-            and self.kind == "hosted"
-            and self.owner is not None
-            and self.generation is not None
-            and self.pid is None
-            and self.resources is None
         )
 
     def active_for(self, owner: UUID | None) -> bool:
         return (
             self.status in ("running", "idling")
-            and self.kind == "hosted"
             and self.owner == owner
             and self.generation is not None
-            and self.fresh is True
         )
 
 
@@ -171,18 +128,12 @@ class OrphanClaim(NamedTuple):
     age_s: float
 
 
-def orphaned_claims(
-    conn: psycopg.Connection,
-    *,
-    parked: tuple[int, ...],
-    cold: frozenset[int] = frozenset(),
-) -> list[OrphanClaim]:
-    """Read the ordinary claims eligible for preparation's orphan settlement.
-
-    Preparation supplies its locked, classified parked set and excludes cold
-    agents whose ordinary claims never block `_unresolved_parked`.
-    """
-    agents = sorted(set(parked) - cold)
+# meiva:note
+# Read the ordinary claims eligible for preparation's orphan settlement.
+#
+# Preparation supplies its locked, classified parked set.
+def orphaned_claims(conn: psycopg.Connection, *, parked: tuple[int, ...]) -> list[OrphanClaim]:
+    agents = sorted(set(parked))
     if not agents:
         return []
     return [
@@ -198,17 +149,15 @@ def orphaned_claims(
     ]
 
 
-def _settle_orphan_claims(
-    conn: psycopg.Connection, hold: MaintenanceHold, cold: frozenset[int]
-) -> list[OrphanClaim]:
-    """Consume orphaned ordinary claims under preparation's agent row locks.
-
-    A claim whose runtime is gone is marked `done`, never returned to
-    `pending`: like a cold boot, preparation does not redeliver input a dead
-    runtime had taken. Returns only the rows this transaction changed.
-    """
+# meiva:note
+# Consume orphaned ordinary claims under preparation's agent row locks.
+#
+# A claim whose runtime is gone is marked `done`, never returned to
+# `pending`: like a host restart, preparation does not redeliver input a dead
+# runtime had taken. Returns only the rows this transaction changed.
+def _settle_orphan_claims(conn: psycopg.Connection, hold: MaintenanceHold) -> list[OrphanClaim]:
     consumed: list[OrphanClaim] = []
-    for row in orphaned_claims(conn, parked=hold.parked, cold=cold):
+    for row in orphaned_claims(conn, parked=hold.parked):
         changed = conn.execute(
             "UPDATE inbound_messages SET status='done' WHERE id=%s AND status='claimed'",
             (row.message_id,),
@@ -255,17 +204,6 @@ def classify(
     )
 
 
-def _cold_agents(
-    rows: list[RuntimeRow], host_owner: UUID | None, *, host_absent: bool
-) -> frozenset[int]:
-    """Parked agents with no resource record, when no host is running at all."""
-    return frozenset(
-        row.agent_id
-        for row in rows
-        if host_absent and row.resources is None and row.parked_idle(host_owner)
-    )
-
-
 def _parked_agents(
     rows: list[RuntimeRow], hold: MaintenanceHold, host_owner: UUID | None
 ) -> tuple[int, ...]:
@@ -290,33 +228,27 @@ def _require_live_owners(selected: list[RuntimeRow], owner: UUID | None, applied
 
 
 def applied_capture(
-    conn: psycopg.Connection,
-    hold: MaintenanceHold,
-    owner: UUID | None,
-    holder: str,
-    acquired_at: datetime,
+    conn: psycopg.Connection, hold: MaintenanceHold, holder: str, acquired_at: datetime
 ) -> set[int]:
-    # The original host can apply a committed restart before the journal's
-    # final write succeeds. Preserve this cohort on retry; this is NOT a final
-    # continuation receipt, which only the original boot may later sign.
+    # meiva:note
+    # The original host can execute a committed restart before the journal's
+    # final write succeeds. Preserve this cohort on retry: the restart row is
+    # done, it carries the release marker, and it names this exact operation.
     operation = Jsonb({"holder": holder, "acquired_at": acquired_at.isoformat()})
     rows = conn.execute(
-        "SELECT m.id FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant SQL fragment
-        "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
+        "SELECT m.id FROM agents_meta m JOIN inbound_messages i "
+        "ON i.agent_id=m.id "
         "WHERE m.id=ANY(%s) AND m.status='idling' AND m.runtime_owner IS NULL "
-        f"AND m.runtime_generation IS NULL AND {DRAINED_RESOURCES} "
-        "AND i.kind='restart' AND i.source='system:restart' AND i.status='claimed' "
-        "AND i.target_owner=%s "
-        "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
+        "AND m.runtime_generation IS NULL "
+        "AND i.kind='restart' AND i.source='system:restart' AND i.status='done' "
+        "AND COALESCE((i.payload -> 'lifecycle_release') = 'true'::jsonb, false) "
         "AND i.payload->'maintenance'=%s",
-        (list(hold.commands), owner, operation),
+        (list(hold.commands), operation),
     ).fetchall()
     return {row[0] for row in rows}
 
 
-def require_resolved(
-    conn: psycopg.Connection, hold: MaintenanceHold, *, cold: frozenset[int] = frozenset()
-) -> None:
+def require_resolved(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
     """The second guard on the same collision, with the same waitability rule.
 
     ``refuse_inflight_lifecycle`` runs first and already covers every parked
@@ -327,7 +259,7 @@ def require_resolved(
     preparation still never freezes past unresolved parked claims.
     """
     rows = _open_commands(conn, list(hold.parked))
-    unresolved = [row for row in rows if _unresolved_parked(row, row.agent_id, cold)]
+    unresolved = [row for row in rows if _unresolved_parked(row)]
     if not unresolved:
         return
     raise LifecycleCollisionError(
@@ -344,7 +276,6 @@ class _CommandRow(NamedTuple):
     command_id: int
     kind: str
     status: str
-    applied: bool
     maintenance: object
 
 
@@ -353,7 +284,7 @@ def _open_commands(conn: psycopg.Connection, agents: list[int]) -> list[_Command
     return [
         _CommandRow(*row)
         for row in conn.execute(
-            "SELECT agent_id, id, kind, status, applied_at IS NOT NULL, payload->'maintenance' "
+            "SELECT agent_id, id, kind, status, payload->'maintenance' "
             "FROM inbound_messages WHERE agent_id=ANY(%s) AND status IN ('pending','claimed') "
             "ORDER BY agent_id, id",
             (agents,),
@@ -377,21 +308,20 @@ def _member_collisions(
 
 
 def _parked_collisions(
-    rows: list[_CommandRow], hold: MaintenanceHold, cold: frozenset[int]
+    rows: list[_CommandRow], hold: MaintenanceHold
 ) -> list[tuple[int, list[_CommandRow]]]:
     """Parked agents' commands that are still unresolved."""
     return [
         (agent_id, [row])
         for agent_id in sorted(hold.parked)
         for row in rows
-        if row.agent_id == agent_id and _unresolved_parked(row, agent_id, cold)
+        if row.agent_id == agent_id and _unresolved_parked(row)
     ]
 
 
 def refuse_inflight_lifecycle(
     conn: psycopg.Connection,
     hold: MaintenanceHold,
-    cold: frozenset[int],
     *,
     holder: str,
     acquired_at: datetime,
@@ -415,7 +345,7 @@ def refuse_inflight_lifecycle(
     rows = _open_commands(conn, agents)
     operation = {"holder": holder, "acquired_at": acquired_at.isoformat()}
     collisions = _member_collisions(rows, hold, operation)
-    collisions.extend(_parked_collisions(rows, hold, cold))
+    collisions.extend(_parked_collisions(rows, hold))
     if not collisions:
         return
     raise LifecycleCollisionError(
@@ -432,15 +362,9 @@ def _collision_line(agent_id: int, rows: list[_CommandRow]) -> str:
     return f"agent {agent_id} has {problem}: {detail}"
 
 
-def _unresolved_parked(row: _CommandRow, agent_id: int, cold: frozenset[int]) -> bool:
+def _unresolved_parked(row: _CommandRow) -> bool:
     """`require_resolved`'s predicate, per row, for the waitability decision."""
-    if row.status == "claimed":
-        return (
-            agent_id not in cold
-            or row.kind == "terminate"
-            or (row.kind == "restart" and not row.applied)
-        )
-    return row.kind in ("restart", "terminate")
+    return row.status == "claimed" or row.kind in ("restart", "terminate")
 
 
 def _restart(conn: psycopg.Connection, agent_id: int, holder: str, acquired_at: datetime) -> int:
@@ -455,6 +379,16 @@ def _restart(conn: psycopg.Connection, agent_id: int, holder: str, acquired_at: 
         if len(pending) != 1 or pending[0][1] != operation:
             raise RuntimeError(f"agent {agent_id} has another unfinished lifecycle command")
         return pending[0][0]
+    # meiva:note
+    # A retry finds the restart this operation already had executed.
+    executed = conn.execute(
+        "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='restart' "
+        "AND source='system:restart' AND status='done' AND payload->'maintenance'=%s "
+        "ORDER BY id DESC LIMIT 1",
+        (agent_id, Jsonb(operation)),
+    ).fetchone()
+    if executed is not None:
+        return executed[0]
     row = conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,payload) "
         "VALUES(%s,'restart','system:restart','',%s) RETURNING id",
@@ -464,15 +398,14 @@ def _restart(conn: psycopg.Connection, agent_id: int, holder: str, acquired_at: 
     return row[0]
 
 
+# meiva:note
+# Cross-check local continuation receipts against the executed restart rows.
 def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
-    """Cross-check local continuation receipts against preserved DB pointers."""
     if set(hold.drained) != set(hold.commands):
         raise RuntimeError("maintenance still has unfinished continuations")
     if hold.parked:
         rows = conn.execute(
-            "SELECT id,status,runtime_kind,runtime_owner,runtime_generation,"
-            "lease_expires_at>clock_timestamp(),pid,incarnation_resources "
-            "FROM agents_meta WHERE id=ANY(%s)",
+            "SELECT id,status,runtime_owner,runtime_generation FROM agents_meta WHERE id=ANY(%s)",
             (list(hold.parked),),
         ).fetchall()
         parked = [RuntimeRow(*row) for row in rows]
@@ -480,13 +413,12 @@ def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
             raise RuntimeError("parked agent intent changed during maintenance")
     for agent_id, command_id in hold.commands.items():
         row = conn.execute(
-            "SELECT 1 FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant SQL fragment
-            "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
-            "WHERE m.id=%s AND i.id=%s AND i.kind='restart' AND i.status='claimed' "
-            "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
-            "AND m.status='idling' AND m.runtime_owner IS NULL AND m.runtime_generation IS NULL "
-            f"AND {DRAINED_RESOURCES}",
+            "SELECT 1 FROM agents_meta m JOIN inbound_messages i "
+            "ON i.agent_id=m.id WHERE m.id=%s AND i.id=%s AND i.kind='restart' "
+            "AND i.status='done' "
+            "AND COALESCE((i.payload -> 'lifecycle_release') = 'true'::jsonb, false) "
+            "AND m.status='idling' AND m.runtime_owner IS NULL AND m.runtime_generation IS NULL",
             (agent_id, command_id),
         ).fetchone()
         if row is None:
-            raise RuntimeError(f"agent {agent_id} no longer has its drained restart pointer")
+            raise RuntimeError(f"agent {agent_id} no longer has its executed restart")

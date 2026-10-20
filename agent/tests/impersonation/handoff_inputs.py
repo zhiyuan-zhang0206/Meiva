@@ -135,7 +135,6 @@ async def prepare_graph(
         agent_id,
         machine,
         uuid4(),
-        expected_from="idling",
         db=Database.from_settings(gate=database_gate),
     )
     assert owner is not None
@@ -480,7 +479,6 @@ async def resume_native(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        resources=ctx.hosted_resources,
         notes=handoff_notes(),
         read_local_machine=lambda: ctx.require_machine().name(),
     )

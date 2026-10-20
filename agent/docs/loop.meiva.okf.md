@@ -31,16 +31,16 @@ heartbeat is new input for a runnable agent. A permanent provider error stops
 background wakes after one rejection; new chat or explicit operator action may
 try after the cause is fixed. There is no billing recovery tool or SDK outbox.
 
-Strong native controls retain exact-target acceptance and normal original
-completion. Interrupted cancel/compact/restart can stay held for inspection;
-a later generation never automatically reconstructs their successful receipts.
+Restart and terminate execute and close in one transaction at the turn boundary;
+cancel cancels the running turn Task and leaves the checkpoint for the next
+fresh-input invocation. A later generation never reconstructs an interrupted turn.
 
 ## Entry points
 
 - `services/agent_runner/agent_host/daemon.py` — startup, health and finite DB renewal.
 - `services/agent_runner/agent_host/dispatcher.py` — wake scheduling and single-flight.
 - `services/agent_runner/agent_host/host.py` — admission, one-shot work and settlement.
-- `services/agent_runner/agent_host/invocation/native_work.py` — fresh-input boundary.
+- `services/agent_runner/agent_host/invocation/__init__.py` — completed-invocation settlement and lifecycle apply.
 - `services/agent_runner/agent_host/db_recovery.py` — database-only deadline.
 
 ## Related contracts
@@ -48,4 +48,3 @@ a later generation never automatically reconstructs their successful receipts.
 - [[agent/startup/docs/startup.meiva.okf.md]]
 - [[agent/ownership/docs/ownership.meiva.okf.md]]
 - [[lifecycle.meiva.okf.md]]
-- [[base/agents/incarnation/docs/native-work-cancel.meiva.okf.md]]

@@ -39,10 +39,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "the compaction triggers point at the meiva.self.compact contract in meiva_builtins/commands/compact.md",
     ),
-    "tests/components/agent/test_maintenance_legacy_cold.py": (
-        "integration",
-        "maintenance classifies persisted agent ENDs that ops lifecycle rows decide: spans agent, base, ops, no one of which may import all the others",
-    ),
     "tests/components/meiva/test_migration_baseline.py": (
         "contract",
         "asserts the baseline schema and trigger contracts of db/schema.sql and migrations/",

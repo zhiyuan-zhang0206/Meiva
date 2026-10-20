@@ -423,8 +423,7 @@ def test_agent_count_reads_local_retained_identities_without_processes(
     ):
         agent = create_agent(db_conn)
         db_conn.execute(
-            "INSERT INTO agents_meta(id,machine,status,runtime_kind,pid) "
-            "VALUES(%s,%s,%s,'hosted',NULL)",
+            "INSERT INTO agents_meta(id,machine,status) VALUES(%s,%s,%s)",
             (agent, machine, status),
         )
     db_conn.commit()

@@ -1,30 +1,30 @@
-"""The deploy timeout family — one definition of "this host stopped making
-progress".
-
-`NO_PROGRESS_TIMEOUT_S` is that single definition. Its consumers share it rather
-than calibrate their own: the ops daemon's wedge bound (`services.agent_runner.agent_ops.health`);
-the schedule-stall alert (`base.deploy.timing`) is ordered above it. Two clocks
-that disagree about "stopped making progress" are two chances to declare a host
-dead while it is working, or alive while it is not.
-
-## Why 360 s
-
-The only runtime consumer is the ops daemon's wedge bound, so the value bounds
-how long one `/ops` request may legitimately run. Measured on the production
-`api_idempotency` ledger (the only record of ops request wall time: `completed_at -
-created_at`, 2026-09-11..10-11): 109 completed `lifecycle` requests with p50 1.3 s,
-p99 39.2 s, max 94.1 s, and 52 `spawn-launch-v2` requests with max 2.5 s. The longest
-deadline any caller puts on an ops request is 130 s (the upload delivery worker), so
-an op running past that has already been abandoned by its caller.
-
-360 s is 3.8x the measured maximum and 2.8x the longest caller deadline. It must stay
-above ten times `GATEWAY_PREFLIGHT_BUDGET_S` and below the schedule-stall alert; both
-orderings are declared and checked in `base.deploy.timing`.
-
-The module also holds the agent-lease family, the `meiva start` readiness
-clocks and a remote unit's capability bundle lifetime; each constant's comment
-names its consumer.
-"""
+# meiva:note
+# The deploy timeout family — one definition of "this host stopped making
+# progress".
+#
+# `NO_PROGRESS_TIMEOUT_S` is that single definition. Its consumers share it rather
+# than calibrate their own: the ops daemon's wedge bound (`services.agent_runner.agent_ops.health`);
+# the schedule-stall alert (`base.deploy.timing`) is ordered above it. Two clocks
+# that disagree about "stopped making progress" are two chances to declare a host
+# dead while it is working, or alive while it is not.
+#
+# ## Why 360 s
+#
+# The only runtime consumer is the ops daemon's wedge bound, so the value bounds
+# how long one `/ops` request may legitimately run. Measured on the production
+# `api_idempotency` ledger (the only record of ops request wall time: `completed_at -
+# created_at`, 2026-09-11..10-11): 109 completed `lifecycle` requests with p50 1.3 s,
+# p99 39.2 s, max 94.1 s, and 52 `spawn-launch-v2` requests with max 2.5 s. The longest
+# deadline any caller puts on an ops request is 130 s (the upload delivery worker), so
+# an op running past that has already been abandoned by its caller.
+#
+# 360 s is 3.8x the measured maximum and 2.8x the longest caller deadline. It must stay
+# above ten times `GATEWAY_PREFLIGHT_BUDGET_S` and below the schedule-stall alert; both
+# orderings are declared and checked in `base.deploy.timing`.
+#
+# The module also holds the agent-host beat family, the `meiva start` readiness
+# clocks and a remote unit's capability bundle lifetime; each constant's comment
+# names its consumer.
 
 from __future__ import annotations
 
@@ -32,17 +32,12 @@ from __future__ import annotations
 # docstring names its consumers).
 NO_PROGRESS_TIMEOUT_S = 360.0
 
-# How often the agent host renews its hosted agents' leases: the one ownership
-# beat of `services/agent_runner/agent_host/daemon.py` (`_beat_forever`), which sleeps exactly
-# this long between renewals and uses this constant as its step, so the lattice
-# checks the beat that actually runs.
-AGENT_LEASE_RENEW_INTERVAL_S = 15.0
-
-# The hosted agent ownership lease: `agents_meta.lease_expires_at`.
-# Forty renewal beats (the lattice floor is ten), so transient DB renewal
-# failures do not immediately relinquish a live turn. Expiry bounds crash
-# recovery.
-AGENT_LEASE_TTL_S = 600.0
+# meiva:note
+# How often the agent host beats: the one ownership beat of
+# `services/agent_runner/agent_host/daemon.py` (`_beat_forever`), which reports
+# liveness and reaps crash corpses, sleeping exactly this long between rounds and
+# using this constant as its step, so the lattice checks the beat that actually runs.
+AGENT_HOST_BEAT_INTERVAL_S = 15.0
 
 # meiva:note
 # The root health monitor's round interval. A unit's declared stop window may not
@@ -57,11 +52,10 @@ ROOT_HEALTH_INTERVAL_S = 60.0
 STOP_KILL_REAP_S = 2.0
 
 # How long a crash-marked idling row may sit dead before the agent_host beat's
-# corpse reaper stamps it terminated ('reaper'). Deliberately longer than
-# AGENT_LEASE_TTL_S so a corpse first decays offline (renew skips marked rows)
-# and then terminates — the user sees an honest sequence. Also longer than the
-# claim-park window after a fatal abort (~4 min observed on the 5858 corpse),
-# so a still-running parked row is never raced.
+# meiva:note
+# corpse reaper stamps it terminated ('reaper'). Longer than the claim-park
+# window after a fatal abort (~4 min observed on the 5858 corpse), so a
+# still-running parked row is never raced.
 CORPSE_REAP_GRACE_S = 900.0
 
 # How long a pure agent-runner's start preflight keeps re-dialing the gateway

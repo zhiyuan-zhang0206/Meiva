@@ -40,9 +40,7 @@ async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
             (agent_id, kind),
         )
     db_conn.commit()
-    batch = await claim_inbound_batch(
-        aops_pool, agent_id, lifecycle_only=True, incarnation=None, work=None
-    )
+    batch = await claim_inbound_batch(aops_pool, agent_id, lifecycle_only=True, incarnation=None)
     assert batch == []
     assert db_conn.execute(
         "SELECT kind FROM inbound_messages WHERE agent_id=%s AND status='pending' ORDER BY kind",
@@ -50,7 +48,7 @@ async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
     ).fetchall() == [("cancel",), ("chat",), ("compact_request",)]
     db_conn.commit()
     assert not await impersonation.lifecycle_ready(aops_pool, agent_id)
-    resumed = await claim_inbound_batch(aops_pool, agent_id, incarnation=None, work=None)
+    resumed = await claim_inbound_batch(aops_pool, agent_id, incarnation=None)
     assert {item.kind for item in resumed} == {"cancel", "chat", "compact_request"}
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='cancel'",
@@ -59,7 +57,7 @@ async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
-async def test_control_claim_records_superseded_accepted_intent(
+async def test_control_claim_reclaims_a_predecessors_claimed_command(
     redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -87,7 +85,6 @@ async def test_control_claim_records_superseded_accepted_intent(
         agent_id,
         machine_identity.name(),
         uuid4(),
-        expected_from="idling",
         db=database,
     )
     assert owner is not None
@@ -97,7 +94,7 @@ async def test_control_claim_records_superseded_accepted_intent(
     )
     db_conn.commit()
     accepted = await claim_inbound_batch(
-        aops_pool, agent_id, lifecycle_only=True, incarnation=owner, work=None
+        aops_pool, agent_id, lifecycle_only=True, incarnation=owner
     )
     assert len(accepted) == 1 and accepted[0].durable_lifecycle
     replacement = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -106,26 +103,17 @@ async def test_control_claim_records_superseded_accepted_intent(
         (replacement.generation, replacement.owner, agent_id),
     )
     db_conn.commit()
-    assert (
-        await claim_inbound_batch(
-            aops_pool, agent_id, lifecycle_only=True, incarnation=replacement, work=None
-        )
-        == []
+    # meiva:note
+    # The command is not bound to the incarnation that claimed it: a host that
+    # died between claim and apply loses nothing, the replacement claims it again.
+    reclaimed = await claim_inbound_batch(
+        aops_pool, agent_id, lifecycle_only=True, incarnation=replacement
     )
+    assert [item.id for item in reclaimed] == [accepted[0].id]
+    assert reclaimed[0].durable_lifecycle
     assert db_conn.execute(
-        "SELECT status,applied_at,target_generation,target_owner,payload->'lifecycle_result' "
-        "FROM inbound_messages WHERE agent_id=%s AND kind=%s",
-        (agent_id, kind),
-    ).fetchone() == (
-        "done",
-        None,
-        owner.generation,
-        owner.owner,
-        {"outcome": "superseded", "reason": "target_replaced"},
-    )
-    assert db_conn.execute(
-        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (None,)
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind=%s", (agent_id, kind)
+    ).fetchone() == ("claimed",)
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
@@ -155,9 +143,7 @@ async def test_control_claim_preserves_unaccepted_intent(
     )
     db_conn.commit()
     with pytest.raises(RuntimeError, match="lifecycle claim requires an admitted"):
-        await claim_inbound_batch(
-            aops_pool, agent_id, lifecycle_only=True, incarnation=None, work=None
-        )
+        await claim_inbound_batch(aops_pool, agent_id, lifecycle_only=True, incarnation=None)
     assert db_conn.execute(
         "SELECT status,claimed_at,payload->'lifecycle_result' "
         "FROM inbound_messages WHERE agent_id=%s",

@@ -21,7 +21,6 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
-from base.agents.incarnation.hosted_force import original_host_force
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -52,9 +51,8 @@ def test_reminder_commands_are_bare_meiva(
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
-        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
-        "clock_timestamp()+interval '10 minutes')",
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner) "
+        "VALUES(%s,'idling',%s,%s,%s)",
         (agent_id, local_machine, owner.generation, owner.owner),
     )
     db_conn.commit()
@@ -116,9 +114,8 @@ def test_request_rejects_a_malformed_invoked_python(
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
-        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
-        "clock_timestamp()+interval '10 minutes')",
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner) "
+        "VALUES(%s,'idling',%s,%s,%s)",
         (agent_id, local_machine, owner.generation, owner.owner),
     )
     db_conn.commit()
@@ -158,7 +155,6 @@ async def _termination_session(
         agent_id,
         local_machine,
         uuid4(),
-        expected_from="idling",
         db=Database.from_settings(gate=database_gate),
     )
     assert owner is not None
@@ -224,13 +220,6 @@ async def _terminate_native(
     ) as ops_pool:
         if mode == "force":
             force_terminate_transaction(owner.agent_id, ops_pool, source="user")
-            assert await original_host_force(
-                aops_pool,
-                owner.agent_id,
-                owner.owner,
-                local_machine,
-                quiescent=True,
-            )
         else:
             terminate_id, _cutoff = enqueue_termination_inbounds(
                 Database.from_settings(gate=database_gate),
@@ -246,13 +235,16 @@ async def _terminate_native(
                 assert "Termination was accepted" in str(accepted.update)
             else:
                 batch = await claim_inbound_batch(
-                    aops_pool, owner.agent_id, lifecycle_only=True, incarnation=owner, work=None
+                    aops_pool, owner.agent_id, lifecycle_only=True, incarnation=owner
                 )
                 assert [item.id for item in batch] == [terminate_id]
             assert _native_notices(db_conn, owner.agent_id) == []
             assert (
                 await apply_hosted_lifecycle(
-                    aops_pool, owner, bus=EventBus.from_settings(), resources=None
+                    aops_pool,
+                    owner,
+                    bus=EventBus.from_settings(),
+                    resume_turn=False,
                 )
                 == "terminate"
             )
@@ -318,14 +310,12 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         event_bus,
         owner.agent_id,
         resurrected_by="user",
-        local_machine=machine_identity.name(),
     )
     successor = await admit_hosted_runtime(
         aops_pool,
         owner.agent_id,
         local_machine,
         uuid4(),
-        expected_from="idling",
         db=database,
     )
     assert successor is not None
@@ -655,7 +645,6 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
         owner.agent_id,
         resurrected_by="user",
         prompt="Continue",
-        local_machine=machine_identity.name(),
     )
     ordered = db_conn.execute(
         "SELECT kind,payload->>'note_tag' FROM inbound_messages "

@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import psycopg
@@ -623,14 +624,13 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     assert cmd.goto == END
     assert cmd.update["restart_requested"] is True  # type: ignore[index]
     assert cmd.update["exit_requested"] is False  # type: ignore[index]
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert "Restart was accepted from user" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
-    # The host has not applied the accepted restart yet.
+    update = cast(dict[str, Any], cmd.update)
+    assert update["messages"] == []
+    assert update["halted"] is False
     await await_status(aops_pool, tid, "running")
     assert db_conn.execute(
-        "SELECT status,applied_at,observed_at FROM inbound_messages WHERE id=%s", (restart_id,)
-    ).fetchone() == ("claimed", None, None)
+        "SELECT status FROM inbound_messages WHERE id=%s", (restart_id,)
+    ).fetchone() == ("claimed",)
 
 
 async def test_claim_restart_before_terminate_preserves_serial_order(

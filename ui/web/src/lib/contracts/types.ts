@@ -15,11 +15,8 @@ import type { components } from "./types-generated";
 
 type Schemas = components["schemas"];
 
-export type CompactTarget = Schemas["CompactTarget"];
-export type CompactAcceptance = Schemas["CompactAcceptance"];
-export type CompactStatus = Schemas["CompactStatus"];
-export type NativeWorkTarget = Schemas["NativeWorkTarget"];
-export type NativeCancelAcceptance = Schemas["NativeCancelAcceptance"];
+export type CancelAgentResponse = Schemas["CancelAgentResponse"];
+export type CompactAgentResponse = Schemas["CompactAgentResponse"];
 export type RetryLaunchAccepted = Schemas["RetryLaunchAccepted"];
 
 /** The persisted lifecycle vocabulary carried on the gateway wire. These are

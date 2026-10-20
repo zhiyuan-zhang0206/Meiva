@@ -5,12 +5,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 from unittest.mock import AsyncMock
-from uuid import UUID
 
+import psycopg
 import pytest
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from agent.ownership import hosted
 from agent.ownership.corpse_reap import ReapedCorpse
 from base.api_contracts.agent_contract import Harness
 from base.sessions.tests.poll_until import poll_until_async
@@ -87,9 +86,9 @@ class TestConfigRebind:
         host, _, pool = wired({1: Row()})
         await asyncio.wait_for(host.run_turn(1), 2)
         await asyncio.wait_for(host.run_turn(1), 2)
-        # Each turn reads config before work and again for quiescent compact
-        # source qualification; neither read may reuse the cached runtime.
-        assert pool.reads == 4
+        # meiva:note
+        # Each turn reads config before its work; no read may reuse the cached runtime.
+        assert pool.reads == 2
 
 
 class TestTurnLoop:
@@ -200,83 +199,60 @@ class TestTurnLoop:
 
         assert stamps == []
 
-    async def test_renew_ownership_reaps_after_renewing(
+    # meiva:note
+    # The reap publishes each corpse snapshot itself (agent/ownership/corpse_reap.py),
+    # without scheduling an execution replay.
+    async def test_reap_corpses_reaps_this_machines_corpses(
         self, wired: Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Renewal first, reap second: a reap failure must not starve leases.
-        The reap publishes each corpse snapshot itself (agent/ownership/corpse_reap.py),
-        without scheduling an execution replay."""
         import services.agent_runner.agent_host.host as host_mod
 
         calls: list[str] = []
 
-        async def _renew(pool: object, machine: str, owner: UUID) -> None:
-            calls.append("renew")
-
-        async def _reap(
-            pool: object, machine: str, owner: UUID, *, bus: object
-        ) -> list[ReapedCorpse]:
-            calls.append("reap")
+        async def _reap(pool: object, machine: str, *, bus: object) -> list[ReapedCorpse]:
+            calls.append(machine)
             return [ReapedCorpse(7), ReapedCorpse(9)]
 
-        monkeypatch.setattr(hosted, "renew_hosted_owner", _renew)
         monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
 
         host, _, _ = wired({1: Row(status="idling")})
-        await host.renew_ownership()
+        await host.reap_corpses()
 
-        assert calls == ["renew", "reap"]
+        assert calls == ["this-box"]
 
-    async def test_renew_ownership_survives_a_reap_failure(
+    # meiva:note
+    # The beat keeps running when the reap explodes for a non-database reason.
+    async def test_reap_corpses_survives_an_unexpected_reap_failure(
         self, wired: Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The beat must keep renewing healthy leases when the reap explodes."""
         import services.agent_runner.agent_host.host as host_mod
 
-        renewed: list[str] = []
-
-        async def _renew(pool: object, machine: str, owner: UUID) -> None:
-            renewed.append("renew")
-
-        async def _reap(pool: object, machine: str, owner: UUID, *, bus: object) -> list[int]:
+        async def _reap(pool: object, machine: str, *, bus: object) -> list[int]:
             raise RuntimeError("reap exploded")
 
-        monkeypatch.setattr(hosted, "renew_hosted_owner", _renew)
         monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
 
         host, _, _ = wired({1: Row(status="idling")})
-        await host.renew_ownership()  # must not raise
+        await host.reap_corpses()
 
-        assert renewed == ["renew"]
-
-    async def test_renew_failure_preserves_error_and_does_not_start_reaping(
-        self, wired: Build, monkeypatch: pytest.MonkeyPatch
+    # meiva:note
+    # The beat counts an unreachable database; the host must not swallow it.
+    @pytest.mark.parametrize("failure", [psycopg.OperationalError("db down"), PoolTimeout("busy")])
+    async def test_reap_corpses_raises_a_database_failure_to_the_beat(
+        self, wired: Build, monkeypatch: pytest.MonkeyPatch, failure: Exception
     ) -> None:
-        """A failed renewal escapes before the separate recovery failure boundary."""
         import services.agent_runner.agent_host.host as host_mod
 
-        failure = RuntimeError("renewal rejected")
-        calls: list[str] = []
-
-        async def renew(pool: object, machine: str, owner: UUID) -> None:
-            calls.append("renew")
+        async def _reap(pool: object, machine: str, *, bus: object) -> list[ReapedCorpse]:
             raise failure
 
-        async def reap(
-            pool: object, machine: str, owner: UUID, *, bus: object, wake_enabled: object
-        ) -> list[ReapedCorpse]:
-            calls.append("reap")
-            return []
-
-        monkeypatch.setattr(hosted, "renew_hosted_owner", renew)
-        monkeypatch.setattr(host_mod, "reap_crash_corpses", reap)
+        monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
         host, _, _ = wired({1: Row(status="idling")})
 
-        with pytest.raises(RuntimeError, match="renewal rejected") as raised:
-            await host.renew_ownership()
+        with pytest.raises(type(failure)) as raised:
+            await host.reap_corpses()
 
         assert raised.value is failure
-        assert calls == ["renew"]
 
     async def test_exit_requested_does_not_restore_idling(
         self, wired: Build, monkeypatch: pytest.MonkeyPatch
@@ -333,7 +309,16 @@ class TestTurnLoop:
         stub_host_transitions(monkeypatch, _flip)
         host, _, _ = wired(
             {1: Row(status="idling")},
-            {1: [{"exit_requested": False, "turn_idle": False, "restart_requested": True}]},
+            {
+                1: [
+                    {
+                        "exit_requested": False,
+                        "turn_idle": False,
+                        "restart_requested": True,
+                        "halted": True,
+                    }
+                ]
+            },
         )
 
         async def apply(pool: object, incarnation: RuntimeIncarnation, **_kwargs: object) -> str:
@@ -423,7 +408,16 @@ class TestTurnLoop:
         monkeypatch.setattr(invocation, "apply_hosted_lifecycle", apply)
         host, graph, _ = wired(
             {1: Row()},
-            {1: [{"exit_requested": False, "turn_idle": False, "restart_requested": True}]},
+            {
+                1: [
+                    {
+                        "exit_requested": False,
+                        "turn_idle": False,
+                        "restart_requested": True,
+                        "halted": True,
+                    }
+                ]
+            },
         )
         await asyncio.wait_for(host.run_turn(1), 2)
         assert len(graph.observations) == 1

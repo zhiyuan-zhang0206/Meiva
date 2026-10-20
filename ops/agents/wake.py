@@ -5,15 +5,10 @@ from typing import LiteralString
 
 import psycopg
 from psycopg import sql
-from psycopg.types.json import Jsonb
 
 from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.incarnation.lifecycle_acceptance import (
-    LIFECYCLE_RELEASE,
-    UNOWNED_TERMINATION_ID,
-    UNOWNED_TERMINATION_RECORDED,
-)
+from base.agents.incarnation.lifecycle_commands import supersede_lifecycle_for_resurrect
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
 from base.api_contracts.agent_contract import (
     AgentNotFound,
@@ -21,100 +16,69 @@ from base.api_contracts.agent_contract import (
     MachinePaused,
     ResurrectAlreadyAlive,
 )
-from base.db import Database, fetch_one
+from base.db import Database
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.log import logger
-from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.paths import meiva_home
 from base.telemetry.audit_events import prepare_event_log, record_audit
-from ops.agents.resurrection_retry import (
-    ResurrectSettlementDeferredError,
-    hosted_resurrection_target,
-)
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError as ResurrectTriggerStaleError
 from ops.agents.resurrection_retry import lock_active_home_machine as _lock_active_home_machine
 
-# The exact retained hosted identity; or, all three NULL, a never-admitted row
-# whose fresh-INSERT birth marker is still unconsumed, or a row whose unowned
-# termination receipt the last parameter names.
-_RESURRECTION_TARGET: LiteralString = (
-    "runtime_kind IS NOT DISTINCT FROM %s AND runtime_generation IS NOT DISTINCT FROM %s "
-    "AND runtime_owner IS NOT DISTINCT FROM %s "
-    "AND (runtime_kind IS NOT NULL OR incarnation_resources->>'state'='unadmitted' OR "
-    + UNOWNED_TERMINATION_RECORDED
-    + ")"
-)
-# The locked row the gate judges, with this life's unowned termination receipt.
+# meiva:note
+# The locked row the gate judges.
 RESURRECTION_ROW: LiteralString = (
-    "SELECT status,machine,permanent_reject_streak,last_permanent_reject_reason,"  # noqa: S608 -- constant SQL fragment
-    "runtime_kind,runtime_generation,runtime_owner,pid,incarnation_resources,"
-    + UNOWNED_TERMINATION_ID
-    + " FROM agents_meta WHERE id = %s FOR UPDATE"
+    "SELECT status,machine,permanent_reject_streak,last_permanent_reject_reason "
+    "FROM agents_meta WHERE id = %s FOR UPDATE"
 )
 
 
+# meiva:note
+# Run the one final resurrection CAS with a fully static SQL shape.
+#
+# The row leaves unowned: the next admission mints a fresh runtime generation.
+# A trigger inbound must be pending, newer than the termination and newer than
+# every terminate command of the agent, so work queued before a kill (a force
+# on an already terminated agent changes no status) cannot reverse it.
 def transition_terminated_to_unclaimed_idling(
     cur: psycopg.Cursor,
     agent_id: int,
-    incarnation: RuntimeIncarnation | None,
     *,
-    unowned_termination: int | None,
     trigger_inbound_id: int | None,
     trigger_inbound_kind: WakeTriggerKind | None,
 ) -> datetime:
-    """Run the one final resurrection CAS with a fully static SQL shape.
-
-    `incarnation` None is a fresh hosted birth: the CAS re-proves, under the
-    row lock, that no runtime identity exists and that either the birth marker
-    is intact or `unowned_termination` names this agent's unowned force receipt.
-    """
-    base_params = (
-        AgentStatus.IDLING,
-        agent_id,
-        AgentStatus.TERMINATED,
-        None if incarnation is None else "hosted",
-        None if incarnation is None else incarnation.generation,
-        None if incarnation is None else incarnation.owner,
-        unowned_termination,
-    )
     if trigger_inbound_id is not None:
         from base.agents.recovery.breaker import RECOVERY_BREAKER_CLEAR
 
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
         cur.execute(
             sql.SQL(
-                "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
-                "termination_source = NULL, lease_expires_at = NULL, "
-                "last_turn_fatal_at = NULL, "
-                "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL "
-                "WHERE id = %s AND status = %s AND {} "
-                "AND pid IS NULL AND lifecycle_command_id IS NULL "
+                "UPDATE agents_meta SET status = %s, termination_source = NULL, "
+                "last_turn_fatal_at = NULL, runtime_generation = NULL, runtime_owner = NULL "
+                "WHERE id = %s AND status = %s "
                 "AND {} "
                 "AND EXISTS ("
                 "  SELECT 1 FROM inbound_messages m "
                 "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
                 "    AND m.status = 'pending' AND m.kind = %s "
                 "    AND m.created_at > agents_meta.status_changed_at "
-                "    AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0)"
+                "    AND m.id > COALESCE((SELECT max(t.id) FROM inbound_messages t "
+                "        WHERE t.agent_id = agents_meta.id AND t.kind = 'terminate'), 0)"
                 ") RETURNING status_changed_at"
-            ).format(
-                sql.SQL(_RESURRECTION_TARGET),
-                sql.SQL("TRUE" if trigger_inbound_kind == "chat" else RECOVERY_BREAKER_CLEAR),
+            ).format(sql.SQL("TRUE" if trigger_inbound_kind == "chat" else RECOVERY_BREAKER_CLEAR)),
+            (
+                AgentStatus.IDLING,
+                agent_id,
+                AgentStatus.TERMINATED,
+                trigger_inbound_id,
+                trigger_inbound_kind,
             ),
-            (*base_params, trigger_inbound_id, trigger_inbound_kind),
         )
     else:
         cur.execute(
-            sql.SQL(
-                "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
-                "termination_source = NULL, lease_expires_at = NULL, "
-                "last_turn_fatal_at = NULL, "
-                "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL "
-                "WHERE id = %s AND status = %s AND {} "
-                "AND pid IS NULL AND lifecycle_command_id IS NULL RETURNING status_changed_at"
-            ).format(sql.SQL(_RESURRECTION_TARGET)),
-            base_params,
+            "UPDATE agents_meta SET status = %s, termination_source = NULL, "
+            "last_turn_fatal_at = NULL, runtime_generation = NULL, runtime_owner = NULL "
+            "WHERE id = %s AND status = %s RETURNING status_changed_at",
+            (AgentStatus.IDLING, agent_id, AgentStatus.TERMINATED),
         )
     transition_row = cur.fetchone()
     if transition_row is not None:
@@ -166,13 +130,8 @@ def _prepare_resurrect_attempt(
     prompt: str | None,
     trigger_inbound_id: int | None,
     trigger_inbound_kind: WakeTriggerKind | None,
-    local_machine: str,
 ) -> telemetry.Event:
     """Commit ordinary resurrection and its optional prompt before waking the host."""
-    from base.agents.incarnation.exec_owner_recovery import recover_local_resources
-    from base.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_resurrect
-
-    recover_local_resources(db, agent_id, local_machine, home=meiva_home())
     with db.write_transaction() as conn, conn.cursor() as cur:
         # Task before agent: producers hold the task while inserting an inbound
         # whose foreign key can lock agents_meta. Keep the same lock order.
@@ -196,43 +155,25 @@ def _prepare_resurrect_attempt(
             raise ResurrectAlreadyAlive(
                 f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
             )
-        unowned_termination = row[9]
-        incarnation = hosted_resurrection_target(
-            agent_id,
-            kind=row[4],
-            generation=row[5],
-            owner=row[6],
-            pid=row[7],
-            resources=row[8],
-            unowned_termination=unowned_termination,
-        )
-        # The resurrection inbound is inserted before the settlement check so
-        # its id can fence the new incarnation's epoch: every earlier unapplied
-        # lifecycle command is settled as superseded right here (issue #2158),
-        # and a command that never applied cannot defer this resurrection. A
-        # refusal below rolls the whole transaction back - fence included.
+        # meiva:note
+        # The resurrection inbound is inserted first so its id can close every
+        # earlier open lifecycle command as superseded right here (issue
+        # #2158): a restart or terminate queued in the previous life must not
+        # act on the new one. A refusal below rolls the whole transaction back.
         # Stamp after the lock: a transaction begun before termination committed
-        # must not sort its resurrection ahead of the interruption notices. The
-        # row leaves this transaction unowned, a lifecycle release.
+        # must not sort its resurrection ahead of the interruption notices.
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at, payload) "
-            "VALUES (%s, '', 'resurrect', %s, clock_timestamp(), %s) RETURNING id",
-            (agent_id, resurrected_by, Jsonb({LIFECYCLE_RELEASE: True})),
+            "VALUES (%s, '', 'resurrect', %s, clock_timestamp(), NULL) RETURNING id",
+            (agent_id, resurrected_by),
         )
         resurrect_row = cur.fetchone()
         if resurrect_row is None:
             raise RuntimeError("resurrect lifecycle inbound INSERT returned no id")
         supersede_lifecycle_for_resurrect(conn, agent_id, resurrect_row[0])
-        cur.execute("SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,))
-        if fetch_one(cur, "resurrect: locked lifecycle pointer")[0] is not None:
-            raise ResurrectSettlementDeferredError(
-                "outstanding hosted lifecycle command has not settled"
-            )
         transition_terminated_to_unclaimed_idling(
             cur,
             agent_id,
-            incarnation,
-            unowned_termination=unowned_termination,
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
         )
@@ -274,6 +215,13 @@ def _stage_resurrect_event(
     return record_audit(conn, record_central_event(conn, event))
 
 
+# meiva:note
+# Resume a terminated hosted incarnation for explicit or exact new input.
+#
+# The home machine must be unpaused. Pending triggers must be newer than
+# termination and than every terminate command. A permanent provider
+# error blocks background triggers; new chat clears that halt as an explicit
+# attempt after the fix. Resurrection does not replay prior graph work.
 def resurrect_agent(
     db: Database,
     bus: EventBus,
@@ -283,14 +231,7 @@ def resurrect_agent(
     prompt: str | None = None,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
-    local_machine: str,
 ) -> int:
-    """Resume a terminated hosted incarnation for explicit or exact new input.
-
-    Home-machine admission and resource fences remain required. Pending triggers
-    must be newer than termination and above the force fence. A permanent provider
-    error blocks background triggers; new chat clears that halt as an explicit
-    attempt after the fix. Resurrection does not replay prior graph work."""
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
     if trigger_inbound_kind is not None:
@@ -303,7 +244,6 @@ def resurrect_agent(
         prompt=prompt,
         trigger_inbound_id=trigger_inbound_id,
         trigger_inbound_kind=trigger_inbound_kind,
-        local_machine=local_machine,
     )
     telemetry.emit_prepared(prepared_event)
     logger.info(

@@ -1,12 +1,8 @@
-from uuid import uuid4
-
 import psycopg
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
-from base.agents.incarnation.resources import ResourceBirth
 from base.agents.messages.inbound import InboundKind
 from base.api_contracts.agent_contract import AgentStatus
 from base.cluster.machine import MachineIdentity
@@ -29,7 +25,6 @@ async def test_permanent_reject_blocks_heartbeat_but_fresh_chat_can_try_again(
 ) -> None:
     agent = terminated(
         db_conn,
-        ResourceBirth(birth=uuid4()).model_dump(mode="json"),
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
@@ -85,7 +80,6 @@ async def test_permanent_reject_blocks_heartbeat_but_fresh_chat_can_try_again(
 
 def terminated(
     conn: psycopg.Connection,
-    resources: dict[str, object],
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
@@ -101,8 +95,8 @@ def terminated(
         authority=config_authority,
     )
     conn.execute(
-        "UPDATE agents_meta SET status='terminated',termination_source='user',incarnation_resources=%s WHERE id=%s",
-        (Jsonb(resources), agent),
+        "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
+        (agent,),
     )
     conn.commit()
     return agent
@@ -122,7 +116,6 @@ async def test_idling_owner_blocks_background_wake_until_new_chat(
 
     agent = terminated(
         db_conn,
-        ResourceBirth(birth=uuid4()).model_dump(mode="json"),
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,

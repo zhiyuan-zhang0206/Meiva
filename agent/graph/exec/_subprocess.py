@@ -1,15 +1,18 @@
-"""Exec subprocess mechanics — the parent side: spawn / poll / signal / kill /
-collect one disposable child per execute_code call.
-
-The parent polls every 50ms and owns teardown through direct-child reap,
-root-independent process-domain close, and a bounded output EOF tail. POSIX
-owns a new process group. The child's result
-envelope stays advisory except for lifecycle outcomes. It spawns
-`python -I -B -X utf8 -m agent.execution.child`: isolated mode keeps the inherited cwd
-and Python environment out of bootstrap import resolution, and explicit UTF-8
-mode keeps output portable after isolated mode ignores encoding environment
-variables.
-"""
+# meiva:note
+# Exec subprocess mechanics — the parent side: spawn / poll / signal / kill /
+# collect one disposable child per execute_code call.
+#
+# The parent polls every 50ms. Every exit path ends the same way: SIGKILL the
+# child's process group while its leader is still unreaped, reap the leader, drain
+# the output pipe, delete the request and result files. The child leads a new
+# session and process group, and holds the read end of a pipe whose write end this
+# process keeps until the leader is reaped: if this process dies first, the child
+# reads EOF and kills its own group. The child's result envelope stays advisory
+# except for lifecycle outcomes. It spawns
+# `python -I -B -X utf8 -m agent.execution.child`: isolated mode keeps the inherited cwd
+# and Python environment out of bootstrap import resolution, and explicit UTF-8
+# mode keeps output portable after isolated mode ignores encoding environment
+# variables.
 
 from __future__ import annotations
 
@@ -23,19 +26,18 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import psutil
+
 from base.agents.context import MeivaContext
-from base.db import Database
 from base.deploy.release import editable_install
+from base.log import logger
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
-from base.native_process.turn_identity import HostedTurnResources
 from base.paths import exec_run_dir, meiva_home
 
-from . import _process
 from ._child_boundary import build_child_env, read_result_envelope, result_from_payload
 from ._output_pipe import ExecOutputPipe
-from ._owned_run import managed_target, run_owned
 from ._result import (
     ExecChildError,
     ExecCrashed,
@@ -52,6 +54,11 @@ from .protocol import (
 # Same cadence as the old worker-thread poll loop: near-free, and cancel /
 # timeout response latency stays <= 50ms + signal delivery.
 _POLL_INTERVAL_S = 0.05
+
+# meiva:note
+# A descendant that left the process group may keep the output pipe open past the
+# group kill; the tail it still writes is dropped after this long.
+_OUTPUT_DRAIN_TIMEOUT_S = 5.0
 
 
 def _default_editable_guard() -> tuple[str, ...]:
@@ -92,10 +99,11 @@ def _editable_guard_failure(
     )
 
 
-class _ExecNeverStartedError(OSError):
-    """Popen refused before returning a child; preallocated resources closed."""
-
-
+# meiva:note
+# Spawn one child in its own session and process group. This process holds the
+# write end of its stdin pipe until the leader is reaped; the child kills its own
+# group when that end closes. Persistent ``meiva.shell.sessions`` are backend-hosted
+# and outside the group.
 def spawn_exec_child(
     request_path: Path,
     result_path: Path,
@@ -104,8 +112,6 @@ def spawn_exec_child(
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
 ) -> tuple[subprocess.Popen[bytes], ExecProcessDomain]:
-    """Spawn one child. POSIX raw subprocesses stay in its process group;
-    persistent ``meiva.shell.sessions`` are backend-hosted and outside it."""
     env = build_child_env(
         agent_id,
         request_path,
@@ -114,37 +120,39 @@ def spawn_exec_child(
         birth_config=birth_config,
     )
     argv = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent.execution.child"]
+    return ExecProcessDomain.launch_posix(
+        argv,
+        process_control=SYSTEM_PROCESS_CONTROL,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+    )
+
+
+# meiva:note
+# Whether the unreaped leader is a zombie; observing it never reaps it.
+def _leader_exited(leader: psutil.Process) -> bool:
     try:
-        return ExecProcessDomain.launch_posix(
-            argv,
-            process_control=SYSTEM_PROCESS_CONTROL,
-            new_session=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=env,
-        )
-    except OSError as original:
-        # Native admission failures retain the launched handle; an OS spawn
-        # failure has no surviving child.
-        raise _ExecNeverStartedError(str(original)) from original
+        return leader.status() in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}
+    except psutil.NoSuchProcess:
+        return True
 
 
+# meiva:note
+# Poll every 50ms and publish chunks. Signals SIGINT to the group on cancel and
+# SIGTERM on deadline. Returns (cancelled, timed_out); on a same-tick race cancel wins.
 async def _poll_child(
-    proc: subprocess.Popen[bytes],
-    root_exit_task: asyncio.Task[None],
+    domain: ExecProcessDomain,
+    leader: psutil.Process,
     stream: StreamingTextIO,
     chunk_publisher: ExecOutputChunkPublisher | None,
     cancel_event: asyncio.Event,
     timeout: float,
-    domain_close: _process.DomainCloseOwner,
     reader: ExecOutputPipe,
 ) -> tuple[bool, bool]:
-    """Poll every 50ms and publish chunks. POSIX signals SIGINT on cancel and
-    SIGTERM on deadline. Returns
-    (cancelled, timed_out); on a same-tick race cancel wins."""
     deadline = time.monotonic() + timeout
-    while not root_exit_task.done():
+    while not _leader_exited(leader):
         reader.pump()
         # Incrementally publish accumulated stream chunks to frontend.
         if chunk_publisher is not None:
@@ -154,73 +162,52 @@ async def _poll_child(
             chunk_publisher.maybe_keepalive()
 
         if cancel_event.is_set():
-            _process.signal_child(proc, signal.SIGINT, domain_close)
+            domain.signal(signal.SIGINT)
             return True, False
         if time.monotonic() > deadline:
-            _process.signal_child(proc, signal.SIGTERM, domain_close)
+            domain.signal(signal.SIGTERM)
             return False, True
         await asyncio.sleep(_POLL_INTERVAL_S)
     return False, False
 
 
-async def collect_child(
-    proc: subprocess.Popen[bytes],
-    stream: StreamingTextIO,
-    chunk_publisher: ExecOutputChunkPublisher | None,
-    *,
-    cancelled: bool,
-    timed_out: bool,
-    root_exit_task: asyncio.Task[None],
-    reap_task: asyncio.Task[int],
-    domain_close: _process.DomainCloseOwner,
-    reader_join_task: asyncio.Task[None],
-) -> None:
-    """Settle every process resource, then publish the final stream chunk."""
-    if cancelled or timed_out:
-        await _process.wait_with_grace(proc, root_exit_task, KILL_GRACE_S, domain_close)
-    failures = await _process.settle_resources(
-        root_exit_task,
-        reap_task,
-        domain_close,
-        reader_join_task,
-        request_stop=False,
-    )
-    if failures:
-        raise _process.ExecTeardownError(failures)
-
-    if chunk_publisher is not None:
-        pending = stream.take_pending()
-        if pending:
-            chunk_publisher.publish(pending)
+# meiva:note
+# Give a signalled leader its grace window to exit on its own.
+async def _await_leader_exit(domain: ExecProcessDomain, leader: psutil.Process) -> None:
+    deadline = time.monotonic() + KILL_GRACE_S
+    while not _leader_exited(leader):
+        if time.monotonic() >= deadline:
+            logger.warning(
+                "[{label}] exec child {pid} survived the {grace}s grace period — "
+                "hard-stopping its process group (native-stuck code or swallowed signal)",
+                label="exec-subprocess-killed",
+                pid=domain.proc.pid,
+                grace=KILL_GRACE_S,
+                event="exec_subprocess_killed",
+            )
+            return
+        await asyncio.sleep(_POLL_INTERVAL_S)
 
 
-async def finish_failed_run(
-    original: BaseException,
-    root_exit_task: asyncio.Task[None] | None,
-    reap_task: asyncio.Task[int] | None,
-    domain_close: _process.DomainCloseOwner | None,
-    reader_join_task: asyncio.Task[None] | None,
-    reader: ExecOutputPipe | None,
-    *,
-    request_paths: tuple[Path, Path] | None = None,
-    resources: HostedTurnResources | None,
-) -> bool:
-    """Settle an interrupted run without replacing its primary failure."""
-    if root_exit_task is None or reap_task is None or domain_close is None:
-        return False
-    if domain_close.interrupted:
-        failures = _process.settle_cancelled_owners(domain_close, reader)
-    else:
-        failures = await _process.finish_teardown_despite_cancellation(
-            root_exit_task, reap_task, domain_close, reader_join_task
+# meiva:note
+# SIGKILL the group while the leader is unreaped, reap it, then release the control pipe.
+#
+# The write end closes only after the reap: a child that reads EOF kills its group.
+def _close_domain(domain: ExecProcessDomain) -> None:
+    try:
+        domain.kill_and_reap()
+    finally:
+        if domain.proc.stdin is not None:
+            domain.proc.stdin.close()
+
+
+def _close_output(reader: ExecOutputPipe) -> None:
+    if not reader.closed:
+        logger.warning(
+            "exec output pipe stayed open after its process group was killed; "
+            "a descendant outside the group holds it, so the rest of its output is dropped"
         )
-    _process.annotate_original_failure(original, failures)
-    if failures and request_paths is not None:
-        _retain_domain_completion(domain_close, *request_paths, resources=resources)
-        retain_late_reader_completion(
-            _process.ExecTeardownError(failures), *request_paths, reader, resources=resources
-        )
-    return not failures
+        reader.close()
 
 
 def _write_request_failure(
@@ -240,93 +227,18 @@ def _write_request_failure(
     return None
 
 
-def finish_request_evidence(
-    request_path: Path,
-    result_path: Path,
-    expected: object | None,
-    *,
-    settled: bool,
-    resources: HostedTurnResources | None,
-) -> None:
-    scope = resources
-    if scope is not None:
-        if not settled:
-            return
-        if not scope.complete(request_path, expected):
-            return
-    for path in (request_path, result_path):
-        with contextlib.suppress(FileNotFoundError):
-            path.unlink()
-
-
-def _retain_domain_owner(
-    resources: HostedTurnResources | None, request: Path, owner: _process.DomainCloseOwner
-) -> None:
-    if resources is not None:
-        resources.unresolved[request] = owner
-
-
-def _retain_domain_completion(
-    owner: _process.DomainCloseOwner | None,
-    request: Path,
-    result: Path,
-    *,
-    resources: HostedTurnResources | None,
-) -> None:
-    """An unfinished native task remains held by the exact original scope."""
-    if resources is None or owner is None or not owner.unfinished:
-        return
-
-    async def finish_original() -> None:
-        await owner.finish_later()
-        finish_request_evidence(request, result, owner, settled=True, resources=resources)
-
-    resources.require_service().complete_later(
-        resources, finish_original(), name=f"exec-domain-finish-{request.stem}"
-    )
-
-
-def retain_late_reader_completion(
-    failure: _process.ExecTeardownError,
-    request: Path,
-    result: Path,
-    reader: ExecOutputPipe | None,
-    *,
-    resources: HostedTurnResources | None,
-) -> None:
-    """A pipe exceeding its bounded EOF tail may finish later; other failures stay unknown.
-
-    ExecTeardownError includes every failed stage after all owner tasks have
-    completed. A reader-only failure therefore positively proves close/root/reap.
-    This observer pumps that same pipe, never retries a released POSIX pgid.
-    """
-    scope = resources
-    if scope is None or reader is None or not failure.failures:
-        return
-    if any(item.stage != "reader_join" for item in failure.failures):
-        return
-    domain = scope.unresolved[request]
-
-    async def complete_reader() -> None:
-        # The original pipe stays unresolved until actual EOF. Observation
-        # yields between nonblocking reads and does not acquire writer kill authority.
-        while not reader.closed:
-            reader.pump()
-            if not reader.closed:
-                await asyncio.sleep(0.05)
-        reader.pump()  # Closed after a callback error is not successful output EOF.
-        if scope.complete(request, domain):
-            for path in (request, result):
-                with contextlib.suppress(FileNotFoundError):
-                    path.unlink()
-
-    scope.require_service().complete_later(
-        scope, complete_reader(), name=f"exec-late-reader-{request.stem}"
-    )
-
-
+# meiva:note
+# Run `code` in one disposable child process; poll every 50ms monitoring
+# exit / cancel_event / deadline (same priority as the old thread loop:
+# cancel > deadline > natural completion).
+#
+# Returns the `ExecResult` sum type the exec node dispatches plus the raw
+# child envelope (None when the child never wrote one — SIGKILL / watchdog /
+# os._exit): the envelope carries the state-update delta (plugin fields,
+# security findings), which only this function can see.
+# The child's outcome kinds map onto the result with the parent's flags
+# authoritative.
 async def run_in_subprocess(
-    db: Database,
     code: str,
     context: MeivaContext,
     cancel_event: asyncio.Event,
@@ -340,69 +252,9 @@ async def run_in_subprocess(
     birth_config: dict[str, object] | None = None,
     editable_guard: Callable[[], tuple[str, ...]] | None = None,
 ) -> tuple[ExecResult, ResultPayload | None]:
-    """Select admitted managed ownership without changing legacy NULL semantics."""
     guard_failure = _editable_guard_failure(editable_guard)
     if guard_failure is not None:
         return guard_failure, None
-    target = await asyncio.to_thread(
-        managed_target,
-        db,
-        context.require_identity().agent_id,
-        incarnation=context.original_incarnation,
-    )
-    if target is not None:
-        return await run_owned(
-            db,
-            target,
-            code,
-            context,
-            cancel_event,
-            timeout,
-            chunk_publisher,
-            accumulation_max_chars=accumulation_max_chars,
-            state=state,
-            exec_dir=exec_dir,
-            config_overlay=config_overlay,
-            birth_config=birth_config,
-        )
-    return await run_legacy_subprocess(
-        code,
-        context,
-        cancel_event,
-        timeout,
-        chunk_publisher,
-        accumulation_max_chars=accumulation_max_chars,
-        state=state,
-        exec_dir=exec_dir,
-        config_overlay=config_overlay,
-        birth_config=birth_config,
-    )
-
-
-async def run_legacy_subprocess(
-    code: str,
-    context: MeivaContext,
-    cancel_event: asyncio.Event,
-    timeout: float,
-    chunk_publisher: ExecOutputChunkPublisher | None = None,
-    *,
-    accumulation_max_chars: int,
-    state: dict[str, Any] | None = None,
-    exec_dir: Path | None = None,
-    config_overlay: dict[str, object] | None = None,
-    birth_config: dict[str, object] | None = None,
-) -> tuple[ExecResult, ResultPayload | None]:
-    """Run `code` in one disposable child process; poll every 50ms monitoring
-    exit / cancel_event / deadline (same priority as the old thread loop:
-    cancel > deadline > natural completion).
-
-    Returns the `ExecResult` sum type the exec node dispatches plus the raw
-    child envelope (None when the child never wrote one — SIGKILL / watchdog /
-    os._exit): the envelope carries the state-update delta (plugin fields,
-    security findings), which only this function can see.
-    The child's outcome kinds map onto the result with the parent's flags
-    authoritative.
-    """
     agent_id = context.require_identity().agent_id
     if exec_dir is None:
         exec_dir = exec_run_dir(meiva_home())
@@ -416,15 +268,6 @@ async def run_legacy_subprocess(
     stream = StreamingTextIO(max_chars=accumulation_max_chars)
     domain: ExecProcessDomain | None = None
     reader: ExecOutputPipe | None = None
-    root_exit_task: asyncio.Task[None] | None = None
-    reap_task: asyncio.Task[int] | None = None
-    domain_close: _process.DomainCloseOwner | None = None
-    reader_join_task: asyncio.Task[None] | None = None
-    resource_scope = context.hosted_resources
-    if resource_scope is not None:
-        # Register before user code can start, not after the first await.
-        resource_scope.unresolved[request_path] = None
-    resources_settled = False
     try:
         try:
             proc, domain = spawn_exec_child(
@@ -434,47 +277,29 @@ async def run_legacy_subprocess(
                 config_overlay=config_overlay,
                 birth_config=birth_config,
             )
-            if resource_scope is not None:
-                resource_scope.unresolved[request_path] = domain
         except OSError as exc:
-            resources_settled = isinstance(exc, _ExecNeverStartedError)
             return ExecCrashed(
                 output=f"exec subprocess could not be spawned: {exc}",
                 exc=exc,
             ), None
 
-        domain_close = _process.DomainCloseOwner(domain)
-        root_exit_task = domain_close.root_exit_task
-        _retain_domain_owner(resource_scope, request_path, domain_close)
-        reap_task = _process.start_reap(proc, domain_close)
-
+        leader = psutil.Process(proc.pid)
         reader = ExecOutputPipe(proc, stream)
         reader.watch()
 
-        reader_join_task = _process.start_reader_join(reap_task, reader, domain_close)
-
         cancelled, timed_out = await _poll_child(
-            proc,
-            root_exit_task,
-            stream,
-            chunk_publisher,
-            cancel_event,
-            timeout,
-            domain_close,
-            reader,
+            domain, leader, stream, chunk_publisher, cancel_event, timeout, reader
         )
-        await collect_child(
-            proc,
-            stream,
-            chunk_publisher,
-            cancelled=cancelled,
-            timed_out=timed_out,
-            root_exit_task=root_exit_task,
-            reap_task=reap_task,
-            domain_close=domain_close,
-            reader_join_task=reader_join_task,
-        )
-        resources_settled = True
+        if cancelled or timed_out:
+            await _await_leader_exit(domain, leader)
+        _close_domain(domain)
+        await reader.finish(_OUTPUT_DRAIN_TIMEOUT_S)
+        _close_output(reader)
+
+        if chunk_publisher is not None:
+            pending = stream.take_pending()
+            if pending:
+                chunk_publisher.publish(pending)
 
         payload, envelope_error = read_result_envelope(result_path, proc.returncode)
         return (
@@ -489,59 +314,23 @@ async def run_legacy_subprocess(
             ),
             payload,
         )
-    except asyncio.CancelledError as original:
-        # The exec node's outer shield (asyncio.wait_for) cancels this task on
-        # node timeout. Cancellation is not complete until every owned resource
-        # is settled; otherwise the next exec inherits unresolved process/pipe resources.
-        resources_settled = await finish_failed_run(
-            original,
-            root_exit_task,
-            reap_task,
-            domain_close,
-            reader_join_task,
-            reader,
-            request_paths=(request_path, result_path),
-            resources=resource_scope,
-        )
-        raise
-    except _process.ExecTeardownError as exc:
-        _retain_domain_completion(domain_close, request_path, result_path, resources=resource_scope)
-        retain_late_reader_completion(
-            exc, request_path, result_path, reader, resources=resource_scope
-        )
-        # Cleanup failure is an exec outcome, not an agent-process failure.
-        return (
-            ExecCrashed(
-                output=(
-                    f"[exec teardown failure] {exc}\n\n"
-                    "Partial output captured before teardown:\n\n"
-                    f"{stream.getvalue()}"
-                ),
-                exc=exc,
-                stream_cap=stream.cap(),
-            ),
-            None,
-        )
-    except Exception as original:
-        resources_settled = await finish_failed_run(
-            original,
-            root_exit_task,
-            reap_task,
-            domain_close,
-            reader_join_task,
-            reader,
-            request_paths=(request_path, result_path),
-            resources=resource_scope,
-        )
+    except BaseException as original:
+        # meiva:note
+        # Cancellation by the exec node's outer shield (asyncio.wait_for) and any other
+        # failure leave nothing running: the same synchronous, bounded close as above.
+        if domain is not None:
+            try:
+                _close_domain(domain)
+                if reader is not None:
+                    reader.finish_now(_OUTPUT_DRAIN_TIMEOUT_S)
+                    _close_output(reader)
+            except Exception as cleanup:
+                original.add_note(f"exec cleanup failed: {cleanup!r}")
         raise
     finally:
-        finish_request_evidence(
-            request_path,
-            result_path,
-            domain_close or domain,
-            settled=resources_settled,
-            resources=resource_scope,
-        )
+        for path in (request_path, result_path):
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
 
 
 __all__ = ["run_in_subprocess"]

@@ -1,7 +1,7 @@
 exports = ["agent_pause", "agents", "alerts.py", "cluster", "cluster_status", "env_audit.py", "host_config.py", "inventory.py", "lifecycle", "pages.py", "pty_close_notices.py", "rpc_schemas", "to_user.py", "upload_delivery.py"]
 
 [uses]
-"agents" = ["cluster", "rpc_schemas"]
+"agents" = ["rpc_schemas"]
 "cluster" = ["cluster_status", "rpc_schemas"]
 "cluster_status" = ["agent_pause", "rpc_schemas"]
 "host_config.py" = ["env_audit.py", "rpc_schemas"]

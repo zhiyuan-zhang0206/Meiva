@@ -3,14 +3,12 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.tests.impersonation.test_impersonation import gate_ctx as gate_ctx
 from agent.tests.impersonation.test_impersonation import incarnation as incarnation
 from agent.tests.impersonation.test_impersonation import relays as relays
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
-from base.agents.incarnation.resources import ResourceProcess
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -20,12 +18,11 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 
 
-async def test_successor_admission_ends_an_active_lease_without_restoring_the_dead_owner(
+async def test_successor_admission_ends_an_active_lease_without_restoring_the_previous_owner(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
     event_bus: EventBus,
-    exited_host: ResourceProcess,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     *,
@@ -48,7 +45,6 @@ async def test_successor_admission_ends_an_active_lease_without_restoring_the_de
         agent_id,
         machine_identity.name(),
         uuid4(),
-        expected_from="idling",
         db=database,
     )
     assert first is not None
@@ -75,19 +71,11 @@ async def test_successor_admission_ends_an_active_lease_without_restoring_the_de
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], first)
-    db_conn.execute(
-        "UPDATE agents_meta SET lease_expires_at = clock_timestamp() - interval '1 second', "
-        "incarnation_resources=jsonb_set(incarnation_resources,'{host_process}',%s) "
-        "WHERE id=%s",
-        (Jsonb(exited_host.model_dump(mode="json")), agent_id),
-    )
-    db_conn.commit()
     successor = await admit_hosted_runtime(
         aops_pool,
         agent_id,
         machine_identity.name(),
         uuid4(),
-        expected_from="running",
         db=database,
     )
     assert successor is not None

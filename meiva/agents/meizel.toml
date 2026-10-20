@@ -1,5 +1,5 @@
-exports = ["compaction.py", "peers.py", "work.py"]
+exports = ["peers.py"]
 
 [uses]
-"__init__.py" = ["compaction.py", "peers.py", "work.py"]
+"__init__.py" = ["peers.py"]
 "tests" = ["__init__.py"]

@@ -16,7 +16,6 @@ from agent.graph.claim.tests.claim_support import (
 )
 from agent.state import AgentState
 from base.agents.inbox.insert import insert_inbound_message
-from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -61,11 +60,9 @@ async def test_claim_unknown_kind_raises(
         _tid: int,
         *,
         incarnation: RuntimeIncarnation | None,
-        work: NativeWorkTarget | None,
         lifecycle_only: bool = False,
     ):
         assert incarnation is runtime.context.original_incarnation
-        assert work is runtime.context.native_work
         assert not lifecycle_only
         return [ClaimedInbound(id=99, agent_id=tid, content="x", kind="bogus", source="system")]
 
@@ -121,11 +118,9 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
         _agent_id: int,
         *,
         incarnation: RuntimeIncarnation | None,
-        work: NativeWorkTarget | None,
         lifecycle_only: bool = False,
     ):
         assert incarnation is runtime.context.original_incarnation
-        assert work is runtime.context.native_work
         assert not lifecycle_only
         # Faithful to claim_inbound_batch: the grab marks lifecycle rows 'done'
         # atomically, so the vetoed terminate is consumed and never retried.
@@ -206,11 +201,9 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
         _agent_id: int,
         *,
         incarnation: RuntimeIncarnation | None,
-        work: NativeWorkTarget | None,
         lifecycle_only: bool = False,
     ):
         assert incarnation is runtime.context.original_incarnation
-        assert work is runtime.context.native_work
         assert not lifecycle_only
         return [
             ClaimedInbound(

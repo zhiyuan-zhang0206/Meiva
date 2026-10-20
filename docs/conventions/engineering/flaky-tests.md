@@ -35,7 +35,7 @@ a dead process; CI reports `assert not True` and a rerun is green.
 **Evidence.** PR #306 changed three such assertions in
 `agent/tests/test_exec_subprocess.py`, including
 `test_natural_exit_reaps_ordinary_descendant_holding_stdout`.
-`ExecProcessDomain.close()` promises `SIGKILL` delivery, not immediate
+`ExecProcessDomain.kill_and_reap()` promises `SIGKILL` delivery, not immediate
 process-table removal. A descendant can remain a zombie until an OS reaper
 asynchronously collects it, and `pid_exists` remains true meanwhile. PR #964
 applied the same discipline to a forced-shutdown daemon test; its root-cause fix was a daemon ownership-adoption `Event`, not a test relaxation. PR #1303 made

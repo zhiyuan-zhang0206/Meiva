@@ -1,10 +1,9 @@
-"""The parent's side of the exec child boundary: the environment it hands the child, and how it
-reads the child's outcome back.
-
-Shared by the plain spawn path (`_subprocess.py`) and the admitted-resource path (`_owned_run.py`),
-which are siblings: both build the same child environment and map the same result envelope onto
-the `ExecResult` sum type, so neither imports the other for it.
-"""
+# meiva:note
+# The parent's side of the exec child boundary: the environment it hands the child, and how it
+# reads the child's outcome back.
+#
+# Used by the spawn path in `_subprocess.py`: it builds the child environment and maps the result
+# envelope onto the `ExecResult` sum type.
 
 from __future__ import annotations
 

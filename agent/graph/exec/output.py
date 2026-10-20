@@ -86,7 +86,11 @@ def _marker(
     # forgets the mutual exclusion, this blows up rather than silently emitting two markers.
     assert not (cancelled and timed_out), "cancelled and timed_out are mutually exclusive"  # noqa: S101
     if cancelled:
-        return f" [cancelled by {cancel_reason.value}]"
+        match cancel_reason:
+            case InterruptReason.USER | InterruptReason.SYSTEM:
+                return f" [cancelled by {cancel_reason.value}]"
+            case InterruptReason.RESTART:
+                return " [interrupted by restart]"
     if timed_out:
         return f" [timeout after {timeout_seconds:.0f}s]"
     return ""

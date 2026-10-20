@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 import base.deploy.progress_timeout as deploy
+import base.native_process.stop_timing as stop
 from base import config
 from base.deploy.timing import CLOCKS, CONSTRAINTS, assert_clock_lattice, validate_clock_lattice
 from base.host.db_authority import unit
@@ -25,18 +26,37 @@ def test_checker_catches_derived_violation(monkeypatch: pytest.MonkeyPatch) -> N
     assert any("WEDGED_AGE_SEC >= EXEC_NODE_TIMEOUT_S" in f for f in failures)
 
 
-def test_checker_catches_scaled_violation(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(deploy, "AGENT_LEASE_TTL_S", 9 * deploy.AGENT_LEASE_RENEW_INTERVAL_S)
-    failures = validate_clock_lattice()
-    assert any("AGENT_LEASE_TTL_S >= 10 * AGENT_LEASE_RENEW_INTERVAL_S" in f for f in failures)
-
-
 def test_a_default_bundle_lifetime_past_the_cap_is_reported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(deploy, "UNIT_BUNDLE_TTL_S", unit.UNIT_BUNDLE_MAX_TTL_S + 1)
     failures = validate_clock_lattice()
     assert any("UNIT_BUNDLE_TTL_S <= UNIT_BUNDLE_MAX_TTL_S" in f for f in failures)
+
+
+# meiva:note
+# The drain waits for turns whose restart interrupts them after the grace: the lattice states
+# that it exceeds the grace, the next poll and one unwind, and the defaults hold it.
+def test_the_graceful_exit_drain_is_declared_to_outlast_a_restart_interrupt() -> None:
+    [declared] = [
+        c
+        for c in CONSTRAINTS
+        if c.rhs == "HOST_GRACEFUL_EXIT_DRAIN_S" and "RESTART_INTERRUPT_GRACE_S" in c.lhs
+    ]
+    assert declared.kind == "<"
+    assert declared.lhs == "RESTART_INTERRUPT_GRACE_S + INTERRUPT_POLL_S + CANCEL_UNWIND_TIMEOUT_S"
+    assert (
+        stop.RESTART_INTERRUPT_GRACE_S + stop.INTERRUPT_POLL_S + stop.CANCEL_UNWIND_TIMEOUT_S
+        < stop.HOST_GRACEFUL_EXIT_DRAIN_S
+    )
+
+
+def test_the_restart_interrupt_clocks_are_the_stop_family_values() -> None:
+    assert CLOCKS["RESTART_INTERRUPT_GRACE_S"].get() == stop.RESTART_INTERRUPT_GRACE_S
+    assert CLOCKS["INTERRUPT_POLL_S"].get() == stop.INTERRUPT_POLL_S
+    assert {CLOCKS["RESTART_INTERRUPT_GRACE_S"].family, CLOCKS["INTERRUPT_POLL_S"].family} == {
+        "stop"
+    }
 
 
 def test_assert_clock_lattice_raises_on_violation(monkeypatch: pytest.MonkeyPatch) -> None:

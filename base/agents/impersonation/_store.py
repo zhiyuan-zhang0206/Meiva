@@ -107,16 +107,10 @@ def authenticate(
 
 def require_native(conn: psycopg.Connection, incarnation: RuntimeIncarnation) -> dict[str, Any]:
     meta = lock_agent(conn, incarnation.agent_id)
-    fresh = conn.execute(
-        "SELECT lease_expires_at > clock_timestamp() FROM agents_meta WHERE id=%s",
-        (incarnation.agent_id,),
-    ).fetchone()
-    if (
-        (meta["runtime_generation"], meta["runtime_owner"])
-        != (incarnation.generation, incarnation.owner)
-        or AgentStatus(meta["status"]) not in (AgentStatus.RUNNING, AgentStatus.IDLING)
-        or fresh != (True,)
-    ):
+    if (meta["runtime_generation"], meta["runtime_owner"]) != (
+        incarnation.generation,
+        incarnation.owner,
+    ) or AgentStatus(meta["status"]) not in (AgentStatus.RUNNING, AgentStatus.IDLING):
         raise ImpersonationError("Native runtime no longer owns this agent")
     return meta
 

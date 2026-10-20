@@ -43,10 +43,8 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
         *,
         trigger_inbound_id: int | None = None,
         trigger_inbound_kind: WakeTriggerKind | None = None,
-        local_machine: str,
         catalog: ModelCatalog,
     ):
-        assert local_machine == machine_identity.name()
         from ops.rpc_schemas import TerminateAgentResponse
 
         captured["path"] = path
@@ -140,10 +138,8 @@ async def test_dispatch_unparseable_lifecycle_path(
         *,
         trigger_inbound_id: int | None = None,
         trigger_inbound_kind: WakeTriggerKind | None = None,
-        local_machine: str,
         catalog: ModelCatalog,
     ):
-        assert local_machine == machine_identity.name()
         raise ValueError(f"lifecycle path not recognized: {path!r}")
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)
@@ -163,54 +159,6 @@ async def test_dispatch_unparseable_lifecycle_path(
     )
     assert status == "failed"
     assert "not recognized" in str(result["error"])
-
-
-@pytest.mark.asyncio
-async def test_dispatch_resurrect_refusal_fails_with_its_reason(
-    op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    ops_database: Callable[[], Database],
-    ops_image: LoadedCommit,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    from base.api_contracts.agent_contract import ResurrectRefused
-
-    dispatch_pool: ConnectionPool = stub_pool()
-
-    async def _raises(
-        _db: object,
-        _bus: object,
-        path: str,
-        body: dict[str, Any],
-        pool: ConnectionPool | None,
-        *,
-        trigger_inbound_id: int | None = None,
-        trigger_inbound_kind: WakeTriggerKind | None = None,
-        local_machine: str,
-        catalog: ModelCatalog,
-    ):
-        assert local_machine == machine_identity.name()
-        raise ResurrectRefused("runtime_cutover_required")
-
-    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)
-    status, result = await daemon._dispatch(
-        "lifecycle",
-        {"path": "/api/agents/7/resurrect-explicit", "body": {}},
-        active_ops={},
-        workers=set(),
-        pool=dispatch_pool,
-        executor=op_executor,
-        catalog=model_catalog,
-        authority=config_authority,
-        database=ops_database,
-        image=ops_image,
-        local_machine=machine_identity,
-        host=fake_host(),
-    )
-    assert (status, result) == ("failed", {"error": "ResurrectRefused: runtime_cutover_required"})
 
 
 @pytest.mark.asyncio
@@ -237,10 +185,8 @@ async def test_dispatch_wire_error_carries_reason(
         *,
         trigger_inbound_id: int | None = None,
         trigger_inbound_kind: WakeTriggerKind | None = None,
-        local_machine: str,
         catalog: ModelCatalog,
     ):
-        assert local_machine == machine_identity.name()
         raise AgentNotFound("agent 999 does not exist")
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)

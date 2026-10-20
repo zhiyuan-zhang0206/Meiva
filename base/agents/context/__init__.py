@@ -41,7 +41,6 @@ from typing import TYPE_CHECKING, Any, Self
 
 from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
-from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.capture import SdkCaptureOwner
@@ -161,9 +160,6 @@ class MeivaContext:
 
     original_incarnation: RuntimeIncarnation | None = None
     """The exact admission this run received; never refreshed from a replacement row."""
-
-    native_work: NativeWorkTarget | None = None
-    """The original invocation target of this run."""
 
     hosted_resources: HostedTurnResources | None = None
     """The actual turn's domains and late completions, shared by copied contexts."""

@@ -33,8 +33,11 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
         incarnation=None,
     )
     env = child_env(tmp_path, request_path, result_path)
+    # meiva:note
+    # The host's end of stdin stays open until the child exits: end-of-file tells it to kill its group.
     proc = subprocess.Popen(
         [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

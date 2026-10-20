@@ -36,7 +36,6 @@ def _park(
     db: psycopg.Connection,
     *,
     status: str,
-    pid: int | None = None,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
@@ -51,12 +50,11 @@ def _park(
         catalog=model_catalog,
     )
     with db.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET status=%s, pid=%s WHERE id=%s", (status, pid, aid))
+        cur.execute("UPDATE agents_meta SET status=%s WHERE id=%s", (status, aid))
         if status == "terminated":
             cur.execute(
-                "UPDATE agents_meta SET runtime_kind='hosted', "
-                "runtime_generation=gen_random_uuid(), runtime_owner=gen_random_uuid(), "
-                "incarnation_resources=NULL "
+                "UPDATE agents_meta SET "
+                "runtime_generation=gen_random_uuid(), runtime_owner=gen_random_uuid() "
                 "WHERE id=%s",
                 (aid,),
             )
@@ -64,12 +62,12 @@ def _park(
     return aid
 
 
-def _row(db: psycopg.Connection, aid: int) -> tuple[str, int | None]:
+def _row(db: psycopg.Connection, aid: int) -> str:
     with db.cursor() as cur:
-        cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (aid,))
+        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (aid,))
         row = cur.fetchone()
     assert row is not None, f"agents_meta row {aid} missing"
-    return row[0], row[1]
+    return row[0]
 
 
 def _kind_rows(db: psycopg.Connection, aid: int, kind: str) -> int:
@@ -103,10 +101,13 @@ def test_resurrect_agent_hosted_flips_and_wakes(
         machine_identity=machine_identity,
     )
     out = wake.resurrect_agent(
-        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+        database,
+        event_bus,
+        aid,
+        resurrected_by="user",
     )
     assert out == aid
-    assert _row(db_conn, aid) == ("idling", None)
+    assert _row(db_conn, aid) == "idling"
     assert _kind_rows(db_conn, aid, "resurrect") == 1
     assert wakes == [(aid, "0")]
 
@@ -137,7 +138,10 @@ def test_resurrect_agent_hosted_clears_the_corpse_marker(
     )
     db_conn.commit()
     wake.resurrect_agent(
-        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+        database,
+        event_bus,
+        aid,
+        resurrected_by="user",
     )
     assert db_conn.execute(
         "SELECT last_turn_fatal_at FROM agents_meta WHERE id = %s", (aid,)
@@ -171,19 +175,16 @@ def test_resurrect_agent_hosted_keeps_trigger_guard(
             resurrected_by="system",
             trigger_inbound_id=999999,
             trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
         )
-    assert _row(db_conn, aid)[0] == "terminated"
+    assert _row(db_conn, aid) == "terminated"
     assert wakes == []
 
 
 @pytest.mark.parametrize("guarded", [False, True])
-@pytest.mark.parametrize("managed", [False, True])
 async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     guarded: bool,
-    managed: bool,
     database: Database,
     event_bus: EventBus,
     *,
@@ -194,13 +195,10 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
 ) -> None:
     from uuid import uuid4
 
-    from psycopg.types.json import Jsonb
-
     from agent.db import claim_inbound_batch
     from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
     from agent.ownership.inbound import RuntimeOwnershipLostError
     from base.agents.inbox.insert import insert_inbound_message
-    from base.agents.incarnation.resources import ResourceBirth
 
     aid = _park(
         db_conn,
@@ -210,30 +208,29 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    if managed:
-        db_conn.execute(
-            "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
-            (Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")), aid),
-        )
-        db_conn.commit()
     owner = uuid4()
     old = await admit_hosted_runtime(
         aops_pool,
         aid,
         machine_identity.name(),
         owner,
-        expected_from="idling",
         db=database,
     )
     assert old is not None
     command = insert_inbound_message(
         db_conn, aid, "", "self", kind="terminate", bus=event_bus, database=database
     )
-    assert [
-        item.id for item in await claim_inbound_batch(aops_pool, aid, incarnation=old, work=None)
-    ] == [command]
+    assert [item.id for item in await claim_inbound_batch(aops_pool, aid, incarnation=old)] == [
+        command
+    ]
     assert (
-        await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None) == "terminate"
+        await apply_hosted_lifecycle(
+            aops_pool,
+            old,
+            bus=event_bus,
+            resume_turn=False,
+        )
+        == "terminate"
     )
     trigger = insert_inbound_message(
         db_conn, aid, "continue", "user", bus=event_bus, database=database
@@ -245,22 +242,19 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger if guarded else None,
         trigger_inbound_kind=InboundKind.CHAT if guarded else None,
-        local_machine=machine_identity.name(),
     )
     successor = await admit_hosted_runtime(
         aops_pool,
         aid,
         machine_identity.name(),
         owner,
-        expected_from="idling",
         db=database,
     )
     assert successor is not None and successor.generation != old.generation
     with pytest.raises(RuntimeOwnershipLostError):
-        await claim_inbound_batch(aops_pool, aid, incarnation=old, work=None)
+        await claim_inbound_batch(aops_pool, aid, incarnation=old)
     assert {
-        item.kind
-        for item in await claim_inbound_batch(aops_pool, aid, incarnation=successor, work=None)
+        item.kind for item in await claim_inbound_batch(aops_pool, aid, incarnation=successor)
     } == {
         "chat",
         "resurrect",
@@ -325,7 +319,6 @@ def _guarded_resurrect(
         resurrected_by="system",
         trigger_inbound_id=trigger,
         trigger_inbound_kind=InboundKind.CHAT,
-        local_machine=machine_identity.name(),
     )
 
 
@@ -358,9 +351,8 @@ def test_reaped_crash_row_refuses_leftover_work(
             resurrected_by="system",
             trigger_inbound_id=trigger,
             trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
         )
-    assert _row(db_conn, aid) == ("terminated", None)
+    assert _row(db_conn, aid) == "terminated"
     assert wakes == []
 
 
@@ -399,7 +391,7 @@ def test_operator_death_still_refuses_leftover_work(
         _guarded_resurrect(
             aid, trigger, database_gate=database_gate, machine_identity=machine_identity
         )
-    assert _row(db_conn, aid)[0] == "terminated"
+    assert _row(db_conn, aid) == "terminated"
 
 
 def test_suppressed_wakes_refuse_the_reaped_crash_trigger(
@@ -429,7 +421,7 @@ def test_suppressed_wakes_refuse_the_reaped_crash_trigger(
         _guarded_resurrect(
             aid, trigger, database_gate=database_gate, machine_identity=machine_identity
         )
-    assert _row(db_conn, aid)[0] == "terminated"
+    assert _row(db_conn, aid) == "terminated"
 
 
 def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
@@ -455,7 +447,7 @@ def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
         _guarded_resurrect(
             aid, trigger, database_gate=database_gate, machine_identity=machine_identity
         )
-    assert _row(db_conn, aid)[0] == "terminated"
+    assert _row(db_conn, aid) == "terminated"
 
 
 def test_system_resurrect_is_not_capped_by_unconsumed_resurrect_rows(
@@ -489,7 +481,7 @@ def test_system_resurrect_is_not_capped_by_unconsumed_resurrect_rows(
 
     _guarded_resurrect(aid, trigger, database_gate=database_gate, machine_identity=machine_identity)
 
-    assert _row(db_conn, aid) == ("idling", None)
+    assert _row(db_conn, aid) == "idling"
     assert wakes == [(aid, "0")]
 
 
@@ -522,11 +514,14 @@ def test_manual_resurrect_stays_exempt_from_the_gates(
 
     assert (
         wake.resurrect_agent(
-            database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+            database,
+            event_bus,
+            aid,
+            resurrected_by="user",
         )
         == aid
     )
-    assert _row(db_conn, aid) == ("idling", None)
+    assert _row(db_conn, aid) == "idling"
     assert wakes == [(aid, "0")]
     row = db_conn.execute(
         "SELECT permanent_reject_streak, wake_suppress_reason FROM agents_meta WHERE id = %s",
@@ -535,13 +530,11 @@ def test_manual_resurrect_stays_exempt_from_the_gates(
     assert row == (2, "permanent_provider_reject")
 
 
-@pytest.mark.parametrize("runtime_kind", [None, "process"])
 @pytest.mark.parametrize("has_identity", [False, True])
 @pytest.mark.parametrize("guarded", [False, True])
-def test_historical_runtime_cannot_be_resurrected(
+def test_any_terminated_row_resurrects_with_a_cleared_runtime_identity(
     db_conn: psycopg.Connection,
     wakes: list[tuple[int, str]],
-    runtime_kind: str | None,
     has_identity: bool,
     guarded: bool,
     database: Database,
@@ -553,7 +546,6 @@ def test_historical_runtime_cannot_be_resurrected(
     machine_identity: MachineIdentity,
 ) -> None:
     from base.agents.inbox.insert import insert_inbound_message
-    from base.api_contracts.agent_contract import ResurrectRefused
 
     aid = _park(
         db_conn,
@@ -563,70 +555,28 @@ def test_historical_runtime_cannot_be_resurrected(
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    db_conn.execute(
-        "UPDATE agents_meta SET runtime_kind=%s, incarnation_resources=NULL, "
-        "runtime_generation=CASE WHEN %s THEN runtime_generation ELSE NULL END, "
-        "runtime_owner=CASE WHEN %s THEN runtime_owner ELSE NULL END WHERE id=%s",
-        (runtime_kind, has_identity, has_identity, aid),
-    )
-    db_conn.commit()
+    if not has_identity:
+        db_conn.execute(
+            "UPDATE agents_meta SET runtime_generation=NULL, runtime_owner=NULL WHERE id=%s",
+            (aid,),
+        )
+        db_conn.commit()
     trigger = insert_inbound_message(
         db_conn, aid, "continue", "user", bus=event_bus, database=database
     )
-    query = "SELECT row_to_json(a) FROM agents_meta a WHERE id=%s"
-    before = db_conn.execute(query, (aid,)).fetchone()
-    db_conn.commit()
 
-    with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
-        wake.resurrect_agent(
-            database,
-            event_bus,
-            aid,
-            resurrected_by="system" if guarded else "user",
-            trigger_inbound_id=trigger if guarded else None,
-            trigger_inbound_kind=InboundKind.CHAT if guarded else None,
-            local_machine=machine_identity.name(),
-        )
-
-    assert db_conn.execute(query, (aid,)).fetchone() == before
-    assert _kind_rows(db_conn, aid, "resurrect") == 0
-    assert wakes == []
-
-
-@pytest.mark.parametrize("missing", ["runtime_generation", "runtime_owner", "pid"])
-def test_incomplete_hosted_target_requires_cutover(
-    db_conn: psycopg.Connection,
-    wakes: list[tuple[int, str]],
-    missing: str,
-    database: Database,
-    event_bus: EventBus,
-    *,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    from psycopg import sql
-
-    from base.api_contracts.agent_contract import ResurrectRefused
-
-    aid = _park(
-        db_conn,
-        status="terminated",
-        config_authority=config_authority,
-        model_catalog=model_catalog,
-        database_gate=database_gate,
-        machine_identity=machine_identity,
+    wake.resurrect_agent(
+        database,
+        event_bus,
+        aid,
+        resurrected_by="system" if guarded else "user",
+        trigger_inbound_id=trigger if guarded else None,
+        trigger_inbound_kind=InboundKind.CHAT if guarded else None,
     )
-    db_conn.execute(
-        sql.SQL("UPDATE agents_meta SET {}=%s WHERE id=%s").format(sql.Identifier(missing)),
-        (424243 if missing == "pid" else None, aid),
-    )
-    db_conn.commit()
-    with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
-        wake.resurrect_agent(
-            database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
-        )
-    assert _row(db_conn, aid)[0] == "terminated"
-    assert _kind_rows(db_conn, aid, "resurrect") == 0
-    assert wakes == []
+
+    assert _row(db_conn, aid) == "idling"
+    assert db_conn.execute(
+        "SELECT runtime_generation, runtime_owner FROM agents_meta WHERE id=%s", (aid,)
+    ).fetchone() == (None, None)
+    assert _kind_rows(db_conn, aid, "resurrect") == 1
+    assert wakes == [(aid, "0")]

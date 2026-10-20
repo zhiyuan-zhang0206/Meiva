@@ -32,15 +32,12 @@ class TestCancelBeforeTheFirstSlice:
     `finally` never runs for a task that never started, so the reaper callback
     releases the slot and re-arms the wake the task never consumed."""
 
-    async def test_force_cancel_before_the_first_slice_releases_the_slot(self) -> None:
+    async def test_cancel_before_the_first_slice_releases_the_slot(self) -> None:
         rec = Recorder()
         sched = TurnScheduler(rec)
 
-        async def _validate(_agent_id: int, _command_id: int) -> bool:
-            return True
-
         sched.wake(7)
-        assert await asyncio.wait_for(sched.cancel_exact_force(7, 1, _validate), 2) is True
+        assert await asyncio.wait_for(sched.cancel_turn(7), 2) is True
         await settle()
 
         assert rec.started == [7]
@@ -81,14 +78,11 @@ async def test_stuck_fixture_releases_after_failed_assertion() -> None:
             await turn.release()
 
 
-async def _validate_force(_agent_id: int, _command_id: int) -> bool:
-    return True
-
-
-async def test_same_incarnation_settlement_precedes_next_turn_after_cancel_timeout(
+# meiva:note
+# The existing single-flight slot survives a delayed to_thread unwind.
+async def test_settlement_precedes_next_turn_after_cancel_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The existing single-flight slot survives a delayed to_thread unwind."""
     monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.01)
     entered, next_turn = asyncio.Event(), asyncio.Event()
     release = threading.Event()
@@ -112,7 +106,7 @@ async def test_same_incarnation_settlement_precedes_next_turn_after_cancel_timeo
     try:
         scheduler.wake(1)
         await asyncio.wait_for(entered.wait(), 2)
-        await scheduler.cancel_exact_force(1, 1, _validate_force)
+        await scheduler.cancel_turn(1)
         scheduler.wake(1)
         await asyncio.sleep(0)
         assert events == ["turn1"]

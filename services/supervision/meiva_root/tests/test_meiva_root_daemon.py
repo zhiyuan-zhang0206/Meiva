@@ -263,7 +263,7 @@ def test_second_daemon_refuses_the_same_run_dir(short_tmp: Path) -> None:
         )
         out, _ = second.communicate(timeout=15)
         assert second.returncode == 1
-        assert "another root supervisor" in out.decode()
+        assert "already holds the instance lock" in out.decode()
         # The first daemon is unaffected.
         assert client.status()["ok"] is True
 

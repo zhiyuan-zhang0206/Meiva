@@ -12,11 +12,10 @@ collision guards run, it consumes orphaned ordinary claims on the parked agents
 selected by `_classify`, inside the same transaction holding their
 `agents_meta` row locks. Only `status='claimed'` rows with
 `payload->'maintenance' IS NULL` and kind other than `restart`/`terminate`
-qualify. Agents in the host-absent `cold` set stay excluded: their ordinary
-claims do not block `_unresolved_parked` and remain untouched for boot.
+qualify.
 
 Every qualifying claim becomes `done`, whatever its age: the runtime that took
-it is gone, and like a cold boot (`reconcile_claimed_inbounds`) preparation
+it is gone, and like a host restart (`reconcile_claimed_inbounds`) preparation
 never returns such input to `pending` for redelivery. The sender must resend if
 the work still matters. Every update compares `id` and `status='claimed'`; a
 missed CAS leaves the newer state intact.

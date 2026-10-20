@@ -23,9 +23,8 @@ def test_force_expire_endpoint_requires_observed_session_and_returns_distinct_st
 ) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
-        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
-        "clock_timestamp()+interval '10 minutes')",
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner) "
+        "VALUES(%s,'idling',%s,%s,%s)",
         (agent_id, machine_identity.name(), uuid4(), uuid4()),
     )
     db_conn.commit()

@@ -335,23 +335,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/keyed/v1/agents/{agent_id}/native-work": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["native_work_api_keyed_v1_agents__agent_id__native_work_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/keyed/v1/agents/{agent_id}/cancel-work": {
+    "/api/agents/{agent_id}/cancel": {
         parameters: {
             query?: never;
             header?: never;
@@ -360,14 +344,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["native_cancel_api_keyed_v1_agents__agent_id__cancel_work_post"];
+        post: operations["post_agent_cancel_api_agents__agent_id__cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/keyed/v1/agents/{agent_id}/restart-work": {
+    "/api/agents/{agent_id}/compact": {
         parameters: {
             query?: never;
             header?: never;
@@ -376,71 +360,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["native_restart_api_keyed_v1_agents__agent_id__restart_work_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["native_restart_status_api_keyed_v1_agents__agent_id__restart_commands__command_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/keyed/v1/agents/{agent_id}/compact-target": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["guarded_compact_target_api_keyed_v1_agents__agent_id__compact_target_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/keyed/v1/agents/{agent_id}/compact-history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["guarded_compact_history_api_keyed_v1_agents__agent_id__compact_history_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/keyed/v1/agents/{agent_id}/compact-commands/{command_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["guarded_compact_command_api_keyed_v1_agents__agent_id__compact_commands__command_id__get"];
-        put?: never;
-        post?: never;
+        post: operations["post_agent_compact_api_agents__agent_id__compact_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2329,7 +2249,6 @@ export interface components {
             files: components["schemas"]["Object"][];
             status_url: string;
         };
-        AdmissionOutcome: "admitted" | "maintenance_hold" | "resource_fence" | "admission_guard_refused";
         AgentActivity: {
             active_seconds: number;
             alive_seconds: number;
@@ -2341,16 +2260,13 @@ export interface components {
             reason: components["schemas"]["AvailabilityReason"];
             observed_at: string;
             evidence_at?: string | null;
-            admission_outcome?: components["schemas"]["AdmissionOutcome"] | null;
         };
         AgentCard: {
             agent_id: number;
             spawner: string;
             fork_source_agent_id: number | null;
             status: components["schemas"]["AgentStatus"];
-            pid: number | null;
             spawned_at: string;
-            started_at: string | null;
             last_active_at: string;
             last_inbound_at: string;
             label: string | null;
@@ -2403,7 +2319,6 @@ export interface components {
             observation?: components["schemas"]["AgentObservation"] | null;
             shells_available?: boolean | null;
             spawned_at: string;
-            started_at?: string | null;
             shells: components["schemas"]["ShellInfo"][];
             config_overlay: {
                 [key: string]: unknown;
@@ -2471,7 +2386,6 @@ export interface components {
         AgentObservation: {
             machine_probe_at?: string | null;
             machine_probe_valid_until?: string | null;
-            runtime_lease_expires_at?: string | null;
             runtime_owner: "unknown";
         };
         AgentRoster: {
@@ -2484,9 +2398,7 @@ export interface components {
             fork_source_agent_id: number | null;
             fork_source_checkpoint_id: string | null;
             status: components["schemas"]["AgentStatus"];
-            pid: number | null;
             spawned_at: string;
-            started_at: string | null;
             last_active_at: string;
             last_inbound_at: string;
             label: string | null;
@@ -2658,7 +2570,7 @@ export interface components {
             days: number;
             timezone: string;
         };
-        AvailabilityReason: "unknown" | "host_unavailable" | "awaiting_admission" | "admission_refused" | "admitted" | "launch_unreachable" | "launch_rejected" | "launch_unknown";
+        AvailabilityReason: "unknown" | "host_unavailable" | "awaiting_admission" | "admitted" | "launch_unreachable" | "launch_rejected" | "launch_unknown";
         Body_upload_api_keyed_v1_agents__agent_id__uploads_post: {
             files: string[];
         };
@@ -2729,6 +2641,10 @@ export interface components {
             build_id: number | null;
             rebuild_id: number | null;
         };
+        CancelAgentResponse: {
+            status: components["schemas"]["CancelResult"];
+        };
+        CancelResult: "cancelled" | "not_running";
         ChoiceQuestion: {
             type: "multi_select" | "single_select";
             options: components["schemas"]["NoticeOption"][];
@@ -2767,33 +2683,8 @@ export interface components {
             description: string;
             instruction_hint: string;
         };
-        CompactAcceptance: {
-            command_id: string;
-            target: components["schemas"]["CompactTarget"];
-        };
-        CompactOutcome: "accepted" | "prepared" | "applying" | "applied" | "noop" | "rejected" | "uncertain";
-        CompactStatus: {
-            acceptance: components["schemas"]["CompactAcceptance"];
-            outcome: components["schemas"]["CompactOutcome"];
-            reason: string | null;
-            checkpoint_id: string | null;
-            recovery_checkpoint_id: string | null;
-            attempt_id: string | null;
-            attempt_provider: string | null;
-            execution: components["schemas"]["NativeWorkTarget"] | null;
-            result_available: boolean;
-            continuation_released: boolean;
-        };
-        CompactTarget: {
-            protocol: number;
-            observation_id: string;
-            source: components["schemas"]["NativeWorkTarget"];
-            checkpoint_id: string;
-            checkpoint_ns: string;
-            messages_version: string;
-            compact_channel_version: string | null;
-            segment_version: number;
-            model: string;
+        CompactAgentResponse: {
+            inbound_id: number;
         };
         ConfigAuditView: {
             records: {
@@ -3326,41 +3217,6 @@ export interface components {
                 [key: string]: components["schemas"]["ModelInfo"];
             };
             default: string;
-        };
-        NativeCancelAcceptance: {
-            command_id: string;
-            target: components["schemas"]["NativeWorkTarget"];
-        };
-        NativeRestartAcceptance: {
-            command_id: number;
-            target: components["schemas"]["NativeWorkTarget"];
-            config_overlay: {
-                [key: string]: unknown;
-            } | null;
-        };
-        NativeRestartOutcome: "accepted" | "applied" | "observed" | "superseded" | "uncertain";
-        NativeRestartProgress: {
-            acceptance: components["schemas"]["NativeRestartAcceptance"];
-            outcome: components["schemas"]["NativeRestartOutcome"];
-            applied_at: string | null;
-            observed_at: string | null;
-            reason: components["schemas"]["NativeRestartReason"] | null;
-        };
-        NativeRestartReason: "target_replaced" | "resurrect" | "force_terminate" | "invalid_source_transition" | "source_command_unavailable";
-        NativeRestartRequest: {
-            target: components["schemas"]["NativeWorkTarget"];
-            source: string;
-            config_overlay?: {
-                [key: string]: unknown;
-            } | null;
-        };
-        NativeWorkTarget: {
-            work_id: string;
-            agent_id: number;
-            machine: string;
-            generation: string;
-            owner: string;
-            protocol: 1;
         };
         NeighborRow: {
             agent_id: number;
@@ -4874,7 +4730,7 @@ export interface operations {
             };
         };
     };
-    native_work_api_keyed_v1_agents__agent_id__native_work_get: {
+    post_agent_cancel_api_agents__agent_id__cancel_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4890,7 +4746,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NativeWorkTarget"];
+                    "application/json": components["schemas"]["CancelAgentResponse"];
                 };
             };
             422: {
@@ -4903,103 +4759,7 @@ export interface operations {
             };
         };
     };
-    native_cancel_api_keyed_v1_agents__agent_id__cancel_work_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NativeWorkTarget"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NativeCancelAcceptance"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    native_restart_api_keyed_v1_agents__agent_id__restart_work_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NativeRestartRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NativeRestartAcceptance"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    native_restart_status_api_keyed_v1_agents__agent_id__restart_commands__command_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-                command_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NativeRestartProgress"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    guarded_compact_target_api_keyed_v1_agents__agent_id__compact_target_get: {
+    post_agent_compact_api_agents__agent_id__compact_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -5015,70 +4775,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CompactTarget"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    guarded_compact_history_api_keyed_v1_agents__agent_id__compact_history_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CompactTarget"];
-            };
-        };
-        responses: {
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CompactAcceptance"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    guarded_compact_command_api_keyed_v1_agents__agent_id__compact_commands__command_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-                command_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CompactStatus"];
+                    "application/json": components["schemas"]["CompactAgentResponse"];
                 };
             };
             422: {

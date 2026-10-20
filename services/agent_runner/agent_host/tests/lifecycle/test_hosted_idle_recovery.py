@@ -5,14 +5,9 @@ from unittest.mock import AsyncMock
 
 import psycopg
 import pytest
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.state import BaseAgentState
-from base.agents.incarnation.resources import (
-    IncarnationResources,
-    ResourceProcess,
-)
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -38,35 +33,6 @@ def _unexpected_model(state: BaseAgentState) -> dict[str, object]:
     pytest.fail("quiet idle recovery reached a model/initialization node")
 
 
-def _dead_birth_copy(host_process: ResourceProcess) -> ResourceProcess:
-    if host_process.starttime is not None:
-        return host_process.model_copy(update={"starttime": host_process.starttime + 1})
-    return host_process.model_copy(update={"birth": host_process.birth - 60})
-
-
-def _mark_predecessor_idle(
-    db_conn: psycopg.Connection,
-    resources: IncarnationResources,
-    agent: int,
-    *,
-    evidence: str,
-    released: bool,
-) -> None:
-    assert resources.host_process is not None
-    dead = _dead_birth_copy(resources.host_process)
-    incarnation_resources = (
-        None
-        if evidence == "legacy"
-        else Jsonb(resources.model_copy(update={"host_process": dead}).model_dump(mode="json"))
-    )
-    db_conn.execute(
-        "UPDATE agents_meta SET status='idling',incarnation_resources=%s,"
-        "lease_expires_at=CASE WHEN %s THEN NULL ELSE now()-interval '1s' END WHERE id=%s",
-        (incarnation_resources, released, agent),
-    )
-    db_conn.commit()
-
-
 async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
     redis_url: str,
     db_conn: psycopg.Connection,
@@ -88,7 +54,7 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
     )
     agent = incarnation.agent_id
     db_conn.execute(
-        "UPDATE agents_meta SET status='idling',lease_expires_at=now()-interval '1s' WHERE id=%s",
+        "UPDATE agents_meta SET status='idling' WHERE id=%s",
         (agent,),
     )
     db_conn.commit()

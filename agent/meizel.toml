@@ -16,14 +16,11 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "turn" = ["db", "graph", "impersonation_handoff.py", "startup", "state.py", "state_channels.py"]
 
 [debt.private-module]
-"tests/claim/test_inbound_ownership.py -> graph/claim/_batch.py" = 1
 "tests/impersonation/test_impersonation.py -> graph/exec/_result.py" = 1
 "tests/test_exec_subprocess.py -> graph/exec/_result.py" = 1
 "tests/test_exec_subprocess.py -> graph/exec/_stream.py" = 1
 "tests/test_exec_subprocess.py -> graph/exec/_subprocess.py" = 1
 "tests/test_message_identity_graph.py -> hooks/_registry.py" = 1
-"tests/test_resource_admission.py -> graph/exec/_result.py" = 1
-"tests/test_resource_admission.py -> graph/exec/_subprocess.py" = 1
 
 [debt.private-name]
 "tests/execution/test_exec_child_signals.py -> execution/child.py#_run" = 1
@@ -31,5 +28,4 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "tests/test_state_slot.py -> graph/exec/node.py#_exec_node_impl" = 1
 
 [debt.undeclared-edge]
-"graph/exec/_owned_run.py -> execution/domain_owner.py" = 1
 "graph/exec/_subprocess.py -> execution/child.py" = 1

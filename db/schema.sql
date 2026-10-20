@@ -80,24 +80,19 @@ CREATE TABLE agents (
 -- a single agents row, and the concepts "agent" and "conversation" are unified.
 --
 -- State machine:
---   idling     — either unclaimed (pid / started_at / lease are NULL) or a claimed process waiting
---                for inbound work
---   running    — a claimed process, including bootstrap and active execution;
+--   idling     — waiting for inbound work; owned by no host boot until its next admission
+--   running    — a hosted turn admitted by the agent-host of the row's machine (one host per machine);
 --                running an LLM / exec turn (any node: claim got a batch / before_llm / llm /
 --                before_exec / exec / after_exec)
---   terminated — UPDATE before graceful exit, after the process receives a terminate inbound
+--   terminated — the agent ended; its history stays
 --
--- After launch, `_launch_agent_process` polls pid to confirm the child claimed the row. No claim within the
--- timeout raises: on the spawn path, the raise is propagated up so the caller sees it (the row remains
--- unclaimed idling for the boot reaper);
--- on the resurrect/respawn path, `_launch_or_force_terminated` catches it and changes to 'terminated'
--- so the caller can retry. This avoids "spawn returncode 0 but child crash" leaving permanent unclaimed rows.
+-- Admission is one UPDATE (agent/ownership/hosted.py:admit_hosted_runtime): it claims the machine's own
+-- running/idling row, writes runtime_owner (the host boot) and keeps runtime_generation while the same
+-- boot admits again, minting a new one otherwise. The host settles its machine's `running` rows to
+-- `idling` once, when it starts.
 --
--- Wake paths set pid, started_at, and lease to NULL before launch. `claim_agent_row` writes all three
--- atomically, avoiding previous-session ghost data in ops ps/kill views.
---
--- A "terminated" row can be UPDATEd back to 'idling' by resurrect_agent and respawned as a new process
--- (agent + checkpoints + messages all present, the agent picks up from its last state when woken).
+-- A "terminated" row can be UPDATEd back to 'idling' by resurrect_agent (agent + checkpoints + messages
+-- all present, the agent picks up from its last state when woken).
 --
 -- Lineage fields:
 --   spawner                   identifier of the entity that triggered spawn, as a string:
@@ -127,9 +122,7 @@ CREATE TABLE agents_meta (
     fork_source_agent_id       BIGINT REFERENCES agents(id),
     fork_source_checkpoint_id  TEXT,
     status                     TEXT NOT NULL CHECK (status IN ('running', 'idling', 'terminated')),
-    pid                        INTEGER,                  -- filled while a process owns the running/idling row, for ops ps lookup / force kill
     spawned_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
-    started_at                 TIMESTAMPTZ,              -- filled alongside pid and lease by agent._starting.claim_agent_row
     session_index              BIGINT NOT NULL DEFAULT 0,  -- unified shell+watcher session sequence number, auto-incrementing; meiva.shell.new()/meiva.watcher.launch() atomically take the next via UPDATE ... RETURNING
     machine                    TEXT NOT NULL DEFAULT 'unknown',  -- physical machine identifier, for multi-machine deployment (private network + central Postgres); source = MEIVA_MACHINE_NAME, written on INSERT in the create path (spawn_agent), claim_agent_row only verifies
     harness                    TEXT NOT NULL DEFAULT 'meiva' CHECK (harness IN ('meiva', 'claude_code', 'codex', 'antigravity')),  -- the agent-loop runtime this agent was BORN on (user ruling, task #5407): 'meiva' = the built-in loop, the others = an external CLI harness (Claude Code / Codex / Antigravity). Written once by the birth INSERT (base/agents/birth/transaction.py via base/agents/birth/harness.py); a BEFORE UPDATE trigger rejects any change, and a fork inherits its source's value — asking for a different harness on a fork is an error, never a silent override. Model and provider are separate concerns and are not derived from it.
@@ -142,32 +135,22 @@ CREATE TABLE agents_meta (
     config_overlay             JSONB,                    -- per-agent config overlay (currently llm_model); authoritative source read at agent boot after spawn/respawn/resurrect. NULL = cluster defaults.
     birth_config               JSONB,                    -- the values the cluster defaults resolved to at THIS agent's birth, for every per-agent field the registry declares lifecycle="frozen" (base/config: the brain + the system-prompt-shaping set). Stamped once at the spawn boundary (base/agents/model/birth_config.py), replayed on every restart/respawn/resurrect/compact, and inherited verbatim by a fork. Deliberately a SEPARATE column from config_overlay so provenance survives: config_overlay = "someone chose this for this agent", birth_config = "nobody chose; this was merely the cluster default that day". Resolution order everywhere is config_overlay > birth_config > current config. NULL = resolve every frozen field live (pre-column rows the backfill skipped). A migration that rewrites a frozen field's stored VALUE must rewrite this column too — it is a second home for values that used to live only in config_overlay (precedent: 20260725T060802_pin-haiku-dated-model-id.sql rewrites config_overlay->>'llm_model'). The skill-name renames are NOT such a case: they canonicalize stored skill names only, since base/packages/skills/names.py folds dash and underscore so an already-stored per-agent value still resolves. See migrations/20260731T071400_agent-birth-config.sql.
     termination_source         TEXT CHECK (termination_source IN ('user', 'exit', 'reaper', 'launch-confirm', 'integrity')),  -- WHO/WHAT terminated the row; meaningful only while status='terminated'. Value set = base.agents.TerminationSource (locked by tests/contracts/test_db_check_enum_sync.py); stamped in the SAME statement as the status flip by every terminated-write site (enforced by scripts/lint_termination_source.py). 'user' = force-kill / terminate-of-already-dead (ops_lifecycle._force_mark_terminated); 'exit' = agent's own graceful process-exit finalize (mark_agent_exited_op); 'reaper' = restarter corpse reaper forced it (dead pid / stale unclaimed idling row); 'launch-confirm' = a launch that never confirmed forced it — the launcher's confirm poll timing out (agent_launch) or the child's own early-boot schema/placement gate rejecting the boot before it claimed the row (agent/_starting.py); 'integrity' = the framework found the row's own state self-inconsistent and killed it (historical rows only; no code writes it now), deliberately NOT resurrectable since the row's history is corrupt and a retry loop would bury a one-time fault. CrashResurrectController resurrects ONLY 'reaper' + 'launch-confirm' (involuntary/system-detected + self-healing); 'user'/'exit'/'integrity'/NULL are never auto-resurrected. NULL = pre-column legacy row → conservatively not eligible. Cleared to NULL on the terminated→idling resurrect transition (per-death). CHECK permits NULL.
-    last_force_terminate_inbound_id BIGINT,              -- monotonic explicit-kill fence: every force termination (including an already-terminated row) inserts a kind='terminate' inbound under the agents_meta row lock and stores its id here. Pending-work resurrection (chat/compact_request) requires its exact pending inbound id to be greater than this fence, so older work cannot reverse a later kill. No FK on purpose: inbound retention must not erase lifecycle intent. Never cleared; NULL = no force intent recorded.
-    last_resurrect_inbound_id  BIGINT,                  -- incarnation-epoch fence: every resurrection inserts its kind='resurrect' inbound under the agents_meta row lock and stores its id here. A lifecycle command (restart/terminate) whose intent predates the fence is superseded by that resurrection - acceptance settles it as superseded (payload names the resurrect) instead of adopting it - so a delayed terminate created before a resurrect can never kill the incarnation the resurrect just admitted (#2158). No FK on purpose: inbound retention must not erase lifecycle intent. Never cleared; NULL = no resurrection recorded.
     wake_suppressed_until      TIMESTAMPTZ,              -- delivery auto-resurrect and watchdog wake suppression deadline after repeated resurrection failures. New peer/user chats remain pending and become eligible again after expiry. Cleared by a successful resurrection spawn or inbound claim. NULL = not suppressed.
     wake_suppress_reason       TEXT,                     -- operator-readable cause paired with wake_suppressed_until; currently 'resurrect_failed'. Cleared with the deadline on successful recovery.
-    lease_expires_at           TIMESTAMPTZ,              -- R1 (Task #1021): the agent-process lease — liveness is a lease-expiry judgment (`lease_expires_at > now()`), status stays lifecycle intent. Written by the agent process at claim/start (now()+lease TTL, agent/db.py / agent/_starting.py), cleared on terminate/resurrect by the ops lifecycle; read by the heartbeat daemon and the reaper (base/agents/inbox/live.py ALIVE_SQL). NULL = row has no lease (pre-R1 legacy, or terminated).
-    liveness_state             TEXT NOT NULL DEFAULT 'unknown' CHECK (liveness_state IN ('online', 'offline', 'unknown')),  -- gateway-owned derived liveness projection (Task #1174): 'online' = machine reachable AND (process lease alive where one is held); 'offline' = machine unreachable (2 consecutive failed status_probe) or lease expired; 'unknown' = not yet judged (fresh rows / unregistered machine). Written ONLY by the gateway heartbeat daemon's liveness pass — status stays lifecycle intent (R1 invariant #1); the frontend renders offline distinctly. 'terminated' rows are never judged.
+    liveness_state             TEXT NOT NULL DEFAULT 'unknown' CHECK (liveness_state IN ('online', 'offline', 'unknown')),  -- gateway-owned derived liveness projection (Task #1174): 'online' = machine reachable; 'offline' = machine unreachable (2 consecutive failed status_probe); 'unknown' = not yet judged (fresh rows / unregistered machine). Written ONLY by the gateway heartbeat daemon's liveness pass — status stays lifecycle intent (R1 invariant #1); the frontend renders offline distinctly. 'terminated' rows are never judged.
     last_probe_at             TIMESTAMPTZ,              -- when the gateway liveness pass last judged this row (Task #1174).
-    last_turn_fatal_at        TIMESTAMPTZ,              -- first fatal turn crash since the last completed LLM turn (the corpse marker: NULL = healthy, set = crash-dead). Stamped with COALESCE (never refreshed while dead) by the hosted runner at crash catch time (agent/hosted_ownership.stamp_turn_fatal); cleared by a completed LLM turn (_persist_last_active) and the resurrect transition. The agent_host beat's reaper terminates marked idling rows past CORPSE_REAP_GRACE_S with termination_source='reaper'; renew_hosted_owner skips marked rows so their lease decays.
+    last_turn_fatal_at        TIMESTAMPTZ,              -- first fatal turn crash since the last completed LLM turn (the corpse marker: NULL = healthy, set = crash-dead). Stamped with COALESCE (never refreshed while dead) by the hosted runner at crash catch time (agent/hosted_ownership.stamp_turn_fatal); cleared by a completed LLM turn (_persist_last_active) and the resurrect transition. The agent_host beat's reaper terminates marked idling rows past CORPSE_REAP_GRACE_S with termination_source='reaper'.
     permanent_reject_streak    INTEGER NOT NULL DEFAULT 0 CHECK (permanent_reject_streak >= 0),  -- consecutive PERMANENT-class provider rejections since the last completed LLM turn (the recovery circuit breaker, task #3617): +1 at each permanent fatal turn settlement (agent/runloop.py), reset to 0 by the same completed-turn UPDATE that clears last_turn_fatal_at (agent/graph/llm/node.py::_persist_last_active). >= 2 halts every automatic recovery path (event-path resurrect / watchdog re-dispatch+retry / the stalled crash-marked harvest op / the relaxed reaper-marked trigger) until a turn succeeds; a manual resurrect stays exempt. See base/agents/recovery/breaker.py.
     last_permanent_reject_reason TEXT,                   -- the CIRCUIT_REASON_* class (agent/state_channels) of the current consecutive permanent-reject streak: written in the SAME statement as the permanent_reject_streak +1 by base/agents/recovery_breaker.record_permanent_reject_turn, cleared with the streak by the completed-turn UPDATE. 'billing' + streak >= 2 is the billing batch-recovery whitelist (task #3919). NULL = no permanent rejection on the current streak (incl. pre-column rows — never guessed).
     runtime_generation UUID,
-    runtime_kind TEXT CHECK (runtime_kind IN ('process', 'hosted')),
     runtime_owner UUID,
-    last_admission_outcome TEXT CHECK (last_admission_outcome IN
-        ('admitted', 'maintenance_hold', 'resource_fence', 'admission_guard_refused')),
-    last_admission_at TIMESTAMPTZ,
-    CONSTRAINT agents_meta_admission_observation_pair_check
-        CHECK ((last_admission_outcome IS NULL) = (last_admission_at IS NULL)),
+    last_admission_at TIMESTAMPTZ,  -- when the host last admitted a turn; NULL = never admitted (a fresh birth)
     last_launch_attempt_id UUID, -- rotated on explicit retry; fences delayed dispatch results
     last_launch_failure_reason TEXT CHECK (last_launch_failure_reason IN
         ('launch_unreachable', 'launch_rejected', 'launch_unknown')),
     last_launch_failure_at TIMESTAMPTZ,
     CONSTRAINT agents_meta_launch_failure_pair_check
         CHECK ((last_launch_failure_reason IS NULL) = (last_launch_failure_at IS NULL)),
-    runtime_protocol_version INTEGER NOT NULL DEFAULT 0 CHECK (runtime_protocol_version >= 0),
-    incarnation_resources JSONB, -- server-owned versioned resource evidence; NULL is unknown, never an empty-set proof
     -- fork fields exist in pairs or not at all (constraint explicitly named to align with the ALTER in 0002 migration)
     CONSTRAINT agents_meta_fork_pair_check
         CHECK ((fork_source_agent_id IS NULL) = (fork_source_checkpoint_id IS NULL))
@@ -185,19 +168,6 @@ COMMENT ON COLUMN agents_meta.harness IS
     'The agent loop runtime this agent was born on (meiva / claude_code / codex / '
     'antigravity). Immutable: a trigger rejects any UPDATE that changes it, and a '
     'fork inherits its source''s value.';
-
-COMMENT ON COLUMN agents_meta.last_force_terminate_inbound_id IS
-    'Monotonic inbound id fence written by every explicit force termination. '
-    'Pending work may auto-resurrect this agent only when its inbound id is greater '
-    'than this fence. Deliberately no foreign key: inbound retention must not '
-    'erase lifecycle intent.';
-
-COMMENT ON COLUMN agents_meta.last_resurrect_inbound_id IS
-    'Monotonic inbound id fence written by every resurrection: the id of the '
-    'kind=''resurrect'' inbound it enqueued. A lifecycle command whose intent '
-    'predates the fence is superseded by that resurrection; acceptance settles '
-    'it instead of dispatching it. Deliberately no foreign key: inbound '
-    'retention must not erase lifecycle intent.';
 
 COMMENT ON COLUMN agents_meta.last_permanent_reject_reason IS
     'The reason class of the current consecutive permanent-reject streak '
@@ -390,23 +360,8 @@ CREATE TABLE inbound_messages (
     -- gateway compute creation -> pickup latency (claimed_at - created_at),
     -- e.g. for the delivery watchdog / degraded-wake alerts.
     claimed_at TIMESTAMPTZ,
-    target_generation UUID,
-    target_owner UUID,
-    applied_at TIMESTAMPTZ,
-    observed_at TIMESTAMPTZ,
-    CONSTRAINT inbound_agent_command_unique UNIQUE(agent_id,id),
-    CONSTRAINT inbound_lifecycle_target_check CHECK (
-        (target_generation IS NULL AND target_owner IS NULL AND applied_at IS NULL AND observed_at IS NULL)
-        OR (target_generation IS NOT NULL AND target_owner IS NOT NULL
-            AND kind IN ('restart','terminate') AND claimed_at IS NOT NULL
-            AND status IN ('claimed','done') AND (observed_at IS NULL OR applied_at IS NOT NULL))
-    )
+    CONSTRAINT inbound_agent_command_unique UNIQUE(agent_id,id)
 );
-
--- Same-agent reference also prevents retention from deleting unfinished intent.
-ALTER TABLE agents_meta ADD COLUMN lifecycle_command_id BIGINT;
-ALTER TABLE agents_meta ADD CONSTRAINT agents_meta_lifecycle_command_fk
-    FOREIGN KEY(id,lifecycle_command_id) REFERENCES inbound_messages(agent_id,id);
 
 COMMENT ON COLUMN inbound_messages.claimed_at IS
     'When the claim node grabbed this row (pending -> claimed for chat, pending -> done for lifecycle kinds). NULL = never claimed. Pickup latency = claimed_at - created_at.';
@@ -475,34 +430,6 @@ COMMENT ON COLUMN inbound_messages.content_hash IS
 
 COMMENT ON COLUMN inbound_messages.source_assertion_match IS
     'Whether an agent:N source assertion matches a verified agent_token:M credential; NULL when either side is unknown. Informational only.';
-
--- Lifecycle pointer -> done guard (task #3678): a command must not reach `done`
--- while agents_meta.lifecycle_command_id still points at it — that torn shape blinds
--- boot recovery (needs claimed) and live observation (needs a process identity) at
--- once, deferring any resurrect forever. Deferred to COMMIT, so every legitimate
--- writer (supersede / force / observe / hosted settle) passes: each clears the
--- pointer in the same transaction. The TTL reaper's hourly stuck-pointer scan
--- (services/upkeep/ttl_reaper, telemetry lifecycle_pointer_stuck) is the detector
--- for a bypass (a pointer later set onto an already-done row). Ships to existing
--- clusters via a migration.
-CREATE OR REPLACE FUNCTION reject_inbound_done_with_lifecycle_pointer() RETURNS trigger AS $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM agents_meta m
-        WHERE m.lifecycle_command_id = NEW.id AND m.id = NEW.agent_id
-    ) THEN
-        RAISE EXCEPTION 'inbound % (agent %) cannot reach done while agents_meta.lifecycle_command_id still points at it — settle the command and clear the pointer in the same transaction', NEW.id, NEW.agent_id;
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-CREATE CONSTRAINT TRIGGER inbound_messages_lifecycle_pointer_done_guard
-    AFTER UPDATE ON inbound_messages
-    DEFERRABLE INITIALLY DEFERRED
-    FOR EACH ROW
-    WHEN (NEW.status = 'done' AND OLD.status IS DISTINCT FROM 'done'
-          AND NEW.kind IN ('restart', 'terminate'))
-    EXECUTE FUNCTION reject_inbound_done_with_lifecycle_pointer();
 
 -- ─────────────── events Since-Birth rollup ───────────────
 -- Day-grain rollups that preserve the `events` "since-birth" aggregates
@@ -2581,6 +2508,8 @@ INSERT INTO schema_migrations (name) VALUES ('20260924T193804_task-escalation-ma
 INSERT INTO schema_migrations (name) VALUES ('20260926T135638_impersonation-dsh-relay');
 INSERT INTO schema_migrations (name) VALUES ('20261002T044224_audit-events');
 INSERT INTO schema_migrations (name) VALUES ('20261002T153217_telemetry-events');
+-- Rewrites last_admission_outcome, which this baseline no longer has; the baseline already holds its result.
+INSERT INTO schema_migrations (name) VALUES ('20261001T055130_retire-restarting-and-publication-deferred');
 
 CREATE OR REPLACE FUNCTION mark_impersonation_terminal_notice() RETURNS trigger AS $$
 BEGIN
@@ -2835,42 +2764,6 @@ CREATE INDEX weixin_ingress_pending ON weixin_ingress_receipts(namespace,account
 
 INSERT INTO schema_migrations (name) VALUES ('20261007T213541_weixin-durable-ingress');
 
-ALTER TABLE agents_meta ADD COLUMN native_work_id UUID;
-CREATE TABLE native_graph_work (
-    id UUID PRIMARY KEY,
-    agent_id BIGINT NOT NULL CHECK (agent_id > 0),
-    machine TEXT NOT NULL CHECK (machine <> ''),
-    generation UUID NOT NULL,
-    owner UUID NOT NULL,
-    protocol SMALLINT NOT NULL CHECK (protocol = 1),
-    phase TEXT NOT NULL CHECK (phase IN ('preparing','active','settled','abandoned','uncertain')),
-    transfer_chain JSONB NOT NULL DEFAULT '[]',
-    settled_checkpoint_id TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    ended_at TIMESTAMPTZ
-);
-CREATE TABLE native_cancel_commands (
-    id UUID PRIMARY KEY,
-    work_id UUID NOT NULL UNIQUE,
-    agent_id BIGINT NOT NULL CHECK (agent_id > 0),
-    operation_key TEXT NOT NULL UNIQUE,
-    request JSONB NOT NULL,
-    acceptance JSONB NOT NULL,
-    outcome TEXT NOT NULL DEFAULT 'accepted'
-        CHECK (outcome IN ('accepted','applied','recovered_stopped','uncertain')),
-    checkpoint_id TEXT CHECK (length(checkpoint_id)>0),
-    recovery_checkpoint_id TEXT CHECK (length(recovery_checkpoint_id)>0),
-    accepted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    settled_at TIMESTAMPTZ
-);
-CREATE INDEX native_cancel_pending_agent_idx ON native_cancel_commands (agent_id, accepted_at, id)
-    WHERE outcome IN ('accepted', 'uncertain');
-
-COMMENT ON TABLE native_graph_work IS
-    'Native invocation identities and same-transaction certified resource transfers. Retain unsettled work; no inferred closure or TTL.';
-COMMENT ON TABLE native_cancel_commands IS
-    'Guarded native cancel acceptance and checkpoint/certified-stop evidence. Dedicated domain, never generic inbound; retained without FK or expiry.';
-
 INSERT INTO schema_migrations (name) VALUES ('20261007T221732_native-work-cancel');
 CREATE TABLE upload_delivery_batches (
     batch_id text PRIMARY KEY CHECK (batch_id ~ '^[0-9a-f]{32}$'),
@@ -2926,154 +2819,7 @@ CREATE TABLE agent_creation_snapshots (
     accepted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 INSERT INTO schema_migrations (name) VALUES ('20261008T000137_guarded-draft-birth-snapshots');
--- Guarded ACTIVE restart acceptance and retained exact source execution facts.
-CREATE TABLE native_restart_commands (
-    operation_key TEXT PRIMARY KEY CHECK (length(operation_key) BETWEEN 1 AND 128),
-    command_id BIGINT NOT NULL UNIQUE CHECK (command_id > 0),
-    agent_id BIGINT NOT NULL CHECK (agent_id > 0),
-    work_id UUID NOT NULL UNIQUE,
-    target_generation UUID NOT NULL,
-    target_owner UUID NOT NULL,
-    request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
-    request JSONB NOT NULL CHECK (jsonb_typeof(request) = 'object'),
-    acceptance JSONB NOT NULL CHECK (jsonb_typeof(acceptance) = 'object'),
-    outcome TEXT NOT NULL DEFAULT 'accepted'
-        CHECK (outcome IN ('accepted','applied','observed','superseded','uncertain')),
-    applied_at TIMESTAMPTZ,
-    observed_at TIMESTAMPTZ,
-    outcome_reason TEXT CHECK (outcome_reason IN ('target_replaced','resurrect','force_terminate',
-        'invalid_source_transition','source_command_unavailable')),
-    accepted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK (observed_at IS NULL OR applied_at IS NOT NULL),
-    CHECK (outcome <> 'observed' OR (applied_at IS NOT NULL AND observed_at IS NOT NULL)),
-    CHECK (outcome <> 'applied' OR (applied_at IS NOT NULL AND observed_at IS NULL)),
-    CHECK (outcome NOT IN ('accepted','superseded') OR (applied_at IS NULL AND observed_at IS NULL)),
-    CHECK (outcome NOT IN ('superseded','uncertain') OR outcome_reason IS NOT NULL)
-);
-COMMENT ON TABLE native_restart_commands IS
-    'Immutable guarded ACTIVE restart acceptance and exact lifecycle source facts. No cleanup FK, TTL, generic Ops claim or execution inferred from status.';
-
-CREATE FUNCTION project_native_restart_source() RETURNS trigger
-LANGUAGE plpgsql AS $$
-DECLARE
-    original native_restart_commands%ROWTYPE;
-    result_reason TEXT;
-    proven_no_effect BOOLEAN := FALSE;
-    projected_outcome TEXT;
-    projected_reason TEXT;
-BEGIN
-    SELECT * INTO original FROM native_restart_commands WHERE command_id=NEW.id FOR UPDATE;
-    IF NOT FOUND OR original.outcome IN ('observed','superseded') THEN
-        RETURN NEW;
-    END IF;
-    IF NEW.agent_id <> original.agent_id OR NEW.kind <> 'restart'
-       OR NEW.target_generation IS DISTINCT FROM original.target_generation
-       OR NEW.target_owner IS DISTINCT FROM original.target_owner
-       OR NEW.source IS DISTINCT FROM original.request->>'source'
-       OR COALESCE(NEW.payload->'config_overlay','null'::jsonb)
-          IS DISTINCT FROM original.acceptance->'config_overlay' THEN
-        UPDATE native_restart_commands SET outcome='uncertain',outcome_reason='invalid_source_transition'
-        WHERE command_id=NEW.id;
-        RETURN NEW;
-    END IF;
-    IF NEW.applied_at IS NOT NULL AND NEW.observed_at IS NOT NULL AND NEW.status='done' THEN
-        projected_outcome := 'observed';
-    ELSIF NEW.applied_at IS NOT NULL AND NEW.observed_at IS NULL AND NEW.status='claimed' THEN
-        projected_outcome := 'applied';
-    ELSIF NEW.applied_at IS NULL AND NEW.observed_at IS NULL AND NEW.status='claimed'
-          AND original.applied_at IS NULL AND original.outcome='accepted' THEN
-        projected_outcome := 'accepted';
-    ELSE
-        result_reason := NEW.payload->'lifecycle_result'->>'reason';
-        IF original.applied_at IS NULL AND NEW.status='done' AND NEW.applied_at IS NULL AND NEW.observed_at IS NULL
-           AND NEW.payload->'lifecycle_result'->>'outcome'='superseded' THEN
-            IF result_reason='target_replaced' THEN
-                SELECT EXISTS(SELECT 1 FROM agents_meta m WHERE m.id=original.agent_id
-                    AND m.lifecycle_command_id=NEW.id AND m.runtime_generation IS NOT NULL
-                    AND m.runtime_owner IS NOT NULL AND
-                    (m.runtime_generation<>original.target_generation OR m.runtime_owner<>original.target_owner))
-                INTO proven_no_effect;
-            ELSIF result_reason='resurrect' THEN
-                SELECT EXISTS(SELECT 1 FROM agents_meta m JOIN inbound_messages r
-                    ON r.id=m.last_resurrect_inbound_id AND r.agent_id=m.id AND r.kind='resurrect'
-                    WHERE m.id=original.agent_id AND r.id>NEW.id AND
-                    to_jsonb(r.id)=NEW.payload->'lifecycle_result'->'resurrect_inbound_id')
-                INTO proven_no_effect;
-            ELSIF result_reason='force_terminate' THEN
-                SELECT EXISTS(SELECT 1 FROM agents_meta m JOIN inbound_messages force
-                    ON force.id=m.last_force_terminate_inbound_id AND force.agent_id=m.id AND force.kind='terminate'
-                    WHERE m.id=original.agent_id AND force.id>NEW.id)
-                INTO proven_no_effect;
-            END IF;
-        END IF;
-        IF proven_no_effect THEN
-            projected_outcome := 'superseded';
-            projected_reason := result_reason;
-        ELSE
-            projected_outcome := 'uncertain';
-            projected_reason := 'invalid_source_transition';
-        END IF;
-    END IF;
-    UPDATE native_restart_commands SET outcome=projected_outcome,outcome_reason=projected_reason,
-        applied_at=CASE WHEN projected_outcome IN ('applied','observed')
-            THEN COALESCE(original.applied_at,NEW.applied_at) ELSE original.applied_at END,
-        observed_at=CASE WHEN projected_outcome='observed'
-            THEN COALESCE(original.observed_at,NEW.observed_at) ELSE original.observed_at END
-    WHERE command_id=NEW.id;
-    RETURN NEW;
-END;
-$$;
-CREATE TRIGGER native_restart_source_projection
-AFTER UPDATE ON inbound_messages FOR EACH ROW EXECUTE FUNCTION project_native_restart_source();
-
 INSERT INTO schema_migrations (name) VALUES ('20261008T003901_native-active-restart');
-
-CREATE TABLE native_compact_observations (
-    id UUID PRIMARY KEY,
-    agent_id BIGINT NOT NULL CHECK (agent_id > 0),
-    work_id UUID NOT NULL,
-    target JSONB NOT NULL CHECK (jsonb_typeof(target) = 'object'),
-    resources JSONB NOT NULL CHECK (jsonb_typeof(resources) = 'object'),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX native_compact_observed_agent_idx ON native_compact_observations(agent_id, created_at DESC, id);
-
-CREATE TABLE native_compact_commands (
-    id UUID PRIMARY KEY,
-    agent_id BIGINT NOT NULL CHECK (agent_id > 0),
-    operation_key TEXT NOT NULL UNIQUE,
-    request JSONB NOT NULL CHECK (jsonb_typeof(request) = 'object'),
-    acceptance JSONB NOT NULL CHECK (jsonb_typeof(acceptance) = 'object'),
-    outcome TEXT NOT NULL DEFAULT 'accepted'
-        CHECK (outcome IN ('accepted','prepared','applying','applied','noop','rejected','uncertain')),
-    reason TEXT CHECK (length(reason) <= 128),
-    attempt_id UUID,
-    attempt_provider TEXT CHECK (length(attempt_provider)>0),
-    execution JSONB CHECK (jsonb_typeof(execution) = 'object'),
-    result JSONB CHECK (jsonb_typeof(result) = 'object'),
-    checkpoint_id TEXT CHECK (length(checkpoint_id)>0),
-    recovery_checkpoint_id TEXT CHECK (length(recovery_checkpoint_id)>0),
-    accepted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    released_at TIMESTAMPTZ,
-    CHECK ((attempt_id IS NULL) = (execution IS NULL)),
-    CHECK ((attempt_id IS NULL) = (attempt_provider IS NULL)),
-    CHECK (result IS NULL OR attempt_id IS NOT NULL),
-    CHECK (outcome NOT IN ('prepared','applying','applied') OR result IS NOT NULL),
-    CHECK (outcome <> 'applied' OR checkpoint_id IS NOT NULL),
-    CHECK (outcome <> 'noop' OR (attempt_id IS NULL AND result IS NULL AND released_at IS NOT NULL)),
-    CHECK (outcome <> 'rejected' OR attempt_id IS NOT NULL OR released_at IS NOT NULL),
-    CHECK (outcome <> 'uncertain' OR reason IS NOT NULL),
-    CHECK (outcome <> 'uncertain' OR released_at IS NULL OR recovery_checkpoint_id IS NOT NULL),
-    CHECK (checkpoint_id IS NULL OR outcome = 'applied'),
-    CHECK (recovery_checkpoint_id IS NULL OR (outcome = 'uncertain' AND released_at IS NOT NULL))
-);
-CREATE UNIQUE INDEX native_compact_pending_agent_idx ON native_compact_commands(agent_id)
-    WHERE released_at IS NULL;
-
-COMMENT ON TABLE native_compact_observations IS
-    'Actual new-host compact source observations after ended work and resource closure. No inferred capability or TTL.';
-COMMENT ON TABLE native_compact_commands IS
-    'Guarded manual compaction intent, original generation attempt, durable result and cold application proof. Retained without cleanup FK.';
 
 INSERT INTO schema_migrations (name) VALUES ('20261008T060000_guarded-manual-compact');
 

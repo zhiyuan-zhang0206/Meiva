@@ -10,13 +10,10 @@ with a default-executor job mid-flight.
 """
 
 import asyncio
-import contextlib
 import json
 import signal
 import subprocess
 import sys
-import time
-from collections.abc import AsyncGenerator
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -31,7 +28,6 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
 from base.host.tests.daemon_shutdown import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
@@ -40,10 +36,8 @@ from base.host.tests.daemon_shutdown import (
 from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.packages.composer_commands import CommandCatalog
 from base.telemetry import process_name
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 def _note_pidfile_removed(events: list[str], _path: object) -> None:
@@ -192,7 +186,7 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
             AgentHost=MagicMock(return_value=host),
             TurnScheduler=MagicMock(return_value=scheduler),
             beat_forever=beat,
-            settle_stale_running_rows=settle,
+            settle_running_rows_at_start=settle,
             start_health_server=AsyncMock(return_value=object()),
             stop_health_server=close_health,
             background_loops=loops,
@@ -368,47 +362,6 @@ def test_internal_sigterm_drains_async_cleanup_before_exit(
             assert "surrogate cleanup failure" in child.log_tail()
     finally:
         child.close()
-
-
-class _UnreachablePool:
-    """Every borrow waits, as a pool whose server is gone does until its timeout."""
-
-    @contextlib.asynccontextmanager
-    async def connection(self, timeout: float | None = None) -> AsyncGenerator[object]:
-        del timeout
-        await asyncio.Event().wait()
-        yield object()
-
-
-async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachable(
-    monkeypatch: pytest.MonkeyPatch,
-    model_catalog: ModelCatalog,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A/B/A run 6: with the pooler gone, the stop path's ownership release waited
-    out the control pool's 30 s acquire timeout, so meiva-root's 10 s TERM window
-    expired first and root retained custody of the still-exiting agent-host."""
-    from .... import host as host_mod
-
-    monkeypatch.setattr(host_mod, "RELEASE_OWNER_TIMEOUT_S", 0.05)
-    machine_identity.set(name="this-box")
-    host = host_mod.AgentHost(
-        policy=configured_policy(),
-        pool=cast(Any, _UnreachablePool()),
-        checkpointer=cast(Any, object()),
-        graph=cast(Any, object()),
-        machine=machine_identity,
-        catalog=model_catalog,
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(gate=database_gate),
-        commands=CommandCatalog(skills=list),
-    )
-    started = time.monotonic()
-    with pytest.raises(TimeoutError, match="ownership release"):
-        await asyncio.wait_for(host.aclose(), timeout=2.0)
-    assert time.monotonic() - started < 1.0
 
 
 def test_failed_heartbeat_during_boot_still_closes_pools_and_pidfile(unit_home: Path) -> None:

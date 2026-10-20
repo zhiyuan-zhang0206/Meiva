@@ -1,8 +1,8 @@
-"""Nonblocking output owned by the invocation that launched its known process.
-
-Loop readiness, polling and the close/reap barrier pump the same descriptor. There is no reader
-thread or executor worker to outlive cancellation of the invocation.
-"""
+# meiva:note
+# Nonblocking output owned by the invocation that launched its known process.
+#
+# Loop readiness, polling and the final drain after the group kill pump the same descriptor. There is no reader
+# thread or executor worker to outlive cancellation of the invocation.
 
 import asyncio
 import os

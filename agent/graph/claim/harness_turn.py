@@ -11,7 +11,12 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
-from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
+from agent.graph.interrupt import (
+    ModelInterruptedError,
+    interrupt_halt,
+    interruptible_model,
+    subscribe_interrupt,
+)
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.nodes import CLAIM
 from base.agents.context import MeivaContext, agent_id_from_config
@@ -109,8 +114,6 @@ async def harness_turn_node(
         async with subscribe_interrupt(
             ctx.ops_pool,
             agent_id,
-            incarnation=ctx.original_incarnation,
-            work=ctx.native_work,
             resources=ctx.hosted_resources,
         ) as cancel_event:
             turn = await interruptible_model(
@@ -119,10 +122,10 @@ async def harness_turn_node(
                 ),
                 cancel_event,
             )
-    except ModelInterruptedError:
+    except ModelInterruptedError as interrupted:
         _announce_cancel(ctx, agent_id)
         await interrupt_engine(agent_id, bridge)
-        return Command[HarnessGoto](update={"halted": True}, goto=CLAIM)
+        return Command[HarnessGoto](update=interrupt_halt(interrupted.reason), goto=CLAIM)
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
         raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
 

@@ -89,26 +89,11 @@ both literal rate tables without executing plugin code.
   check overlay structure; admission checks membership with the request owner's
   model view before writes or execution.
 
-## Explicit single-attempt construction
+## Unregistered model ids
 
 A bound prefix in the low-level factory can dispatch an unregistered model id
 with `BuildContext.spec = None`; the builder decides whether to accept it.
 Admission and model selection separately enforce catalog membership.
-
-`BuildContext.max_retries` is additive and defaults to `None`; ordinary builders
-retain their existing retry policy. `ProviderBinding.build_single_attempt` is
-an optional explicit provider-owned construction contract. A binding that does
-not declare it cannot support `build_chat_model(single_attempt=True)`. Custom
-model overrides are likewise unsupported rather than inferred from a client
-class or mutating a cached model.
-
-The OpenAI and Anthropic owners construct fresh clients with `max_retries=0` for
-this path. Guarded generation freezes the original available model and rejects
-unavailable-model fallback. Callers must also suppress their own retry
-loops; this construction contract cannot prove exactly-once external vendor
-execution or recover a response that was lost before durable storage.
-The manual compact consumer and its proof boundary are documented in
-[[base/agents/compaction/docs/manual-compact/manual-compact.meiva.okf.md]].
 
 Known declaration violations raise their typed registration error. Unexpected
 Python errors from import, contribution, installation or final construction

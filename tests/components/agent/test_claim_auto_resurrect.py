@@ -52,7 +52,6 @@ async def running_agent(
         agent_id,
         machine_identity.name(),
         uuid4(),
-        expected_from="idling",
         db=database,
     )
     assert incarnation is not None
@@ -95,17 +94,26 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     old = meiva.context.original_incarnation
     assert old is not None
     assert (
-        await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None) == "terminate"
+        await apply_hosted_lifecycle(
+            aops_pool,
+            old,
+            bus=event_bus,
+            resume_turn=False,
+        )
+        == "terminate"
     )
     assert db_conn.execute(
-        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (stop,)
-    ).fetchone() == ("done", True)
+        "SELECT status FROM inbound_messages WHERE id=%s", (stop,)
+    ).fetchone() == ("done",)
     db_conn.commit()
     insert_inbound_message(
         db_conn, tid, "are you there?", source="user", bus=event_bus, database=database
     )
     resurrect_agent(
-        database, event_bus, tid, resurrected_by="user", local_machine=machine_identity.name()
+        database,
+        event_bus,
+        tid,
+        resurrected_by="user",
     )
     launch = db_conn.execute(
         "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='resurrect' "
@@ -119,7 +127,6 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
         tid,
         machine_identity.name(),
         uuid4(),
-        expected_from="idling",
         db=database,
     )
     assert successor is not None

@@ -1,22 +1,22 @@
-"""Memory guard for exec subprocesses: relieve critical system memory pressure
-by killing the one largest `execute_code` process domain, and tell its agent why.
-
-The agent host runs one sequential loop (`ExecMemoryGuard.run_forever`). Each tick
-reads the pressure level the operating system itself reports
-(`base.host.memory_pressure`); only at ``critical`` does it look at the exec
-domains this host owns, pick the one with the largest footprint, record the
-reason next to its result file and kill its session leader. The run that owns
-that domain observes the root exit exactly as for any external SIGKILL — its
-`DomainCloseOwner` closes the whole process group and reaps — and then reads the
-notice, so the agent's result states the cause instead of a generic "exited
-without a result envelope". The loop sleeps one interval after a kill and
-re-reads the level before it considers another domain, so a recovery that
-follows the first kill is never answered with a second.
-
-Domains are found by the OS, not tracked: the host's descendants that lead a
-session running an exec entry module (`base.host.proc.EXEC_DOMAIN_SESSION_ENTRIES`),
-with the agent id and result path read from the leader's launch environment.
-"""
+# meiva:note
+# Memory guard for exec subprocesses: relieve critical system memory pressure
+# by killing the one largest `execute_code` process domain, and tell its agent why.
+#
+# The agent host runs one sequential loop (`ExecMemoryGuard.run_forever`). Each tick
+# reads the pressure level the operating system itself reports
+# (`base.host.memory_pressure`); only at ``critical`` does it look at the exec
+# domains this host owns, pick the one with the largest footprint, record the
+# reason next to its result file and kill its session leader. The run that owns
+# that domain observes the leader exit exactly as for any external SIGKILL — it
+# kills the rest of the process group and reaps the leader — and then reads the
+# notice, so the agent's result states the cause instead of a generic "exited
+# without a result envelope". The loop sleeps one interval after a kill and
+# re-reads the level before it considers another domain, so a recovery that
+# follows the first kill is never answered with a second.
+#
+# Domains are found by the OS, not tracked: the host's descendants that lead a
+# session running an exec entry module (`base.host.proc.EXEC_DOMAIN_SESSION_ENTRIES`),
+# with the agent id and result path read from the leader's launch environment.
 
 from __future__ import annotations
 
@@ -103,12 +103,12 @@ def find_exec_domains(host_pid: int, source: MemorySource) -> list[ExecDomain]:
     return domains
 
 
+# meiva:note
+# SIGKILL the domain's session leader if it is still the process we measured.
+#
+# The run that owns the domain kills the rest of the group when it sees the
+# leader exit (`run_in_subprocess`), the same path an external SIGKILL takes.
 def kill_domain_leader(domain: ExecDomain) -> None:
-    """SIGKILL the domain's session leader if it is still the process we measured.
-
-    The run that owns the domain closes the rest of the group when it sees the
-    root exit (`DomainCloseOwner`), the same path an external SIGKILL takes.
-    """
     try:
         process = psutil.Process(domain.pid)
         if process.create_time() != domain.create_time:

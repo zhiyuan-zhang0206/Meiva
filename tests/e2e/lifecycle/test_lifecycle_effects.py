@@ -7,14 +7,12 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import httpx
 import psycopg
 import pytest
 
 from base.config import settings
-from base.db.code_version_gate import ProcessDbGate
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
@@ -171,34 +169,13 @@ def _start_long_exec(agent_id: int) -> None:
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_cancel")
 def test_cancel_interrupts_a_running_exec_and_the_agent_stays_usable(
-    spawned_agent: int, clean_record: None, database_gate: ProcessDbGate
+    spawned_agent: int, clean_record: None
 ) -> None:
     agent = spawned_agent
     _start_long_exec(agent)
-    from base.agents.impersonation.wake import publish_inbound_wake
-    from base.agents.inbox.native_cancel import accept_native_cancel, observe_native_work
-    from base.db import Database, pool
-    from base.events.live.bus import EventBus
-
-    with pool(max_size=2, gate=database_gate) as command_pool:
-        target = observe_native_work(command_pool, agent)
-        assert target is not None
-        accepted = accept_native_cancel(command_pool, str(uuid4()), agent, target)
-    publish_inbound_wake(
-        Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
-        agent,
-        str(accepted.command_id),
-    )
-
-    def settled() -> tuple[bool, object]:
-        with psycopg.connect(settings.data_plane.db_url) as conn:
-            row = conn.execute(
-                "SELECT outcome FROM native_cancel_commands WHERE id=%s", (accepted.command_id,)
-            ).fetchone()
-        return row is not None and row[0] == "applied", row
-
-    poll_until(settled, timeout=30.0, interval=0.5, what="cancel finalized")
+    cancelled = httpx.post(f"{GATEWAY_URL}/api/agents/{agent}/cancel", timeout=30.0)
+    cancelled.raise_for_status()
+    assert cancelled.json() == {"status": "cancelled"}
     wait_for_status(agent, "idling", timeout=30.0)
     _assert_exec_never_finishes()
 

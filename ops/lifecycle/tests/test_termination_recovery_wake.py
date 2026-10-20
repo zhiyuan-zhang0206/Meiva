@@ -55,8 +55,7 @@ def agent_id(
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentity,
 ) -> int:
-    """A never-admitted agent: it has no runtime identity, so a force on it
-    leaves the unowned-termination receipt that resurrection accepts."""
+    """A never-admitted agent: it has no runtime identity to resurrect from."""
     new_id, _, _, _ = create_agent_row(
         database,
         event_bus,
@@ -117,7 +116,6 @@ def test_a_chat_queued_before_the_fence_cannot_resurrect(
             resurrected_by="system",
             trigger_inbound_id=row[0],
             trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
         )
 
 
@@ -144,7 +142,7 @@ def _audit_rows(
 def test_a_force_terminate_records_its_audit_fact_in_the_same_transaction(
     db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
 ) -> None:
-    _, _, _, fence, _cutoff = termination.force_terminate_transaction(
+    _, _, fence, _cutoff = termination.force_terminate_transaction(
         agent_id, db_pool, source="system"
     )
 
@@ -197,7 +195,6 @@ def test_a_resurrection_records_its_audit_fact(
         resurrected_by="system",
         trigger_inbound_id=wake_id,
         trigger_inbound_kind=InboundKind.CHAT,
-        local_machine=machine_identity.name(),
     )
 
     assert [source for source, _ in _audit_rows(db_conn, agent_id, "resurrect")] == ["system"]

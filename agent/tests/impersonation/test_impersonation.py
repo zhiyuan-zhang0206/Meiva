@@ -177,7 +177,6 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
             42,
             relays,
             incarnation=incarnation,
-            resources=None,
             notes=_notes(),
             read_local_machine=machine_identity.name,
         )
@@ -190,7 +189,6 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
         42,
         relays,
         incarnation=incarnation,
-        resources=None,
         notes=_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -281,7 +279,6 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
         42,
         relays,
         incarnation=incarnation,
-        resources=None,
         notes=_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -313,7 +310,6 @@ async def test_settle_checkpoint_activates_only_after_relay_ready(
         42,
         relays,
         incarnation=incarnation,
-        resources=None,
         notes=_notes(),
         read_local_machine=machine_identity.name,
     )
@@ -658,9 +654,8 @@ def test_an_unreadable_antigravity_record_rolls_back_with_its_path(
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
-        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'hosted',"
-        "clock_timestamp()+interval '1 hour')",
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner) "
+        "VALUES(%s,'idling',%s,%s,%s)",
         (agent_id, local_machine, owner.generation, owner.owner),
     )
     db_conn.commit()

@@ -1,20 +1,15 @@
 import asyncio
-import subprocess
-import sys
 import time
 from collections.abc import Callable
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import psutil
 import psycopg
 import pytest
 from langchain_core.messages import AIMessage
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.state import AgentState
-from base.agents.incarnation import resources as resource_codec
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -33,7 +28,7 @@ from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import 
 )
 
 
-async def test_pending_scan_classifies_lifecycle_work_and_lease(
+async def test_pending_scan_classifies_lifecycle_work_and_impersonation(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     insert_inbound: Callable[..., int],
@@ -162,9 +157,7 @@ async def test_old_pending_scan_never_cancels_a_running_turn(
 
 
 @pytest.mark.parametrize("status", ["running", "idling"])
-@pytest.mark.parametrize(
-    "boundary", ["fresh", "same_owner", "foreign", "unowned", "fatal", "terminated"]
-)
+@pytest.mark.parametrize("boundary", ["same_owner", "foreign", "unowned", "fatal", "terminated"])
 async def test_owner_recovery_scan_excludes_unrelated_rows(
     redis_url: str,
     db_conn: psycopg.Connection,
@@ -199,12 +192,10 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
     if boundary == "same_owner":
         host._owner = incarnation.owner
     db_conn.execute(
-        "UPDATE agents_meta SET status=%s,machine=%s,lease_expires_at=now()+make_interval(secs=>%s) "
-        "WHERE id=%s",
+        "UPDATE agents_meta SET status=%s,machine=%s WHERE id=%s",
         (
             "terminated" if boundary == "terminated" else status,
             "another-machine" if boundary == "foreign" else machine_identity.name(),
-            60 if boundary == "fresh" else -60,
             agent,
         ),
     )
@@ -217,88 +208,3 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
         db_conn.execute("UPDATE agents_meta SET last_turn_fatal_at=now() WHERE id=%s", (agent,))
     db_conn.commit()
     assert await host.pending_inbound_wakes() == []
-
-
-@pytest.mark.parametrize("status", ["running", "idling"])
-async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    status: str,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    incarnation = await _admit(
-        aops_pool,
-        model_catalog=model_catalog,
-        config_authority=config_authority,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
-    agent = incarnation.agent_id
-    host = AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        checkpointer=AsyncMock(),
-        graph=AsyncMock(),
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(gate=database_gate),
-        catalog=model_catalog,
-        machine=configured_machine(),
-        commands=CommandCatalog(skills=list),
-    )
-    with subprocess.Popen(
-        [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE
-    ) as predecessor:
-        assert predecessor.stdin is not None
-        try:
-            row = db_conn.execute(
-                "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent,)
-            ).fetchone()
-            assert row is not None
-            resources = resource_codec.decode_resources(row[0])
-            assert isinstance(resources, resource_codec.IncarnationResources)
-            native = resource_codec.ResourceProcess.capture(psutil.Process(predecessor.pid))
-            db_conn.execute(
-                "UPDATE agents_meta SET status=%s,incarnation_resources=%s,"
-                "lease_expires_at=now()-interval '1s' WHERE id=%s",
-                (
-                    status,
-                    Jsonb(
-                        resources.model_copy(update={"host_process": native}).model_dump(
-                            mode="json"
-                        )
-                    ),
-                    agent,
-                ),
-            )
-            db_conn.commit()
-            before = db_conn.execute(
-                "SELECT status,runtime_generation,runtime_owner,incarnation_resources,"
-                "lease_expires_at FROM agents_meta WHERE id=%s",
-                (agent,),
-            ).fetchone()
-            assert await host.pending_inbound_wakes() == []
-            await host.run_turn(agent)
-            assert host.stats.cache_misses == 0
-            assert (
-                db_conn.execute(
-                    "SELECT status,runtime_generation,runtime_owner,incarnation_resources,"
-                    "lease_expires_at FROM agents_meta WHERE id=%s",
-                    (agent,),
-                ).fetchone()
-                == before
-            )
-            observation = db_conn.execute(
-                "SELECT last_admission_outcome,last_admission_at FROM agents_meta WHERE id=%s",
-                (agent,),
-            ).fetchone()
-            assert observation is not None and observation[0] == "admission_guard_refused"
-            assert observation[1] is not None
-            assert predecessor.poll() is None
-        finally:
-            predecessor.stdin.close()
-            predecessor.wait(timeout=3)

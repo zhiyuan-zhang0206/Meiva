@@ -2,7 +2,6 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any, cast
 from unittest.mock import MagicMock
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -59,8 +58,6 @@ def _owed(
     db_conn: psycopg.Connection[Any],
     machine: MachineIdentity,
     database: Database,
-    *,
-    applied: bool = False,
 ) -> tuple[int, int, MaintenanceHold]:
     agent = maintenance_agent(db_conn, machine_name=machine.name())
     command = insert_inbound_message(
@@ -73,13 +70,6 @@ def _owed(
         database=database,
         bus=EventBus.from_settings(),
     )
-    if applied:
-        db_conn.execute(
-            "UPDATE inbound_messages SET status='claimed', claimed_at=clock_timestamp(), "
-            "applied_at=clock_timestamp(), target_owner=%s, target_generation=%s WHERE id=%s",
-            (uuid4(), uuid4(), command),
-        )
-    db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (command, agent))
     db_conn.commit()
     before = pause_owner.begin_maintenance("grade", WHEN).snapshot
     assert before.maintenance is not None
@@ -90,8 +80,7 @@ def _owed(
 
 def _command(db_conn: psycopg.Connection[Any], command: int) -> tuple[Any, ...]:
     row = db_conn.execute(
-        "SELECT i.status, i.payload->'lifecycle_result', m.lifecycle_command_id "
-        "FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id WHERE i.id=%s",
+        "SELECT status, payload->'lifecycle_result' FROM inbound_messages WHERE id=%s",
         (command,),
     ).fetchone()
     assert row is not None
@@ -128,7 +117,6 @@ async def test_a_failed_continuation_ends_its_restart_and_alerts_exactly_once(
     assert _command(db_conn, command) == (
         "done",
         {"outcome": "failed", "reason": "continuation_failed"},
-        None,
     )
     assert admission.require_operation("grade", WHEN).maintenance == hold
     for _scan in range(3):
@@ -158,9 +146,6 @@ async def test_other_members_with_an_open_restart_are_still_woken(
             database=database,
             bus=EventBus.from_settings(),
         )
-        db_conn.execute(
-            "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (commands[agent], agent)
-        )
     db_conn.commit()
     before = pause_owner.begin_maintenance("grade", WHEN).snapshot
     assert before.maintenance is not None
@@ -172,23 +157,6 @@ async def test_other_members_with_an_open_restart_are_still_woken(
 
     wakes = await held_maintenance_wakes(aops_pool)
     assert wakes == [healthy]
-
-
-async def test_an_applied_restart_is_not_rewritten(
-    redis_url: str,
-    alerts: Alerts,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    machine_identity: MachineIdentity,
-    database: Database,
-) -> None:
-    agent, command, _hold = _owed(db_conn, machine_identity, database, applied=True)
-
-    await receipts.record_failure(aops_pool, agent, RuntimeError("node failed"))
-
-    assert alerts.rows[0]["outcome"] == "applied"
-    status, result, pointer = _command(db_conn, command)
-    assert (status, result, pointer) == ("claimed", None, command)
 
 
 async def test_an_unreachable_database_still_alerts_and_keeps_the_restart_open(
@@ -217,13 +185,13 @@ async def test_a_member_with_an_open_restart_is_run_held(
     database: Database,
 ) -> None:
     agent, _command_id, _hold = _owed(db_conn, machine_identity, database)
-    controls: list[tuple[int, str]] = []
+    controls: list[int] = []
 
-    async def control(agent_id: int, status: str) -> None:
-        controls.append((agent_id, status))
+    async def control(agent_id: int) -> None:
+        controls.append(agent_id)
 
-    assert await receipts.run_held(agent, "idling", control) is True
-    assert controls == [(agent, "idling")]
+    assert await receipts.run_held(agent, control) is True
+    assert controls == [agent]
 
 
 async def test_failure_outside_a_hold_is_not_reported(alerts: Alerts) -> None:

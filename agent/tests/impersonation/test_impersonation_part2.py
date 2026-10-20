@@ -1,6 +1,5 @@
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock
@@ -9,7 +8,6 @@ from uuid import uuid4
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 import base.agents.impersonation as agents_impersonation
@@ -17,7 +15,6 @@ from agent import impersonation
 from agent.tests.impersonation.test_impersonation import _notes
 from base.agents.context import MeivaContext
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
-from base.agents.incarnation.resources import ResourceProcess
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -28,7 +25,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 
@@ -91,7 +87,6 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
     event_bus: EventBus,
-    exited_host: ResourceProcess,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -110,7 +105,7 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
         machine=machine_identity,
     )
     first = await admit_hosted_runtime(
-        aops_pool, agent_id, machine_identity.name(), uuid4(), expected_from="idling", db=database
+        aops_pool, agent_id, machine_identity.name(), uuid4(), db=database
     )
     assert first is not None
     lease = leases.request(
@@ -135,15 +130,8 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
         "Handoff brief",
         local_machine=machine_identity.name(),
     )
-    db_conn.execute(
-        "UPDATE agents_meta SET lease_expires_at = clock_timestamp() - interval '1 second', "
-        "incarnation_resources=jsonb_set(incarnation_resources,'{host_process}',%s) "
-        "WHERE id=%s",
-        (Jsonb(exited_host.model_dump(mode="json")), agent_id),
-    )
-    db_conn.commit()
     successor = await admit_hosted_runtime(
-        aops_pool, agent_id, machine_identity.name(), uuid4(), expected_from="running", db=database
+        aops_pool, agent_id, machine_identity.name(), uuid4(), db=database
     )
     assert successor is not None
     assert db_conn.execute(
@@ -174,7 +162,7 @@ def relays() -> RelaySupervision:
     return RelaySupervision()
 
 
-async def test_activation_waits_for_resource_closure(
+async def test_activation_is_skipped_when_not_requested(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
     database: Database,
@@ -186,21 +174,7 @@ async def test_activation_waits_for_resource_closure(
     )
     activate = Mock(return_value=_session())
     monkeypatch.setattr(agents_impersonation, "activate", activate)
-    read_local_machine = Mock(side_effect=AssertionError("identity read before resource closure"))
-    resources = HostedTurnResources(unresolved={Path("request"): object()})
-    with pytest.raises(RuntimeError, match="unresolved native exec"):
-        await impersonation.settle_checkpoint(
-            MagicMock(),
-            database,
-            event_bus,
-            42,
-            relays,
-            incarnation=incarnation,
-            resources=resources,
-            notes=_notes(),
-            read_local_machine=read_local_machine,
-        )
-    activate.assert_not_called()
+    read_local_machine = Mock(side_effect=AssertionError("identity read without activation"))
     assert not await impersonation.settle_checkpoint(
         MagicMock(),
         database,
@@ -209,7 +183,6 @@ async def test_activation_waits_for_resource_closure(
         relays,
         activate_accepted=False,
         incarnation=incarnation,
-        resources=resources,
         notes=_notes(),
         read_local_machine=read_local_machine,
     )

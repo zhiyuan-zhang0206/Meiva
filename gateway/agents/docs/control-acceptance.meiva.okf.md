@@ -1,39 +1,29 @@
 ---
 type: doc
-title: Cancel and Compact Acceptance
-description: Observed targets and required principal-scoped keys fence native cancel and manual compaction.
-tags: [gateway, agents, idempotency]
+title: Cancel and Compact Requests
+description: Two unkeyed routes ask the host to cancel a running turn or to compact at the next turn.
+tags: [gateway, agents]
 ---
 
-# Cancel and compact acceptance
+# Cancel and compact requests
 
-Public callers first observe the exact target through
-`GET /api/keyed/v1/agents/{agent_id}/native-work` or `compact-target`, then submit
-that unchanged target to `POST /api/keyed/v1/agents/{agent_id}/cancel-work` or
-`compact-history`. Both writes require `Idempotency-Key`,
-`Idempotency-Scope: principal-v1` and a verified credential principal. Missing
-identity or unsupported ingress fails before effects. The former `/api/cancel`
-and `/api/agents/{agent_id}/compact` routes are removed.
+`POST /api/agents/{agent_id}/cancel` forwards to the agent's home runner, whose
+host cancels the agent's running turn Task (see
+[[agent/graph/exec/docs/hosted-turn-cancel.meiva.okf.md]]). It answers
+`cancelled` or `not_running`; the agent stays alive and its next input starts a
+fresh turn. An unreachable home runner is an error, never `not_running`. The
+request names no turn, so a repeat cancels whatever turn is running then: the
+route contract marks it non-idempotent and it takes no `Idempotency-Key`.
 
-One user action owns one key and one observation. Recovery replays that exact
-pair; it never silently observes newer work or history. Changed intent with the
-same key conflicts. A deliberate new action gets a fresh observation and key.
-Acceptance returns the original `command_id + target`, not proof of application.
-Native command status owns the eventual outcome. Fresh birth transactions stamp
-`ResourceBirth`; actual host admission must consume it and capture its process
-before a work/history observation is eligible. Existing unknown resource rows
-remain ineligible; receipt replay does not reset their resource state.
+`POST /api/agents/{agent_id}/compact` inserts one `compact_request` inbound and
+wakes the host; the agent summarizes and replaces its history when its claim
+node next dispatches the request (`agent/graph/claim/_dispatch.py`). The
+response (`inbound_id`) says the request is durable, not that a summary was
+applied. A terminated agent returns 409 and nothing resurrects it for a
+compaction. A repeat queues another request.
 
-The browser captures the observation promise and key before its compaction
-mutation can retry. Its stop action observes native work before submitting
-cancel. CLI cancel and compact validate both the observation and acceptance
-against the requested agent, and print only acceptance. There is no implicit
-resurrection for manual compaction.
-
-Canonical owners describe native admission, checkpoint recovery and settlement:
-[[base/agents/incarnation/docs/native-work-cancel.meiva.okf.md]] and
-[[base/agents/compaction/docs/manual-compact/manual-compact.meiva.okf.md]]. The native
-compact-envelope insertion primitive remains for graph/history producers and
-fixtures; it is not public manual-compaction admission. Historical
-`agent_control_receipts` data has no remaining writer; merged migrations and
-stored evidence are retained.
+Callers: the web stop button and compact action, `meiva agents cancel` and
+`compact`, and `meiva.agents.cancel` / `meiva.agents.compact`. The compact
+envelope insertion primitive (`base/agents/inbox/compact.py`) is shared with
+the graph and history producers. Historical `agent_control_receipts` data has no
+remaining writer; merged migrations and stored evidence are retained.
