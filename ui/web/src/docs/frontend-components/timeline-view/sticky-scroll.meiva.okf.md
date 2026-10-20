@@ -66,6 +66,13 @@ area, so the echo arrives as ordinary growth and a following reader stays on the
 tail either way. Only a following reader releases the oldest rows (the 250-row
 retention rule in the paging doc).
 
+A viewport width change is the same problem in the other direction: every row
+re-wraps, so the pixel offset that was the reader's place now points at a
+different one — opening or closing the sidebar moves that column by a sixth of
+the window. A reader who is not following has the bookmark's anchor re-applied
+after the reflow, so they stay on the row they were reading; a reader in the
+bottom zone pins as before (user report 2026-10-20).
+
 ## Header scrolling scope
 Human-message and agent-reply titles stay in normal flow, including historical,
 streaming and interrupted replies. Expanded work blocks retain their sticky

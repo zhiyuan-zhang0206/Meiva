@@ -490,3 +490,31 @@ it("rests on the loading ring while new messages arrive and stays clickable", ()
   expect(screen.getByTestId("scroll-to-bottom-arrow").className).toContain("hidden");
   expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: "smooth" });
 });
+
+  it("keeps the reader on their row when the viewport width changes", () => {
+    useTimelineStore.getState().switchThread(42, items, false);
+    render(conversation(42, "history-width-change"));
+    resize();
+    act(() => { viewport().scrollTop = 900; fireEvent.scroll(viewport()); });
+    expect(readingOffset("4.0")).toBe(0);
+
+    let width = 400;
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => width);
+    // meiva:note
+    // The first pass only records the width the viewport already had.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    act(() => { resizeCallbacks.forEach((deliver) => deliver()); });
+
+    // meiva:note
+    // A width change re-wraps every row; the ones above the reader grew, so the
+    // pixel offset that used to point at 4.0 now points past it.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    act(() => {
+      width = 700;
+      aboveSettle = 120;
+      resizeCallbacks.forEach((deliver) => deliver());
+    });
+
+    expect(readingOffset("4.0")).toBe(0);
+    expect(viewport().scrollTop).toBe(1020);
+  });

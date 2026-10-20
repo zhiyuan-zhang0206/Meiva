@@ -169,21 +169,17 @@ export function HomeLayout({
     );
   }
 
-  if (sidebarCollapsed) {
-    return (
-      <>
-        <div className={cn("h-full w-full", FLEX, MIN_H_0, MIN_W_0)}>
-          {isLarge && inspector !== null && inspector !== undefined && inspector !== false ? (
-            <DesktopMain main={main} inspector={inspector} />
-          ) : (
-            main
-          )}
-        </div>
-        {isLarge ? null : inspector}
-      </>
-    );
-  }
-
+  // meiva:note
+  // One tree, whether the sidebar is open or collapsed: the group stays mounted
+  // and the sidebar panel and its divider are the only children that come and
+  // go, keyed so the conversation's panel is matched by key and keeps its
+  // component. Swapping the group for a bare div unmounted the whole main
+  // subtree on every toggle — the conversation rebuilt, its height flashed, and
+  // the reader's place came back from the per-entry bookmark instead of staying
+  // put (user report 2026-10-20). The library reads a stored layout only when
+  // its key count matches the panels present, so the collapsed single-panel
+  // group lands on 100% rather than the stored two-panel split.
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
   return (
     <>
       {/* Desktop and compact frames have different layout ids, so breakpoint
@@ -195,19 +191,23 @@ export function HomeLayout({
         onLayoutChanged={onLayoutChanged}
         className={cn(FLEX_1, MIN_H_0, MIN_W_0)}
       >
+        {sidebarCollapsed ? null : (
+          <ResizablePanel
+            key={PANEL_SIDEBAR}
+            id={PANEL_SIDEBAR}
+            defaultSize={frame.expanded[0]}
+            minSize={frame.expandedMinimums[0]}
+            maxSize="50%"
+            className={cn(FLEX, MIN_H_0, MIN_W_0)}
+          >
+            {sidebar}
+          </ResizablePanel>
+        )}
+        {sidebarCollapsed ? null : <HomeDividerHandle key="home-divider" />}
         <ResizablePanel
-          id={PANEL_SIDEBAR}
-          defaultSize={frame.expanded[0]}
-          minSize={frame.expandedMinimums[0]}
-          maxSize="50%"
-          className={cn(FLEX, MIN_H_0, MIN_W_0)}
-        >
-          {sidebar}
-        </ResizablePanel>
-        <HomeDividerHandle />
-        <ResizablePanel
+          key={PANEL_MAIN}
           id={PANEL_MAIN}
-          defaultSize={frame.expanded[1]}
+          defaultSize={sidebarCollapsed ? "100%" : frame.expanded[1]}
           minSize={frame.expandedMinimums[1]}
           className={cn(FLEX, MIN_H_0, MIN_W_0)}
         >
