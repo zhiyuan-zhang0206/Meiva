@@ -126,6 +126,60 @@ class RootUnitStopped(TypedDict):
     stopped_in_s: float
 
 
+class RootUnitLeftBehind(TypedDict):
+    # meiva:note
+    # A unit's recorded previous generation was still running when this root
+    # started (task #5474).
+    #
+    # A root that exits without stopping its tree (a crash, or the code-version
+    # gate's hard exit from a pool worker thread) leaves the units it spawned
+    # running with no supervisor. The next root stops that recorded birth before
+    # it spawns its own, because the leftover still holds the unit's port, socket
+    # or instance lock. left_behind_s is how long it outlived its root.
+
+    unit: str
+    generation: int
+    pid: int
+    left_behind_s: float
+
+
+class RootUnitLeftBehindStuck(TypedDict):
+    # meiva:note
+    # A recorded leftover survived TERM and KILL, so no replacement was spawned
+    # (task #5474).
+    #
+    # Root refuses to start a second process onto a port the leftover still
+    # holds: the spawn would lose the bind and exit while the leftover kept
+    # answering the readiness probe. The unit stays stopped with this error on
+    # its row until the process is dealt with.
+
+    unit: str
+    generation: int
+    pid: int
+
+
+class RootUnitUnownedAlive(TypedDict):
+    # meiva:note
+    # A readiness answer from a process this root owns no generation for.
+    #
+    # The answer proves the unit's daemon of this home is serving — never that
+    # this root owns it: a leftover of a dead root answers identically. That is
+    # how a unit reads "state stopped / probe alive" for hours with every monitor
+    # green (task #5474). One event per episode; detail is the probe's evidence
+    # and never a grouping key.
+
+    unit: str
+    verdict: str
+    detail: str
+
+
+class RootUnitOwnedAlive(TypedDict):
+    # meiva:note
+    # The answering process is this root's own generation again (task #5474).
+
+    unit: str
+
+
 class RootDiagnostic(TypedDict):
     """`root_diagnostic` payload — services/supervision/meiva_root_glue/diagnostics.py.
 
@@ -455,6 +509,38 @@ EVENTS: dict[str, EventSpec] = {
         "an observed operator stop ended the outage (task #5315)",
         payload=RootUnitBreakerClosed,
         tier="noise",
+    ),
+    "root_unit_left_behind_reclaimed": telemetry_event(
+        "root_unit_left_behind_reclaimed",
+        "a unit's recorded previous generation outlived the root that spawned it — this "
+        "root stopped it before spawning its own replacement (task #5474)",
+        payload=RootUnitLeftBehind,
+        tier="anomaly",
+        site="services/supervision/meiva_root/left_behind.py:_emit_left_behind",
+    ),
+    "root_unit_left_behind_stuck": telemetry_event(
+        "root_unit_left_behind_stuck",
+        "a recorded leftover survived TERM and KILL, so this root refused to spawn a "
+        "replacement onto the port it still holds (task #5474)",
+        payload=RootUnitLeftBehindStuck,
+        tier="anomaly",
+        site="services/supervision/meiva_root/left_behind.py:_clear_left_behind",
+    ),
+    "root_unit_unowned_alive": telemetry_event(
+        "root_unit_unowned_alive",
+        "a unit's readiness probe answers while this root owns no generation for it — "
+        "the answering process is unmanaged and holds the unit's port (task #5474)",
+        payload=RootUnitUnownedAlive,
+        tier="anomaly",
+        site="services/supervision/meiva_root/health.py:_note_alive_ownership",
+    ),
+    "root_unit_owned_alive": telemetry_event(
+        "root_unit_owned_alive",
+        "the process answering a unit's readiness probe is this root's own generation "
+        "again — a root_unit_unowned_alive episode closed (task #5474)",
+        payload=RootUnitOwnedAlive,
+        tier="noise",
+        site="services/supervision/meiva_root/health.py:_note_alive_ownership",
     ),
     "root_unit_not_revivable": telemetry_event(
         "root_unit_not_revivable",
