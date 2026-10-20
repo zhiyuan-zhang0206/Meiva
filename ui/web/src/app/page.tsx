@@ -277,7 +277,7 @@ function HomeContent({
     [activeId],
   );
 
-  const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading, retainedItemsMax, error: timelineError, isFetching, retryTimeline } =
+  const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading, retainedItemsMax, error: timelineError, isFetching, loadingNewer, retryTimeline } =
     useTimeline(activeId, showError, activeAgent?.status);
   const { contextTokens, maxContextTokens, softCompactTokens, hardCompactTokens, contextPending } = useTokenUsage(
     activeId,
@@ -385,7 +385,7 @@ function HomeContent({
             onLoadOlder={loadOlder}
             retainedItemsMax={retainedItemsMax}
             loading={isLoading}
-            loadingNew={isFetching && items.length > 0}
+            loadingNew={loadingNewer && items.length > 0}
             maxWidthCss={contentColumnMaxWidth}
           />
           <HeaderBar
