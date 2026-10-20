@@ -2948,7 +2948,7 @@ describe("ItemTimestamp", () => {
     expect(screen.queryByText(/\[\d{4}-\d{2}-\d{2}/)).toBeNull();
   });
 
-  it("valid iso → renders [YYYY-MM-DD DayOfWeek HH:MM:SS] format, no hover tooltip", () => {
+  it("valid iso → renders YYYY-MM-DD DayOfWeek HH:MM:SS with no brackets and no hover tooltip", () => {
     render(
       <TimelineView
         items={[
@@ -2960,7 +2960,7 @@ describe("ItemTimestamp", () => {
         ]}
       />,
     );
-    const stamp = screen.getByText(/\[\d{4}-\d{2}-\d{2}( [A-Z][a-z]{2})? \d{2}:\d{2}:\d{2}\]/);
+    const stamp = screen.getByText(/^\d{4}-\d{2}-\d{2}( [A-Z][a-z]{2})? \d{2}:\d{2}:\d{2}$/);
     expect(stamp).toBeTruthy();
     expect(stamp.getAttribute("title")).toBeNull();
   });
@@ -3286,7 +3286,7 @@ describe("formatItemTime: clock format and zone name", () => {
         ]}
       />,
     );
-    expect(screen.getByText("[2026-05-15 Fri 12:00:00]")).toBeTruthy();
+    expect(screen.getByText("2026-05-15 Fri 12:00:00")).toBeTruthy();
   });
 
   it("renders a 12-hour clock and the zone name when the viewer turns them on", () => {
@@ -3302,7 +3302,7 @@ describe("formatItemTime: clock format and zone name", () => {
         ]}
       />,
     );
-    expect(screen.getByText("[2026-05-15 Fri 12:00:00 PM UTC]")).toBeTruthy();
+    expect(screen.getByText("2026-05-15 Fri 12:00:00 PM UTC")).toBeTruthy();
   });
 });
 

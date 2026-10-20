@@ -345,10 +345,19 @@ export const UNSTUCK_HEADER_CLS =
   "before:bg-transparent before:backdrop-blur-none";
 
 // meiva:note
-// The card frame and its hover footer. `footer` (timestamp, Copy) is a SIBLING of the card box, not part of it: the box keeps its own padding and border, and the footer takes its own line right-aligned just under it. It stays in the flow rather than floating, because `.timeline-item` carries content-visibility paint containment and would clip anything drawn past its box; reserving the line also means the card never jumps when the chrome appears. It is invisible and click-through until the pointer hovers the card or focus enters it, and a coarse pointer — with no hover to gate on — keeps it visible.
+// The hover footer (timestamp, Copy) floats in the card box's own bottom-right
+// corner instead of taking a line under it. A reserved line existed only on the
+// kinds that stamp a timestamp or offer Copy, so the gap between two cards
+// depended on which kinds they were — 12px between two plain cards, 28px between
+// two stamped ones (user report 2026-10-21). Floating costs no layout height, so
+// every pair of cards is 12px apart, and it stays inside the box because
+// `.timeline-item` carries content-visibility paint containment, which would clip
+// anything drawn past it. Invisible and click-through until the pointer hovers the
+// card or focus enters it; a coarse pointer, with no hover to gate on, keeps it
+// visible.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 const CARD_FOOTER_CLS = cn(
-  "mt-0.5 items-center justify-end gap-1.5",
+  "absolute right-1 bottom-0 items-center justify-end gap-1",
   "pointer-events-none opacity-0 transition-opacity motion-reduce:transition-none",
   "group-hover/msgcard:pointer-events-auto group-hover/msgcard:opacity-100",
   "group-focus-within/msgcard:pointer-events-auto group-focus-within/msgcard:opacity-100",
