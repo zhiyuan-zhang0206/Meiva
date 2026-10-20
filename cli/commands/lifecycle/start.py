@@ -35,10 +35,7 @@ from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.start_generation import record_running_sha as record_running_sha
 from cli.commands.lifecycle.status import cmd_status
 from cli.database import OperatorDatabaseFactory
-from cli.database.lifecycle_audit import (
-    lifecycle_audit,
-    operator_request_recorder,
-)
+from cli.database.lifecycle_audit import operator_lifecycle_audit
 from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
 from services.supervision.roster.service_spec import ServiceSpec
@@ -676,11 +673,10 @@ def cmd_start(
     # retrying that unit on its backoff ladder (task #5315).
     if retained_children is None:
         raise ValueError("start requires its caller-owned PostgreSQL child retention")
-    recorder = (
-        None if boot_attempt else operator_request_recorder(database_factory=database_factory)
-    )
-    with lifecycle_audit(recorder):
-        return cmd_start_body(
+    with operator_lifecycle_audit(
+        database_factory=database_factory, enabled=not boot_attempt
+    ) as audit:
+        code = cmd_start_body(
             operation,
             database_factory,
             command.machine,
@@ -695,3 +691,5 @@ def cmd_start(
             command=command,
             boot_attempt=boot_attempt,
         )
+        audit.exited(code)
+        return code

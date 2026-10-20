@@ -86,7 +86,8 @@ Emit sites and consumers: see the comments at each emit point.
 | `env_unauthorized_write` | out-of-band .env modification detected (no official write recorded) | anomaly | — | events |
 | `computer_session_start` | computer-use task session opened (first action with a task_id) | business | task_id, first_tool, first_action_at | events |
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
-| `lifecycle_request` | a CLI process asked meiva-root to change unit state — the verb, the units and the caller block (pid/argv/host/operation), recorded when the request is sent rather than when it succeeds, so an operator stop or start is attributable after the fact | business | verb, units, operation_id, caller | events |
+| `lifecycle_request` | a CLI process asked meiva-root to change unit state — the verb, the units and the caller block (pid/argv/host/operation), recorded when the request is sent rather than when it succeeds, so an operator stop or start is attributable after the fact | business | verb, units, operation_id, caller, head_sha | events |
+| `lifecycle_result` | the operator command that asked meiva-root to change unit state finished — the verb, the units, its outcome and how long it held — recorded after the last request settled, so a stop that nothing restarted is bracketed by facts (a request with no clean result, or a result whose head_sha equals the next start's) instead of being inferred from log absence (task #5464) | business | verb, units, outcome, seconds, operation_id, head_sha | events |
 
 ## 3. Telemetry events (category=telemetry)
 

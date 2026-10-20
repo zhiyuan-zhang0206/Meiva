@@ -32,8 +32,7 @@ from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import force_close_terminals
 from cli.database import OperatorDatabaseFactory
 from cli.database.lifecycle_audit import (
-    lifecycle_audit,
-    operator_request_recorder,
+    operator_lifecycle_audit,
     record_lifecycle_request,
 )
 from cli.database.runtime import CommandRuntime
@@ -312,8 +311,8 @@ def cmd_stop(
     #
     # `keep_infra` is None exactly on a host without the gateway capability (no
     # local data plane); every other choice is a required explicit answer.
-    with lifecycle_audit(operator_request_recorder(database_factory=database_factory)):
-        return do_stop(
+    with operator_lifecycle_audit(database_factory=database_factory) as command:
+        code = do_stop(
             repo_root(),
             require_confirmation=require_confirmation,
             keep_infra=keep_infra,
@@ -330,6 +329,8 @@ def cmd_stop(
             machine=machine,
             helper=helper,
         )
+        command.exited(code)
+        return code
 
 
 def release_self_heal_pause(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
@@ -625,8 +626,8 @@ def cmd_restart(
 ) -> int:
     # meiva:note
     # Stop then start the service tree without a confirmation prompt.
-    with lifecycle_audit(operator_request_recorder(database_factory=database_factory)):
-        return _cmd_restart_body(
+    with operator_lifecycle_audit(database_factory=database_factory) as audit:
+        code = _cmd_restart_body(
             only_services=only_services,
             disabled_services=disabled_services,
             all_services=all_services,
@@ -641,6 +642,8 @@ def cmd_restart(
             producer=producer,
             command=command,
         )
+        audit.exited(code)
+        return code
 
 
 AGENT_HOST = "agent-host"
@@ -715,10 +718,10 @@ def cmd_restart_agent_host(
     # meiva:note
     # Stop agent-host within `timeout` (force-killing only with `force`), then bring it up and
     # wait up to `start_timeout` for its readiness.
-    with lifecycle_audit(operator_request_recorder(database_factory=database_factory)):
+    with operator_lifecycle_audit(database_factory=database_factory) as audit:
         try:
             _temporary_stop.refuse_hosted_stop()
-            return restart_agent_host(
+            code = restart_agent_host(
                 force=force,
                 timeout=timeout,
                 client_for=lambda seconds: root_driver.root_client(timeout=seconds),
@@ -733,4 +736,6 @@ def cmd_restart_agent_host(
             )
         except (RuntimeError, OSError) as exc:
             print(f"  ✗ restart of {AGENT_HOST} incomplete: {exc}", file=sys.stderr)
-            return 1
+            code = 1
+        audit.exited(code)
+        return code
