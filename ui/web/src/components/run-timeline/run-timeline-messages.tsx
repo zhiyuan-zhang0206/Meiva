@@ -60,8 +60,6 @@ function PartRow({ item }: { item: BackendTimelineItem }) {
       showActions
       isStuck={false}
       onToggle={() => setExpanded((open) => !open)}
-      onFork={null}
-      forkPending={false}
     />
   );
 }

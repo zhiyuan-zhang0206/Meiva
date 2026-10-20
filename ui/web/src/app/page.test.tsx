@@ -39,7 +39,6 @@ const hooksState = {
   isDesktop: true,
   agents: [] as AgentRow[],
   activeId: null as number | null,
-  forkPending: false,
   toast: null as string | null,
   timelineItems: [] as unknown[],
   timelineError: null as Error | null,
@@ -72,7 +71,6 @@ vi.mock("@/lib/agents/use-agents", () => ({
     setActiveId: vi.fn(),
     pendingActions: {},
     pendingSpawnCount: 0,
-    forkPending: hooksState.forkPending,
     spawn: hooksState.spawn,
     fork: hooksState.fork,
     terminate: hooksState.terminate,
@@ -132,7 +130,6 @@ vi.mock("@/lib/state/store", () => ({
       toast: hooksState.toast,
       showToast: hooksState.showToast,
       focusComposer: hooksState.focusComposer,
-      forkPending: hooksState.forkPending,
       composerFocusToken: 0,
       setMobileSidebarOpen: hooksState.setMobileSidebarOpen,
       mobileInspectorOpen: false,
@@ -338,7 +335,6 @@ beforeEach(() => {
   inspectorMockState.mounts = 0;
   hooksState.agents = [];
   hooksState.activeId = null;
-  hooksState.forkPending = false;
   hooksState.toast = null;
   hooksState.timelineItems = [];
   hooksState.timelineError = null;

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Timeline deep collapse
-description: Turn grouping and expansion state — secondary-item classification into TurnBlocks, Details-mode defaults, per-turn and per-item override maps, and the fork boundary rule.
+description: Turn grouping and expansion state — secondary-item classification into TurnBlocks, Details-mode defaults, and per-turn and per-item override maps.
 tags:
 - frontend
 ---
@@ -24,9 +24,7 @@ flipped); a mode change clears both maps, and re-picking the same mode bumps a
 reset token so manual expansions under that mode revert too (user ruling
 2026-08-06). Pinned state is scoped per thread — item ids are message indexes
 local to each thread, so an unscoped map would resurrect another conversation's
-choices. Fork attaches only under the last agent reply, a clean halt boundary
-rather than mid-execution; copy and fork actions appear only for expanded,
-settled rows.
+choices. The card's copy action appears only for expanded, settled rows.
 
 ## Relationship to Other Nodes
 

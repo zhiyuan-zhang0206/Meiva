@@ -23,6 +23,12 @@ and the matching GitHub Releases.
 
 ### Removed
 
+- A message card in the Messages timeline no longer offers a fork action on hover (user
+  ruling 2026-10-20): the card's hover pill carries Copy alone, and `TimelineView`'s
+  `onFork`/`forkPending` props, the row plumbing behind them and the `timeline.forkFromHere`
+  label are gone. Forking starts from an agent row's context menu in the sidebar, which keeps
+  its quick fork and fork-with-prompt entries
+  ([card chrome](ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md)).
 - The frontend pixel-regression apparatus is gone (user ruling 2026-10-20): the
   Visual baselines workflow, the screenshot regression suite with its goldens, the
   preview-gate matrix with its 44 captures, and the post-deploy visual gate. The

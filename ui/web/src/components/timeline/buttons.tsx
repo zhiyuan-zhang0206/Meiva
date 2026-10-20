@@ -1,13 +1,10 @@
 "use client";
 
-// Hover-revealed actions rendered inside a MessageCard's bottom-right corner
-// (see MessageCard's `actions` prop in ./card): copy attaches to every
-// expanded, non-partial card; fork additionally attaches to the last agent
-// message. The shared backdrop / hover-reveal / opacity transition lives on
-// MessageCard — these components render only the button content, so they
-// stay simple inline-light controls (font-mono, muted, hover-tint).
+// meiva:note
+// Copy is the only hover-revealed action rendered inside a MessageCard's bottom-right corner (see MessageCard's `actions` prop in ./card): it attaches to every expanded, non-partial card. The shared backdrop / hover-reveal / opacity transition lives on MessageCard — this component renders only the button content, so it stays a simple inline-light control (font-mono, muted, hover-tint).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 
-import { Check, Copy, GitBranch } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -19,21 +16,6 @@ const ACTION_BTN_CLS = cn(
   "text-muted-foreground/60 hover:text-foreground transition-colors",
   "hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed",
 );
-
-export function ForkButton({ onFork, pending }: { onFork: () => void; pending: boolean }) {
-  const t = useTranslations("timeline");
-  return (
-    <button
-      type="button"
-      onClick={onFork}
-      disabled={pending}
-      className={cn(ACTION_BTN_CLS, pending && "animate-pulse")}
-      aria-label={t("forkFromHere")}
-    >
-      <GitBranch className="size-3.5" />
-    </button>
-  );
-}
 
 // Copy a card's content to the clipboard. After click, the icon flips to the
 // check icon for 1s as feedback, then reverts. The timer ref lets "rapid

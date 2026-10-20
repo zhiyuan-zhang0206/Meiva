@@ -102,7 +102,6 @@ function HomeShell({ showError }: HomeShellProps) {
     activeId,
     pendingActions,
     pendingSpawnCount,
-    forkPending,
     spawn,
     fork,
     terminate,
@@ -149,12 +148,6 @@ function HomeShell({ showError }: HomeShellProps) {
     [spawn, focusComposer],
   );
 
-  const handleFork = useCallback(async () => {
-    if (activeId == null) return;
-    const newId = await fork(activeId);
-    if (newId !== null) focusComposer();
-  }, [activeId, fork, focusComposer]);
-
   useQuery({
     queryKey: ["agent-pages", activeId] as const,
     queryFn: () => {
@@ -188,9 +181,7 @@ function HomeShell({ showError }: HomeShellProps) {
       <HomeContent
         activeId={activeId}
         activeAgent={activeAgent}
-        forkPending={forkPending}
         showError={showError}
-        handleFork={handleFork}
         contextAvailable={!isLarge && activeId != null}
         openContext={() => { setMobileContextOpen(true); if (inspectorOpen) toggleInspector(); }}
         contextPanelOpen={contextPanelOpen}
@@ -228,9 +219,7 @@ function HomeShell({ showError }: HomeShellProps) {
 interface HomeContentProps {
   activeId: number | null;
   activeAgent: AgentRow | undefined;
-  forkPending: boolean;
   showError: (msg: string) => void;
-  handleFork: () => void;
   contextAvailable: boolean;
   openContext: () => void;
   contextPanelOpen: boolean;
@@ -240,9 +229,7 @@ interface HomeContentProps {
 function HomeContent({
   activeId,
   activeAgent,
-  forkPending,
   showError,
-  handleFork,
   contextAvailable,
   openContext,
   contextPanelOpen,
@@ -393,8 +380,6 @@ function HomeContent({
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}
             streamingCode={streamingCode}
             turnActive={agentBusy}
-            onFork={activeId != null ? handleFork : null}
-            forkPending={forkPending}
             hasMoreOlder={hasMoreOlder}
             loadingOlder={loadingOlder}
             onLoadOlder={loadOlder}

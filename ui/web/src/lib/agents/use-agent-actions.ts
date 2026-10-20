@@ -23,7 +23,6 @@ export type PendingAction = "restarting" | "terminating" | "resurrecting" | "com
 export interface AgentActions {
   pendingActions: Record<number, PendingAction>;
   pendingSpawnCount: number;
-  forkPending: boolean;
   spawn: (machine?: string, model?: string, reasoning_effort?: string, harness?: Harness) => Promise<number | null>;
   fork: (sourceId: number, prompt?: string) => Promise<number | null>;
   terminate: (id: number, force?: boolean) => Promise<void>;
@@ -254,8 +253,6 @@ export function useAgentActions(
     return inFlight + pendingSpawnIds.size;
   }, [spawnMutation.isPending, agents, pendingSpawnIds, spawnBaseline]);
 
-  const forkPending = forkMutation.isPending;
-
   // -- Action wrappers --
 
   const markSpawnPending = useCallback(
@@ -414,7 +411,6 @@ export function useAgentActions(
   return {
     pendingActions,
     pendingSpawnCount,
-    forkPending,
     spawn,
     fork,
     terminate,

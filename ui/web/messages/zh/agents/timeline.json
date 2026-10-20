@@ -25,7 +25,6 @@
   "agentMessages": "{count} {unit}",
   "message": "消息",
   "messages": "消息",
-  "forkFromHere": "从此处创建子 agent",
   "copyMessage": "复制消息",
   "streamingInterrupted": "流式传输中断，内容可能不完整（重连后继续接收）",
   "commandOutput": "命令输出",
