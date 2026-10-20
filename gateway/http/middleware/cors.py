@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from urllib.parse import urlsplit
 
+from base.cluster.port_preflight import LOOPBACK_ALIASES
+
 
 def _frontend_port(frontend_healthcheck_url: str) -> int:
     parsed = urlsplit(frontend_healthcheck_url)
@@ -106,6 +108,34 @@ def cors_allowed_origins(
         if origin not in origins:
             origins.append(origin)
     return origins
+
+
+# meiva:note
+# Hostnames a request may name in its `Host` header when it presents no credential: the
+# loopback aliases, the host of every allowed browser origin, this machine's declared
+# reachable host and the gateway URL's host. A DNS-rebinding page reaches the listener
+# under an attacker-controlled name, so any other name is refused on an anonymous request.
+def trusted_request_hosts(
+    *, allowed_origins: Sequence[str], machine_host: str, gateway_url: str
+) -> frozenset[str]:
+    machine = f"[{machine_host}]" if machine_host.count(":") > 1 else machine_host
+    hosts = set(LOOPBACK_ALIASES)
+    for url in (*allowed_origins, f"//{machine}", gateway_url.strip()):
+        hostname = urlsplit(url).hostname
+        if hostname:
+            hosts.add(hostname)
+    return frozenset(hosts)
+
+
+# meiva:note
+# The hostname of a `Host` header (port and IPv6 brackets removed), or None when absent or malformed.
+def request_host(host_header: str | None) -> str | None:
+    if not host_header:
+        return None
+    try:
+        return urlsplit(f"//{host_header}").hostname
+    except ValueError:
+        return None
 
 
 def session_cookie_secure(
