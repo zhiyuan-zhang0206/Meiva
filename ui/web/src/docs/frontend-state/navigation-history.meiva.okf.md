@@ -20,7 +20,13 @@ panel's own Back control follows the same semantics — it calls `history.back()
 for an entry this panel pushed (the entry's history state carries the marker) and
 otherwise rewrites the current entry to the parent, because a deep link has no
 in-app entry to return to. Selecting another agent drops the previous chain; it
-belongs to the agent that was open. External links keep opening in a new tab and
+belongs to the agent that was open. Selecting an agent is itself a history
+entry (user report 2026-10-20): two agents selected in a row read as A -> B, so
+browser Back opens A again and Forward returns to B. `?agent_id=` stays the
+source of truth and a `popstate` traversal writes the selected agent back into
+the store instead of pushing the entry it just restored; only a change between
+two selected agents pushes, because the agent the app opens on rewrites its own
+entry in place and must not leave a duplicate behind it. External links keep opening in a new tab and
 non-Markdown resources keep their own document.
 
 The panel's document chain lives in the URL as `?agent_id=…&reference=…`: opening a linked document pushes a history entry, a popstate traversal restores the chain it selects, and the panel's Back control calls `history.back()` for entries it pushed while a chain without history rewrites its own entry instead of leaving the app. Selecting another agent drops the previous chain.
