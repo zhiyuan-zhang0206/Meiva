@@ -21,5 +21,6 @@
   "harness": "Harness",
   "harnessStatus": {
     "unavailable": "unavailable"
-  }
+  },
+  "newAgent": "Create agent"
 }

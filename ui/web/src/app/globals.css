@@ -302,6 +302,15 @@
     @apply border border-border px-2 py-1 text-left [overflow-wrap:normal];
   }
   .chat-md th { @apply bg-muted font-semibold; }
+  /* Math keeps its own spacing: the container's overflow-wrap:anywhere would
+     otherwise break a formula mid-expression (the 2026-10-20 phone report had
+     \frac and \left( split across three lines). A display formula wider than
+     the column scrolls sideways instead of wrapping or pushing the message
+     wider than the viewport. */
+  .chat-md .katex { @apply [overflow-wrap:normal] [white-space:nowrap]; }
+  .chat-md .katex-display {
+    @apply my-2 max-w-full overflow-x-auto overflow-y-hidden [overflow-wrap:normal];
+  }
   .chat-md hr { @apply my-3 border-border; }
   .chat-md sup { @apply align-super text-[0.75em] leading-none; }
   .chat-md sup a { @apply no-underline; }

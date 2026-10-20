@@ -1,5 +1,7 @@
 {
   "status": "Status",
+  "sortId": "ID",
+  "sortActivity": "Activity",
   "sortBy": "Sort by",
   "loadingAgents": "Loading agents…",
   "statistics": "Statistics",
@@ -56,5 +58,9 @@
   "showSidebar": "Show sidebar",
   "hideSidebar": "Hide sidebar",
   "showContextPanel": "Show shared context",
-  "hideContextPanel": "Hide shared context"
+  "hideContextPanel": "Hide shared context",
+  "sidebarSettings": "Sidebar settings",
+  "view": "View",
+  "display": "Display",
+  "emptyAgents": "No agents yet."
 }
