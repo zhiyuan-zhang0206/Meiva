@@ -10,7 +10,7 @@
   "spawnOn": "在以下机器创建",
   "spawn": "创建",
   "model": "模型",
-  "reasoningEffort": "推理强度",
+  "reasoningEffort": "Effort",
   "spawnAgent": "创建 agent",
   "hostUnavailable": "Agent host 不可用",
   "hostUnknown": "Agent host 状态未知",

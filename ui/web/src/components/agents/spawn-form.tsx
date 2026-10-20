@@ -13,6 +13,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 
 import { DEFAULT_HARNESS, harnessRows, harnessRunsProvider, type Harness } from "@/lib/harness/harness";
 import { useHarnessAvailabilityByMachine } from "@/lib/harness/use-harness-availability";
@@ -28,6 +29,16 @@ interface SpawnOpts {
   model?: string;
   reasoning_effort?: string;
   harness?: Harness;
+}
+
+// meiva:note
+// Picks made while the form is open, laid over the stored spawn config. An
+// empty object means "show the last spawn".
+// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+interface SpawnPicks {
+  harness?: Harness;
+  model?: string;
+  effort?: string;
 }
 
 // meiva:note
@@ -55,25 +66,25 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
     staleTime: Infinity,
   });
   const modelsData = modelsQuery.error ? undefined : modelsQuery.data;
-  // meiva:note
-  // Picker selections are DB-backed user preferences (behavior.spawn_*) so they
-  // survive remounts, are shared across the collapsed/expanded instances, and
-  // sync across frontends — the user can spawn many agents on one config without
-  // re-picking. `null` in the DB means "no override"; expose it as `undefined`
-  // to the picker logic below. Written back as `?? null`.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
   const { settings, setSetting } = useUserSettings();
   // meiva:note
-  // The harness is a birth attribute the user picks per spawn and keeps as a
-  // preference, exactly like the model: `null` in the DB means "no override".
+  // What the form shows is the LAST SPAWN, not the last click (user 2026-10-20):
+  // `behavior.spawn_*` holds the config of the previous spawn, and a click only
+  // lays a pick over it — written back at spawn, dropped when the form closes.
+  // So reopening answers "what did the last agent run on", and a settings load
+  // that lands after mount still reaches the form because nothing copies it.
+  // `null` in the DB means "no override"; exposed here as `undefined`.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-  const selectedHarness = (settings["behavior.spawn_harness"] as Harness | null) ?? DEFAULT_HARNESS;
-  const setSelectedHarness = (v: Harness) => setSetting("behavior.spawn_harness", v);
-  const selectedModel = (settings["behavior.spawn_model"] as string | null) ?? undefined;
-  const setSelectedModel = (v: string | undefined) => setSetting("behavior.spawn_model", v ?? null);
-  const selectedReasoningEffort = (settings["behavior.spawn_reasoning_effort"] as string | null) ?? undefined;
-  const setSelectedReasoningEffort = (v: string | undefined) =>
-    setSetting("behavior.spawn_reasoning_effort", v ?? null);
+  const storedHarness = (settings["behavior.spawn_harness"] as Harness | null) ?? DEFAULT_HARNESS;
+  const storedModel = (settings["behavior.spawn_model"] as string | null) ?? undefined;
+  const storedEffort = (settings["behavior.spawn_reasoning_effort"] as string | null) ?? undefined;
+  const [picks, setPicks] = useState<SpawnPicks>({});
+  const selectedHarness = picks.harness ?? storedHarness;
+  const selectedModel = picks.model ?? storedModel;
+  const selectedReasoningEffort = picks.effort ?? storedEffort;
+  const pickHarness = (v: Harness) => setPicks((p) => ({ ...p, harness: v }));
+  const pickModel = (v: string) => setPicks((p) => ({ ...p, model: v }));
+  const pickEffort = (v: string) => setPicks((p) => ({ ...p, effort: v }));
 
   // meiva:note
   // Ops reachability is not agent-host readiness. Keep the existing host-alive
@@ -170,15 +181,21 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
       : (modelDefaultEffort ?? undefined);
 
   // meiva:note
-  // A spawn writes back the config it actually used, so the form opens on the
-  // last spawn rather than on a stale preference the cascade had to override
-  // (user 2026-10-20). Unchanged values write nothing.
+  // The spawn is the only write: it stores the config the request actually used
+  // (cascade included), so the next open shows the last spawn. Unchanged values
+  // write nothing. Releasing the draft afterwards lets the stored values — now
+  // this spawn's — re-seed it, so a cascade-filled model or effort becomes the
+  // visible pick instead of staying an invisible default.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-  function rememberEffectiveConfig() {
-    if (effectiveModel !== undefined && effectiveModel !== selectedModel) setSelectedModel(effectiveModel);
-    if (effectiveReasoningEffort !== undefined && effectiveReasoningEffort !== selectedReasoningEffort) {
-      setSelectedReasoningEffort(effectiveReasoningEffort);
+  function rememberSpawnedConfig() {
+    if (selectedHarness !== storedHarness) setSetting("behavior.spawn_harness", selectedHarness);
+    if (effectiveModel !== undefined && effectiveModel !== storedModel) {
+      setSetting("behavior.spawn_model", effectiveModel);
     }
+    if (effectiveReasoningEffort !== undefined && effectiveReasoningEffort !== storedEffort) {
+      setSetting("behavior.spawn_reasoning_effort", effectiveReasoningEffort);
+    }
+    setPicks({});
   }
 
   function buildOpts(machine?: string): SpawnOpts {
@@ -195,7 +212,7 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
   }
 
   function spawnOn(machine: string) {
-    rememberEffectiveConfig();
+    rememberSpawnedConfig();
     onSpawn(buildOpts(machine));
     onDone();
   }
@@ -246,14 +263,14 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
       <SpawnTable
         harnessRows={tableHarnessRows}
         harness={selectedHarness}
-        onHarness={setSelectedHarness}
+        onHarness={pickHarness}
         modelGroups={modelGroups}
         models={modelsData?.models}
         model={effectiveModel}
-        onModel={setSelectedModel}
+        onModel={pickModel}
         efforts={effortLevels}
         effort={effectiveReasoningEffort}
-        onEffort={setSelectedReasoningEffort}
+        onEffort={pickEffort}
       />
       {hiddenModelCount > 0 && (
         <div className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">

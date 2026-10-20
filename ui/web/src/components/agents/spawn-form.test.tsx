@@ -26,7 +26,7 @@ vi.mock("@/lib/transport/api", () => ({
 vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
 
 import { api } from "@/lib/transport/api";
-import { resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
+import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
 
 function wrap() {
   const onSpawn = vi.fn();
@@ -141,7 +141,7 @@ const harnessAllAvailable = () =>
 
 const HARNESS_COLUMN = "Harness";
 const MODEL_COLUMN = "Model";
-const EFFORT_COLUMN = "Thinking effort";
+const EFFORT_COLUMN = "Effort";
 
 async function table(): Promise<HTMLElement> {
   return await screen.findByTestId("spawn-table");
@@ -226,6 +226,42 @@ describe("spawn table", () => {
     // A model without an effort ladder leaves the column empty.
     // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
     expect(within(column(form, EFFORT_COLUMN)).queryByRole("button")).toBeNull();
+  });
+
+  it("a pick that is never spawned does not become the stored config", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
+    setMockSetting("behavior.spawn_model", "deepseek-v4-pro");
+    wrap();
+    const form = await table();
+    pick(form, MODEL_COLUMN, /claude-opus-4-8/);
+    expect(selected(form, MODEL_COLUMN, /claude-opus-4-8/)).toBe(true);
+    // meiva:note
+    // Closing without spawning keeps the previous spawn's config: the next open
+    // must answer "what did the last agent run on", not "what did I click last"
+    // (user 2026-10-20). A click that wrote through would surface here.
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    cleanup();
+    wrap();
+    const reopened = await table();
+    expect(selected(reopened, MODEL_COLUMN, /deepseek-v4-pro/)).toBe(true);
+  });
+
+  it("a spawn stores the config it used, cascade included", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
+    wrap();
+    const form = await table();
+    pick(form, EFFORT_COLUMN, "high");
+    fireEvent.click(screen.getByRole("button", { name: "Spawn on test-host" }));
+    // meiva:note
+    // No stored model or effort means the cascade filled them in; the spawn
+    // writes what it actually sent, so the next open marks the same rows.
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    expect(mockSetSettingCalls()).toEqual([
+      { key: "behavior.spawn_model", value: "deepseek-v4-pro" },
+      { key: "behavior.spawn_reasoning_effort", value: "high" },
+    ]);
   });
 
   it("changing the harness keeps only the models that harness runs", async () => {

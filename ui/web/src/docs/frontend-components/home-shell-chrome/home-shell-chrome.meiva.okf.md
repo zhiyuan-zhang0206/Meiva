@@ -23,6 +23,19 @@ for the same reason. Both variants are `relative`: the rule is the bar's own
 
 Every home column title bar is BAR_HEIGHT_PX tall and paints BAR_DIVIDER_CLASS's inset rule, so the Agent Tree, Timeline and right-panel dividers sit on one line; the right panel's document bar takes the wrapping variant (44px minimum, growing only when its content cannot fit one line) and its notice header takes the fixed variant — neither draws a border on its section.
 
+## Edge-pinned controls
+
+A control that belongs to the viewport's edge belongs to the bar, not to the
+centred column. `HeaderBar` pins the collapsed rail's restore button at `left-2`
+and accepts an optional `pinnedRight` node at `right-2`, both absolutely
+positioned and vertically centred; the conversation column is capped and
+centred, so an in-flow control lands near the middle of a wide viewport and
+reads as part of the timeline. The home page passes the collapsed right panel's
+reopen control through `pinnedRight`. Both slots are desktop-only (`md:`),
+matching the rail behaviour they mirror.
+
+The collapsed rail's restore control and a collapsed right panel's reopen control are pinned to HeaderBar's own edges, never to the centred conversation column.
+
 ## Details mode
 
 The Details mode has one writer and one surface: the Display settings row bound to
