@@ -25,24 +25,24 @@ __all__ = ["hosting_supervised_session"]
 _SESSION_CREATE_TIME_TOLERANCE_S = 2.0
 
 
+# meiva:note
+# The supervised session this process is running INSIDE — the name of a live
+# `$MEIVA_HOME/run/sessions/<name>.json` record, or of a persistent shell session
+# of the pty-sessions service, whose pid is this process or one of its ancestors
+# — or None when the lineage is clear.
+#
+# The question a host-transition verb must ask before running in-process: the
+# stop leg of a stop/restart kills every service session's whole tree, and
+# agents + their shells are reaped with it, so a transition launched
+# from inside one of those trees is killed by its own stop mid-flight
+# (2026-08-12: a host transition run in an agent's background shell died when
+# the stop force-killed that shell's whole tree, stranding the cluster paused
+# with every service down).
+#
+# A record whose process is gone, or whose pid the OS recycled onto a
+# different process (start-time mismatch), does not count. Neither does a
+# pty-sessions service that does not answer: there is then no evidence either way.
 def hosting_supervised_session() -> str | None:
-    """The supervised session this process is running INSIDE — the name of a live
-    `$MEIVA_HOME/run/sessions/<name>.json` record, or of a persistent shell session
-    of the pty-sessions service, whose pid is this process or one of its ancestors
-    — or None when the lineage is clear.
-
-    The question a host-transition verb must ask before running in-process: the
-    stop leg of a stop/restart kills every service session's whole tree, and
-    agents + their shells are quiesced/reaped with it, so a transition launched
-    from inside one of those trees is killed by its own stop mid-flight
-    (2026-08-12: a host transition run in an agent's background shell died when
-    the stop force-killed that shell's whole tree, stranding the cluster paused
-    with every service down).
-
-    A record whose process is gone, or whose pid the OS recycled onto a
-    different process (start-time mismatch), does not count. Neither does a
-    pty-sessions service that does not answer: there is then no evidence either way.
-    """
     try:
         me = psutil.Process()
         lineage = {me.pid} | {p.pid for p in me.parents()}

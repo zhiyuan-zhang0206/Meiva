@@ -41,7 +41,6 @@ from base.clock.configuration import clock_config_from_boot  # noqa: E402
 from base.config import ConfigBoot  # noqa: E402
 from base.db import Database  # noqa: E402
 from base.db.code_version_gate import ProcessDbGate  # noqa: E402
-from base.deploy.maintenance import admission  # noqa: E402
 from base.lm.catalog import ModelCatalog  # noqa: E402
 from base.lm.context_budget import resolve_context_budget  # noqa: E402
 from base.native_process.code_version import CodeVersion  # noqa: E402
@@ -136,7 +135,6 @@ def _understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
         corrections=lambda: config.view.agent.understanding_group_corrections,
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         timestamps_enabled=lambda: config.view.general.message_timestamps,
-        quiesced=admission.quiesced,
     )
 
 

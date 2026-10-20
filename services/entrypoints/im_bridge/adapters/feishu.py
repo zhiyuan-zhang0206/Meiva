@@ -351,7 +351,6 @@ class FeishuAdapter(IMAdapter):
         rejection or API rejection — enters the bounded backoff. Unclassified
         failures still escape to the service task owner."""
         await self._restore_cursors()
-        # quiesce-exempt: polls the Feishu API; a cursor is written only when an update arrives, and forwarding goes through the gateway, which refuses business requests in the window
         while True:
             failed = 0
             total = len(self._poll_chats)

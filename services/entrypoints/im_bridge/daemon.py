@@ -35,7 +35,6 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.deploy.maintenance import admission
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -206,7 +205,6 @@ async def liveness_loop(liveness: Liveness) -> None:
     a wedged event loop stops scheduling it and the staleness ceiling trips.
     """
 
-    # quiesce-exempt: beats the health liveness; no database
     while True:
         liveness.beat()
         await asyncio.sleep(LIVENESS_BEAT_INTERVAL_S)
@@ -217,25 +215,23 @@ async def notice_loop(core: Any) -> None:
     chat (Task #884). Cursor + filter persist across restarts."""
 
     while True:
-        if not admission.quiesced():
-            await core.notice_bridge.poll_once()
+        await core.notice_bridge.poll_once()
         await asyncio.sleep(3.0)
 
 
 async def timeline_outbound_loop(core: Any, alerts: AlertOutboundBridge) -> None:
     """One service-owned dispatcher and periodic committed-tail wakeup."""
     while True:
-        if not admission.quiesced():
-            try:
-                await alerts.poll_once()
-                await core.poll_timeline_outbound()
-            except (
-                *NETWORK_ERRORS,
-                ConnectionDoesNotExist,
-                ConnectionFailure,
-                PoolTimeout,
-            ) as exc:
-                _log.warning("im_bridge: outbound round failed class=%s", type(exc).__name__)
+        try:
+            await alerts.poll_once()
+            await core.poll_timeline_outbound()
+        except (
+            *NETWORK_ERRORS,
+            ConnectionDoesNotExist,
+            ConnectionFailure,
+            PoolTimeout,
+        ) as exc:
+            _log.warning("im_bridge: outbound round failed class=%s", type(exc).__name__)
         await asyncio.sleep(3.0)
 
 

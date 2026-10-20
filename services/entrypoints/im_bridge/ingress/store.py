@@ -11,7 +11,6 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
 from base.db.transaction import write_transaction
-from base.deploy.maintenance import admission
 from services.entrypoints.im_bridge.ingress.types import (
     IngressBindingState,
     IngressIdentityConflictError,
@@ -57,8 +56,6 @@ class WeixinIngressStore:
     def require_pool(self) -> ConnectionPool:
         if self.pool is None:
             raise RuntimeError("Weixin durable ingress requires the native database pool")
-        if admission.quiesced():
-            raise RuntimeError("Weixin ingress is held during maintenance")
         return self.pool
 
     @staticmethod

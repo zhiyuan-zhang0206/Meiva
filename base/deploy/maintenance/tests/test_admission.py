@@ -76,36 +76,6 @@ def test_replayed_cohort_write_cannot_drop_a_drain_receipt() -> None:
         )
 
 
-def test_quiesced_covers_only_the_stop_window() -> None:
-    assert not admission.quiesced()
-
-    first = pause_owner.begin_maintenance("migration", WHEN).snapshot
-    assert first.maintenance is not None
-    assert first.maintenance.phase == MaintenancePhase.PREPARING
-    assert not admission.quiesced()
-
-    pause_owner.change_maintenance(
-        "migration", WHEN, first.maintenance, MaintenanceHold(MaintenancePhase.DRAINING)
-    )
-    assert not admission.quiesced()
-
-    for phase in (
-        MaintenancePhase.DRAINED,
-        MaintenancePhase.STOPPING,
-        MaintenancePhase.STOPPED,
-    ):
-        current = admission.set_phase("migration", WHEN, phase)
-        assert current.maintenance is not None
-        assert admission.quiesced(), phase
-
-    final = admission.snapshot()
-    assert final is not None and final.maintenance is not None
-    pause_owner.change_maintenance(
-        "migration", WHEN, final.maintenance, final.maintenance, resumed=True
-    )
-    assert not admission.quiesced()
-
-
 def test_business_gate_tracks_the_journal_without_posture_or_time(tmp_path: Path) -> None:
     assert not admission.business_paused(tmp_path)
 
@@ -145,16 +115,6 @@ def test_business_gate_refuses_unreadable_state(tmp_path: Path) -> None:
     journal.mkdir(parents=True)
     assert pause_owner.read_for_home(tmp_path).status == "invalid"
     assert admission.business_paused(tmp_path)
-
-
-def test_windows_read_an_unreadable_owner_as_held(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _unreadable() -> None:
-        raise OSError("owner state unreadable")
-
-    monkeypatch.setattr(admission, "snapshot", _unreadable)
-    assert admission.quiesced()
 
 
 def test_a_hold_certifies_only_after_every_member_drained() -> None:

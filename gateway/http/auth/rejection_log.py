@@ -158,7 +158,6 @@ async def auth401_flusher(rejections: AuthRejectionLog) -> None:
     the next tick retries (a dropped bucket is only a monitoring gap, and the
     emit pipeline itself is already best-effort).
     """
-    # quiesce-exempt: drains an in-process counter into telemetry; no database
     while True:
         await asyncio.sleep(_AUTH401_FLUSH_INTERVAL_S)
         try:

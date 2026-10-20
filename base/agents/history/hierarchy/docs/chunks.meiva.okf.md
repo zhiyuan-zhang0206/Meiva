@@ -63,7 +63,7 @@ share the queue. A `running` row past its lease (claimer died) is failed by the 
 ## Consumer (`chunk_consumer.py`)
 
 A loop of the agent host (`services/agent_runner/agent_host/daemon.py`, given the agent's
-`execute_code` schema), quiesce-gated, never raising. Every due job runs at
+`execute_code` schema), never raising. Every due job runs at
 once, with no cap ([[base/agents/history/hierarchy/docs/concurrency.meiva.okf.md|concurrency]]). Each poll
 samples the queue as `understanding_backlog`. A job, claimed:
 

@@ -82,7 +82,6 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus, EventBusConfig
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
@@ -359,14 +358,13 @@ async def dispatch_loop(
     failures = RoundFailureBudget("events-maintenance rollup")
     while True:
         try:
-            if not admission.quiesced():
-                await maintenance_with_liveness(
-                    pool,
-                    progress,
-                    lambda target_pool: run_maintenance(target_pool, progress, config, db),
-                    tasks=tasks,
-                )
-                failures.succeeded()
+            await maintenance_with_liveness(
+                pool,
+                progress,
+                lambda target_pool: run_maintenance(target_pool, progress, config, db),
+                tasks=tasks,
+            )
+            failures.succeeded()
         except asyncio.CancelledError:
             raise
         except WedgedPassError:
@@ -418,14 +416,13 @@ async def resolution_loop(
     failures = RoundFailureBudget("events-maintenance resolution")
     while True:
         try:
-            if not admission.quiesced():
-                await maintenance_with_liveness(
-                    pool,
-                    progress,
-                    lambda target_pool: _run_resolution(target_pool, progress, config, cadence),
-                    tasks=tasks,
-                )
-                failures.succeeded()
+            await maintenance_with_liveness(
+                pool,
+                progress,
+                lambda target_pool: _run_resolution(target_pool, progress, config, cadence),
+                tasks=tasks,
+            )
+            failures.succeeded()
         except asyncio.CancelledError:
             raise
         except WedgedPassError:
