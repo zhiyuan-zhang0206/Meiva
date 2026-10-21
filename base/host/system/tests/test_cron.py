@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from base import paths
+from base.host.env.harness_binaries import require_harness_paths
 from base.host.system import cron
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import (
@@ -157,6 +158,17 @@ def test_launchd_path_env_reaches_the_user_install_dirs() -> None:
 
     assert str(Path.home() / ".local/bin") in entries
     assert str(Path.home() / ".npm-global/bin") in entries
+
+
+# meiva:note
+# The producer contract: whatever this job writes must itself pass the check every unit
+# PATH has to pass, so a future edit that narrows the list fails here rather than at the
+# first harness spawn (#5495).
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def test_the_launchd_path_passes_the_unit_check() -> None:
+    path = cron.launchd_path_env(host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}))
+
+    assert require_harness_paths(path, what="the launchd job PATH") == path
 
 
 def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:

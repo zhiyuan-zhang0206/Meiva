@@ -115,3 +115,29 @@ def harness_child_path(*, path_env: str | None = None, home: Path | None = None)
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 def with_harness_path(environ: Mapping[str, str], *, home: Path | None = None) -> dict[str, str]:
     return {**environ, "PATH": harness_child_path(path_env=environ.get("PATH"), home=home)}
+
+
+# meiva:note
+# A unit that sets its own narrow PATH sends every service under it back to the OS default,
+# where `claude`/`agy` do not exist (#5491). Producers compose a unit PATH through this
+# one builder and it refuses a result that omits a harness directory, so the omission
+# fails where the unit is written instead of at the first spawn.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+class HarnessPathIncompleteError(RuntimeError):
+    pass
+
+
+def require_harness_paths(path_value: str, *, home: Path | None = None, what: str) -> str:
+    entries = set(path_value.split(os.pathsep))
+    missing = [entry for entry in harness_bin_dirs(home) if entry not in entries]
+    if missing:
+        raise HarnessPathIncompleteError(
+            f"{what} omits harness install directories: {', '.join(missing)}"
+        )
+    return path_value
+
+
+def harness_unit_path(*, leading: Sequence[str], home: Path | None = None, what: str) -> str:
+    entries = [*leading, *harness_bin_dirs(home), *_SYSTEM_BIN_DIRS]
+    joined = os.pathsep.join(dict.fromkeys(entry for entry in entries if entry))
+    return require_harness_paths(joined, home=home, what=what)
