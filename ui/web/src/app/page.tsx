@@ -10,7 +10,6 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentSidebar } from "@/components/agent-sidebar";
-import { AlertsBadge } from "@/components/notifications/alerts-badge";
 import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-preloader";
 import { ErrorBoundary } from "@/components/connection/error-boundary";
 import { Composer } from "@/components/conversation/composer";
@@ -407,7 +406,6 @@ function HomeContent({
               ) : null
             }
           >
-            <AlertsBadge />
             {contextAvailable && <button onClick={openContext} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent">{contextText("openContext")}</button>}
           </HeaderBar>
           <div className="relative z-20 bg-background">
