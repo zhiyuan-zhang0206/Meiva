@@ -39,7 +39,7 @@ matching the rail behaviour they mirror.
 
 The collapsed rail's restore control and a collapsed right panel's reopen control are pinned to HeaderBar's own edges, never to the centred conversation column.
 
-The restore control also carries the unresolved-alert count (`alertCount`, a count bubble at its top-right corner, nothing at zero) and names it in its label: the rail is the one surface that disappears when collapsed, so the count that leads the sidebar's icon row would otherwise vanish with it (user 2026-10-21). It is the only signal the collapsed state shows — no agent list, status dots or other badges.
+The restore control also carries the unresolved-alert count (`alertCount`, a count bubble at its top-right corner, nothing at zero) and names it in its label: the rail is the one surface that disappears when collapsed, so the count that leads the sidebar's icon row would otherwise vanish with it (user 2026-10-21). The phone's menu button, which opens the same sidebar as a drawer, carries the same bubble, because a closed drawer hides the row for the same reason. It is the only signal a closed sidebar shows — no agent list, status dots or other badges.
 
 ## Column frame
 

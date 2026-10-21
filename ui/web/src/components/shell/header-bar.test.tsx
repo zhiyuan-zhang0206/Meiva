@@ -125,4 +125,19 @@ describe("HeaderBar", () => {
     expect(screen.queryByTestId("sidebar-toggle-alert-count")).toBeNull();
     expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).not.toContain("unresolved");
   });
+
+  it("mobile menu button carries the unresolved-alert count too", () => {
+    // meiva:note
+    // The drawer is the phone's sidebar: closed, it hides the same icon row the
+    // desktop rail hides, so the count rides the menu button that opens it.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} alertCount={2} />);
+    expect(screen.getByTestId("mobile-sidebar-alert-count").textContent).toBe("2");
+    expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 unresolved alerts");
+  });
+
+  it("mobile menu button stays quiet with no unresolved alerts", () => {
+    render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} />);
+    expect(screen.queryByTestId("mobile-sidebar-alert-count")).toBeNull();
+  });
 });

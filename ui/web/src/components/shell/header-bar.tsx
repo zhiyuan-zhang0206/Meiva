@@ -19,10 +19,11 @@ interface Props {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   // meiva:note
-  // The unresolved-alert count, so the collapsed rail keeps the one signal the expanded
-  // sidebar shows beside its Fleet shortcut: with the rail closed the icon row is gone and
-  // an unreviewed P0 would be invisible (user 2026-10-21). The count rides the restore
-  // button and the button's label names it, so the collapse stays quiet but not blind.
+  // The unresolved-alert count, so a closed sidebar keeps the one signal the expanded
+  // sidebar shows at the head of its icon row: with the rail collapsed on desktop, or the
+  // drawer closed on a phone, the icon row is gone and an unreviewed P0 would be invisible
+  // (user 2026-10-21). It rides the restore button on desktop and the menu button on a
+  // phone, and each button's label names it, so the closed state stays quiet but not blind.
   // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
   alertCount?: number;
   // meiva:note
@@ -100,10 +101,17 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
         <div className={cn("items-center gap-2", FLEX, MIN_W_0, FLEX_1, sidebarCollapsed && "md:pl-8")}>
           <button
             onClick={onOpenSidebar}
-            className="md:hidden p-1 -ml-1 rounded hover:bg-sidebar-accent shrink-0"
-            aria-label={t("openSidebar")}
+            className="md:hidden relative p-1 -ml-1 rounded hover:bg-sidebar-accent shrink-0"
+            aria-label={
+              alertCount > 0
+                ? `${t("openSidebar")}, ${alertsT("unresolvedAlerts", { count: alertCount })}`
+                : t("openSidebar")
+            }
           >
             <Menu className="size-5" />
+            {alertCount > 0 ? (
+              <AlertsCountPill count={alertCount} testId="mobile-sidebar-alert-count" />
+            ) : null}
           </button>
           <span className="truncate">{label}</span>
         </div>
