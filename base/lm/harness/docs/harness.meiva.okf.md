@@ -93,47 +93,15 @@ failure names the PATH and every directory that was searched instead of a bare
 The handoff is a wire format, not an internal dataclass: the waking agent reads
 it as the first message of a fresh session, and its rendered size is a per-wake
 cost the host reports (`Handoff.size_bytes()`, and a `HandoffInjected` event).
-
-Section order is fixed — identity, cluster, entry points, do not use, reporting,
-task — because an agent that skims it still meets the task last. `HANDOFF_VERSION`
-is part of the document (`- handoff version: 1` in section 1) so a provider that
-caches or replays a handoff can tell which field set it holds.
-
-Section 3 names where to start, not an inventory: `DEFAULT_ENTRIES` holds the
-`meiva` entry — which attaches this session's identity on first use — plus the
-three namespaces a turn reaches for first (files, tasks, agents). Listing every
-namespace there would become a second copy of `meiva.help()` that drifts from the
-SDK; the entry point and its pointer are enough to start.
-
-Changing the field set or the section order means bumping the version.
-`tests/test_handoff.py` pins both: the field tuple is compared against
-`PINNED_HANDOFF_FIELDS` and the version against a literal, so the edit that
-changes the shape fails until the version moves with it.
+Section order, the versioned field set and the tests that pin both:
+[[handoff.meiva.okf.md]].
 
 ## Identity
 
-`FileSessionRegistry` writes `agent_id ↔ session_id` (plus cwd, model, resume
-count and the harness that wrote it) as soon as the adapter reports the session
-started. Writes are a temp file
-plus `Path.replace`, so a reader never sees a half-written record, and a corrupt
-document raises instead of silently starting a fresh session under an id that
-already has history.
-
-A registration is not a second identity: it is the bridge's claim that a session on
-this machine belongs to one agent. Three facts gate it — the row says `attached`,
-`expires_at` has not passed, and the calling process descends from
-`controller_pid` — and the expiry is the one the bridge cannot forget, because the
-others degrade silently: a pid gets reused, and a row that never expires would be a
-bearer capability nobody can revoke. The bridge rewrites the row at the start of
-every turn, so the deadline only runs out when the writing host is gone.
-
-`SessionRecord.harness` makes the registry self-describing. A record written
-before the field existed reads as `meiva` — the only harness that predates it —
-and every write names its harness, so the fallback can only describe an older
-document. `load(agent_id, harness=...)` refuses a record that names another
-harness instead of resuming one provider's transcript under another provider's
-session, and the wiring passes its harness through a scoped registry rather than
-trusting every caller to remember.
+`FileSessionRegistry` owns `agent_id ↔ session_id`; a registration is not a
+second identity but the bridge's claim that a session belongs to one agent, and
+three facts gate it. Records, expiry and the self-describing `harness` field:
+[[identity.meiva.okf.md]].
 
 ## Testing
 
