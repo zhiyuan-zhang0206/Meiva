@@ -28,8 +28,8 @@ One toolbar heads the complete context. The question sits directly below it,
 followed by the document; there is no separate notice bar, queue counter or
 collapse control. Plain numbered choice rows avoid a card around every option.
 A persistent comment input and the shared send button match the chat composer;
-the selection and comment form one explicit submission. Dismiss is a secondary
-header action. This keeps the user's task in one reading flow rather than
+the selection and comment form one explicit submission. Dismiss is a small outlined
+header button. This keeps the user's task in one reading flow rather than
 splitting it into stacked control panels.
 Switching agents or navigating to another referenced document resets this shared
 reading position to the top.
