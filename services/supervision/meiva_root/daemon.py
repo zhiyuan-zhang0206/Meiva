@@ -220,6 +220,7 @@ async def run(options: DaemonOptions) -> int:
             # (and the control server) still exist. A failing stop never blocks the
             # tree shutdown below.
             await finish(started, server, supervisor, lock_fd)
+        _log.info("meiva-root exiting with code %d", retirement.exit_code)
         return retirement.exit_code
 
 
