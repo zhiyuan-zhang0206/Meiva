@@ -20,9 +20,12 @@ tags: [services, lifecycle]
   consecutive broken readings of the marker the helper stamps into every process
   it spawns retire the root instead: it reports `helper_chain_broken` with
   `process=root`, stops its tree, and releases the lock so the keeper seeds a
-  replacement from the same seed. The agent host reports the same event with
-  `process=agent_host` and exits `HELPER_CHAIN_BROKEN_EXIT_CODE`; a process the
-  helper did not spawn carries no marker and never retires. Detection timing is
+  replacement from the same seed. It logs `meiva-root exiting with code` and
+  that code as it leaves, so the retirement is read from the log rather than
+  inferred from a predecessor that merely stopped. The agent host reports the
+  same event with `process=agent_host` and exits
+  `HELPER_CHAIN_BROKEN_EXIT_CODE`; a process the helper did not spawn carries no
+  marker and never retires. Detection timing is
   `--helper-chain-interval` and `--helper-chain-confirm-rounds` (5 s and 2 by
   default). The macOS helper smoke seeds its root with a 3600 s interval,
   because its conflict phase deliberately keeps an orphan alive across a helper
