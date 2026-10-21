@@ -14,14 +14,11 @@ verdict keeps its pidfile meaning, and a false or absent verdict leaves that row
 disabled with its reason.
 
 Creation is one table, read left to right: **Machine, Harness, Model, Effort**.
-The machine is the first column because it is the first fact — a harness is only
-available *on* a machine.
-Every agent-runner machine is a row; a down host keeps its row, disabled with
-its reason.
+The machine comes first because harness availability belongs to a machine.
+Every agent-runner is a row; down hosts stay disabled with the reason in a title.
 Each column is sized by its content; the panel follows it.
-Each column narrows the next and marks exactly one row selected as soon as the
-form renders, so opening it answers "what will the next agent be born on, and
-where" before it asks anything. The harness column speaks for the selected
+Each column narrows the next and marks exactly one selected row on entry.
+The harness column speaks for the selected
 machine, and a stored or picked harness that machine cannot start falls through
 to the first one it can (the pick itself is left alone, so switching back
 restores it). The model column keeps only the models whose published
@@ -35,8 +32,10 @@ the selected model's `reasoning_effort_options` ladder; a model that publishes
 none leaves the column empty rather than offering a synthetic default, and the
 model's concrete `reasoning_effort_default` is the row marked when nothing is
 stored. The header names the quantity, not the mechanism.
-External harnesses label these columns "Meiva history model" and
-"Summary effort": their CLI model settings are independent. The footer states the action only — one `Spawn` button, disabled with
+External harnesses use "Meiva history model" and "Summary effort" in
+both layouts, including closed sections and expanded lists. Help text explains
+their history budget and compaction purpose; CLI model settings are independent.
+The footer states the action only — one `Spawn` button, disabled with
 the first refusal that applies (a down host, then a harness the machine cannot
 start).
 

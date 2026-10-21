@@ -344,6 +344,8 @@ export function SpawnStack({
   prices,
 }: SpawnPickerProps) {
   const t = useTranslations("spawn");
+  const modelLabel = t(harness === "meiva" ? "model" : "historyModel");
+  const effortLabel = t(harness === "meiva" ? "reasoningEffort" : "historyEffort");
   // meiva:note
   // One open section at a time: the panel stays short enough to keep the action
   // visible, and picking a value closes the section it belongs to.
@@ -424,12 +426,12 @@ export function SpawnStack({
 
       <StackSection
         id="model"
-        label={t("model")}
+        label={modelLabel}
         value={model ?? t("modelsUnavailable")}
         expanded={open === "model"}
         onToggle={() => toggle("model")}
       >
-        <ul aria-label={t("model")} className={STACK_LIST}>
+        <ul aria-label={modelLabel} className={STACK_LIST}>
           {modelGroups.map(([provider, providerModels]) => (
             <li key={provider}>
               <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 first:pt-1">
@@ -466,12 +468,12 @@ export function SpawnStack({
 
       <StackSection
         id="effort"
-        label={t("reasoningEffort")}
+        label={effortLabel}
         value={effort ?? "—"}
         expanded={open === "effort"}
         onToggle={() => toggle("effort")}
       >
-        <ul aria-label={t("reasoningEffort")} className={STACK_LIST}>
+        <ul aria-label={effortLabel} className={STACK_LIST}>
           {efforts.map((level) => (
             <li key={level}>
               <StackRow selected={level === effort} onClick={() => pick("effort", () => onEffort(level))}>
@@ -484,6 +486,11 @@ export function SpawnStack({
           )}
         </ul>
       </StackSection>
+      {harness !== "meiva" && (
+        <p className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
+          {t("externalModelHelp", { harness: harnessLabel(harness) })}
+        </p>
+      )}
     </div>
   );
 }
