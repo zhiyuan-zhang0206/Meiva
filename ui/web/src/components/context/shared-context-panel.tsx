@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ScanSearch } from "lucide-react";
 import dynamic from "next/dynamic";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { useTranslations } from "next-intl";
@@ -31,10 +31,15 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
   onCollapse?: () => void;
 }) {
   const t = useTranslations("toUser");
+  const tInspector = useTranslations("inspector");
   const { open: inspecting, toggle: toggleInspector } = useInspectorOpen();
   const queryClient = useQueryClient();
   const documentScroll = useRef<HTMLDivElement>(null);
   const readingPosition = useRef(0);
+  const toggleInspection = () => {
+    if (!inspecting) readingPosition.current = documentScroll.current?.scrollTop ?? 0;
+    toggleInspector();
+  };
   const resetReadingPosition = useCallback(() => {
     readingPosition.current = 0;
     if (documentScroll.current) documentScroll.current.scrollTop = 0;
@@ -44,16 +49,24 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
   }, [inspecting]);
   const notice = notices.at(0);
   // meiva:note
-  // Inspector is a mode, not a second surface: the document bar above already
-  // says which one is on and carries the pressed magnifier that turns it off,
-  // so the overlay below adds no header and no second exit (user 2026-10-20:
-  // the panel should read like a mode being on).
+  // Inspector replaces the body; its toggle stays in the desktop document bar
+  // or narrow top bar so the active mode always has an exit.
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   return (
     <aside className={cn("relative w-full bg-background", FLEX, MIN_H_0, FLEX_COL, mobile ? "fixed inset-0 z-50" : "h-full")} aria-label={t("title")}>
-      {mobile && <header className={cn("h-11 shrink-0 items-center border-b px-3 text-xs", FLEX)}>
+      {mobile && <header className={cn("h-11 shrink-0 items-center justify-between border-b px-3 text-xs", FLEX)}>
         <button onClick={onClose} className={cn("items-center gap-2 rounded px-1 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground", FLEX)}>
           <ArrowLeft className="size-3.5" />{t("backToMessages")}
+        </button>
+        <button
+          type="button"
+          title={tInspector(inspecting ? "closeInspector" : "openInspector")}
+          aria-label={tInspector(inspecting ? "closeInspector" : "openInspector")}
+          aria-pressed={inspecting}
+          onClick={toggleInspection}
+          className={cn("rounded p-1 hover:bg-accent", inspecting && "bg-foreground/20 text-foreground")}
+        >
+          <ScanSearch className="size-3.5" />
         </button>
       </header>}
       <div ref={documentScroll} data-testid="shared-document" className={cn(MIN_H_0, FLEX_1, inspecting ? [FLEX_COL, FLEX] : "overflow-y-auto")}>
@@ -72,10 +85,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
           inspecting={inspecting}
           bodyHidden={inspecting}
           onNavigate={resetReadingPosition}
-          onInspect={() => {
-            if (!inspecting) readingPosition.current = documentScroll.current?.scrollTop ?? 0;
-            toggleInspector();
-          }}
+          onInspect={mobile ? undefined : toggleInspection}
           onCollapse={onCollapse}
         />
         {inspecting && (

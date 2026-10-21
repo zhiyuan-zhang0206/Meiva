@@ -12,12 +12,12 @@ vi.mock("@/lib/inspector/inspector-panel-store", () => ({
   useInspectorOpen: () => ({ open: snapshot.inspectorOpen, toggle: vi.fn() }),
 }));
 vi.mock("./to-user-document", () => ({
-  ToUserDocumentView: function Document({ bodyHidden, onInspect, onNavigate }: { bodyHidden?: boolean; onInspect: () => void; onNavigate: () => void }) {
+  ToUserDocumentView: function Document({ bodyHidden, onInspect, onNavigate }: { bodyHidden?: boolean; onInspect?: () => void; onNavigate: () => void }) {
     useEffect(onNavigate, [onNavigate]);
     return (
     <section aria-label="sharedContext">
       <div data-testid="document-bar">sharedContext</div>
-      <button onClick={onInspect}>Inspect</button>
+      {onInspect && <button onClick={onInspect}>Inspect</button>}
       <button onClick={onNavigate}>Navigate</button>
       {bodyHidden ? null : <div data-testid="document-view" />}
     </section>
@@ -167,4 +167,27 @@ it("closes the reading view from the mobile header", () => {
   renderPanel({ mobile: true, onClose });
   fireEvent.click(screen.getByRole("button", { name: "backToMessages" }));
   expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("keeps the narrow Inspector toggle beside Back through mode changes", () => {
+  const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: true, onClose: vi.fn() };
+  const { rerender } = render(<SharedContextPanel {...props} />);
+  const back = screen.getByRole("button", { name: "backToMessages" });
+  const toggle = screen.getByRole("button", { name: "openInspector" });
+  expect(toggle.parentElement).toBe(back.parentElement);
+  expect(screen.queryByRole("button", { name: "Inspect" })).toBeNull();
+  const body = screen.getByTestId("shared-document");
+  body.scrollTop = 180;
+  fireEvent.click(toggle);
+  snapshot.inspectorOpen = true;
+  rerender(<SharedContextPanel {...props} />);
+  const exit = screen.getByRole("button", { name: "closeInspector" });
+  expect(exit).toBe(toggle);
+  expect(exit.getAttribute("aria-pressed")).toBe("true");
+  expect(exit.parentElement).toBe(back.parentElement);
+  body.scrollTop = 0;
+  fireEvent.click(exit);
+  snapshot.inspectorOpen = false;
+  rerender(<SharedContextPanel {...props} />);
+  expect(body.scrollTop).toBe(180);
 });
