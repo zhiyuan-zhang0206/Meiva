@@ -38,14 +38,28 @@ attempted it yet, not that something is wrong.
 
 Every surface reads the matrix through run_preflight and the helper's ping, never through a second query implementation. File, Automation and report-only rows come from one helper-spawned TCCAccessPreflight child in the same call. Screen Recording and Accessibility are read on two planes: the TCC record (the same preflight child) and the running helper's own boolean (`preflight_screen`, `ax_trusted`).
 
-## App Management is a row no dialog can be asked for
+## App Management is granted in System Settings, never by a dialog
 
 `kTCCServiceSystemPolicyAppBundles` (the "Meiva would like to access data from
-other apps" prompt) is the one row with no request path: `request_grants` asks
-Screen Recording and Accessibility, and macOS stops asking once a denial is on
-record. The row is therefore `SYSTEM_SETTINGS`, the only mode that tells the
-person to open Privacy & Security > App Management themselves; reporting it as
-prompted would claim a dialog the helper cannot raise. The pane anchor
+other apps" prompt) is the one row no request can raise, and the obstacle is the
+client rather than a missing API: tccd answers a request for this service with
+
+> Service kTCCServiceSystemPolicyAppBundles does not allow prompting for
+> unentitled binaries; returning denied
+
+and records `authValue=0, authReason=2` against the asking identity. A
+self-signed or ad-hoc helper carries no team identity, so it is unentitled:
+macOS offers it no dialog, through `TCCAccessRequest` or through the enforcement
+path alike. Measured on 2026-10-21 (macOS 26), from an app outside Meiva signed
+the way the helper is: the request returned denied with that sentence, a write
+into another app's bundle returned `EPERM`, neither raised a window, and the
+request created a fresh denied row (the same answer the helper itself gets in the
+host log: `AUTHREQ_RESULT authValue=0, authReason=2`).
+
+That is why the row is `SYSTEM_SETTINGS` rather than `PROMPT`: a `PROMPT` row
+would make onboarding claim a dialog the helper cannot raise, and a request would
+only stamp a policy denial on each rebuilt helper identity. The pane toggle is
+the path that grants it, and the row's `verify` names it. The pane anchor
 (`Privacy_AppBundles`) is read from this macOS build's
 `SecurityPrivacyExtension.appex/Contents/Resources/TCCServiceList.plist`, which
 maps the service to that reveal key.
