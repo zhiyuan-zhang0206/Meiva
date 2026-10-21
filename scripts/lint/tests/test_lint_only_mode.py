@@ -32,6 +32,7 @@ from scripts.lint import (
     async_no_sync_blocking,
     code_structure,
     fixture_scope,
+    host_platform_marks,
     pool_keepalives,
     termination_source,
 )
@@ -175,6 +176,12 @@ CASES = [
         fixture_scope,
         "tests/sub/conftest.py",
         '@pytest.fixture(scope="session")\ndef _unset():\n    os.environ.pop("MEIVA_HOME", None)\n    yield\n',
+        extra={"pyproject.toml": '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'},
+    ),
+    Case(
+        host_platform_marks,
+        "tests/test_host_read.py",
+        "import sys\n\n\ndef test_x():\n    assert sys.platform == 'linux'\n",
         extra={"pyproject.toml": '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'},
     ),
     Case(
