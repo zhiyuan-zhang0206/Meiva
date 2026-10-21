@@ -24,9 +24,19 @@ _REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
 _REPO_ROOT = Path(base.__file__).resolve().parents[1]
 # meiva:note
 # Timed workflows do not block a pull request, so a red one is silent by default: the
-# nightly duration refresh failed 6 of 8 runs and nothing said so (task #5479). Two
-# consecutive failures is already "this pipeline is broken", not "one bad night".
-_SCHEDULED_WORKFLOWS = ("refresh-test-durations.yml",)
+# nightly duration refresh failed 6 of 8 runs and nothing said so (task #5479), and the
+# pricing refresh failed 10 in a row the same way (task #5496). Two consecutive failures
+# is already "this pipeline is broken", not "one bad night". Each entry carries what
+# stays wrong while it is red, because the alert has to say what it costs.
+_SCHEDULED_WORKFLOWS = {
+    "refresh-test-durations.yml": (
+        "CI keeps splitting shards with the previous test-duration model"
+    ),
+    "update-model-pricing.yml": (
+        "the price catalog stops following its sources, so every per-model cost figure "
+        "drifts from what the vendor charges"
+    ),
+}
 _CONSECUTIVE_FAILURES_ALERT = 2
 
 
@@ -110,7 +120,7 @@ def _message_p0_lead(message: str) -> None:
 def _alert_broken_scheduled_workflows(
     exporter: Any, repo: str, *, notify: Callable[[str], None] = _message_p0_lead
 ) -> None:
-    for workflow in _SCHEDULED_WORKFLOWS:
+    for workflow, cost in _SCHEDULED_WORKFLOWS.items():
         try:
             runs = _workflow_runs(exporter, repo, workflow)
         except Exception as exc:
@@ -124,7 +134,7 @@ def _alert_broken_scheduled_workflows(
         notify(
             f"Scheduled workflow {workflow} failed {streak} runs in a row. It does not "
             "block a pull request, so a red run is silent by default: while it keeps "
-            "failing, CI keeps splitting shards with the previous test-duration model.\n"
+            f"failing, {cost}.\n"
             f"Newest run: {newest.get('html_url')} ({newest.get('created_at')})\n"
             "Find the failing step; the fix is accepted only after two consecutive "
             "successful nights.",
