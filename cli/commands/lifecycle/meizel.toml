@@ -3,14 +3,15 @@ exports = ["converge_host.py", "lgtm_toggle.py", "migrations.py", "root_driver.p
 [uses]
 "__init__.py" = ["_exclusive_resources.py"]
 "_start_readiness_preflight.py" = ["root_driver.py"]
-"_temporary_stop.py" = ["_stop_extras.py", "root_driver.py", "service_stop.py"]
+"_temporary_stop.py" = ["_stop_extras.py", "root_driver.py", "service_stop.py", "stand_down.py"]
 "lgtm_toggle.py" = ["start.py"]
 "root_driver.py" = ["start_generation.py"]
 "root_readiness.py" = ["root_driver.py"]
-"start.py" = ["_exclusive_resources.py", "converge_host.py", "login_link.py", "migrations.py", "root_driver.py", "root_readiness.py", "start_generation.py", "status.py"]
+"start.py" = ["_exclusive_resources.py", "converge_host.py", "login_link.py", "migrations.py", "root_driver.py", "root_readiness.py", "stand_down.py", "start_generation.py", "status.py"]
 "status.py" = ["root_driver.py"]
 "stop.py" = ["_exclusive_resources.py", "_start_readiness_preflight.py", "_temporary_stop.py", "root_driver.py", "root_readiness.py", "service_stop.py", "start.py"]
-"tests" = ["_exclusive_resources.py", "_start_readiness_preflight.py", "_stop_extras.py", "_temporary_stop.py", "converge_host.py", "lgtm_toggle.py", "login_link.py", "migrations.py", "root_driver.py", "root_readiness.py", "service_stop.py", "start.py", "start_generation.py", "status.py", "stop.py"]
+"stand_down.py" = []
+"tests" = ["_exclusive_resources.py", "_start_readiness_preflight.py", "_stop_extras.py", "_temporary_stop.py", "converge_host.py", "lgtm_toggle.py", "login_link.py", "migrations.py", "root_driver.py", "root_readiness.py", "service_stop.py", "stand_down.py", "start.py", "start_generation.py", "status.py", "stop.py"]
 
 [debt.private-name]
 "tests/converge_host/test_converge.py -> converge_host.py#_ensure_permissions_helper" = 1

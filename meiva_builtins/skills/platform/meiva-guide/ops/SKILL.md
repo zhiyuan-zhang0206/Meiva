@@ -70,7 +70,10 @@ meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-s
               # shell sessions, keep or stop the browser and extras, --keep-service NAME…
               # or --keep-no-services, --mode smooth|force, --timeout, --yes|--prompt.
               # --keep-infra instead of --stop-infra retains pg/redis; a pure runner takes
-              # neither (drop it there)
+              # neither (drop it there). A stop also leaves a stand-down: the OS boot job
+              # will not start this home again until an explicit `meiva start`, or until
+              # --maintenance-for T runs out. Something that must come back at boot also
+              # needs a recorded window (cli/commands/lifecycle/docs/stand-down)
 meiva start --all-services   # after a stop, restore services and resume after readiness
 meiva restart --all-services --close-shell-sessions --keep-browser --keep-extras --mode smooth --timeout 300
               # stop then start in one command; pg+redis always stay up; the keep/restart
