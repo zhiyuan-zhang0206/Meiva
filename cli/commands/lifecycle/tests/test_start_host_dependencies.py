@@ -60,15 +60,13 @@ def test_the_owner_doc_names_the_same_groups_and_optional_rows() -> None:
 
 
 # meiva:note
-# The criterion the task names: remove a required tool from PATH and start must
-# refuse, naming the tool and its repair. The child runs the real gate with an
-# empty PATH — exactly what a host without crontab looks like to it. That the
-# refusal happens before any service launches is structural (the gate is
-# `cold_start_steps()[0]`) and is proved end to end by
-# `scripts/verify/host_dependency_refusal.py`.
-def test_a_tool_removed_from_path_is_refused_with_its_repair(tmp_path: Path) -> None:
+# A gate refusal over a host this process chooses, as stderr text. The child's
+# world holds no executable at all: its `Host` reports nothing on PATH and the
+# process PATH is empty too, so a probe that reached for the environment instead of
+# the host could not make the outcome depend on the machine running the test.
+def _refusal(platform: str, tmp_path: Path) -> str:
     result = subprocess.run(
-        [sys.executable, str(CHILD), str(tmp_path)],
+        [sys.executable, str(CHILD), str(tmp_path), platform],
         cwd=REPO_ROOT,
         env={"PATH": str(tmp_path)},
         capture_output=True,
@@ -77,8 +75,32 @@ def test_a_tool_removed_from_path_is_refused_with_its_repair(tmp_path: Path) -> 
         check=False,
     )
     assert result.returncode == 1, result.stderr
-    assert "✗ crontab" in result.stderr
-    assert str(tmp_path / "scripts/provision/host_utils.sh") in result.stderr
+    return result.stderr
+
+
+# meiva:note
+# The criterion the task names: remove a required tool from PATH and start must
+# refuse, naming the tool and its repair. The child runs the real gate on a Linux
+# `Host` whose PATH holds nothing — exactly what a host without crontab looks like
+# to it — so the assertion is the same on macOS, where reading the process platform
+# would select the launchctl rows instead. That the refusal happens before any
+# service launches is structural (the gate is `cold_start_steps()[0]`) and is
+# proved end to end by `scripts/verify/host_dependency_refusal.py`.
+def test_a_tool_removed_from_path_is_refused_with_its_repair(tmp_path: Path) -> None:
+    stderr = _refusal("linux", tmp_path)
+    assert "✗ crontab" in stderr
+    assert str(tmp_path / "scripts/provision/host_utils.sh") in stderr
+
+
+# meiva:note
+# The macOS half of the same gate: which rows exist and which repair is printed come
+# from the injected `Host.platform`, so a Linux CI lane proves the macOS table and a
+# macOS developer machine proves the Linux one.
+def test_a_macos_host_is_refused_over_launchctl_with_its_repair(tmp_path: Path) -> None:
+    stderr = _refusal("darwin", tmp_path)
+    assert "✗ launchctl" in stderr
+    assert "✗ crontab" not in stderr
+    assert "launchd ships with macOS" in stderr
 
 
 # meiva:note
