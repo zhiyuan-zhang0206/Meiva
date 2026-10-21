@@ -168,7 +168,7 @@ class NoticeBridge:
     ) -> bool:
         # meiva:note
         # One place decides whether a notice reaches Telegram, and it says why: this
-        # bridge's `/notice filter` scope, the FYI push scope and the user's category
+        # bridge's `/notice filter` scope, historical FYI rows and the user's category
         # switch. Acceptance still advances the poll cursor either way; only the push
         # is withheld.
         # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
@@ -228,10 +228,9 @@ class NoticeBridge:
         return True
 
     # meiva:note
-    # Every unaccepted notice above the cutover is read, including the ones the
-    # filter will hold back: a filtered notice must leave a receipt that says why,
-    # or "what would the user have received" has no answer. The FYI TTL still bounds
-    # how long a held-back FYI stays in this scan.
+    # Historical FYI rows receive a filtered receipt without creating an outbound
+    # intent. The TTL bounds this compatibility scan; active queues contain only
+    # notices that require a response.
     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
     def _unaccepted_notices(self, limit: int | None = None) -> list[dict[str, Any]]:
         from base.agents.inbox.rows import NOTICE_FYI_TTL_DAYS
@@ -251,10 +250,6 @@ class NoticeBridge:
             return [_row_to_notice(r) for r in cur.fetchall()]
 
     def _open_notices(self, limit: int | None = None) -> list[dict[str, Any]]:
-        """Every open notice, both kinds, priority-then-newest — the
-        direct-DB twin of the gateway's /api/notices/open query. Without an
-        explicit limit the listing caps at services.im_bridge_notice_open_limit;
-        callers may narrow it."""
         if limit is None:
             limit = self._config.im_bridge_notice_open_limit
 
@@ -268,26 +263,17 @@ class NoticeBridge:
             return [_row_to_notice(r) for r in cur.fetchall()]
 
     # meiva:note
-    # One place decides whether a notice reaches the chat, and it says why. The FYI
-    # scope is answered first because it is a decision about the notice's kind; the
-    # user's `core.needs_input` switch answers only for a notice that needs an
-    # answer, so switching that category off never reclassifies an FYI. `all`
-    # restores the pre-2026-10-18 feed from configuration alone.
+    # Historical FYI rows are never pushed, even when the needs-input category is
+    # disabled. Their distinct receipt reason preserves the transport audit.
     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
     def _filter_reason(self, n: dict[str, Any], *, switches: dict[str, bool]) -> str | None:
         if not n["require_response"]:
-            if self._config.im_bridge_notice_push_scope != "all":
-                return "fyi"
-        elif not enabled_for(_NEEDS_INPUT, switches):
+            return "fyi"
+        if not enabled_for(_NEEDS_INPUT, switches):
             return "needs_input_off"
         agent = (self._filters or {}).get("agent")
         if agent is not None and int(n["agent_id"]) != int(agent):
             return "agent"
-        min_prio = (self._filters or {}).get("min_priority")
-        if min_prio and not n["require_response"]:
-            kept = _PRIORITY_RANK.get(n["priority"], 9) <= _PRIORITY_RANK.get(min_prio, 9)
-            if not kept:
-                return "priority"
         return None
 
     @staticmethod
@@ -388,9 +374,6 @@ class NoticeBridge:
         return "✅ Closed without answering"  # emoji-ok: hint
 
     async def list_queue(self) -> str | None:
-        """List every open notice (both kinds) as its own message with
-        processing buttons — the queue view (Task #941). Returns a summary
-        hint; each item is pushed like a fresh notice."""
         try:
             if self.db_pool is not None:
                 notices = await asyncio.to_thread(self._open_notices)

@@ -201,17 +201,15 @@ async def test_poll_pushes_new_notices_and_accepts_each(
         assert len(adapter.sent) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         assert "A" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
         assert _accepted_ids() == [1, 2]
-        # with min_priority=P1: P3 FYI filtered, require_response always pushes
         bridge._filters = {"min_priority": "P1", "agent": None}
         gateway.notices = [
             _notice(3, "low", priority="P3", require_response=True),
             _notice(4, "decide", require_response=True),
         ]
         await bridge.poll_once()
-        await bridge.core.outbound_worker.run_once()
-        assert (
-            len(adapter.sent) == 3  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        )  # low filtered, decide pushed
+        for _ in range(2):
+            await bridge.core.outbound_worker.run_once()
+        assert len(adapter.sent) == 4
         assert _accepted_ids() == [1, 2, 3, 4]
 
 
@@ -247,7 +245,7 @@ async def test_switched_off_decisions_are_accepted_but_not_pushed(
         assert decision == ("filtered",)
 
 
-async def test_the_switch_leaves_the_ambient_fyi_feed_alone(
+async def test_historical_fyi_is_filtered_even_with_needs_input_disabled(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async with owned_tasks() as _owned_tasks:
@@ -264,8 +262,8 @@ async def test_the_switch_leaves_the_ambient_fyi_feed_alone(
         await bridge.poll_once()
         await bridge.core.outbound_worker.run_once()
 
-        assert len(adapter.sent) == 1
-        assert "just an fyi" in adapter.sent[0][0]
+        assert adapter.sent == []
+        assert _accepted_ids() == [1]
 
 
 async def test_filter_agent_restricts_pushes(
@@ -345,21 +343,16 @@ async def test_reply_mode_cancel_and_expiry(tmp_path: Any, monkeypatch: pytest.M
         assert gateway.resolved == []
 
 
-async def test_fyi_reply_mode_resolves_answer(
+async def test_historical_fyi_callback_still_arms_reply_mode(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Task #1061: an FYI notice's [Reply] button arms the same reply mode as a
-    require_response notice; the text resolves it as an answer, so the reply
-    reaches the notice's agent through the unified channel."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
         bridge, _ = _bridge(tmp_path, gateway, monkeypatch, tasks=_owned_tasks)
 
-        # FYI notice pushed with a reply button (require_response False)
         gateway.notices = [_notice(1, "FYI done", require_response=False)]
         await bridge.poll_once()
 
-        # arm reply mode on the FYI notice and answer
         hint = await bridge.handle_callback("12345", "notice:reply:1:1")
         assert hint is not None and "Reply mode" in hint
         out = await bridge.handle_inbound("12345", "\u6536\u5230\uff0c\u8c22\u8c22")

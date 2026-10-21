@@ -109,7 +109,7 @@ it("swaps the body under a bar that stays, instead of laying a sheet over it", a
 
 it("keeps the notice and document inside the shared reading area", () => {
   renderPanel({ notices: [notice()] });
-  const body = screen.getByTestId("shared-document");
+  const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
   expect(body.contains(screen.getByTestId("notice-detail"))).toBe(true);
   expect(screen.queryByText("needsReply")).toBeNull();
 });
@@ -117,7 +117,7 @@ it("keeps the notice and document inside the shared reading area", () => {
 it("hides the mounted question in Inspector mode and restores its reading position", async () => {
   const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: false, onClose: vi.fn() };
   const { rerender } = render(<SharedContextPanel {...props} />);
-  const body = screen.getByTestId("shared-document");
+  const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
   const detail = screen.getByTestId("notice-detail");
   const draft = screen.getByRole<HTMLInputElement>("textbox", { name: "Answer draft" });
   fireEvent.change(draft, { target: { value: "Keep this answer" } });
@@ -140,13 +140,13 @@ it("hides the mounted question in Inspector mode and restores its reading positi
 it("starts a new agent or referenced document at the top of the shared reading area", () => {
   const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: false, onClose: vi.fn() };
   const { rerender } = render(<SharedContextPanel {...props} />);
-  const body = screen.getByTestId("shared-document");
+  const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
   body.scrollTop = 420;
   fireEvent.click(screen.getByRole("button", { name: "Navigate" }));
   expect(body.scrollTop).toBe(0);
   body.scrollTop = 500;
   rerender(<SharedContextPanel {...props} agentId={8} />);
-  expect(screen.getByTestId("shared-document")).toBe(body);
+  expect(screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!).toBe(body);
   expect(body.scrollTop).toBe(0);
 });
 
@@ -176,7 +176,7 @@ it("keeps the narrow Inspector toggle beside Back through mode changes", () => {
   const toggle = screen.getByRole("button", { name: "openInspector" });
   expect(toggle.parentElement).toBe(back.parentElement);
   expect(screen.queryByRole("button", { name: "Inspect" })).toBeNull();
-  const body = screen.getByTestId("shared-document");
+  const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
   body.scrollTop = 180;
   fireEvent.click(toggle);
   snapshot.inspectorOpen = true;
