@@ -6,12 +6,14 @@
 
 import { memo, useCallback } from "react";
 
+import { cn } from "@/lib/format/utils";
+
 import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 import { CopyButton } from "./buttons";
 import { ItemTimestamp } from "./timestamp";
-import { type CardConfig, CardHeader, MessageCard, messageCardConfig } from "./card";
+import { CARD_FOOTER_CLS, type CardConfig, CardHeader, MessageCard, messageCardConfig } from "./card";
 import { ItemView } from "./item";
 import { ItemErrorBoundary } from "./item-error-boundary";
 
@@ -102,10 +104,16 @@ export const TimelineRow = memo(function TimelineRow({
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   const hasInternalCopy = item.kind === "agent_code" || item.kind === "code_output";
   // meiva:note
-  // The card's hover footer carries the timestamp when the kind stamps one and Copy when the row is expanded, settled, and has no body-level copy of its own. Either half can stand alone; with neither, no footer is mounted at all.
+  // The row's chrome band carries the timestamp when the kind stamps one and Copy when the row is expanded, settled, and has no body-level copy of its own. Either half can stand alone; with neither, no band is mounted and the row takes no hover group.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  const stamp = config.showTimestamp && item.created_at ? <ItemTimestamp iso={item.created_at} /> : null;
-  const copy = copyable && !hasInternalCopy ? <CopyButton text={item.payload} /> : null;
+  // meiva:note
+  // The stamp rides only an EXPANDED block: a collapsed row is a one-line header,
+  // and the time under it read as chrome for a message that is not showing (user
+  // 2026-10-21). Copy is already expanded-only (its `copyable` prop).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  const stamp =
+    expanded && config.showTimestamp && item.created_at ? <ItemTimestamp iso={item.created_at} /> : null;
+  const copy = copyable && !hasInternalCopy ? <CopyButton text={item.payload} compact /> : null;
   const footer = stamp || copy ? <>{stamp}{copy}</> : null;
 
   // Sticky only while expanded — a collapsed row has nothing to scroll under
@@ -126,13 +134,13 @@ export const TimelineRow = memo(function TimelineRow({
       data-card-sticky={sticky}
       data-turn-child={nestedSticky ? "true" : undefined}
       aria-live="off"
-      className="timeline-item"
+      className={cn("timeline-item", footer ? "group/msgcard" : null)}
     >
       {/* Boundary wraps header + content together: the header's summary
           derivation parses the payload too, so a malformed payload must
           not escape the per-item fallback. */}
       <ItemErrorBoundary resetKey={item.payload}>
-        <MessageCard config={config} footer={footer}>
+        <MessageCard config={config}>
           <CardHeader
             item={item}
             config={config}
@@ -142,12 +150,13 @@ export const TimelineRow = memo(function TimelineRow({
             isStuck={isStuck}
           />
           {expanded ? (
-            <div className="px-2 pb-2 pt-0.5 sm:px-3">
+            <div className="px-2 pb-1 pt-0.5 sm:px-3">
               <ItemView item={item} streaming={streaming} />
             </div>
           ) : null}
         </MessageCard>
       </ItemErrorBoundary>
+      {footer ? <div className={CARD_FOOTER_CLS}>{footer}</div> : null}
     </div>
   );
 });

@@ -24,8 +24,8 @@ flipped); a mode change clears both maps, and re-picking the same mode bumps a
 reset token so manual expansions under that mode revert too (user ruling
 2026-08-06). Pinned state is scoped per thread — item ids are message indexes
 local to each thread, so an unscoped map would resurrect another conversation's
-choices. Copy joins a card's timestamp in its hover footer only for expanded,
-settled rows.
+choices. Copy joins a block's timestamp in the hover band under it only for
+expanded, settled rows.
 
 ## Relationship to Other Nodes
 
