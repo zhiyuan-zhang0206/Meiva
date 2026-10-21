@@ -544,6 +544,32 @@ describe("stacked picker", () => {
     expect(screen.getByRole("button", { name: "Spawn" })).toBeTruthy();
   });
 
+  it.each([
+    { harness: "claude_code", label: "Claude Code", model: "claude-opus-4-8", effort: "—", catalog: modelsWithEffort },
+    { harness: "codex", label: "Codex", model: "gpt-5.6", effort: "medium", catalog: modelsWithTwoLadders },
+  ] as const)("explains $harness history settings in closed sections and open lists", async ({ harness, label, model, effort, catalog }) => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(catalog());
+    setMockSetting("behavior.spawn_harness", harness);
+    wrap("stack");
+    const form = await stack();
+    expect(section(form, `Meiva history model ${model}`)).toBeTruthy();
+    expect(section(form, `Summary effort ${effort}`)).toBeTruthy();
+    expect(within(form).getByText(`These options configure Meiva history budgets and compaction. ${label} uses its own adapter or CLI model settings.`)).toBeTruthy();
+
+    fireEvent.click(section(form, `Meiva history model ${model}`));
+    expect(within(form).getByRole("list", { name: "Meiva history model" })).toBeTruthy();
+    expect(selected(form, MODEL_COLUMN, model)).toBe(true);
+    fireEvent.click(section(form, `Summary effort ${effort}`));
+    expect(within(form).getByRole("list", { name: "Summary effort" })).toBeTruthy();
+
+    fireEvent.click(section(form, `Harness ${label}`));
+    pick(form, HARNESS_COLUMN, "Meiva");
+    expect(section(form, "Model deepseek-v4-pro")).toBeTruthy();
+    expect(section(form, "Effort max")).toBeTruthy();
+    expect(within(form).queryByText(/These options configure Meiva history budgets and compaction/)).toBeNull();
+  });
+
   it("one pick closes its section and reaches the spawn", async () => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
     vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
