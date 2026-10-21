@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
+import { Button } from "@/components/ui/button";
 import { AutoExpandTextarea } from "@/components/ui/auto-expand-textarea";
 import { SendButton } from "@/components/ui/send-button";
 import { api } from "@/lib/transport/api";
@@ -126,16 +127,18 @@ export function OpenNoticeDetail({
               </span>
             </>
           ) : null}
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="xs"
             onClick={dismiss}
             disabled={pending || unavailable}
             aria-label={t("closeQuestion")}
             title={t("closeQuestion")}
-            className="ml-auto text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+            className="ml-auto text-muted-foreground"
           >
             {t("dismiss")}
-          </button>
+          </Button>
         </div>
         <h4 className="text-[13px] font-semibold leading-snug break-words">{notice.title}</h4>
         {notice.content && (
