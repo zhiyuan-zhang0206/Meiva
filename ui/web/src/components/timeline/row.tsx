@@ -4,7 +4,7 @@
 // index.tsx (outlier cleanup, task #1010) so the view file stays under the
 // 800-line budget; behavior is identical.
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { cn } from "@/lib/format/utils";
 
@@ -16,6 +16,12 @@ import { ItemTimestamp } from "./timestamp";
 import { CARD_FOOTER_CLS, type CardConfig, CardHeader, MessageCard, messageCardConfig } from "./card";
 import { ItemView } from "./item";
 import { ItemErrorBoundary } from "./item-error-boundary";
+
+// meiva:note
+// How long a touch keeps the chrome band up: long enough to read the time and
+// reach Copy, short enough that it is gone before the next message is read.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+const TOUCH_REVEAL_MS = 6000;
 
 // Per-item card-config cache. messageCardConfig is pure over `item`, and the
 // store preserves object identity for items unchanged across a commit (its
@@ -85,6 +91,29 @@ export const TimelineRow = memo(function TimelineRow({
     [onToggle, item.item_id, item.kind],
   );
 
+  // meiva:note
+  // A touch pointer has no hover, so the band is revealed by touching the block
+  // and hides itself again after a few seconds: leaving it painted put a
+  // timestamp and Copy under every message on a phone, which is what the user
+  // reported. A mouse never takes this path — hover and focus already gate it.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  const [touchRevealed, setTouchRevealed] = useState(false);
+  const revealTimer = useRef<number | null>(null);
+  const revealForTouch = useCallback((event: ReactPointerEvent) => {
+    if (event.pointerType === "mouse") return;
+    setTouchRevealed(true);
+    if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+    revealTimer.current = window.setTimeout(() => {
+      setTouchRevealed(false);
+      revealTimer.current = null;
+    }, TOUCH_REVEAL_MS);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+    };
+  }, []);
+
   if (config === null) {
     return (
       <div data-item-id={item.item_id} data-timeline-source={timelineSource} data-display-rank={displayRank} aria-live="off" className="timeline-item">
@@ -135,6 +164,7 @@ export const TimelineRow = memo(function TimelineRow({
       data-turn-child={nestedSticky ? "true" : undefined}
       aria-live="off"
       className={cn("timeline-item", footer ? "group/msgcard" : null)}
+      onPointerDown={footer ? revealForTouch : undefined}
     >
       {/* Boundary wraps header + content together: the header's summary
           derivation parses the payload too, so a malformed payload must
@@ -156,7 +186,9 @@ export const TimelineRow = memo(function TimelineRow({
           ) : null}
         </MessageCard>
       </ItemErrorBoundary>
-      {footer ? <div className={CARD_FOOTER_CLS}>{footer}</div> : null}
+      {footer ? (
+        <div className={cn(CARD_FOOTER_CLS, touchRevealed && "pointer-events-auto opacity-100")}>{footer}</div>
+      ) : null}
     </div>
   );
 });
