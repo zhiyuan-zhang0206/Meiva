@@ -19,10 +19,11 @@ its wake tail, with the exact pending-row resurrection guard preventing revival
 of completed work. An answer or dismissal which originally succeeded replays
 instead of returning an already-resolved conflict. Historical read receipts still replay; they do not admit a new read operation.
 
-A creation receipt keeps the original local id, pending summary and superseded
-ids. Replaying after another notice was posted does not supersede it or publish
-an old posted event. Current task existence and expiration checks run only for
-new operations; an accepted notice retains its receipt after those facts change.
+A creation receipt keeps the original local id, pending summary and — for
+receipts written before the one-open-notice rule (2026-10-21) — the ids it
+superseded. Replaying never supersedes anything or publishes an old posted
+event. Current task existence and expiration checks run only for new
+operations; an accepted notice retains its receipt after those facts change.
 Receipt lookup also precedes the new response-required and no-Other checks.
 Legacy creation retries with omitted `require_response` can match their old
 normalized false default; explicit changed inputs still conflict. New FYI and
@@ -59,7 +60,7 @@ edits or withdraws the later notice. Missing agents return 404 on fresh calls.
 The existing receipt table stores the explicit fields (omission differs from
 null) and original 200 `NoticeItem` snapshot. Concrete path, method and principal
 isolate these keys from creation, resolution and each other. Receipt lookup
-precedes mutable target/expiration checks, so replay survives superseding or
+precedes mutable target/expiration checks, so replay survives a later close or
 physical deletion. The result records historical acceptance, not current
 activity, delivery or URL availability. Receipts have no FK or TTL pruning.
 

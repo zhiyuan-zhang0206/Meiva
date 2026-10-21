@@ -486,7 +486,6 @@ export interface NoticeResolvedEvent extends BaseEvent {
   readonly require_response?: boolean | null;
   readonly age_seconds?: number | null;
   readonly had_reply?: boolean | null;
-  readonly superseded_by?: number | null;
 }
 export interface TaskCreatedEvent extends BaseEvent {
   readonly role: "task_created";

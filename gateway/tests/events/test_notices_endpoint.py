@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import psycopg
@@ -637,10 +638,9 @@ def test_answer_event_carries_resolution_fields(
     assert event["require_response"] is True
     assert event["had_reply"] is True
     assert isinstance(event["age_seconds"], int) and event["age_seconds"] >= 0
-    assert event["superseded_by"] is None
 
 
-def test_supersede_event_carries_superseded_by(
+def test_a_second_notice_is_refused_while_one_is_open(
     db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:
     a = seed_agent(db_conn)
@@ -650,23 +650,93 @@ def test_supersede_event_carries_superseded_by(
         first = client.post(
             f"/api/agents/{a}/notices",
             json={"title": "first", "require_response": True},
-            headers=keyed_headers("supersede-first"),
+            headers=keyed_headers("single-open-first"),
         )
         second = client.post(
             f"/api/agents/{a}/notices",
             json={"title": "second", "require_response": True},
-            headers=keyed_headers("supersede-second"),
+            headers=keyed_headers("single-open-second"),
         )
-    assert first.status_code == second.status_code == 201
+    assert first.status_code == 201
+    assert second.status_code == 409
+    open_local_id = int(first.json()["id"])
+    detail = second.json()["detail"]
+    assert f"#{open_local_id}" in detail
+    assert "meiva.ui.dismiss_notice" in detail
+    assert "meiva.ui.edit_notice" in detail
+
     with db_conn.cursor() as cur:
-        cur.execute("SELECT id, title FROM agent_notices WHERE agent_id = %s ORDER BY id", (a,))
-        ids = {title: notice_id for notice_id, title in cur.fetchall()}
-    event = next(
-        e
-        for e in bus.payloads
-        if e.get("role") == "notice_resolved" and e.get("notice_id") == ids["first"]
-    )
-    assert event["resolution"] == "superseded"
-    assert event["require_response"] is True
-    assert event["had_reply"] is False
-    assert event["superseded_by"] == ids["second"]
+        cur.execute(
+            "SELECT title, resolved_at FROM agent_notices WHERE agent_id = %s ORDER BY id",
+            (a,),
+        )
+        rows = cur.fetchall()
+    assert rows == [("first", None)]
+    assert [e for e in bus.payloads if e.get("role") == "notice_resolved"] == []
+    assert len([e for e in bus.payloads if e.get("role") == "notice_posted"]) == 1
+
+
+def test_concurrent_creations_leave_exactly_one_open_notice(
+    db_conn: psycopg.Connection, event_bus: EventBus
+) -> None:
+    # meiva:note
+    # The open-notice check and the local-id allocation share the agent row lock,
+    # so concurrent creations under different keys cannot both land: one is
+    # accepted and the rest are refused.
+    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    a = seed_agent(db_conn)
+    with gateway_test_client() as client, ThreadPoolExecutor(max_workers=4) as executor:
+
+        def post(index: int) -> int:
+            response = client.post(
+                f"/api/agents/{a}/notices",
+                json={"title": f"question {index}", "require_response": True},
+                headers=keyed_headers(f"race-{index}"),
+            )
+            return response.status_code
+
+        statuses = sorted(
+            future.result() for future in [executor.submit(post, i) for i in range(4)]
+        )
+    assert statuses == [201, 409, 409, 409]
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL", (a,)
+        )
+        assert cur.fetchone() == (1,)
+
+
+def test_a_notice_can_be_posted_after_the_open_one_is_closed(
+    db_conn: psycopg.Connection, event_bus: EventBus
+) -> None:
+    a = seed_agent(db_conn)
+    with gateway_test_client() as client:
+        first = client.post(
+            f"/api/agents/{a}/notices",
+            json={"title": "first", "require_response": True},
+            headers=keyed_headers("closed-then-post-first"),
+        )
+        assert first.status_code == 201
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT id FROM agent_notices WHERE agent_id = %s", (a,))
+            row = cur.fetchone()
+        assert row is not None
+        global_id = row[0]
+        closed = client.post(
+            f"/api/keyed/v1/agents/{a}/notices/{global_id}/resolve",
+            json={"action": "dismiss"},
+            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
+        )
+        assert closed.status_code == 201
+        second = client.post(
+            f"/api/agents/{a}/notices",
+            json={"title": "second", "require_response": True},
+            headers=keyed_headers("closed-then-post-second"),
+        )
+    assert second.status_code == 201
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT title, resolution FROM agent_notices WHERE agent_id = %s ORDER BY id",
+            (a,),
+        )
+        assert cur.fetchall() == [("first", "dismissed"), ("second", None)]

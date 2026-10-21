@@ -67,25 +67,41 @@ def test_later_answer_requires_a_new_open_question(db_conn: psycopg.Connection) 
     ).fetchone() == (1,)
 
 
-def test_creation_replay_preserves_original_result_after_superseding(
+def test_creation_replay_survives_a_closed_notice(
     db_conn: psycopg.Connection,
 ) -> None:
+    # meiva:note
+    # A replay answers with the original acceptance even once that notice is closed:
+    # receipt lookup precedes the mutable target checks. Closing is the only way past
+    # an open notice (user ruling 2026-10-21), so the replay is checked against a
+    # dismissed row.
+    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
     agent = seed_agent(db_conn)
     path = f"/api/agents/{agent}/notices"
     with gateway_test_client() as client:
         body = {"title": "original"}
         first = client.post(path, json=body, headers=keyed_headers("create-1"))
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT id FROM agent_notices WHERE agent_id = %s", (agent,))
+            row = cur.fetchone()
+        assert row is not None
+        global_id = row[0]
+        closed = client.post(
+            f"/api/keyed/v1/agents/{agent}/notices/{global_id}/resolve",
+            json={"action": "dismiss"},
+            headers={"Idempotency-Key": "dismiss-original", "Idempotency-Scope": "principal-v1"},
+        )
         later = client.post(path, json={"title": "later"}, headers=keyed_headers("create-2"))
         replay = client.post(path, json=body, headers=keyed_headers("create-1"))
         conflict = client.post(path, json={"title": "different"}, headers=keyed_headers("create-1"))
-    assert first.status_code == later.status_code == replay.status_code == 201
+    assert first.status_code == closed.status_code == later.status_code == replay.status_code == 201
     assert first.json() == replay.json()
     assert conflict.status_code == 409
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT title, resolution FROM agent_notices WHERE agent_id=%s ORDER BY id", (agent,)
         )
-        assert cur.fetchall() == [("original", "superseded"), ("later", None)]
+        assert cur.fetchall() == [("original", "dismissed"), ("later", None)]
 
 
 def test_creation_key_requires_the_principal_scope(db_conn: psycopg.Connection) -> None:
