@@ -134,6 +134,7 @@ delivery feed of its own: its inbox is the notice queue, so the `notification` r
 never enters a timeline. The Telegram bridge still reads `agent_notices` directly for
 what to push — it moves onto these rows next — but it applies the same per-category
 switches before pushing, so a decision notice the user switched off does not reach
-Telegram either; its ambient FYI feed carries no category and is unaffected. No transport
+Telegram either. Historical FYI rows receive filtered receipts and are never
+pushed; ordinary information stays in conversation. No transport
 re-derives its own trigger from agent state. A transport may render less (an importance
 floor, a master switch), never more.

@@ -9,8 +9,10 @@ tags:
 
 # Normal notice outbound acceptance
 
-`NoticeBridge.poll_once` reads open response-required notices from the existing
-database, applying its agent filter and notification category switch. It accepts normal
+`NoticeBridge.poll_once` reads unaccepted rows from the existing database,
+applying its agent filter and notification category switch. Historical FYI rows
+receive a filtered receipt with reason `fyi` and no outbound intent; their TTL
+bounds this compatibility scan. Only response-required notices can be pushed. It accepts normal
 poll decisions through `NoticePollStore`; it does not call the provider.
 `IMOutboxStore` owns the shared intent insertion primitive and `IMOutboxWorker`
 owns the same queued/sending/sent/uncertain/failed lifecycle as timeline output.

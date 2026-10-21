@@ -7,6 +7,7 @@ import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef } from "react";
 
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { OpenNoticeDetail } from "@/components/notifications/open-notice-detail";
 import { ToUserDocumentView } from "./to-user-document";
@@ -69,7 +70,8 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
           <ScanSearch className="size-3.5" />
         </button>
       </header>}
-      <div ref={documentScroll} data-testid="shared-document" className={cn(MIN_H_0, FLEX_1, inspecting ? [FLEX_COL, FLEX] : "overflow-y-auto")}>
+      <ScrollArea viewportRef={documentScroll} data-testid="shared-document" className={cn(MIN_H_0, FLEX_1)} viewportClassName={inspecting ? "[&>div]:h-full" : undefined}>
+        <div className={inspecting ? cn("h-full", MIN_H_0, FLEX, FLEX_COL) : undefined}>
         {noticesFailed && <p hidden={inspecting} role="status" className="px-5 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}
         {notice && <section hidden={inspecting} className="shrink-0 border-b border-border/60 px-5 py-3" aria-label={t("notification")}>
           <OpenNoticeDetail key={notice.id} agentId={agentId} notice={notice} onResolved={() => dropOpenNotices(queryClient, [notice.id])} />
@@ -93,7 +95,8 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
             <Inspector agentId={agentId} embedded />
           </div>
         )}
-      </div>
+        </div>
+      </ScrollArea>
     </aside>
   );
 }

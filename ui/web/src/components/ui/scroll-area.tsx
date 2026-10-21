@@ -12,6 +12,7 @@ const SCROLLBAR_IDLE_DELAY_MS = 800
 function ScrollArea({
   className,
   viewportClassName,
+  viewportRef: externalViewportRef,
   children,
   onScrollCapture,
   ...props
@@ -19,6 +20,7 @@ function ScrollArea({
   // Extra classes for the inner scroll viewport (the element that actually
   // scrolls). Used e.g. by the timeline to set `overflow-anchor: none`.
   viewportClassName?: string;
+  viewportRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const [isScrollActive, setIsScrollActive] = React.useState(false)
   const [isDraggingScrollbar, setIsDraggingScrollbar] = React.useState(false)
@@ -31,6 +33,10 @@ function ScrollArea({
 
   // Element refs for the direct thumb positioning in positionThumb below.
   const viewportRef = React.useRef<HTMLDivElement | null>(null)
+  const setViewportRef = React.useCallback((element: HTMLDivElement | null) => {
+    viewportRef.current = element
+    if (externalViewportRef) externalViewportRef.current = element
+  }, [externalViewportRef])
   const trackRef = React.useRef<HTMLDivElement | null>(null)
   const thumbRef = React.useRef<HTMLDivElement | null>(null)
 
@@ -69,6 +75,7 @@ function ScrollArea({
     if (!viewport || !track || !thumb) return
     const maxScroll = viewport.scrollHeight - viewport.clientHeight
     if (maxScroll <= 0) {
+      // meiva:note
       // Content fits (or layout is not measured yet): park the thumb at the
       // top of the track instead of a stale mid-track offset.
       thumb.style.transform = "translate3d(0, 0, 0)"
@@ -99,6 +106,7 @@ function ScrollArea({
     const viewport = viewportRef.current
     if (!viewport) return
     viewport.addEventListener("scroll", positionThumb, { passive: true })
+    // meiva:note
     // A viewport resize (window resize / panel drag) changes the scroll range
     // and thumb travel; re-anchor even when no scroll event follows.
     let resizeObserver: ResizeObserver | null = null
@@ -125,7 +133,7 @@ function ScrollArea({
       }}
     >
       <ScrollAreaPrimitive.Viewport
-        ref={viewportRef}
+        ref={setViewportRef}
         nonce={nonce}
         data-slot="scroll-area-viewport"
         className={cn(

@@ -236,7 +236,7 @@ async def test_filtered_decision_commits_without_owner_and_does_not_later_replay
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    core, adapter = make_core(pool, im_bridge_notice_push_scope="all")
+    core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll()
     with pool.connection() as conn:
         notice = insert_notice(
@@ -394,12 +394,10 @@ async def test_concurrent_normal_acceptances_freeze_first_target_without_duplica
 
 
 # meiva:note
-# Which notices reach the chat is one decision with a recorded reason. The default
-# holds an FYI back (`filtered_reason='fyi'`); `all` is the configuration rollback;
-# a switched-off `core.needs_input` silences decisions on this transport too.
+# Historical FYI rows retain a filtered receipt but never reach the chat. A
+# switched-off `core.needs_input` silences response-required notices too.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-@pytest.mark.parametrize(("scope", "fyi_pushed"), [("decisions", False), ("all", True)])
-async def test_push_scope_decides_whether_an_fyi_reaches_the_chat(
+async def test_historical_fyi_is_filtered_while_a_question_reaches_the_chat(
     redis_url: str,
     pool: ConnectionPool,
     *,
@@ -407,10 +405,8 @@ async def test_push_scope_decides_whether_an_fyi_reaches_the_chat(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
-    scope: str,
-    fyi_pushed: bool,
 ) -> None:
-    core, adapter = make_core(pool, im_bridge_notice_push_scope=scope)
+    core, adapter = make_core(pool)
     core.notice_bridge.initialize_poll()
     agent = spawn_agent(
         catalog=model_catalog,
@@ -426,20 +422,19 @@ async def test_push_scope_decides_whether_an_fyi_reaches_the_chat(
         await core.outbound_worker.run_once()
 
     sent = [text for _chat, text, _buttons in adapter.deliveries]
-    assert len(sent) == (2 if fyi_pushed else 1)
+    assert len(sent) == 1
     assert any("ship it?" in text for text in sent)
-    assert ("internal progress note" in " ".join(sent)) is fyi_pushed
+    assert "internal progress note" not in " ".join(sent)
     by_notice = {row[0]: row for row in receipts(pool)}
-    assert by_notice[fyi][1] == ("queued" if fyi_pushed else "filtered")
-    assert by_notice[fyi][2]["filtered_reason"] == (None if fyi_pushed else "fyi")
+    assert by_notice[fyi][1] == "filtered"
+    assert by_notice[fyi][2]["filtered_reason"] == "fyi"
     assert by_notice[decision][1] == "queued"
 
 
 # meiva:note
 # The switch belongs to the "needs an answer" category, not to the notice kind: an
-# FYI keeps its own reason when that switch is off, and `all` still restores it.
+# FYI keeps its own filtered reason when that switch is off.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-@pytest.mark.parametrize(("scope", "fyi_pushed"), [("decisions", False), ("all", True)])
 async def test_a_switched_off_category_does_not_reclassify_an_fyi(
     redis_url: str,
     pool: ConnectionPool,
@@ -448,10 +443,8 @@ async def test_a_switched_off_category_does_not_reclassify_an_fyi(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
-    scope: str,
-    fyi_pushed: bool,
 ) -> None:
-    core, adapter = make_core(pool, im_bridge_notice_push_scope=scope)
+    core, adapter = make_core(pool)
     core.notice_bridge.initialize_poll()
     agent = spawn_agent(
         catalog=model_catalog,
@@ -472,9 +465,9 @@ async def test_a_switched_off_category_does_not_reclassify_an_fyi(
 
         row = receipts(pool)[0]
         assert row[0] == fyi
-        assert row[1] == ("queued" if fyi_pushed else "filtered")
-        assert row[2]["filtered_reason"] == (None if fyi_pushed else "fyi")
-        assert len(adapter.deliveries) == (1 if fyi_pushed else 0)
+        assert row[1] == "filtered"
+        assert row[2]["filtered_reason"] == "fyi"
+        assert len(adapter.deliveries) == 0
     finally:
         with pool.connection() as conn:
             conn.execute("DELETE FROM user_settings WHERE key = 'notifications.categories'")

@@ -11,7 +11,6 @@ receives the slice it needs through its constructor. See
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -27,7 +26,6 @@ class ImBridgeConfig:
     im_bridge_replay_messages: int
     im_bridge_notice_reply_window_seconds: int
     im_bridge_notice_open_limit: int
-    im_bridge_notice_push_scope: Literal["decisions", "all"]
     # The gateway's own display default, shared with `GET /api/notices/live`.
     notices_open_default_limit: int
     im_push_health_channels: tuple[str, ...]

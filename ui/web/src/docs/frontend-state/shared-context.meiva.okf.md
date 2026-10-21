@@ -19,7 +19,9 @@ the title bar's PanelRight toggle, and the timeline takes the width until it is
 reopened. The panel itself is a lazy boundary, loaded when the right panel first
 renders.
 
-The question and the to-user document share one vertical scroll container.
+The question and the to-user document share one `ScrollArea` viewport. Its
+viewport reference owns reading-position capture and restoration across Inspector
+mode changes.
 Neither the question area nor the document body has a nested scrollbar; long
 choices, comments and document content remain in one continuous reading flow.
 Question controls use the timeline's 13px body size and compact row spacing.

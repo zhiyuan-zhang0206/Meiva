@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from contextlib import suppress
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, cast
 
 from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
@@ -321,25 +321,6 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
             "minutes) covers reading the notice and typing an answer; shorter "
             "risks the mode expiring mid-reply, longer leaves a forgotten mode "
             "swallowing unrelated chat messages (/cancel exits early)."
-        ),
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    im_bridge_notice_push_scope: Literal["decisions", "all"] = Field(
-        default="all",
-        alias="MEIVA_IM_BRIDGE_NOTICE_PUSH_SCOPE",
-        description=(
-            "Which notices the Telegram bridge pushes to the owner chat. "
-            "`all` (the default, chosen by the user on 2026-10-21) keeps every notice "
-            "on the chat -- 12.2 a day measured 2026-10-12..18, 73% of it FYI. "
-            "`decisions` pushes only a notice that needs an answer -- 3.3 a day -- and "
-            "leaves an FYI to the console inbox, the same line the notification spine "
-            "draws for `core.needs_input`; it stays available as a one-field switch."
         ),
         json_schema_extra={
             "restart_required": "gateway",
