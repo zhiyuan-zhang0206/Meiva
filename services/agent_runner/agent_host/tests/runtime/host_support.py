@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -218,6 +219,9 @@ class _FakeGraph:
     def arrival(self, agent_id: int) -> asyncio.Event:
         return self.arrived.setdefault(agent_id, asyncio.Event())
 
+    async def aget_state(self, _config: object) -> SimpleNamespace:
+        return SimpleNamespace(values={})
+
     async def _observe(self, _agent_id: int, context: MeivaContext) -> HostTurnObservation:
         agent = context.require_agent()
         plugin_cfg = cast(_HostPluginConfig, agent.plugin_config("hostplug"))
@@ -258,6 +262,9 @@ class GatedGraph:
         self.refuse_cancel = refuse_cancel
         self.cancel_seen = False
         self.contexts: list[MeivaContext] = []
+
+    async def aget_state(self, _config: object) -> SimpleNamespace:
+        return SimpleNamespace(values={})
 
     async def ainvoke(
         self, _input: dict[str, Any], *, config: dict[str, Any], context: MeivaContext

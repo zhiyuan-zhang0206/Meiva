@@ -658,6 +658,7 @@ class AgentHost:
     #
     #         A turn's first invocation sets `halted` so that a continuation left by
     #         an interrupted predecessor is abandoned and waits for fresh input.
+    #         An unhalted, unprocessed handoff note is already that fresh input.
     async def _invoke_graph(
         self,
         agent_id: int,
@@ -667,10 +668,11 @@ class AgentHost:
         *,
         fresh_input: bool,
     ) -> dict[str, object] | PendingTurnFailure:
-        await settle_handoff_before_invocation(
+        resume_handoff = await settle_handoff_before_invocation(
             checkpoints.graph,
             ctx,
             agent_id,
+            fresh_input=fresh_input,
             db=self._db,
             bus=self._bus,
             relays=self.relays,
@@ -681,7 +683,7 @@ class AgentHost:
             config,
             ctx,
             {
-                **({"halted": True} if fresh_input else {}),
+                **({"halted": True} if fresh_input and not resume_handoff else {}),
                 "turn_active": False,
                 "exit_requested": False,
                 "turn_idle": False,

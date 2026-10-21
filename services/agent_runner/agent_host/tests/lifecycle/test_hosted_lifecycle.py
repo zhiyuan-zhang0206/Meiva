@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -46,6 +47,7 @@ def _graph_blocked_until_released(
         }
 
     graph = Mock()
+    graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
     graph.ainvoke = AsyncMock(side_effect=graph_return)
     return graph
 
@@ -169,6 +171,7 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
         owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
         inbound = insert_lifecycle_command(db_conn, agent_id, "terminate")
         graph = Mock()
+        graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
         graph.ainvoke = AsyncMock(
             return_value={
                 "exit_requested": True,
@@ -350,6 +353,7 @@ async def _run_terminating_turn(
 ) -> None:
     async with hosted_scope() as resources:
         graph = Mock()
+        graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
         graph.ainvoke = AsyncMock(
             return_value={
                 "exit_requested": True,

@@ -9,7 +9,7 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation import settle_checkpoint
-from agent.impersonation_handoff import flush_checkpoint
+from agent.impersonation_handoff import flush_checkpoint, resume_note_pending
 from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_turn_failure
@@ -41,11 +41,12 @@ async def settle_handoff_before_invocation(
     ctx: MeivaContext,
     agent_id: int,
     *,
+    fresh_input: bool,
     db: Database,
     bus: EventBus,
     relays: RelaySupervision,
     notes: HandoffNotes,
-) -> None:
+) -> bool:
     async with database_phase():
         await settle_checkpoint(
             graph,
@@ -58,6 +59,11 @@ async def settle_handoff_before_invocation(
             notes=notes,
             read_local_machine=lambda: ctx.require_machine().name(),
         )
+        if not fresh_input or ctx.original_incarnation is None:
+            return False
+        snapshot = await graph.aget_state({"configurable": {"thread_id": str(agent_id)}})
+        state = BaseAgentState.model_validate(snapshot.values)
+        return not state.halted and resume_note_pending(state)
 
 
 async def finish_pending_failure(
