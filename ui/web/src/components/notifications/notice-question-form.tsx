@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
+import { ChatMarkdown } from "@/components/content/markdown";
 import { Textarea } from "@/components/ui/textarea";
 import type { NoticeAnswer, NoticeQuestion } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
@@ -102,8 +103,8 @@ export function NoticeQuestionForm({
                 className="mt-0.5 size-3.5 shrink-0 accent-primary"
               />
               <span className={cn("break-words", MIN_W_0)}>
-                <span className={selected ? "font-medium" : undefined}><span className="text-muted-foreground">{index + 1}.</span> {option.label}</span>
-                {option.description && <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{option.description}</span>}
+                <span className={selected ? "font-medium" : undefined}><span className="text-muted-foreground">{index + 1}.</span> <ChatMarkdown content={option.label} inline /></span>
+                {option.description && <span className="mt-0.5 block text-xs leading-snug text-muted-foreground"><ChatMarkdown content={option.description} inline /></span>}
               </span>
             </label>
           );
@@ -144,8 +145,8 @@ export function NoticeQuestionSummary({ question, answer }: { question: NoticeQu
       <ol className="space-y-2" aria-label={t("originalOptions")}>
         {question.options.map((option, index) => (
           <li key={option.id} className={cn("break-words", answer?.option_ids?.includes(option.id) ? "font-medium text-foreground" : "text-muted-foreground")}>
-            {index + 1}. {option.label}
-            {option.description && <span className="mt-1 block font-normal text-muted-foreground">{option.description}</span>}
+            {index + 1}. <ChatMarkdown content={option.label} inline />
+            {option.description && <span className="mt-1 block font-normal text-muted-foreground"><ChatMarkdown content={option.description} inline /></span>}
             {answer?.option_ids?.includes(option.id) && <span className="ml-2 text-xs">{t("selected")}</span>}
           </li>
         ))}
