@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-"""The permissions helper's signing identity: inspect it, provision it, switch the install.
-
-Run from a checkout with its own `.venv`:
-
-    .venv/bin/python scripts/host_ops/tcc/helper-signing.py status
-    .venv/bin/python scripts/host_ops/tcc/helper-signing.py switch
-
-`switch` is the whole install-location change: back the installed helper up,
-rebuild it signed with the fixed identity, prove the designated requirement now
-names the certificate, and restore the backup if any step fails.
-"""
 
 from __future__ import annotations
 
@@ -34,6 +23,16 @@ def _select_home(home: str | None) -> None:
 
 
 # meiva:note
+# Inspect, provision, move and switch the permissions helper's signing identity.
+#
+# Usage from a checkout with its own `.venv`:
+#     .venv/bin/python scripts/host_ops/tcc/helper-signing.py status
+#     .venv/bin/python scripts/host_ops/tcc/helper-signing.py switch
+#
+# `switch` is the whole install-location change: back the installed helper up,
+# rebuild it signed with the fixed identity, prove the designated requirement now
+# names the certificate, and restore the backup if any step fails.
+#
 # Re-run this command in its own session and return at once.
 #
 # `switch --retire` stops the helper, which is the parent of this home's
@@ -55,25 +54,30 @@ def _detach(argv: list[str]) -> int:
     print(f"=== detached switch started {datetime.now(UTC).isoformat()} ===")
     try:
         return main(args)
-    except BaseException as error:  # noqa: BLE001 - the log is the only witness
+    except BaseException as error:  # noqa: BLE001
         print(f"switch aborted: {error!r}")
         raise
 
 
+# meiva:note
+# Read `codesign`'s answer for one bundle: fixed argv, macOS tool.
 def _codesign(*args: str, app: Path) -> str:
-    result = subprocess.run(  # noqa: S603 - fixed argv, macOS tool
+    result = subprocess.run(  # noqa: S603
         ["/usr/bin/codesign", *args, str(app)], capture_output=True, text=True, check=False
     )
     return (result.stdout or "") + (result.stderr or "")
 
 
+# meiva:note
+# Report the identity, the installed helper and the requirement it carries; reads
+# `security find-identity` for this home's keychain only.
 def status() -> int:
     from services.desktop.permissions_helper import signing_identity
 
     keychain = signing_identity.keychain_path()
     print(f"identity keychain: {keychain} ({'present' if keychain.exists() else 'MISSING'})")
     print(f"keychain password: {signing_identity.password_path()}")
-    identities = subprocess.run(  # noqa: S603 - fixed argv, macOS tool
+    identities = subprocess.run(  # noqa: S603
         ["/usr/bin/security", "find-identity", "-p", "codesigning", str(keychain)],
         capture_output=True,
         text=True,
@@ -182,12 +186,15 @@ def switch(*, retire: bool, start: bool) -> int:
         (backup / "codesign-dr.txt").write_text(before_dr)
         print(f"backed up the installed helper to {backup}")
 
+    # meiva:note
+    # Every failure of the swap restores the backup: this runs detached on a host
+    # whose runtime it just stopped, so nobody is watching the terminal.
     if retire:
         _retire_helper()
     try:
         signing_identity.ensure(lifecycle.run_tool, create=True)
         built, rebuilt = lifecycle.build_and_sign()
-    except Exception as error:  # noqa: BLE001 - every failure restores the backup
+    except Exception as error:  # noqa: BLE001
         print(f"switch failed: {error}", file=sys.stderr)
         _restore(backup, home, app, before_dr)
         return 1
@@ -217,28 +224,30 @@ def switch(*, retire: bool, start: bool) -> int:
     return 0
 
 
+# meiva:note
+# Bring this home back up after the switch retired it, through the checkout's own
+# entry point: `meiva start` needs an explicit service selection.
 def _start_services() -> None:
-    """Bring this home back up after the switch retired it."""
     meiva = Path(sys.executable).parent / "meiva"
     print(f"starting this home's services: {meiva} start --all-services")
-    result = subprocess.run(  # noqa: S603 - the checkout's own entry point
+    result = subprocess.run(  # noqa: S603
         [str(meiva), "start", "--all-services"], check=False
     )
     print(f"`meiva start --all-services` exited {result.returncode}")
 
 
+# meiva:note
+# Stop this home's helper job, which is also the parent of its meiva-root.
+#
+# A loaded helper is never replaced in place, so this is the step that turns the
+# swap into a restart of everything this home supervises on the host: agents die
+# with it and `meiva start` brings them back.
 def _retire_helper() -> None:
     from services.desktop.permissions_helper.launchd_job import helper_job_loaded
 
     if not helper_job_loaded():
         print("the permissions helper job is not loaded; nothing to retire")
         return
-    """Stop this home's helper job, which is also the parent of its meiva-root.
-
-    A loaded helper is never replaced in place, so this is the step that turns
-    the swap into a restart of everything this home supervises on the host:
-    agents die with it and `meiva start` brings them back.
-    """
     from cli.commands.lifecycle._stop_extras import stop_permissions_helper
 
     print("retiring the running permissions helper (and the meiva-root it owns) ...")

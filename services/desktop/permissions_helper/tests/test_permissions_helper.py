@@ -474,16 +474,18 @@ def test_dr() -> str:
     return f'identifier "com.meiva.permissions-helper" and cdhash H"{TEST_CDHASH}"'
 
 
+# meiva:note
+# The requirement a certificate-signed helper carries.
 def certificate_dr() -> str:
-    """The requirement a certificate-signed helper carries."""
     return (
         'identifier "com.meiva.permissions-helper" and certificate leaf = H"c6000dcb95407f03ca68d4'
         'f3dcb1ae8873ea7ba1"'
     )
 
 
+# meiva:note
+# The identity files a host has after `helper-signing.py provision` ran once.
 def stage_signing_identity() -> None:
-    """The identity files a host has after `helper-signing.py provision` ran once."""
     from services.desktop.permissions_helper import signing_identity
 
     signing_identity.keychain_path().parent.mkdir(parents=True, exist_ok=True)
@@ -498,12 +500,12 @@ def fake_identity_reply(
     search_list: tuple[str, ...] | None = None,
     rival: bool = False,
 ) -> subprocess.CompletedProcess[bytes] | None:
-    """What `security` answers for a staged identity; None for every other tool.
-
-    `identity_name` overrides the name `find-identity` reports and `search_list`
-    the keychains it lists; both default to the staged identity being fully
-    usable.
-    """
+    # meiva:note
+    # What `security` answers for a staged identity; None for every other tool.
+    #
+    # `identity_name` overrides the name `find-identity` reports and `search_list`
+    # the keychains it lists; both default to the staged identity being fully
+    # usable.
     from services.desktop.permissions_helper import signing_identity
 
     if Path(cmd[0]).name != "security":

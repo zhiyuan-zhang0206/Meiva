@@ -1,11 +1,3 @@
-"""The certificate the helper is signed with: provisioning, and refusing to guess.
-
-An ad-hoc signature names the code hash, so a rebuild silently invalidates every
-desktop grant. These tests pin the two halves of the fix: a build always signs
-with the fixed identity, and a build whose identity is missing stops instead of
-falling back.
-"""
-
 from __future__ import annotations
 
 import stat
@@ -24,6 +16,10 @@ from services.desktop.permissions_helper.tests.test_permissions_helper import (
 )
 
 
+# meiva:note
+# These tests pin the two halves of the fix: a build always signs with the fixed
+# certificate, and a build whose identity is missing stops instead of falling back
+# to an ad-hoc signature, which would silently invalidate every desktop grant.
 def test_first_build_provisions_the_identity_without_asking_anyone(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

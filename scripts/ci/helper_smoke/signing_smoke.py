@@ -33,14 +33,15 @@ def _codesign_readback(*args: str) -> tuple[int, str]:
 #
 # A certificate-signed helper names its certificate in the designated requirement,
 # so the requirement survives a rebuild; a code hash there would mean the build
-# fell back to an ad-hoc signature. The entitlement must land in the signature,
-# not only on the command line.
+# fell back to an ad-hoc signature. A self-signed certificate anchors itself, so
+# the requirement reads `certificate root = H"..."` -- there is no separate leaf.
+# The entitlement must land in the signature, not only on the command line.
 def verify_signature(app: Path) -> None:
     returncode, dr_text = _codesign_readback("-d", "-r-", str(app))
     print(f"DR readback: {dr_text[:500]}")
-    problem = readback_failure("designated requirement", returncode, dr_text, "certificate leaf")
-    if problem is None and "cdhash" in dr_text:
-        problem = f"the designated requirement names a code hash: {dr_text[:500]}"
+    problem = readback_failure(
+        "designated requirement", returncode, dr_text, 'certificate root = H"'
+    )
     if problem is None:
         returncode, ent_text = _codesign_readback("-d", "--entitlements", ":-", str(app))
         problem = readback_failure("entitlements", returncode, ent_text, APPLE_EVENTS_ENTITLEMENT)
