@@ -128,3 +128,18 @@ def test_a_keychain_listed_through_a_symlink_is_not_added_twice(
     lifecycle.build_and_sign()
 
     assert not any("-s" in argv for argv in recorded_argvs(recorded) if "list-keychains" in argv)
+
+
+def test_a_second_keychain_with_the_same_name_stops_the_build(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.desktop.permissions_helper import lifecycle, signing_identity
+
+    stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    stale = tmp_path / "stale.keychain-db"
+    stale.write_bytes(b"keychain")
+    recorded = fake_tools(monkeypatch, search_list=(str(stale),), rival=True)
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="ambiguous"):
+        lifecycle.build_and_sign()
+    assert not any("--force" in argv for argv in recorded_argvs(recorded))
