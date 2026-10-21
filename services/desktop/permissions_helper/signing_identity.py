@@ -193,6 +193,13 @@ def require(run: Runner) -> None:
             f"`security find-identity -p codesigning` reports: {listed.strip() or '(nothing)'}"
         )
     _add_to_search_list(run)
+    rivals = _rival_keychains(run)
+    if rivals:
+        raise SigningIdentityError(
+            f"{IDENTITY_NAME!r} also exists in {', '.join(rivals)}, and `codesign` refuses an "
+            f"ambiguous identity. Remove those keychains from the user search list: "
+            f"`security list-keychains -d user -s <every keychain but those>`"
+        )
 
 
 def identity_line(find_identity_output: str) -> str | None:
@@ -207,8 +214,28 @@ def search_list(list_keychains_output: str) -> list[str]:
     return [line.strip().strip('"') for line in list_keychains_output.splitlines() if line.strip()]
 
 
-def _identities(run: Runner) -> str:
-    return _text(run([SECURITY, "find-identity", "-p", "codesigning", str(keychain_path())]))
+# meiva:note
+# Other keychains in the user search list that hold a certificate with our name.
+#
+# `codesign --sign <name> --keychain <keychain>` still resolves the name across
+# the whole search list and fails with "ambiguous" when two keychains match, so
+# a leftover test keychain breaks every build until it is removed.
+def _rival_keychains(run: Runner) -> list[str]:
+    ours = keychain_path().resolve()
+    rivals: list[str] = []
+    for entry in search_list(_text(run([SECURITY, "list-keychains", "-d", "user"]))):
+        path = Path(entry)
+        if path.resolve() == ours or not path.exists():
+            continue
+        if identity_line(_identities(run, keychain=path)) is not None:
+            rivals.append(entry)
+    return rivals
+
+
+def _identities(run: Runner, *, keychain: Path | None = None) -> str:
+    return _text(
+        run([SECURITY, "find-identity", "-p", "codesigning", str(keychain or keychain_path())])
+    )
 
 
 # meiva:note
@@ -334,7 +361,13 @@ quietly minting a replacement, so the loss is loud.
 
 To move the identity to another Mac, copy `{KEYCHAIN_NAME}` and
 `{PASSWORD_NAME}` into that Mac's `~/.meiva/helper/`, then run
-`python3 scripts/host_ops/tcc/helper-signing.py status` there. The same
-certificate means the same designated requirement everywhere, so one set of
-System Settings clicks covers every host.
+`python3 scripts/host_ops/tcc/helper-signing.py status` there (a machine without
+the keychain can `import` a PKCS#12 archive exported here). The same certificate
+means the same designated requirement everywhere, so one set of System Settings
+clicks covers every host.
+
+Only one keychain per machine may hold `{IDENTITY_NAME}`: `codesign` resolves the
+name across the whole user search list and refuses an ambiguous identity, so a
+stale test keychain with the same name breaks every build until it is removed
+from `security list-keychains -d user`.
 """

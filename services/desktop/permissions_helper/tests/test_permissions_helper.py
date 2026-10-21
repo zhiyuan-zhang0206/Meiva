@@ -496,6 +496,7 @@ def fake_identity_reply(
     *,
     identity_name: str | None = None,
     search_list: tuple[str, ...] | None = None,
+    rival: bool = False,
 ) -> subprocess.CompletedProcess[bytes] | None:
     """What `security` answers for a staged identity; None for every other tool.
 
@@ -513,7 +514,12 @@ def fake_identity_reply(
             text = ""
         case "find-identity":
             name = signing_identity.IDENTITY_NAME if identity_name is None else identity_name
-            text = f'  1) ABCDEF0123456789 "{name}" (CSSMERR_TP_NOT_TRUSTED)\n'
+            ours = Path(cmd[-1]).resolve() == signing_identity.keychain_path().resolve()
+            text = (
+                f'  1) ABCDEF0123456789 "{name}" (CSSMERR_TP_NOT_TRUSTED)\n'
+                if ours or rival
+                else "     0 identities found\n"
+            )
         case "list-keychains":
             listed = (
                 (str(signing_identity.keychain_path()),)
@@ -555,11 +561,12 @@ class _FakeToolOutputs:
     dr_streams: tuple[bytes, bytes] | None
     identity_name: str | None = None
     search_list: tuple[str, ...] | None = None
+    rival: bool = False
 
     def respond(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
         """The result of one tool invocation; unmatched commands succeed silently."""
         identity = fake_identity_reply(
-            cmd, identity_name=self.identity_name, search_list=self.search_list
+            cmd, identity_name=self.identity_name, search_list=self.search_list, rival=self.rival
         )
         if identity is not None:
             return identity
@@ -598,6 +605,7 @@ def fake_tools(
     hang: tuple[str, ...] = (),
     identity_name: str | None = None,
     search_list: tuple[str, ...] | None = None,
+    rival: bool = False,
 ) -> list[_Call]:
     from services.desktop.permissions_helper import lifecycle
 
@@ -608,6 +616,7 @@ def fake_tools(
         dr_streams=dr_streams,
         identity_name=identity_name,
         search_list=search_list,
+        rival=rival,
     )
     recorded: list[_Call] = []
 

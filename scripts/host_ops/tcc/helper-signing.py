@@ -108,13 +108,16 @@ def export(path: str) -> int:
     return 0
 
 
-def import_identity(path: str) -> int:
+def import_identity(path: str, *, password_file: str | None) -> int:
     from services.desktop.permissions_helper import lifecycle, signing_identity
 
     archive = Path(path).expanduser().resolve()
-    if not signing_identity.password_path().exists():
-        raise SystemExit(f"no keychain password at {signing_identity.password_path()}")
-    password = signing_identity.password_path().read_text().strip()
+    source = Path(password_file).expanduser() if password_file else signing_identity.password_path()
+    if not source.exists():
+        raise SystemExit(f"no keychain password at {source}")
+    password = source.read_text().strip()
+    if password_file:
+        signing_identity._write_secret(signing_identity.password_path(), password)
     keychain = signing_identity.keychain_path()
     if not keychain.exists():
         signing_identity.directory().mkdir(parents=True, exist_ok=True)
@@ -221,6 +224,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("path", nargs="?", help="PKCS#12 archive for import/export")
     parser.add_argument("--home", help="MEIVA_HOME to act on, e.g. a rehearsal home")
     parser.add_argument(
+        "--password-file",
+        help="keychain password that opens an archive being imported (default: this home's)",
+    )
+    parser.add_argument(
         "--retire",
         action="store_true",
         help="stop the running helper first; this also stops every agent this home supervises",
@@ -234,7 +241,7 @@ def main(argv: list[str]) -> int:
         "provision": provision,
         "switch": lambda: switch(retire=args.retire),
         "export": lambda: export(args.path or ""),
-        "import": lambda: import_identity(args.path or ""),
+        "import": lambda: import_identity((args.path or ""), password_file=args.password_file),
     }[args.command]()
 
 
