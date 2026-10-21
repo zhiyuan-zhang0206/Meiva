@@ -45,8 +45,9 @@ def test_chrome_args_has_debug_port_and_profile(tmp_path: Path) -> None:
     assert not any(a.startswith("--headless") for a in args)
 
 
+@pytest.mark.parametrize("restore", [False, True])
 def test_main_asserts_capable_then_execvps_chrome(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, restore: bool
 ) -> None:
     """main() must fail-loud-check capability before launching, then exec the
     resolved Chrome with the configured port but no automatic page."""
@@ -92,12 +93,15 @@ def test_main_asserts_capable_then_execvps_chrome(
         captured_args = args
 
     monkeypatch.setattr(bd.os, "execvp", _fake_execvp)
-    bd.main()
+    bd.main(restore_last_session=restore)
     assert order == ["capable", "port", "ready", "profile", "exec"]
     assert captured_file == "/chrome"
     # main() takes the port from settings, and a cluster gets one out of its own
     # port block — a literal here only holds on a default-home install.
     assert f"--remote-debugging-port={settings.services.browser_cdp_port}" in captured_args
+    # meiva:note
+    # The flag is the ledger's decision, and nothing else's.
+    assert ("--restore-last-session" in captured_args) is restore
     # Even a gateway host with an app port must leave Chrome's first page alone.
     assert len([arg for arg in captured_args if not arg.startswith("--")]) == 1
 
@@ -159,3 +163,10 @@ def test_main_refuses_when_cdp_port_already_served(
         bd.main()
     assert exc.value.code == 1
     assert "already served" in capsys.readouterr().err
+
+
+def test_chrome_args_restores_the_last_session_only_on_request(tmp_path: Path) -> None:
+    plain = bd.chrome_args("/chrome", 9222, tmp_path / "prof")
+    assert "--restore-last-session" not in plain
+    restoring = bd.chrome_args("/chrome", 9222, tmp_path / "prof", restore_last_session=True)
+    assert restoring[-1] == "--restore-last-session"

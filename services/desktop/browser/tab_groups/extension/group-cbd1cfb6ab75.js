@@ -21,6 +21,7 @@
 // Chrome caches an extension's service-worker script in the profile and keeps
 // running the cached copy when only the content changes.
 // meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+// meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
 self.meivaGroup = async (targetId, title) => {
   const target = (await chrome.debugger.getTargets()).find((t) => t.id === targetId);
   if (!target || target.tabId === undefined) {
@@ -72,4 +73,98 @@ self.meivaUngroupLast = async (targetId, title) => {
   }
   await chrome.tabs.ungroup([target.tabId]);
   return true;
+};
+
+// meiva:note
+// Every open window's tabs in strip order, with the two layout attributes that a
+// browser restart does not always bring back: `pinned` and the tab group's title.
+// Read-only, and the only thing that looks at windows: the stop-time session
+// ledger is a record, never a plan to re-create tabs.
+// meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+self.meivaLayout = async () => {
+  const windows = await chrome.windows.getAll({ populate: true });
+  const groups = await chrome.tabGroups.query({});
+  const titles = new Map(groups.map((g) => [g.id, g.title]));
+  return windows.map((w) =>
+    (w.tabs || []).map((t) => ({
+      index: t.index,
+      url: t.url || "",
+      title: t.title || "",
+      pinned: t.pinned === true,
+      group:
+        t.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE ? null : titles.get(t.groupId) || null,
+      active: t.active === true,
+    })),
+  );
+};
+
+// meiva:note
+// Re-applies the two attributes above from the stop-time ledger: pin the tabs
+// recorded as pinned, then put each recorded group back by title. Idempotent by
+// construction -- a tab already pinned stays pinned, and a group whose members
+// already match is left alone -- so a Chrome that restored the layout itself
+// costs nothing. It never closes, moves or unpins a tab: restoring what was
+// there must not destroy what is. Tabs are matched by URL in strip order, so two
+// tabs with the same URL keep their own pin and group.
+// meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+self.meivaApplyLayout = async (spec) => {
+  const pins = spec.pins || [];
+  const groups = spec.groups || [];
+  const windows = await chrome.windows.getAll({ populate: true });
+  const tabs = (windows || []).flatMap((w) => w.tabs || []);
+  const used = new Set();
+  const take = (url) => {
+    const tab = tabs.find((t) => !used.has(t.id) && (t.url || "") === url);
+    if (tab) {
+      used.add(tab.id);
+    }
+    return tab || null;
+  };
+  let pinned = 0;
+  for (const url of pins) {
+    const tab = take(url);
+    if (!tab) {
+      continue;
+    }
+    if (tab.pinned !== true) {
+      await chrome.tabs.update(tab.id, { pinned: true });
+    }
+    // meiva:note
+    // Counted when the tab IS pinned, not only when this call pinned it: a
+    // Chrome that restored the pin itself leaves nothing to do, and the caller
+    // reports "how many recorded attributes are in place".
+    pinned += 1;
+  }
+  let grouped = 0;
+  for (const group of groups) {
+    const members = [];
+    for (const url of group.urls || []) {
+      const tab = take(url);
+      if (tab && tab.pinned !== true) {
+        members.push(tab);
+      }
+    }
+    if (members.length === 0) {
+      continue;
+    }
+    const [existing] = await chrome.tabGroups.query({ title: group.title });
+    if (existing && members.every((t) => t.groupId === existing.id)) {
+      grouped += members.length;
+      continue;
+    }
+    const tabIds = members.map((t) => t.id);
+    if (existing) {
+      await chrome.tabs.group({ groupId: existing.id, tabIds });
+    } else {
+      const groupId = await chrome.tabs.group({ tabIds });
+      await chrome.tabGroups.update(groupId, { title: group.title });
+    }
+    grouped += members.length;
+  }
+  return {
+    pinned,
+    grouped,
+    expectedPinned: pins.length,
+    expectedGrouped: groups.reduce((n, g) => n + (g.urls || []).length, 0),
+  };
 };
