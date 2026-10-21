@@ -294,3 +294,186 @@ async def test_lease_controls_settle_the_handoff_of_a_dead_relays_lease(
     assert Path(ended["handoff_path"]).is_file()
     assert graph.values["impersonation_handoff_id"] == f"{agent_id}:0"
     assert agent_id not in host.relays.children
+
+
+# meiva:note
+# One agent whose live automatic takeover the next host wake ends: the setup both
+# command paths share, so each test differs only in the lifecycle command it parks.
+async def _takeover_in_progress(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
+    config_authority: ConfigAuthority,
+    machine: str,
+    *,
+    local_machine: str,
+) -> tuple[int, str]:
+    agent_id = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'idling',%s)", (agent_id, machine)
+    )
+    db_conn.commit()
+    predecessor = await admit_hosted_runtime(aops_pool, agent_id, machine, uuid4(), db=database)
+    assert predecessor is not None
+    lease = leases.request(
+        database,
+        event_bus,
+        agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="antigravity"),
+        process_metadata=recorded_tree(),
+        relay_provider="antigravity",
+        relay_thread_id=str(uuid4()),
+        authority=config_authority,
+        automatic=True,
+        name="session-0",
+        executor_name="antigravity",
+        local_machine=local_machine,
+    )
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        agent_id,
+        predecessor,
+        "Handoff brief",
+        local_machine=local_machine,
+    )
+    leases.activate(database, event_bus, lease["id"], predecessor)
+    return agent_id, cast(str, lease["id"])
+
+
+def _handoff_host(
+    aops_pool: AsyncConnectionPool[Any],
+    graph: _HandoffGraph,
+    machine: str,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+) -> Any:
+    from services.agent_runner.agent_host.host import AgentHost
+
+    return AgentHost(
+        policy=configured_policy(),
+        pool=aops_pool,
+        checkpointer=MagicMock(),
+        graph=cast(Any, graph),
+        machine=configured_machine(name=machine),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(gate=database_gate),
+        catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
+    )
+
+
+# meiva:note
+# A restart command is the common way a takeover ends, and the same wake releases the
+# incarnation. The handoff therefore has to be settled before that release: afterwards
+# there is no ownership to write the checkpoint under, and the unsettled lease refuses
+# every later request. Settling only in the no-command branch left this path (#5492).
+# meiva:link docs/conventions/agents/agent-impersonation.md
+async def test_restart_command_settles_the_ended_takeover_before_releasing_the_incarnation(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    machine = machine_identity.name()
+    agent_id, lease_id = await _takeover_in_progress(
+        db_conn,
+        aops_pool,
+        database,
+        event_bus,
+        config_authority,
+        machine,
+        local_machine=machine,
+    )
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'','restart','user')",
+        (agent_id,),
+    )
+    db_conn.commit()
+    graph = _HandoffGraph()
+    host = _handoff_host(aops_pool, graph, machine, model_catalog, database_gate)
+
+    await host.run_turn(agent_id)
+
+    ended = leases.get(database, event_bus, lease_id, local_machine=machine)
+    assert ended["status"] == "expired"
+    assert ended["rejection_reason"] == "aborted: native runtime restarted"
+    assert ended["handoff_applied_at"] is not None
+    assert Path(ended["handoff_path"]).is_file()
+    assert graph.values["impersonation_handoff_id"] == f"{agent_id}:0"
+    assert db_conn.execute(
+        "SELECT status,runtime_generation,runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("idling", None, None)
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='restart'", (agent_id,)
+    ).fetchone() == ("done",)
+    db_conn.commit()
+
+    replacement = leases.request(
+        database,
+        event_bus,
+        agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="antigravity"),
+        process_metadata=recorded_tree(),
+        relay_provider="antigravity",
+        relay_thread_id=str(uuid4()),
+        authority=config_authority,
+        automatic=True,
+        name="session-1",
+        executor_name="antigravity",
+        local_machine=machine,
+    )
+    assert replacement["status"] == "requested"
+
+
+# meiva:note
+# A terminate command ends the takeover in its own wake; the handoff still lands before
+# the row leaves 'running', so the receipt never waits for whatever revives the agent.
+# meiva:link docs/conventions/agents/agent-impersonation.md
+async def test_terminate_command_settles_the_ended_takeover_before_the_agent_goes_down(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    machine = machine_identity.name()
+    agent_id, lease_id = await _takeover_in_progress(
+        db_conn,
+        aops_pool,
+        database,
+        event_bus,
+        config_authority,
+        machine,
+        local_machine=machine,
+    )
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'','terminate','user')",
+        (agent_id,),
+    )
+    db_conn.commit()
+    graph = _HandoffGraph()
+    host = _handoff_host(aops_pool, graph, machine, model_catalog, database_gate)
+
+    await host.run_turn(agent_id)
+
+    ended = leases.get(database, event_bus, lease_id, local_machine=machine)
+    assert ended["status"] == "expired"
+    assert ended["handoff_applied_at"] is not None
+    assert Path(ended["handoff_path"]).is_file()
+    assert graph.values["impersonation_handoff_id"] == f"{agent_id}:0"
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("terminated",)
+    db_conn.commit()
