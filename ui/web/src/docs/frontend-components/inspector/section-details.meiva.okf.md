@@ -61,7 +61,8 @@ not a valid finite integer renders as plain text, so the panel never navigates
 to `/shell/NaN/NaN`.
 
 **Configuration overlay.** Rows render every overlay entry's value — strings
-pass through, everything else is JSON-stringified. Skill-list keys
+pass through, everything else is JSON-stringified. `llm_model` is skipped: the
+model is the agent's state, and it reads in Liveness instead (user 2026-10-21). Skill-list keys
 (`skills_to_inject_into_system_prompt`, `skills_to_expand_at_start`) are stored
 in the runtime's underscore Python projection and render in the canonical dash
 spelling (the same rule as the `# Capabilities` index); `*` stays `*`.
@@ -70,7 +71,9 @@ spelling (the same rule as the `# Capabilities` index); `*` stays `*`.
 2026-09-18 field order, Task #3952 / #3904). Cells in display order: agent birth
 — `spawned_at` (the true birth, written once at spawn), rendered as
 "relative, absolute" on a single line (user ruling 2026-08-24) and deliberately
-not `started_at`, which refreshes on every restart; next heartbeat — both
+not `started_at`, which refreshes on every restart; harness (roster's display
+label, em dash until the roster loads) and the model the agent was born on
+(`config_overlay.llm_model`, user 2026-10-21); next heartbeat — both
 projected instants (the end of an active pause and the check-in time) render
 through `formatUpcoming`, so the day boundary is part of the value: clock time
 later today, `Tomorrow 15:21` across local midnight, a weekday name two to six

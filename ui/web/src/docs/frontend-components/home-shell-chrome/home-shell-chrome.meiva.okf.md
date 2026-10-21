@@ -23,10 +23,14 @@ for the same reason. Both variants are `relative`: the rule is the bar's own
 
 Every home column title bar is BAR_HEIGHT_PX tall and paints BAR_DIVIDER_CLASS's inset rule, so the Agent Tree, Timeline and right-panel dividers sit on one line; the right panel's document bar takes the wrapping variant (44px minimum, growing only when its content cannot fit one line) and its notice header takes the fixed variant — neither draws a border on its section.
 
-The conversation title includes the agent's stored Harness display name, using
-the same labels as the spawn picker, in every mode: Inspector changes what the right
-column shows, so naming the bar after the mode would hide the agent the reader is still
-in (user 2026-10-21). The mode is visible in its pressed toggle and in the column itself.
+The conversation title names the agent — `Agent #<id> · <label>` — in every mode: Inspector
+changes what the right column shows, so naming the bar after the mode would hide the agent
+the reader is still in (user 2026-10-21). The mode is visible in its pressed toggle and in
+the column itself. The bar no longer appends the harness display name (also 2026-10-21):
+which harness runs the agent is state the reader checks when inspecting it, not a
+label read on every glance, so it reads in the Inspector's Liveness section beside the
+model
+([[ui/web/src/docs/frontend-state/shared-context.meiva.okf.md|shared context]]).
 
 ## Edge-pinned controls
 

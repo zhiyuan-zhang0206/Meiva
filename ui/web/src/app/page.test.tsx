@@ -467,6 +467,11 @@ describe("HomePage top-level render", () => {
     expect(label).toContain("Agent #5");
     expect(label).toContain("research");
     expect(label).not.toContain("Idling");
+    // meiva:note
+    // The harness belongs to the inspector's Liveness section, not to the title bar:
+    // naming it there was information the reader never acts on (user 2026-10-21).
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    expect(label).not.toContain("Meiva");
   });
 
   it("keeps the agent label while Inspector mode is on", () => {

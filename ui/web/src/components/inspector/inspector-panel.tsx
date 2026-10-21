@@ -29,6 +29,7 @@ import { formatTokens } from "@/lib/format/format-number";
 import { useNow } from "@/lib/format/use-now";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { useAgentPages } from "@/lib/agents/use-agent-pages";
+import { harnessLabel } from "@/lib/harness/harness";
 import { useAgentRoster } from "@/lib/agents/use-agents";
 import { AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
@@ -567,8 +568,14 @@ function displaySkillName(name: string): string {
   return name === "*" ? name : name.replace(/_/g, "-");
 }
 
+// meiva:note
+// llm_model is not an override a reader compares — it is the agent's own state, shown in
+// Liveness beside its harness (user 2026-10-21). Every other key stays.
+// meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+const CONFIG_OVERLAY_HIDDEN_KEYS = new Set(["llm_model"]);
+
 function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
-  const entries = Object.entries(inspect.config_overlay);
+  const entries = Object.entries(inspect.config_overlay).filter(([key]) => !CONFIG_OVERLAY_HIDDEN_KEYS.has(key));
   const t = useTranslations("inspector");
   if (entries.length === 0) return null;
 
@@ -723,6 +730,15 @@ const STATUS_LABEL_KEY: Record<string, string> = {
 function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   const { liveness_state: state, heartbeat, spawned_at } = inspect;
   const { data: roster } = useAgentRoster();
+  const rosterRow = roster?.agents.find((agent) => agent.agent_id === inspect.agent_id);
+  // meiva:note
+  // Which harness runs the agent and which model it was born on belong to the agent's
+  // current state, not to its configuration overrides: the title bar stopped naming the
+  // harness (user 2026-10-21), and the overlay's llm_model row is hidden below, so the
+  // two facts a reader checks first sit together here.
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  const harness = rosterRow?.harness;
+  const model = typeof inspect.config_overlay.llm_model === "string" ? inspect.config_overlay.llm_model : undefined;
   const offline = state === "offline";
   const t = useTranslations("inspector");
   const tStatus = useTranslations("agentRow");
@@ -730,9 +746,7 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   const { formatAbsolute, formatUpcoming } = useTimeFormat();
   const next = nextHeartbeatCell(heartbeat, { pending: t("pending"), due: t("due") }, now, formatUpcoming);
   const lastPause = heartbeat.last_pause;
-  const impersonated =
-    inspect.status !== "terminated" &&
-    roster?.agents.find((agent) => agent.agent_id === inspect.agent_id)?.status === "impersonated";
+  const impersonated = inspect.status !== "terminated" && rosterRow?.status === "impersonated";
   const status = impersonated ? "impersonated" : inspect.status;
   const statusKey = STATUS_LABEL_KEY[status];
   return (
@@ -752,6 +766,8 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
               : t("neverPaused")
           }
         />
+        <Metric label={t("metricHarness")} value={harness ? harnessLabel(harness) : "—"} />
+        <Metric label={t("metricModel")} value={model ?? "—"} />
         <Metric label={t("metricMachine")} value={inspect.machine} />
         <Metric
           label={t("metricStatus")}

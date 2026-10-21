@@ -343,9 +343,19 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("dev-server").closest("a")?.getAttribute("href")).toBe("/shell/1/0");
     expect(screen.getByText("watcher").closest("a")?.getAttribute("href")).toBe("/shell/1/2");
 
-    expect(screen.getByText("llm_model")).toBeTruthy();
-    expect(screen.getByText("claude-opus-4-8")).toBeTruthy();
-    expect(screen.getByText("0.7")).toBeTruthy();
+    // meiva:note
+    // The model is the agent's state, not an override: it reads in Liveness beside the
+    // harness, and the overlay no longer repeats it as llm_model (user 2026-10-21).
+    // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+    const livenessSection = screen.getByText("Liveness").closest("section");
+    expect(livenessSection).not.toBeNull();
+    expect(within(livenessSection!).getByText("Harness")).toBeTruthy();
+    expect(within(livenessSection!).getByText("Model")).toBeTruthy();
+    expect(within(livenessSection!).getByText("claude-opus-4-8")).toBeTruthy();
+    const overlaySection = screen.getByText("Configuration overlay").closest("section");
+    expect(overlaySection).not.toBeNull();
+    expect(within(overlaySection!).queryByText("llm_model")).toBeNull();
+    expect(within(overlaySection!).getByText("0.7")).toBeTruthy();
 
     expect(screen.getByText("$0.4213")).toBeTruthy();
     expect(screen.getByText("1.20M / 84.0k")).toBeTruthy();
@@ -948,6 +958,30 @@ describe("InspectorPanel", () => {
   });
 });
 
+describe("InspectorPanel liveness identity rows", () => {
+  it("names the roster's harness and the model the agent was born on", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "codex" }));
+    getAgentInspectLive.mockResolvedValue(liveFixture());
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    const livenessSection = screen.getByText("Liveness").closest("section");
+    expect(within(livenessSection!).getByText("Codex")).toBeTruthy();
+    expect(within(livenessSection!).getByText("claude-opus-4-8")).toBeTruthy();
+  });
+
+  it("falls back to an em dash when the roster has not loaded", async () => {
+    getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
+    getAgentInspectLive.mockResolvedValue(liveFixture({ config_overlay: { auto_compact_fraction: 0.7 } }));
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    const livenessSection = screen.getByText("Liveness").closest("section");
+    for (const label of ["Harness", "Model"]) {
+      const cell = within(livenessSection!).getByText(label).closest("div");
+      expect(within(cell!).getByText("—")).toBeTruthy();
+    }
+  });
+});
+
 describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", () => {
   it("shows the projected next check-in as a local clock time when idle and un-paused", async () => {
     useFrozenClock("2026-10-17T16:26:00Z");
@@ -1033,7 +1067,9 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
     const livenessSection = screen.getByText("Liveness").closest("section");
     expect(livenessSection).not.toBeNull();
-    expect(within(livenessSection!).getByText("—")).toBeTruthy();
+    const nextCell = within(livenessSection!).getByText("Next heartbeat").closest("div");
+    expect(nextCell).not.toBeNull();
+    expect(within(nextCell!).getByText("—")).toBeTruthy();
     expect(screen.getByText("5m ago · 30m")).toBeTruthy();
   });
 });
