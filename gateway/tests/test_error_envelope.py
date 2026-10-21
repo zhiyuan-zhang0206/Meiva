@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Iterator
+from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
@@ -180,7 +181,9 @@ def _request(
     store. A request without a session cookie must never reach `db_pool`, so
     bearer and anonymous requests pay no session lookup.
     """
-    _middleware_app.state.gateway_config = gateway_config_from_boot(snapshot_process_config())
+    _middleware_app.state.gateway_config = replace(
+        gateway_config_from_boot(snapshot_process_config()), human_auth="required"
+    )
     return Request(
         {
             "type": "http",
