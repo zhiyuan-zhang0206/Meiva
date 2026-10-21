@@ -198,7 +198,6 @@ def _build_request_resources(
         rerank_candidates=lambda: config.view.services.memory_rerank_candidates,
         dedup_candidates=lambda: config.view.services.memory_dedup_candidates,
     )
-    app.state.memory_graph_cache = memory_router.MemoryGraphCache()
     app.state.auth401_log = rejection_log.AuthRejectionLog()
     app.state.login_limiter = LoginRateLimiter(
         max_failures_reader=lambda: config.view.gateway.login_max_failures,

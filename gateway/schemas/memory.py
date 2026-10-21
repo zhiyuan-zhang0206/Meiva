@@ -1,6 +1,6 @@
 """Memory search and graph HTTP contracts."""
 
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import (
     AfterValidator,
@@ -107,59 +107,11 @@ class MemoryRefreshResponse(BaseModel):
     head: str  # HEAD commit sha of the gateway memory checkout after fast-forward to origin/main
 
 
-class MemoryGraphNode(BaseModel):
-    """One node in the OKF memory graph — a concept note, or a folder pseudo
-    node (the graph's structural skeleton)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    id: str
-    path: str
-    title: str
-    kind: Literal["note", "folder"]
-    description: str | None
-    tags: list[str]
-    primary_tag: str
-    timestamp: str | None
-    meiva_agent: str | None
-    meiva_machine: str | None
-
-
-class MemoryGraphEdge(BaseModel):
-    """One directed edge in the OKF memory graph.
-
-    `kind` separates the two edge families the frontend renders differently:
-    `containment` (note → folder, folder → parent folder — the main
-    structure) and `reference` (a markdown cross-link between two notes).
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    source: str
-    target: str
-    kind: Literal["containment", "reference"]
-
-
-class MemoryGraphResponse(BaseModel):
-    """GET /api/memory/graph response."""
-
-    model_config = ConfigDict(frozen=True)
-
-    nodes: list[MemoryGraphNode]
-    edges: list[MemoryGraphEdge]
-    warnings: list[str] = Field(default_factory=list)
-
-
+# meiva:note
+# GET /api/memory/note carries the parsed fields plus the markdown body with its YAML
+# frontmatter already stripped, so a reader renders the note instead of re-parsing it.
+# meiva:link gateway/routers/docs/memory.meiva.okf.md
 class MemoryNoteResponse(BaseModel):
-    """GET /api/memory/note response — one parsed memory note.
-
-    Mirrors MemoryGraphNode plus the parsed markdown body. The body is the
-    markdown with the YAML frontmatter removed (base.parse_note's body), so
-    the frontend renders the note itself rather than re-parsing frontmatter
-    (frontmatter values arrive as structured fields: title / description /
-    tags / timestamp / meiva_agent / meiva_machine).
-    """
-
     model_config = ConfigDict(frozen=True)
 
     path: str
