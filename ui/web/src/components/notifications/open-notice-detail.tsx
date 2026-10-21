@@ -140,7 +140,7 @@ export function OpenNoticeDetail({
             {t("dismiss")}
           </Button>
         </div>
-        <h4 className="text-[13px] font-semibold leading-snug break-words">{notice.title}</h4>
+        <h4 className="text-[13px] font-semibold leading-snug break-words"><ChatMarkdown content={notice.title} inline /></h4>
         {notice.content && (
           <div className="text-[13px] break-words text-foreground/85">
             <ChatMarkdown content={notice.content} />

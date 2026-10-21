@@ -21,18 +21,19 @@ afterEach(() => {
 });
 
 describe("ChatMarkdown lazy boundary", () => {
-  it("shows the plain-text fallback while the chunk is in flight, then upgrades to markdown", async () => {
+  it.each([false, true])("upgrades the lazy fallback to markdown with inline=%s", async (inline) => {
     let resolveImport: (renderer: Renderer) => void = () => undefined;
     const pending = new Promise<Renderer>((resolve) => {
       resolveImport = resolve;
     });
     __setMarkdownImportForTests(() => pending);
 
-    const { container } = render(<ChatMarkdown content="**bold** text" />);
+    const { container } = render(<ChatMarkdown content="**bold** text" inline={inline} />);
 
     const fallback = screen.getByTestId("chat-markdown-plain");
     expect(fallback.textContent).toBe("**bold** text");
     expect(fallback.classList.contains("chat-md")).toBe(true);
+    expect(fallback.tagName).toBe(inline ? "SPAN" : "DIV");
     expect(container.querySelector("strong")).toBeNull();
 
     resolveImport(ChatMarkdownRenderer);
@@ -41,6 +42,7 @@ describe("ChatMarkdown lazy boundary", () => {
       expect(container.querySelector("strong")?.textContent).toBe("bold");
     });
     expect(screen.queryByTestId("chat-markdown-plain")).toBeNull();
+    if (inline) expect(container.querySelector("div, p, pre")).toBeNull();
   });
 
   it("renders markdown on the first paint when the renderer was already prefetched", async () => {

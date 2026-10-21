@@ -59,11 +59,14 @@ export const ChatMarkdown = memo(function ChatMarkdown(props: ChatMarkdownProps)
     };
   }, [Renderer]);
 
-  if (Renderer === null) return <PlainChatMarkdown content={props.content} />;
+  if (Renderer === null) return <PlainChatMarkdown content={props.content} inline={props.inline} />;
   return <Renderer {...props} />;
 });
 
-function PlainChatMarkdown({ content }: { content: string }) {
+function PlainChatMarkdown({ content, inline }: { content: string; inline?: boolean }) {
+  if (inline) {
+    return <span className={cn("chat-md font-sans whitespace-pre-wrap [overflow-wrap:anywhere]", MIN_W_0)} data-testid="chat-markdown-plain">{content}</span>;
+  }
   return (
     <div className={cn("chat-md font-sans", MIN_W_0)} data-testid="chat-markdown-plain">
       <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{content}</p>

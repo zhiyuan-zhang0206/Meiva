@@ -4,6 +4,7 @@ import { AppWindow } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { STATUS_DOT } from "@/components/agents/agent-row";
+import { ChatMarkdown } from "@/components/content/markdown";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
 import { formatRelativeTime } from "@/lib/agents/sidebar";
 import type { PublicAgentStatus, OpenNotice, PageRow } from "@/lib/contracts/types";
@@ -128,7 +129,9 @@ export function NoticeListRow({
       >
         <span className={cn("space-y-1.5", FLEX_1, MIN_W_0)}>
           <span className={cn("items-start gap-2", FLEX)}>
-            <span data-testid="notice-title" className={cn("text-sm font-medium break-words", MIN_W_0, FLEX_1)}>{title}</span>
+            <span data-testid="notice-title" className={cn("text-sm font-medium break-words", MIN_W_0, FLEX_1)}>
+              <ChatMarkdown content={title} inline components={{ a: ({ children }) => <>{children}</> }} />
+            </span>
             <PriorityBadge priority={priority} muted={muted} />
           </span>
           <span className={cn("flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground", FLEX)}>

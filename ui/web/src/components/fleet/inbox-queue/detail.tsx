@@ -140,7 +140,7 @@ export function ResolvedDetail({
             {t("decision")}
           </span>
         </div>
-        <h3 className="mt-2 text-sm font-medium break-words">{notice.title}</h3>
+        <h3 className="mt-2 text-sm font-medium break-words"><ChatMarkdown content={notice.title} inline /></h3>
         {notice.content && (
           <div className="mt-3 text-xs text-foreground/90">
             <ChatMarkdown content={notice.content} />
