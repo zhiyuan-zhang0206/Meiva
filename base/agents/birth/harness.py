@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Collection, Sequence
+import subprocess
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,7 +17,11 @@ from base.api_contracts.agent_contract import (
     HarnessStatus,
 )
 from base.db import fetch_one
-from base.host.env.harness_binaries import HARNESS_BIN_DIRS, locate_harness_binary
+from base.host.env.harness_binaries import (
+    HARNESS_BIN_DIRS,
+    harness_child_path,
+    locate_harness_binary,
+)
 
 DEFAULT_HARNESS = Harness.MEIVA
 
@@ -319,8 +324,121 @@ if _UNPROBED:
     )
 
 
+# meiva:note
+# What the CLI itself says, asked through the same environment a session would be handed
+# (the runner allowlist plus the install directories). The keychain and the CLI's own
+# session store are readable only from the session this probe runs in — the files an
+# installer leaves in the home directory are not evidence either way: a machine can answer
+# with no credentials file (macbook-air, Claude Code) or hold a token file its CLI never
+# reads (company-air, agy).
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+_CLI_STATUS_ARGS: dict[Harness, tuple[str, ...]] = {
+    Harness.CLAUDE_CODE: ("auth", "status", "--json"),
+    Harness.CODEX: ("login", "status"),
+    Harness.ANTIGRAVITY: ("models",),
+}
+
+# meiva:note
+# `agy models` fetches the catalogue over the network (measured 2-5s); the other two are
+# local reads under a second. Each bound keeps the ops call bounded when a CLI hangs on a
+# login prompt or a dead network, and a timeout reads `unknown`, never "signed in".
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+_CLI_TIMEOUT_S: dict[Harness, float] = {
+    Harness.CLAUDE_CODE: 8.0,
+    Harness.CODEX: 8.0,
+    Harness.ANTIGRAVITY: 12.0,
+}
+
+CliRunner = Callable[..., "subprocess.CompletedProcess[str]"]
+
+
+def _cli_environment() -> dict[str, str]:
+    from base.host.env.registry import child_env
+
+    environment = child_env("runner")
+    return {**environment, "PATH": harness_child_path(path_env=environment.get("PATH"))}
+
+
+def _answered_claude(done: subprocess.CompletedProcess[str]) -> _LoginEvidence:
+    try:
+        record = json.loads(done.stdout)
+    except json.JSONDecodeError:
+        return _LoginEvidence(signed_in=None, detail="claude auth status printed no JSON")
+    if not isinstance(record, dict):
+        return _LoginEvidence(signed_in=None, detail="claude auth status printed no login state")
+    data = cast("dict[str, object]", record)
+    logged_in = data.get("loggedIn")
+    if logged_in is True:
+        return _LoginEvidence(
+            signed_in=True,
+            detail=f"claude auth status reports a login ({data.get('authMethod') or 'unknown'})",
+        )
+    if logged_in is False:
+        return _LoginEvidence(signed_in=False, detail="claude auth status reports no login")
+    return _LoginEvidence(signed_in=None, detail="claude auth status reported no login state")
+
+
+def _answered_codex(done: subprocess.CompletedProcess[str]) -> _LoginEvidence:
+    said = f"{done.stdout}\n{done.stderr}".lower()
+    if done.returncode == 0 and "logged in" in said:
+        return _LoginEvidence(signed_in=True, detail="codex login status reports a login")
+    if done.returncode != 0 and "not logged in" in said:
+        return _LoginEvidence(signed_in=False, detail="codex login status reports no login")
+    return _LoginEvidence(signed_in=None, detail="codex login status reported no login state")
+
+
+def _answered_agy(done: subprocess.CompletedProcess[str]) -> _LoginEvidence:
+    said = f"{done.stdout}\n{done.stderr}".lower()
+    if done.returncode == 0 and done.stdout.strip():
+        return _LoginEvidence(
+            signed_in=True, detail="agy models listed the catalogue, which needs a login"
+        )
+    if done.returncode != 0 and ("sign in" in said or "authentication required" in said):
+        return _LoginEvidence(signed_in=False, detail="agy models asked for a sign-in")
+    return _LoginEvidence(signed_in=None, detail="agy models reported no login state")
+
+
+_CLI_ANSWERS: dict[Harness, Callable[[subprocess.CompletedProcess[str]], _LoginEvidence]] = {
+    Harness.CLAUDE_CODE: _answered_claude,
+    Harness.CODEX: _answered_codex,
+    Harness.ANTIGRAVITY: _answered_agy,
+}
+
+
+def _cli_login(
+    harness: Harness,
+    binary: str,
+    *,
+    runner: CliRunner = subprocess.run,
+    environment: dict[str, str] | None = None,
+) -> _LoginEvidence:
+    args = _CLI_STATUS_ARGS[harness]
+    env = _cli_environment() if environment is None else environment
+    try:
+        done = runner(
+            [binary, *args],
+            capture_output=True,
+            text=True,
+            timeout=_CLI_TIMEOUT_S[harness],
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return _LoginEvidence(
+            signed_in=None, detail=f"`{binary} {' '.join(args)}` did not answer in time"
+        )
+    except OSError as exc:
+        return _LoginEvidence(
+            signed_in=None, detail=f"`{binary} {' '.join(args)}` could not run: {exc}"
+        )
+    return _CLI_ANSWERS[harness](done)
+
+
 def _probe_external(
-    harness: Harness, home: Path, path_env: str | None, bin_dirs: Sequence[str]
+    harness: Harness,
+    home: Path,
+    path_env: str | None,
+    bin_dirs: Sequence[str],
+    cli_runner: CliRunner = subprocess.run,
 ) -> HarnessProbe:
     binary = _BINARIES[harness]
     path, on_path = locate_harness_binary(binary, home=home, path_env=path_env, bin_dirs=bin_dirs)
@@ -332,7 +450,9 @@ def _probe_external(
             harness, "unavailable", f"the {binary} command was not found on PATH or in {searched}"
         )
     installed = f"installed at {path}" if on_path else f"installed at {path} (not on PATH)"
-    evidence = _LOGIN_CHECKS[harness](home)
+    evidence = _cli_login(harness, path, runner=cli_runner)
+    if evidence.signed_in is None:
+        evidence = _LOGIN_CHECKS[harness](home)
     if evidence.signed_in is True:
         return HarnessProbe(harness, "available", f"{installed}; {evidence.detail}", path, on_path)
     if evidence.signed_in is False:
@@ -354,14 +474,15 @@ def _probe_external(
 
 
 # meiva:note
-# The probe reads the filesystem only: no command runs, so it cannot hang on a
-# login prompt, spend quota or start a session. A sign-in it cannot prove is
-# reported as unknown rather than guessed either way.
+# The probe asks each CLI and falls back to the stored credential only when the CLI cannot
+# answer; neither path starts a session or spends model quota, and a sign-in it cannot
+# prove stays `unknown` rather than being guessed either way.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def probe_local_harnesses(
     home: Path | None = None,
     path_env: str | None = None,
     bin_dirs: Sequence[str] | None = None,
+    cli_runner: CliRunner = subprocess.run,
 ) -> list[HarnessProbe]:
     resolved_home = Path.home() if home is None else home
     resolved_bin_dirs = HARNESS_BIN_DIRS if bin_dirs is None else bin_dirs
@@ -374,5 +495,9 @@ def probe_local_harnesses(
                 )
             )
             continue
-        rows.append(_probe_external(harness, resolved_home, path_env, resolved_bin_dirs))
+        rows.append(
+            _probe_external(
+                harness, resolved_home, path_env, resolved_bin_dirs, cli_runner=cli_runner
+            )
+        )
     return rows
