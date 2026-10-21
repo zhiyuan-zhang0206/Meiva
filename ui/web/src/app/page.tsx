@@ -236,7 +236,6 @@ function HomeContent({
 }: HomeContentProps) {
   const t = useTranslations("common");
   const timelineText = useTranslations("timeline");
-  const contextText = useTranslations("toUser");
   const composerFocusToken = useStore((s) => s.composerFocusToken);
   const { settings: userSettings, isLoading: userSettingsLoading } = useUserSettings();
   const { isNarrow, isLarge } = useBreakpoint();
@@ -406,7 +405,7 @@ function HomeContent({
               ) : null
             }
           >
-            {contextAvailable && <button onClick={openContext} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent">{contextText("openContext")}</button>}
+            {contextAvailable && <ContextPanelToggle open={false} onToggle={openContext} iconClass="size-4" />}
           </HeaderBar>
           <div className="relative z-20 bg-background">
             <PendingStrip items={visiblePendingMessages} maxWidthCss={composerMaxWidth} />
