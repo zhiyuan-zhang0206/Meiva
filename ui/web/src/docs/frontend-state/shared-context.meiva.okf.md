@@ -48,8 +48,10 @@ and leaving the full body height for Inspector. Returning restores the shared
 document reading position. Below the
 desktop breakpoint the shared context opens as a full-screen reading view from
 the header's To user action — available whenever an agent is selected. Its top
-bar contains only Back to messages navigation, so the document's title never
-appears to encompass the question.
+bar pairs Back to messages with the Inspector mode toggle on the right. The
+toggle stays in that bar when active and becomes the exit. The narrow document
+toolbar contains only document controls, so the document's title never appears
+to encompass the question or the panel's mode switch.
 
 `["to-user", agentId]` owns the root document snapshot. Linked Markdown uses
 that query-key prefix followed by its reference chain. The home-machine ops
