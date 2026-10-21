@@ -524,9 +524,7 @@ def fake_identity_reply(
             )
         case "list-keychains":
             listed = (
-                (str(signing_identity.keychain_path()),)
-                if search_list is None
-                else search_list
+                (str(signing_identity.keychain_path()),) if search_list is None else search_list
             )
             text = "".join(f'    "{path}"\n' for path in listed)
         case _:

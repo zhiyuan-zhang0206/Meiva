@@ -239,9 +239,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
         shutil.copytree(lproj, app / "Contents" / "Resources" / lproj.name, dirs_exist_ok=True)
 
     run_tool(
-        signing_identity.sign_arguments(
-            app, entitlements=ENTITLEMENTS, identifier=HELPER_BUNDLE_ID
-        )
+        signing_identity.sign_arguments(app, entitlements=ENTITLEMENTS, identifier=HELPER_BUNDLE_ID)
     )
     actual_dr = read_dr(app)
     write_build_state(state_path, source_hash, actual_dr)

@@ -41,9 +41,12 @@ def _select_home(home: str | None) -> None:
 # `switch --retire` stops the helper, which is the parent of this home's
 # meiva-root: a process inside that tree would be killed halfway through the
 # swap. A new session survives the teardown, and its log is the only evidence
-# left on the host, so the path is printed before anything else happens.
+# left on the host -- `$MEIVA_HOME/logs`, where a recovery session looks -- so the
+# path is printed before anything else happens.
 def _detach(argv: list[str]) -> int:
-    log = Path(f"/tmp/helper-signing-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.log")
+    from base.paths import logs_dir
+
+    log = logs_dir() / f"helper-signing-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.log"
     pid = os.fork()
     if pid:
         print(f"detached as pid {pid}; log: {log}")
@@ -57,7 +60,7 @@ def _detach(argv: list[str]) -> int:
     print(f"=== detached switch started {datetime.now(UTC).isoformat()} ===")
     try:
         return main(args)
-    except BaseException as error:  # noqa: BLE001
+    except BaseException as error:
         print(f"switch aborted: {error!r}")
         raise
 
@@ -159,12 +162,31 @@ def import_identity(path: str, *, password_file: str | None) -> int:
         lifecycle.run_tool(["/usr/bin/security", "set-keychain-settings", str(keychain)])
     lifecycle.run_tool(["/usr/bin/security", "unlock-keychain", "-p", password, str(keychain)])
     lifecycle.run_tool(
-        ["/usr/bin/security", "import", str(archive), "-k", str(keychain), "-P", password,
-         "-T", "/usr/bin/codesign", "-T", "/usr/bin/security"]
+        [
+            "/usr/bin/security",
+            "import",
+            str(archive),
+            "-k",
+            str(keychain),
+            "-P",
+            password,
+            "-T",
+            "/usr/bin/codesign",
+            "-T",
+            "/usr/bin/security",
+        ]
     )
     lifecycle.run_tool(
-        ["/usr/bin/security", "set-key-partition-list", "-S", "apple-tool:,apple:", "-s",
-         "-k", password, str(keychain)]
+        [
+            "/usr/bin/security",
+            "set-key-partition-list",
+            "-S",
+            "apple-tool:,apple:",
+            "-s",
+            "-k",
+            password,
+            str(keychain),
+        ]
     )
     signing_identity.require(lifecycle.run_tool)
     print(f"imported the identity into {keychain}")
@@ -197,15 +219,18 @@ def switch(*, retire: bool, start: bool) -> int:
     try:
         signing_identity.ensure(lifecycle.run_tool, create=True)
         built, rebuilt = lifecycle.build_and_sign()
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         print(f"switch failed: {error}", file=sys.stderr)
         _restore(backup, home, app, before_dr)
         return 1
 
     after = _codesign("-d", "-r-", app=built)
     requirement = next(
-        (line.removeprefix("# ").removeprefix("designated => ") for line in after.splitlines()
-         if line.startswith(("designated =>", "# designated =>"))),
+        (
+            line.removeprefix("# ").removeprefix("designated => ")
+            for line in after.splitlines()
+            if line.startswith(("designated =>", "# designated =>"))
+        ),
         "",
     )
     if "certificate" not in requirement:
