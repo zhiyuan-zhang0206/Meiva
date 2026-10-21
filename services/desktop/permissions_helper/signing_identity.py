@@ -330,7 +330,7 @@ either file.
 Why: TCC keys a grant on the designated requirement. Under an ad-hoc signature
 that requirement is the code hash, so every rebuild is a new identity and the
 grants silently stop matching. With a certificate the requirement is
-`identifier "com.meiva.permissions-helper" and certificate leaf = H"..."`, which
+`identifier "com.meiva.permissions-helper" and certificate root = H"..."`, which
 does not change when the helper is rebuilt.
 
 ## How it was created
