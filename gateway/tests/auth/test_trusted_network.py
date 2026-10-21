@@ -47,16 +47,17 @@ def probe(request: Request) -> dict[str, str | None]:
 
 @contextmanager
 def served(
-    human_auth: Literal["required", "trusted_network"], machine: MachineIdentity
+    human_auth: Literal["required", "trusted_network"] | None, machine: MachineIdentity
 ) -> Generator[TestClient]:
     with gateway_test_process(machine=machine) as process:
         config = replace(
             gateway_config_from_boot(process.config),
             cluster_secret=CLUSTER_KEY,
             allowed_origins=(ALLOWED_ORIGIN,),
-            human_auth=human_auth,
             trusted_hosts=HOSTS,
         )
+        if human_auth is not None:
+            config = replace(config, human_auth=human_auth)
         app = gateway_test_app(process=process, config=config)
         app.add_api_route("/api/probe", probe, methods=["GET", "POST"])
         app.add_api_route(
@@ -205,7 +206,19 @@ def test_require_human_credential_accepts_the_trusted_network_fact() -> None:
     assert refused.value.status_code == 403
 
 
-def test_human_auth_defaults_to_required_and_rejects_unknown_values() -> None:
-    assert GatewaySettings().human_auth == "required"
+def test_human_auth_defaults_to_trusted_network_and_rejects_unknown_values() -> None:
+    assert GatewaySettings().human_auth == "trusted_network"
+    assert GatewaySettings.model_validate({"human_auth": "required"}).human_auth == "required"
     with pytest.raises(ValidationError):
         GatewaySettings.model_validate({"human_auth": "open"})
+
+
+def test_default_policy_skips_login_and_serves_the_api(
+    *, machine_identity: MachineIdentity
+) -> None:
+    with served(None, machine_identity) as client:
+        check = client.get("/api/auth/check", headers=DECLARED)
+        response = client.get("/api/probe", headers=DECLARED)
+    assert check.json() == {"authenticated": True}
+    assert response.status_code == 200
+    assert response.json() == {"fact": TRUSTED_NETWORK_FACT, "principal": "cluster:administrator"}

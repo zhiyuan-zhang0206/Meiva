@@ -422,14 +422,14 @@ class GatewaySettings(EnvSettings):
     )
 
     human_auth: Literal["required", "trusted_network"] = Field(
-        default="required",
+        default="trusted_network",
         alias="MEIVA_GATEWAY_HUMAN_AUTH",
         description=(
             "How the gateway authenticates human-facing callers (the web UI login and an "
-            "operator's cluster-secret bearer). `required` (default): every request carries a "
-            "session cookie or a bearer. `trusted_network`: a request that presents neither is "
+            "operator's cluster-secret bearer). `required`: every request carries a "
+            "session cookie or a bearer. `trusted_network` (default): a request that presents neither is "
             "served as the cluster administrator, so the API does not authenticate human "
-            "callers; set it only when the machine's MEIVA_MACHINE_HOST is a trusted private "
+            "callers; use it only when the machine's MEIVA_MACHINE_HOST is a trusted private "
             "network address (the gateway then listens on loopback and that address only). "
             "Anonymous requests still face the browser-origin and Host-header checks. Machine "
             "credentials, the data plane, webhook tokens and the /mcp endpoint's own tokens are "

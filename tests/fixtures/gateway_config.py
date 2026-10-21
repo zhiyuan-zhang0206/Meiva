@@ -81,7 +81,11 @@ def gateway_test_app(
         )
     else:
         ownership = "borrowed" if process_ownership is None else process_ownership
-    resolved_config = gateway_config_from_boot(process.config) if config is None else config
+    resolved_config = (
+        replace(gateway_config_from_boot(process.config), human_auth="required")
+        if config is None
+        else config
+    )
     if cluster_secret is not None:
         # meiva:note
         # A test that pins the app's secret, e.g. to prove a client built from the

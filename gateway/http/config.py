@@ -24,7 +24,7 @@ class GatewayConfig:
     browser_origin: str
     session_cookie_secure: bool
     memory_root: Path
-    human_auth: Literal["required", "trusted_network"] = "required"
+    human_auth: Literal["required", "trusted_network"]
     trusted_hosts: frozenset[str] = frozenset()
 
 
