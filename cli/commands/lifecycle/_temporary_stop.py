@@ -24,6 +24,25 @@ from cli.commands.lifecycle.service_stop import close_shell_sessions, stop_data_
 from services.supervision.roster import build_services
 
 
+# meiva:note
+# Write the session ledger a later `meiva start` restores (see session_restore).
+# Called at the top of the stop, before the services phase: that phase is what
+# signals the `meiva-browser` session, so waiting for the stop's own `browser`
+# phase would find Chrome already gone.
+# meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+def record_browser_session() -> None:
+    from base.config import settings
+    from base.paths import meiva_home
+    from services.desktop.browser import session_restore
+
+    line = session_restore.record_for_stop(
+        home=meiva_home(),
+        chrome=session_restore.CdpChrome(settings.services.browser_cdp_port),
+    )
+    if line is not None:
+        print(f"  {line}")
+
+
 def stop_browser(deadline: float) -> None:
     from services.desktop.browser.orphan import find_cluster_chrome
 
@@ -384,6 +403,8 @@ def stop(
     clients: list[str] = []  # the pooler's clients still connected at its stop (reported only)
 
     try:
+        if not keep_browser:
+            _timed_phase(phases, "browser-session", record_browser_session)
         if require_unstarted_initialization():
             _stop_initialization(
                 phases,

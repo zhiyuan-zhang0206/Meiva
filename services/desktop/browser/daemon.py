@@ -33,9 +33,9 @@ from loguru import logger
 from base.config import settings
 from base.host.system.hostport import Host
 from base.host.system.probes import browser_incapability, resolve_chrome_binary
-from base.paths import logs_dir
+from base.paths import logs_dir, meiva_home
 
-from . import macos_readiness
+from . import macos_readiness, session_restore
 from . import profile as browser_profile
 from .probe import cdp_url
 from .profile import profile_dir as profile_dir
@@ -67,14 +67,24 @@ def cdp_reachable(port: int) -> bool:
         return False
 
 
-def chrome_args(binary: str, port: int, profile: Path) -> list[str]:
-    return [
+# meiva:note
+# The launch line. `--restore-last-session` reopens the profile's last session, and
+# only a deliberate `meiva stop` asks for it (through the session ledger):
+# relaunching after a crash must not replay the tab set the profile died with.
+# meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+def chrome_args(
+    binary: str, port: int, profile: Path, *, restore_last_session: bool = False
+) -> list[str]:
+    args = [
         binary,
         f"--remote-debugging-port={port}",
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",
     ]
+    if restore_last_session:
+        args.append("--restore-last-session")
+    return args
 
 
 def exec_chrome(binary: str, args: list[str]) -> None:
@@ -86,7 +96,7 @@ def exec_chrome(binary: str, args: list[str]) -> None:
         sys.exit(127)
 
 
-def main() -> None:
+def main(*, restore_last_session: bool | None = None) -> None:
     # Fail loud BEFORE the log redirect so the reason is visible in the
     # session log — this also guards healthcheck-triggered respawns, not just the first
     # launch (the converge preflight only runs at `meiva start`).
@@ -120,6 +130,15 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+    # meiva:note
+    # Consume a pending restore only here, after the port guard refused nothing:
+    # a launch that never happens must not eat the one chance to reopen the tabs.
+    # `restore_last_session` is an explicit parameter only so a test can pin the
+    # decision; the entry point always reads the ledger.
+    if restore_last_session is None:
+        restore_last_session = session_restore.begin_launch(meiva_home())
+    if restore_last_session:
+        logger.info("meiva-browser: restoring the tabs of the last deliberate stop")
     binary = resolve_chrome_binary(settings.services.chrome_binary, host=host)
     if binary is None:  # assert_browser_capable already raised if so — this narrows the type
         sys.exit(127)
@@ -140,7 +159,9 @@ def main() -> None:
     os.dup2(log_fd, 1)
     os.dup2(log_fd, 2)
     os.close(log_fd)
-    exec_chrome(binary, chrome_args(binary, cdp_port, profile))
+    exec_chrome(
+        binary, chrome_args(binary, cdp_port, profile, restore_last_session=restore_last_session)
+    )
 
 
 if __name__ == "__main__":

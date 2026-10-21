@@ -129,6 +129,15 @@ def _worker_file() -> str:
     return manifest["background"]["service_worker"]
 
 
+# meiva:note
+# The service-worker file name this checkout ships (public door to `_worker_file`).
+# The session ledger calls the same worker directly, outside the daemon; a second
+# reader of the manifest could drift from this one.
+# meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+def shipped_worker() -> str:
+    return _worker_file()
+
+
 async def _live_worker(ws: Any, ids: Any, extension_id: str) -> str | None:
     """The target id of this checkout's worker file running in ``extension_id``, if any."""
     url = f"chrome-extension://{extension_id}/{_worker_file()}"

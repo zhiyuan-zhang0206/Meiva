@@ -54,6 +54,16 @@ the operating choices below do not redefine either component.
   reuses a retained session and relaunches a stopped one. Explicit force stop
   and cluster destroy additionally sweep owned Chrome processes outside the
   recorded session tree (`services/desktop/browser/orphan.py`).
+- **Tabs survive a deliberate stop**: `meiva stop --stop-browser` records the
+  open tabs to `<home>/run/browser-session.json` before the services phase
+  signals the browser, and the next `meiva start` relaunches Chrome with
+  `--restore-last-session`, re-applies the recorded pins and tab groups, and
+  prints `browser session: restored N/M tabs; pin/group reapplied K/J`. A crash
+  never restores, and `--keep-browser` records nothing. The ledger holds URLs,
+  titles, pins and group titles only — never cookies, tokens or headers. Do not
+  reach for Chrome's "continue where you left off" preference instead: measured
+  on Chrome 156 it restores an incomplete set and drops grouped tabs
+  ([browser session restore](browser-session-restore.meiva.okf.md)).
 - **First login is the user's job**: the headed window opens on the host's
   desktop; **you** sign into the target sites (e.g. Google / Xiaohongshu) once — the
   agent does not (and cannot) log in for you. The dedicated profile persists the
