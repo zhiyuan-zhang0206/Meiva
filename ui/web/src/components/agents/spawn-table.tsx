@@ -226,11 +226,6 @@ export function SpawnTable({
           <li className="px-2 py-1 text-muted-foreground">—</li>
         )}
       </ul>
-      {harness !== "meiva" && (
-        <p className="col-span-4 border-t border-border px-2 py-2 text-xs text-muted-foreground">
-          {t("externalModelHelp", { harness: harnessLabel(harness) })}
-        </p>
-      )}
     </div>
   );
 }
@@ -486,11 +481,6 @@ export function SpawnStack({
           )}
         </ul>
       </StackSection>
-      {harness !== "meiva" && (
-        <p className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
-          {t("externalModelHelp", { harness: harnessLabel(harness) })}
-        </p>
-      )}
     </div>
   );
 }

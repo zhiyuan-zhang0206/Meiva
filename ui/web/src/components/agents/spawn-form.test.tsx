@@ -262,11 +262,9 @@ describe("spawn table", () => {
     const form = await table();
     expect(within(form).getByRole("list", { name: "Meiva history model" })).toBeTruthy();
     expect(within(form).getByRole("list", { name: "Summary effort" })).toBeTruthy();
-    expect(screen.getByText(/These options configure Meiva history budgets and compaction/)).toBeTruthy();
     expect(within(form).queryByRole("list", { name: "Model" })).toBeNull();
     pick(form, HARNESS_COLUMN, "Meiva");
     expect(within(form).getByRole("list", { name: "Model" })).toBeTruthy();
-    expect(screen.queryByText(/These options configure Meiva history budgets and compaction/)).toBeNull();
   });
 
   it("a pick that is never spawned does not become the stored config", async () => {
@@ -547,7 +545,7 @@ describe("stacked picker", () => {
   it.each([
     { harness: "claude_code", label: "Claude Code", model: "claude-opus-4-8", effort: "—", catalog: modelsWithEffort },
     { harness: "codex", label: "Codex", model: "gpt-5.6", effort: "medium", catalog: modelsWithTwoLadders },
-  ] as const)("explains $harness history settings in closed sections and open lists", async ({ harness, label, model, effort, catalog }) => {
+  ] as const)("names $harness model choices as Meiva history settings in stacked sections", async ({ harness, label, model, effort, catalog }) => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
     vi.mocked(api.getModels).mockResolvedValue(catalog());
     setMockSetting("behavior.spawn_harness", harness);
@@ -555,7 +553,6 @@ describe("stacked picker", () => {
     const form = await stack();
     expect(section(form, `Meiva history model ${model}`)).toBeTruthy();
     expect(section(form, `Summary effort ${effort}`)).toBeTruthy();
-    expect(within(form).getByText(`These options configure Meiva history budgets and compaction. ${label} uses its own adapter or CLI model settings.`)).toBeTruthy();
 
     fireEvent.click(section(form, `Meiva history model ${model}`));
     expect(within(form).getByRole("list", { name: "Meiva history model" })).toBeTruthy();
@@ -567,7 +564,6 @@ describe("stacked picker", () => {
     pick(form, HARNESS_COLUMN, "Meiva");
     expect(section(form, "Model deepseek-v4-pro")).toBeTruthy();
     expect(section(form, "Effort max")).toBeTruthy();
-    expect(within(form).queryByText(/These options configure Meiva history budgets and compaction/)).toBeNull();
   });
 
   it("one pick closes its section and reaches the spawn", async () => {
