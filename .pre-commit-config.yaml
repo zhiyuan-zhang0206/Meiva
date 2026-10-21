@@ -157,6 +157,19 @@ repos:
         # Every tests/ directory; changing their testpaths owner rechecks the full scope.
         files: (^|/)tests/.*\.py$|^pyproject\.toml$
 
+      # A test that reads the process's own platform (`sys.platform`, `Host.system()`,
+      # `Platform.current()`) or resolves through the ambient PATH without saying so
+      # reports a verdict about the machine, not about the code: green in CI, red on a
+      # developer's macOS. It injects a fake `Host` instead, or declares a subject that
+      # only exists on one host with `@pytest.mark.requires_host(...)`. The existing
+      # sites are frozen in scripts/lint/baseline/host_platform_marks.json; see the
+      # script header for both rules.
+      - id: lint-host-platform-marks
+        name: lint host-platform marks (a test injects a host or names the one it needs)
+        entry: .venv/bin/python scripts/lint/host_platform_marks.py --only
+        language: system
+        files: (^|/)tests/.*\.py$|^pyproject\.toml$
+
       # A root test stays by design, by a reasoned contract/integration registration,
       # or by a complete subject-LCA proof whose common ancestor is the repository root.
       # Registered/by-design paths keep the fast path; unresolved or single-component
