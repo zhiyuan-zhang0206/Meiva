@@ -27,7 +27,7 @@ from typing import TextIO
 
 from loguru import logger
 
-from base.host.env.harness_binaries import HARNESS_BIN_DIRS
+from base.host.env.harness_binaries import harness_unit_path
 from base.host.system.hostport import Host
 from base.native_process.os_platform import (
     crontab_lock,
@@ -340,21 +340,18 @@ def launchd_path_env(*, host: Host) -> str:
     needed, so this is not cosmetic.
     """
 
-    dirs: list[str] = [str(Path(meiva_binary_path(host=host)).parent)]  # ~/.local/bin or venv/bin
+    meiva_dir = str(Path(meiva_binary_path(host=host)).parent)  # ~/.local/bin or venv/bin
+    brew = host.which("brew")
+    brew_dirs = [str(Path(brew).parent)] if brew else ["/opt/homebrew/bin", "/usr/local/bin"]
     # meiva:note
     # The harness CLIs live where a login shell finds them, not where launchd does:
     # `claude` and `agy` install into ~/.local/bin, which this PATH used to omit, so
     # every external harness failed to start from a launchd-hosted runner (#5491).
+    # The builder below appends them and refuses a PATH that somehow misses one.
     # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-    dirs += [
-        entry if Path(entry).is_absolute() else str(Path.home() / entry)
-        for entry in HARNESS_BIN_DIRS
-    ]
-    brew = host.which("brew")
-    dirs += [str(Path(brew).parent)] if brew else ["/opt/homebrew/bin", "/usr/local/bin"]
-    dirs += ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
-    seen: set[str] = set()
-    return ":".join(d for d in dirs if not (d in seen or seen.add(d)))
+    return harness_unit_path(
+        leading=[meiva_dir, *brew_dirs], home=Path.home(), what="the launchd job PATH"
+    )
 
 
 _HEALTH_PROBE_LABEL = f"{LAUNCHD_LABEL_PREFIX}.health-probe"

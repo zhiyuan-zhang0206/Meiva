@@ -6,8 +6,11 @@ import pytest
 from base.host.env.harness_binaries import (
     HARNESS_BIN_DIRS,
     HarnessBinaryNotFoundError,
+    HarnessPathIncompleteError,
     harness_child_path,
+    harness_unit_path,
     locate_harness_binary,
+    require_harness_paths,
     resolve_harness_binary,
     with_harness_path,
 )
@@ -82,3 +85,26 @@ def test_with_harness_path_replaces_the_inherited_path_and_keeps_the_other_keys(
     assert session["MEIVA_HOME"] == str(tmp_path / "home")
     assert session["HOME"] == str(tmp_path)
     assert str(tmp_path / ".local/bin") in session["PATH"].split(os.pathsep)
+
+
+# meiva:note
+# A unit that writes its own narrow PATH puts every service under it back on the OS
+# default, where `claude` and `agy` do not exist; the refusal names the unit and the
+# directories it dropped (#5491, #5495).
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def test_a_unit_path_that_omits_a_harness_directory_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(HarnessPathIncompleteError) as raised:
+        require_harness_paths("/usr/bin:/bin", home=tmp_path, what="the test unit PATH")
+
+    message = str(raised.value)
+    assert "the test unit PATH" in message
+    assert str(tmp_path / ".local/bin") in message
+    assert str(tmp_path / ".npm-global/bin") in message
+
+
+def test_the_unit_builder_always_covers_the_table(tmp_path: Path) -> None:
+    built = harness_unit_path(leading=["/vendor/bin"], home=tmp_path, what="the test unit PATH")
+
+    entries = built.split(os.pathsep)
+    assert entries[0] == "/vendor/bin"
+    assert require_harness_paths(built, home=tmp_path, what="the test unit PATH") == built
