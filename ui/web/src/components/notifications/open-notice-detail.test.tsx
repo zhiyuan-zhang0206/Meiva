@@ -208,13 +208,47 @@ describe("OpenNoticeDetail — numbered questions", () => {
     await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", answer: { option_ids: ["desktop"] } }, expect.any(String)));
   });
 
+  it.each(["single_select", "multi_select"] as const)("%s submits a comment-only answer when nothing is chosen", async (type) => {
+    // meiva:note
+    // Choosing nothing is allowed: a comment alone is a whole answer (user
+    // 2026-10-21), so the submit button leaves its disabled state on the comment
+    // alone and the payload carries an empty selection.
+    // meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+    resolveNotice.mockResolvedValue({ status: "ok" });
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type, options, allow_other: false } })} />);
+    const submit = screen.getByRole("button", { name: "Submit answer" });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Neither fits — hold until Monday." } });
+    expect(submit.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(submit);
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, {
+      action: "answer", answer: { option_ids: [], comment: "Neither fits — hold until Monday." },
+    }, expect.any(String)));
+  });
+
+  it("lets a single choice be cleared by choosing it again", async () => {
+    resolveNotice.mockResolvedValue({ status: "ok" });
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options, allow_other: false } })} />);
+    const first = screen.getByRole<HTMLInputElement>("radio", { name: "1. Web" });
+    const submit = screen.getByRole("button", { name: "Submit answer" });
+    fireEvent.click(first);
+    expect(first.checked).toBe(true);
+    fireEvent.click(first);
+    expect(first.checked).toBe(false);
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Hold one more day." } });
+    fireEvent.click(submit);
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, {
+      action: "answer", answer: { option_ids: [], comment: "Hold one more day." },
+    }, expect.any(String)));
+  });
+
   it.each(["single_select", "multi_select"] as const)("%s preserves comments independently of selections", async (type) => {
     resolveNotice.mockResolvedValue({ status: "ok" });
     render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type, options, allow_other: false } })} />);
     const comment = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Comment (optional)" });
     fireEvent.change(comment, { target: { value: "Based on 2, defer 1." } });
     const submit = screen.getByRole("button", { name: "Submit answer" });
-    expect(submit.hasAttribute("disabled")).toBe(true);
     const role = type === "single_select" ? "radio" : "checkbox";
     fireEvent.click(screen.getByRole(role, { name: "1. Web" }));
     fireEvent.click(screen.getByRole(role, { name: "2. Desktop" }));

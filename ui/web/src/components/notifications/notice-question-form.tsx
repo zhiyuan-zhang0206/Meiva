@@ -20,8 +20,14 @@ function answerFromDraft(question: NoticeQuestion, draft: Draft): NoticeAnswer |
   if (question.type === "text") {
     return draft.text.trim() ? { text: draft.text.trim() } : null;
   }
+  // meiva:note
+  // Choosing nothing is allowed in both kinds: a comment alone is a whole answer
+  // (user ruling 2026-10-21). Submitting still needs one of the two, which is
+  // what the disabled button expresses.
+  // meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
   const count = draft.optionIds.length;
-  if (!count || (question.type === "single_select" && count !== 1)) return null;
+  if (count > 1 && question.type === "single_select") return null;
+  if (count === 0 && !comment) return null;
   return {
     option_ids: question.options.filter((o) => draft.optionIds.includes(o.id)).map((o) => o.id),
     ...(comment ? { comment } : {}),
@@ -82,7 +88,9 @@ export function NoticeQuestionForm({
   const choose = (id: string, checked: boolean) => {
     setDraft({
       ...draft,
-      optionIds: single ? [id] : checked ? [...draft.optionIds, id] : draft.optionIds.filter((v) => v !== id),
+      optionIds: single
+        ? (checked ? [id] : [])
+        : checked ? [...draft.optionIds, id] : draft.optionIds.filter((v) => v !== id),
     });
   };
   const optionClass = cn(FLEX, "-mx-2 cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-[13px] leading-snug hover:bg-muted/40 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
@@ -100,6 +108,13 @@ export function NoticeQuestionForm({
                 name={fieldId}
                 checked={selected}
                 onChange={(e) => choose(option.id, e.target.checked)}
+                onClick={() => { if (single && selected) choose(option.id, false); }}
+                onKeyDown={(e) => {
+                  if (single && selected && (e.key === " " || e.key === "Enter")) {
+                    e.preventDefault();
+                    choose(option.id, false);
+                  }
+                }}
                 className="mt-0.5 size-3.5 shrink-0 accent-primary"
               />
               <span className={cn("break-words", MIN_W_0)}>
