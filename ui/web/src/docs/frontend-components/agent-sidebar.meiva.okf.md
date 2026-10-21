@@ -20,7 +20,7 @@ Fleet, Insights, Control, then whatever a plugin contributes. The bell leads the
 row because a standing cluster state outranks navigation (user 2026-10-21), it
 links to the alert section, and it renders only while the count is non-zero. The
 row leaves with the rail when it collapses; the count then rides `HeaderBar`'s
-restore button instead of vanishing
+restore button (desktop) or its menu button (phone drawer) instead of vanishing
 ([[ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md|Home Shell Chrome]]).
 
 ## Display settings popover
