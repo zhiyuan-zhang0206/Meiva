@@ -84,7 +84,9 @@ retried under the same key and replays the original acceptance.
 
 Question rows carry immutable question JSON; priority and blocking remain editable.
 Answer resolution validates the submitted selection against the locked question,
-canonicalizes selected IDs into its original number order, and commits answer JSON,
+canonicalizes selected IDs into its original number order, commits answer JSON
+(an empty selection with a comment is a complete answer; one with neither is
+refused),
 readable reply, notice state, inbound and operation receipt together. Text-only
 clients use the same validator after parsing the numbered first line. Numbers inside the optional comment never select an option. Replay keeps the original inbound and
 answer without validating against later state; new expired-question answers fail.

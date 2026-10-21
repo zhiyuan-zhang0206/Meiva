@@ -153,7 +153,8 @@ def notify(
         content: optional background for the question in title.
         question: one structured question: type=text, or type=single_select /
             multi_select with ordered options (id, label, optional description)
-            with an optional comment alongside the selection. No Other option.
+            with an optional comment alongside the selection; the user may also
+            answer with a comment alone, choosing no option at all. No Other option.
             Options are numbered from 1. The question and its context are immutable.
         task: groups your notices by task in the user's queue.
         expire_at: expiration deadline; omit it to use the configured lifetime.

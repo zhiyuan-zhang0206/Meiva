@@ -68,10 +68,15 @@ def validate_answer(question: NoticeQuestion, answer: NoticeAnswer) -> NoticeAns
         return answer
     _validate_choice_fields(question, answer)
     selected_count = len(answer.option_ids)
-    if question.type == QuestionType.SINGLE_SELECT and selected_count != 1:
-        raise ValueError("single-select questions require exactly one option")
-    if selected_count == 0:
-        raise ValueError("select at least one option; a comment does not replace a selection")
+    if question.type == QuestionType.SINGLE_SELECT and selected_count > 1:
+        raise ValueError("single-select answers select at most one option")
+    # meiva:note
+    # A selection is optional in both kinds: answering with a comment alone is a
+    # real answer (user ruling 2026-10-21), so zero selections are valid as long
+    # as the comment says something. An answer carrying neither is not an answer.
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+    if selected_count == 0 and answer.comment is None:
+        raise ValueError("an answer carries a selection or a comment")
     return answer.model_copy(
         update={"option_ids": [o.id for o in question.options if o.id in answer.option_ids]}
     )
@@ -152,7 +157,12 @@ def answer_reply(question: NoticeQuestion, answer: NoticeAnswer) -> str:
         lines = [f"Answer: {answer.text}"]
     else:
         selected = [str(i) for i, o in enumerate(question.options, 1) if o.id in answer.option_ids]
-        lines = ["Options:", numbered_options(question), "", f"Selected: {', '.join(selected)}"]
+        lines = [
+            "Options:",
+            numbered_options(question),
+            "",
+            f"Selected: {', '.join(selected) or 'none'}",
+        ]
     if answer.comment is not None:
         lines.append(f"Comment: {answer.comment}")
     return "\n".join(lines)

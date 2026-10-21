@@ -59,7 +59,6 @@ def test_numbered_choice_reply_fails_closed(reply: str) -> None:
 @pytest.mark.parametrize(
     "answer",
     [
-        {},
         {"option_ids": ["unknown"]},
         {"option_ids": ["web", "web"]},
         {"text": "yes"},
@@ -79,7 +78,7 @@ def test_invalid_structured_answers_fail(answer: dict[str, object]) -> None:
     ],
 )
 def test_single_select_cannot_combine_answers(answer: dict[str, object]) -> None:
-    with pytest.raises(ValueError, match="exactly one"):
+    with pytest.raises(ValueError, match="at most one"):
         validate_answer(choice("single_select"), NoticeAnswer.model_validate(answer))
 
 
@@ -89,9 +88,24 @@ def test_legacy_other_is_not_an_answer_option() -> None:
 
 
 @pytest.mark.parametrize("kind", ["single_select", "multi_select"])
-def test_comment_does_not_replace_a_choice(kind: str) -> None:
-    with pytest.raises(ValueError):
-        validate_answer(choice(kind), NoticeAnswer(comment="Please decide later"))
+def test_a_comment_alone_is_a_valid_answer(kind: str) -> None:
+    # meiva:note
+    # Answering without choosing anything is allowed in both kinds (user ruling
+    # 2026-10-21); the comment is then the whole answer.
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+    question = choice(kind)
+    answer = validate_answer(question, NoticeAnswer(comment="Please decide later"))
+    assert answer.option_ids == []
+    assert answer.comment == "Please decide later"
+    rendered = answer_reply(question, answer)
+    assert "Selected: none" in rendered
+    assert "Comment: Please decide later" in rendered
+
+
+@pytest.mark.parametrize("kind", ["single_select", "multi_select"])
+def test_an_answer_with_neither_a_selection_nor_a_comment_is_refused(kind: str) -> None:
+    with pytest.raises(ValueError, match="selection or a comment"):
+        validate_answer(choice(kind), NoticeAnswer())
 
 
 def test_open_answer_accepts_numbers_as_text() -> None:
