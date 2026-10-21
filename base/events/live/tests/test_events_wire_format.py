@@ -109,7 +109,6 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
             "require_response": True,
             "age_seconds": 900,
             "had_reply": True,
-            "superseded_by": None,
         },
     ),
     (TaskCreated, "task_created", {"task_id": 3}),

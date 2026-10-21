@@ -68,7 +68,6 @@ async def publish_notice_resolved(
     notice_id: int,
     *,
     facts: NoticeResolutionFacts | None = None,
-    superseded_by: int | None = None,
 ) -> None:
     """Publish NoticeResolved to refresh the open and resolved Inbox views.
     Best-effort, never raises."""
@@ -79,7 +78,6 @@ async def publish_notice_resolved(
         require_response=None if facts is None else facts["require_response"],
         age_seconds=None if facts is None else facts["age_seconds"],
         had_reply=None if facts is None else facts["had_reply"],
-        superseded_by=superseded_by,
     )
     await bus.publish_best_effort(ev.model_dump_json(), context="notice_resolved")
 

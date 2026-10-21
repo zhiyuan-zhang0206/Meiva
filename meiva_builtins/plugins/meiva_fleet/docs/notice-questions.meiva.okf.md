@@ -10,7 +10,8 @@ tags:
 # Numbered questions and answers
 
 One notice carries one question. An agent with another question waits for the
-current answer before posting it; posting still supersedes the old open notice.
+current answer before posting it; posting while a notice is open is refused, so
+close or edit the open one first.
 The shared contract lives in `base.api_contracts.notice_question`.
 
 ```python

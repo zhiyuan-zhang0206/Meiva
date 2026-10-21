@@ -90,12 +90,10 @@ class PendingNoticeRow(TypedDict):
 
 class Notice(int):
     """The notice's id (an int, usable wherever a notice id is expected).
-    `.pending_notices` / `.pending_count` are your still-open notices;
-    `.superseded` lists the ids this call auto-resolved."""
+    `.pending_notices` / `.pending_count` are your still-open notices."""
 
     pending_count: int
     pending_notices: list[PendingNoticeRow]
-    superseded: list[int]
 
     def __new__(
         cls,
@@ -103,26 +101,24 @@ class Notice(int):
         *,
         pending_count: int,
         pending_notices: list[PendingNoticeRow],
-        superseded: list[int] | None = None,
     ) -> "Notice":
         instance = super().__new__(cls, id)
         instance.pending_count = pending_count
         instance.pending_notices = pending_notices
-        instance.superseded = superseded or []
         return instance
 
 
 def _raise_as_value_error(resp: Any) -> None:
-    """Raise gateway 422 validation errors as ValueError — the SDK's
-    validation contract (fail fast with a clear message). Any other error
-    propagates through the normal wire contract."""
+    """Raise gateway 409/422 refusals as ValueError — the SDK's validation
+    contract (fail fast with a clear message the agent can act on). Any other
+    error propagates through the normal wire contract."""
     from base.agents.context.gateway_client import transport
 
     try:
         transport.raise_from_response(resp)
     except Exception as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
-        if status != 422:
+        if status not in (409, 422):
             raise
         detail = e.response.json().get("detail")  # type: ignore[attr-defined]
         raise ValueError(detail if isinstance(detail, str) else "invalid request") from e
@@ -140,7 +136,7 @@ def notify(
     idempotency_key: str,
     question: dict[str, object] | None = None,
 ) -> "Notice":
-    """Post one notice, replacing any previous open notice.
+    """Post one notice to the user's queue.
 
     Every notice requires a user response. Ordinary information, progress and
     results belong in chat. `require_response=False` is rejected.
@@ -148,9 +144,10 @@ def notify(
     `blocking=True` means you cannot make progress until the user answers.
 
     Posting returns immediately. A user reply arrives later as an ordinary
-    message; continue work you can do while waiting. You can have one open notice
-    at a time; a new notify() auto-resolves the old one ("superseded"). Use edit_notice to add
-    to the current notice instead of replacing it.
+    message; continue work you can do while waiting. You hold one open notice at
+    a time: calling notify() again while one is open raises, naming that notice's
+    id, and nothing is replaced behind your back. Close the open one with
+    dismiss_notice, or rewrite it in place with edit_notice, then post the new one.
 
     Args:
         content: optional background for the question in title.
@@ -164,8 +161,7 @@ def notify(
             Use an absolute expire_at when retrying with a key.
 
     Returns:
-        The notice id (an int); its `.superseded` attribute lists the ids
-        this call auto-resolved.
+        The notice id (an int), carrying `.pending_notices` and `.pending_count`.
     """
     title = coerce_str(title, "title")
     content = coerce_str(content, "content", allow_none=True)
@@ -202,9 +198,6 @@ def notify(
     idempotency_key = validate_idempotency_key(idempotency_key)
     aid = meiva.sdk_surface.agent_identity.require_agent_id()
 
-    # One unified write path (R3 door ④): the gateway performs the whole
-    # lifecycle atomically — supersede the previous open notice + insert the
-    # new one in one transaction, then publish the events.
     from base.agents.context.gateway_client import transport
 
     resp = transport.post(
@@ -241,7 +234,6 @@ def notify(
         int(data["id"]),
         pending_count=int(data["pending_count"]),
         pending_notices=pending_rows,
-        superseded=[int(i) for i in data["superseded"]],
     )
 
 
@@ -302,8 +294,8 @@ def edit_notice(
 
 
 def dismiss_notice() -> None:
-    """Withdraw the open notice. At most one notice is open per agent (notify
-    auto-resolves the previous one), so no id is needed."""
+    """Withdraw the open notice. One notice is open per agent and this call
+    observes it, so no id is needed; with none open it does nothing."""
     aid = meiva.sdk_surface.agent_identity.require_agent_id()
     observed = _observe_open_notice_id(aid)
     if observed is None:

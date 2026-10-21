@@ -87,13 +87,11 @@ def _assert_first_notice_is_sole_pending_fyi(nid: Any) -> None:
     assert nid.pending_notices[0]["title"] == "migration done"
     assert nid.pending_notices[0]["priority"] == "P1"
     assert "created_at" in nid.pending_notices[0]
-    assert nid.superseded == []
 
 
-def _assert_second_notice_supersedes_first(nid: Any, nid2: Any) -> None:
-    assert nid2.pending_count == 1
-    assert [n["title"] for n in nid2.pending_notices] == ["hit a rate limit"]
-    assert nid2.superseded == [nid]
+def _assert_second_notice_is_refused(nid: Any) -> None:
+    assert nid.pending_count == 1
+    assert [n["title"] for n in nid.pending_notices] == ["migration done"]
 
 
 def test_notify_defaults_to_response_and_snapshot_lists_question(
@@ -108,14 +106,18 @@ def test_notify_defaults_to_response_and_snapshot_lists_question(
     assert isinstance(nid, int)
     _assert_first_notice_is_sole_pending_fyi(nid)
 
-    nid2 = meiva.ui.notify("hit a rate limit", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
-    _assert_second_notice_supersedes_first(nid, nid2)
+    with pytest.raises(ValueError, match="already holds an open notice"):
+        meiva.ui.notify("hit a rate limit", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+    _assert_second_notice_is_refused(nid)
+
+    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
+    meiva.ui.notify("hit a rate limit", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
 
     db_conn.rollback()
     rows = _notices(db_conn, agent_id)
     assert rows[0][0] == "migration done"
     assert rows[0][5] is not None
-    assert rows[0][6] == "superseded"
+    assert rows[0][6] == "withdrawn"
     assert rows[1][0] == "hit a rate limit"
     assert rows[1][5] is None
 
@@ -143,12 +145,18 @@ def test_notify_require_response_rides_awaiting_worklist(
         blocking=True,
         idempotency_key=str(uuid4()),
     )
-    # Posting a second require_response notice auto-resolves the first.
-    nid2 = meiva.ui.notify("Name the branch?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
-    assert nid2.superseded != []  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    # meiva:note
+    # A second notice is refused while the first is open; close it, then post.
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
+    with pytest.raises(ValueError, match="already holds an open notice"):
+        meiva.ui.notify("Name the branch?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
+    meiva.ui.notify("Name the branch?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
 
     db_conn.rollback()
-    # Only the most recent require_response notice rides the snapshot worklist.
+    # meiva:note
+    # Only the open require_response notice rides the snapshot worklist.
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
     snap = select_one(
         db_conn,
         agent_id,
@@ -411,19 +419,20 @@ def test_dismiss_notice_withdraws(
     meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
 
 
-def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
+def test_each_agent_side_resolution_publishes_notice_resolved(
     sdk_via_inprocess_gateway: None,
     load_activity_plugin: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Every agent-side resolution — supersede (a newer notice) or withdraw
-    (dismiss_notice) — publishes notice_resolved regardless of require_response.
-    The unified inbox refreshes its resolved history off this event alone, so a
-    require_response notice resolved without one would leave the open list yet
-    never surface in the resolved history."""
-    # Events now publish from the gateway (R3 door ④ unified write API), not
-    # the SDK — patch the gateway-side publisher.
+    # meiva:note
+    # Every agent-side resolution — a dismissal through dismiss_notice — publishes
+    # notice_resolved regardless of require_response. The unified inbox refreshes its
+    # resolved history off this event alone, so a notice resolved without one would
+    # leave the open list yet never surface in the resolved history. Posting resolves
+    # nothing. Events publish from the gateway (R3 door ④ unified write API), not the
+    # SDK, so the gateway-side publisher is patched.
+    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
     import ops.lifecycle as ops_mod
 
     resolved: list[int] = []
@@ -435,12 +444,10 @@ def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
 
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    meiva.ui.notify("Q1?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
-    assert resolved == []  # the first post resolves nothing
-    # A second require_response notice supersedes the first — must publish even
-    # though the superseded notice needed a response.
-    meiva.ui.notify("Q2?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.notify("Q1?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+    assert resolved == []
+    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
     assert len(resolved) == 1
-    # Withdrawing the surviving require_response notice publishes too.
-    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
+    meiva.ui.notify("Q2?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
     assert len(resolved) == 2

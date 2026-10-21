@@ -339,12 +339,14 @@ async def post_notice_resolve(
 
 
 # ── unified notice write API (R3 door ④) ─────────────────────────────────
-# The agent->user queue has ONE write path: the agent SDK calls these
-# endpoints (meiva.ui.notify here; edit_notice / dismiss_notice through the
-# guarded routes in `notice_operations`), which perform the whole lifecycle
-# atomically in one transaction — supersede+insert for notify, observed-row
-# update for edit/dismiss — plus the event publishes. The agent_notices table
-# is the single truth source and every writer goes through the same code.
+# meiva:note
+# The agent->user queue has ONE write path: the agent SDK calls these endpoints
+# (meiva.ui.notify here; edit_notice / dismiss_notice through the guarded routes
+# in `notice_operations`), which perform the whole lifecycle atomically in one
+# transaction — a one-open-notice check plus insert for notify, an observed-row
+# update for edit/dismiss — plus the event publishes. The agent_notices table is
+# the single truth source and every writer goes through the same code.
+# meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
 #
 # Pause semantics: data-plane like every other agent write — the quiesce has
 # drained the agents before the migration window, so nothing legitimately
@@ -369,10 +371,7 @@ async def post_notice_create(
     ) -> tuple[
         int,
         int,
-        list[int],
-        list[int],
         list[dict[str, object]],
-        list[_ops.NoticeResolutionFacts],
         bool,
         int | None,
     ]:
@@ -390,10 +389,7 @@ async def post_notice_create(
                 return (
                     int(cast(int, previous["global_id"])),
                     int(cast(int, previous["id"])),
-                    cast(list[int], previous["superseded_global"]),
-                    cast(list[int], previous["superseded"]),
                     cast(list[dict[str, object]], previous["pending_notices"]),
-                    [],
                     True,
                     cast(int | None, previous.get("notification_id")),
                 )
@@ -402,48 +398,31 @@ async def post_notice_create(
             # Serialize all creations for an agent, including different keys:
             # no-open-notice races must not allocate the same local id.
             cur.execute("SELECT id FROM agents WHERE id = %s FOR UPDATE", (agent_id,))
-            # Auto-resolve any existing open notice (supersede).
+            # meiva:note
+            # One open notice per agent, and no silent replacement: a second
+            # notify() is refused with the open notice's id and the two ways
+            # out, instead of resolving the first one on the writer's behalf.
+            # Legacy FYI rows (require_response false, unwritable since
+            # 2026-10-19) are not notices and never block a poster.
+            # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
             cur.execute(
-                "SELECT id, local_id, require_response, created_at, reply, answer "
-                "FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL FOR UPDATE",
+                "SELECT id, local_id, title FROM agent_notices "
+                "WHERE agent_id = %s AND resolved_at IS NULL AND require_response "
+                "ORDER BY created_at DESC, local_id DESC LIMIT 1",
                 (agent_id,),
             )
-            existing = cur.fetchall()
-            superseded_local: list[int] = []
-            superseded_global: list[int] = []
-            superseded_details: list[_ops.NoticeResolutionFacts] = []
-            superseded_response_required = False
-            for (
-                global_id,
-                local_id,
-                require_response,
-                superseded_created_at,
-                old_reply,
-                old_answer,
-            ) in existing:
-                cur.execute(
-                    "UPDATE agent_notices SET resolved_at = now(), resolution = 'superseded' "
-                    "WHERE id = %s",
-                    (global_id,),
-                )
-                # Two id spaces, two consumers: the SDK's Notice.superseded
-                # carries LOCAL ids (its id space); the published events must
-                # carry GLOBAL ids (the frontend feed matches on those).
-                # Passing a local id to publish_notice_resolved made the
-                # frontend unable to drop the superseded notice until the next
-                # snapshot refresh (audit cc-backend-runtime P2).
-                superseded_local.append(int(local_id))
-                superseded_global.append(int(global_id))
-                superseded_response_required = superseded_response_required or bool(
-                    require_response
-                )
-                superseded_details.append(
-                    _ops.notice_resolution_facts(
-                        "superseded",
-                        require_response=bool(require_response),
-                        created_at=superseded_created_at,
-                        replied=old_reply is not None or old_answer is not None,
-                    )
+            open_notice = cur.fetchone()
+            if open_notice is not None:
+                open_local_id = int(open_notice[1])
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"agent {agent_id} already holds an open notice "
+                        f"#{open_local_id} ({open_notice[2]!r}); an agent holds one "
+                        f"notice at a time. Close it first with meiva.ui.dismiss_notice() "
+                        f"(or answer it in the console), or rewrite it in place with "
+                        f'meiva.ui.edit_notice(content="..."), then post the new one.'
+                    ),
                 )
             now = datetime.now(UTC)
             max_expire = now + timedelta(seconds=settings.daemon.notice_ttl_limit_seconds)
@@ -502,8 +481,6 @@ async def post_notice_create(
                 {
                     "global_id": notice_global_id,
                     "id": notice_local_id,
-                    "superseded_global": superseded_global,
-                    "superseded": superseded_local,
                     "pending_notices": pending,
                     "notification_id": notification_id,
                 },
@@ -511,15 +488,12 @@ async def post_notice_create(
             # Publish only after the durable rows are visible to the snapshot
             # query; a pre-commit AgentUpdated would preserve the stale view.
             conn.commit()
-            if body.require_response or superseded_response_required:
+            if body.require_response:
                 publish_response_required_hint(request.app.state.bus, agent_id)
             return (
                 notice_global_id,
                 notice_local_id,
-                superseded_global,
-                superseded_local,
                 pending,
-                superseded_details,
                 False,
                 notification_id,
             )
@@ -528,25 +502,15 @@ async def post_notice_create(
     (
         notice_global_id,
         notice_local_id,
-        superseded_global,
-        superseded_local,
         pending,
-        superseded_details,
         replayed,
         notification_id,
     ) = await asyncio.to_thread(_create, pool)
-    # Events after the commit: superseded notices first (the feed drops them),
-    # then the new posted notice. Best-effort, never raises. Events publish by
-    # GLOBAL id; the SDK's return value carries LOCAL ids.
+    # meiva:note
+    # The posted event publishes after the commit, by GLOBAL id; the SDK's return
+    # value carries LOCAL ids. Best-effort, never raises.
+    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
     if not replayed:
-        for _gid, _details in zip(superseded_global, superseded_details, strict=True):
-            await _ops.publish_notice_resolved(
-                request.app.state.bus,
-                agent_id,
-                _gid,
-                facts=_details,
-                superseded_by=notice_global_id,
-            )
         await _ops.publish_notice_posted(
             request.app.state.bus,
             agent_id,
@@ -562,7 +526,6 @@ async def post_notice_create(
         "id": int(notice_local_id),
         "pending_count": len(pending),
         "pending_notices": pending,
-        "superseded": superseded_local,
     }
 
 

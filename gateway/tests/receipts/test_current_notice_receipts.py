@@ -53,30 +53,37 @@ def _send(
 
 
 @pytest.mark.parametrize("dismiss", [False, True])
-def test_original_snapshot_survives_replacement_and_deletion(
+def test_original_snapshot_survives_a_later_close_and_deletion(
     client: TestClient, db_conn: psycopg.Connection, dismiss: bool
 ) -> None:
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "A")
+    notice = insert_notice(db_conn, agent, "A", require_response=True)
     first = _send(client, agent, notice, dismiss)
     assert first.status_code == 200, first.text
-    later = client.post(
-        f"/api/agents/{agent}/notices",
-        json={"title": "B"},
-        headers=keyed_headers(str(uuid4())),
-    )
-    assert later.status_code == 201
+    # meiva:note
+    # One open notice per agent (user ruling 2026-10-21) means a later post cannot
+    # replace this row, so the edit branch reaches the same state by closing it
+    # explicitly: the observed row is no longer current either way.
+    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    if not dismiss:
+        closed = client.post(
+            f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve",
+            json={"action": "dismiss"},
+            headers=keyed_headers(str(uuid4())),
+        )
+        assert closed.status_code == 201, closed.text
     assert _send(client, agent, notice, dismiss, key="fresh").status_code == 409
     replay = _send(client, agent, notice, dismiss)
     assert replay.json() == first.json()
     assert db_conn.execute(
-        "SELECT title FROM agent_notices WHERE agent_id=%s AND resolved_at IS NULL", (agent,)
-    ).fetchone() == ("B",)
+        "SELECT count(*) FROM agent_notices WHERE agent_id=%s AND resolved_at IS NULL", (agent,)
+    ).fetchone() == (0,)
     db_conn.execute("DELETE FROM agent_notices WHERE agent_id=%s", (agent,))
     db_conn.commit()
     assert _send(client, agent, notice, dismiss).json() == first.json()
     db_conn.execute("DELETE FROM agents_meta WHERE id=%s", (agent,))
     db_conn.execute("DELETE FROM agent_lifecycle_intervals WHERE agent_id=%s", (agent,))
+    db_conn.execute("DELETE FROM inbound_messages WHERE agent_id=%s", (agent,))
     db_conn.execute("DELETE FROM agents WHERE id=%s", (agent,))
     db_conn.commit()
     assert _send(client, agent, notice, dismiss).json() == first.json()
@@ -246,7 +253,7 @@ def test_creation_waits_for_guarded_owner_lock(
     from threading import Event
 
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "A")
+    notice = insert_notice(db_conn, agent, "A", require_response=True)
     locked = Event()
     release = Event()
     original = current_notice_receipts.save_receipt
@@ -279,10 +286,14 @@ def test_creation_waits_for_guarded_owner_lock(
         finally:
             release.set()
         assert edit.result(timeout=10).status_code == 200
-        assert later.result(timeout=10).status_code == 201
+        # meiva:note
+        # The creation still waits for the edit's transaction, then finds the row
+        # open and is refused (one open notice per agent, user ruling 2026-10-21).
+        # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+        assert later.result(timeout=10).status_code == 409
     assert db_conn.execute(
         "SELECT title FROM agent_notices WHERE agent_id=%s AND resolved_at IS NULL", (agent,)
-    ).fetchone() == ("B",)
+    ).fetchone() == ("edited",)
 
 
 def test_receipt_survives_expiration_and_changed_body_conflicts(
