@@ -10,9 +10,20 @@ tags:
 
 `components/timeline/` renders the BackendTimelineItem list (chat / code / output / reasoning / system marker) and is the only item-list surface of a thread. Directory: `index`, `segments` (compact grouping), `use-compact-transition-anchor` (reading position), `use-timeline-window` (bounded DOM), `card`, `item`, `buttons`, `markers`, `timestamp`, `reasoning-clock`, `runs` (turn grouping), `run-block`.
 
+## Harness prompts
+
+The selected agent's required `harness` field controls prompt visibility.
+Only `meiva` renders `system_prompt` items; an unknown/loading identity does
+not briefly display them. Claude Code and Codex own their system prompts;
+older graph checkpoints contain a synthetic Meiva prompt that the bridge never
+sent. The view filters that item after combining live, paged and compact-buffer
+rows, without rewriting checkpoints, cached items, source coordinates or message
+counts. Real messages and other historical notes remain visible.
+
 ## Streaming rows
 
-During streaming each line is memoized `TimelineRow` + `React.memo` PythonCode/ChatMarkdown to suppress unchanged-row renders; `TimelineView` itself is memoized against unrelated page renders, and `TurnBlock` compares its rebuilt member ids and summary by value so collapsed historical turns skip each regroup. Every live clock (block chips, the turn header, the compacting block) shares one 100ms ticker in `reasoning-clock`; the interval exists only while a clock is live, and block clocks tick only while the agent is busy (`LiveClockGate`). The load-older circle animates while the reader pulls or a page is loading, and is absent while idle. Grouping is reused while the items reference is unchanged. Rows render with `aria-live="off"` (rows and history dividers opt out individually, so the direct-child structure used by scroll anchoring and dividers is unchanged); the view announces only turn-boundary changes, so streamed chunks generate no screen-reader noise. A live stamp that outlived a missed turn-end freezes on an idle page instead of re-rendering its row ten times a second. Sticky bottom auto-scroll.
+Memoization, clock ownership and announcements:
+[[ui/web/src/docs/frontend-components/timeline-view/streaming-rows.meiva.okf.md|Streaming rows]].
 
 ## Returning to an agent
 

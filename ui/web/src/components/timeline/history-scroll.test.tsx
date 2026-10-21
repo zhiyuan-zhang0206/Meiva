@@ -41,7 +41,7 @@ let resizeCallbacks: Set<() => void>;
 
 function Conversation({ agentId, entry }: { agentId: number | null; entry: string }) {
   const timeline = useTimeline(agentId, () => undefined);
-  return <TimelineView items={timeline.items} threadKey={agentId === null ? undefined : String(agentId)} scrollMemoryKey={entry} />;
+  return <TimelineView harness="meiva" items={timeline.items} threadKey={agentId === null ? undefined : String(agentId)} scrollMemoryKey={entry} />;
 }
 function conversation(agentId: number | null, entry: string) {
   return <QueryClientProvider client={client}><Conversation agentId={agentId} entry={entry} key={entry} /></QueryClientProvider>;
@@ -282,7 +282,7 @@ describe("history entry scroll ownership", () => {
 
 function AgentTabs({ agentId, entry }: { agentId: number; entry: string }) {
   const timeline = useTimeline(agentId, () => undefined);
-  return <TimelineView key={agentId} items={timeline.items} threadKey={String(agentId)}
+  return <TimelineView harness="meiva" key={agentId} items={timeline.items} threadKey={String(agentId)}
     scrollMemoryKey={`${entry}:agent:${agentId}`} loadingNew={timeline.isFetching} />;
 }
 function tabs(agentId: number, entry: string) {
@@ -390,7 +390,7 @@ describe("agent switch reading positions", () => {
   });
 
   it("one loading ring at a time: an older-history load keeps the bottom button quiet", () => {
-    render(<TimelineView items={items} threadKey="one-ring" loadingNew loadingOlder />, {
+    render(<TimelineView harness="meiva" items={items} threadKey="one-ring" loadingNew loadingOlder />, {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     });
     // meiva:note
@@ -405,7 +405,7 @@ describe("agent switch reading positions", () => {
   });
 
   it("uses the bottom button's existing footprint for a refresh without moving content", () => {
-    const { rerender } = render(<TimelineView items={items} threadKey="spinner" loadingNew />, {
+    const { rerender } = render(<TimelineView harness="meiva" items={items} threadKey="spinner" loadingNew />, {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     });
     const button = screen.getByTestId("scroll-to-bottom");
@@ -419,7 +419,7 @@ describe("agent switch reading positions", () => {
     expect(restingArrow.className).toContain("group-hover:block");
     expect(button.hasAttribute("disabled")).toBe(false);
     expect(button.getAttribute("aria-label")).toBe("Scroll to bottom");
-    rerender(<TimelineView items={items} threadKey="spinner" />);
+    rerender(<TimelineView harness="meiva" items={items} threadKey="spinner" />);
     expect(screen.getByTestId("scroll-to-bottom")).toBe(button);
     expect(button.querySelector(".animate-spin")).toBeNull();
     expect(screen.getByTestId("scroll-to-bottom-arrow")).toBeTruthy();
@@ -482,7 +482,7 @@ it("captures the departing reading position before the native pull reserve is re
 });
 
 it("rests on the loading ring while new messages arrive and stays clickable", () => {
-  render(<QueryClientProvider client={client}><TimelineView items={items} threadKey="ring-click" loadingNew /></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><TimelineView harness="meiva" items={items} threadKey="ring-click" loadingNew /></QueryClientProvider>);
   act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
   const scrollTo = vi.spyOn(viewport(), "scrollTo");
   fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));

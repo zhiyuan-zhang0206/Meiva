@@ -29,9 +29,11 @@ emptying a CLI's model column.
 The declaration answers one question: may this model be chosen for an agent born
 on that harness? It is not the launch probe — whether a machine can start a
 harness at all stays `harness_availability()` and its `launchable` verdict — and
-it is not what the CLI is told to run: the adapters start their CLI on the CLI's
-own default model today, while the agent row's model remains the one the graph
-budgets and compacts against. The spawn form keeps a model in its column only
+it is not what the CLI is told to run: Claude Code starts with its adapter's
+model default and Codex inherits its CLI configuration today, while the agent row's model remains the one the graph
+budgets and compacts against. The spawn form labels these external-harness
+choices as Meiva history model and summary effort, and explains that the external CLI uses its own adapter or CLI
+model settings. The form keeps a model in its column only
 while the chosen harness appears in the published list, and holds no
 harness-to-provider table of its own, so assigning a model to another harness is
 one line in its `ModelSpec` and reaches that column with no frontend change.

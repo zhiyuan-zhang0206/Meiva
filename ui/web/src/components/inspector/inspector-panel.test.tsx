@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
   act,
   cleanup,
@@ -17,15 +17,16 @@ import type * as TimeFormat from "@/lib/format/time";
 import { formatAbsolute, formatRelative, formatUpcoming } from "@/lib/format/time";
 import { foldNotices } from "@/lib/fold/notices";
 import { BACK_VISIT_REVALIDATE_MAX } from "@/lib/layout/switch-budget";
-import { AGENTS_QUERY_KEY } from "@/lib/fold/agents";
+import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
 import { projectAgentStatus } from "@/lib/contracts/types";
-import type { AgentInspectStatistics, AgentInspectLive, AgentRoster, InspectWidget, PageRow, SystemEvent, WireAgentCard } from "@/lib/contracts/types";
+import type { AgentInspectStatistics, AgentInspectLive, AgentRoster, AgentRow, InspectWidget, PageRow, SystemEvent, WireAgentCard } from "@/lib/contracts/types";
 
 const {
   getAgentInspectStatistics,
   getAgentInspectLive,
   getAgentInspectWidgets,
   getAgentRoster,
+  getAgent,
   listPages,
   resolveNotice,
 } = vi.hoisted(() => ({
@@ -40,6 +41,7 @@ const {
     getAgentInspectLive:
       vi.fn<(agentId: number, signal?: AbortSignal) => Promise<AgentInspectLive>>(),
     getAgentRoster: vi.fn<(signal?: AbortSignal) => Promise<AgentRoster>>(),
+    getAgent: vi.fn<(id: number, signal?: AbortSignal) => Promise<AgentRow>>(),
     getAgentInspectWidgets: vi.fn<(agentId: number, signal?: AbortSignal) => Promise<InspectWidget[]>>(
       () => Promise.resolve([]),
     ),
@@ -52,6 +54,7 @@ vi.mock("@/lib/transport/api", () => ({
     getAgentInspectLive,
     getAgentInspectWidgets,
     getAgentRoster,
+    getAgent,
     listPages,
     resolveNotice,
     getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
@@ -125,6 +128,7 @@ afterEach(() => {
   getAgentInspectLive.mockReset();
   getAgentInspectWidgets.mockReset();
   getAgentRoster.mockReset();
+  getAgent.mockReset();
   vi.mocked(formatUpcoming).mockClear();
   resolveNotice.mockClear();
   toggle.mockReset();
@@ -1306,6 +1310,7 @@ describe("InspectorPanel section layout", () => {
       closed_at: null,
     } satisfies PageRow;
     listPages.mockResolvedValue([page]);
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
     act(() => {
       useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
     });
@@ -1351,6 +1356,7 @@ function rosterFixture(overrides: Partial<WireAgentCard> = {}): AgentRoster {
     agents: [projectAgentStatus({
       agent_id: 1,
       spawner: "user",
+      harness: "meiva",
       fork_source_agent_id: null,
       status: "idling",
       spawned_at: "2026-06-14T12:00:00Z",
@@ -1803,6 +1809,9 @@ describe("internal duration evidence never renders (task #3869)", () => {
 });
 
 describe("InspectorPanel Context section", () => {
+  beforeEach(() => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
+  });
   afterEach(() => {
     act(() => { useTimelineStore.getState().applyTokenUsage(0, 0, 0, 0, 0); });
   });
@@ -1832,6 +1841,51 @@ describe("InspectorPanel Context section", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(panel.className).toContain("bottom-full");
     expect(panel.className).not.toContain("top-full");
+  });
+
+  it.each(["claude_code", "codex"] as const)("does not present the Meiva mirror as %s context", async (harness) => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness }));
+    act(() => {
+      useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
+    });
+    render(<InspectorPanel agentId={1} />);
+    await screen.findByText("Activity");
+    await waitFor(() => expect(getAgentRoster).toHaveBeenCalled());
+    expect(screen.queryByText("Context")).toBeNull();
+    expect(screen.queryByTestId("context-meter-button")).toBeNull();
+  });
+
+  it("uses selected detail for a Meiva agent outside the roster without another read", async () => {
+    getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData([...AGENT_DETAIL_QUERY_KEY, 1], rosterFixture({ harness: "meiva" }).agents[0]);
+    act(() => {
+      useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
+    });
+    render(<InspectorPanel agentId={1} />, qc);
+    expect(await screen.findByTestId("inspector-context-used")).toBeTruthy();
+  });
+
+  it("keeps the active detail owner's refresh query usable after subscribing", async () => {
+    getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
+    getAgent.mockResolvedValue(rosterFixture({ harness: "meiva" }).agents[0]);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const key = [...AGENT_DETAIL_QUERY_KEY, 1];
+    function DetailOwner() {
+      useQuery({ queryKey: key, queryFn: ({ signal }) => getAgent(1, signal) });
+      return null;
+    }
+    act(() => {
+      useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
+    });
+    const view = rtlRender(<QueryClientProvider client={qc}><DetailOwner /></QueryClientProvider>);
+    await waitFor(() => expect(qc.getQueryState(key)?.status).toBe("success"));
+    view.rerender(<QueryClientProvider client={qc}><DetailOwner /><InspectorPanel agentId={1} /></QueryClientProvider>);
+    await screen.findByTestId("inspector-context-used");
+    expect(getAgent).toHaveBeenCalledTimes(1);
+    await act(async () => { await qc.invalidateQueries({ queryKey: key }); });
+    expect(getAgent).toHaveBeenCalledTimes(2);
+    expect(qc.getQueryState(key)?.status).toBe("success");
   });
 
   it("renders no Context section before the first LLM call", async () => {

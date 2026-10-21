@@ -21,3 +21,11 @@ tags:
 **Context card follows selection.** The card appears after selecting a block or node. It reads `GET .../run-timeline/context?at=` at the block's `i0` or the node's `span_start`, pinned to the selected snapshot, and is titled with the resolved request, session and time. Pan, zoom and hover do not change that point or trigger another context read. Clearing the selection hides the card. The composer's panel still reads the current context.
 
 Node details show recorded agent usage, not understanding-generation cost; missing recorded cost stays unknown. A turn-part selection shows only its matching parts and its own context-token share, while node spans show full messages. Raw messages are paged in groups of 50 with the selected snapshot. Conversation TimelineRow owns the message rendering. An arrow landing on a block uses that same message path; an unmatched event fetches only its selected content and renders it through PreviewMessage.
+
+
+When a historical message page contains a prompt, the Messages list resolves
+that agent through the shared detail query and renders the prompt only for the
+Meiva harness. External harness prompts belong to the provider; the old local
+synthetic prompt is hidden while all other parts, indices and snapshot ranges
+stay intact. Pages without prompts need no extra identity read. A pending or
+failed identity read never labels the synthetic prompt as provider instructions.

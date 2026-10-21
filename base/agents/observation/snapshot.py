@@ -21,7 +21,7 @@ from base.agents.observation.evidence import (
     observation,
 )
 from base.agents.tasks.priority import Priority
-from base.api_contracts.agent_contract import AgentStatus, LivenessState
+from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
 from base.api_contracts.notice_question import NoticeQuestion
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
@@ -72,7 +72,7 @@ _FULL_COLS = (
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
     ", a.config_overlay, mp.last_probe_at, "
     "mp.agent_host_online, a.last_admission_at, "
-    "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config, a.last_launch_attempt_id"
+    "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config, a.last_launch_attempt_id, a.harness"
 )
 _FROM = (
     "FROM agents_meta a "
@@ -155,6 +155,7 @@ class AgentSnapshot(BaseModel):
     fork_source_agent_id: int | None
     fork_source_checkpoint_id: str | None
     status: AgentStatus
+    harness: Harness
     spawned_at: datetime
     last_active_at: datetime
     last_inbound_at: datetime
@@ -228,6 +229,7 @@ def _row_to_snapshot(
             "fork_source_agent_id": row[2],
             "fork_source_checkpoint_id": row[3],
             "status": AgentStatus(row[4]),
+            "harness": row[23],
             "spawned_at": row[5],
             "last_active_at": row[6],
             "last_inbound_at": row[7],

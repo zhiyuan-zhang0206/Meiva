@@ -9,7 +9,6 @@ import json
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
-from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -466,8 +465,8 @@ class HarnessSessions:
         self._registrations = registrations
         self._tasks = asyncio.TaskGroup()
         self._started = False
-        self._pending: set[asyncio.Task[None]] = set()
-        self._retiring: dict[int, asyncio.Task[None]] = {}
+        self._pending: set[asyncio.Task[BaseException | None]] = set()
+        self._retiring: dict[int, asyncio.Task[BaseException | None]] = {}
         self.failures: list[BaseException] = []
 
     async def start(self) -> None:
@@ -487,8 +486,10 @@ class HarnessSessions:
             raise RuntimeError(
                 "a harness session cannot be retired before the host's session owner started"
             )
+        if agent_id in self._retiring:
+            raise RuntimeError(f"agent {agent_id} already has a retiring harness session")
         task = self._tasks.create_task(
-            self._close(bridge, reason), name=f"harness-close-{runtime.harness.value}"
+            self._close(bridge, reason), name=f"harness-close-{runtime.harness.value}-{agent_id}"
         )
         self._pending.add(task)
         self._retiring[agent_id] = task
@@ -497,37 +498,45 @@ class HarnessSessions:
     # meiva:note
     # Wait for this agent's retired session to finish closing, if one is. The next turn
     # calls it before it builds a runtime, which is the only ordering that keeps one
-    # resumed session id from having two CLIs at once.
+    # resumed session id from having two CLIs at once. A cancelled waiter leaves the
+    # close running, and a failed close keeps refusing admission on every later join.
     # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
     async def join(self, agent_id: int) -> None:
-        task = self._retiring.pop(agent_id, None)
+        task = self._retiring.get(agent_id)
         if task is None:
             return
-        with suppress(asyncio.CancelledError):
-            await task
+        error = await asyncio.shield(task)
+        if error is not None:
+            raise error
+        if self._retiring.get(agent_id) is task:
+            del self._retiring[agent_id]
 
-    def _collect(self, task: asyncio.Task[None]) -> None:
+    def _collect(self, task: asyncio.Task[BaseException | None]) -> None:
         self._pending.discard(task)
-        if task.cancelled():
-            return
-        error = task.exception()
+        try:
+            error = task.result()
+        except asyncio.CancelledError as cancelled:
+            error = cancelled
         if error is not None:
             self.failures.append(error)
-            logger.warning(
+            logger.opt(exception=error).warning(
                 "[{label}] {body}",
                 label="harness",
                 event="harness_close_failed",
+                task_name=task.get_name(),
                 body=f"retiring a harness session raised: {error!r}",
             )
 
-    async def _close(self, bridge: TurnEngine, reason: str) -> None:
+    # meiva:note
+    # One agent's failed teardown is a retained admission fence, not a TaskGroup
+    # failure that cancels the other agents' teardown tasks.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    async def _close(self, bridge: TurnEngine, reason: str) -> BaseException | None:
         try:
             await bridge.close(reason=reason)
-        except Exception:
-            logger.exception(
-                "closing an external harness session failed",
-                event="harness_close_failed",
-            )
+        except BaseException as error:
+            return error
+        return None
 
     async def aclose(self) -> None:
         if not self._started:
@@ -542,4 +551,3 @@ class HarnessSessions:
                 body=f"{len(self.failures)} session close(s) raised while running: "
                 f"{self.failures!r}",
             )
-            self.failures.clear()

@@ -143,6 +143,7 @@ function agent(over: {
 }): AgentRow {
   return {
     agent_id: over.agent_id,
+    harness: "meiva",
     spawner: "user",
     fork_source_agent_id: null,
     status: over.status ?? "idling",

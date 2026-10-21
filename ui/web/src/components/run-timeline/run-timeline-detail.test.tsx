@@ -2,19 +2,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { RunTimelineMessages, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
+import type { AgentRow, RunTimelineMessages, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
 import { api } from "@/lib/transport/api";
+import { AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
 
 vi.mock("@/lib/transport/api", () => ({
   api: {
     getRunTimelineMessages: vi.fn(() => new Promise<never>(() => undefined)),
     getRunTimelineLinkContent: vi.fn(),
+    getAgent: vi.fn(),
     getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
   },
 }));
 
 import { preloadChatMarkdown } from "@/components/content/markdown";
 import { NodeDetail, UnitDetail } from "./run-timeline-detail";
+import { TimelineMessages } from "./run-timeline-messages";
 import { LinkDetail } from "./run-timeline-link-detail";
 import type { ResolvedLink } from "./model/timeline-links";
 
@@ -149,5 +152,43 @@ describe("the details of an arrow and of the block it ends on", () => {
     expect(shown[0]).toContain("long long long");
     expect(api.getRunTimelineLinkContent).toHaveBeenCalledWith({ notice_id: 3 });
     expect(api.getRunTimelineMessages).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("historical harness prompts", () => {
+  it.each(["meiva", "claude_code", "codex"] as const)("respects the immutable %s harness identity", async (harness) => {
+    const client = new QueryClient();
+    const agent: AgentRow = {
+      agent_id: 42,
+      harness,
+      spawner: "user",
+      fork_source_agent_id: null,
+      status: "idling",
+      spawned_at: "2026-10-21T00:00:00Z",
+      last_active_at: "2026-10-21T00:00:00Z",
+      last_inbound_at: "2026-10-21T00:00:00Z",
+      label: null,
+      machine: "test",
+      supports_vision: false,
+      liveness_state: "online",
+      awaiting_response_count: 0,
+      highest_notice_priority: null,
+      unread_notice_count: 0,
+      heartbeat_paused_until: null,
+    };
+    client.setQueryData([...AGENT_DETAIL_QUERY_KEY, 42], agent);
+    vi.mocked(api.getRunTimelineMessages).mockResolvedValue({
+      messages: [
+        { idx: 0, ts: null, source: null, parts: [{ kind: "prompt", text: "Legacy synthetic Meiva prompt", chars: 29, text_truncated: false }], context_tokens: null, estimated: null },
+        { idx: 1, ts: null, source: "user", parts: [{ kind: "inbound", text: "Real user request", chars: 17, text_truncated: false }], context_tokens: null, estimated: null },
+      ],
+      next_start: null,
+    });
+    render(<QueryClientProvider client={client}><TimelineMessages agentId={42} start={0} end={1} unitKind={null} /></QueryClientProvider>);
+    expect(await screen.findByText("Real user request")).toBeTruthy();
+    expect(screen.queryByText("Legacy synthetic Meiva prompt") !== null).toBe(harness === "meiva");
+    expect(screen.getAllByTestId("run-timeline-message")).toHaveLength(harness === "meiva" ? 2 : 1);
+    client.clear();
   });
 });

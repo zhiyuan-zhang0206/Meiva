@@ -78,6 +78,7 @@ function edge(
 function rosterRow(agent_id: number, over: Partial<AgentRow> = {}): AgentRow {
   return {
     agent_id,
+    harness: "meiva",
     spawner: "user",
     fork_source_agent_id: null,
     status: "terminated",

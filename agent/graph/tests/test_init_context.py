@@ -597,24 +597,79 @@ async def test_compacted_takeover_context_restores_explanation_before_summary(
     ).update is None
 
 
-# meiva:note
-# The head is the graph's context, not a message an external harness receives: an agent
-# on one gets those facts from its handoff document. `harness_cursor` is what keeps
-# `harness_turn` from sending the head as user turns, so it must cover the whole head
-# exactly, and the built-in loop must not carry a cursor at all.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-async def test_a_cold_start_starts_the_harness_cursor_after_the_head(
+@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
+async def test_external_harness_establishes_no_native_prompt_or_notes(
+    harness: Harness,
+    aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
 ) -> None:
+    def forbidden_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+        raise AssertionError("External harness must not build a Meiva system prompt")
+
+    def forbidden_note(_ctx: MeivaContext) -> HumanMessage:
+        raise AssertionError("External harness must not build Meiva standing notes")
+
+    registry = ExtensionRegistry(
+        (
+            (
+                "demo",
+                PluginContributions(
+                    system_prompt_sections=(forbidden_section,),
+                    context_notes=(ContextNote(forbidden_note),),
+                ),
+            ),
+        )
+    )
     command = await init_context_node(
         AgentState(),
-        _runtime(None, harness=Harness.CLAUDE_CODE, database_gate=database_gate),
+        _runtime(aops_pool, registry, harness=harness, database_gate=database_gate),
         _config(42),
     )
 
-    assert command.update is not None
-    assert command.update["harness_cursor"] == len(command.update["messages"])
-    assert command.update["harness_cursor"] > 0
+    assert command.update == {"messages": [], "harness_cursor": 0, "context_reset": ContextReset()}
+    assert command.goto == "claim"
+
+
+@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
+async def test_external_context_reset_preserves_the_tail_for_submission(
+    harness: Harness,
+    database_gate: ProcessDbGate,
+) -> None:
+    tail: list[AnyMessage] = [
+        HumanMessage(content="The real compact summary", id="compact-summary")
+    ]
+    command = await init_context_node(
+        AgentState(harness_cursor=19, context_reset=ContextReset(tail=tail, resume="before_llm")),
+        _runtime(None, harness=harness, database_gate=database_gate),
+        _config(42),
+    )
+
+    assert command.update == {
+        "messages": tail,
+        "harness_cursor": 0,
+        "context_reset": ContextReset(),
+    }
+    assert command.goto == "harness_turn"
+
+
+@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
+async def test_existing_external_history_and_cursor_are_not_rewritten(
+    harness: Harness,
+    database_gate: ProcessDbGate,
+) -> None:
+    state = AgentState(
+        messages=[SystemMessage(content="Legacy local prompt"), HumanMessage(content="Task")],
+        harness_cursor=1,
+    )
+    command = await init_context_node(
+        state,
+        _runtime(None, harness=harness, database_gate=database_gate),
+        _config(42),
+    )
+
+    assert command.update is None
+    assert state.harness_cursor == 1
+    assert state.messages[0].content == "Legacy local prompt"
 
 
 async def test_the_built_in_loop_writes_no_cursor(database_gate: ProcessDbGate) -> None:

@@ -10,7 +10,7 @@ const availability: NonNullable<WireAgentRow["availability"]> = {
 };
 const detail: Required<WireAgentRow> = {
   last_launch_attempt_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-  agent_id: 7, spawner: "user", fork_source_agent_id: null,
+  agent_id: 7, spawner: "user", harness: "meiva", fork_source_agent_id: null,
   fork_source_checkpoint_id: "detail-only-checkpoint", status: "idling",
   spawned_at: "2026-09-01T00:00:00Z",
   last_active_at: "2026-09-01T00:00:00Z", last_inbound_at: "2026-09-01T00:00:00Z",
@@ -20,7 +20,7 @@ const detail: Required<WireAgentRow> = {
   unread_notice_count: 2, heartbeat_paused_until: null,
 };
 const wireCard: Required<WireAgentCard> = {
-  agent_id: 9, spawner: "user", fork_source_agent_id: null, status: "running",
+  agent_id: 9, spawner: "user", harness: "meiva", fork_source_agent_id: null, status: "running",
   spawned_at: "2026-09-01T00:00:00Z",
   last_active_at: "2026-09-01T00:00:00Z", last_inbound_at: "2026-09-01T00:00:00Z",
   label: "card", machine: "test-host", supports_vision: true, liveness_state: "unknown",

@@ -2266,6 +2266,7 @@ export interface components {
             spawner: string;
             fork_source_agent_id: number | null;
             status: components["schemas"]["AgentStatus"];
+            harness: components["schemas"]["Harness"];
             spawned_at: string;
             last_active_at: string;
             last_inbound_at: string;
@@ -2398,6 +2399,7 @@ export interface components {
             fork_source_agent_id: number | null;
             fork_source_checkpoint_id: string | null;
             status: components["schemas"]["AgentStatus"];
+            harness: components["schemas"]["Harness"];
             spawned_at: string;
             last_active_at: string;
             last_inbound_at: string;

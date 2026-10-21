@@ -221,6 +221,8 @@ async def interrupt_engine(agent_id: int, bridge: TurnEngine) -> None:
 # as a provider that said nothing.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: HarnessTurn) -> None:
+    if turn.replayed:
+        return
     usage = turn.usage
     if usage.input_tokens == 0 and usage.output_tokens == 0:
         return

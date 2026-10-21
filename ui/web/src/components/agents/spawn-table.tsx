@@ -84,6 +84,8 @@ export function SpawnTable({
   prices,
 }: SpawnPickerProps) {
   const t = useTranslations("spawn");
+  const modelLabel = t(harness === "meiva" ? "model" : "historyModel");
+  const effortLabel = t(harness === "meiva" ? "reasoningEffort" : "historyEffort");
   // meiva:note
   // The model cell keeps the input rate visible, because comparing models is what
   // the column is for; everything the old full-width row carried - every rate
@@ -117,8 +119,8 @@ export function SpawnTable({
     <div className={COLUMNS} data-testid="spawn-table">
       <div className={HEADER}>{t("machine")}</div>
       <div className={HEADER}>{t("harness")}</div>
-      <div className={HEADER}>{t("model")}</div>
-      <div className={cn(HEADER, "border-r-0")}>{t("reasoningEffort")}</div>
+      <div className={HEADER}>{modelLabel}</div>
+      <div className={cn(HEADER, "border-r-0")}>{effortLabel}</div>
 
       <ul aria-label={t("machine")} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1 pb-2">
         {machines.map((row) => {
@@ -162,7 +164,7 @@ export function SpawnTable({
         })}
       </ul>
 
-      <ul aria-label={t("model")} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1 pb-2">
+      <ul aria-label={modelLabel} className="max-h-[300px] overflow-y-auto border-r border-border py-1 pr-1 pb-2">
         {modelGroups.map(([provider, providerModels]) => (
           <li key={provider}>
             <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 first:pt-1">
@@ -203,7 +205,7 @@ export function SpawnTable({
         )}
       </ul>
 
-      <ul aria-label={t("reasoningEffort")} className="max-h-[300px] overflow-y-auto py-1 pb-2">
+      <ul aria-label={effortLabel} className="max-h-[300px] overflow-y-auto py-1 pb-2">
         {efforts.map((level) => {
           const selected = level === effort;
           return (
@@ -224,6 +226,11 @@ export function SpawnTable({
           <li className="px-2 py-1 text-muted-foreground">—</li>
         )}
       </ul>
+      {harness !== "meiva" && (
+        <p className="col-span-4 border-t border-border px-2 py-2 text-xs text-muted-foreground">
+          {t("externalModelHelp", { harness: harnessLabel(harness) })}
+        </p>
+      )}
     </div>
   );
 }

@@ -72,6 +72,7 @@ const agentsMock = vi.fn<() => AgentRow[]>(() => [
   {
     agent_id: 7,
     spawner: "user",
+    harness: "meiva",
     fork_source_agent_id: null,
     status: "idling",
     spawned_at: "2026-06-06T00:00:00Z",

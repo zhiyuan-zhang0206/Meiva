@@ -429,9 +429,11 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                 <PowerOff className="text-destructive" /> {t("forceExpire")}
               </ContextMenuItem>
             ) : null}
-            <ContextMenuItem onSelect={onCompact} disabled={pending !== undefined}>
-              <Shrink className="text-amber-500" /> {t("compact")}
-            </ContextMenuItem>
+            {agent.harness === "meiva" && (
+              <ContextMenuItem onSelect={onCompact} disabled={pending !== undefined}>
+                <Shrink className="text-amber-500" /> {t("compact")}
+              </ContextMenuItem>
+            )}
             <ContextMenuItem onSelect={() => onFork()}>
               <GitFork /> {t("fork")}
             </ContextMenuItem>

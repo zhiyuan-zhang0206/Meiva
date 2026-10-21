@@ -60,7 +60,7 @@ function mockRect(top: number, bottom: number, height: number): DOMRect {
 }
 
 function setupStuckBlock() {
-  const { container } = render(<TimelineView items={makeItems()} />);
+  const { container } = render(<TimelineView harness="meiva" items={makeItems()} />);
   const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
   Object.defineProperty(viewport, "scrollHeight", { value: 2000, configurable: true });
   Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });

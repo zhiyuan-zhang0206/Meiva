@@ -34,7 +34,9 @@ table. The effort column shows
 the selected model's `reasoning_effort_options` ladder; a model that publishes
 none leaves the column empty rather than offering a synthetic default, and the
 model's concrete `reasoning_effort_default` is the row marked when nothing is
-stored. The header names the quantity, not the mechanism. The footer states the action only — one `Spawn` button, disabled with
+stored. The header names the quantity, not the mechanism.
+External harnesses label these columns "Meiva history model" and
+"Summary effort": their CLI model settings are independent. The footer states the action only — one `Spawn` button, disabled with
 the first refusal that applies (a down host, then a harness the machine cannot
 start).
 

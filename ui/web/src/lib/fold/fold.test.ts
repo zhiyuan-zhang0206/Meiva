@@ -20,6 +20,7 @@ const baseAgent: AgentRow = {
   status: "running",
   last_active_at: "2026-05-10T00:00:00Z", last_inbound_at: "2026-05-10T00:00:00Z",
   spawner: "user",
+  harness: "meiva",
   fork_source_agent_id: null,
   spawned_at: "2026-05-10T00:00:00Z",
   machine: "test",

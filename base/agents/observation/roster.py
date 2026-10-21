@@ -24,7 +24,7 @@ from base.agents.observation.evidence import (
 )
 from base.agents.observation.snapshot import agent_supports_vision
 from base.agents.tasks.priority import Priority
-from base.api_contracts.agent_contract import AgentStatus, LivenessState
+from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
 from base.lm.catalog import ModelCatalog
 
 AgentDirectoryScope = Literal["live", "terminated", "all"]
@@ -42,6 +42,7 @@ class AgentCard(AgentLineage):
     """Scalar list state; selected-agent details and notice bodies are separate reads."""
 
     status: AgentStatus
+    harness: Harness
     spawned_at: datetime
     last_active_at: datetime
     last_inbound_at: datetime
@@ -79,7 +80,7 @@ class AgentRoster(BaseModel):
 
 
 _CARD_COLUMNS = """
-    a.id AS agent_id, a.spawner, a.fork_source_agent_id, a.status,
+    a.id AS agent_id, a.spawner, a.fork_source_agent_id, a.status, a.harness,
     a.spawned_at,
     COALESCE(a.last_active_at, a.spawned_at) AS last_active_at,
     COALESCE(im.last_inbound_at, a.spawned_at) AS last_inbound_at,

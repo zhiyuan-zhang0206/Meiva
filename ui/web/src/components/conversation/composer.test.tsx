@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, MessageDeliveryUnknownError } from "@/lib/transport/api";
@@ -1519,6 +1519,118 @@ describe("Composer image attachments", () => {
         expect.any(String),
       ),
     );
+  });
+
+  it("drops native images when switching agents while keeping text drafts and ordinary file delivery", async () => {
+    const revoke = vi.fn();
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(revoke);
+    const onSend = vi.fn(() => Promise.resolve(true));
+    const onUploadFiles = vi.fn();
+    const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/807/uploads/shot.png"));
+    const { rerender } = render(
+      <Composer {...baseProps} mode="idle" agentId={807} onSend={onSend} onAttachImage={onAttachImage} />,
+    );
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "native draft" } });
+    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
+    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled).toBe(false));
+    sessionStorage.setItem("composer-draft-809", "external draft");
+
+    rerender(<Composer {...baseProps} mode="idle" agentId={809} onSend={onSend} onUploadFiles={onUploadFiles} />);
+
+    expect(screen.queryByTestId("composer-attachments")).toBeNull();
+    expect(revoke).toHaveBeenCalledWith("blob:preview");
+    expect(ta.value).toBe("external draft");
+    expect(sessionStorage.getItem("composer-draft-807")).toBe("native draft");
+    const ordinaryFile = new File(["notes"], "notes.txt", { type: "text/plain" });
+    const pastedImage = imageFile();
+    fireEvent.paste(ta, { clipboardData: { files: [pastedImage, ordinaryFile], types: ["Files"] } });
+    expect(onUploadFiles).toHaveBeenCalledWith([pastedImage]);
+    expect(onUploadFiles).toHaveBeenCalledWith([ordinaryFile]);
+    expect(onAttachImage).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("external draft", [], expect.any(String)));
+  });
+
+  it("releases an image preview when selection changes before the attachment commits", () => {
+    const revoke = vi.fn();
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(revoke);
+    const onAttachImage = vi.fn(() => new Promise<string>(() => undefined));
+    const { rerender } = render(
+      <Composer {...baseProps} mode="idle" agentId={837} onAttachImage={onAttachImage} />,
+    );
+    act(() => {
+      fireEvent.paste(screen.getByTestId("composer-input"), {
+        clipboardData: { files: [imageFile()], types: ["Files"] },
+      });
+      rerender(<Composer {...baseProps} mode="idle" agentId={839} />);
+    });
+    expect(screen.queryByTestId("composer-attachments")).toBeNull();
+    expect(revoke).toHaveBeenCalledWith("blob:preview");
+  });
+
+  it("ignores an old agent's pending upload after switching away and returning", async () => {
+    let resolveUpload!: (url: string) => void;
+    const onAttachImage = vi.fn(() => new Promise<string>((resolve) => { resolveUpload = resolve; }));
+    const onSend = vi.fn(() => Promise.resolve(true));
+    const { rerender } = render(
+      <Composer {...baseProps} mode="idle" agentId={817} onSend={onSend} onAttachImage={onAttachImage} />,
+    );
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "saved native text" } });
+    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled).toBe(true);
+
+    rerender(<Composer {...baseProps} mode="idle" agentId={819} onSend={onSend} />);
+    fireEvent.change(ta, { target: { value: "send while old upload is pending" } });
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("send while old upload is pending", [], expect.any(String)));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
+    rerender(<Composer {...baseProps} mode="idle" agentId={817} onSend={onSend} onAttachImage={onAttachImage} />);
+    expect(ta.value).toBe("saved native text");
+
+    await act(() => {
+      resolveUpload("/api/agents/817/uploads/shot.png");
+      return Promise.resolve();
+    });
+
+    expect(screen.queryByTestId("composer-attachments")).toBeNull();
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith("saved native text", [], expect.any(String)));
+  });
+
+  it("invalidates pending images on capability loss without resetting them for callback replacement", async () => {
+    let resolveOldUpload!: (url: string) => void;
+    let resolveNewUpload!: (url: string) => void;
+    const oldAttach = vi.fn(() => new Promise<string>((resolve) => { resolveOldUpload = resolve; }));
+    const newAttach = vi.fn((_file: File) => new Promise<string>((resolve) => { resolveNewUpload = resolve; }));
+    const onSend = vi.fn(() => Promise.resolve(true));
+    const { rerender } = render(
+      <Composer {...baseProps} mode="idle" agentId={827} onSend={onSend} onAttachImage={oldAttach} />,
+    );
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "keep this draft" } });
+    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
+    rerender(<Composer {...baseProps} mode="idle" agentId={827} onSend={onSend} />);
+    expect(screen.queryByTestId("composer-attachments")).toBeNull();
+    expect(ta.value).toBe("keep this draft");
+    rerender(<Composer {...baseProps} mode="idle" agentId={827} onSend={onSend} onAttachImage={newAttach} />);
+    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
+
+    await act(() => {
+      resolveOldUpload("/api/agents/827/uploads/old.png");
+      return Promise.resolve();
+    });
+
+    expect(screen.getAllByRole("button", { name: "Remove shot.png" })).toHaveLength(1);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled).toBe(true);
+    rerender(<Composer {...baseProps} mode="idle" agentId={827} onSend={onSend} onAttachImage={(file) => newAttach(file)} />);
+    await act(() => {
+      resolveNewUpload("/api/agents/827/uploads/new.png");
+      return Promise.resolve();
+    });
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("keep this draft", ["/api/agents/827/uploads/new.png"], expect.any(String)));
   });
 
   it("normal Send preserves an unchanged image snapshot identity after ambiguity", async () => {
