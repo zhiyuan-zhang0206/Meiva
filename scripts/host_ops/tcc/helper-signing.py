@@ -11,6 +11,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+DESCRIPTION = (
+    "The permissions helper's signing identity: inspect it, provision it, switch the install."
+)
 
 
 # meiva:note
@@ -272,7 +275,7 @@ def _restore(backup: Path, home: Path, app: Path, before_dr: str) -> None:
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument("command", choices=("status", "provision", "import", "export", "switch"))
     parser.add_argument("path", nargs="?", help="PKCS#12 archive for import/export")
     parser.add_argument("--home", help="MEIVA_HOME to act on, e.g. a rehearsal home")
