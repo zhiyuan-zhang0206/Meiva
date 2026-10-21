@@ -236,6 +236,8 @@ def test_retires_when_the_helper_ancestry_is_gone(short_tmp: Path) -> None:
     with _daemon(run_dir, manifests, env=env, extra=_FAST_HELPER_CHAIN) as (proc, log):
         assert proc.wait(timeout=30) == HELPER_CHAIN_BROKEN_EXIT_CODE, _read_log(log)
     assert "helper ancestry is gone" in _read_log(log)
+    text = _read_log(log)
+    assert f"meiva-root exiting with code {HELPER_CHAIN_BROKEN_EXIT_CODE}" in text, text
     assert not (run_dir / _SOCKET_NAME).exists()
 
 
