@@ -464,7 +464,7 @@ class TestReasoningEffortDispatch:
 
     @pytest.mark.parametrize(
         "model",
-        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+        ("mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
     )
     def test_mimo_thinking_disabled_sends_body_thinking(
         self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
@@ -484,7 +484,7 @@ class TestReasoningEffortDispatch:
 
     @pytest.mark.parametrize(
         "model",
-        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+        ("mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
     )
     def test_mimo_high_effort_is_noop(
         self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
@@ -504,7 +504,7 @@ class TestReasoningEffortDispatch:
 
     @pytest.mark.parametrize(
         "model",
-        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+        ("mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
     )
     def test_mimo_none_effort_disables_thinking_body(
         self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
@@ -523,7 +523,7 @@ class TestReasoningEffortDispatch:
 
     @pytest.mark.parametrize(
         "model",
-        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+        ("mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
     )
     def test_mimo_rejects_low_effort(
         self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
@@ -539,7 +539,7 @@ class TestReasoningEffortDispatch:
 
     @pytest.mark.parametrize(
         "model",
-        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+        ("mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
     )
     def test_mimo_explicit_thinking_disabled_wins_over_effort(
         self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog

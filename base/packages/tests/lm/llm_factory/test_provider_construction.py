@@ -90,7 +90,7 @@ class TestProviderConstruction:
 
     @pytest.mark.parametrize(
         "model",
-        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+        ("mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
     )
     def test_mimo_returns_reasoning_content_model(
         self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
@@ -114,7 +114,7 @@ class TestProviderConstruction:
         monkeypatch.delenv("MIMO_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="MIMO_API_KEY"):
             build_chat_model(
-                "mimo-v2.5-pro",
+                "mimo-v2.6-pro",
                 catalog=model_catalog,
                 llm_override="",
                 overrides=model_overrides(),
@@ -319,7 +319,7 @@ class TestProviderConstruction:
 
     @pytest.mark.parametrize(
         "model",
-        ("mimo-v2.5-pro", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
+        ("mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"),
     )
     def test_mimo_defaults_to_streaming(
         self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
