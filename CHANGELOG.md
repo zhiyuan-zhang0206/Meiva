@@ -64,6 +64,13 @@ and the matching GitHub Releases.
   visibility) remain, unused by any pixel comparison.
 
 ### Fixed
+- A timeline block's timestamp and Copy moved out of the card box into the 12px gap below it
+  (user 2026-10-21): the row owns that gap as its own bottom padding with a compensating
+  negative margin, so block-to-block spacing is unchanged while the chrome stops overlapping
+  the body's bottom-right corner. The stamp now rides an expanded block only — a collapsed row
+  showed a time for a message that was not on screen — and the body's bottom padding dropped to
+  4px, so a block's 7px inset is the same above and below
+  ([card chrome](ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md)).
 
 - The "To user" panel scrolls with the console's own auto-hiding scrollbar instead of
   a native one that never leaves, and its narrow-screen header offers the same
@@ -83,12 +90,6 @@ and the matching GitHub Releases.
   stream, so the amber banner appeared inside the timeline for a few frames and pushed
   every card down and back. The banner now floats over the list, and the store only
   publishes a reconnect that outlasts the delay (user report 2026-10-21).
-- The gap between timeline cards no longer depends on which kinds they are: the
-  timestamp and Copy took a line under the card, and only the kinds that stamp a
-  timestamp or offer Copy got that line, so two plain cards sat 12px apart and two
-  stamped ones 28px. The footer now floats in the card's own bottom-right corner
-  and takes no height, the stamp drops its brackets and renders one step smaller,
-  and Copy's icon shrinks with it (user report 2026-10-21).
 - The Telegram notice bridge honors the user's per-category switches: a decision
   notice under a switched-off `core.needs_input` is accepted (the poll cursor still
   advances) but not pushed, so "turn notifications off" now means the same thing on

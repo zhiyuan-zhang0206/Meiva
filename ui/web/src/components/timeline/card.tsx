@@ -345,19 +345,20 @@ export const UNSTUCK_HEADER_CLS =
   "before:bg-transparent before:backdrop-blur-none";
 
 // meiva:note
-// The hover footer (timestamp, Copy) floats in the card box's own bottom-right
-// corner instead of taking a line under it. A reserved line existed only on the
-// kinds that stamp a timestamp or offer Copy, so the gap between two cards
-// depended on which kinds they were — 12px between two plain cards, 28px between
-// two stamped ones (user report 2026-10-21). Floating costs no layout height, so
-// every pair of cards is 12px apart, and it stays inside the box because
-// `.timeline-item` carries content-visibility paint containment, which would clip
-// anything drawn past it. Invisible and click-through until the pointer hovers the
-// card or focus enters it; a coarse pointer, with no hover to gate on, keeps it
-// visible.
+// The hover chrome (timestamp, Copy) lives in the gap BELOW a block, not on the
+// block: it reads as a separator between two messages instead of eating the
+// card's own bottom padding (user 2026-10-21). `.timeline-item` owns that gap —
+// it pads its bottom by the same 12px the row list already separates rows by and
+// gives the height back as a negative margin (globals.css), so block-to-block
+// spacing is unchanged and the band is drawn inside the row rather than past it,
+// where content-visibility paint containment would clip it. A reserved line
+// existed once and made the gap depend on which kinds stamped a time; this band
+// costs no layout height at rest. Invisible and click-through until the pointer
+// hovers the block or focus enters it; a coarse pointer, with no hover to gate
+// on, keeps it visible.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-const CARD_FOOTER_CLS = cn(
-  "absolute right-1 bottom-0 items-center justify-end gap-1",
+export const CARD_FOOTER_CLS = cn(
+  "absolute right-2 bottom-0 h-3 items-center justify-end gap-1 sm:right-3",
   "pointer-events-none opacity-0 transition-opacity motion-reduce:transition-none",
   "group-hover/msgcard:pointer-events-auto group-hover/msgcard:opacity-100",
   "group-focus-within/msgcard:pointer-events-auto group-focus-within/msgcard:opacity-100",
@@ -367,27 +368,19 @@ const CARD_FOOTER_CLS = cn(
 
 export function MessageCard({
   config,
-  footer,
   children,
 }: {
   config: CardConfig;
-  // meiva:note
-  // Timestamp and Copy for the hover footer; omitted, the card mounts no footer and stays out of the named hover group.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  footer?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div className={cn("relative", footer ? "group/msgcard" : null)}>
-      <div className={cn("relative rounded-r-sm", config.bg, config.cardText)}>
-        <span
-          aria-hidden
-          data-testid="card-accent"
-          className={cn("pointer-events-none absolute top-0 left-0 h-7 w-0 rounded-full border-l-2", config.border)}
-        />
-        {children}
-      </div>
-      {footer ? <div className={CARD_FOOTER_CLS}>{footer}</div> : null}
+    <div className={cn("relative rounded-r-sm", config.bg, config.cardText)}>
+      <span
+        aria-hidden
+        data-testid="card-accent"
+        className={cn("pointer-events-none absolute top-0 left-0 h-7 w-0 rounded-full border-l-2", config.border)}
+      />
+      {children}
     </div>
   );
 }
