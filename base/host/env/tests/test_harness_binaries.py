@@ -1,4 +1,6 @@
 import os
+import subprocess
+from contextlib import chdir
 from pathlib import Path
 
 import pytest
@@ -37,6 +39,46 @@ def test_path_wins_when_it_already_holds_the_program(tmp_path: Path) -> None:
 
     assert found == str(installed)
     assert on_path is True
+
+
+@pytest.mark.parametrize("symlink", [False, True])
+def test_a_relative_path_cli_runs_from_another_working_directory(
+    tmp_path: Path, symlink: bool
+) -> None:
+    installed = _install(tmp_path, "bin")
+    installed.write_text('#!/bin/sh\nprintf \'%s\\n\' "$0" "$PWD"\n')
+    executable = installed
+    if symlink:
+        executable = tmp_path / "links" / installed.name
+        executable.parent.mkdir()
+        executable.symlink_to(Path("../bin") / installed.name)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    with chdir(tmp_path):
+        resolved = resolve_harness_binary(
+            installed.name,
+            path_env=str(executable.parent.relative_to(tmp_path)),
+            bin_dirs=(),
+        )
+
+    # meiva:note
+    # Execute only the test-owned stub, from a different directory, to verify the
+    # path still selects the installed file rather than merely looking absolute.
+    completed = subprocess.run(  # noqa: S603
+        [resolved], cwd=workspace, capture_output=True, text=True, check=True, timeout=5
+    )
+
+    assert resolved == str(executable)
+    assert completed.stdout.splitlines() == [str(executable), str(workspace)]
+
+
+def test_a_configured_relative_path_is_returned_unchanged(tmp_path: Path) -> None:
+    configured = _install(tmp_path, "vendor/bin")
+    relative = str(configured.relative_to(tmp_path))
+
+    with chdir(tmp_path):
+        assert resolve_harness_binary(relative, path_env="", bin_dirs=()) == relative
 
 
 def test_a_missing_cli_names_path_and_every_directory_it_searched(tmp_path: Path) -> None:

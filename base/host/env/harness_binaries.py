@@ -92,7 +92,7 @@ def resolve_harness_binary(
         raise HarnessBinaryNotFoundError(
             f"{program} was not found on PATH ({path_env or 'unset'}) or in {searched}"
         )
-    return found
+    return str(Path(found).absolute())
 
 
 # meiva:note
