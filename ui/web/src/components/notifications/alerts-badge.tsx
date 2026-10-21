@@ -1,8 +1,12 @@
 "use client";
 
-// The header-bar alerts badge: the unresolved count as a pill button; clicking
-// jumps to the alert section (/insights#alerts). Renders nothing when there is
-// nothing unresolved — a zero badge is noise.
+// meiva:note
+// The alerts count sits in the sidebar's icon row beside Settings rather than in the
+// conversation header: it is a standing state of the cluster, not a control over what
+// the reader is looking at, and a badge in the header took a permanent slot from the
+// conversation (user 2026-10-21). Clicking jumps to the alert section, and nothing
+// renders at zero — a zero badge is noise.
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
 import { Bell } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -23,12 +27,15 @@ export function AlertsBadge() {
       href="/insights#alerts"
       aria-label={t("unresolvedAlerts", { count: unresolved })}
       data-testid="alerts-badge"
-      className={cn("relative size-8 items-center justify-center rounded-md transition-colors hover:bg-sidebar-accent", FLEX)}
+      className={cn(
+        "relative shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground",
+        FLEX,
+      )}
     >
       <Bell className="size-4" aria-hidden />
       <span
         data-testid="alerts-badge-count"
-        className="absolute -right-1 -top-1 rounded-full bg-destructive px-1 text-[10px] font-semibold tabular-nums leading-4 text-white"
+        className="absolute -right-0.5 -top-0.5 rounded-full bg-destructive px-1 text-[10px] font-semibold tabular-nums leading-4 text-white"
       >
         {unresolved > 99 ? "99+" : unresolved}
       </span>

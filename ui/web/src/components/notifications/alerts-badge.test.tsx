@@ -1,5 +1,7 @@
-// The header-bar alerts badge: the unresolved count from the ["alerts"] cache;
-// renders nothing at zero.
+// meiva:note
+// The sidebar alerts badge: the unresolved count from the ["alerts"] cache, rendered
+// beside the Settings shortcut, and nothing at all at zero.
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -37,6 +39,13 @@ describe("AlertsBadge", () => {
   it("renders nothing at zero unresolved", () => {
     wrap(<AlertsBadge />, response(0));
     expect(screen.queryByTestId("alerts-badge")).toBeNull();
+  });
+
+  it("matches the sidebar icon row's hit box rather than a header pill", () => {
+    wrap(<AlertsBadge />, response(3));
+    const badge = screen.getByTestId("alerts-badge");
+    expect(badge.className).toContain("p-1.5");
+    expect(badge.className).toContain("hover:bg-sidebar-accent");
   });
 
   it("caps the badge at 99+", () => {
