@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Sequence
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -153,6 +154,32 @@ class TestStart:
         assert captured.out == ""
         assert captured.err == ""
         assert recorder.calls == [["python", "eval.py", "--jobs", "8"]]
+
+    def test_an_overcommitted_single_worker_still_says_so(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, recorder = _run(
+            ["--peak-mb", "8800", "--", "python", "eval.py", "--jobs", "1"], tmp_path=tmp_path
+        )
+
+        captured = capsys.readouterr()
+        assert code == 0
+        assert "admission: jobs 1 (overcommitted, still starting one" in captured.out
+        assert recorder.calls == [["python", "eval.py", "--jobs", "1"]]
+        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+        assert (event["kind"], event["requested"], event["jobs"]) == ("overcommitted", 1, 1)
+
+    def test_a_single_worker_that_fits_prints_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, recorder = _run(
+            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "1"], tmp_path=tmp_path
+        )
+
+        captured = capsys.readouterr()
+        assert code == 0
+        assert (captured.out, captured.err) == ("", "")
+        assert recorder.calls == [["python", "eval.py", "--jobs", "1"]]
 
     def test_a_missing_declaration_fails_fast(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -444,3 +471,47 @@ class TestClassLock:
 
         assert (lock, reservation) == (None, None)
         assert status["wait_outcome"] == "none"
+
+
+class TestOptionalProbesOnAHostWithoutThem:
+    # meiva:note
+    # Each of these readings is either recorded and never priced (the GPU) or backed by a
+    # second source that already answered (statvfs without `df`): a host that lacks the tool
+    # keeps the job the gate decided to start. 2026-10-21 — an absent `nvidia-smi` raised out
+    # of `_announce_gate` before the launch and before the event, so on macOS every start the
+    # gate lowered died with rc=1 and left no record at all.
+
+    def test_a_missing_gpu_tool_reads_as_unknown(self) -> None:
+        assert admission.read_gpu(("/nonexistent/nvidia-smi",)) is None
+
+    def test_a_missing_df_prices_from_statvfs_alone(self, tmp_path: Path) -> None:
+        reading = admission.read_disk(str(tmp_path), df_reader=lambda _path: None)
+
+        assert reading.source == "disk"
+        assert reading.free_gib > 0
+        assert reading.unstable is False
+        assert "statvfs" in reading.detail
+
+    def test_a_missing_df_tool_reads_the_same_as_silence(self) -> None:
+        assert admission.read_df("/nonexistent/volume") is None
+
+    def test_a_missing_sysctl_reports_unknown_swap(self) -> None:
+        assert admission.swap_line(platform="darwin", sysctl=("/nonexistent/sysctl",)) == "unknown"
+
+    def test_a_lowered_job_starts_and_records_without_a_gpu_tool(self, tmp_path: Path) -> None:
+        recorder = _Recorder()
+        code = admission.main(
+            ["--peak-mb", "2800", "--", "python", "eval.py", "--jobs", "8"],
+            budget_reader=_collect(26.1)[0],
+            pressure_reader=lambda: 1,
+            psi_reader=lambda: None,
+            gpu_reader=partial(admission.read_gpu, ("/nonexistent/nvidia-smi",)),
+            executor=recorder,
+            home=tmp_path,
+        )
+
+        assert code == 0
+        assert recorder.calls == [["python", "eval.py", "--jobs", "2"]]
+        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+        assert event["kind"] == "adjusted"
+        assert event["gpu_max_used_mib"] is None
