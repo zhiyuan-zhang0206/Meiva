@@ -83,7 +83,6 @@ _REPO_MODEL_VENDORS = {
     "gpt-6-luna-fast": "openai",
     "jev-1.13.0": "typesafe",
     "kimi-k3": "moonshot",
-    "mimo-v2.5-pro": "xiaomi",
     "mimo-v2.6-pro": "xiaomi",
     "mimo-v2.6-pro-ultraspeed": "xiaomi",
     "qwen3.8-27b": "alibaba",
@@ -124,11 +123,15 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 
 def test_repo_model_vendor_vocabulary_is_complete(model_catalog: ModelCatalog) -> None:
     assert {*model_catalog.models, *model_catalog.decision_models} == _REPO_MODEL_VENDORS.keys()
+    # meiva:note
+    # The archive rows no plugin overrides. A model retired from a provider plugin keeps its
+    # row here: price history survives the ModelSpec.
     assert set(model_catalog.prices.archive) == {
         "gemini-embedding-2",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
+        "mimo-v2.5-pro",
     }
     assert {
         model: pricing.model_vendor(model, prices=model_catalog.prices)
@@ -327,13 +330,15 @@ def test_repo_moonshot_provider_is_enabled_and_registers_complete_contract() -> 
 
 def _assert_mimo_models_registered_with_pricing_vendor(catalog: ModelCatalog) -> None:
     mimo_models = {
-        "mimo-v2.5-pro",
         "mimo-v2.6-pro",
         "mimo-v2.6-pro-ultraspeed",
     }
     assert {model for model in catalog.models if model.startswith("mimo-")} == mimo_models
     assert set(catalog.supported_models["mimo"]) == mimo_models
-    assert catalog.models["mimo-v2.5-pro"].superseded_by == "mimo-v2.6-pro"
+    # meiva:note
+    # Retired upstream on 2026-10-21 (task #4416): no longer spawnable, still priced from the
+    # archive row its history lives in.
+    assert "mimo-v2.5-pro" not in catalog.models
     assert pricing.model_vendor("mimo-v2.5-pro", prices=catalog.prices) == "xiaomi"
 
 
@@ -341,7 +346,7 @@ def _assert_mimo_provider_key_and_binding(catalog: ModelCatalog) -> None:
     from base.lm.factory import provider_key_map, provider_key_of_model
 
     assert provider_key_map(catalog=catalog)["mimo-"] == ("Xiaomi", "MIMO_API_KEY")
-    assert provider_key_of_model("mimo-v2.5-pro", catalog=catalog) == "mimo"
+    assert provider_key_of_model("mimo-v2.6-pro", catalog=catalog) == "mimo"
     binding = catalog.bindings["mimo-"]
     assert binding.prefix == "mimo-"
     assert binding.provider_key is None

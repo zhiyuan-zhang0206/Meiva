@@ -208,7 +208,7 @@ class TestValidateModelConfig:
         monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("legacy-settings-key"))
         monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
         with pytest.raises(ValueError, match="MIMO_API_KEY"):
-            validate_model_config(model="mimo-v2.5-pro", catalog=model_catalog, llm_override="")
+            validate_model_config(model="mimo-v2.6-pro", catalog=model_catalog, llm_override="")
 
     def test_missing_kimi_key_raises(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
