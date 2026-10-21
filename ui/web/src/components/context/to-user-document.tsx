@@ -2,7 +2,7 @@
 
 import { ArrowLeft, House, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { ZoomableImage } from "@/components/content/zoomable-image";
@@ -24,8 +24,7 @@ function pushedEntry(): boolean {
 // The inspector trigger is optional: `onInspect` decides whether the bar renders
 // it at all, and `inspecting` drives its pressed state.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate, children }: {
-  children?: ReactNode;
+export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate }: {
   agentId: number;
   document: ToUserDocument | undefined;
   failed: boolean;
@@ -80,12 +79,11 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   }));
   const byUrl = new Map([...resources.values()].map((resource) => [resource.url, resource]));
   // meiva:note
-  // The question slot stays mounted outside the referenced document's keyed
-  // body. Its caller hides it in Inspector mode without discarding a draft;
-  // Inspector itself lives outside this agent-keyed subtree.
+  // The caller owns the question and Inspector as siblings of this document,
+  // so navigating its keyed body cannot discard an unfinished answer.
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   return (
-    <section className={cn(FLEX, MIN_H_0, "shrink-0", FLEX_COL)} aria-label={t("title")}>
+    <section className={cn(FLEX, MIN_H_0, "shrink-0", FLEX_COL)} aria-label={t("sharedContext")}>
       <div data-testid="document-bar" className={cn("shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_WRAP_CLASS, FLEX)}>
         {inspecting ? null : (
           <>
@@ -97,9 +95,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
             </button>}
           </>
         )}
-        {!mobile && (
-          <span className="shrink-0 whitespace-nowrap">{inspecting ? tInspector("title") : t("sharedContext")}</span>
-        )}
+        <span className="shrink-0 whitespace-nowrap">{inspecting ? tInspector("title") : t("sharedContext")}</span>
         {inspecting ? null : (
           <div data-testid="document-status" className={cn("shrink-0 items-center gap-1.5", FLEX)}>
             {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at) })}</span>}
@@ -136,7 +132,6 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
           ) : null}
         </div>
       </div>
-      {children}
       {bodyHidden ? null : (
         <>
           {error && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}
@@ -145,7 +140,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
               {loading ? t("loading") : error ? t("unavailable") : current?.legacy_html ? t("legacyHtml") : t("empty")}
             </div>
           ) : (
-        <div key={references.join("/")} className={cn("p-5 text-[13px] leading-relaxed")}>
+        <div key={references.join("/")} data-testid="document-content" className="px-5 py-3 text-[13px] leading-relaxed [&>.chat-md>:first-child]:mt-0">
           <ChatMarkdown content={content} resolveUrl={(href) => {
             const resource = resources.get(href);
             return resource?.url ?? (/^(https?:|mailto:|#)/i.test(href) ? href : "about:blank");

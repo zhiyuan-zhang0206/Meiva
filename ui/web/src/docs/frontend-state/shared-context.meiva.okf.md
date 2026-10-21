@@ -24,9 +24,11 @@ Neither the question area nor the document body has a nested scrollbar; long
 choices, comments and document content remain in one continuous reading flow.
 Question controls use the timeline's 13px body size and compact row spacing.
 Touch inputs retain their 16px baseline; a narrow desktop column still uses 13px.
-One toolbar heads the complete context. The question sits directly below it,
-followed by the document; there is no separate notice bar, queue counter or
-collapse control. Plain numbered choice rows avoid a card around every option.
+The question and document are sibling sections. The question comes first;
+the Shared context title and document toolbar belong only to the document below
+it, on both desktop and narrow screens. There is no separate notice bar, queue
+counter or collapse control. Document padding supplies the initial spacing;
+the first Markdown block adds no top margin. Plain numbered choice rows avoid a card around every option.
 A persistent comment input and the shared send button match the chat composer;
 the selection and comment form one explicit submission. Dismiss is a small outlined
 header button. This keeps the user's task in one reading flow rather than
@@ -45,8 +47,9 @@ hides, so they leave with it. The question stays mounted but hidden in Inspector
 and leaving the full body height for Inspector. Returning restores the shared
 document reading position. Below the
 desktop breakpoint the shared context opens as a full-screen reading view from
-the header's To user action — available whenever an agent is selected — with a
-return-to-messages control.
+the header's To user action — available whenever an agent is selected. Its top
+bar contains only Back to messages navigation, so the document's title never
+appears to encompass the question.
 
 `["to-user", agentId]` owns the root document snapshot. Linked Markdown uses
 that query-key prefix followed by its reference chain. The home-machine ops

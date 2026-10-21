@@ -12,16 +12,15 @@ vi.mock("@/lib/inspector/inspector-panel-store", () => ({
   useInspectorOpen: () => ({ open: snapshot.inspectorOpen, toggle: vi.fn() }),
 }));
 vi.mock("./to-user-document", () => ({
-  ToUserDocumentView: function Document({ bodyHidden, onInspect, onNavigate, children }: { children: React.ReactNode; bodyHidden?: boolean; onInspect: () => void; onNavigate: () => void }) {
+  ToUserDocumentView: function Document({ bodyHidden, onInspect, onNavigate }: { bodyHidden?: boolean; onInspect: () => void; onNavigate: () => void }) {
     useEffect(onNavigate, [onNavigate]);
     return (
-    <div>
-      <div data-testid="document-bar" />
+    <section aria-label="sharedContext">
+      <div data-testid="document-bar">sharedContext</div>
       <button onClick={onInspect}>Inspect</button>
       <button onClick={onNavigate}>Navigate</button>
-      {children}
       {bodyHidden ? null : <div data-testid="document-view" />}
-    </div>
+    </section>
     );
   },
 }));
@@ -29,7 +28,7 @@ vi.mock("@/components/inspector/inspector-panel", () => ({
   InspectorPanel: () => <div data-testid="inspector-view" />,
 }));
 vi.mock("@/components/notifications/open-notice-detail", () => ({
-  OpenNoticeDetail: () => <div data-testid="notice-detail" />,
+  OpenNoticeDetail: () => <div data-testid="notice-detail"><input aria-label="Answer draft" /></div>,
 }));
 vi.mock("@/lib/notifications/use-notices", () => ({ dropOpenNotices: vi.fn() }));
 
@@ -108,7 +107,7 @@ it("swaps the body under a bar that stays, instead of laying a sheet over it", a
   expect(screen.queryByTestId("notice-bar")).toBeNull();
 });
 
-it("keeps the notice area inside the document body", () => {
+it("keeps the notice and document inside the shared reading area", () => {
   renderPanel({ notices: [notice()] });
   const body = screen.getByTestId("shared-document");
   expect(body.contains(screen.getByTestId("notice-detail"))).toBe(true);
@@ -120,6 +119,8 @@ it("hides the mounted question in Inspector mode and restores its reading positi
   const { rerender } = render(<SharedContextPanel {...props} />);
   const body = screen.getByTestId("shared-document");
   const detail = screen.getByTestId("notice-detail");
+  const draft = screen.getByRole<HTMLInputElement>("textbox", { name: "Answer draft" });
+  fireEvent.change(draft, { target: { value: "Keep this answer" } });
   body.scrollTop = 420;
   fireEvent.click(screen.getByRole("button", { name: "Inspect" }));
   snapshot.inspectorOpen = true;
@@ -132,6 +133,8 @@ it("hides the mounted question in Inspector mode and restores its reading positi
   rerender(<SharedContextPanel {...props} />);
   expect(screen.getByRole("region", { name: "notification" })).toBeTruthy();
   expect(body.scrollTop).toBe(420);
+  expect(screen.getByRole("textbox", { name: "Answer draft" })).toBe(draft);
+  expect(draft.value).toBe("Keep this answer");
 });
 
 it("starts a new agent or referenced document at the top of the shared reading area", () => {
@@ -147,12 +150,14 @@ it("starts a new agent or referenced document at the top of the shared reading a
   expect(body.scrollTop).toBe(0);
 });
 
-it("places the question between the sole toolbar and the document, even without document data", () => {
-  renderPanel({ notices: [notice()] });
+it.each([false, true])("keeps the question before and outside the document section, even without content (mobile=%s)", (mobile) => {
+  renderPanel({ notices: [notice()], mobile });
   const bar = screen.getByTestId("document-bar");
   const question = screen.getByTestId("notice-detail");
   const document = screen.getByTestId("document-view");
-  expect(bar.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(question.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByRole("region", { name: "sharedContext" }).contains(question)).toBe(false);
+  expect(screen.getAllByText("sharedContext")).toHaveLength(1);
   expect(question.compareDocumentPosition(document) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.queryByTestId("notice-bar")).toBeNull();
 });
