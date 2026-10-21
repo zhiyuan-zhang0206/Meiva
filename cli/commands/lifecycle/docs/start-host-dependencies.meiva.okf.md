@@ -22,7 +22,7 @@ tool
   runs its `scripts/provision/*` script once for the group, and the probe runs
   again afterwards. A tool still missing refuses the start.
 - **A host-owned tool** (`systemctl`, `sudo`, `launchctl`, the Apple toolchain
-  (`swiftc`, `codesign`), `/bin/sh`): this repository cannot install it, so the refusal names it
+  (`swiftc`, `codesign`, `security`, `openssl`), `/bin/sh`): this repository cannot install it, so the refusal names it
   and prints the decision or command that fixes the host.
 - **An optional tool** (`brew`, `lsof`, `ps`): start warns or skips
   the step that uses it; nothing blocks.
@@ -46,6 +46,8 @@ tool
 | `curl` | frontend service selected: the frontend readiness probe | `scripts/provision/host_utils.sh` (apt; macOS ships both) | install → re-probe; still missing → refuse |
 | `swiftc` | macOS with the permissions helper: compiles the helper app | the host; this repository cannot install it | refuse before converge |
 | `codesign` | macOS with the permissions helper: signs the helper app | the host; this repository cannot install it | refuse before converge |
+| `security` | macOS with the permissions helper: unlocks the keychain holding its signing certificate | the host; this repository cannot install it | refuse before converge |
+| `openssl` | macOS with the permissions helper: creates that certificate on the host's first build | the host; this repository cannot install it | refuse before converge |
 | `sh` | always: every supervised service and OS job line launches through /bin/sh | the host; this repository cannot install it | refuse before converge |
 | `git` | always: enumerates tracked migrations and digests the checkout on every start | `scripts/provision/install-cli-tools.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
 | `gh` | split agent-runner that consolidates the memory pool through GitHub PRs (not a gateway, MEIVA_MEMORY_KEEP_LOCAL unset, MEIVA_REQUIRE_GITHUB_PR on) | `scripts/provision/install-cli-tools.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |

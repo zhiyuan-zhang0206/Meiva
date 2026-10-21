@@ -11,16 +11,16 @@ from scripts.verify import tart_golden
 from scripts.verify.boundary import RunFailedError
 from scripts.verify.tart_vm import Tart
 
-CDHASH = "c2cd6485ef1fa91d10ff82fec89864ac666fe394"
+LEAF = "c6000dcb95407f03ca68d4f3dcb1ae8873ea7ba1"
 GRANTED: dict[str, Any] = {
     "ping": {"preflight_screen": True, "ax_trusted": True},
     "signature": [
-        f'designated => cdhash H"{CDHASH}"',
-        f"CDHash={CDHASH}",
+        f'designated => identifier "com.meiva.permissions-helper" and certificate leaf = H"{LEAF}"',
+        "CDHash=c2cd6485ef1fa91d10ff82fec89864ac666fe394",
     ],
     "tcc": {
-        "kTCCServiceScreenCapture": [2, f"FADE0C00{CDHASH.upper()}"],
-        "kTCCServiceAccessibility": [2, f"FADE0C00{CDHASH.upper()}"],
+        "kTCCServiceScreenCapture": [2, f"FADE0C00{LEAF.upper()}"],
+        "kTCCServiceAccessibility": [2, f"FADE0C00{LEAF.upper()}"],
     },
     "capture": {"distinct": 270171, "top_share": 0.36},
 }
@@ -114,11 +114,12 @@ def _edit(record: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
     [
         (("ping", "preflight_screen"), False, "preflight_screen"),
         (("ping", "ax_trusted"), False, "ax_trusted"),
-        (("tcc", "kTCCServiceScreenCapture"), [0, f"FADE{CDHASH.upper()}"], "ScreenCapture"),
+        (("tcc", "kTCCServiceScreenCapture"), [0, f"FADE{LEAF.upper()}"], "ScreenCapture"),
         (("tcc", "kTCCServiceAccessibility"), _DROP, "Accessibility"),
         (("tcc", "kTCCServiceAccessibility"), [2, "FADE0C00"], "requirement"),
-        (("signature",), [], "no CDHash"),
-        (("signature",), ["CDHash=abc"], "designated requirement"),
+        (("signature",), [], "names no certificate"),
+        (("signature",), ["CDHash=abc"], "names no certificate"),
+        (("signature",), [f'designated => cdhash H"{LEAF}"', "CDHash=abc"], "ad-hoc"),
         (("capture",), {"distinct": 3, "top_share": 0.99}, "uniform"),
         (("capture",), {"error": "RuntimeError('no display')"}, "no capture"),
     ],

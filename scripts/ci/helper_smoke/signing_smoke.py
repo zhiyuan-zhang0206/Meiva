@@ -31,11 +31,16 @@ def _codesign_readback(*args: str) -> tuple[int, str]:
 # meiva:note
 # Read the designated requirement and the entitlement back through the real `codesign`.
 #
-# An ad-hoc signature names its code hash in the designated requirement. The entitlement must land in the signature, not only on the command line.
+# A certificate-signed helper names its certificate in the designated requirement,
+# so the requirement survives a rebuild; a code hash there would mean the build
+# fell back to an ad-hoc signature. The entitlement must land in the signature,
+# not only on the command line.
 def verify_signature(app: Path) -> None:
     returncode, dr_text = _codesign_readback("-d", "-r-", str(app))
     print(f"DR readback: {dr_text[:500]}")
-    problem = readback_failure("designated requirement", returncode, dr_text, "cdhash")
+    problem = readback_failure("designated requirement", returncode, dr_text, "certificate leaf")
+    if problem is None and "cdhash" in dr_text:
+        problem = f"the designated requirement names a code hash: {dr_text[:500]}"
     if problem is None:
         returncode, ent_text = _codesign_readback("-d", "--entitlements", ":-", str(app))
         problem = readback_failure("entitlements", returncode, ent_text, APPLE_EVENTS_ENTITLEMENT)
@@ -62,7 +67,7 @@ def run() -> None:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
-        description="Build, ad-hoc sign, launch and ping the real permissions helper."
+        description="Build, sign with the fixed identity, launch and ping the real permissions helper."
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("run", help="build, sign, read back, launch and ping")

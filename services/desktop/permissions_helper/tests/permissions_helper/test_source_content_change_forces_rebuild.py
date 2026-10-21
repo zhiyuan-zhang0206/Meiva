@@ -118,7 +118,8 @@ def test_current_build_is_neither_rebuilt_nor_re_signed(
 
     assert lifecycle.build_and_sign() == (app, False)
     assert not any(
-        c[0] == "swiftc" or c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded)
+        c[0] == "swiftc" or (Path(c[0]).name == "codesign" and "--force" in c)
+        for c in recorded_argvs(recorded)
     )
 
 
@@ -147,28 +148,32 @@ def test_content_hash_needs_no_signing_tool_or_identity(
     assert recorded == []
 
 
-def test_build_signs_ad_hoc_with_the_declared_entitlements_and_identifier(
+def test_build_signs_with_the_fixed_identity_and_the_declared_entitlements(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from services.desktop.permissions_helper import lifecycle
+    from services.desktop.permissions_helper import lifecycle, signing_identity
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
     recorded = fake_tools(monkeypatch)
 
     assert lifecycle.build_and_sign() == (app, True)
     assert sign_command(recorded) == [
-        "codesign",
+        "/usr/bin/codesign",
         "--force",
         "--sign",
-        "-",
+        signing_identity.IDENTITY_NAME,
+        "--keychain",
+        str(signing_identity.keychain_path()),
         "--options",
         "runtime",
+        "--timestamp=none",
         "--entitlements",
         str(lifecycle.ENTITLEMENTS),
         "--identifier",
         lifecycle.HELPER_BUNDLE_ID,
         str(app),
     ]
+    assert not any("--deep" in argv for argv in recorded_argvs(recorded))
     argvs = recorded_argvs(recorded)
     assert argvs.index(sign_command(recorded)) > argvs.index(
         next(c for c in argvs if c[0] == "swiftc")
@@ -209,7 +214,6 @@ def test_rebuild_with_a_new_code_identity_warns_that_grants_are_needed_again(
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    app.parent.mkdir(parents=True)
     write_current_build_state(
         app, "hash-of-the-previous-build", dr='identifier "old" and cdhash H"00"'
     )
@@ -254,7 +258,7 @@ def test_every_call_carries_its_declared_bound(
     lifecycle.build_and_sign()
     assert recorded
     for call in recorded:
-        assert call.timeout == lifecycle.TIMEOUTS_S[call.argv[0]], call.argv
+        assert call.timeout == lifecycle.TIMEOUTS_S[Path(call.argv[0]).name], call.argv
 
 
 def test_swiftc_hang_fails_the_build_instead_of_blocking(
@@ -268,7 +272,7 @@ def test_swiftc_hang_fails_the_build_instead_of_blocking(
     with pytest.raises(lifecycle.PermissionsHelperTimeoutError) as err:
         lifecycle.build_and_sign()
     assert f"{lifecycle.TIMEOUTS_S['swiftc']:.0f}s" in str(err.value)
-    assert not any(c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded))
+    assert not any(Path(c[0]).name == "codesign" and "--force" in c for c in recorded_argvs(recorded))
 
 
 def test_codesign_hang_fails_the_build_instead_of_blocking(
@@ -277,7 +281,7 @@ def test_codesign_hang_fails_the_build_instead_of_blocking(
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    fake_tools(monkeypatch, hang=("codesign", "--force"))
+    fake_tools(monkeypatch, hang=("/usr/bin/codesign",))
 
     with pytest.raises(lifecycle.PermissionsHelperTimeoutError) as err:
         lifecycle.build_and_sign()
