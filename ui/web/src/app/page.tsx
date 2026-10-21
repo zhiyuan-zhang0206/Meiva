@@ -242,8 +242,6 @@ function HomeContent({
   const unresolvedAlerts = useAlerts().data?.meta.unresolved_count ?? 0;
   const { isNarrow, isLarge } = useBreakpoint();
   const { collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed } = useSidebarCollapsed();
-  const { open: inspectorOpen } = useInspectorOpen();
-  const inspectorText = useTranslations("inspector");
   const contentColumnMaxWidth = isNarrow
     ? undefined
     : timelineMaxWidthCss(userSettings["display.timeline_width_ratio"]);
@@ -338,16 +336,14 @@ function HomeContent({
   }, [activeId, showError]);
 
   // meiva:note
-  // Inspector is a mode over the whole shell, so the title bar says so: while it
-  // is on the bar names the view, not the agent behind it (user 2026-10-20). It
-  // returns to the agent label the moment the mode is off.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
-  const activeLabel =
-    inspectorOpen && isLarge
-      ? inspectorText("title")
-      : activeAgent
-        ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""} · ${harnessLabel(activeAgent.harness)}`
-        : "…";
+  // The bar names the agent in every mode, Inspector included: the mode changes what the
+  // right column shows, not which conversation the reader is in, and a title reading
+  // "Inspector" made the agent it still belonged to disappear (user 2026-10-21). The mode
+  // stays visible in its own pressed toggle and in the column itself.
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  const activeLabel = activeAgent
+    ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""} · ${harnessLabel(activeAgent.harness)}`
+    : "…";
   const agentBusy = turnActive || activeAgent?.status === "running";
   const composerMode: "disabled" | "idle" | "busy" =
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";

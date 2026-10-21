@@ -24,7 +24,9 @@ for the same reason. Both variants are `relative`: the rule is the bar's own
 Every home column title bar is BAR_HEIGHT_PX tall and paints BAR_DIVIDER_CLASS's inset rule, so the Agent Tree, Timeline and right-panel dividers sit on one line; the right panel's document bar takes the wrapping variant (44px minimum, growing only when its content cannot fit one line) and its notice header takes the fixed variant — neither draws a border on its section.
 
 The conversation title includes the agent's stored Harness display name, using
-the same labels as the spawn picker. Inspector mode keeps its own view title.
+the same labels as the spawn picker, in every mode: Inspector changes what the right
+column shows, so naming the bar after the mode would hide the agent the reader is still
+in (user 2026-10-21). The mode is visible in its pressed toggle and in the column itself.
 
 ## Edge-pinned controls
 

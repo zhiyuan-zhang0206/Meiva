@@ -469,6 +469,22 @@ describe("HomePage top-level render", () => {
     expect(label).not.toContain("Idling");
   });
 
+  it("keeps the agent label while Inspector mode is on", () => {
+    // meiva:note
+    // Inspector changes what the right column shows, not which conversation the
+    // reader is in: a bar titled "Inspector" made the agent behind it disappear
+    // (user 2026-10-21).
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    hooksState.activeId = 5;
+    hooksState.isLarge = true;
+    hooksState.settings = { "display.timeline_width_ratio": 0.4, "display.inspector_open": true };
+    hooksState.agents = [makeAgent({ agent_id: 5, label: "research", status: "idling" })];
+    wrap(<HomePage />);
+    const label = screen.getByTestId("header-bar").getAttribute("data-label");
+    expect(label).toContain("Agent #5");
+    expect(label).not.toContain("Inspector");
+  });
+
   it("toast is NOT rendered by the page (the renderer moved to the root ToastHost in Providers, Task #1051)", () => {
     hooksState.toast = "Save failed: 500";
     wrap(<HomePage />);
