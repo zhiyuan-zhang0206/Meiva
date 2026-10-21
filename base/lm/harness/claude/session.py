@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from base.host.env.harness_binaries import resolve_harness_binary
+from base.host.env.registry import process_environment
 from base.lm.harness.claude.auth import build_env
 from base.lm.harness.claude.config import BridgeConfig
 from base.lm.harness.claude.mapping import map_message, parse_result
@@ -402,7 +403,7 @@ class ClaudeSession:
             setting_sources=[],
             strict_mcp_config=True,
             include_partial_messages=True,
-            env=build_env(self._environ, self.config.auth),
+            env=build_env(self._environ, self.config.auth, host=process_environment()),
             resume=resume,
         )
 
