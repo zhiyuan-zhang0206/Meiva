@@ -1,6 +1,6 @@
 "use client";
 
-import { harnessLabel, type Harness } from "@/lib/harness/harness";
+import type { Harness } from "@/lib/harness/harness";
 import { newOperationKey } from "@/lib/transport/operation-key";
 
 import { useQuery } from "@tanstack/react-query";
@@ -342,7 +342,7 @@ function HomeContent({
   // stays visible in its own pressed toggle and in the column itself.
   // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
   const activeLabel = activeAgent
-    ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""} · ${harnessLabel(activeAgent.harness)}`
+    ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""}`
     : "…";
   const agentBusy = turnActive || activeAgent?.status === "running";
   const composerMode: "disabled" | "idle" | "busy" =

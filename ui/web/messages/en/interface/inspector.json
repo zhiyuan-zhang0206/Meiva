@@ -40,6 +40,8 @@
   "metricNextHeartbeat": "Next heartbeat",
   "metricLastPause": "Last pause",
   "metricMachine": "Machine",
+  "metricHarness": "Harness",
+  "metricModel": "Model",
   "metricStatus": "Status",
   "neverPaused": "never paused",
   "pending": "pending",

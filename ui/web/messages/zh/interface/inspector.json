@@ -40,6 +40,8 @@
   "metricNextHeartbeat": "下次心跳",
   "metricLastPause": "上次暂停",
   "metricMachine": "机器",
+  "metricHarness": "Harness",
+  "metricModel": "模型",
   "metricStatus": "状态",
   "neverPaused": "从未暂停",
   "pending": "待定",
