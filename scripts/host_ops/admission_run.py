@@ -420,7 +420,9 @@ def _announce_gate(
 ) -> int:
     # meiva:note
     # The whole visible half of the gate: decide, print the one line when it changed, and
-    # leave the event. A job that fits prints nothing, so silence stays meaningful. A
+    # leave the event. A job that fits prints nothing, so silence stays meaningful — but an
+    # overcommitted one says so even at its requested count, because "would start 1 of 1"
+    # reads the same whether the budget held one worker or none (task #5481). A
     # reader that cannot answer is recorded as unknown and never read as a comfortable
     # zero: the job runs at its requested concurrency and the line says why.
     budget = budget_reader()
@@ -450,11 +452,14 @@ def _announce_gate(
             free_gib=round(budget.free_gib, 2),
         )
         return requested
-    if outcome.jobs == requested:
+    if outcome.jobs == requested and not outcome.overcommitted:
         return requested
     why = "overcommitted, still starting one" if outcome.overcommitted else "lowered"
+    choice = (
+        f"jobs {requested}->{outcome.jobs}" if outcome.jobs != requested else f"jobs {requested}"
+    )
     print(
-        f"admission: jobs {requested}->{outcome.jobs} ({why}: free {budget.free_gib:.1f} GiB "
+        f"admission: {choice} ({why}: free {budget.free_gib:.1f} GiB "
         f"({budget.source}) - reserved {reserved:.1f} - reserve {reserve_gib:.1f} = "
         f"{outcome.budget_gib:.1f} GiB / "
         f"{outcome.cost_gib:.2f} GiB per worker; pressure {pressure}; {swap_line()})",
