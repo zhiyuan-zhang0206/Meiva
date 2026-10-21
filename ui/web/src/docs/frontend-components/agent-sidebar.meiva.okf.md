@@ -13,6 +13,16 @@ awaiting-reply badge (opt-in), the display controls (sliders, not a gear — the
 the body below it is only the tree or flat list, so a 230px column spends no
 height on controls.
 
+## Footer icon row
+
+Below the list, one row of shortcuts in a fixed order: the unresolved-alert bell,
+Fleet, Insights, Control, then whatever a plugin contributes. The bell leads the
+row because a standing cluster state outranks navigation (user 2026-10-21), it
+links to the alert section, and it renders only while the count is non-zero. The
+row leaves with the rail when it collapses; the count then rides `HeaderBar`'s
+restore button instead of vanishing
+([[ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md|Home Shell Chrome]]).
+
 ## Display settings popover
 
 The sliders button opens view (tree / flat, `display.*` user setting), the sort key and

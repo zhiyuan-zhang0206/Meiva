@@ -340,6 +340,7 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
       </Popover.Root>
 
       <div className={cn("items-center gap-0.5", FLEX)}>
+        <AlertsBadge />
         <SidebarNavButton
           href={fleetHref(activeAgentId)}
           onClick={() => router.push(fleetHref(activeAgentId))}
@@ -350,7 +351,6 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
         <SidebarNavButton href="/insights" onClick={() => router.push("/insights")} label={navT("insights")}>
           <Activity className="size-4" />
         </SidebarNavButton>
-        <AlertsBadge />
         <SidebarNavButton href="/control" onClick={() => router.push("/control")} label={navT("control")}>
           <Settings className="size-4" />
         </SidebarNavButton>

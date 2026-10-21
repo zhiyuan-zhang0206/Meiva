@@ -285,8 +285,10 @@ function MobileSidebar(props: MobileProps) {
 }
 
 
-// ── Collapsed sidebar: a completely blank rail ──
-//
-// Collapsed means "I looked away — tell me nothing": no mini agent list, no
-// status dots, no spinners, no badges. The only affordance is expanding —
-// static presence (and any opted-in signals) live behind that deliberate pull.
+// meiva:note
+// Collapsed means "I looked away — tell me nothing": no mini agent list, no status
+// dots, no spinners. The one exception is the unresolved-alert count, which rides the
+// restore button in HeaderBar instead of a badge in this rail: an unreviewed P0 must
+// not be invisible for as long as the reader keeps the rail closed (user 2026-10-21).
+// Every other opted-in signal still lives behind the deliberate pull of expanding.
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
