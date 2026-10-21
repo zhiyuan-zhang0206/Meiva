@@ -1,10 +1,12 @@
 "use client";
 
+// meiva:note
 // Per-item body renderer (ItemView) — the content that sits below a card header.
 // The card frame (colored left border, background, the icon + title header, the
-// collapse chevron, the timestamp) is owned by MessageCard + CardHeader in
-// `./card`; ItemView renders only the body for each kind, unpadded, so the card
-// body wrapper controls spacing uniformly.
+// collapse chevron) is owned by MessageCard + CardHeader in `./card`, and the
+// timestamp/Copy band under the block by `./row`; ItemView renders only the body
+// for each kind, unpadded, so the card body wrapper controls spacing uniformly.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 //
 // -- Color mapping -- lives entirely in `./card`:messageCardConfig. ItemView
 // carries no per-kind border / background; it just emits the inner content

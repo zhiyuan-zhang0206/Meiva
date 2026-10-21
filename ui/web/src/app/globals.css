@@ -340,6 +340,16 @@
 .timeline-item {
   content-visibility: auto;
   contain-intrinsic-size: auto 80px;
+  /* meiva:note
+     A block owns the gap BELOW it: the hover chrome (timestamp, Copy) sits in
+     that gap, and content-visibility paint containment would clip it if it were
+     drawn past the row. The row grows by the same 12px the row list separates
+     rows by (space-y-3) and hands the height back as a negative margin, so
+     block-to-block spacing is unchanged and the chrome lands in whitespace that
+     already existed (user 2026-10-21). */
+  position: relative;
+  padding-bottom: 0.75rem;
+  margin-bottom: -0.75rem;
 }
 
 /* The mounted virtual window is small enough to measure real row heights. */

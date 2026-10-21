@@ -256,43 +256,22 @@ describe("MessageCard", () => {
     expect(accent?.className).toContain("h-7");
   });
 
-  it("no footer → mounts no footer DOM at all and does not opt into the named hover group", () => {
-    const { container, queryByText } = render(
-      <MessageCard config={cfg}>
-        <div>hello</div>
-      </MessageCard>,
-    );
-    expect(queryByText("act")).toBeNull();
-    expect(container.firstElementChild?.className).not.toContain("group/msgcard");
-  });
-
   // meiva:note
-  // The footer is the card's OUTSIDE bottom-right band: a sibling of the card box, so the box keeps its own padding and background and the footer never overlaps the body. It takes its own line (content-visibility paint containment would clip a floating band) and is invisible and click-through until the pointer hovers the card or focus enters it.
+  // The card box is only the box: the timestamp/Copy band belongs to the row, in
+  // the gap below the block (user 2026-10-21), so a card can never mount chrome of
+  // its own and a kind that stamps nothing cannot carry an empty band. The band's
+  // placement and its hover reveal are asserted at the TimelineView level.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  it("footer → floats in the card box's bottom-right corner, hidden until hover or focus-within", () => {
-    const { container, getByText } = render(
-      <MessageCard config={cfg} footer={<span>act</span>}>
-        <div>hello</div>
+  it("renders the box alone — the hover band belongs to the row, not the card", () => {
+    const { container } = render(
+      <MessageCard config={cfg}>
+        <div data-testid="child">hello</div>
       </MessageCard>,
     );
-    expect(getByText("act")).toBeTruthy();
     const frame = container.firstElementChild;
-    expect(frame?.className).toContain("relative");
-    expect(frame?.className).toContain("group/msgcard");
-    const band = getByText("act").parentElement;
-    const box = band?.previousElementSibling;
-    expect(box?.className).toContain("bg-red-50");
-    expect(box?.contains(band)).toBe(false);
-    expect(band?.className).toContain("absolute");
-    expect(band?.className).toContain("bottom-0");
-    expect(band?.className).toContain("justify-end");
-    expect(band?.className).toContain("opacity-0");
-    expect(band?.className).toContain("pointer-events-none");
-    expect(band?.className).toContain("group-hover/msgcard:opacity-100");
-    expect(band?.className).toContain("group-hover/msgcard:pointer-events-auto");
-    expect(band?.className).toContain("group-focus-within/msgcard:opacity-100");
-    expect(band?.className).toContain("group-focus-within/msgcard:pointer-events-auto");
-    expect(band?.className).toContain("pointer-coarse:opacity-100");
+    expect(frame?.className).toContain("bg-red-50");
+    expect(frame?.className).not.toContain("group/msgcard");
+    expect(frame?.children).toHaveLength(2);
   });
 });
 
