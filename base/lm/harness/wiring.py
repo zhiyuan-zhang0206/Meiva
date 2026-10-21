@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
+from base.host.env.harness_binaries import with_harness_path
 from base.host.env.registry import child_env
 from base.lm.harness.antigravity import AgySession, AntigravityConfig
 from base.lm.harness.antigravity import build_handoff as antigravity_handoff
@@ -34,6 +35,15 @@ HANDOFF_INSTRUCTION = (
 # cannot run, and it fails here rather than starting a session with another
 # provider's flags.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:note
+# The environment a harness session runs with. The daemon child environment this starts
+# from is a positive allowlist that carries no PATH, and a session delivery point is where
+# it is rebuilt — the CLI and everything it runs resolve through this (#5491).
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def session_environ(environ: Mapping[str, str] | None) -> dict[str, str]:
+    return with_harness_path(child_env("runner") if environ is None else environ)
+
+
 def open_session(
     harness: Harness,
     *,
@@ -46,7 +56,7 @@ def open_session(
     if harness is Harness.CLAUDE_CODE:
         return ClaudeSession(
             BridgeConfig(cwd=cwd),
-            environ=child_env("runner") if environ is None else environ,
+            environ=session_environ(environ),
             agent_id=agent_id,
             registry=registry,
         )
@@ -113,13 +123,12 @@ def bridge_for(
     handoff = _handoff_for(harness, agent_id=agent_id, machine=machine, workspace=workspace)
 
     def factory(handle: str) -> HarnessSession:
-        inherited = child_env("runner") if environ is None else environ
         return open_session(
             harness,
             agent_id=agent_id,
             cwd=workspace,
             registry=scoped,
-            environ={**inherited, HANDLE_ENV: handle},
+            environ={**session_environ(environ), HANDLE_ENV: handle},
             skip_permissions=skip_permissions,
         )
 
