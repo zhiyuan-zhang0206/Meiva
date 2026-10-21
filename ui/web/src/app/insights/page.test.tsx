@@ -57,7 +57,14 @@ describe("InsightsPage shell", () => {
       expect(document.getElementById(section.id)).toBeTruthy();
     }
     expect(screen.getByText("STATUS_BODY")).toBeTruthy();
-    expect(screen.getByText("OPS_BODY")).toBeTruthy();
+    // meiva:note
+    // The section bodies mount through ControlSection's deferred queue, which
+    // releases one body per idle callback — waiting for the first body says nothing
+    // about the second one. On a slow CI worker Ops was still queued when this line
+    // ran, so the assertion has to wait for it like the composition test below does
+    // (CI red 2026-10-21, twice, same point; green locally at every speed tried).
+    // meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+    await waitFor(() => expect(screen.getByText("OPS_BODY")).toBeTruthy());
   });
 
   it("composes Status before Ops", async () => {
