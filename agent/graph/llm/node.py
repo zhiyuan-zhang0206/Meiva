@@ -15,6 +15,7 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.graph._callbacks import RedisStreamHandler
+from agent.graph.claim.turn_stamp import persist_last_active
 from agent.graph.hooks.compact import auto_compact_for_llm
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
@@ -31,7 +32,6 @@ from agent.state_channels import CircuitState
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.kwargs import read_meiva_kwargs
-from base.db.transaction import async_write_transaction
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.catalog import ModelCatalog
@@ -330,35 +330,6 @@ def _silent_idle_command(
         update={"messages": [final_msg], "halted": False},
         goto=AFTER_EXEC,
     )
-
-
-async def persist_last_active(ctx: MeivaContext, agent_id: int, text: str) -> None:
-    ctx.turn_progress.mark(agent_id)
-    if ctx.ops_pool is None:
-        return
-    try:
-        async with async_write_transaction(ctx.ops_pool) as conn, conn.cursor() as cur:
-            if text:
-                await cur.execute(
-                    "UPDATE agents_meta SET last_active_at = now(), last_message_text = %s, "
-                    "last_turn_fatal_at = NULL, permanent_reject_streak = 0, last_permanent_reject_reason = NULL "
-                    "WHERE id = %s",
-                    (text, agent_id),
-                )
-            else:
-                await cur.execute(
-                    "UPDATE agents_meta SET last_active_at = now(), last_turn_fatal_at = NULL, "
-                    "permanent_reject_streak = 0, last_permanent_reject_reason = NULL "
-                    "WHERE id = %s",
-                    (agent_id,),
-                )
-    except Exception:
-        logger.warning(
-            "[{label}] {body}",
-            label="last-msg",
-            event="last_msg",
-            body=f"failed to persist last_active_at / last_message_text for agent {agent_id}",
-        )
 
 
 async def _llm_node_impl(
