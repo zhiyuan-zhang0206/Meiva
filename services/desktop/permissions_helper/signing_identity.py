@@ -129,7 +129,7 @@ def ensure(run: Runner, *, create: bool) -> None:
 def provision(run: Runner) -> None:
     directory().mkdir(parents=True, exist_ok=True)
     password = secrets.token_urlsafe(32)
-    _write_secret(password_path(), password)
+    write_secret(password_path(), password)
     keychain = keychain_path()
     run([SECURITY, "create-keychain", "-p", password, str(keychain)])
     run([SECURITY, "set-keychain-settings", str(keychain)])
@@ -310,7 +310,7 @@ def _text(result: object) -> str:
     return getattr(result, "stdout", b"").decode(errors="replace")
 
 
-def _write_secret(path: Path, secret: str) -> None:
+def write_secret(path: Path, secret: str) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w") as handle:
         handle.write(secret + "\n")
