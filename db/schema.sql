@@ -1347,7 +1347,7 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
     name TEXT NOT NULL DEFAULT '',
     executor_name TEXT NOT NULL DEFAULT '',
     process_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    automatic BOOLEAN NOT NULL DEFAULT FALSE,
+    automatic BOOLEAN NOT NULL DEFAULT TRUE,
     summary TEXT,
     handoff_document JSONB,
     handoff_path TEXT,
@@ -1433,10 +1433,29 @@ COMMENT ON COLUMN agent_impersonations.capabilities IS
 COMMENT ON COLUMN agent_impersonations.capability_declared_by IS
     'How the capability set arose: explicit, caller-default, launcher-default or legacy.';
 
+CREATE OR REPLACE FUNCTION require_meiva_impersonation() RETURNS trigger AS $$
+DECLARE
+    target_harness TEXT;
+BEGIN
+    SELECT harness INTO target_harness FROM agents_meta WHERE id=NEW.agent_id FOR UPDATE;
+    IF target_harness IS DISTINCT FROM 'meiva' THEN
+        RAISE EXCEPTION 'Impersonation requires the Meiva harness';
+    END IF;
+    IF NOT NEW.automatic THEN
+        RAISE EXCEPTION 'Manual impersonation consent is no longer supported';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS agent_impersonations_require_meiva ON agent_impersonations;
+CREATE TRIGGER agent_impersonations_require_meiva
+    BEFORE INSERT ON agent_impersonations
+    FOR EACH ROW EXECUTE FUNCTION require_meiva_impersonation();
+
 CREATE UNIQUE INDEX IF NOT EXISTS agent_impersonations_one_open
     ON agent_impersonations(agent_id)
     WHERE status IN ('requested', 'accepted', 'active') OR delta_version > applied_version
-        OR (automatic AND handoff_applied_at IS NULL);
+        OR handoff_applied_at IS NULL;
 CREATE INDEX IF NOT EXISTS agent_impersonations_expiry ON agent_impersonations(expires_at)
     WHERE status IN ('requested', 'accepted', 'active');
 CREATE INDEX IF NOT EXISTS agent_impersonations_relay_heartbeat
@@ -1629,7 +1648,7 @@ RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, 
 AS $function$
 BEGIN
     UPDATE public.agent_impersonations SET event_admission_closed_at=clock_timestamp()
-    WHERE id=p_lease_id AND automatic AND event_delivery_protocol_version = 2
+    WHERE id=p_lease_id AND event_delivery_protocol_version = 2
       AND event_admission_closed_at IS NULL;
     IF NOT FOUND THEN
         RETURN FALSE;
@@ -1690,13 +1709,13 @@ BEGIN
         GRANT INSERT (
             id,agent_id,source,machine,reason,status,ttl_seconds,expires_at,
             relay_provider,relay_thread_id,relay_codex_remote,relay_token_hash,
-            relay_batch_window_seconds,name,executor_name,process_metadata,automatic,
+            relay_batch_window_seconds,name,executor_name,process_metadata,
             ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version,
             capabilities,capability_declared_by
         ) ON agent_impersonations TO meiva_runner;
         GRANT UPDATE (
             status,ttl_seconds,expires_at,rejection_reason,summary_inbound_id,summary,
-            accepted_generation,accepted_owner,consent_version,activated_at,ended_at,
+            accepted_generation,accepted_owner,activated_at,ended_at,
             plugin_delta,delta_version,applied_version,relay_token_hash,relay_heartbeat_at,
             relay_last_failure_at,relay_minted_at,relay_minted_generation,relay_minted_owner,
             handoff_document,handoff_path,handoff_applied_at,
@@ -1724,7 +1743,7 @@ DECLARE
     api_count BIGINT;
 BEGIN
     SELECT * INTO lease FROM public.agent_impersonations WHERE id=p_lease_id FOR UPDATE;
-    IF NOT FOUND OR NOT lease.automatic OR lease.event_delivery_protocol_version IS DISTINCT FROM 2 THEN
+    IF NOT FOUND OR lease.event_delivery_protocol_version IS DISTINCT FROM 2 THEN
         RETURN FALSE;
     END IF;
     IF lease.events_completed_at IS NOT NULL THEN

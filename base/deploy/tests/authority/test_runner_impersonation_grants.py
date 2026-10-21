@@ -263,8 +263,10 @@ def test_runner_drives_the_lease_lifecycle(
             relay_thread_id=str(uuid4()),
             authority=config_authority,
             local_machine=_LOCAL_MACHINE,
+            name="Test name",
+            executor_name="Test executor_name",
         )
-        leases.accept(
+        leases.prepare(
             database,
             bus,
             lease["id"],

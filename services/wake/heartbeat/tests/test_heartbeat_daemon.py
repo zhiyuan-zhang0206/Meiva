@@ -162,7 +162,7 @@ class TestSelectIdleAgents:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        lease(db_conn, aid, status="expired", local_machine=machine_identity)
+        lease(db_conn, aid, status="expired", handoff_applied=True, local_machine=machine_identity)
         assert aid in _selected(pool)
 
     def test_unapplied_impersonation_delta_excludes_agent(
@@ -194,7 +194,7 @@ class TestSelectIdleAgents:
         )
         assert aid not in _selected(pool)
 
-    def test_unapplied_automatic_handoff_excludes_agent(
+    def test_unapplied_handoff_excludes_agent(
         self,
         redis_url: str,
         pool: ConnectionPool,
@@ -213,10 +213,10 @@ class TestSelectIdleAgents:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        lease(db_conn, aid, status="expired", automatic=True, local_machine=machine_identity)
+        lease(db_conn, aid, status="expired", local_machine=machine_identity)
         assert aid not in _selected(pool)
 
-    def test_applied_automatic_handoff_does_not_block_checkin(
+    def test_applied_handoff_does_not_block_checkin(
         self,
         redis_url: str,
         pool: ConnectionPool,
@@ -239,7 +239,6 @@ class TestSelectIdleAgents:
             db_conn,
             aid,
             status="expired",
-            automatic=True,
             handoff_applied=True,
             local_machine=machine_identity,
         )

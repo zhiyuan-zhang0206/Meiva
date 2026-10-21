@@ -81,7 +81,11 @@ def test_public_readers_reject_invalid_raw_status(
         "events_completed_at",
     )
     raw: dict[str, Any] = dict.fromkeys(fields)
-    raw.update(agent_id=7, session_id=1, machine="local", automatic=False)
+    raw.update(
+        agent_id=7,
+        session_id=1,
+        machine="local",
+    )
     raw.update(row)
     cursor = SimpleNamespace(execute=execute, fetchone=lambda: raw, fetchall=lambda: [raw])
 

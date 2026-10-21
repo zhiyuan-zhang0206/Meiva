@@ -64,9 +64,11 @@ def active(
         process_metadata=recorded_tree(),
         authority=config_authority,
         local_machine=machine_identity.name(),
+        name="Test name",
+        executor_name="Test executor_name",
     )
     assert (lease["ack_window_seconds"], lease["max_delivery_attempts"]) == (window, attempts)
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],

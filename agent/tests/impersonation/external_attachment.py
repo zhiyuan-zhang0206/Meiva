@@ -64,7 +64,6 @@ def attached_runtime(
         "delta_version": 0,
         "applied_version": 0,
         "plugin_delta": [],
-        "automatic": False,
         "event_delivery_protocol_version": None,
     }
     staged: list[dict[str, Any]] = []

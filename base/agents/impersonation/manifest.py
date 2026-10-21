@@ -356,7 +356,7 @@ def record_central_event(conn: psycopg.Connection, event: Event) -> Event:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT * FROM agent_impersonations WHERE agent_id=%s AND status='active' "
-            "AND expires_at>clock_timestamp() AND automatic AND "
+            "AND expires_at>clock_timestamp() AND "
             "event_delivery_protocol_version=%s FOR UPDATE",
             (actor, LOG_PROTOCOL_VERSION),
         )

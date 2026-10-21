@@ -25,7 +25,7 @@ from base.agents.impersonation.manifest import (
 )
 from base.agents.impersonation.status import pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
-from base.agents.impersonation.tests.impersonation_support import recorded_tree
+from base.agents.impersonation.tests.impersonation_support import legacy_session
 from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
 from base.agents.tests.capture_inputs import (
@@ -37,7 +37,6 @@ from base.agents.tests.capture_inputs import (
 )
 from base.agents.tests.capture_inputs import lease as lease
 from base.agents.tests.capture_inputs import owner as owner
-from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.authority.event_grants import grant_event_log_runner_access
 from base.cluster.authority.tests.runner_logins import grant_runner_login
 from base.cluster.machine import MachineIdentity
@@ -161,7 +160,7 @@ def test_a_service_owned_central_event_is_recorded_in_both_logs_before_it_is_emi
     assert seen_at_emit == [(1, 1)]
 
 
-def test_manual_leases_keep_no_event_log_and_protocol_less_leases_stay_legacy(
+def test_protocol_less_history_keeps_unknown_event_coverage(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     database: Database,
@@ -171,31 +170,20 @@ def test_manual_leases_keep_no_event_log_and_protocol_less_leases_stay_legacy(
     machine_identity: MachineIdentity,
 ) -> None:
     local_machine = machine_identity.name()
-    manual = leases.request(
-        database,
-        event_bus,
-        owner.agent_id,
-        caller=CallerIdentity(kind="external_agent", subject="manual-capture"),
-        relay_provider="codex",
-        relay_thread_id="manual-capture-thread",
-        process_metadata=recorded_tree(),
-        automatic=False,
-        authority=config_authority,
-        local_machine=local_machine,
-    )
-    assert manual["id"] is not None
+    legacy = legacy_session(db_conn, owner, local_machine=local_machine)
+    assert legacy["id"] is not None
     row = db_conn.execute(
         "SELECT event_delivery_protocol_version FROM agent_impersonations WHERE id=%s",
-        (manual["id"],),
+        (legacy["id"],),
     ).fetchone()
     assert row == (None,)
     document = history.build_document(
         history.resolve(
-            database, owner.agent_id, manual["session_id"], local_machine=local_machine
+            database, owner.agent_id, legacy["session_id"], local_machine=local_machine
         ),
-        history.entries(str(manual["id"]), db_conn),
+        history.entries(str(legacy["id"]), db_conn),
     )
-    assert document["statistics"]["event_delivery"]["pending_reason"] == "manual"
+    assert document["statistics"]["event_delivery"]["pending_reason"] == "legacy"
 
 
 def test_a_held_sdk_call_keeps_its_admission_and_seals_its_source_when_it_drains(

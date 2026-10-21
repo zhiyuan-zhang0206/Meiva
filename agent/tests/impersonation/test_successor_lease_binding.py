@@ -60,8 +60,10 @@ async def test_successor_admission_ends_an_active_lease_without_restoring_the_pr
         relay_thread_id=str(uuid4()),
         authority=config_authority,
         local_machine=machine_identity.name(),
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -81,7 +83,7 @@ async def test_successor_admission_ends_an_active_lease_without_restoring_the_pr
     assert successor is not None
     assert successor.generation != first.generation
     assert db_conn.execute(
-        "SELECT status,rejection_reason,summary_inbound_id IS NOT NULL "
+        "SELECT status,rejection_reason,handoff_applied_at IS NULL "
         "FROM agent_impersonations WHERE id=%s",
         (lease["id"],),
     ).fetchone() == ("expired", "aborted: native runtime restarted", True)
@@ -89,7 +91,7 @@ async def test_successor_admission_ends_an_active_lease_without_restoring_the_pr
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND source='system:impersonation' "
         "AND content LIKE %s",
         (agent_id, "%native runtime restarted%"),
-    ).fetchone() == (1,)
+    ).fetchone() == (0,)
     with pytest.raises(leases.ImpersonationError):
         leases.release(
             database,

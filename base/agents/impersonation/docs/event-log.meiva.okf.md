@@ -12,9 +12,9 @@ tags:
 Decision: `docs/decisions/agents/impersonation/2026-10-02-impersonation-event-log-in-postgres.md`.
 
 The record of what a borrowed identity did lives in `agent_impersonation_entries`,
-the lease's permanent, immutable, sequenced log. New automatic leases carry
-`event_delivery_protocol_version = 2`; manual leases and older leases carry none,
-keep no event log, and report `pending_reason` `manual` or `legacy`.
+the lease's permanent, immutable, sequenced log. New leases carry
+`event_delivery_protocol_version = 2`; historical protocol-less leases retain
+unknown event coverage and report `pending_reason` `legacy`.
 
 ## Writers
 

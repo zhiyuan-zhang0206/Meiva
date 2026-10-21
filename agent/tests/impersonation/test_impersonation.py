@@ -3,7 +3,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
-from unittest.mock import ANY, AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -16,14 +16,12 @@ from pydantic import BaseModel, Field
 import base.agents.impersonation as agents_impersonation
 from agent import impersonation, impersonation_handoff, impersonation_process
 from agent.extensions import plugin_state_codec
-from agent.graph.exec._result import lifecycle_exception_from_name
 from agent.graph.exec.protocol import read_request, write_request
 from agent.hooks.tests.fakes import placeholder_runtime
 from agent.state import BaseAgentState
 from base.agents.context import MeivaContext
 from base.agents.impersonation import relay
 from base.agents.impersonation.notes import HandoffNotes
-from base.agents.lifecycle import AgentImpersonation
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
@@ -37,7 +35,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
-from meiva.tests.fixtures.pin_agent import exec_context, pin_agent
+from meiva.tests.fixtures.pin_agent import exec_context
 
 
 def _notes() -> HandoffNotes:
@@ -85,13 +83,11 @@ def incarnation() -> Iterator[RuntimeIncarnation]:
 def _session(status: str = "active", **values: Any) -> dict[str, Any]:
     return {
         "id": "lease-1",
-        "automatic": False,
-        "handoff_applied_at": None,
+        "handoff_applied_at": "already-applied",
         "process_metadata": {},
         "source": "external_agent:codex:task1",
         "status": status,
         "reason": "Finish the assigned task",
-        "consent_version": 1,
         "plugin_delta": [],
         "delta_version": 0,
         "applied_version": 0,
@@ -196,30 +192,6 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     assert receipt.call_count == 2
 
 
-def test_accept_stops_exec_and_uses_captured_incarnation(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    machine_identity: MachineIdentity,
-) -> None:
-    from meiva.impersonation import accept
-
-    accepted = Mock()
-    monkeypatch.setattr(agents_impersonation, "accept", accepted)
-    pin_agent(incarnation.agent_id, incarnation=incarnation)
-    with pytest.raises(AgentImpersonation):
-        accept("lease-1", "Hand the task to the external session.")
-    accepted.assert_called_once_with(
-        ANY,
-        ANY,
-        "lease-1",
-        42,
-        incarnation,
-        "Hand the task to the external session.",
-        local_machine=machine_identity.name(),
-    )
-    assert isinstance(lifecycle_exception_from_name("AgentImpersonation"), AgentImpersonation)
-
-
 def test_exec_envelope_carries_parent_incarnation(
     tmp_path: Path, incarnation: RuntimeIncarnation
 ) -> None:
@@ -319,7 +291,7 @@ async def test_settle_checkpoint_activates_only_after_relay_ready(
 
 
 @pytest.mark.parametrize("provider", ["claude", "dsh"])
-def test_establish_relay_session_relay_requires_a_fresh_heartbeat(
+def test_establish_relay_session_relay_accepts_a_fresh_heartbeat(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
     provider: str,
@@ -328,26 +300,10 @@ def test_establish_relay_session_relay_requires_a_fresh_heartbeat(
     relays: RelaySupervision,
     machine_identity: MachineIdentity,
 ) -> None:
-    from datetime import UTC, datetime, timedelta
+    from datetime import UTC, datetime
 
     fail = Mock()
     monkeypatch.setattr(agents_impersonation, "fail_acceptance", fail)
-    stale = _relay_session(
-        "accepted", provider=provider, relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5)
-    )
-    assert (
-        impersonation.establish_relay(
-            database,
-            event_bus,
-            stale,
-            incarnation,
-            relays,
-            read_local_machine=machine_identity.name,
-        )
-        is False
-    )
-    fail.assert_called_once()
-    fail.reset_mock()
     fresh = _relay_session("accepted", provider=provider, relay_heartbeat_at=datetime.now(UTC))
     assert (
         impersonation.establish_relay(
@@ -670,8 +626,10 @@ def test_an_unreadable_antigravity_record_rolls_back_with_its_path(
         relay_thread_id=thread_id,
         authority=config_authority,
         local_machine=local_machine,
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         session["id"],

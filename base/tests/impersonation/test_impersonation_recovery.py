@@ -71,7 +71,7 @@ def test_expiry_between_driver_read_and_activation_returns_control(
     lease = request_controller(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -88,10 +88,10 @@ def test_expiry_between_driver_read_and_activation_returns_control(
     )
     db_conn.commit()
     assert leases.activate(database, event_bus, lease["id"], owner)["status"] == "expired"
-    assert leases.native_status(database, event_bus, owner.agent_id, owner) is None
+    assert native_status(owner, database_gate=database_gate)["handoff_applied_at"] is None
 
 
-def test_renew_replaces_ttl_and_reject_records_reason(
+def test_renew_replaces_ttl(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
@@ -102,18 +102,6 @@ def test_renew_replaces_ttl_and_reject_records_reason(
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
-    lease = request_controller(
-        owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
-    )
-    result = leases.reject(
-        database,
-        event_bus,
-        lease["id"],
-        owner.agent_id,
-        owner,
-        "Finish the critical operation first",
-    )
-    assert result["rejection_reason"] == "Finish the critical operation first"
     lease = accept_controller(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
     )
@@ -181,7 +169,7 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
         db_conn.commit()
         maintenance.reap_impersonations(reaper_pool, database, event_bus)
     assert db_conn.execute("SELECT count(*) FROM agent_impersonations").fetchone() == (1,)
-    assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
+    assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (0,)
 
 
 def _assert_force_expired_row(
@@ -199,21 +187,11 @@ def _assert_force_expired_row(
     status, ended_at, reason, inbound_id = row
     assert (status, reason) == ("expired", "force-expired: ended by an operator")
     assert ended_at is not None
-    assert (inbound_id is not None) == (lease_status == "active")
-    if inbound_id is not None:
-        note = db_conn.execute(
-            "SELECT content,kind,source FROM inbound_messages WHERE id=%s", (inbound_id,)
-        ).fetchone()
-        assert note is not None
-        content, kind, source = note
-        assert (kind, source) == ("chat", "system:impersonation")
-        assert "Control has returned" in content
-        assert "handoff" not in content.lower()
-        assert "read the" not in content.lower()
-        assert db_conn.execute(
-            "SELECT status FROM inbound_messages WHERE kind='reminder' AND agent_id=%s",
-            (owner.agent_id,),
-        ).fetchone() == ("done",)
+    assert inbound_id is None
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE kind='reminder' AND agent_id=%s",
+        (owner.agent_id,),
+    ).fetchone() == (("done",) if lease_status == "active" else None)
 
 
 def _assert_expired_lifecycle_entry(db_conn: psycopg.Connection, lease: dict[str, Any]) -> None:
@@ -249,7 +227,7 @@ def test_operator_force_expire_closes_only_observed_session(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
     )
     if lease_status in ("accepted", "active"):
-        leases.accept(
+        leases.prepare(
             database,
             event_bus,
             lease["id"],
@@ -341,13 +319,12 @@ def test_operator_force_expire_automatic_session_has_no_manual_end_note(
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
-        automatic=True,
         name="Automatic takeover",
         executor_name="Codex: test",
         authority=config_authority,
         local_machine=local_machine,
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],

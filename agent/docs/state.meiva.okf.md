@@ -14,10 +14,10 @@ Meiva agent's LangGraph state management system. Base `BaseAgentState` carries c
 `impersonation_introduced` retains the native conversation's first-takeover
 explanation receipt across compaction; context establishment restores that
 standing explanation only after a takeover has occurred.
-`impersonation_request_id` records the last consent request and version across
-compaction. `impersonation_applied` records the external lease and plugin-log
-version applied in the same checkpoint as its delta; recovery uses it to avoid
-repeating reducers after an acknowledgement failure. See [[base/agents/impersonation/docs/impersonation.meiva.okf.md]].
+
+`impersonation_applied` records the external lease and plugin-log version applied
+in the same checkpoint as its delta; recovery uses it to avoid repeating reducers
+after an acknowledgement failure. See [[base/agents/impersonation/docs/impersonation.meiva.okf.md]].
 
 ## Core Responsibilities
 

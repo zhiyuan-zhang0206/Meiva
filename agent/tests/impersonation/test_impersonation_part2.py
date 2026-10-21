@@ -49,13 +49,11 @@ def incarnation() -> Iterator[RuntimeIncarnation]:
 def _session(status: str = "active", **values: Any) -> dict[str, Any]:
     return {
         "id": "lease-1",
-        "automatic": False,
-        "handoff_applied_at": None,
+        "handoff_applied_at": "already-applied",
         "process_metadata": {},
         "source": "external_agent:codex:task1",
         "status": status,
         "reason": "Finish the assigned task",
-        "consent_version": 1,
         "plugin_delta": [],
         "delta_version": 0,
         "applied_version": 0,
@@ -120,8 +118,10 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
         relay_thread_id=str(uuid4()),
         authority=config_authority,
         local_machine=machine_identity.name(),
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -135,10 +135,9 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
     )
     assert successor is not None
     assert db_conn.execute(
-        "SELECT status,ended_at IS NOT NULL,rejection_reason,consent_version "
-        "FROM agent_impersonations WHERE id=%s",
+        "SELECT status,ended_at IS NOT NULL,rejection_reason FROM agent_impersonations WHERE id=%s",
         (lease["id"],),
-    ).fetchone() == ("expired", True, "aborted: native runtime restarted", 1)
+    ).fetchone() == ("expired", True, "aborted: native runtime restarted")
     assert db_conn.execute(
         "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (successor.generation, successor.owner)

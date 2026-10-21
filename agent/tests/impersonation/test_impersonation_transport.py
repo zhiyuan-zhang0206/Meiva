@@ -113,8 +113,10 @@ def active_codex_lease(
                 process_metadata=recorded_tree(),
                 authority=config_authority,
                 local_machine=machine_identity.name(),
+                name="Test name",
+                executor_name="Test executor_name",
             )
-            leases.accept(
+            leases.prepare(
                 database,
                 event_bus,
                 session["id"],

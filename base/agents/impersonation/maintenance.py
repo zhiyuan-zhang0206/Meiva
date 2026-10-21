@@ -83,7 +83,6 @@ def force_expire_impersonation(
     from base.agents.impersonation._store import (
         close_event_admission,
         dismiss_reminders,
-        insert_handoff,
         lock_agent,
     )
     from base.agents.impersonation.history import set_actor
@@ -107,20 +106,10 @@ def force_expire_impersonation(
         set_actor(conn, actor)
         if is_log_native(lease):
             close_event_admission(conn, str(lease["id"]))
-        inbound_id = None
-        if lease["status"] == ImpersonationStatus.ACTIVE and not lease["automatic"]:
-            inbound_id = insert_handoff(
-                conn,
-                lease,
-                f"The external session {session_id} for this agent was ended by an operator. "
-                "Control has returned to the agent. Unacknowledged messages remain pending; "
-                "no external completion summary was supplied.",
-                expired=True,
-            )
         conn.execute(
             "UPDATE agent_impersonations SET status='expired',ended_at=clock_timestamp(), "
-            "rejection_reason=%s,summary_inbound_id=%s WHERE id=%s",
-            ("force-expired: ended by an operator", inbound_id, lease["id"]),
+            "rejection_reason=%s WHERE id=%s",
+            ("force-expired: ended by an operator", lease["id"]),
         )
         dismiss_reminders(conn, lease)
     logger.info(

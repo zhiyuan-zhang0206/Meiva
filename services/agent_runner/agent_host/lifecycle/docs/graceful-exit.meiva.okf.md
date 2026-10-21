@@ -53,7 +53,9 @@ commits, through its scheduler. An exiting host has closed admission and refuses
 that wake, so the next host's pending scan
 (`scheduling/pending_wakes.py::scan_rows`) wakes every row with a pending inbound,
 which is where the continuation note waits; the agent continues from its
-checkpoint with that note as the input that starts the next model step. Nothing
+checkpoint with that note as the input that starts the next model step. The scan
+also discovers Meiva takeover rows with unapplied handoffs or plugin deltas,
+including sessions retired by an upgrade without a pending inbound. Nothing
 new is written at boot.
 
 ## Bounds

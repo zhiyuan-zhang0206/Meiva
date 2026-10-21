@@ -57,8 +57,10 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
         relay_thread_id=str(uuid4()),
         authority=config_authority,
         local_machine=machine_identity.name(),
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -70,12 +72,12 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
     leases.activate(database, event_bus, lease["id"], owner)
     spawn = MagicMock(return_value=MagicMock(poll=MagicMock(return_value=None)))
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
-    graph = MagicMock()
+    graph = _HandoffGraph()
     host = AgentHost(
         policy=configured_policy(),
         pool=aops_pool,
         checkpointer=MagicMock(),
-        graph=graph,
+        graph=cast(Any, graph),
         machine=configured_machine(name=machine),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
@@ -148,12 +150,11 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
         relay_provider="antigravity",
         relay_thread_id=str(uuid4()),
         authority=config_authority,
-        automatic=True,
         name="session-0",
         executor_name="antigravity",
         local_machine=machine_identity.name(),
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -204,7 +205,6 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
         relay_provider="antigravity",
         relay_thread_id=str(uuid4()),
         authority=config_authority,
-        automatic=True,
         name="session-1",
         executor_name="antigravity",
         local_machine=machine_identity.name(),
@@ -259,12 +259,11 @@ async def test_lease_controls_settle_the_handoff_of_a_dead_relays_lease(
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
         authority=config_authority,
-        automatic=True,
         name="session-0",
         executor_name="codex",
         local_machine=machine_identity.name(),
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -325,12 +324,11 @@ async def _takeover_in_progress(
         relay_provider="antigravity",
         relay_thread_id=str(uuid4()),
         authority=config_authority,
-        automatic=True,
         name="session-0",
         executor_name="antigravity",
         local_machine=local_machine,
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -425,7 +423,6 @@ async def test_restart_command_settles_the_ended_takeover_before_releasing_the_i
         relay_provider="antigravity",
         relay_thread_id=str(uuid4()),
         authority=config_authority,
-        automatic=True,
         name="session-1",
         executor_name="antigravity",
         local_machine=machine,

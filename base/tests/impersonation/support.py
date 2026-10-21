@@ -61,6 +61,8 @@ def request_controller(
         authority=authority,
         **kwargs,
         local_machine=local_machine,
+        name="Test name",
+        executor_name="Test executor_name",
     )
 
 
@@ -74,7 +76,7 @@ def accept_controller(
     lease = request_controller(
         owner, authority=authority, database_gate=database_gate, local_machine=local_machine
     )
-    leases.accept(
+    leases.prepare(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         lease["id"],

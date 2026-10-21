@@ -46,7 +46,7 @@ jitter revalidates its lease before using the agent ID.
 - [[shell.meiva.okf.md]] — Shell commands: run() / run_background() (auto-report on completion) + sessions (new / send / capture / kill)
 
 ### Agent Interop
-- [[meiva/impersonation/docs/attachment.meiva.okf.md]] — local external Python attachment to a consented agent lease
+- [[meiva/impersonation/docs/attachment.meiva.okf.md]] — local external Python attachment to an active agent lease
 - [[meiva/agents/docs/agents.meiva.okf.md]] — spawn / fork / send_message / terminate / resurrect / get_neighbors / get_ancestors / get_status
 - [[meiva_builtins/plugins/meiva_fleet/docs/tasks/tasks.meiva.okf.md|Tasks]] — Task registry `meiva.tasks`: create / get / list / update / log (injected by meiva_fleet plugin, not core SDK—docs in fleet subtree)
 

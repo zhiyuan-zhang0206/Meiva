@@ -43,7 +43,6 @@ def request(
         name=name,
         executor_name=executor_name,
         process_metadata=process_metadata,
-        automatic=True,
         ttl_seconds=ttl_seconds,
         reason=reason,
         relay_provider=provider,

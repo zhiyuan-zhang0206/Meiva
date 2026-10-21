@@ -75,7 +75,6 @@ def lease(
     status: str = "active",
     delta_version: int = 0,
     applied_version: int = 0,
-    automatic: bool = False,
     handoff_applied: bool = False,
     local_machine: MachineIdentity,
 ) -> None:
@@ -83,9 +82,9 @@ def lease(
         cur.execute(
             "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,"
             "ttl_seconds,expires_at,session_id,plugin_delta,delta_version,"
-            "applied_version,automatic,handoff_applied_at) "
+            "applied_version,handoff_applied_at) "
             "VALUES(%s,%s,'external_agent:codex:test',%s,%s,300,"
-            "clock_timestamp()+interval '5 minutes',0,%s,%s,%s,%s,"
+            "clock_timestamp()+interval '5 minutes',0,%s,%s,%s,"
             "CASE WHEN %s THEN clock_timestamp() ELSE NULL END)",
             (
                 uuid4(),
@@ -95,7 +94,6 @@ def lease(
                 Jsonb([{} for _ in range(delta_version)]),
                 delta_version,
                 applied_version,
-                automatic,
                 handoff_applied,
             ),
         )

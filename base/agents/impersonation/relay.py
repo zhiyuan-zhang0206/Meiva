@@ -12,7 +12,6 @@ from base.agents.impersonation._store import (
     authenticate_relay,
     dismiss_reminders,
     expire,
-    insert_handoff,
     lock_lease,
     public,
     require_native,
@@ -264,20 +263,19 @@ def aborted_detail(reason: object) -> str | None:
 def abort_lease(
     db: Database, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation, detail: str
 ) -> dict[str, Any] | None:
-    """Stop a takeover after confirmed executor death, like a TTL expiry.
-
-    ``detail`` is the confirmed executor death phrase ("the executor process
-    is gone"). The lease goes terminal ("expired")
-    with ``rejection_reason`` recorded as ``aborted: <detail>`` — the request's
-    own ``reason`` (its stated purpose) is preserved, and the resume chain
-    reads the prefixed marker back via ``aborted_detail``. Like expiry, a
-    log-native lease closes event admission so its log can complete. A non-automatic
-    active lease also gets the legacy end note (the automatic note is delivered
-    by the resume chain), and pending renewal reminders are dismissed.
-    Idempotent: an already-terminal lease returns None. Every writer's lease
-    lock serializes with claim-time expiry, the TTL reaper and the terminate
-    trigger, so an abort that loses the race is a no-op here.
-    """
+    # meiva:note
+    # Stop a takeover after confirmed executor death, like a TTL expiry.
+    #
+    # ``detail`` is the confirmed executor death phrase ("the executor process
+    # is gone"). The lease goes terminal ("expired")
+    # with ``rejection_reason`` recorded as ``aborted: <detail>`` — the request's
+    # own ``reason`` (its stated purpose) is preserved, and the resume chain
+    # reads the prefixed marker back via ``aborted_detail``. Like expiry, a
+    # log-native lease closes event admission so its log can complete. The checkpoint
+    # resume chain delivers the end note; pending renewal reminders are dismissed.
+    # Idempotent: an already-terminal lease returns None. Every writer's lease
+    # lock serializes with claim-time expiry, the TTL reaper and the terminate
+    # trigger, so an abort that loses the race is a no-op here.
     from base.agents.impersonation._store import close_event_admission
     from base.agents.impersonation.status import is_log_native
 
@@ -294,19 +292,10 @@ def abort_lease(
             return None
         if is_log_native(lease):
             close_event_admission(conn, lease_id)
-        inbound_id = None
-        if lease["status"] == ImpersonationStatus.ACTIVE and not lease["automatic"]:
-            inbound_id = insert_handoff(
-                conn,
-                lease,
-                f"Impersonation {lease['id']} by {lease['source']} stopped — {detail}. "
-                "Control has returned; unacknowledged messages remain pending.",
-                expired=True,
-            )
         conn.execute(
             "UPDATE agent_impersonations SET status='expired',ended_at=clock_timestamp(),"
-            "rejection_reason=%s,summary_inbound_id=%s WHERE id=%s",
-            (reason, inbound_id, lease_id),
+            "rejection_reason=%s WHERE id=%s",
+            (reason, lease_id),
         )
         dismiss_reminders(conn, lease)
         with conn.cursor(row_factory=dict_row) as cur:

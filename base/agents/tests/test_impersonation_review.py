@@ -53,7 +53,7 @@ def session(
     lease = history.resolve(
         database, agent_id, requested["session_id"], local_machine=local_machine
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         str(lease["id"]),

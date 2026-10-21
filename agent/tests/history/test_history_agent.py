@@ -70,7 +70,7 @@ def start(
         local_machine=machine_identity.name(),
     )
     if active:
-        leases.accept(
+        leases.prepare(
             Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             str(lease["id"]),
@@ -94,11 +94,9 @@ def start(
     return lease
 
 
-@pytest.mark.parametrize("automatic", [True, False])
 def test_inbound_attachments_survive_timeline_and_handoff(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
-    automatic: bool,
     config_authority: ConfigAuthority,
     database: Database,
     event_bus: EventBus,
@@ -118,9 +116,6 @@ def test_inbound_attachments_survive_timeline_and_handoff(
         config_authority=config_authority,
         database_gate=database_gate,
         machine_identity=machine_identity,
-    )
-    db_conn.execute(
-        "UPDATE agent_impersonations SET automatic=%s WHERE id=%s", (automatic, lease["id"])
     )
     valid_url = upload_url(owner.agent_id, "screenshot.png")
     payload = {

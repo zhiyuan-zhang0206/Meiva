@@ -70,7 +70,7 @@ from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, validate_plugin_state_keys
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
+from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from base.agents.messages.kwargs import ExecStatus
 from base.clock import Clock
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
@@ -295,11 +295,9 @@ def dispatch_exec_result(
             logger.info(
                 "[halt] {body}", event="halt", body="system_halt (compact)", agent_id=agent_id
             )
-        case ExecLifecycle(
-            output=output, exc=AgentTermination() | AgentRestart() | AgentImpersonation() as exc
-        ):
-            # Restart/terminate enqueue lifecycle inbounds; impersonation
-            # records consent in its lease. Their drivers resume after exec
+        case ExecLifecycle(output=output, exc=AgentTermination() | AgentRestart() as exc):
+            # meiva:note
+            # Restart/terminate enqueue lifecycle inbounds. Their drivers resume after exec
             # cleanup, without adding a duplicate "[halt]" annotation here.
             halted, status = True, ExecStatus.HALTED
             envelope = wrap(

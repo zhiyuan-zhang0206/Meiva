@@ -177,7 +177,7 @@ def test_closure_restore_rolls_back_with_lease(
     lease = request_controller(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
