@@ -33,6 +33,33 @@ def _select_home(home: str | None) -> None:
         os.environ["MEIVA_HOME"] = str(Path(home).expanduser().resolve())
 
 
+# meiva:note
+# Re-run this command in its own session and return at once.
+#
+# `switch --retire` stops the helper, which is the parent of this home's
+# meiva-root: a process inside that tree would be killed halfway through the
+# swap. A new session survives the teardown, and its log is the only evidence
+# left on the host, so the path is printed before anything else happens.
+def _detach(argv: list[str]) -> int:
+    log = Path(f"/tmp/helper-signing-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.log")
+    pid = os.fork()
+    if pid:
+        print(f"detached as pid {pid}; log: {log}")
+        return 0
+    os.setsid()
+    descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    os.dup2(descriptor, 1)
+    os.dup2(descriptor, 2)
+    os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
+    args = [argument for argument in argv if argument != "--detach"]
+    print(f"=== detached switch started {datetime.now(UTC).isoformat()} ===")
+    try:
+        return main(args)
+    except BaseException as error:  # noqa: BLE001 - the log is the only witness
+        print(f"switch aborted: {error!r}")
+        raise
+
+
 def _codesign(*args: str, app: Path) -> str:
     result = subprocess.run(  # noqa: S603 - fixed argv, macOS tool
         ["/usr/bin/codesign", *args, str(app)], capture_output=True, text=True, check=False
@@ -137,7 +164,7 @@ def import_identity(path: str, *, password_file: str | None) -> int:
     return status()
 
 
-def switch(*, retire: bool) -> int:
+def switch(*, retire: bool, start: bool) -> int:
     from base.paths import permissions_helper_app_dir
     from services.desktop.permissions_helper import lifecycle, signing_identity
 
@@ -185,10 +212,27 @@ def switch(*, retire: bool) -> int:
         "Accessibility, AppleEvents and App Management in System Settings -- this is a new\n"
         "code identity, so those grants are asked again exactly once."
     )
+    if start:
+        _start_services()
     return 0
 
 
+def _start_services() -> None:
+    """Bring this home back up after the switch retired it."""
+    meiva = Path(sys.executable).parent / "meiva"
+    print(f"starting this home's services: {meiva} start --all-services")
+    result = subprocess.run(  # noqa: S603 - the checkout's own entry point
+        [str(meiva), "start", "--all-services"], check=False
+    )
+    print(f"`meiva start --all-services` exited {result.returncode}")
+
+
 def _retire_helper() -> None:
+    from services.desktop.permissions_helper.launchd_job import helper_job_loaded
+
+    if not helper_job_loaded():
+        print("the permissions helper job is not loaded; nothing to retire")
+        return
     """Stop this home's helper job, which is also the parent of its meiva-root.
 
     A loaded helper is never replaced in place, so this is the step that turns
@@ -232,14 +276,24 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="stop the running helper first; this also stops every agent this home supervises",
     )
+    parser.add_argument(
+        "--start", action="store_true", help="run `meiva start --all-services` after the switch"
+    )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="re-run this command in its own session, so the switch survives the runtime it stops",
+    )
     args = parser.parse_args(argv)
     _select_home(args.home)
+    if args.detach:
+        return _detach(sys.argv[1:])
     if args.command in {"import", "export"} and not args.path:
         parser.error(f"{args.command} needs a PKCS#12 path")
     return {
         "status": status,
         "provision": provision,
-        "switch": lambda: switch(retire=args.retire),
+        "switch": lambda: switch(retire=args.retire, start=args.start),
         "export": lambda: export(args.path or ""),
         "import": lambda: import_identity((args.path or ""), password_file=args.password_file),
     }[args.command]()
