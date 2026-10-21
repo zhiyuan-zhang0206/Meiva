@@ -225,6 +225,33 @@ def test_duration_guard_falls_back_to_full_when_subset_is_nearly_full(tmp_path: 
     assert result.full_est_seconds == 10.5
 
 
+# meiva:note
+# A subset that would spend more than half of a real suite is not a subset: on 2026-10-21
+# a 12,125-test selection (48% of 25,291) reached 89% of the twenty-minute subset job and
+# was killed twice. Past half of a suite bigger than that job's own budget, the
+# eight-shard fan-out is what actually runs the tests.
+# meiva:link scripts/ci/docs/duration-refresh.md
+def test_a_subset_over_half_of_a_real_suite_runs_the_full_fan_out(tmp_path: Path) -> None:
+    repo_root = _selector_repo(tmp_path)
+    _write(
+        repo_root,
+        ".test_durations",
+        json.dumps(
+            {
+                "tests/unit/test_changed.py::test_changed": 5000.0,
+                "tests/unit/test_imports.py::test_imports": 1000.0,
+                "tests/unit/test_other.py::test_other": 1000.0,
+                "cli/tests/test_owner.py::test_owner": 7000.0,
+            }
+        ),
+    )
+
+    result = test_selector.select_tests(["cli/commands.py"], repo_root=repo_root)
+
+    assert result.decision == "FULL"
+    assert 0.5 * result.full_est_seconds < result.est_seconds <= 0.8 * result.full_est_seconds
+
+
 def test_uses_average_duration_for_a_new_test_without_a_timing_entry(tmp_path: Path) -> None:
     """A missing timing must cost the known average instead of being free."""
     repo_root = _selector_repo(tmp_path)

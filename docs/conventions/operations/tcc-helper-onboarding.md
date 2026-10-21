@@ -129,6 +129,7 @@ included: its prompt writes no `PROMPTING` line, so verify it by screenshot
 |---|---|---|---|---|---|---|
 | Screen Recording (incl. ScreenCaptureKit) | `kTCCServiceScreenCapture` | helper | the helper's first start without the grant, or the first capture | yes -- helper-owned `CGRequestScreenCaptureAccess` (`ping.request_grants_v1`), at most once per helper process | **yes** once denied -- System Settings > Screen Recording | **yes** |
 | Accessibility | `kTCCServiceAccessibility` | helper | the helper's first start without the grant, or the first AX-gated operation | yes -- helper-owned `AXIsProcessTrustedWithOptions` (`axTrustedOrPrompt`), at most once per helper process | **yes** once denied | no (read live per call) |
+| App Management | `kTCCServiceSystemPolicyAppBundles` | helper | never asked: tccd refuses to prompt an unentitled client | **no** -- `TCCAccessRequest` is answered "does not allow prompting for unentitled binaries; returning denied" and records a policy denial (measured 2026-10-21) | **yes** -- System Settings > App Management | no |
 | Desktop / Documents / Downloads folders | `kTCCServiceSystemPolicy{Desktop,Documents,Downloads}Folder` | helper | first folder operation by whichever workflow needed it | yes -- helper-spawned child lists the folder | after a denial | no |
 | Automation (Finder, Terminal, System Events, Safari, Chrome) | `kTCCServiceAppleEvents` per target | helper | first AppleEvent to that app | yes -- one benign `get version` event per app | after a denial | no |
 | App data | `kTCCServiceSystemPolicyAppData` | helper | -- (no shipped feature uses it) | experimental (`--fill-pending`) | -- | no |
@@ -180,6 +181,15 @@ are never attempted, by decision.
 
 ## Trigger mechanics worth knowing
 
+- **App Management can not be requested at all.** The helper is ad-hoc or self-signed, so
+  it carries no team identity and tccd treats it as an unentitled binary: a
+  `TCCAccessRequest` for `kTCCServiceSystemPolicyAppBundles` is answered `Service
+  kTCCServiceSystemPolicyAppBundles does not allow prompting for unentitled binaries;
+  returning denied` (`authValue=0, authReason=2`), raises no dialog, and *creates* that
+  denial row for the asking identity; the enforcement path (a helper-spawned write into
+  another app's bundle) is refused the same way. Onboard therefore never asks for it, the
+  pane toggle is the only grant path, and a request path must not be added back
+  (macOS 26, 2026-10-21).
 - **Documents can not be triggered through the helper file APIs.** The
   helper's `file_list` / `file_read` path whitelist covers only `~/Desktop`,
   `~/Downloads` and `~/.meiva/incoming`; asking for `~/Documents` fails with

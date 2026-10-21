@@ -23,6 +23,13 @@ raises each desktop dialog at most once per process, so a later pass over an
 unanswered row re-reads the state and reports it rather than re-interrupting the
 operator; see the authorization model.
 
+The desktop rows are not one ask set. `request_grants` covers Screen Recording and
+Accessibility, the two grants a system dialog can still raise for this helper. App
+Management is never asked, because tccd refuses to prompt an unentitled client and
+records a policy denial instead (see the grant catalog's App Management section): the
+row stays `SYSTEM_SETTINGS`, and adding it to the ask would spend no dialog and could
+only create that denial.
+
 ## A restart is custody, not a button
 
 The helper is the ancestor of this home's root, so nothing inside that tree may replace it: `install_and_load` refuses a loaded helper that differs from the requested artifact ('stop and unregister ... from outside its process tree'), and the restart verb prints the custody path instead of running `launchctl kickstart -k`. The symptom of the alternative, measured on 2026-10-17: a kickstart replaced the helper under the running root, every agent host exited with os._exit(70) -- 26 agents offline for six minutes -- and the host only recovered when the old root was shut down by hand. A grant macOS holds but the running helper has not read is fixed by `meiva stop`, then `meiva start`, which retires and recreates the helper under custody.
