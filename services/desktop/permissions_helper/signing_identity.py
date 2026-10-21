@@ -351,6 +351,16 @@ does not change when the helper is rebuilt.
 private key, certificate and PKCS#12 archive were created in a temporary
 directory beside the keychain and deleted after the import.
 
+## A deployment that predates this identity undoes it
+
+`meiva start` rebuilds the helper whenever the content hash it records differs
+from the installed one, and that hash now includes the signing policy. A host
+whose `$MEIVA_HOME/source` predates this change computes a different hash, reads
+the installed helper as stale, and signs it ad-hoc again on its next start --
+which silently invalidates the grants the operator just granted. Update that
+checkout to a release that contains this identity *before* switching, and never
+switch a host whose deployment still runs older code.
+
 ## What breaks if it is lost
 
 The certificate *is* the helper's identity. If this keychain is deleted, the
