@@ -26,8 +26,10 @@
 # when the agent is running or idling — a terminated agent's page expiring is
 # exactly the cleanup the TTL exists for, and must not resurrect it. The one
 # exception is notice expiry: that message reports the owner's own notice, so it
-# is queued for a terminated owner too (read on its next life) while still
-# publishing no wake. Expiry is silent for the user (ruling 2026-10-21): the
+# is queued for a terminated owner too while still publishing no wake — read if
+# the agent comes back within the stale-chat window (24h by default), retired as
+# history after it. Such a row is not a delivery stall (the watchdog skips system
+# rows of a dead owner). Expiry is silent for the user (ruling 2026-10-21): the
 # notice only leaves the open queue, and no new notification appears.
 #
 # Every reclaim is a CAS that loses cleanly to ``close()`` / termination. The sweep

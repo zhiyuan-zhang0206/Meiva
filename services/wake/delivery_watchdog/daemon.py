@@ -11,6 +11,7 @@ from pathlib import Path
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.agents.incarnation.lifecycle_commands import SYSTEM_NOTICE_SOURCE
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
@@ -62,22 +63,29 @@ _SCAN_LIVENESS_TIMEOUT_S = 60.0
 _POOL_MAX_SIZE = 1
 
 
+# meiva:note
+# Chat inbounds still `pending` past the threshold, as
+# `(inbound_id, agent_id, agent_label, age_seconds)`, oldest first.
+#
+# An owner mid-turn (`running`) queues inbound legitimately: the claim's turn-end
+# SELECT picks them up, so they are NOT stalls. Only a waiting owner (`idling`,
+# lost wake) or a terminal one (`terminated`, delivery auto-resurrect failed)
+# signals a real stall.
+#
+# A system notification queued for a terminated owner is not a stall either: it
+# is written to be read on a later life and is never woken or resurrected
+# (`SYSTEM_NOTICE_SOURCE`, the same predicate the resurrect gate refuses), so it
+# may sit pending until the dead-letter sweep retires it. Any other source
+# (`agent:` / user) still counts — that is the delivery that actually failed.
+#
+# The one interpolated fragment is that module constant, never caller input.
 def select_stale_pending(
     pool: ConnectionPool,
     threshold_s: float,
 ) -> list[tuple[int, int, str | None, float]]:
-    """Chat inbounds still `pending` past `threshold_s`, as
-    `(inbound_id, agent_id, agent_label, age_seconds)`, oldest first.
-
-    An owner mid-turn (status='running') queues inbound legitimately — the
-    claim's turn-end SELECT picks them up, so they are NOT stalls (a long LLM
-    turn with a queued user message is normal). Only waiting/terminal owners signal
-    a real stall: 'idling' (lost wake), 'terminated' (delivery auto-resurrect
-    failed).
-    """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT m.id, m.agent_id, a.label, "
+            "SELECT m.id, m.agent_id, a.label, "  # noqa: S608
             "       EXTRACT(EPOCH FROM (now() - m.created_at)) AS age_s "
             "FROM inbound_messages m "
             "LEFT JOIN agents a ON a.id = m.agent_id "
@@ -85,6 +93,7 @@ def select_stale_pending(
             "WHERE m.status = 'pending' AND m.kind = 'chat' "
             "  AND am.status IN ('idling', 'terminated') "
             "  AND m.created_at < now() - make_interval(secs => %s) "
+            f"  AND NOT (am.status = 'terminated' AND {SYSTEM_NOTICE_SOURCE}) "
             "ORDER BY m.created_at ASC",
             (threshold_s,),
         )
