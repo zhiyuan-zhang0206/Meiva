@@ -28,7 +28,9 @@ and the matching GitHub Releases.
   harness, model and effort became four 44px rows that state the current pick, open one list
   each, and close on a pick, with a refusal written beside the action because a touch screen
   has no hover. In both arrangements the three price figures sit on a smaller line under the
-  model name instead of beside it, so the name keeps the column's width. Harness availability
+  model name instead of beside it, so the name keeps the column's width, and the four columns
+  now size to their own content — the panel follows the table instead of the table filling a
+  fixed width, which had clipped the effort column. Harness availability
   is probed once per page load — the sidebar warms it on mount and the picker reads that
   reading, instead of starting a probe RPC every time the form opens
   ([creation availability](ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md)).

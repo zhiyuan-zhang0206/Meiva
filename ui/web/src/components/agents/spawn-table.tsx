@@ -24,7 +24,14 @@ import {
   type HarnessAvailability,
 } from "@/lib/harness/harness";
 
-const COLUMNS = "grid grid-cols-[7rem_7.5rem_minmax(0,1fr)_4.5rem] border-b border-border text-xs";
+// meiva:note
+// Every column is sized by its own content (user 2026-10-21): the model column used
+// to take all the slack of a fixed-width panel, so it read far wider than the names
+// it holds while the effort column was pinned to 4.5rem and clipped levels like
+// "minimal". With `auto` tracks the table is exactly as wide as its widest row and
+// the panel follows it instead of the other way round.
+// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+const COLUMNS = "grid grid-cols-[auto_auto_auto_auto] border-b border-border text-xs";
 const HEADER = "border-b border-r border-border px-2 py-1.5 font-medium text-muted-foreground";
 const CELL = "flex w-full items-center gap-1 rounded-sm px-2 py-1 text-left";
 const SELECTED = "bg-foreground/10 font-medium text-foreground";
