@@ -44,7 +44,8 @@ def test_gateway_snapshot_preserves_all_values_and_timezone_origin(explicit: boo
         if not explicit:
             settings.general.model_fields_set.discard("timezone")
         values = {name: get_field(name) for name in field_names()}
-        app = gateway_test_app()
+        boot = snapshot_process_config()
+        app = gateway_test_app(boot=boot, config=gateway_config_from_boot(boot))
         owner = app.state.gateway_process.config
         assert app.state.gateway_config == gateway_config_from_boot(owner)
         assert {name: owner.get_field(name) for name in values} == values
