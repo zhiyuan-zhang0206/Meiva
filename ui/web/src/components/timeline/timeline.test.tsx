@@ -2987,7 +2987,7 @@ describe("ItemTimestamp", () => {
 // The item stamp and Copy share one footer OUTSIDE the card box; the band is hover-revealed, so the card body keeps its own padding and both pieces of chrome line up under the card's bottom-right corner.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 describe("card hover footer", () => {
-  it("timestamp and Copy share the one band under the card, outside the card box", () => {
+  it("timestamp and Copy share the one band under the block, outside the card box", () => {
     const item = makeItem({
       kind: "agent_chat",
       payload: "hello",
@@ -2999,7 +2999,38 @@ describe("card hover footer", () => {
     expect(band).toBe(screen.getByLabelText("Copy message").parentElement);
     expect(band?.className).toContain("justify-end");
     expect(band?.closest('[data-testid="card-toggle"]')).toBeNull();
-    expect(band?.previousElementSibling?.textContent).toContain("hello");
+    // meiva:note
+    // The band is the row's own bottom strip, not the card's: it follows the card
+    // box as a sibling inside `.timeline-item`, which pads its bottom by the gap
+    // between two blocks and gives that height back with a negative margin. So the
+    // chrome stands in whitespace that already existed, and never overlaps the
+    // body (user 2026-10-21).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+    const cardBox = band?.previousElementSibling;
+    expect(cardBox?.textContent).toContain("hello");
+    expect(cardBox?.contains(band ?? null)).toBe(false);
+    expect(band?.className).toContain("absolute");
+    expect(band?.className).toContain("bottom-0");
+    expect(band?.parentElement?.className).toContain("timeline-item");
+  });
+
+  it("a collapsed block stamps no time — the stamp rides the block that is open", () => {
+    const item = makeItem({
+      kind: "agent_chat",
+      payload: "hello",
+      created_at: "2026-10-06T13:39:25+00:00",
+    });
+    render(<TimelineView items={[item]} />);
+    const stamped = formatItemTime(item.created_at!, { showWeekday: true });
+    expect(screen.getByText(stamped)).toBeTruthy();
+    // meiva:note
+    // A collapsed row is a one-line header; a time under it read as chrome for a
+    // message that is not showing (user 2026-10-21).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+    fireEvent.click(screen.getByTestId("card-toggle"));
+    expect(screen.queryByText(stamped)).toBeNull();
+    fireEvent.click(screen.getByTestId("card-toggle"));
+    expect(screen.getByText(stamped)).toBeTruthy();
   });
 
   it("a streaming reply stamps the timestamp but offers no Copy", () => {
