@@ -8,14 +8,10 @@ tags:
 
 # Creation Availability
 
-`SpawnButton` reads `/api/status` and places agents only on online,
-non-paused agent-runner machines with `agent_host_online=true`. The host
-verdict keeps its existing pidfile meaning. A false or absent verdict leaves
-the runner disabled with an explicit reason; when another runner is ready, the
-blocked runner remains a disabled picker entry. With one eligible ready
-runner, the button sends directly; with multiple eligible runners it opens a
-popover. The disabled trigger's tooltip sits on a wrapper so it still appears
-when the button itself cannot receive pointer events.
+Creation lives behind the sidebar header's `+`. The form lists agents only on
+online, non-paused agent-runner machines with `agent_host_online=true`; the host
+verdict keeps its pidfile meaning, and a false or absent verdict leaves that row
+disabled with its reason.
 
 Creation is one table, read left to right: **Machine, Harness, Model, Effort**.
 The machine is the first column because it is the first fact — a harness is only
@@ -42,6 +38,12 @@ mechanism. The footer states the action only — one `Spawn` button, disabled wi
 the first refusal that applies (a down host, then a harness the machine cannot
 start).
 
+Below the md breakpoint the same decisions stack instead of a table: on a
+390px phone the four fixed columns left the model column 4px wide (2026-10-21).
+Each decision becomes a 44px row that states the current pick and opens its list
+on a tap, and a refusal is written beside the action: a touch screen has no
+hover.
+
 The table shows the **last spawn, not the last click**. `behavior.spawn_*`
 holds the config the previous spawn actually used, cascade included; a click
 while the form is open only lays a pick over it, written back when a spawn is
@@ -58,10 +60,10 @@ for the external CLIs), because the same model costs differently depending on
 which loop runs it: a subscription pays nothing per token, so a per-million-token
 price beside the model name would describe a cost the user is not incurring. For
 a metered harness the model row carries the three numbers that decide it —
-non-cached input, cached input (cache read), output, in USD per million tokens,
-with no legend line above the column (user 2026-10-20); the declared 5-minute and
-1-hour cache-write rates and the vendor reference TPS (with its source and check
-date) are on hover. Standard and Fast service IDs have separate catalog entries and
+non-cached input, cached input (cache read), output, in USD per million tokens —
+on one smaller line under the model name, so the name keeps the column's width
+(user 2026-10-21); the declared 5-minute and 1-hour cache-write rates and the
+vendor reference TPS (with its source and check date) are on hover. Standard and Fast service IDs have separate catalog entries and
 prices. Absent reliable absolute vendor figures say so instead of
 showing a blank column; relative speed multipliers and cluster measurements
 never stand in for the vendor figure.

@@ -9,8 +9,9 @@
 // machine comes first — a harness is only available *on* a machine).
 // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
 
-import { Check } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 
 import type { ModelsResponse } from "@/lib/contracts/types";
 import { providerLabel } from "@/lib/contracts/models";
@@ -38,7 +39,7 @@ export interface SpawnMachine {
   reason?: string;
 }
 
-export interface SpawnTableProps {
+export interface SpawnPickerProps {
   machines: SpawnMachine[];
   machine: string | undefined;
   onMachine: (machine: string) => void;
@@ -74,7 +75,7 @@ export function SpawnTable({
   effort,
   onEffort,
   prices,
-}: SpawnTableProps) {
+}: SpawnPickerProps) {
   const t = useTranslations("spawn");
   // meiva:note
   // The model cell keeps the input rate visible, because comparing models is what
@@ -173,12 +174,15 @@ export function SpawnTable({
                       title={detailFor(candidate)}
                       className={cn(CELL, selected ? SELECTED : IDLE)}
                     >
-                      <span className={cn(MIN_W_0, FLEX_1, "truncate")}>{candidate}</span>
-                      {prices && price != null && (
-                        <span className="shrink-0 pl-2 text-[10px] tabular-nums text-muted-foreground">
-                          {formatModelPrice(price.input)} / {formatModelPrice(price.cache_read)} / {formatModelPrice(price.output)}
-                        </span>
-                      )}
+                      <span className={cn(MIN_W_0, FLEX_1)}>
+                        <span className="block truncate">{candidate}</span>
+                        {prices && price != null && (
+                          <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
+                            {formatModelPrice(price.input)} / {formatModelPrice(price.cache_read)} /{" "}
+                            {formatModelPrice(price.output)}
+                          </span>
+                        )}
+                      </span>
                       {selected && <Check className="ml-1 size-3 shrink-0" />}
                     </button>
                   </li>
@@ -213,6 +217,259 @@ export function SpawnTable({
           <li className="px-2 py-1 text-muted-foreground">—</li>
         )}
       </ul>
+    </div>
+  );
+}
+
+// meiva:note
+// Below md the four columns have nowhere to go: the popover is 94vw wide, the
+// action rail keeps 88px of it, and on a 390px phone the model column measured
+// 4px of usable width (2026-10-21) — the one column that decides the agent was
+// the one that vanished. The same four choices render as stacked sections
+// instead: a closed section states the current pick, tapping it opens that one
+// list, and picking closes it again, so the form still answers "what will be
+// born, and where" before it asks anything, and every row is a 44px touch
+// target. The two arrangements share this file and the same props so a rule
+// (availability, cascade, selection) can never exist in only one of them.
+// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+const STACK_SECTION = "border-b border-border";
+const STACK_CELL = "flex w-full min-h-11 items-center gap-2 px-3 py-2 text-left";
+const STACK_LIST = "max-h-[40vh] overflow-y-auto border-t border-border py-1";
+const STACK_NOTE = "block truncate text-[11px] text-muted-foreground";
+
+type StackSectionKey = "machine" | "harness" | "model" | "effort";
+
+
+
+function StackSection({
+  id,
+  label,
+  value,
+  note,
+  expanded,
+  onToggle,
+  children,
+}: {
+  id: StackSectionKey;
+  label: string;
+  value: string;
+  note?: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={STACK_SECTION}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={expanded ? `spawn-stack-${id}` : undefined}
+        onClick={onToggle}
+        className={cn(STACK_CELL, "hover:bg-accent")}
+      >
+        <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+        <span className={cn(MIN_W_0, FLEX_1)}>
+          <span className="block truncate text-sm">{value}</span>
+          {note !== undefined && <span className={STACK_NOTE}>{note}</span>}
+        </span>
+        <ChevronDown
+          className={cn(
+            "size-4 shrink-0 text-muted-foreground transition-transform",
+            expanded && "rotate-180",
+          )}
+        />
+      </button>
+      {expanded ? <div id={`spawn-stack-${id}`}>{children}</div> : null}
+    </div>
+  );
+}
+
+function StackRow({
+  selected,
+  disabled,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-pressed={selected}
+      onClick={onClick}
+      className={cn(
+        STACK_CELL,
+        selected ? SELECTED : IDLE,
+        "disabled:opacity-50 disabled:hover:bg-transparent",
+      )}
+    >
+      {children}
+      {selected && <Check className="ml-auto size-4 shrink-0" />}
+    </button>
+  );
+}
+
+export function SpawnStack({
+  machines,
+  machine,
+  onMachine,
+  harnessRows,
+  harness,
+  onHarness,
+  modelGroups,
+  models,
+  model,
+  onModel,
+  efforts,
+  effort,
+  onEffort,
+  prices,
+}: SpawnPickerProps) {
+  const t = useTranslations("spawn");
+  // meiva:note
+  // One open section at a time: the panel stays short enough to keep the action
+  // visible, and picking a value closes the section it belongs to.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  const [open, setOpen] = useState<StackSectionKey | null>(null);
+  const toggle = (key: StackSectionKey) =>
+    setOpen((current) => (current === key ? null : key));
+  const pick = (key: StackSectionKey, apply: () => void) => {
+    apply();
+    setOpen(null);
+  };
+
+  const target = machines.find((row) => row.name === machine);
+  const harnessBlocked =
+    harnessRows.find((row) => row.harness === harness)?.launchable === false;
+
+  return (
+    <div data-testid="spawn-stack">
+      <StackSection
+        id="machine"
+        label={t("machine")}
+        value={machine ?? "—"}
+        note={target?.reason}
+        expanded={open === "machine"}
+        onToggle={() => toggle("machine")}
+      >
+        <ul aria-label={t("machine")} className={STACK_LIST}>
+          {machines.map((row) => {
+            const selected = row.name === machine;
+            return (
+              <li key={row.name}>
+                <StackRow
+                  selected={selected}
+                  disabled={row.reason !== undefined}
+                  onClick={() => pick("machine", () => onMachine(row.name))}
+                >
+                  <span className={cn(MIN_W_0, FLEX_1)}>
+                    <span className="block truncate">{row.name}</span>
+                    {row.reason !== undefined && <span className={STACK_NOTE}>{row.reason}</span>}
+                  </span>
+                </StackRow>
+              </li>
+            );
+          })}
+        </ul>
+      </StackSection>
+
+      <StackSection
+        id="harness"
+        label={t("harness")}
+        value={harnessLabel(harness)}
+        note={harnessBlocked ? t("harnessStatus.unavailable") : undefined}
+        expanded={open === "harness"}
+        onToggle={() => toggle("harness")}
+      >
+        <ul aria-label={t("harness")} className={STACK_LIST}>
+          {harnessRows.map((row) => {
+            const selected = row.harness === harness;
+            return (
+              <li key={row.harness}>
+                <StackRow
+                  selected={selected}
+                  disabled={!row.launchable}
+                  onClick={() => pick("harness", () => onHarness(row.harness))}
+                >
+                  <span className={cn(MIN_W_0, FLEX_1)}>
+                    <span className="block truncate">{harnessLabel(row.harness)}</span>
+                    {!row.launchable && (
+                      <span className={STACK_NOTE}>{t("harnessStatus.unavailable")}</span>
+                    )}
+                  </span>
+                </StackRow>
+              </li>
+            );
+          })}
+        </ul>
+      </StackSection>
+
+      <StackSection
+        id="model"
+        label={t("model")}
+        value={model ?? t("modelsUnavailable")}
+        expanded={open === "model"}
+        onToggle={() => toggle("model")}
+      >
+        <ul aria-label={t("model")} className={STACK_LIST}>
+          {modelGroups.map(([provider, providerModels]) => (
+            <li key={provider}>
+              <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 first:pt-1">
+                {providerLabel(provider)}
+              </div>
+              <ul>
+                {providerModels.map((candidate) => {
+                  const selected = candidate === model;
+                  const price = models?.[candidate]?.pricing;
+                  return (
+                    <li key={candidate}>
+                      <StackRow selected={selected} onClick={() => pick("model", () => onModel(candidate))}>
+                        <span className={cn(MIN_W_0, FLEX_1)}>
+                          <span className="block truncate">{candidate}</span>
+                          {prices && price != null && (
+                            <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
+                              {formatModelPrice(price.input)} / {formatModelPrice(price.cache_read)} /{" "}
+                              {formatModelPrice(price.output)}
+                            </span>
+                          )}
+                        </span>
+                      </StackRow>
+                    </li>
+                  );
+                })}
+              </ul>
+            </li>
+          ))}
+          {modelGroups.length === 0 && (
+            <li className="px-3 py-2 text-muted-foreground">{t("modelsUnavailable")}</li>
+          )}
+        </ul>
+      </StackSection>
+
+      <StackSection
+        id="effort"
+        label={t("reasoningEffort")}
+        value={effort ?? "—"}
+        expanded={open === "effort"}
+        onToggle={() => toggle("effort")}
+      >
+        <ul aria-label={t("reasoningEffort")} className={STACK_LIST}>
+          {efforts.map((level) => (
+            <li key={level}>
+              <StackRow selected={level === effort} onClick={() => pick("effort", () => onEffort(level))}>
+                <span className="truncate">{level}</span>
+              </StackRow>
+            </li>
+          ))}
+          {efforts.length === 0 && (
+            <li className="px-3 py-2 text-muted-foreground">—</li>
+          )}
+        </ul>
+      </StackSection>
     </div>
   );
 }
