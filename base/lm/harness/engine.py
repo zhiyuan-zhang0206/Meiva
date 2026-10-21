@@ -33,7 +33,7 @@ class HarnessTurn:
 # meiva:note
 # The adapter contract the bridge consumes, stated structurally: the three
 # adapters share these member shapes without sharing a base class, and a test fake
-# needs only to look like one. `submit` returns an adapter-owned ticket because a
+# needs only to look like one. `submit` returns an adapter-owned ticket because
 # tickets carry their turn id and an outcome for completed-key replay. A fresh
 # session exposes its handoff ticket so the bridge can await it before user work.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
