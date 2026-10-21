@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -161,32 +162,39 @@ TIMEOUTS = {
 
 
 # meiva:note
-# The helper's CDHash in `codesign -dv` output: what TCC knows an ad-hoc helper by.
-def _code_hash(record: dict[str, Any]) -> str | None:
-    prefix = "CDHash="
-    return next(
-        (line[len(prefix) :] for line in record["signature"] if line.startswith(prefix)), None
+# The certificate leaf the helper's designated requirement names: what TCC keys
+# a grant on, and what survives a rebuild (a code hash there would not).
+_LEAF_RE = re.compile(r'certificate leaf = H"(?P<leaf>[0-9a-f]+)"')
+
+
+def _certificate_leaf(record: dict[str, Any]) -> str | None:
+    designated = next(
+        (line for line in record["signature"] if line.startswith("designated =>")), None
     )
+    if designated is None:
+        return None
+    match = _LEAF_RE.search(designated)
+    return match.group("leaf") if match else None
 
 
-def _identity_problems(record: dict[str, Any], code_hash: str | None) -> list[str]:
-    if code_hash is None:
-        return ["codesign reported no CDHash for the helper"]
+def _identity_problems(record: dict[str, Any], leaf: str | None) -> list[str]:
     designated = [line for line in record["signature"] if line.startswith("designated =>")]
-    if not any(f'cdhash H"{code_hash.lower()}"' in line for line in designated):
-        return [f"the designated requirement does not pin the helper's code hash: {designated}"]
+    if any("cdhash" in line for line in designated):
+        return [f"the helper is ad-hoc signed: {designated}"]
+    if leaf is None:
+        return [f"the designated requirement names no certificate: {designated}"]
     return []
 
 
-def _tcc_problems(record: dict[str, Any], code_hash: str | None) -> list[str]:
+def _tcc_problems(record: dict[str, Any], leaf: str | None) -> list[str]:
     problems: list[str] = []
     for service, allowed in GRANTED.items():
         row = record["tcc"].get(service)
         if row is None or row[0] != allowed:
             problems.append(f"the system TCC row for {service} is {row}, expected auth {allowed}")
-        elif code_hash is not None and code_hash.upper() not in row[1]:
+        elif leaf is not None and leaf.upper() not in row[1].upper():
             problems.append(
-                f"the TCC row for {service} does not carry the helper's code requirement"
+                f"the TCC row for {service} does not carry the helper's certificate requirement"
             )
     return problems
 
@@ -202,15 +210,15 @@ def _capture_problems(capture: dict[str, Any]) -> list[str]:
 def judge_grant(record: dict[str, Any]) -> list[str]:
     """Why a golden image's helper is not ready to be cloned; empty when it is."""
     ping = record["ping"]
-    code_hash = _code_hash(record)
+    leaf = _certificate_leaf(record)
     return [
         *(
             f"the helper reports {key} = {ping[key]}"
             for key in ("preflight_screen", "ax_trusted")
             if ping[key] is not True
         ),
-        *_identity_problems(record, code_hash),
-        *_tcc_problems(record, code_hash),
+        *_identity_problems(record, leaf),
+        *_tcc_problems(record, leaf),
         *_capture_problems(record["capture"]),
     ]
 

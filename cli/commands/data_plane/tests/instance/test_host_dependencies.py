@@ -212,7 +212,7 @@ def test_pooling_off_drops_pgbouncer() -> None:
 
 def test_macos_uses_launchctl_and_the_helper_tools() -> None:
     names = _names(_scope(host=_host(macos=True), permissions_helper=True))
-    assert {"launchctl", "swiftc", "codesign"} <= names
+    assert {"launchctl", "swiftc", "codesign", "security", "openssl"} <= names
     assert names.isdisjoint({"crontab", "systemctl", "sudo"})
 
 

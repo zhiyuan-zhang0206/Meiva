@@ -1,6 +1,6 @@
 [uses]
 "permissions_helper" = ["test_permissions_helper.py"]
-"test_helper_retirement.py" = ["support.py"]
+"test_helper_retirement.py" = ["support.py", "test_permissions_helper.py"]
 "test_native_drag.py" = ["support.py"]
 "test_native_input.py" = ["support.py"]
 "test_native_mouse_hold.py" = ["support.py"]

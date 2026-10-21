@@ -435,7 +435,9 @@ def parse_strings(path: Path) -> dict[str, str]:
 TEST_CDHASH = "0123456789abcdef0123456789abcdef01234567"
 
 
-def stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present: bool) -> Path:
+def stage_bundle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present: bool, identity: bool = True
+) -> Path:
     from services.desktop.permissions_helper import launchd_job, lifecycle
 
     src = tmp_path / "main.swift"
@@ -463,11 +465,65 @@ def stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present
     monkeypatch.setattr(lifecycle, "ENTITLEMENTS", entitlements)
     monkeypatch.setattr(lifecycle, "LOCALES", locales)
     monkeypatch.setattr(base_paths, "permissions_helper_app_dir", lambda: build)
+    if identity:
+        stage_signing_identity()
     return app
 
 
 def test_dr() -> str:
     return f'identifier "com.meiva.permissions-helper" and cdhash H"{TEST_CDHASH}"'
+
+
+def certificate_dr() -> str:
+    """The requirement a certificate-signed helper carries."""
+    return (
+        'identifier "com.meiva.permissions-helper" and certificate leaf = H"c6000dcb95407f03ca68d4'
+        'f3dcb1ae8873ea7ba1"'
+    )
+
+
+def stage_signing_identity() -> None:
+    """The identity files a host has after `helper-signing.py provision` ran once."""
+    from services.desktop.permissions_helper import signing_identity
+
+    signing_identity.keychain_path().parent.mkdir(parents=True, exist_ok=True)
+    signing_identity.keychain_path().write_bytes(b"keychain")
+    signing_identity.password_path().write_text("test-password\n")
+
+
+def fake_identity_reply(
+    cmd: list[str],
+    *,
+    identity_name: str | None = None,
+    search_list: tuple[str, ...] | None = None,
+) -> subprocess.CompletedProcess[bytes] | None:
+    """What `security` answers for a staged identity; None for every other tool.
+
+    `identity_name` overrides the name `find-identity` reports and `search_list`
+    the keychains it lists; both default to the staged identity being fully
+    usable.
+    """
+    from services.desktop.permissions_helper import signing_identity
+
+    if Path(cmd[0]).name != "security":
+        return None
+    match cmd[1]:
+        case "create-keychain":
+            Path(cmd[-1]).write_bytes(b"keychain")
+            text = ""
+        case "find-identity":
+            name = signing_identity.IDENTITY_NAME if identity_name is None else identity_name
+            text = f'  1) ABCDEF0123456789 "{name}" (CSSMERR_TP_NOT_TRUSTED)\n'
+        case "list-keychains":
+            listed = (
+                (str(signing_identity.keychain_path()),)
+                if search_list is None
+                else search_list
+            )
+            text = "".join(f'    "{path}"\n' for path in listed)
+        case _:
+            text = ""
+    return subprocess.CompletedProcess(cmd, 0, text.encode(), b"")
 
 
 def write_current_build_state(app: Path, source_hash: str, *, dr: str | None = None) -> None:
@@ -497,16 +553,23 @@ class _FakeToolOutputs:
     verify_rc: int
     designated_requirement: str | None
     dr_streams: tuple[bytes, bytes] | None
+    identity_name: str | None = None
+    search_list: tuple[str, ...] | None = None
 
     def respond(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
         """The result of one tool invocation; unmatched commands succeed silently."""
+        identity = fake_identity_reply(
+            cmd, identity_name=self.identity_name, search_list=self.search_list
+        )
+        if identity is not None:
+            return identity
         if cmd[0] == "swiftc":
             Path(cmd[cmd.index("-o") + 1]).write_bytes(b"\x00")
         if cmd[:2] == ["codesign", "--verify"]:
             return subprocess.CompletedProcess(cmd, self.verify_rc, b"", b"invalid")
         if cmd[:3] == ["codesign", "-d", "-r-"]:
             return self._designated_requirement(cmd)
-        if cmd[:2] == ["codesign", "--force"] and self.sign_rc != 0:
+        if Path(cmd[0]).name == "codesign" and "--force" in cmd and self.sign_rc != 0:
             return subprocess.CompletedProcess(cmd, self.sign_rc, b"", b"code object is not signed")
         return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
@@ -533,6 +596,8 @@ def fake_tools(
     designated_requirement: str | None = None,
     dr_streams: tuple[bytes, bytes] | None = None,
     hang: tuple[str, ...] = (),
+    identity_name: str | None = None,
+    search_list: tuple[str, ...] | None = None,
 ) -> list[_Call]:
     from services.desktop.permissions_helper import lifecycle
 
@@ -541,6 +606,8 @@ def fake_tools(
         verify_rc=verify_rc,
         designated_requirement=designated_requirement,
         dr_streams=dr_streams,
+        identity_name=identity_name,
+        search_list=search_list,
     )
     recorded: list[_Call] = []
 
@@ -562,7 +629,9 @@ def recorded_argvs(recorded: list[_Call]) -> list[list[str]]:
 
 
 def sign_command(recorded: list[_Call]) -> list[str]:
-    return next(c.argv for c in recorded if c.argv[:2] == ["codesign", "--force"])
+    return next(
+        c.argv for c in recorded if Path(c.argv[0]).name == "codesign" and "--force" in c.argv
+    )
 
 
 # --- Install, in-place upgrade, and launchd repair ------------------------

@@ -181,7 +181,7 @@ are never attempted, by decision.
 
 ## Trigger mechanics worth knowing
 
-- **App Management can not be requested at all.** The helper is ad-hoc or self-signed, so
+- **App Management can not be requested at all.** The helper is self-signed, so
   it carries no team identity and tccd treats it as an unentitled binary: a
   `TCCAccessRequest` for `kTCCServiceSystemPolicyAppBundles` is answered `Service
   kTCCServiceSystemPolicyAppBundles does not allow prompting for unentitled binaries;
@@ -220,13 +220,14 @@ are never attempted, by decision.
   silently; the 2026-09-17 validation also showed the readings discriminate
   (bogus service name -> denied; Microphone -> not-determined; FDA -> denied),
   so a granted reading is meaningful; the trigger side is the archive below.
-- **Helper instances share a TCC identity only while their code hash matches.**
-  The helper is signed ad-hoc, so TCC keys its grants on the code hash (its
-  designated requirement is `cdhash H"..."`), not on a certificate. A second
-  cluster instance (its own build, launchd service and socket -- e.g. a
-  dev/test instance) inherits the same grants only while its helper has the same
-  code hash. Any other helper binary is a new identity and needs a fresh
-  onboarding pass.
+- **Helper instances share a TCC identity while they are signed by the same
+  certificate.** The helper is signed with `Meiva Local Signing`, a self-signed
+  certificate kept in `$MEIVA_HOME/helper/signing.keychain-db`, so its designated
+  requirement is `identifier "com.meiva.permissions-helper" and certificate root
+  = H"..."` and a rebuild does not change it. A second cluster instance (its own
+  build, launchd service and socket -- e.g. a dev/test instance) inherits the
+  same grants only when it is signed by that certificate; a host with its own
+  certificate is a different identity and needs a fresh onboarding pass.
 
 ## Extended-group trigger methods (archive)
 
@@ -249,9 +250,10 @@ from the preflight re-read, not from the child's own output.
   prompts, each later attributed to a process scanning the home directory
   (`find`, `du`, a recursive glob). Prompts DO write `AUTHREQ_PROMPTING` +
   `AUTHREQ_SUBJECT` (subject = the helper), but no `RESULT` row.
-- Rebuild gotcha: like every grant of an ad-hoc signed helper, this row does
-  NOT survive a helper rebuild -- it returns to `not-determined` and the next
-  scan re-prompts. Expect to re-run the fill after every helper rebuild.
+- Rebuild gotcha: this row survives a helper rebuild only if the rebuild keeps
+  the signing certificate (it does, by design) -- the row is keyed on the
+  designated requirement, not the code hash. A helper signed by a *different*
+  certificate returns the row to `not-determined`, and the next scan re-prompts.
 - The fill path replays the evidenced surface; a deliberate fill of a missing
   row has not yet been exercised (macmini's row reads granted).
 
@@ -303,10 +305,11 @@ present. A historical grant on another machine is not evidence for this unit.
 
 Per-machine rebuild/reinstall flow gains one step, inserted before the flip:
 
-1. Rebuild / reinstall the helper (design: ad-hoc signing, so TCC keys the
-   grants on the code hash -- an unchanged helper keeps every grant, a rebuild
-   is a new code identity that invalidates every existing grant, and the
-   onboarding must be redone by hand).
+1. Rebuild / reinstall the helper (design: one fixed self-signed certificate
+   signs it, so TCC keys the grants on that certificate's designated
+   requirement -- an unchanged helper keeps every grant, and a rebuild keeps
+   them too because the requirement does not name the code hash. Only a new
+   certificate, or deleting the keychain, invalidates the grants).
 2. Run the inventory: `.venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py --check`.
 3. Complete the missing grants with the user present: run the tool without
    `--check`; add `--fill-pending --confirm-user-present` to also attempt the
