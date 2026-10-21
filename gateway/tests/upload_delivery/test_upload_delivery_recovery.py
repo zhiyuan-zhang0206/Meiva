@@ -85,10 +85,17 @@ def post(
     )
 
 
+# meiva:note
+# Tests drive one batch at a time, so they claim it and read it back: a zero claim
+# keeps the row due for the next caller (claim semantics are covered by
+# test_due_claims_a_batch_once).
+_NO_CLAIM = 0.0
+
+
 def request_for(pool: ConnectionPool, batch_id: str, *, local_machine: str) -> ReceiveRequest:
     return next(
         item
-        for item in source.due(pool, local_machine=local_machine)
+        for item in source.due(pool, local_machine=local_machine, claim_seconds=_NO_CLAIM)
         if item.manifest.batch_id == batch_id
     )
 
@@ -380,3 +387,23 @@ def test_guarded_routes_reject_invalid_agent_paths_before_native_effects(
     assert client.get(path + "/objects/0").status_code == 422
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (0,)
     assert not source.agent_upload_dir(invalid_agent, create=False).exists()
+
+
+# meiva:note
+# Two workers on one database never copy the same batch (task #5439). The claim lives
+# in due() itself: the first caller pushes next_attempt_at a lease ahead and returns
+# the batch; a second caller reading at the same instant finds nothing.
+def test_due_claims_a_batch_once(
+    uploaded_agent: tuple[GatewayTestClient, int],
+    *,
+    machine_identity: MachineIdentity,
+):
+    client, agent = uploaded_agent
+    response = post(client, agent)
+    assert response.status_code == 202, response.text
+    batch_id = response.json()["batch_id"]
+    pool = client.app.state.db_pool
+    first = source.due(pool, local_machine=machine_identity.name(), claim_seconds=300)
+    second = source.due(pool, local_machine=machine_identity.name(), claim_seconds=300)
+    assert batch_id in [item.manifest.batch_id for item in first]
+    assert batch_id not in [item.manifest.batch_id for item in second]

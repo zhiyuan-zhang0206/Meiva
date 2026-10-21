@@ -42,8 +42,13 @@ app-state replacement cannot leave the original recovery TaskGroup unstopped.
 including pure Gateway topology without Ops. Four intents run in a scoped
 TaskGroup; due selection and final acceptance borrow short transactions, with no
 DB connection held across RPC/HTTP. A batch gets `source.MAX_COPY_ATTEMPTS` (3) copy
-attempts spaced by a short linear backoff. Backoff is scheduling, never a lease or proof
-another writer died. Multiple Gateway processes can repeat the same batch.
+attempts spaced by a short linear backoff. `source.due()` claims what it returns: the
+same statement pushes `next_attempt_at` a claim window ahead
+(`settings.gateway.upload_recovery_claim_seconds`, 300 s by default) under
+`FOR UPDATE SKIP LOCKED`, so two Gateway processes sharing a database never copy one
+batch twice. The claim is scheduling, not proof another writer died: a failed copy
+replaces it with its own backoff, and a worker that dies mid-copy delays only that batch
+by one window.
 Source placement is checked before copy and again under locks before inbound.
 
 The independently known Ops kind `upload-receive-v1` requires explicit integer
