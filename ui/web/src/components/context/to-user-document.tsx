@@ -82,6 +82,13 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   // The caller owns the question and Inspector as siblings of this document,
   // so navigating its keyed body cannot discard an unfinished answer.
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  // meiva:note
+  // The inspector toggle changes nothing on hover: on a 14px icon the
+  // background wash reads as a shadow, and the pointer cursor already says the
+  // button is live (user 2026-10-21). Its pressed background while the mode is
+  // on stays.
+  // meiva:link ui/web/src/components/context/to-user-document.tsx
+  const inspectorToggleClass = cn("rounded p-1", inspecting && "bg-foreground/20 text-foreground");
   return mobile && inspecting ? null : (
     <section className={cn(FLEX, MIN_H_0, "shrink-0", FLEX_COL)} aria-label={t("sharedContext")}>
       <div data-testid="document-bar" className={cn("shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_WRAP_CLASS, FLEX)}>
@@ -113,7 +120,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
               aria-label={inspecting ? tInspector("closeInspector") : tInspector("openInspector")}
               aria-pressed={inspecting}
               onClick={onInspect}
-              className={cn("rounded p-1 hover:bg-accent", inspecting && "bg-foreground/20 text-foreground")}
+              className={inspectorToggleClass}
             >
               <ScanSearch className="size-3.5" />
             </button>

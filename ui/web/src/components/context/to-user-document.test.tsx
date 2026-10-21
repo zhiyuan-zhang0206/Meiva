@@ -203,15 +203,23 @@ describe("To user document bar", () => {
     expect(screen.getByTestId("context-panel-collapse")).toBeTruthy();
   });
 
-  it("marks the inspector toggle with a selected background, not the hover wash", () => {
+  it("marks the inspector toggle with a selected background and gives it no hover wash", () => {
     // meiva:note
     // bg-accent is 97% lightness in the light theme — a pressed state painted
-    // with it reads as unpressed (user 2026-10-20).
+    // with it reads as unpressed (user 2026-10-20). Hovering the toggle changes
+    // nothing at all: the pointer cursor is the only hover feedback (user
+    // 2026-10-21).
     // meiva:link ui/web/src/components/context/to-user-document.tsx
     show(document("hello"), { onInspect: vi.fn(), inspecting: true });
     const classes = screen.getByTestId("open-inspector").className.split(/\s+/);
     expect(classes).toContain("bg-foreground/20");
-    expect(classes).not.toContain("bg-accent");
+    expect(classes.filter((name) => name.startsWith("hover:bg-"))).toEqual([]);
+  });
+
+  it("leaves the idle inspector toggle without a hover wash too", () => {
+    show(document("hello"), { onInspect: vi.fn() });
+    const classes = screen.getByTestId("open-inspector").className.split(/\s+/);
+    expect(classes.filter((name) => name.startsWith("hover:bg-"))).toEqual([]);
   });
 
   it("labels the document section in the mobile reading view", () => {
