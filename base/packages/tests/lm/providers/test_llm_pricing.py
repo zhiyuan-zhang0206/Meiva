@@ -680,7 +680,6 @@ def test_mimo_plugin_prices_equal_archive_current_base_tier(
     model_catalog: ModelCatalog, prices: pricing.PriceBook
 ) -> None:
     model_ids = (
-        "mimo-v2.5-pro",
         "mimo-v2.6-pro",
         "mimo-v2.6-pro-ultraspeed",
     )

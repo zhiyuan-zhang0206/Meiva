@@ -105,30 +105,13 @@ PROVIDER = ProviderContribution(
         stop_spec=None,
     ),
     models={
-        "mimo-v2.5-pro": ModelSpec(
-            provider="mimo",
-            spawnable=True,
-            # Xiaomi's pricing page (https://mimo.mi.com/docs/price/pay-as-you-go,
-            # checked 2026-09-22) marks V2.5 Pro for deprecation at 10:00
-            # Beijing time on 2026-10-21 and publishes the same rates as V2.6
-            # Pro. Keep this id spawnable for existing configurations;
-            # superseded_by only hides it in the picker.
-            superseded_by="mimo-v2.6-pro",
-            # Xiaomi's model page and the HF card both say 1M context / 128K max
-            # output — the old 128,000 window was the OUTPUT cap filed as the
-            # window, which understated the window ~8x and made the compact
-            # threshold unreachable in practice.
-            context_window=1_000_000,
-            max_output_tokens=128_000,
-            knowledge_cutoff="2024-12",
-            effort_levels=("none", "high"),  # body-level thinking on/off only
-            tuning=ModelTuning(
-                # Pinned 2026-08-01 (task #568): the "high" rung IS the provider
-                # default — thinking is on unless explicitly disabled
-                # (`mimo_extra_body`).
-                reasoning_effort="high",
-            ),
-        ),
+        # meiva:note
+        # V2.5 Pro was deleted here on 2026-10-21 (task #4416): Xiaomi stopped serving it at
+        # 10:00 Beijing that day, so the roster no longer lists it and a chat probe answers
+        # `400 Unsupported model` while V2.6 Pro on the same account answers 200. A stored
+        # config naming this id now fails spawn validation as unknown, and the price history
+        # stays in the archive (base/lm/pricing/pricing_catalog_archive.json).
+        # meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
         "mimo-v2.6-pro": ModelSpec(
             provider="mimo",
             spawnable=True,
@@ -171,29 +154,6 @@ PROVIDER = ProviderContribution(
         ),
     },
     pricing={
-        "mimo-v2.5-pro": PriceRates(
-            cache_miss=0.435,
-            cache_hit=0.0036,
-            output=0.87,
-            source_url="https://platform.xiaomimimo.com",
-            source_checked_at="2026-06-27",
-            vendor="xiaomi",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="0.435",
-                            cache_hit="0.0036",
-                            output="0.87",
-                        ),
-                    ),
-                ),
-            ),
-        ),
         "mimo-v2.6-pro": PriceRates(
             cache_miss=0.435,
             cache_hit=0.0036,

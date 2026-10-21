@@ -175,7 +175,7 @@ def test_mimo_plugin_key_ignores_legacy_settings_field(
     assert provider_key_map(catalog=model_catalog)["mimo-"] == ("Xiaomi", "MIMO_API_KEY")
     with pytest.raises(ValueError, match="MIMO_API_KEY"):
         validate_model_config(
-            model="mimo-v2.5-pro",
+            model="mimo-v2.6-pro",
             config={},
             catalog=model_catalog,
             llm_override="",
@@ -249,6 +249,7 @@ def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
+        "mimo-v2.5-pro",
         "mimo-v2.5-pro-ultraspeed",
     ),
 )
