@@ -68,6 +68,38 @@ with `-I` ignore `PYTHONPATH`; cross-process tests need this checkout's own
 editable environment. For native lifecycle behavior, use the release interpreter
 build and exercise cleanup as well as startup.
 
+### Platform-dependent tests
+
+A test reports on the code, not on the machine that runs it. `Host` is the port
+that makes this possible: production code branches on `host.platform` and
+resolves programs through `host.which`, so a test builds the host it wants with
+`fake_host` (`base/host/system/tests/fake_commands.py`) and asserts one result
+everywhere — a macOS host takes the launchctl rows even while the test process
+runs on Linux.
+
+A test must not read the process's own platform (`sys.platform`,
+`Host.system()`, `Platform.current()`) or the ambient PATH (`shutil.which(name)`
+with no `path=`) to decide what to assert: that verdict flips between a CI
+runner and a developer's macOS, which is a false positive nobody can debug from
+the failing side. `lint-host-platform-marks` reports such a read, and its
+baseline (`scripts/lint/baseline/host_platform_marks.json`) freezes the sites
+that predate the rule; `--write-baseline` lowers it after a repair.
+
+When the subject itself exists on one host only — launchd, TCC, codesign,
+swiftc — the test declares it:
+
+```python
+@pytest.mark.requires_host("darwin")
+def test_the_helper_is_signed() -> None:
+    ...
+```
+
+`tests/fixtures/host_platform.py` turns the marker into a skip on every other
+host with one consistent reason; `--collect-only` still lists the test, and a CI
+lane must run it on the named host (a skip with no lane is how a broken test
+disappears). The marker is for that case only: "this test is about the host",
+never "this test is hard to port".
+
 ## Frontend
 
 From `ui/web`, run the affected tests and eslint, then check generated Next.js

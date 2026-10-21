@@ -107,6 +107,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "checks pyproject testpaths and ci.yml against every tests/ directory in the tree",
     ),
+    "tests/ci/test_host_platform_marker.py": (
+        "contract",
+        "tests the requires_host plugin, tests/fixtures/host_platform.py",
+    ),
     "tests/ci/test_leak_guard.py": (
         "contract",
         "tests the root leak guard plugin, tests/fixtures/leak_guard.py",
