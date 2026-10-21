@@ -438,6 +438,12 @@ markers = [
     # tests/e2e/conftest.py): tests outside tests/e2e import e2e modules, and
     # --ignore=tests/e2e runs never load that conftest.
     "scenario(module_factory): specify fake LLM scenario module:factory string",
+    # A test whose subject is one operating system (launchd, TCC, codesign, swiftc)
+    # names it here; the root conftest plugin turns the marker into a skip on every
+    # other platform, and a CI lane must run it on the named one. Everything else
+    # injects a fake `Host` (base/host/system/tests/fake_commands.py) instead. See
+    # docs/conventions/testing.md "Platform-dependent tests".
+    "requires_host(system): the test proves one host OS's own behavior; skipped on the others",
 ]
 # The kernel goes fully async (psycopg AsyncConnection / AsyncPostgresSaver / aioredis
 # / asyncio.create_subprocess_exec) — tests written as `async def test_...` auto-run,

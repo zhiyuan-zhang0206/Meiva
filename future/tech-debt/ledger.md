@@ -121,6 +121,13 @@ fixture/incident scope.
 - **first-seen**: 2026-10-19 (PR #6295)
 - **last-verified**: 2026-10-19
 
+### inline-marker:scripts/lint/host_platform_marks.py:baseline
+- **class**: inline-marker
+- **status**: open
+- **evidence**: `scripts/lint/baseline/host_platform_marks.json` freezes 84 unmarked host reads in 49 test files that predate `lint-host-platform-marks` (`sys.platform` / `Host.system()` / `Platform.current()` reads and ambient `shutil.which` lookups). The baseline only shrinks: a file may go under its count, never over, `--write-baseline` lowers it after a repair, and the file plus this entry go when it empties. The macOS-only `services/desktop/permissions_helper/tests/` and the tool-availability `shutil.which(...) is None` skips are the bulk of it.
+- **first-seen**: 2026-10-21 (PR #6635)
+- **last-verified**: 2026-10-21
+
 ## Wontfix
 
 ### docstring-budget:meiva/security.py:module
