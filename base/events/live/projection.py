@@ -508,7 +508,6 @@ class NoticeResolved(_Base):
     require_response: bool | None = None
     age_seconds: int | None = None
     had_reply: bool | None = None
-    superseded_by: int | None = None
 
 
 class TaskCreated(_Base):

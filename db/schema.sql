@@ -211,14 +211,14 @@ BEGIN
 END $$;
 
 -- ─────────────── agent_notices ───────────────
--- The agent->user queue: one primitive at three obligation rungs, discriminated
--- by require_response (the stakes axis priority P0..P3 is orthogonal):
---   require_response=FALSE                 -> FYI, the user may glance or ignore
---   require_response=TRUE,  blocking=FALSE -> needs an answer, agent keeps working
---   require_response=TRUE,  blocking=TRUE  -> needs an answer, agent is stalled
--- blocking is meaningful only when require_response is TRUE (you can only be
--- stalled waiting on a reply you need) -- enforced by a CHECK, and rejected at
--- the SDK (meiva.ui.notify raises). meiva.ui.notify() INSERTs one row per call.
+-- The agent->user queue: every notice asks for an answer (require_response is
+-- always TRUE; the SDK rejects a false one), and `blocking` separates the two
+-- rungs that remain: blocking=FALSE keeps the agent working while it waits,
+-- blocking=TRUE means it is stalled on the reply. The stakes axis priority
+-- P0..P3 is orthogonal. blocking is meaningful only when require_response is
+-- TRUE, enforced by a CHECK and rejected at the SDK. meiva.ui.notify() INSERTs
+-- one row per call, and refuses while the agent still has an open notice (one
+-- open notice per agent, user ruling 2026-10-21): close or edit it first.
 --
 -- title = one-line headline (queue list); content = optional detail body shown
 -- on click. resolved_at + resolution + reply is the single close triple:
@@ -226,14 +226,16 @@ END $$;
 --   dismissed -- user waved away a require_response notice without answering
 --   read      -- user reviewed an FYI notice (reply optional)
 --   withdrawn  -- the agent dismissed its own notice (meiva.ui.dismiss_notice)
---   superseded -- replaced by a newer notice from the same agent (meiva.ui.notify auto-resolve)
+--   superseded -- historical only: a newer notice replaced this one before the
+--               one-open-notice rule (2026-10-21); no writer produces it now
 -- reply caches the user's free-text reply for history/display; the live delivery
 -- to the agent rides the chat-inbound path, not this column. updated_at tracks
 -- the agent editing its own still-open notice (meiva.ui.edit_notice).
 --
--- The snapshot inlines the still-open require_response notices
--- (notices_awaiting_response, bounded worklist) and counts the still-open FYI
--- notices (unread_notice_count); the FYI feed content is served off-snapshot.
+-- The snapshot inlines the still-open notices (notices_awaiting_response, the
+-- bounded worklist). unread_notice_count and the FYI feed remain for the rows
+-- written before FYI stopped being accepted (2026-10-19); new writes are all
+-- require_response, so nothing new lands in that feed.
 CREATE TABLE agent_notices (
     id              BIGSERIAL PRIMARY KEY,
     local_id        INTEGER NOT NULL,

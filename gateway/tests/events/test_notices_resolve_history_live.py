@@ -284,7 +284,12 @@ def test_live_empty_after_cursor(db_conn: psycopg.Connection) -> None:
         assert r.json() == []
 
 
-def test_supersede_publishes_global_notice_id(
+# meiva:note
+# The published event carries the GLOBAL id, not the agent-local one: the SDK's id
+# space is local and the frontend feed matches on global ids, so a local id here
+# leaves the resolved row in the open list until a refresh.
+# meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+def test_resolution_publishes_global_notice_id(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from ops import lifecycle as ops_lifecycle
@@ -295,19 +300,10 @@ def test_supersede_publishes_global_notice_id(
         row = cur.fetchone()
         assert row is not None
         local_skew = int(row[0]) + 100
-        cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, reply, resolved_at, resolution, expire_at) "
-            "VALUES (%s, %s, 'old closed', 'P2', TRUE, 'old reply', now(), 'answered', now() + interval '1 day')",
-            (agent_id, local_skew),
-        )
-    db_conn.commit()
-    open_id = insert_notice(db_conn, agent_id, "open notice")
+    open_id = insert_notice(db_conn, agent_id, "open notice", require_response=True)
     with db_conn.cursor() as cur:
-        cur.execute("SELECT local_id FROM agent_notices WHERE id = %s", (open_id,))
-        row = cur.fetchone()
-        assert row is not None
-        open_local = int(row[0])
-    assert open_local != open_id, "test setup: local id must differ from the global id"
+        cur.execute("UPDATE agent_notices SET local_id = %s WHERE id = %s", (local_skew, open_id))
+    db_conn.commit()
 
     published: list[int] = []
 
@@ -317,13 +313,11 @@ def test_supersede_publishes_global_notice_id(
     monkeypatch.setattr(ops_lifecycle, "publish_notice_resolved", _capture)
     with gateway_test_client() as client:
         resp = client.post(
-            f"/api/agents/{agent_id}/notices",
-            json={"title": "new notice", "content": None},
-            headers=keyed_headers(str(uuid4())),
+            f"/api/keyed/v1/agents/{agent_id}/notices/{open_id}/resolve",
+            json={"action": "dismiss"},
+            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 201, resp.text
-    body = resp.json()
-    assert body["superseded"] == [open_local]
     assert published == [open_id], f"expected global id {open_id}, got {published}"
 
 

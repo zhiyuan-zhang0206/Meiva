@@ -182,7 +182,6 @@ def _samples() -> dict[str, dict]:
             "require_response": True,
             "age_seconds": 900,
             "had_reply": True,
-            "superseded_by": None,
         },
         "task_created": {
             "role": "task_created",

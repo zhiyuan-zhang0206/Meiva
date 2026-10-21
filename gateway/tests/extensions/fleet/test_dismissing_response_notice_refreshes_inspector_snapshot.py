@@ -59,7 +59,7 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
     assert published_awaiting == [["decision needed"], []]
 
 
-def test_superseding_legacy_fyi_and_question_refreshes_inbox_and_inspector_projections(
+def test_a_legacy_fyi_row_does_not_block_and_a_second_notice_is_refused(
     sdk_via_inprocess_gateway: None,
     load_activity_plugin: None,
     db_conn: psycopg.Connection,
@@ -109,19 +109,26 @@ def test_superseding_legacy_fyi_and_question_refreshes_inbox_and_inspector_proje
         )
     db_conn.commit()
     meiva.ui.notify("question", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+    with pytest.raises(ValueError, match="already holds an open notice"):
+        meiva.ui.notify("next question", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
     meiva.ui.notify("next question", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
         cur.execute(
-            "SELECT id, title FROM agent_notices WHERE agent_id = %s ORDER BY local_id",
+            "SELECT id, title, resolution FROM agent_notices WHERE agent_id = %s ORDER BY local_id",
             (agent_id,),
         )
-        notice_ids = {str(title): int(notice_id) for notice_id, title in cur.fetchall()}
+        rows = cur.fetchall()
+    by_title = {str(title): (int(notice_id), resolution) for notice_id, title, resolution in rows}
 
-    assert resolved == [notice_ids["Legacy FYI"], notice_ids["question"]]
-    assert posted == [notice_ids["question"], notice_ids["next question"]]
-    assert published_awaiting == [["question"], ["next question"]]
+    assert by_title["Legacy FYI"][1] is None, "posting must not resolve a legacy FYI row"
+    assert by_title["question"][1] == "withdrawn"
+    assert resolved == [by_title["question"][0]]
+    assert posted == [by_title["question"][0], by_title["next question"][0]]
+    assert published_awaiting[0] == ["question"]
+    assert published_awaiting[-1] == ["next question"]
 
 
 def test_notice_return_int_and_edit_dismiss_take_no_id(
@@ -163,6 +170,11 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
 def test_notify_with_expire_at_valid(
     sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
+    # meiva:note
+    # Absolute and relative deadlines both land in the row. One notice stays open
+    # per agent (user ruling 2026-10-21), so the second post needs the first one
+    # dismissed.
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
     from datetime import datetime, timedelta
 
     agent_id = seed_agent(db_conn)
@@ -170,7 +182,7 @@ def test_notify_with_expire_at_valid(
     # timedelta
     nid1 = meiva.ui.notify(
         "expires in 1h", expire_at=timedelta(hours=1), idempotency_key=str(uuid4())
-    )  # type: ignore[attr-defined]
+    )  # pyright: ignore[reportCallIssue]
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT expire_at FROM agent_notices WHERE agent_id = %s AND local_id = %s",
@@ -180,9 +192,10 @@ def test_notify_with_expire_at_valid(
     assert row is not None
     assert row[0] > datetime.now(UTC)
 
-    # ISO string
+    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
+
     target = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
-    nid2 = meiva.ui.notify("expires at ISO", expire_at=target, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    nid2 = meiva.ui.notify("expires at ISO", expire_at=target, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT expire_at FROM agent_notices WHERE agent_id = %s AND local_id = %s",
