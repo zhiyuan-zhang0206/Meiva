@@ -1,8 +1,9 @@
-exports = ["__init__.py", "harness_turn.py", "node.py", "tests"]
+exports = ["__init__.py", "harness_turn.py", "node.py", "tests", "turn_stamp.py"]
 
 [uses]
 "__init__.py" = ["_routing.py"]
 "_decide.py" = ["_batch.py", "_dispatch.py", "_routing.py"]
 "_dispatch.py" = ["_chat_inbound.py", "_routing.py"]
+"harness_turn.py" = ["turn_stamp.py"]
 "node.py" = ["_decide.py", "_dispatch.py", "_present.py", "_routing.py"]
 "tests" = ["_chat_inbound.py", "_dispatch.py", "harness_turn.py", "node.py"]

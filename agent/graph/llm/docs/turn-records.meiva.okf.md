@@ -19,7 +19,10 @@ Cancelled stays with the node. Only a success whose command carries `messages`
 closes the heartbeat circuit breaker — the cancel-shaped return never does (no
 stream completed; the partial generation was discarded).
 
-Every completed turn persists through `persist_last_active`: `last_active_at`
+Every completed turn persists through `persist_last_active` (`agent/graph/turn_stamp.py`) — the native `llm`
+node and the external-harness `harness_turn` node both call it, so a harness
+agent's `get_last_message` answers with its reply instead of `None` (#5511):
+`last_active_at`
 always advances (the heartbeat daemon's idle clock — the ops lifecycle
 deliberately never writes it), `last_turn_fatal_at` clears the corpse marker,
 `permanent_reject_streak` and its reason reset (the recovery breaker's only

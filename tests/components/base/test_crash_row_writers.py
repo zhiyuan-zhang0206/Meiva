@@ -57,7 +57,7 @@ def test_marker_clear_sites_are_enumerated() -> None:
         if _MARKER_CLEAR.search(path.read_text(encoding="utf-8"))
     }
     assert clearers == {
-        "agent/graph/llm/node.py",
+        "agent/graph/claim/turn_stamp.py",
         "ops/agents/wake.py",
     }
 
