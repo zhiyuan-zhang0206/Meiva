@@ -56,8 +56,8 @@ export function NoticeQuestionForm({
 
   if (question.type === "text") {
     return (
-      <div className="space-y-2">
-        <label htmlFor={fieldId} className="text-sm font-medium">{t("openQuestion")}</label>
+      <div className="space-y-1.5">
+        <label htmlFor={fieldId} className="text-xs font-medium">{t("openQuestion")}</label>
         <Textarea
           id={fieldId}
           ref={textRef}
@@ -65,7 +65,7 @@ export function NoticeQuestionForm({
           onChange={(e) => setDraft({ ...draft, text: e.target.value })}
           placeholder={t("openPlaceholder")}
           disabled={pending}
-          className="min-h-28 text-base sm:text-sm"
+          className="min-h-20 rounded-md py-1.5 text-[13px] md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base"
         />
       </div>
     );
@@ -78,12 +78,12 @@ export function NoticeQuestionForm({
       optionIds: single ? [id] : checked ? [...draft.optionIds, id] : draft.optionIds.filter((v) => v !== id),
     });
   };
-  const optionClass = cn(FLEX, "min-h-12 cursor-pointer items-start gap-3 rounded-xl border px-4 py-3 text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
+  const optionClass = cn(FLEX, "cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-[13px] leading-snug transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
 
   return (
-    <div className="space-y-4">
-      <fieldset disabled={pending} className="space-y-2 disabled:opacity-60">
-        <legend className="mb-3 text-sm font-medium">{single ? t("singleSelect") : t("multiSelect")}</legend>
+    <div className="space-y-2.5">
+      <fieldset disabled={pending} className="space-y-1.5 disabled:opacity-60">
+        <legend className="mb-1.5 text-xs text-muted-foreground">{single ? t("singleSelect") : t("multiSelect")}</legend>
         {question.options.map((option, index) => {
           const selected = draft.optionIds.includes(option.id);
           return (
@@ -93,26 +93,26 @@ export function NoticeQuestionForm({
                 name={fieldId}
                 checked={selected}
                 onChange={(e) => choose(option.id, e.target.checked)}
-                className="mt-0.5 size-4 shrink-0 accent-primary"
+                className="mt-0.5 size-3.5 shrink-0 accent-primary"
               />
               <span className={cn("break-words", MIN_W_0)}>
                 <span className="font-medium">{index + 1}. {option.label}</span>
-                {option.description && <span className="mt-1 block text-sm text-muted-foreground">{option.description}</span>}
+                {option.description && <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{option.description}</span>}
               </span>
             </label>
           );
         })}
 
       </fieldset>
-      <div className="space-y-2 border-t border-border/60 pt-4">
-        <label htmlFor={`${fieldId}-comment`} className="text-sm font-medium">{t("comment")}</label>
+      <div className="space-y-1.5">
+        <label htmlFor={`${fieldId}-comment`} className="text-xs font-medium">{t("comment")}</label>
         <Textarea
           id={`${fieldId}-comment`}
           value={draft.comment}
           onChange={(e) => setDraft({ ...draft, comment: e.target.value })}
           disabled={pending}
           placeholder={t("commentPlaceholder")}
-          className="min-h-24 text-base sm:text-sm"
+          className="min-h-14 rounded-md py-1.5 text-[13px] md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base"
         />
       </div>
     </div>

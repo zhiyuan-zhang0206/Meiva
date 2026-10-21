@@ -22,6 +22,9 @@ renders.
 The question and the to-user document share one vertical scroll container.
 Neither the question area nor the document body has a nested scrollbar; long
 choices, comments and document content remain in one continuous reading flow.
+Question controls use the timeline's 13px body size and compact row spacing.
+Touch inputs retain their 16px baseline; a narrow desktop column still uses 13px.
+The notice bar carries the response status once; question details do not repeat it.
 Switching agents or navigating to another referenced document resets this shared
 reading position to the top.
 

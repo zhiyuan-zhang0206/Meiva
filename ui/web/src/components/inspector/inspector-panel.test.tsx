@@ -650,7 +650,7 @@ describe("InspectorPanel", () => {
     await waitFor(() => expect(screen.getByText("Notice")).toBeTruthy());
     expect(screen.getByText("P0")).toBeTruthy();
     expect(screen.getByText("Blocking")).toBeTruthy();
-    expect(screen.getByText("Needs your answer")).toBeTruthy();
+    expect(screen.queryByText("Needs your answer")).toBeNull();
     expect(
       screen.getByText(`${formatRelative(createdAt)}, ${formatAbsolute(createdAt)}`),
     ).toBeTruthy();
@@ -787,7 +787,7 @@ describe("InspectorPanel", () => {
     expect(send.hasAttribute("disabled")).toBe(false);
   });
 
-  it("labels every notice as needing an answer", async () => {
+  it("shows a nonblocking question without redundant answer status", async () => {
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         notice: {
@@ -803,7 +803,8 @@ describe("InspectorPanel", () => {
     );
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.getByText("Needs your answer")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Milestone reached")).toBeTruthy());
+    expect(screen.queryByText("Needs your answer")).toBeNull();
     expect(screen.queryByText("Blocking")).toBeNull();
     expect(screen.getByText("P2")).toBeTruthy();
     expect(screen.getByText("Milestone reached")).toBeTruthy();
