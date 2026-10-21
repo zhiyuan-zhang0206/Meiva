@@ -464,6 +464,22 @@ HOST_TOOLS: tuple[HostTool, ...] = (
         repair="install the Apple Command Line Tools: `xcode-select --install`",
     ),
     HostTool(
+        name="security",
+        when="macOS with the permissions helper: unlocks the keychain that holds the certificate it is signed with",
+        component=None,
+        needed=_needs_macos_helper,
+        probe=_which_probe("security"),
+        repair="`security` ships with macOS; repair /usr/bin/security before starting",
+    ),
+    HostTool(
+        name="openssl",
+        when="macOS with the permissions helper, first build on the host: creates that certificate",
+        component=None,
+        needed=_needs_macos_helper,
+        probe=_which_probe("openssl"),
+        repair="`openssl` ships with macOS at /usr/bin/openssl; repair it before starting",
+    ),
+    HostTool(
         name="sh",
         when="always: every supervised service and OS job line launches through /bin/sh",
         component=None,

@@ -15,7 +15,7 @@ from base.config import settings
 from base.host.permissions_helper.client import HelperFactory
 from base.host.proc import run_bounded
 from base.paths import logs_dir, meiva_home, permissions_helper_socket
-from services.desktop.permissions_helper import hardened_runtime
+from services.desktop.permissions_helper import hardened_runtime, signing_identity
 from services.desktop.permissions_helper.build_state import (
     BUILD_STATE_NAME,
     BuildState,
@@ -50,10 +50,14 @@ _DESIGNATED_REQUIREMENT_RE = re.compile(r"^(?:# )?designated => (.+)$", re.MULTI
 # Every tool below is local and has no network leg, so a bound only catches a wedged tool. It turns that wait into a failed converge step, which the update path already knows how to abort and recover from. None of these is a performance budget -- each sits well above what the work costs.
 #
 # The bound is applied by `base.host.proc.run_bounded`, not `subprocess.run(timeout=)`, which kills only the process Python spawned and leaves its descendants running. Every git-driving module bounds git through the same helper.
+#
+# `security` is here for the keychain unlock, import and identity reads of the signing identity -- local IPC; `openssl` generates one 2048-bit key and one PKCS#12 archive, once per host.
 TIMEOUTS_S = {
     "swiftc": 300.0,  # one small file; the ceiling only catches a wedged toolchain
     "codesign": 60.0,  # signs a few-MB bundle in well under a second
     "launchctl": 30.0,  # local IPC with launchd
+    "security": 30.0,
+    "openssl": 60.0,
 }
 
 # Stands in for the exit status of a call the bound killed. 124 is `timeout(1)`'s
@@ -72,9 +76,17 @@ class PermissionsHelperTimeoutError(PermissionsHelperBuildError): ...
 
 
 # meiva:note
+# Each tool is known by its name, whatever path it was invoked through: the
+# signing identity names `/usr/bin/security` and `/usr/bin/openssl` absolutely so
+# a Homebrew `openssl` cannot shadow them.
+def _bound(cmd: list[str]) -> float:
+    return TIMEOUTS_S[Path(cmd[0]).name]
+
+
+# meiva:note
 # Run a step that must succeed, raising `PermissionsHelperBuildError` if it does not -- including when it outlived its `TIMEOUTS_S` bound, which is a failure of the same kind and is reported as one so the converge step aborts rather than blocks.
 def run_tool(cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
-    timeout = TIMEOUTS_S[cmd[0]]
+    timeout = _bound(cmd)
     try:
         proc = run_bounded(cmd, timeout=timeout, capture_output=True)
     except subprocess.TimeoutExpired as exc:
@@ -95,7 +107,7 @@ def run_tool(cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
 def run_readonly_query(
     cmd: list[str], *, timeout: float | None = None
 ) -> subprocess.CompletedProcess[bytes]:
-    bound = TIMEOUTS_S[cmd[0]] if timeout is None else timeout
+    bound = _bound(cmd) if timeout is None else timeout
     try:
         return run_bounded(cmd, timeout=bound, capture_output=True)
     except subprocess.TimeoutExpired:
@@ -113,6 +125,7 @@ def source_content_hash() -> str:
         digest.update(path.relative_to(LOCALES).as_posix().encode() + path.read_bytes())
     # A signing-policy change is a new artifact, never an in-place re-sign.
     digest.update(" ".join(hardened_runtime.SIGNING_OPTIONS).encode())
+    digest.update(signing_identity.policy().encode())
     return digest.hexdigest()
 
 
@@ -192,9 +205,11 @@ def _replaces_installed(exe: Path, destination: Path | None) -> bool:
 
 
 # meiva:note
-# Compile and ad-hoc sign the helper; return (app bundle path, rebuilt).
+# Compile and sign the helper with the fixed identity; return (app bundle path, rebuilt).
 #
-# Skips the compile + sign only when the installed bundle is valid and its recorded content hash matches every build input. Checkout mtimes therefore cannot churn the binary or its TCC identity. A stale installed bundle is rebuilt in place, only when `_replaces_installed` admits it. A rebuild is a new code identity: macOS asks for the desktop grants again.
+# Skips the compile + sign only when the installed bundle is valid and its recorded content hash matches every build input. Checkout mtimes therefore cannot churn the binary or its TCC identity. A stale installed bundle is rebuilt in place, only when `_replaces_installed` admits it. A rebuild is only a new code identity when the certificate changes: the designated requirement names the certificate, not the code hash, so the desktop grants survive it.
+#
+# The signature this build will carry is settled before anything is removed. A host whose recorded requirement names a certificate has nothing to fall back to, so a missing identity stops the build here rather than after the old artifact is gone.
 # meiva:link services/docs/agent_runner_side/permissions-helper/authorization.meiva.okf.md
 def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     build_dir = build_directory(destination)
@@ -206,6 +221,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
 
     if _installed_build_is_current(app, state, source_hash):
         return app, False
+    _require_signing_identity(state)
     replacing = _replaces_installed(exe, destination)
 
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -223,18 +239,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
         shutil.copytree(lproj, app / "Contents" / "Resources" / lproj.name, dirs_exist_ok=True)
 
     run_tool(
-        [
-            "codesign",
-            "--force",
-            "--sign",
-            "-",
-            *hardened_runtime.SIGNING_OPTIONS,
-            "--entitlements",
-            str(ENTITLEMENTS),
-            "--identifier",
-            HELPER_BUNDLE_ID,
-            str(app),
-        ]
+        signing_identity.sign_arguments(app, entitlements=ENTITLEMENTS, identifier=HELPER_BUNDLE_ID)
     )
     actual_dr = read_dr(app)
     write_build_state(state_path, source_hash, actual_dr)
@@ -244,6 +249,22 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
             "macOS permissions (Screen Recording, Accessibility, ...) need granting again\n"
         )
     return app, True
+
+
+# meiva:note
+# Whether this build may mint the signing identity, or must find it.
+#
+# No recorded requirement (first build on this host) or one that names a code
+# hash (an ad-hoc artifact) means there is nothing to lose: provisioning the
+# identity is the ordinary first step. A recorded certificate requirement means
+# the installed helper already has an identity, and a missing keychain then is a
+# deletion, not a first run -- signing anything else would cost every grant.
+def _require_signing_identity(state: BuildState | None) -> None:
+    create = state is None or "certificate" not in state["dr"]
+    try:
+        signing_identity.ensure(run_tool, create=create)
+    except signing_identity.SigningIdentityError as exc:
+        raise PermissionsHelperBuildError(str(exc)) from exc
 
 
 def label() -> str:

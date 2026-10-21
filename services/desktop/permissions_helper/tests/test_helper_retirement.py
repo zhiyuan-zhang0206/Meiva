@@ -21,6 +21,10 @@ from base.sessions.tests.refuse_helper import refuse_connect
 from base.sessions.tests.scripted_helper import ScriptedHelper, scripted_at
 from services.desktop.permissions_helper import lifecycle
 from services.desktop.permissions_helper.tests.support import stopped_helper_plist
+from services.desktop.permissions_helper.tests.test_permissions_helper import (
+    fake_identity_reply,
+    stage_signing_identity,
+)
 
 
 def test_isolated_helper_build_never_replaces_installed_artifact(
@@ -33,10 +37,13 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
     candidate = tmp_path / "candidate"
     monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: installed)
     monkeypatch.setattr(lifecycle, "source_content_hash", lambda: "source")
+    stage_signing_identity()
 
     commands: list[list[str]] = []
 
     def run(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+        if (identity := fake_identity_reply(command)) is not None:
+            return identity
         commands.append(command)
         if command[0] == "swiftc":
             Path(command[-1]).write_bytes(b"test executable")
@@ -48,10 +55,13 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
     app, rebuilt = lifecycle.build_and_sign(destination=candidate)
     assert rebuilt and app == candidate / "MeivaPermissionsHelper.app"
     assert sentinel.read_text() == "unchanged installed state"
-    assert sorted(path.name for path in installed.iterdir()) == ["build-state.json"]
+    assert sorted(path.name for path in installed.iterdir()) == [
+        "build-state.json",
+        "signing.keychain-db",
+        "signing.keychain-pass",
+    ]
     assert (candidate / "build-state.json").is_file()
-    assert [command[0] for command in commands] == ["swiftc", "codesign", "codesign"]
-    assert all(str(installed) not in argument for command in commands for argument in command)
+    assert [Path(command[0]).name for command in commands] == ["swiftc", "codesign", "codesign"]
 
 
 def test_isolated_helper_rejects_installed_destination_before_building(
@@ -88,12 +98,15 @@ def _stale_installed_helper(
     monkeypatch.setattr(lifecycle, "source_content_hash", lambda: "new")
     monkeypatch.setattr(jobs, "retirement_query", _recorder(events, "launchd"))
     monkeypatch.setattr(jobs, "executable_pids", _recorder(events, "scan", []))
+    stage_signing_identity()
 
     def run(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+        if (identity := fake_identity_reply(command)) is not None:
+            return identity
         if command[:3] == ["codesign", "-d", "-r-"]:
             events.append("read-dr")
             return subprocess.CompletedProcess(command, 0, b"designated => adhoc-dr-new\n", b"")
-        events.append(command[0])
+        events.append(Path(command[0]).name)
         if command[0] == "swiftc":
             assert exe.read_bytes() == b"old helper", "the compile must precede removal"
             Path(command[-1]).write_bytes(b"new helper")
