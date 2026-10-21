@@ -131,7 +131,32 @@ ACCESSIBILITY_ITEM = PermissionItem(
     ping_key="ax_trusted",
 )
 
-DESKTOP_ITEMS: tuple[PermissionItem, ...] = (SCREEN_ITEM, ACCESSIBILITY_ITEM)
+# meiva:note
+# App Management has no request path this helper can take: `requestGrants` asks only
+# Screen Recording and Accessibility, and macOS stops asking once a denial is on record.
+# The row is therefore SYSTEM_SETTINGS -- an honest "turn it on in this pane" rather than
+# an Ask button that cannot raise the dialog (#5481).
+# meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
+APP_MANAGEMENT_ITEM = PermissionItem(
+    id="app-management",
+    group="desktop",
+    title="App Management",
+    why=(
+        "Replace or update another app's bundle, and install components into it, without"
+        ' macOS answering "Meiva would like to access data from other apps" and then'
+        " refusing the install."
+    ),
+    mode=RequestMode.SYSTEM_SETTINGS,
+    pane="Privacy_AppBundles",
+    verify=(
+        "Privacy & Security > App Management shows Meiva's row turned on, and a real"
+        " install or update of another app no longer raises the dialog. macOS asks at most"
+        " once and never again after a denial, so this row is turned on here by hand."
+    ),
+    services=("kTCCServiceSystemPolicyAppBundles",),
+)
+
+DESKTOP_ITEMS: tuple[PermissionItem, ...] = (SCREEN_ITEM, ACCESSIBILITY_ITEM, APP_MANAGEMENT_ITEM)
 
 REPORT_ONLY_ITEMS: tuple[PermissionItem, ...] = (
     PermissionItem(

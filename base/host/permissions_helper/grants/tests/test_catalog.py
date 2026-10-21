@@ -35,12 +35,30 @@ def test_required_set_is_the_product_desktop_surface() -> None:
     assert {
         "screen-recording",
         "accessibility",
+        "app-management",
         "desktop-folder",
         "documents-folder",
         "downloads-folder",
         *(f"automation-{suffix}" for suffix, _ in catalog.AUTOMATION_TARGETS),
     } == required
     assert all(not item.required for item in catalog.REPORT_ONLY_ITEMS)
+
+
+# meiva:note
+# App Management is the one row no dialog can grant today: the helper's requestGrants
+# asks Screen Recording and Accessibility only, and macOS will not ask again once a
+# denial is recorded, so the row must send the person to the pane by hand (#5481).
+def test_app_management_sends_the_person_to_its_pane_instead_of_asking() -> None:
+    item = catalog.ITEMS_BY_ID["app-management"]
+    assert item.mode is RequestMode.SYSTEM_SETTINGS
+    assert item.required
+    assert item.group == "desktop"
+    assert item.services == ("kTCCServiceSystemPolicyAppBundles",)
+    assert item.pane == "Privacy_AppBundles"
+    assert catalog.settings_url(item).endswith("?Privacy_AppBundles")
+    assert "App Management" in item.verify
+    assert "no longer raises the dialog" in item.verify
+    assert "by hand" in item.verify
 
 
 def test_report_only_rows_are_never_prompted() -> None:

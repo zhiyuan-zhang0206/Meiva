@@ -40,7 +40,7 @@ def test_a_missing_row_carries_the_restart_note_where_macos_needs_one() -> None:
 def test_the_text_checklist_names_the_missing_item_and_the_recheck_verb() -> None:
     text = checklist.render_text(_report(**{"desktop-folder": Grant.DENIED}))
     assert "Desktop folder" in text
-    assert "1 of 10 required authorizations are not granted." in text
+    assert "1 of 11 required authorizations are not granted." in text
     assert "meiva permissions status" in text
     assert "x-apple.systempreferences" in text
 
@@ -54,10 +54,25 @@ def test_a_complete_host_says_so_and_lists_no_actions() -> None:
 def test_the_payload_counts_only_required_rows() -> None:
     payload = checklist.payload(_report(**{"documents-folder": Grant.DENIED}))
     assert payload["state"] == "action_required"
-    assert payload["required_total"] == 10
+    assert payload["required_total"] == 11
     assert payload["required_missing"] == 1
     assert len(payload["items"]) == len(CATALOG)
     assert payload["headline"] == checklist.headline(_report(**{"documents-folder": Grant.DENIED}))
+
+
+# meiva:note
+# A denied App Management row is the one case the dialog can never resolve again: the
+# text must open the App Management pane and say the grant is switched on there (#5481).
+def test_a_denied_app_management_row_opens_its_pane_and_says_it_is_turned_on_by_hand() -> None:
+    rows = {row.id: row for row in checklist.rows(_report(**{"app-management": Grant.DENIED}))}
+    row = rows["app-management"]
+    assert row.state is Grant.DENIED
+    assert row.blocking
+    assert row.state_label == "denied -- turn it on in System Settings"
+    assert row.jump.endswith("?Privacy_AppBundles")
+    text = checklist.render_text(_report(**{"app-management": Grant.DENIED}))
+    assert "Privacy & Security > App Management" in text
+    assert "by hand" in text
 
 
 def test_a_row_meiva_never_requests_does_not_read_as_an_action() -> None:
