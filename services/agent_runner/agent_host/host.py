@@ -369,6 +369,29 @@ class AgentHost:
         # An earlier ordinary failure can leave a buffered tail. Preserve
         # it before accepting lifecycle intent, without replaying graph work.
         await flush_checkpoint(self._checkpointer, agent_id)
+        # meiva:note
+        # This wake can be the one that ends a takeover: the admission above closes a
+        # predecessor's lease as expired, and relay supervision closes one whose relay
+        # died. An ended automatic lease owes the native checkpoint the end-of-session
+        # note and the receipt that releases the agent's next request. Settling it only
+        # after the lifecycle command was applied missed every restart — the common
+        # path, where the release clears the incarnation and an unsettled lease then
+        # refuses every new takeover (#5467, #5492). Supervision runs first, so this
+        # settles the lease this wake actually leaves behind.
+        # meiva:link docs/conventions/agents/agent-impersonation.md
+        ended = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
+        if handoff_owed(ended):
+            await settle_checkpoint(
+                self._graph,
+                self._db,
+                self._bus,
+                agent_id,
+                self.relays,
+                activate_accepted=False,
+                incarnation=incarnation,
+                notes=self._policy.handoff_notes,
+                read_local_machine=lambda: self._machine,
+            )
         batch = await claim_inbound_batch(
             self._control_pool,
             agent_id,
@@ -388,28 +411,6 @@ class AgentHost:
             kill_shell_sessions=kill_terminating_agent_shells,
         )
         if kind is None:
-            # meiva:note
-            # This wake can be the one that ends a takeover: the admission above closes a
-            # predecessor's lease as expired, and relay supervision closes one whose relay
-            # died. An ended automatic lease owes the native checkpoint the end-of-session
-            # note and the receipt that releases the agent's next request; settling to idle
-            # without it refused every new takeover until an unrelated message happened to
-            # run a turn (#5467). Supervision runs first, so this read is the lease this
-            # wake actually leaves behind.
-            # meiva:link docs/conventions/agents/agent-impersonation.md
-            ended = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
-            if handoff_owed(ended):
-                await settle_checkpoint(
-                    self._graph,
-                    self._db,
-                    self._bus,
-                    agent_id,
-                    self.relays,
-                    activate_accepted=False,
-                    incarnation=incarnation,
-                    notes=self._policy.handoff_notes,
-                    read_local_machine=lambda: self._machine,
-                )
             await settle_hosted_runtime(
                 self._control_pool,
                 incarnation,
