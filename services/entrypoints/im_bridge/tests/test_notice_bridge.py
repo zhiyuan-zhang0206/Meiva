@@ -189,7 +189,10 @@ async def test_poll_pushes_new_notices_and_accepts_each(
 ) -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        gateway.notices = [_notice(1, "A"), _notice(2, "B")]
+        gateway.notices = [
+            _notice(1, "A", require_response=True),
+            _notice(2, "B", require_response=True),
+        ]
         bridge, adapter = _bridge(tmp_path, gateway, monkeypatch, tasks=_owned_tasks)
 
         await bridge.poll_once()
@@ -201,7 +204,7 @@ async def test_poll_pushes_new_notices_and_accepts_each(
         # with min_priority=P1: P3 FYI filtered, require_response always pushes
         bridge._filters = {"min_priority": "P1", "agent": None}
         gateway.notices = [
-            _notice(3, "low", priority="P3"),
+            _notice(3, "low", priority="P3", require_response=True),
             _notice(4, "decide", require_response=True),
         ]
         await bridge.poll_once()
@@ -270,7 +273,10 @@ async def test_filter_agent_restricts_pushes(
 ) -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        gateway.notices = [_notice(1, "from 2", agent=2), _notice(2, "from 1", agent=1)]
+        gateway.notices = [
+            _notice(1, "from 2", agent=2, require_response=True),
+            _notice(2, "from 1", agent=1, require_response=True),
+        ]
         bridge, adapter = _bridge(tmp_path, gateway, monkeypatch, tasks=_owned_tasks)
         bridge._filters = {"min_priority": None, "agent": 2}
 
@@ -518,14 +524,19 @@ def _direct_bridge(
 
 
 def _seed_notice(
-    db_conn: psycopg.Connection, agent_id: int, title: str, *, prio: str = "P2"
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    title: str,
+    *,
+    prio: str = "P2",
+    require_response: bool = False,
 ) -> int:
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
-            "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, %s, %s, false, false, now() + interval '1 day') "
+            "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, %s, %s, %s, false, now() + interval '1 day') "
             "RETURNING id",
-            (agent_id, agent_id, title, prio),
+            (agent_id, agent_id, title, prio, require_response),
         )
         row = cur.fetchone()
         assert row is not None
@@ -556,7 +567,9 @@ def test_poll_reads_directly_from_db(
         machine=machine_identity,
     )
     bridge, adapter, pool = _direct_bridge(db_conn, tmp_path, monkeypatch)
-    nid = _seed_notice(db_conn, agent_id, "direct db notice")  # after the cutover is fixed
+    nid = _seed_notice(
+        db_conn, agent_id, "direct db notice", require_response=True
+    )  # after the cutover is fixed
     try:
         asyncio.run(bridge.poll_once())
         asyncio.run(bridge.core.outbound_worker.run_once())
@@ -567,7 +580,7 @@ def test_poll_reads_directly_from_db(
         # Resolved notices stop being returned.
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE agent_notices SET resolved_at = now(), resolution = 'read' WHERE id = %s",
+                "UPDATE agent_notices SET resolved_at = now(), resolution = 'dismissed' WHERE id = %s",
                 (nid,),
             )
         db_conn.commit()
@@ -668,7 +681,9 @@ def test_unaccepted_notices_caps_at_display_default(
         db_conn, tmp_path, monkeypatch, notices_open_default_limit=2
     )
     for i in range(3):
-        _seed_notice(db_conn, agent_id, f"live item {i}")  # after the cutover is fixed
+        _seed_notice(
+            db_conn, agent_id, f"live item {i}", require_response=True
+        )  # after the cutover is fixed
     try:
         rows = bridge._unaccepted_notices()
         assert len(rows) == 2
@@ -702,7 +717,11 @@ async def test_poll_accepts_before_uncertain_send_and_never_retries(
 ) -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        gateway.notices = [_notice(1, "A"), _notice(2, "B"), _notice(3, "C")]
+        gateway.notices = [
+            _notice(1, "A", require_response=True),
+            _notice(2, "B", require_response=True),
+            _notice(3, "C", require_response=True),
+        ]
         bridge, _ = _bridge(tmp_path, gateway, monkeypatch, tasks=_owned_tasks)
         flaky = _FlakyAdapter(fail_first=1)
         bridge.core.adapters["telegram"] = flaky  # type: ignore[assignment]
@@ -738,7 +757,7 @@ async def test_poll_holds_acceptance_when_adapter_absent(
     Acceptance must hold instead."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        gateway.notices = [_notice(1, "A")]
+        gateway.notices = [_notice(1, "A", require_response=True)]
         bridge, _ = _bridge(tmp_path, gateway, monkeypatch, tasks=_owned_tasks)
         bridge.core.adapters.pop("telegram")
 

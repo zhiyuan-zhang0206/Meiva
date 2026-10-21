@@ -46,6 +46,7 @@ class NoticePollStore:
         intent: OutboundIntent | None,
         *,
         filtered: bool,
+        filtered_reason: str | None = None,
     ) -> NoticePollReceipt:
         """Freeze one normal-poll decision with its shared outbound intent.
 
@@ -73,6 +74,7 @@ class NoticePollStore:
             request = {
                 "source": snapshot,
                 "intent": intent.model_dump(mode="json") if intent else None,
+                "filtered_reason": filtered_reason,
             }
             conn.execute(
                 "INSERT INTO im_bridge_notice_acceptances (notice_id,decision,request,intent_ids) "
