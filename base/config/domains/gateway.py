@@ -135,6 +135,25 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    upload_recovery_claim_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        alias="MEIVA_UPLOAD_RECOVERY_CLAIM_SECONDS",
+        description=(
+            "How long (seconds) one upload-recovery claim hides a due batch from other "
+            "workers: `due()` pushes the row's next_attempt_at this far ahead as it returns "
+            "it, so two gateways sharing a database never copy the same batch twice. A "
+            "failed copy overwrites the claim with its own backoff; a worker that dies "
+            "mid-copy delays that batch by at most this window."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     notification_outbox_batch: int = Field(
         default=100,
         ge=1,

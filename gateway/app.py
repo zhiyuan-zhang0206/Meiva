@@ -286,6 +286,7 @@ async def lifespan(
                 app.state.db,
                 app.state.bus,
                 machine=process.machine,
+                claim_seconds=settings.gateway.upload_recovery_claim_seconds,
             )
             app.state.upload_recovery = upload_recovery
 

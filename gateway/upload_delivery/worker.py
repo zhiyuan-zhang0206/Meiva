@@ -60,9 +60,11 @@ class UploadRecovery:
         bus: EventBus,
         *,
         machine: MachineIdentity,
+        claim_seconds: float,
     ) -> None:
         self.pool, self.db, self.bus = pool, db, bus
         self.machine = machine
+        self.claim_seconds = claim_seconds
         self.stopped = asyncio.Event()
         self.calls: set[asyncio.Future[Any]] = set()
         self.task: asyncio.Task[None] | None = None
@@ -113,7 +115,13 @@ class UploadRecovery:
                 await asyncio.wait_for(self.stopped.wait(), timeout=5.0)
 
     async def round(self) -> None:
-        requests = await self.native(source.due, self.pool, 4, local_machine=self.machine.name())
+        requests = await self.native(
+            source.due,
+            self.pool,
+            4,
+            local_machine=self.machine.name(),
+            claim_seconds=self.claim_seconds,
+        )
         async with asyncio.TaskGroup() as group:
             for request in requests:
                 group.create_task(self.copy(request))

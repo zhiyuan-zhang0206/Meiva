@@ -25,6 +25,11 @@ from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
 from gateway.upload_delivery import worker
 from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
+# meiva:note
+# The recovery worker's claim lease for a constructed worker: these tests drive one
+# batch at a time, so any positive lease behaves the same here.
+_CLAIM_SECONDS = 300.0
+
 
 @pytest.mark.parametrize("stage", ["before-link", "after-link"])
 def test_hard_death_native_temp_not_double_charged_or_cleaned(
@@ -140,6 +145,7 @@ async def test_shutdown_drains_native_future_after_cancelled_http_wait(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        claim_seconds=_CLAIM_SECONDS,
     )
     entered, finish = threading.Event(), threading.Event()
 
@@ -191,6 +197,7 @@ async def test_accepted_upload_wakes_once_and_a_lost_wake_is_not_repeated(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        claim_seconds=_CLAIM_SECONDS,
     )
     await recovery.round()
     await recovery.round()
@@ -232,6 +239,7 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        claim_seconds=_CLAIM_SECONDS,
     )
     # Bound here, not as a fixture: the gateway of `uploaded_agent` binds its own pipeline first.
     with capturing_events() as emitted_events:
@@ -279,6 +287,7 @@ async def test_a_stopped_recovery_skips_new_copy_and_db_round(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        claim_seconds=_CLAIM_SECONDS,
     )
     recovery.stopped.set()
     await recovery.copy(request)
@@ -298,6 +307,7 @@ async def test_cancelled_shutdown_wait_still_drains_actual_native_writer(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        claim_seconds=_CLAIM_SECONDS,
     )
     entered, finish = threading.Event(), threading.Event()
 
