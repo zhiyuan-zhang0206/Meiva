@@ -39,8 +39,6 @@ class LeaseRecord(TypedDict):
     ack_window_seconds: Any
     agent_id: Any
     applied_version: Any
-    automatic: Any
-    consent_version: Any
     delta_version: Any
     expires_at: Any
     handoff_applied_at: Any
@@ -77,18 +75,13 @@ RELAY_FAILURE_STAMP_SECONDS = 600
 
 def is_log_native(lease: Mapping[str, Any]) -> bool:
     """Whether this lease records its events in its own entries (protocol v2)."""
-    return (
-        lease["automatic"] is True
-        and lease["event_delivery_protocol_version"] == LOG_PROTOCOL_VERSION
-    )
+    return lease["event_delivery_protocol_version"] == LOG_PROTOCOL_VERSION
 
 
 def pending_reason(lease: Mapping[str, Any]) -> str | None:
     """Classify a handoff's current delivery uncertainty without inventing state."""
     if lease["events_completed_at"] is not None:
         return None
-    if lease["automatic"] is not True:
-        return "manual"
     if lease["event_delivery_protocol_version"] != LOG_PROTOCOL_VERSION:
         return "legacy"
     stored = lease["event_delivery_pending_reason"]

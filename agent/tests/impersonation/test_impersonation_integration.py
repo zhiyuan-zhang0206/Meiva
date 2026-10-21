@@ -12,7 +12,6 @@ from agent.extensions.plugin_state_codec import encode_plugin_delta
 from agent.impersonation import settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.tests.impersonation.handoff_inputs import (
-    assert_consent_tool_result_checkpointed,
     assert_end_note_and_handoff_document,
     assert_handoff_precedes_queued_input,
     assert_resumed_transcript,
@@ -38,7 +37,7 @@ from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 @pytest.mark.parametrize("finish", ["release", "expire"])
 @pytest.mark.usefixtures("runner_exec_env")
-async def test_consent_exec_inbox_release_and_resume(
+async def test_takeover_inbox_release_and_resume(
     hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -110,7 +109,6 @@ async def test_consent_exec_inbox_release_and_resume(
         (requested["id"],),
     )
     db_conn.commit()
-    await assert_consent_tool_result_checkpointed(saver, config)
     second_peer = deliver_peers_and_ack_first(
         db_conn, database, event_bus, requested, agent_id, machine_identity=machine_identity
     )
@@ -121,7 +119,7 @@ async def test_consent_exec_inbox_release_and_resume(
         context=replace(ctx, original_incarnation=owner, hosted_resources=scope),
     )
     await flush_checkpoint(saver, agent_id)
-    assert len(model_calls) == 1
+    assert model_calls == []
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (second_peer,)
     ).fetchone() == ("pending",)
@@ -155,8 +153,16 @@ async def test_consent_exec_inbox_release_and_resume(
     )
     await flush_checkpoint(saver, agent_id)
     assert resumed["handoff__total"] == 7
-    assert len(model_calls) == 2
+    assert len(model_calls) == 1
     assert_resumed_transcript(resumed, finish)
+    document = db_conn.execute(
+        "SELECT handoff_document FROM agent_impersonations WHERE id=%s", (requested["id"],)
+    ).fetchone()
+    assert document is not None
+    assert [(m["payload"]["content"], m["acknowledged"]) for m in document[0]["messages"]] == [
+        ("Peer message acknowledged", True),
+        ("Peer message still pending", False),
+    ]
     assert not await settle_checkpoint(
         graph,
         database,
@@ -189,7 +195,6 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         db_conn,
         aops_pool,
         monkeypatch,
-        automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
@@ -300,14 +305,13 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
         db_conn,
         aops_pool,
         monkeypatch,
-        automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
     monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         requested["id"],
@@ -366,7 +370,6 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         db_conn,
         aops_pool,
         monkeypatch,
-        automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
@@ -454,7 +457,6 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
         db_conn,
         aops_pool,
         monkeypatch,
-        automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,

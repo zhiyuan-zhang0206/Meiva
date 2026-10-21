@@ -27,7 +27,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from base.agents.lifecycle import (
-    AgentImpersonation,
     AgentRestart,
     AgentTermination,
     LifecycleExit,
@@ -117,7 +116,7 @@ type ExecResult = ExecDone | ExecCancelled | ExecTimedOut | ExecLifecycle | Exec
 # parent turns a missing name into an ExecChildError crash; the dispatcher's
 # exhaustive TypeError separately guards any in-process `LifecycleExit` callers.
 _LIFECYCLE_BY_NAME: dict[str, type[LifecycleExit]] = {
-    cls.__name__: cls for cls in (AgentTermination, AgentRestart, AgentImpersonation, SystemHalt)
+    cls.__name__: cls for cls in (AgentTermination, AgentRestart, SystemHalt)
 }
 
 

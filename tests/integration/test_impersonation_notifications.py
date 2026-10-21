@@ -8,18 +8,21 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 from langchain_core.messages import BaseMessage
-from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import StateGraph
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.graph.claim.node import claim_node
+from agent.impersonation import settle_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.state import BaseAgentState
 from base.agents import impersonation as leases
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
+from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
@@ -68,8 +71,10 @@ def test_reminder_commands_are_bare_meiva(
         relay_thread_id=str(uuid4()),
         authority=config_authority,
         local_machine=local_machine,
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -131,6 +136,8 @@ def test_request_rejects_a_malformed_invoked_python(
             relay_thread_id=str(uuid4()),
             authority=config_authority,
             local_machine=local_machine,
+            name="Test name",
+            executor_name="Test executor_name",
         )
 
 
@@ -139,7 +146,6 @@ async def _termination_session(
     aops_pool: AsyncConnectionPool,
     *,
     status: str = "active",
-    automatic: bool = False,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     local_machine: str,
@@ -169,12 +175,11 @@ async def _termination_session(
         executor_name="test executor",
         process_metadata=recorded_tree(),
         relay_provider="claude",
-        automatic=automatic,
         authority=config_authority,
         local_machine=local_machine,
     )
     if status in ("accepted", "active"):
-        leases.accept(
+        leases.prepare(
             Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             session["id"],
@@ -212,8 +217,6 @@ async def _terminate_native(
     *,
     local_machine: str,
 ) -> None:
-    config: RunnableConfig = {"configurable": {"thread_id": str(owner.agent_id)}}
-    state = BaseAgentState(impersonation_request_id=f"{session['id']}:1")
     with pool(
         max_size=2,
         gate=database_gate,
@@ -229,15 +232,10 @@ async def _terminate_native(
                 source="user",
                 message=None,
             )
-            if mode == "live":
-                accepted = await claim_node(state, runtime, config)
-                assert accepted.goto == "__end__"
-                assert "Termination was accepted" in str(accepted.update)
-            else:
-                batch = await claim_inbound_batch(
-                    aops_pool, owner.agent_id, lifecycle_only=True, incarnation=owner
-                )
-                assert [item.id for item in batch] == [terminate_id]
+            batch = await claim_inbound_batch(
+                aops_pool, owner.agent_id, lifecycle_only=True, incarnation=owner
+            )
+            assert [item.id for item in batch] == [terminate_id]
             assert _native_notices(db_conn, owner.agent_id) == []
             assert (
                 await apply_hosted_lifecycle(
@@ -258,7 +256,7 @@ async def _terminate_native(
     ).fetchone() == ("terminated",)
 
 
-@pytest.mark.parametrize("mode", ["live", "drained", "force", "delayed_resurrection"])
+@pytest.mark.parametrize("mode", ["drained", "force", "delayed_resurrection"])
 async def test_termination_notices_precede_resurrection_in_native_claim(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -274,7 +272,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
     owner, session = await _termination_session(
         db_conn,
         aops_pool,
-        status="requested" if mode == "live" else "active",
+        status="active",
         config_authority=config_authority,
         database_gate=database_gate,
         local_machine=local_machine,
@@ -320,6 +318,20 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
     )
     assert successor is not None
     runtime = Runtime(context=replace(runtime.context, original_incarnation=successor))
+    builder: Any = StateGraph(BaseAgentState, context_schema=MeivaContext)
+    builder.add_node("claim", claim_node, destinations=("__end__",))
+    builder.set_entry_point("claim")
+    graph = builder.compile(checkpointer=InMemorySaver())
+    assert not await settle_checkpoint(
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        runtime.context.relays,
+        incarnation=successor,
+        notes=HandoffNotes(Clock.from_settings, lambda: False),
+        read_local_machine=machine_identity.name,
+    )
     resumed = await claim_node(
         BaseAgentState(), runtime, {"configurable": {"thread_id": str(owner.agent_id)}}
     )
@@ -372,7 +384,6 @@ async def test_termination_closes_automatic_preparation_and_dismisses_reminders(
         db_conn,
         aops_pool,
         status=status,
-        automatic=True,
         config_authority=config_authority,
         database_gate=database_gate,
         local_machine=local_machine,

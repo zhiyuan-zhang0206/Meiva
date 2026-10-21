@@ -19,13 +19,14 @@ to false for older checkpoints. The context-establishment node restores the
 explanation after compaction without claiming a lease is active; agents that
 have never encountered a takeover carry no impersonation guidance.
 
-The claim gate accepts named automatic requests without a model decision and
+Only Meiva harness targets support impersonation. The claim gate prepares named requests without a model decision and
 ends the invocation. The driver drains resources, reconciles the session's
 checkpoint marker (including an accepted request whose initial write failed),
 flushes it and verifies relay readiness before activation. Hosted turns return
 their slot and reject ordinary active-session wakes before runtime preparation.
-The legacy consent version and accept/reject calls remain available only for
-requests already created by older clients during an upgrade.
+There is no agent consent prompt, accept/reject SDK, or consent checkpoint channel.
+The upgrade retires open legacy manual leases and unsupported external-harness leases;
+Meiva targets finish their return through the same checkpoint handoff path.
 
 Relay recovery uses existing claim and lease-control supervision opportunities;
 see [[agent/docs/impersonation/relay-supervision.meiva.okf.md]] for exit evidence,
@@ -75,7 +76,7 @@ reducer twice. Core lifecycle fields cannot be changed by plugin deltas.
 Tests: `agent/tests/impersonation/test_impersonation.py` covers gates, receipt recovery,
 and fenced delivery recovery;
 `agent/tests/impersonation/test_impersonation_integration.py` exercises PostgreSQL, buffered
-checkpoints, the compiled graph, a real exec child, peer inbox acknowledgement,
+checkpoints, the compiled graph, model-free preparation, peer inbox acknowledgement,
 release summary, and native resumption with plugin state.
 `agent/tests/impersonation/test_impersonation_transport_integration.py` combines real
 PostgreSQL and a compiled graph with stubbed relay establishment. Delivery
@@ -85,35 +86,4 @@ native binding, and preserves unacknowledged input in the handoff record before
 native resumption. These tests do not start or restart a real agent host or
 Codex relay process.
 
-`agent/impersonation_handoff.py` saves one JSON file under the agent workspace,
-then appends the impersonator summary and path as the first new system note.
-The introduction, takeover, and closing notes include their creation time in
-the agent-visible text when message timestamps are enabled, using the same
-instant as their timeline metadata. Existing receipts retain their original
-notes and timestamps across retries. The process owner supplies `HandoffNotes`
-from `base.agents.impersonation.notes`, the shared input contract for controllers
-and native graph execution, with a clock factory and a live timestamp-policy
-reader. Message construction stays in the agent layer. Constructing the inputs reads
-neither input; each new note obtains its clock, captures the creation instant,
-then reads the display flag. Native graph notes use their explicit agent context;
-invocation settlement carries the same narrow inputs from the host owner.
-The stable note id and `impersonation_handoff_id` channel survive retries.
-Checkpoint flush is unconditional before setting `handoff_applied_at`; only
-that receipt consumes captured pending input and opens the normal claim gate.
-The file retains incoming ACK state and every recorded body. Input arriving
-after release remains queued behind the note. The note is the resumed input:
-while it is the newest message, claim runs its first turn even with an
-otherwise empty queue and no conversation yet, and delivery ends by publishing
-a wake so a turn ending first still resumes the agent. File or checkpoint
-errors retain the native gate. An unavailable event backend leaves accounting explicitly
-pending without blocking the control handoff; the registered agent-host event
-reconciler supplements the same file after late events become readable. The
-resume note identifies ordinary assistant text in the current conversation as
-the reply channel, then asks the native agent to review incoming requests and continue work
-whose completion is not established, regardless of message receipt status. It
-warns that missing activity entries do not prove an action never happened. In the
-record, `event_delivery` describes coverage: pending coverage is unknown, so zero
-consumed events is not a zero-call claim. The upstream
-manifest's `complete_emitted_events` coverage is only a census of emitted
-events; SDK sampling policy remains unknown, so even a completed zero SDK count
-is not a zero-call claim.
+Checkpoint return notes and event-coverage semantics are in [[impersonation-handoff.meiva.okf.md]].

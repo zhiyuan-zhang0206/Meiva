@@ -503,15 +503,15 @@ async def relay_inbox(
     max_chars: int | None = None,
     notify_terminal: bool = True,
 ) -> None:
-    """Deliver consent/start first, then respect the lease budget per pending row.
-
-    Database time and durable reservations own the ACK windows and budget;
-    local monotonic time only controls batching/rate limits. Every read
-    records exhaustion across the whole lease, even outside this inbox
-    page. Due retries precede fresh rows so arrivals cannot starve them.
-    Reserve immediately before the host call, rechecking ACK/release races.
-    A failed or ambiguous host submission spends an attempt, never an ACK.
-    """
+    # meiva:note
+    # Deliver the session start first, then respect the lease budget per pending row.
+    #
+    # Database time and durable reservations own the ACK windows and budget;
+    # local monotonic time only controls batching/rate limits. Every read
+    # records exhaustion across the whole lease, even outside this inbox
+    # page. Due retries precede fresh rows so arrivals cannot starve them.
+    # Reserve immediately before the host call, rechecking ACK/release races.
+    # A failed or ambiguous host submission spends an attempt, never an ACK.
     if not math.isfinite(debounce) or not 0 <= debounce <= _CATCHUP_SECONDS:
         raise ValueError(f"debounce must be between 0 and {_CATCHUP_SECONDS:g} seconds")
     if not math.isfinite(catchup_seconds) or catchup_seconds <= 0:

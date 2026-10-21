@@ -19,13 +19,11 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 def _session(status: str = "active", **values: Any) -> dict[str, Any]:
     return {
         "id": "lease-1",
-        "automatic": False,
-        "handoff_applied_at": None,
+        "handoff_applied_at": "already-applied",
         "process_metadata": {},
         "source": "external_agent:codex:task1",
         "status": status,
         "reason": "Finish the assigned task",
-        "consent_version": 1,
         "plugin_delta": [],
         "delta_version": 0,
         "applied_version": 0,

@@ -6,7 +6,7 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "extensions" = ["state.py"]
 "graph" = ["db", "hooks", "impersonation.py", "impersonation_handoff.py", "llm", "messages", "nodes.py", "ownership", "state.py", "state_channels.py"]
 "hooks" = ["messages", "nodes.py", "state.py", "state_channels.py"]
-"impersonation.py" = ["extensions", "impersonation_handoff.py", "impersonation_process.py", "messages", "nodes.py", "state.py"]
+"impersonation.py" = ["extensions", "impersonation_handoff.py", "impersonation_process.py", "nodes.py", "state.py"]
 "impersonation_handoff.py" = ["messages"]
 "process_boot.py" = ["startup"]
 "startup" = ["db"]
@@ -16,7 +16,6 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "turn" = ["db", "graph", "impersonation_handoff.py", "startup", "state.py", "state_channels.py"]
 
 [debt.private-module]
-"tests/impersonation/test_impersonation.py -> graph/exec/_result.py" = 1
 "tests/test_exec_subprocess.py -> graph/exec/_result.py" = 1
 "tests/test_exec_subprocess.py -> graph/exec/_stream.py" = 1
 "tests/test_exec_subprocess.py -> graph/exec/_subprocess.py" = 1

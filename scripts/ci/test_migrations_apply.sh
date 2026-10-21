@@ -499,6 +499,46 @@ BEGIN
 END $$;
 SQL
 
+# Exercise automatic-only admission and both event-log completion functions.
+echo "-> impersonation accepts only automatic Meiva takeovers"
+psql -d "$TEST_DB" -v ON_ERROR_STOP=1 -q <<'SQL'
+DO $$
+DECLARE
+    native_id BIGINT;
+    external_id BIGINT;
+    lease_id UUID := gen_random_uuid();
+BEGIN
+    INSERT INTO agents(label) VALUES('automatic-takeover-smoke') RETURNING id INTO native_id;
+    INSERT INTO agents_meta(id,status,machine) VALUES(native_id,'idling','smoke-machine');
+    INSERT INTO agents(label) VALUES('external-takeover-smoke') RETURNING id INTO external_id;
+    INSERT INTO agents_meta(id,status,machine,harness) VALUES(external_id,'idling','smoke-machine','codex');
+    BEGIN
+        INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,expires_at,automatic)
+        VALUES(gen_random_uuid(),native_id,'external_agent:smoke','smoke-machine','requested',300,now()+interval '5 minutes',false);
+        RAISE EXCEPTION 'manual takeover was admitted';
+    EXCEPTION WHEN raise_exception THEN
+        IF SQLERRM <> 'Manual impersonation consent is no longer supported' THEN RAISE; END IF;
+    END;
+    BEGIN
+        INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,expires_at)
+        VALUES(gen_random_uuid(),external_id,'external_agent:smoke','smoke-machine','requested',300,now()+interval '5 minutes');
+        RAISE EXCEPTION 'external harness takeover was admitted';
+    EXCEPTION WHEN raise_exception THEN
+        IF SQLERRM <> 'Impersonation requires the Meiva harness' THEN RAISE; END IF;
+    END;
+    INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,expires_at,event_delivery_protocol_version)
+    VALUES(lease_id,native_id,'external_agent:smoke','smoke-machine','requested',300,now()+interval '5 minutes',2);
+    IF NOT (SELECT automatic FROM agent_impersonations WHERE id=lease_id) THEN
+        RAISE EXCEPTION 'new takeover did not default to automatic';
+    END IF;
+    PERFORM close_impersonation_event_admission(lease_id);
+    UPDATE agent_impersonations SET status='expired',ended_at=now() WHERE id=lease_id;
+    IF NOT finalize_impersonation_event_log(lease_id) THEN
+        RAISE EXCEPTION 'closed takeover log did not complete';
+    END IF;
+END $$;
+SQL
+
 echo "-> convergence: db/schema.sql alone vs baseline-pending migrations (pg_dump --schema-only)"
 psql -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE $FULL_DB"
 psql -d "$FULL_DB" -v ON_ERROR_STOP=1 -q -f db/schema.sql

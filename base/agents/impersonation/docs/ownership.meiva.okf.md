@@ -49,8 +49,9 @@ preserves these notes through long terminated periods for later resurrection.
 
 The gateway force-expire endpoint closes only the open session number supplied
 by its caller. It records an operator cause and actor, dismisses reminders,
-queues a resumed-turn note for a live non-automatic session, and publishes a
-native wake. A stale session number returns `not_open` without touching a newer
+leaves the return note to the checkpoint handoff, and publishes a native wake.
+The host also scans terminal sessions with unapplied handoffs or plugin deltas,
+so a cold start can finish the return without an inbound or Redis notification. A stale session number returns `not_open` without touching a newer
 session. The external executor remains outside this DB action.
 
 Explicit renewal replaces the database deadline; attaching and relay heartbeats

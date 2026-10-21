@@ -10,6 +10,11 @@ when the work ahead looks like about an hour) and extend by renewal. A short
 window is the deadlock backstop; a long one parks the agent for its whole
 span if the external side dies.
 
+The target agent must use the **Meiva harness**. Agents born on Claude Code,
+Codex or any other external harness cannot be impersonated; the backend refuses
+the request before creating a session. This does not restrict which supported
+external provider controls a Meiva-harness agent.
+
 ## Start a named session
 
 Run the commands with a bare `meiva`: it acts on the cluster `MEIVA_HOME` names,
@@ -204,7 +209,7 @@ and visible again for the native agent.
 | heartbeat | claimed -> done | not delivered during takeover; the native claim consumes it after |
 | system_note / reminder | claimed -> done | delivered + ACK (a reminder also expires/dismisses) |
 
-An automatic session's handoff receipt consumes its captured backlog to
+A session's handoff receipt consumes its captured backlog to
 `done`; uncaptured unacknowledged rows stay `pending` for the native agent. ACK
 state is delivery bookkeeping, not completion: the resume note directs the
 native agent to review acknowledged messages for work the summary does not
@@ -245,9 +250,8 @@ those facts and does not change collection or sampling.
 An operator can end an open external session from the visible agent sidebar
 row button or its context menu. The action closes the session shown in the
 row, records `expired` with a `force-expired: ` reason and the caller in
-permanent lifecycle history, and wakes the native agent. For a live
-non-automatic session it also queues a
-plain-language note that starts a resumed turn. The action does not stop the
+permanent lifecycle history, and wakes the native agent. The checkpoint handoff
+delivers the end note before the resumed turn. The action does not stop the
 external executor process. If the native runtime itself is wedged, terminating
 the agent is the stronger fallback: the termination trigger revokes the session,
 and the agent can then be resurrected. Its inbox records an impersonation
@@ -255,3 +259,20 @@ interruption note followed by a completed-termination note, ahead of the next
 resurrection marker. The bound relay also reports that termination interrupted
 the takeover through its usual host transport. Executor delivery is best-effort
 when the relay or external session is unavailable; it never delays revocation.
+
+## Automatic-only upgrade
+
+All takeover requests prepare automatically at the native checkpoint boundary.
+There is no `meiva.impersonation.accept` or `reject` API and no consent prompt.
+`accepted` is the persisted preparation state before execution closure, durable
+checkpoint flush and relay readiness permit `active`; it is not an approval.
+Only targets born with the Meiva harness can be impersonated. The controller
+provider remains independent of the target harness.
+
+The upgrade expires open legacy manual requests and external-harness leases.
+Meiva targets finish the pending checkpoint return even without queued input;
+external-harness history remains readable without a native handoff. Previously
+ended manual history is marked settled to avoid duplicating its old return note.
+The `automatic` and `consent_version` database columns are retained only for
+expand-contract compatibility and history; current runtime APIs do not expose
+or use them as mode switches. Their physical removal belongs to a later migration.

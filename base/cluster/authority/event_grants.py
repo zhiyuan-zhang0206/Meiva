@@ -14,7 +14,7 @@ def grant_event_log_runner_access(conn: psycopg.Connection, runner_role: str) ->
         sql.SQL(
             "GRANT INSERT (id,agent_id,source,machine,reason,status,ttl_seconds,expires_at,"
             "relay_provider,relay_thread_id,relay_codex_remote,relay_token_hash,"
-            "relay_batch_window_seconds,name,executor_name,process_metadata,automatic,"
+            "relay_batch_window_seconds,name,executor_name,process_metadata,"
             "ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version,"
             "capabilities,capability_declared_by) "
             "ON agent_impersonations TO {}"
@@ -23,7 +23,7 @@ def grant_event_log_runner_access(conn: psycopg.Connection, runner_role: str) ->
     conn.execute(
         sql.SQL(
             "GRANT UPDATE (status,ttl_seconds,expires_at,rejection_reason,summary_inbound_id,summary,"
-            "accepted_generation,accepted_owner,consent_version,activated_at,ended_at,"
+            "accepted_generation,accepted_owner,activated_at,ended_at,"
             "plugin_delta,delta_version,applied_version,relay_token_hash,relay_heartbeat_at,"
             "relay_last_failure_at,relay_minted_at,relay_minted_generation,relay_minted_owner,"
             "relay_generation,relay_degraded_reason,relay_degraded_at,"

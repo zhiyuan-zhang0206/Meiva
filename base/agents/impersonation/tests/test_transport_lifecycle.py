@@ -53,8 +53,10 @@ def active(
         process_metadata=recorded_tree(),
         authority=config_authority,
         local_machine=local_machine,
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         session["id"],
@@ -196,6 +198,11 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
 ) -> None:
     session, owner = active
     end(database, event_bus, session, local_machine=machine_identity.name())
+    db_conn.execute(
+        "UPDATE agent_impersonations SET handoff_applied_at=clock_timestamp() WHERE id=%s",
+        (session["id"],),
+    )
+    db_conn.commit()
     replacement = leases.request(
         database,
         event_bus,
@@ -209,8 +216,10 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
         process_metadata=recorded_tree(),
         authority=config_authority,
         local_machine=machine_identity.name(),
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         replacement["id"],
@@ -271,8 +280,8 @@ def test_already_terminal_insert_is_not_historically_backfilled(
     end(database, event_bus, session, local_machine=machine_identity.name())
     legacy_id = uuid4()
     db_conn.execute(
-        "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,expires_at,ended_at) "
-        "VALUES(%s,%s,'external_agent:legacy',%s,'expired',300,clock_timestamp(),clock_timestamp())",
+        "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,expires_at,ended_at,handoff_applied_at) "
+        "VALUES(%s,%s,'external_agent:legacy',%s,'expired',300,clock_timestamp(),clock_timestamp(),clock_timestamp())",
         (legacy_id, owner.agent_id, machine_identity.name()),
     )
     db_conn.commit()

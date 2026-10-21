@@ -17,12 +17,12 @@ from base.agents.impersonation._store import (
     close_event_admission,
     dismiss_reminders,
     expire,
-    insert_handoff,
     local,
     lock_agent,
     machine_mismatch_message,
     public,
     require_active_locked,
+    require_meiva_harness,
     token_hash,
     validate_active,
     validate_relay_spec,
@@ -60,10 +60,10 @@ INSERT_LEASE_SQL = (
     "INSERT INTO agent_impersonations(id,agent_id,source,machine,reason,"
     "status,ttl_seconds,expires_at,relay_provider,relay_thread_id,relay_codex_remote,"
     "relay_token_hash,relay_batch_window_seconds,name,executor_name,"
-    "process_metadata,automatic,"
+    "process_metadata,"
     "ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version) "
     "VALUES(%s,%s,%s,%s,%s,'requested',%s,clock_timestamp()+%s*interval '1 second',"
-    "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+    "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 
 RENEW_LEASE_SQL = (
@@ -91,7 +91,6 @@ def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:
 def _validate_request(
     caller: CallerIdentity,
     *,
-    automatic: bool,
     name: str,
     executor_name: str,
     process_metadata: dict[str, Any] | None,
@@ -100,7 +99,7 @@ def _validate_request(
     relay_codex_remote: str | None,
     relay_batch_window_seconds: int,
 ) -> None:
-    if automatic and (not name.strip() or not executor_name.strip()):
+    if not name.strip() or not executor_name.strip():
         raise ValueError("Session name and executor name must be nonempty")
     if caller.kind != "external_agent":
         raise ValueError("Impersonation requires an external_agent caller")
@@ -119,7 +118,7 @@ def _reject_open_previous(conn: Connection[Any], agent_id: int) -> None:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT * FROM agent_impersonations WHERE agent_id=%s "
-            "AND (status IN ('requested','accepted','active') OR delta_version>applied_version OR (automatic AND handoff_applied_at IS NULL)) "
+            "AND (status IN ('requested','accepted','active') OR delta_version>applied_version OR handoff_applied_at IS NULL) "
             "FOR UPDATE",
             (agent_id,),
         )
@@ -130,7 +129,7 @@ def _reject_open_previous(conn: Connection[Any], agent_id: int) -> None:
     if (
         previous["status"] in OPEN
         or previous["delta_version"] > previous["applied_version"]
-        or (previous["automatic"] and previous["handoff_applied_at"] is None)
+        or previous["handoff_applied_at"] is None
     ):
         raise ImpersonationError("Agent already has a request, lease, or unapplied state")
 
@@ -148,17 +147,15 @@ def request(
     relay_thread_id: str | None = None,
     relay_codex_remote: str | None = None,
     relay_batch_window_seconds: int = 0,
-    name: str = "",
-    executor_name: str = "",
+    name: str,
+    executor_name: str,
     process_metadata: dict[str, Any] | None = None,
-    automatic: bool = False,
     local_machine: str,
 ) -> dict[str, Any]:
     """Prepare a controller lease and return its scoped relay credential."""
     ttl = _ttl(ttl_seconds)
     _validate_request(
         caller,
-        automatic=automatic,
         name=name,
         executor_name=executor_name,
         process_metadata=process_metadata,
@@ -170,9 +167,9 @@ def request(
     relay_token = secrets.token_urlsafe(32) if relay_provider in SESSION_RELAY_PROVIDERS else None
     lease_id = uuid4()
     delivery_config = authority.current_field_values()
-    event_delivery_protocol_version = event_protocol_for_new_lease(automatic=automatic)
     with db.write_transaction() as conn:
         meta = lock_agent(conn, agent_id)
+        require_meiva_harness(meta)
         if meta["machine"] != local_machine:
             raise ImpersonationError(
                 machine_mismatch_message(
@@ -201,12 +198,11 @@ def request(
                 token_hash(relay_token) if relay_token is not None else None,
                 relay_batch_window_seconds,
                 name,
-                executor_name or caller.source(),
+                executor_name,
                 Jsonb(process_metadata or {}),
-                automatic,
                 delivery_config["impersonation_ack_window_seconds"],
                 delivery_config["impersonation_max_delivery_attempts"],
-                event_delivery_protocol_version,
+                LOG_PROTOCOL_VERSION,
             ),
         )
         result = public(lock_lease(conn, str(lease_id)))
@@ -214,11 +210,6 @@ def request(
     if relay_token is not None:
         return result | {"relay_token": relay_token}
     return result
-
-
-def event_protocol_for_new_lease(*, automatic: bool) -> int | None:
-    """New automatic leases log their events at the source; manual leases keep no event log."""
-    return LOG_PROTOCOL_VERSION if automatic else None
 
 
 def get(
@@ -250,7 +241,7 @@ def require_active(
     """Check one committed snapshot; SDK work does not hold a database lock."""
     with db.connect() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT l.*,m.machine AS current_machine,m.status AS current_status,"
+            "SELECT l.*,m.machine AS current_machine,m.status AS current_status,m.harness AS harness,m.id AS current_agent_id,"
             "l.expires_at>clock_timestamp() AS fresh FROM agent_impersonations l "
             "JOIN agents_meta m ON m.id=l.agent_id WHERE l.id=%s",
             (lease_id,),
@@ -258,6 +249,7 @@ def require_active(
         lease = cur.fetchone()
     if lease is None:
         raise ImpersonationError("Impersonation does not exist")
+    require_meiva_harness({"id": lease.pop("current_agent_id"), "harness": lease.pop("harness")})
     parsed_lease = parse_lease(lease)
     validate_active(
         parsed_lease,
@@ -269,7 +261,7 @@ def require_active(
     return public(lease)
 
 
-def accept(
+def prepare(
     db: Database,
     bus: EventBus,
     lease_id: str,
@@ -279,17 +271,10 @@ def accept(
     *,
     local_machine: str,
 ) -> dict[str, Any]:
-    """Record native preparation and the required start message for the external session.
-
-    The start message becomes the relay's first host message at activation, so
-    the controller starts with the native agent's own words instead of a
-    synthetic hint. An empty start message is rejected: user ruling 2026-09-08
-    (decision C).
-    """
     if not start_message.strip():
         raise ImpersonationError("A nonempty start message is required for the external controller")
     if incarnation.agent_id != agent_id:
-        raise ImpersonationError("Consent belongs to a different agent")
+        raise ImpersonationError("Preparation belongs to a different agent")
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
@@ -298,11 +283,11 @@ def accept(
             local_machine=local_machine,
         )
         if lease["agent_id"] != agent_id or lease["status"] != ImpersonationStatus.REQUESTED:
-            raise ImpersonationError("Only the requested agent can accept a pending request")
+            raise ImpersonationError("Only the requested agent can prepare a pending request")
         if lease["relay_provider"] is None:
             raise ImpersonationError(
-                "Impersonation request has no relay binding; it cannot be accepted. "
-                "Reject it and ask the controller to re-request with a relay endpoint."
+                "Impersonation request has no relay binding; it cannot be prepared. "
+                "The controller must request again with a relay endpoint."
             )
         if conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone() != (
             True,
@@ -315,33 +300,6 @@ def accept(
         )
         result = public(lock_lease(conn, lease_id))
     wake_agent(db, bus, agent_id)
-    return result
-
-
-def reject(
-    db: Database,
-    bus: EventBus,
-    lease_id: str,
-    agent_id: int,
-    incarnation: RuntimeIncarnation,
-    reason: str = "",
-) -> dict[str, Any]:
-    with db.write_transaction() as conn:
-        require_native(conn, incarnation)
-        lease = lock_lease(conn, lease_id)
-        if (
-            incarnation.agent_id != agent_id
-            or lease["agent_id"] != agent_id
-            or lease["status"] != ImpersonationStatus.REQUESTED
-        ):
-            raise ImpersonationError("Only the requested agent can reject a pending request")
-        conn.execute(
-            "UPDATE agent_impersonations SET status='rejected',ended_at=clock_timestamp(),rejection_reason=%s "
-            "WHERE id=%s",
-            (reason, lease_id),
-        )
-        result = public(lock_lease(conn, lease_id))
-    wake_agent(db, bus, agent_id, roster_changed=True)
     return result
 
 
@@ -366,7 +324,7 @@ def activate(
                 lease["agent_id"] != incarnation.agent_id
                 or lease["status"] != ImpersonationStatus.ACCEPTED
             ):
-                raise ImpersonationError("Activation requires accepted native consent")
+                raise ImpersonationError("Activation requires completed native preparation")
             if (lease["accepted_generation"], lease["accepted_owner"]) != (
                 incarnation.generation,
                 incarnation.owner,
@@ -393,15 +351,16 @@ def native_status(
 ) -> dict[str, Any] | None:
     if incarnation.agent_id != agent_id:
         raise ImpersonationError("Native status belongs to a different agent")
+    # meiva:note
     # No-lease reads must not lock the hot native metadata row at every node.
-    # A concurrently inserted request still needs this native owner's consent;
-    # absence can delay presentation until the next gate, never activate it.
+    # A concurrently inserted request still needs this native owner's preparation;
+    # absence can delay preparation until the next gate, never activate it.
     with db.connect() as conn:
         row = conn.execute(
             "SELECT runtime_generation=%s AND runtime_owner=%s "
             "AND status IN ('running','idling'),"
-            "EXISTS(SELECT 1 FROM agent_impersonations WHERE agent_id=%s AND "
-            "(status IN ('requested','accepted','active') OR delta_version>applied_version OR (automatic AND handoff_applied_at IS NULL))) "
+            "EXISTS(SELECT 1 FROM agent_impersonations WHERE agent_id=%s AND harness='meiva' AND "
+            "(status IN ('requested','accepted','active') OR delta_version>applied_version OR handoff_applied_at IS NULL)) "
             "FROM agents_meta WHERE id=%s",
             (incarnation.generation, incarnation.owner, agent_id, agent_id),
         ).fetchone()
@@ -414,7 +373,7 @@ def native_status(
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT * FROM agent_impersonations WHERE agent_id=%s AND "
-                "(status IN ('requested','accepted','active') OR delta_version>applied_version OR (automatic AND handoff_applied_at IS NULL)) "
+                "(status IN ('requested','accepted','active') OR delta_version>applied_version OR handoff_applied_at IS NULL) "
                 "ORDER BY created_at LIMIT 1 FOR UPDATE",
                 (agent_id,),
             )
@@ -508,19 +467,10 @@ def release(
                 raise ImpersonationError(
                     "Cannot release until every impersonation event participant seals"
                 ) from exc
-        inbound_id = (
-            None
-            if lease["automatic"]
-            else insert_handoff(
-                conn,
-                lease,
-                f"External session ended (lease {lease_id}).\n\n{summary}",
-            )
-        )
         conn.execute(
             "UPDATE agent_impersonations SET status='released',ended_at=clock_timestamp(),"
-            "summary_inbound_id=%s,summary=%s WHERE id=%s",
-            (inbound_id, summary, lease_id),
+            "summary=%s WHERE id=%s",
+            (summary, lease_id),
         )
         dismiss_reminders(conn, lease)
         result = public(lock_lease(conn, lease_id))

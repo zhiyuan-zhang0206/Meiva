@@ -139,7 +139,7 @@ def test_existing_lease_still_serializes_native_reconciliation(
     lease = request_controller(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -191,7 +191,7 @@ def test_accept_requires_a_nonempty_start_message(
     )
     for empty in ("", "   "):
         with pytest.raises(leases.ImpersonationError, match="start message is required"):
-            leases.accept(
+            leases.prepare(
                 database,
                 event_bus,
                 lease["id"],
@@ -201,7 +201,7 @@ def test_accept_requires_a_nonempty_start_message(
                 local_machine=local_machine,
             )
     assert native_status(owner, database_gate=database_gate)["status"] == "requested"
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -215,7 +215,7 @@ def test_accept_requires_a_nonempty_start_message(
     assert state["start_message"] == "Do the implementation, then summarize."
 
 
-def test_request_needs_consent_then_native_checkpoint_ack(
+def test_request_needs_preparation_then_native_checkpoint_ack(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
@@ -236,7 +236,7 @@ def test_request_needs_consent_then_native_checkpoint_ack(
     assert native_status(owner, database_gate=database_gate)["reason"] == "Handle the next message"
     with pytest.raises(leases.ImpersonationError, match="not active"):
         leases.require_active(database, lease["id"], local_machine=local_machine)
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -255,7 +255,7 @@ def test_request_needs_consent_then_native_checkpoint_ack(
     )
 
 
-def test_consent_and_activation_cannot_use_another_incarnation(
+def test_preparation_and_activation_cannot_use_another_incarnation(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
@@ -271,7 +271,7 @@ def test_consent_and_activation_cannot_use_another_incarnation(
     )
     stale = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
     with pytest.raises(leases.ImpersonationError, match="no longer owns"):
-        leases.accept(
+        leases.prepare(
             database,
             event_bus,
             lease["id"],
@@ -280,7 +280,7 @@ def test_consent_and_activation_cannot_use_another_incarnation(
             "Handoff brief",
             local_machine=local_machine,
         )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -348,14 +348,14 @@ def test_inbox_ack_and_atomic_real_sender_handoff(
         local_machine=local_machine,
     )
     assert result["status"] == "released"
-    assert leases.native_status(database, event_bus, owner.agent_id, owner) is None
+    assert native_status(owner, database_gate=database_gate)["handoff_applied_at"] is None
     rows = db_conn.execute(
         "SELECT id,status,source,payload FROM inbound_messages ORDER BY id"
     ).fetchall()
     assert rows[0][:3] == (first, "done", "agent:99")
     assert rows[1][:3] == (second, "pending", "agent:99")
-    assert rows[2][1:3] == ("pending", "external_agent:codex:test")
-    assert rows[2][3]["caller_identity"]["subject"] == "codex"
+    assert len(rows) == 2
+    assert result["summary"] == "Finished first; second still needs work."
     db_conn.commit()
     assert (
         leases.release(
@@ -367,7 +367,7 @@ def test_inbox_ack_and_atomic_real_sender_handoff(
         )
         == result
     )
-    assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (3,)
+    assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (2,)
 
 
 def test_external_inbox_preserves_cancel_until_explicit_processing_ack(
@@ -553,10 +553,10 @@ def test_ttl_revokes_all_borrower_operations_and_preserves_pending(
         with pytest.raises(leases.ImpersonationError, match="stale-session"):
             operation()
     assert native_status(owner, database_gate=database_gate)["status"] == "expired"
-    assert leases.native_status(database, event_bus, owner.agent_id, owner) is None
+    assert native_status(owner, database_gate=database_gate)["handoff_applied_at"] is None
     rows = db_conn.execute("SELECT id,status,source FROM inbound_messages ORDER BY id").fetchall()
     assert rows[0] == (pending, "pending", "agent:99")
-    assert rows[1][1:] == ("pending", "system:impersonation")
+    assert len(rows) == 1
 
 
 def test_plugin_journal_blocks_new_lease_until_checkpoint_receipt(
@@ -607,6 +607,18 @@ def test_plugin_journal_blocks_new_lease_until_checkpoint_receipt(
     state = native_status(owner, database_gate=database_gate)
     assert state["plugin_delta"] == [{"encoded": "first"}]
     leases.mark_plugin_applied(database, lease["id"], 1, owner)
+    with pytest.raises(leases.ImpersonationError, match="unapplied state"):
+        request_controller(
+            owner,
+            authority=config_authority,
+            database_gate=database_gate,
+            local_machine=local_machine,
+        )
+    db_conn.execute(
+        "UPDATE agent_impersonations SET handoff_applied_at=clock_timestamp() WHERE id=%s",
+        (lease["id"],),
+    )
+    db_conn.commit()
     assert (
         request_controller(
             owner,

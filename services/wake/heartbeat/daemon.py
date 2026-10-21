@@ -231,7 +231,7 @@ def select_idle_agents_needing_heartbeat(
         "    AND (lease.status IN ('requested','accepted') "
         "         OR (lease.status='active' AND lease.expires_at <= now()) "
         "         OR (lease.status <> 'active' AND (lease.delta_version > lease.applied_version "
-        "             OR (lease.automatic AND lease.handoff_applied_at IS NULL)))) "
+        "             OR lease.handoff_applied_at IS NULL))) "
         ") "
         "ORDER BY COALESCE(active.activated_at, active.created_at, last_active_at) ASC"
     )

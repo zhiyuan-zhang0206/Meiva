@@ -174,7 +174,6 @@ class BaseAgentState(BaseModel):
     impersonation_introduced: bool = False
     """Native conversation has encountered impersonation; survives compaction."""
     impersonation_handoff_id: str | None = None
-    impersonation_request_id: str | None = None
     """Last presented takeover request; survives history compaction."""
     impersonation_applied: dict[str, object] = Field(default_factory=dict)
     """Atomic checkpoint receipt for the last external plugin delta applied."""

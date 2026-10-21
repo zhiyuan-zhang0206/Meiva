@@ -74,37 +74,7 @@ def inbound_message(
     image_urls: list[str] | None = None,
     message_id: str | None = None,
 ) -> HumanMessage:
-    """Envelope-wrapped inbound message (product of `base/agents/messages/envelope.py:wrap_inbound`).
-
-    `content` is a plain string for a text inbound, or a list of content blocks
-    for a multimodal one (a leading text block carrying the envelope-wrapped
-    text, followed by native `image` blocks the model decodes). `image_urls`
-    then lists each image's reference url so the timeline can render a thumbnail
-    without decoding the base64 that sits in `content`.
-
-    `inbound_id` is None only for an inbound that has no `inbound_messages`
-    row (the impersonation consent request); no id is invented for it.
-    `message_id` pins the LangChain message id when the caller needs a
-    deterministic one (the consent request is deduplicated by it).
-
-    additional_kwargs:
-        meiva_msg_type: "inbound"
-        meiva_source: original source string ("system" / "agent:N" / "user")
-        meiva_inbound_id: inbound_messages.id of the source row — history
-            readers (timeline, run timeline) correlate a message with its
-            queue row through it (see agent/db/__init__.py:claim_inbound_batch).
-            Omitted when the inbound has no queue row.
-        meiva_inbound_body_start: index in the (first text block of) `content` where the
-            sender's content begins, after the envelope header (`inbound_head`).
-        meiva_created_at: ISO-8601 wall-clock the inbound entered the conversation
-            (the source row's stored created_at, i.e. its ARRIVAL time).
-            Omitted when not supplied.
-        meiva_picked_up_at: ISO-8601 wall-clock the inbound was put into the LLM
-            context (claim time) — the time the model reads it. Timeline and
-            history render by this, not by arrival.
-        meiva_image_urls: reference urls of any inlined images (timeline render).
-            Omitted when the inbound carries no image.
-    """
+    # meiva:link agent/messages/docs/message-format.meiva.okf.md
     kwargs: dict[str, object] = {
         "meiva_msg_type": MeivaMsgType.INBOUND.value,
         "meiva_source": source,

@@ -26,6 +26,13 @@ use the scoped integer. The controller holds no credential: its authority is
 the `(agent_id, session_id)` lease handle on the hosting machine.
 Relay credentials are returned once and stored as hashes.
 
+Only an agent born on the `meiva` harness can be impersonated. The request
+transaction reads the target's immutable `agents_meta.harness` under its row
+lock and refuses every other harness before creating a lease or waking the
+target. Every request uses automatic safe-boundary preparation; there is no manual consent mode.
+The controller may still be Codex, Claude Code or another supported provider;
+the restriction concerns the target agent's harness, not the controller's.
+
 ## Ownership and return
 
 See [[base/agents/impersonation/docs/ownership.meiva.okf.md]] for the lease state machine,
@@ -106,33 +113,6 @@ evidence of zero calls. `complete_emitted_events` covers emitted events only; th
 SDK sampling policy is explicitly `unknown`, so a zero SDK count is never a
 zero-call fact. Statistics never extrapolate samples.
 
-## CLI parameters: explicit, with four named exceptions
+## CLI and transport
 
-The `meiva impersonate` tree spells out every parameter that decides behavior
-(user ruling 2026-09-20; task #4102): `request` requires `--ttl` and
-`--batch-window`, `renew` requires `--ttl`, and a missing value is a usage
-error before any command runs. `send` carries the lease form — it delivers as
-the borrowed `agent:<id>`, attested by the controller session. Four options
-keep a default because one value is the only reading:
-
-- `list` / `inbox` `--limit` 100 — presentation only; the service validates
-  1..1000 (task #3696 exception inventory).
-- `inbox` `--wait` 0 — the unique "return immediately" value; any other number
-  waits, so the default cannot be confused with consent to block.
-- `say` `--phase` `commentary` — the in-progress reply is the routine phase;
-  `final` is a deliberate close.
-- `relay` `--debounce` 0.5 — internal host machinery (the relay coalesces wake
-  hints); not an operator parameter.
-
-See [[meiva/impersonation/docs/attachment.meiva.okf.md]],
-[external agent procedure](../../../../docs/conventions/agents/agent-impersonation.md), and
-[host relay setup](../../../../docs/conventions/agents/agent-impersonation-hosts.md).
-
-The relay credential is minted once per lease under the native owner and lease
-locks; a second mint returns nothing and a relay is never rotated or replaced.
-Already in-flight host RPCs may complete later: no distributed exactly-once
-claim is made. `relay_degraded_reason` and `relay_degraded_at` describe the last
-observed failure, not an assertion that the channel is currently unhealthy.
-`terminal_notices.py` owns the ended-lease notice text and its single submission
-(nothing is recorded or retried), while `host_transport.py` owns actual Codex
-acceptance and CLI compatibility imports.
+See [[impersonation-cli.meiva.okf.md]] for required parameters, bounded defaults, and relay credentials.

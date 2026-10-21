@@ -39,6 +39,8 @@ def test_force_expire_endpoint_requires_observed_session_and_returns_distinct_st
         relay_thread_id=str(uuid4()),
         authority=config_authority,
         local_machine=machine_identity.name(),
+        name="Test name",
+        executor_name="Test executor_name",
     )
     path = f"/api/agents/{agent_id}/impersonation/force-expire"
     with gateway_test_client(machine=machine_identity) as client:

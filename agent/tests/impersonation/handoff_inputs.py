@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import START, StateGraph
 from langgraph.types import Command
@@ -54,7 +53,6 @@ from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 __all__ = [
     "HandoffState",
-    "assert_consent_tool_result_checkpointed",
     "assert_death_cause_note",
     "assert_end_note_and_handoff_document",
     "assert_handoff_precedes_queued_input",
@@ -107,7 +105,6 @@ async def prepare_graph(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     *,
-    automatic: bool = False,
     config_authority: ConfigAuthority,
     clients: ClientSet,
     database_gate: ProcessDbGate,
@@ -145,7 +142,6 @@ async def prepare_graph(
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         process_metadata=recorded_tree(),
         reason="Do the task",
-        automatic=automatic,
         name="Integration test",
         executor_name="Codex: integration",
         relay_provider="codex",
@@ -157,30 +153,6 @@ async def prepare_graph(
 
     async def model(state: Any) -> Command[str]:
         model_calls.append(state)
-        if len(model_calls) == 1 and not automatic:
-            code = (
-                "import meiva\n"
-                "import os, psycopg\n"
-                "from base.host.env.registry import ADMIN_DATA_PLANE_ALIASES\n"
-                "assert not ADMIN_DATA_PLANE_ALIASES.intersection(os.environ)\n"
-                "with psycopg.connect(meiva.DB_URL) as conn:\n"
-                "    assert conn.execute('SELECT current_user').fetchone() == ('meiva_g0_runner',)\n"
-                f"meiva.impersonation.accept({requested['id']!r}, "
-                "'Hand the task to the external session.')"
-            )
-            return Command(
-                update={
-                    "messages": [
-                        AIMessage(
-                            content="I accept the handoff",
-                            tool_calls=[
-                                {"id": "consent", "name": "execute_code", "args": {"code": code}}
-                            ],
-                        )
-                    ]
-                },
-                goto="exec",
-            )
         return Command(update={"halted": True}, goto="claim")
 
     async def before_llm(*_args: Any) -> Command[Any]:
@@ -226,17 +198,6 @@ async def prepare_graph(
         "restart_requested": False,
     }
     return graph, saver, ctx, config, reset, owner, requested, model_calls
-
-
-async def assert_consent_tool_result_checkpointed(
-    saver: AsyncPostgresSaver, config: RunnableConfig
-) -> None:
-    checkpoint = await saver.aget(config)
-    assert checkpoint is not None
-    assert any(
-        getattr(message, "tool_call_id", None) == "consent"
-        for message in checkpoint["channel_values"]["messages"]
-    )
 
 
 def deliver_peers_and_ack_first(
@@ -314,7 +275,8 @@ def end_external_session(
 def assert_resumed_transcript(resumed: dict[str, Any], finish: str) -> None:
     transcript = "\n".join(str(message.content) for message in resumed["messages"])
     assert ("External work complete" if finish == "release" else "expired") in transcript
-    assert "Peer message still pending" in transcript
+    assert "Peer message still pending" not in transcript
+    assert "impersonation/0.json" in transcript
     assert "Peer message acknowledged" not in transcript
 
 

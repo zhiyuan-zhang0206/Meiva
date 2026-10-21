@@ -101,7 +101,7 @@ def public_session(lease: Mapping[str, Any]) -> dict[str, Any]:
     )
     result = {key: lease[key] for key in fields} | {"id": lease["session_id"]}
     result["status"] = status
-    if lease["automatic"] and status in (
+    if status in (
         ImpersonationStatus.REQUESTED,
         ImpersonationStatus.ACCEPTED,
     ):

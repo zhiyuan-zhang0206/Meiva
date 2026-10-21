@@ -315,7 +315,7 @@ def test_independent_attachment_seal_wait_reads_its_live_configuration_owner(
     tmp_path: Path,
 ) -> None:
     lease, _, _ = attached_runtime
-    lease.update(automatic=True, event_delivery_protocol_version=LOG_PROTOCOL_VERSION)
+    lease.update(event_delivery_protocol_version=LOG_PROTOCOL_VERSION)
     owners: list[ConfigBoot] = []
     waits: list[float] = []
 

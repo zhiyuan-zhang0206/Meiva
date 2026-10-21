@@ -123,8 +123,10 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         relay_thread_id=str(uuid4()),
         authority=config_authority,
         local_machine=machine_identity.name(),
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -210,8 +212,10 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
         relay_thread_id=str(uuid4()),
         authority=config_authority,
         local_machine=machine_identity.name(),
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -239,17 +243,10 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
         "Delivered the implementation to the peer",
         local_machine=machine_identity.name(),
     )
-    handoff = db_conn.execute(
-        "SELECT agent_id,content,source,payload FROM inbound_messages WHERE id=%s",
-        (returned["summary_inbound_id"],),
-    ).fetchone()
-    assert handoff is not None
-    assert handoff[:3] == (
-        owner.agent_id,
-        f"External session ended (lease {lease['id']}).\n\nDelivered the implementation to the peer",
-        "external_agent:codex:test",
-    )
-    assert handoff[3]["caller_identity"] == caller.model_dump()
+    assert returned["summary_inbound_id"] is None
+    assert returned["handoff_applied_at"] is None
+    assert returned["source"] == caller.source()
+    assert returned["summary"] == "Delivered the implementation to the peer"
 
 
 @pytest.mark.usefixtures("sdk_via_gateway")
@@ -277,13 +274,12 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
-        automatic=True,
         name="attachment-event-log",
         executor_name="codex",
         authority=config_authority,
         local_machine=machine_identity.name(),
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],

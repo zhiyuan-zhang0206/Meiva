@@ -28,7 +28,7 @@ WITH leases AS (
             SELECT 1 FROM agent_impersonation_event_participants p
             WHERE p.lease_id = l.id AND p.state = 'failed') AS capture_failed
     FROM agent_impersonations l
-    WHERE l.automatic AND l.event_delivery_protocol_version = %s
+    WHERE l.event_delivery_protocol_version = %s
         AND l.events_completed_at IS NULL
 )
 SELECT * FROM leases WHERE seal_stuck OR capture_failed

@@ -47,6 +47,8 @@ def test_request_requires_a_relay_binding(
             relay_provider="nope",
             authority=config_authority,
             local_machine=local_machine,
+            name="Test name",
+            executor_name="Test executor_name",
         )
     with pytest.raises(ValueError, match="thread id"):
         leases.request(
@@ -57,6 +59,8 @@ def test_request_requires_a_relay_binding(
             relay_provider="codex",
             authority=config_authority,
             local_machine=local_machine,
+            name="Test name",
+            executor_name="Test executor_name",
         )
     with pytest.raises(ValueError, match="thread id"):
         leases.request(
@@ -67,6 +71,8 @@ def test_request_requires_a_relay_binding(
             relay_provider="antigravity",
             authority=config_authority,
             local_machine=local_machine,
+            name="Test name",
+            executor_name="Test executor_name",
         )
     with pytest.raises(ValueError, match="thread id and remote are rejected"):
         leases.request(
@@ -78,6 +84,8 @@ def test_request_requires_a_relay_binding(
             relay_thread_id=str(uuid4()),
             authority=config_authority,
             local_machine=local_machine,
+            name="Test name",
+            executor_name="Test executor_name",
         )
     with pytest.raises(ValueError, match="unix:// or ws://"):
         leases.request(
@@ -90,6 +98,8 @@ def test_request_requires_a_relay_binding(
             relay_codex_remote="http://not-a-codex-endpoint",
             authority=config_authority,
             local_machine=local_machine,
+            name="Test name",
+            executor_name="Test executor_name",
         )
 
 
@@ -161,6 +171,8 @@ def test_request_validates_and_records_the_batch_window(
                 authority=config_authority,
                 relay_batch_window_seconds=bad,  # type: ignore[arg-type] — the runtime check rejects non-ints
                 local_machine=local_machine,
+                name="Test name",
+                executor_name="Test executor_name",
             )
     with pytest.raises(leases.ImpersonationError, match="already has"):
         request_controller(
@@ -170,7 +182,7 @@ def test_request_validates_and_records_the_batch_window(
             database_gate=database_gate,
             local_machine=machine_identity.name(),
         )  # first lease still open
-    leases.reject(database, event_bus, lease["id"], owner.agent_id, owner, "window probe done")
+    owner = create_native_owner(db_conn, local_machine=local_machine)
     window_off = leases.request(
         database,
         event_bus,
@@ -181,6 +193,8 @@ def test_request_validates_and_records_the_batch_window(
         relay_batch_window_seconds=0,
         authority=config_authority,
         local_machine=local_machine,
+        name="Test name",
+        executor_name="Test executor_name",
     )
     assert window_off["relay_batch_window_seconds"] == 0
 
@@ -233,7 +247,7 @@ def test_accept_without_relay_binding_fails_loudly(
     )
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="no relay binding"):
-        leases.accept(
+        leases.prepare(
             database,
             event_bus,
             str(legacy_id),
@@ -261,7 +275,7 @@ def test_provision_relay_only_for_the_accepting_incarnation(
         database_gate=database_gate,
         local_machine=machine_identity.name(),
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -305,7 +319,7 @@ def test_provision_relay_mints_one_credential_and_refuses_a_second(
         database_gate=database_gate,
         local_machine=local_machine,
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -348,7 +362,7 @@ def test_relay_inbox_uses_the_scoped_credential_only(
         database_gate=database_gate,
         local_machine=machine_identity.name(),
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -400,7 +414,7 @@ def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
         local_machine=machine_identity.name(),
     )
     assert row["relay_heartbeat_at"] is not None
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -443,7 +457,7 @@ def test_fail_acceptance_rolls_back_with_reason_and_native_note(
         database_gate=database_gate,
         local_machine=machine_identity.name(),
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -484,7 +498,7 @@ def test_fail_acceptance_requires_an_accepted_lease(
     )
     with pytest.raises(leases.ImpersonationError):
         leases.fail_acceptance(database, event_bus, lease["id"], owner, "too early")
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -527,10 +541,6 @@ def test_abort_lease_stops_the_takeover_and_keeps_the_request_reason(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A core-component death (task #3998) stops the takeover like an expiry:
-    the cause lands in rejection_reason prefixed "aborted: ", the request's own
-    reason survives, a non-automatic lease gets the legacy end note, and a
-    second abort is a no-op."""
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
     lease = accept_controller(
         owner,
@@ -548,8 +558,8 @@ def test_abort_lease_stops_the_takeover_and_keeps_the_request_reason(
     note = db_conn.execute(
         "SELECT content FROM inbound_messages WHERE id=%s", (ended["summary_inbound_id"],)
     ).fetchone()
-    assert note is not None
-    assert "stopped — the executor process is gone" in note[0]
+    assert note is None
+    assert ended["handoff_applied_at"] is None
     # An abort that loses the race (lease already terminal) is a no-op.
     assert (
         leases.abort_lease(database, event_bus, lease["id"], owner, "the executor process is gone")
@@ -579,13 +589,12 @@ def test_abort_lease_leaves_the_automatic_end_note_to_the_resume_chain(
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
-        automatic=True,
         name="Auto takeover",
         executor_name="Codex: test",
         authority=config_authority,
         local_machine=local_machine,
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],

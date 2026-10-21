@@ -141,8 +141,10 @@ def test_external_personal_path_uses_borrowed_identity(
         relay_thread_id=str(uuid4()),
         authority=config_authority,
         local_machine=machine_identity.name(),
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],
@@ -194,8 +196,10 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
         relay_thread_id=str(uuid4()),
         authority=config_authority,
         local_machine=machine_identity.name(),
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         database,
         event_bus,
         lease["id"],

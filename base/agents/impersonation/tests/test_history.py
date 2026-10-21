@@ -11,8 +11,8 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.agents.impersonation.tests.impersonation_support import (
+    legacy_session,
     recorded_tree,
-    request_legacy_leases,
 )
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -66,7 +66,7 @@ def start(
         local_machine=local_machine,
     )
     if active:
-        leases.accept(
+        leases.prepare(
             Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             str(lease["id"]),
@@ -292,10 +292,7 @@ def test_legacy_empty_events_never_certify_a_zero_call_claim(
     machine_identity: MachineIdentity,
 ) -> None:
     local_machine = machine_identity.name()
-    request_legacy_leases(monkeypatch)
-    lease = start(
-        owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
-    )
+    lease = legacy_session(db_conn, owner, local_machine=local_machine)
     leases.release(
         database,
         event_bus,
@@ -334,16 +331,13 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
     machine_identity: MachineIdentity,
 ) -> None:
     local_machine = machine_identity.name()
-    request_legacy_leases(monkeypatch)
     from psycopg.types.json import Jsonb
 
     def workspace_for_agent(_agent_id: int) -> Path:
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    lease = start(
-        owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
-    )
+    lease = legacy_session(db_conn, owner, local_machine=local_machine)
     leases.release(
         database,
         event_bus,

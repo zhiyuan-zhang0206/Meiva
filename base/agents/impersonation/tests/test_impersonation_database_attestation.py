@@ -52,8 +52,10 @@ def _active(
         relay_thread_id=str(uuid4()),
         authority=config_authority,
         local_machine=local_machine,
+        name="Test name",
+        executor_name="Test executor_name",
     )
-    leases.accept(
+    leases.prepare(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         lease["id"],
@@ -122,6 +124,8 @@ def test_dsh_request_mints_a_session_relay_credential(
             relay_thread_id="thread",
             authority=config_authority,
             local_machine=local_machine,
+            name="Test name",
+            executor_name="Test executor_name",
         )
     lease = leases.request(
         database,
@@ -134,6 +138,8 @@ def test_dsh_request_mints_a_session_relay_credential(
         relay_provider="dsh",
         authority=config_authority,
         local_machine=local_machine,
+        name="Test name",
+        executor_name="Test executor_name",
     )
     assert lease["relay_provider"] == "dsh"
     assert lease["relay_token"]
@@ -161,6 +167,8 @@ def test_antigravity_request_records_host_relay_spec(
             relay_provider="antigravity",
             authority=config_authority,
             local_machine=local_machine,
+            name="Test name",
+            executor_name="Test executor_name",
         )
     lease = leases.request(
         database,
@@ -174,6 +182,8 @@ def test_antigravity_request_records_host_relay_spec(
         relay_thread_id=thread_id,
         authority=config_authority,
         local_machine=local_machine,
+        name="Test name",
+        executor_name="Test executor_name",
     )
     assert lease["relay_provider"] == "antigravity"
     assert lease["relay_thread_id"] == thread_id

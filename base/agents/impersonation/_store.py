@@ -8,7 +8,6 @@ from uuid import UUID
 
 import psycopg
 from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 
 from base.agents.impersonation.status import (
     OPEN,
@@ -17,8 +16,7 @@ from base.agents.impersonation.status import (
     is_log_native,
     parse_lease,
 )
-from base.api_contracts.agent_contract import AgentStatus
-from base.api_contracts.caller_identity import caller_payload
+from base.api_contracts.agent_contract import AgentStatus, Harness
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -61,7 +59,7 @@ def public(lease: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: status if key == "status" else str(value) if isinstance(value, UUID) else value
         for key, value in lease.items()
-        if key not in ("token_hash", "relay_token_hash")
+        if key not in ("token_hash", "relay_token_hash", "automatic", "consent_version")
     }
 
 
@@ -105,35 +103,23 @@ def authenticate(
     )
 
 
+def require_meiva_harness(meta: Mapping[str, Any]) -> None:
+    harness = Harness(meta["harness"])
+    if harness is not Harness.MEIVA:
+        raise ImpersonationError(
+            f"Impersonation requires the Meiva harness: agent {meta['id']} uses {harness.value!r}"
+        )
+
+
 def require_native(conn: psycopg.Connection, incarnation: RuntimeIncarnation) -> dict[str, Any]:
     meta = lock_agent(conn, incarnation.agent_id)
+    require_meiva_harness(meta)
     if (meta["runtime_generation"], meta["runtime_owner"]) != (
         incarnation.generation,
         incarnation.owner,
     ) or AgentStatus(meta["status"]) not in (AgentStatus.RUNNING, AgentStatus.IDLING):
         raise ImpersonationError("Native runtime no longer owns this agent")
     return meta
-
-
-def insert_handoff(
-    conn: psycopg.Connection, lease: Mapping[str, Any], content: str, *, expired: bool = False
-) -> int:
-    """Write only the negotiated workflow's handoff, in the lease transaction.
-
-    The native consumer has explicitly accepted this source through its private
-    request table. This is not generic caller-protocol activation: all ordinary
-    external message/lifecycle writers keep their existing rollout fences.
-    """
-    source = "system:impersonation" if expired else lease["source"]
-    payload = caller_payload(source, {"impersonation_id": str(lease["id"])})
-    row = conn.execute(
-        "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
-        "VALUES(%s,%s,'chat',%s,%s) RETURNING id",
-        (lease["agent_id"], content, source, Jsonb(payload)),
-    ).fetchone()
-    if row is None:
-        raise RuntimeError("Handoff INSERT returned no row")
-    return row[0]
 
 
 def dismiss_reminders(conn: psycopg.Connection, lease: Mapping[str, Any]) -> None:
@@ -182,22 +168,9 @@ def expire(conn: psycopg.Connection, lease: LeaseRecord) -> LeaseRecord:
         return lease
     if is_log_native(lease):
         close_event_admission(conn, str(lease["id"]))
-    detail = None
-    inbound_id = None
-    if lease["status"] == ImpersonationStatus.ACTIVE and not lease["automatic"]:
-        inbound_id = insert_handoff(
-            conn,
-            lease,
-            f"Impersonation {lease['id']} by {lease['source']} "
-            + (f"stopped: {detail}. " if detail else "expired. ")
-            + "Control has returned. Unacknowledged messages remain pending; "
-            "no external completion summary was supplied.",
-            expired=True,
-        )
     conn.execute(
-        "UPDATE agent_impersonations SET status='expired',ended_at=clock_timestamp(), "
-        "summary_inbound_id=%s,rejection_reason=COALESCE(%s,rejection_reason) WHERE id=%s",
-        (inbound_id, f"aborted: {detail}" if detail else None, lease["id"]),
+        "UPDATE agent_impersonations SET status='expired',ended_at=clock_timestamp() WHERE id=%s",
+        (lease["id"],),
     )
     # A pending renewal reminder only matters to the external session; the
     # lease is over, so it must never reach the native agent's inbox.
@@ -208,7 +181,6 @@ def expire(conn: psycopg.Connection, lease: LeaseRecord) -> LeaseRecord:
         assert refreshed is not None  # noqa: S101 - locked session exists
         lease = parse_lease(refreshed)
     lease["status"] = ImpersonationStatus.EXPIRED
-    lease["summary_inbound_id"] = inbound_id
     return lease
 
 
@@ -243,6 +215,7 @@ def require_active_locked(
     # Do not persist expiration here and then raise (which would roll it back).
     # The native boundary/get reconciler persists it independently.
     meta = lock_agent(conn, lease["agent_id"])
+    require_meiva_harness(meta)
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
     validate_active(
         lease,
@@ -311,6 +284,7 @@ def require_relay_active_locked(
     local_machine: str,
 ) -> None:
     meta = lock_agent(conn, lease["agent_id"])
+    require_meiva_harness(meta)
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
     authenticate_relay(
         lease,

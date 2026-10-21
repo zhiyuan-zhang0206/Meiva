@@ -24,14 +24,12 @@ from psycopg_pool import AsyncConnectionPool
 from agent import impersonation_handoff as _handoff
 from agent import impersonation_process as _relay_process
 from agent import state as _state
-from agent.messages import inbound_message
-from agent.nodes import BEFORE_LLM, END, NodeName
+from agent.nodes import END, NodeName
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.relay import record_relay_failure
 from base.agents.impersonation.relay import stamp_relay_failure as stamp_relay_failure
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
-from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
 from base.agents.observation.relay_supervision import heartbeat_fresh as _heartbeat_fresh
 from base.agents.observation.relay_supervision import terminate_relay as terminate_relay
@@ -77,7 +75,7 @@ async def active_lease(pool: AsyncConnectionPool, agent_id: int) -> bool:
 async def claim_gate(
     state: _state.AgentState, agent_id: int, ctx: MeivaContext
 ) -> Command[NodeName] | None:
-    """Present consent once, or end the invocation without claiming input."""
+    # meiva:link agent/docs/impersonation/impersonation.meiva.okf.md
     incarnation = ctx.original_incarnation
     db, bus = ctx.require_db(), ctx.require_bus()
     session = await native_status(db, bus, agent_id, incarnation=incarnation)
@@ -91,13 +89,13 @@ async def claim_gate(
     )
     if session is None:
         return None
-    if session["status"] == ImpersonationStatus.REQUESTED and session["automatic"]:
-        from base.agents.impersonation import accept
+    if session["status"] == ImpersonationStatus.REQUESTED:
+        from base.agents.impersonation import prepare
 
         assert incarnation is not None  # noqa: S101 — native_status requires it
         brief = session["reason"] or "Continue the agent's work from its saved state."
         await asyncio.to_thread(
-            accept,
+            prepare,
             db,
             bus,
             session["id"],
@@ -120,46 +118,6 @@ async def claim_gate(
                 "turn_idle": True,
             },
             goto=END,
-        )
-    if session["status"] == ImpersonationStatus.REQUESTED:
-        request_receipt = f"{session['id']}:{session['consent_version']}"
-        if state.impersonation_request_id == request_receipt:
-            return None
-        request_id = session["id"]
-        content = (
-            f"External agent requests to impersonate you. Request: {request_id}.\n"
-            f"Reason: {session['reason']}\n"
-            "To accept, save your working state and call "
-            f"meiva.impersonation.accept({request_id!r}, start_message='your handoff "
-            "brief for the external session'); this ends your execution. The brief "
-            "is delivered to the external session when the takeover starts and is "
-            "required: cover the current work, the context it needs, and how to "
-            "acknowledge incoming messages. "
-            f"To decline, call meiva.impersonation.reject({request_id!r}, reason=...). "
-            "Acceptance pauses your native loop until release or lease expiry."
-        )
-        head = inbound_head(
-            session["source"],
-            inputs=EnvelopeReadInputs(
-                ctx.require_clock, lambda: ctx.require_agent().read("general", "message_timestamps")
-            ),
-        )
-        message = inbound_message(
-            message_id=f"impersonation-request:{request_receipt}",
-            content=head + content,
-            source=session["source"],
-            inbound_id=None,
-            body_start=len(head),
-            created_at=datetime.now(UTC),
-        )
-        return Command(
-            update={
-                "messages": [message],
-                "impersonation_request_id": request_receipt,
-                "halted": False,
-                "turn_active": True,
-            },
-            goto=BEFORE_LLM,
         )
     # Terminal rows with an unapplied delta also stop here: the invocation
     # driver applies the ordered log before allowing another model decision.
@@ -253,14 +211,13 @@ async def _apply_plugin_deltas(
 
 
 # meiva:note
-# Whether a terminal automatic lease still owes the native checkpoint its receipt: the
+# Whether a terminal lease still owes the native checkpoint its receipt: the
 # end-of-session note plus `handoff_applied_at`. Until it lands, the agent refuses every
 # new takeover as an unapplied state.
 # meiva:link docs/conventions/agents/agent-impersonation.md
 def handoff_owed(session: dict[str, Any] | None) -> bool:
     return bool(
         session is not None
-        and session["automatic"]
         and session["status"] not in OPEN
         and session["handoff_applied_at"] is None
     )
@@ -351,7 +308,8 @@ def establish_relay(
     if provider in SESSION_RELAY_PROVIDERS:
         return _await_session_relay(db, bus, session, incarnation)
     if provider not in ("codex", "antigravity"):
-        # Defensive: accept() already rejects leases without a relay binding.
+        # meiva:note
+        # Defensive: prepare() already rejects leases without a relay binding.
         return _roll_back_relay_failure(
             db, bus, session, incarnation, fail_acceptance, "request has no relay binding"
         )
@@ -365,21 +323,19 @@ def _await_session_relay(
 ) -> bool:
     """claude / dsh: the relay runs in the controller's own session; require a fresh heartbeat."""
     from base.agents.impersonation import fail_acceptance
+    from base.agents.impersonation import native_status as read_status
 
-    if session["automatic"]:
-        from base.agents.impersonation import native_status as read_status
-
-        deadline = time.monotonic() + RELAY_READY_TIMEOUT_S
-        while not _heartbeat_fresh(session["relay_heartbeat_at"]) and time.monotonic() < deadline:
-            time.sleep(_RELAY_READY_POLL_S)
-            latest = read_status(db, bus, incarnation.agent_id, incarnation)
-            if (
-                latest is None
-                or latest["id"] != session["id"]
-                or latest["status"] != ImpersonationStatus.ACCEPTED
-            ):
-                return False
-            session = latest
+    deadline = time.monotonic() + RELAY_READY_TIMEOUT_S
+    while not _heartbeat_fresh(session["relay_heartbeat_at"]) and time.monotonic() < deadline:
+        time.sleep(_RELAY_READY_POLL_S)
+        latest = read_status(db, bus, incarnation.agent_id, incarnation)
+        if (
+            latest is None
+            or latest["id"] != session["id"]
+            or latest["status"] != ImpersonationStatus.ACCEPTED
+        ):
+            return False
+        session = latest
     if _heartbeat_fresh(session["relay_heartbeat_at"]):
         return True
     return _roll_back_relay_failure(
