@@ -17,15 +17,6 @@ DESCRIPTION = (
 
 
 # meiva:note
-# `MEIVA_HOME` is read when the app modules import, so it must be set before
-# they do -- including for `--home`, which is how a rehearsal runs against a
-# throwaway home instead of the running deployment.
-def _select_home(home: str | None) -> None:
-    if home:
-        os.environ["MEIVA_HOME"] = str(Path(home).expanduser().resolve())
-
-
-# meiva:note
 # Inspect, provision, move and switch the permissions helper's signing identity.
 #
 # Usage from a checkout with its own `.venv`:
@@ -35,6 +26,9 @@ def _select_home(home: str | None) -> None:
 # `switch` is the whole install-location change: back the installed helper up,
 # rebuild it signed with the fixed identity, prove the designated requirement now
 # names the certificate, and restore the backup if any step fails.
+#
+# A rehearsal names its own home by exporting `MEIVA_HOME` before the command --
+# the home is read when the app modules import, so this script never rewrites it.
 #
 # Re-run this command in its own session and return at once.
 #
@@ -303,7 +297,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument("command", choices=("status", "provision", "import", "export", "switch"))
     parser.add_argument("path", nargs="?", help="PKCS#12 archive for import/export")
-    parser.add_argument("--home", help="MEIVA_HOME to act on, e.g. a rehearsal home")
+
     parser.add_argument(
         "--password-file",
         help="keychain password that opens an archive being imported (default: this home's)",
@@ -322,7 +316,6 @@ def main(argv: list[str]) -> int:
         help="re-run this command in its own session, so the switch survives the runtime it stops",
     )
     args = parser.parse_args(argv)
-    _select_home(args.home)
     if args.detach:
         return _detach(sys.argv[1:])
     if args.command in {"import", "export"} and not args.path:
