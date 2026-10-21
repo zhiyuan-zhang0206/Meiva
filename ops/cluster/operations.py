@@ -80,9 +80,11 @@ def cluster_status_op(
 # directory and a login live on that box, not on the gateway's. `reason` passes
 # through unchanged — the probe already separates not installed, installed outside
 # PATH, not signed in and sign-in state unknown, and that sentence is what the form
-# shows. The probe reads files only, so it cannot hang on a login prompt; it runs
-# on the daemon's worker thread because a stalled network mount would still block
-# the event loop that serves spawn and lifecycle. The gateway caches one answer per
+# shows. The probe asks each CLI with a bounded timeout (`claude auth status`,
+# `codex login status`, `agy models` — the last one fetches the catalogue, measured
+# 2-5s) and never starts a session or spends model quota; it runs on the daemon's
+# worker thread because a slow CLI, like a stalled network mount, would block the
+# event loop that serves spawn and lifecycle. The gateway caches one answer per
 # machine for 30 seconds, so a repeat read of the form does not reach this op.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def harness_probe_op(machine: str) -> HarnessProbeResult:
