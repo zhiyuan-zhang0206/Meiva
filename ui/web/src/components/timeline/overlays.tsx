@@ -2,7 +2,7 @@
 
 // Overlays follow their owning interaction without intercepting pointer input.
 
-import { ArrowDown, Loader2 } from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/format/utils";
@@ -96,15 +96,24 @@ export function LoadOlderKeyboardButton({ loading, onClick }: { loading: boolean
   );
 }
 
-// Cold-load spinner — only when this thread has no items yet AND a fetch
-// is in flight (no cache, no live bucket). A warm switch or a background
-// refetch keeps its items on screen and never shows this.
+// meiva:note
+// Cold load draws the same ring as every other loading state in the timeline, at the
+// top of the pane, instead of its own spinner glyph plus a "Loading conversation…"
+// label: one loading vocabulary, and nothing to re-translate (user 2026-10-21). It
+// only appears when this thread has no items yet AND a fetch is in flight — a warm
+// switch or a background refetch keeps its items on screen and never shows this.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
 export function ColdLoadSpinner({ show }: { show: boolean }) {
+  const t = useTranslations("timeline");
   if (!show) return null;
   return (
-    <div className={cn("absolute inset-0 z-10 items-center justify-center gap-2 text-xs text-muted-foreground pointer-events-none", FLEX)}>
-      <Loader2 className="size-4 animate-spin" />
-      Loading conversation…
+    <div
+      role="status"
+      data-testid="cold-load-spinner"
+      className={cn("pointer-events-none absolute inset-x-0 top-0 z-10 justify-center pt-3 text-muted-foreground", FLEX)}
+    >
+      <LoadingRing testId="cold-load-ring" arc={0.72} />
+      <span className="sr-only">{t("loadingConversation")}</span>
     </div>
   );
 }
