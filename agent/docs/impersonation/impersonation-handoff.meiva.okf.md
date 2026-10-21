@@ -27,7 +27,11 @@ after release remains queued behind the note. The note is the resumed input:
 while it is the newest message, claim runs its first turn even with an
 otherwise empty queue and no conversation yet, and delivery ends by publishing
 a wake so a turn ending first still resumes the agent. File or checkpoint
-errors retain the native gate. An unavailable event backend leaves accounting explicitly
+errors retain the native gate. The host preserves this fresh input when its
+first invocation sees the matching trailing note and `halted=False` in the
+committed checkpoint. A completed reply, an explicit halt, or an open circuit
+still prevents automatic continuation on later wakes.
+An unavailable event backend leaves accounting explicitly
 pending without blocking the control handoff; the registered agent-host event
 reconciler supplements the same file after late events become readable. The
 resume note identifies ordinary assistant text in the current conversation as

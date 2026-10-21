@@ -14,7 +14,10 @@ agent occupies no resident turn task. Filesystem and command execution remain
 on the agent's home machine; no failure path relocates them.
 
 A fresh wake starts halted at claim, so only new inbound or explicit control
-can start work. A current healthy turn can continue ordinary graph steps until
+can start work. An unhalted trailing impersonation handoff note is already fresh
+input; the host preserves it for its first resumed turn (see
+[[impersonation/impersonation-handoff.meiva.okf.md]]).
+A current healthy turn can continue ordinary graph steps until
 idle or lifecycle exit. Every admitted invocation runs once. Database phases
 have finite deadlines; failed result or checkpoint saving does not re-enter the
 graph. Claimed interrupted chat is consumed with unknown outcome rather than

@@ -268,9 +268,16 @@ def test_transport_delta_preserves_legacy_custody_and_does_not_backfill_notices(
         assert row is not None
         aid = row[0]
         conn.execute(
-            "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,expires_at) "
-            "VALUES(gen_random_uuid(),%s,'codex','fixture','released',3600,now()+interval '1 hour'),"
-            "(gen_random_uuid(),%s,'codex','fixture','active',3600,now()+interval '1 hour')",
+            "INSERT INTO agents_meta(id,status,machine,harness) VALUES(%s,'idling','fixture','meiva')",
+            (aid,),
+        )
+        conn.execute(
+            "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,"
+            "expires_at,ended_at,handoff_applied_at) "
+            "VALUES(gen_random_uuid(),%s,'codex','fixture','released',3600,"
+            "now()+interval '1 hour',now(),now()),"
+            "(gen_random_uuid(),%s,'codex','fixture','active',3600,"
+            "now()+interval '1 hour',NULL,NULL)",
             (aid, aid),
         )
         conn.execute(cast(LiteralString, delta.read_text()))

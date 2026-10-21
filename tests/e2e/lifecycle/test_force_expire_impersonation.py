@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
@@ -196,9 +198,8 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
     def resumed() -> tuple[bool, object]:
         with psycopg.connect(settings.data_plane.db_url) as conn:
             result = conn.execute(
-                "SELECT l.status,l.ended_at,l.rejection_reason,i.status "
-                "FROM agent_impersonations l LEFT JOIN inbound_messages i "
-                "ON i.id=l.summary_inbound_id WHERE l.id=%s",
+                "SELECT status,ended_at,rejection_reason,handoff_applied_at,handoff_path "
+                "FROM agent_impersonations WHERE id=%s",
                 (lease_id,),
             ).fetchone()
         timeline = httpx.get(
@@ -206,16 +207,47 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
         ).json()["items"]
         replied = any(RESUMED_REPLY in str(item["payload"]) for item in timeline)
         return bool(
-            result and result[0] == "expired" and result[1] and result[3] == "done" and replied
+            result and result[0] == "expired" and result[1] and result[3] and result[4] and replied
         ), result
 
     poll_until(resumed, timeout=60.0, interval=0.5, what="native agent resumes after force-expire")
     page.get_by_text(RESUMED_REPLY).wait_for(timeout=10_000)
+    _assert_native_handoff(agent_id, lease_id, session_id, request)
+
+
+def _assert_native_handoff(
+    agent_id: int, lease_id: UUID, session_id: int, request: str | None
+) -> None:
+    with psycopg.connect(settings.data_plane.db_url) as conn:
+        handoff = conn.execute(
+            "SELECT handoff_path,handoff_applied_at FROM agent_impersonations WHERE id=%s",
+            (lease_id,),
+        ).fetchone()
+    assert handoff is not None and handoff[0] is not None and handoff[1] is not None
+    document = json.loads(Path(handoff[0]).read_text())
+    assert (
+        document["session"]["agent_id"],
+        document["session"]["id"],
+        document["session"]["session_id"],
+    ) == (agent_id, session_id, session_id)
+    assert document["session"]["handoff_path"] == handoff[0]
+    assert document["session"]["status"] == "expired"
+    calls = model_inputs(agent_id)
+    assert len(calls) == 2
+    assert any(
+        f"Impersonation session {session_id} has ended." in message["text"]
+        and handoff[0] in message["text"]
+        for message in calls[-1]
+    )
 
     if request is not None:
-        calls = model_inputs(agent_id)
-        assert len(calls) == 2
-        assert any(request in message["text"] for message in calls[-1])
+        incoming = [
+            message
+            for message in document["messages"]
+            if message["payload"]["direction"] == "in" and message["payload"]["content"] == request
+        ]
+        assert len(incoming) == 1
+        assert incoming[0]["acknowledged"] is False
         with psycopg.connect(settings.data_plane.db_url) as conn:
             received = conn.execute(
                 "SELECT i.status,m.delivery_attempts,m.acknowledged_at FROM inbound_messages i "
