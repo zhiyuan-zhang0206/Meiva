@@ -21,6 +21,18 @@ and the matching GitHub Releases.
   host and a host that never announced a stop stay silent. A whole-stack stop is still the
   cluster-external probe's job, not this rule's (task #5464).
 
+### Changed
+
+- The spawn form stacks below the md breakpoint (user 2026-10-21, phone): at a 390px
+  viewport the four-column table gave the model column 4px of usable width, so machine,
+  harness, model and effort became four 44px rows that state the current pick, open one list
+  each, and close on a pick, with a refusal written beside the action because a touch screen
+  has no hover. In both arrangements the three price figures sit on a smaller line under the
+  model name instead of beside it, so the name keeps the column's width. Harness availability
+  is probed once per page load — the sidebar warms it on mount and the picker reads that
+  reading, instead of starting a probe RPC every time the form opens
+  ([creation availability](ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md)).
+
 ### Removed
 
 - The memory graph is gone: its sidebar entry, the `/memory/graph` page that drew

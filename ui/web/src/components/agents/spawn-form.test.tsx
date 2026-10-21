@@ -12,6 +12,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useWarmHarnessAvailability } from "@/lib/harness/use-harness-availability";
+
 import { SpawnForm } from "./spawn-form";
 import type { ModelsResponse, SystemStatus } from "@/lib/contracts/types";
 
@@ -28,7 +30,7 @@ vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-setti
 import { api } from "@/lib/transport/api";
 import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
 
-function wrap() {
+function wrap(layout?: "table" | "stack") {
   const onSpawn = vi.fn();
   const onDone = vi.fn();
   const qc = new QueryClient({
@@ -36,7 +38,7 @@ function wrap() {
   });
   render(
     <QueryClientProvider client={qc}>
-      <SpawnForm onSpawn={onSpawn} onDone={onDone} />
+      <SpawnForm onSpawn={onSpawn} onDone={onDone} layout={layout} />
     </QueryClientProvider>,
   );
   return { onSpawn, onDone };
@@ -342,7 +344,7 @@ describe("spawn table", () => {
     wrap();
     const form = await table();
     await waitFor(() => {
-      expect(row(form, HARNESS_COLUMN, "Claude Code").hasAttribute("disabled")).toBe(true);
+      expect(row(form, HARNESS_COLUMN, /Claude Code/).hasAttribute("disabled")).toBe(true);
     });
   });
 
@@ -491,5 +493,122 @@ describe("unavailable model catalog", () => {
     wrap();
     expect(await screen.findByText("Models unavailable")).toBeTruthy();
     expect(screen.queryByTestId("spawn-table")).toBeNull();
+  });
+});
+
+// meiva:note
+// The narrow arrangement: on a phone the popover is 94vw and the four-column
+// table left the model column 4px wide (measured 2026-10-21), so the same four
+// decisions render as sections whose closed rows state the current pick. These
+// cases pin the properties the table cases pin - the pick reaches the spawn, a
+// pick that is never spawned is not stored, a refusal is readable - against the
+// layout the phone actually gets.
+// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+describe("stacked picker", () => {
+  async function stack(): Promise<HTMLElement> {
+    return await screen.findByTestId("spawn-stack");
+  }
+
+  function section(form: HTMLElement, name: string): HTMLElement {
+    return within(form).getByRole("button", { name });
+  }
+
+  it("states the current pick in each closed section", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
+    wrap("stack");
+    const form = await stack();
+    expect(section(form, "Machine test-host").getAttribute("aria-expanded")).toBe("false");
+    expect(section(form, "Harness Meiva")).toBeTruthy();
+    expect(section(form, "Model deepseek-v4-pro")).toBeTruthy();
+    expect(section(form, "Effort max")).toBeTruthy();
+    expect(within(form).queryByRole("list", { name: MODEL_COLUMN })).toBeNull();
+    expect(screen.getByRole("button", { name: "Spawn" })).toBeTruthy();
+  });
+
+  it("one pick closes its section and reaches the spawn", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
+    const { onSpawn } = wrap("stack");
+    const form = await stack();
+    fireEvent.click(section(form, "Model deepseek-v4-pro"));
+    const models = within(form).getByRole("list", { name: MODEL_COLUMN });
+    fireEvent.click(within(models).getByRole("button", { name: /claude-opus-4-8/ }));
+    expect(section(form, "Model claude-opus-4-8")).toBeTruthy();
+    expect(within(form).queryByRole("list", { name: MODEL_COLUMN })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    expect(onSpawn).toHaveBeenCalledWith(
+      expect.objectContaining({ machine: "test-host", model: "claude-opus-4-8" }),
+    );
+  });
+
+  it("a dead host carries its reason as text, not a hover title", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(
+      statusWith([
+        { name: "cloud", online: true },
+        { name: "test-host", online: true },
+        { name: "dead-host", online: true, agentHostOnline: false },
+      ]),
+    );
+    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
+    wrap("stack");
+    const form = await stack();
+    fireEvent.click(section(form, "Machine test-host"));
+    const machines = within(form).getByRole("list", { name: MACHINE_COLUMN });
+    const dead = within(machines).getByRole("button", { name: /dead-host/ });
+    expect(dead.hasAttribute("disabled")).toBe(true);
+    expect(within(dead).getByText("Agent host unavailable")).toBeTruthy();
+  });
+
+  it("a refusal is written beside the action instead of titled", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
+    vi.mocked(api.getHarnessAvailability).mockResolvedValue(
+      (["meiva", "claude_code", "codex", "antigravity"] as const).map((harness) => ({
+        harness,
+        status: "unavailable" as const,
+        reason: "missing",
+        launchable: false,
+        billing: "subscription" as const,
+      })),
+    );
+    wrap("stack");
+    await stack();
+    expect(screen.getByTestId("spawn-refusal").textContent).toBe("unavailable");
+    expect(screen.getByRole("button", { name: "Spawn" }).hasAttribute("disabled")).toBe(true);
+  });
+});
+
+// meiva:note
+// One probe per page load (user 2026-10-21): the sidebar warms every agent-runner
+// machine when the page mounts, and opening the picker afterwards answers from
+// that reading instead of dispatching another probe. The probe is not free — the
+// gateway RPCs the machine and the probe stats binaries and login stores — so a
+// session must not re-ask on every open.
+// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+describe("harness availability freshness", () => {
+  it("a warm page answers the picker without asking again", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    function Warm() {
+      useWarmHarnessAvailability();
+      return null;
+    }
+    const warm = render(
+      <QueryClientProvider client={qc}>
+        <Warm />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(vi.mocked(api.getHarnessAvailability).mock.calls.length).toBeGreaterThan(0));
+    const probed = vi.mocked(api.getHarnessAvailability).mock.calls.length;
+    warm.unmount();
+    render(
+      <QueryClientProvider client={qc}>
+        <SpawnForm onSpawn={vi.fn()} onDone={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    await screen.findByTestId("spawn-table");
+    expect(vi.mocked(api.getHarnessAvailability).mock.calls.length).toBe(probed);
   });
 });

@@ -18,7 +18,7 @@ import { useState } from "react";
 import { DEFAULT_HARNESS, harnessRows, type Harness } from "@/lib/harness/harness";
 import { useHarnessAvailabilityByMachine } from "@/lib/harness/use-harness-availability";
 import { api } from "@/lib/transport/api";
-import { SpawnTable, type SpawnMachine } from "./spawn-table";
+import { SpawnStack, SpawnTable, type SpawnMachine } from "./spawn-table";
 import { groupedModels, isSuperseded, runsOnHarness } from "@/lib/contracts/models";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
@@ -49,9 +49,15 @@ interface SpawnPicks {
 interface Props {
   onSpawn: (opts: SpawnOpts) => void;
   onDone: () => void;
+  // meiva:note
+  // The shell owns the arrangement: below md the popover is 94vw and the
+  // four-column table leaves the model column 4px (2026-10-21), so the same
+  // decisions render stacked. The form keeps one rule set either way.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  layout?: "table" | "stack";
 }
 
-export function SpawnForm({ onSpawn, onDone }: Props) {
+export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   const t = useTranslations("spawn");
   const { data: statusData } = useQuery({
     queryKey: ["status"],
@@ -262,6 +268,63 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
 
   const target = machines.find((row) => row.name === selectedMachine);
   const spawnReason = target?.reason ?? (harnessBlocked ? t("harnessStatus.unavailable") : undefined);
+  // meiva:note
+  // Rates are the decision only when the harness meters them. A subscription
+  // harness pays nothing per token, so the price column stays empty there
+  // (user 2026-10-20); the harness row is the authority on which it is.
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  const pickerProps = {
+    machines,
+    machine: selectedMachine,
+    onMachine: pickMachine,
+    harnessRows: tableHarnessRows,
+    harness: selectedHarness,
+    onHarness: pickHarness,
+    modelGroups,
+    models: modelsData?.models,
+    model: effectiveModel,
+    onModel: pickModel,
+    efforts: effortLevels,
+    effort: effectiveReasoningEffort,
+    onEffort: pickEffort,
+    prices: tableHarnessRows.find((row) => row.harness === selectedHarness)?.billing === "api",
+  };
+
+  const spawnButton = (className?: string) => (
+    <button
+      type="button"
+      disabled={spawnReason !== undefined || selectedMachine === undefined}
+      title={spawnReason}
+      onClick={() => { if (selectedMachine !== undefined) spawnOn(selectedMachine); }}
+      className={cn(
+        "items-center justify-center gap-1.5 rounded-sm border border-border px-2 py-1.5 text-xs font-medium hover:bg-sidebar-accent disabled:opacity-50",
+        FLEX,
+        className,
+      )}
+    >
+      <Plus className="size-3.5" />
+      <span>{t("spawn")}</span>
+    </button>
+  );
+
+  if (layout === "stack") {
+    return (
+      // meiva:note
+      // The narrow arrangement: the four decisions stack, the action sits under
+      // them at full width, and a refusal is written out instead of titled — a
+      // phone has no hover for a tooltip (2026-10-21).
+      // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+      <div className={cn("rounded-md border border-border bg-popover text-popover-foreground", FLEX, FLEX_COL)}>
+        <SpawnStack {...pickerProps} />
+        {spawnReason !== undefined && (
+          <p data-testid="spawn-refusal" className="px-3 py-2 text-xs text-muted-foreground">
+            {spawnReason}
+          </p>
+        )}
+        <div className="border-t border-border p-2">{spawnButton("w-full min-h-11 text-sm")}</div>
+      </div>
+    );
+  }
 
   return (
     // meiva:note
@@ -272,42 +335,10 @@ export function SpawnForm({ onSpawn, onDone }: Props) {
     // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
     <div className={cn("rounded-md border border-border bg-popover text-popover-foreground", FLEX)}>
       <div className={cn(MIN_W_0, FLEX_1)}>
-      <SpawnTable
-        machines={machines}
-        machine={selectedMachine}
-        onMachine={pickMachine}
-        harnessRows={tableHarnessRows}
-        harness={selectedHarness}
-        onHarness={pickHarness}
-        modelGroups={modelGroups}
-        models={modelsData?.models}
-        model={effectiveModel}
-        onModel={pickModel}
-        efforts={effortLevels}
-        effort={effectiveReasoningEffort}
-        onEffort={pickEffort}
-        // meiva:note
-        // Rates are the decision only when the harness meters them. A subscription
-        // harness pays nothing per token, so the price column stays empty there
-        // (user 2026-10-20); the harness row is the authority on which it is.
-        // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-        prices={tableHarnessRows.find((row) => row.harness === selectedHarness)?.billing === "api"}
-      />
+        <SpawnTable {...pickerProps} />
       </div>
       <div className={cn("w-[5.5rem] shrink-0 justify-end border-l border-border p-2", FLEX, FLEX_COL)}>
-        <button
-          type="button"
-          disabled={spawnReason !== undefined || selectedMachine === undefined}
-          title={spawnReason}
-          onClick={() => { if (selectedMachine !== undefined) spawnOn(selectedMachine); }}
-          className={cn(
-            "w-full items-center justify-center gap-1.5 rounded-sm border border-border px-2 py-1.5 text-xs font-medium hover:bg-sidebar-accent disabled:opacity-50",
-            FLEX,
-          )}
-        >
-          <Plus className="size-3.5" />
-          <span>{t("spawn")}</span>
-        </button>
+        {spawnButton("w-full")}
       </div>
     </div>
   );
