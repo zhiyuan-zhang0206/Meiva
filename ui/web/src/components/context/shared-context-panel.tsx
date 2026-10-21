@@ -65,7 +65,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
           aria-label={tInspector(inspecting ? "closeInspector" : "openInspector")}
           aria-pressed={inspecting}
           onClick={toggleInspection}
-          className={cn("rounded p-1 hover:bg-accent", inspecting && "bg-foreground/20 text-foreground")}
+          className={cn("rounded p-1", inspecting && "bg-foreground/20 text-foreground")}
         >
           <ScanSearch className="size-3.5" />
         </button>
