@@ -422,10 +422,10 @@ async def test_read_dismiss_callbacks(tmp_path: Any, monkeypatch: pytest.MonkeyP
         bridge, _ = _bridge(tmp_path, gateway, monkeypatch, tasks=_owned_tasks)
 
         out = await bridge.handle_callback("1", "notice:read:7:42")
-        assert out == "✓ Marked as read"
+        assert out == "Notices require a reply or an explicit dismissal."
         out2 = await bridge.handle_callback("1", "notice:dismiss:8:43")
-        assert out2 == "✅ Handled"  # emoji-ok: Telegram hint text (user-facing)
-        assert gateway.resolved == [(7, 42, "read", None), (8, 43, "dismiss", None)]
+        assert out2 == "✅ Closed without answering"  # emoji-ok: Telegram hint text (user-facing)
+        assert gateway.resolved == [(8, 43, "dismiss", None)]
 
 
 async def test_list_queue_pushes_each_open_notice(
@@ -437,7 +437,7 @@ async def test_list_queue_pushes_each_open_notice(
         gateway = FakeGateway()
         gateway.open_notices = [
             _notice(1, "A", require_response=True),
-            _notice(2, "B"),
+            _notice(2, "B", require_response=True),
         ]
         bridge, adapter = _bridge(tmp_path, gateway, monkeypatch, tasks=_owned_tasks)
 
@@ -449,10 +449,8 @@ async def test_list_queue_pushes_each_open_notice(
         b0 = adapter.sent[0][2]
         b1 = adapter.sent[1][2]
         assert b0 is not None and b0[0][0] == "✏️ Reply"  # emoji-ok: button label
-        assert (
-            b1 is not None and b1[0][0] == "✏️ Reply"  # emoji-ok: button label
-        )  # emoji-ok: button label  # FYI answerable too (Task #1061)
-        assert b1 is not None and b1[1][0] == "✓ Got it"
+        assert b1 is not None and b1[0][0] == "✏️ Reply"  # emoji-ok: button label
+        assert b1 is not None and b1[1][1].startswith("notice:dismiss:")
         # queue button
         assert b0 is not None and b0[-1][1] == "notice:list"
 
@@ -529,7 +527,7 @@ def _seed_notice(
     title: str,
     *,
     prio: str = "P2",
-    require_response: bool = False,
+    require_response: bool = True,
 ) -> int:
     with db_conn.cursor() as cur:
         cur.execute(

@@ -8,7 +8,6 @@ from typing import Any, NamedTuple
 from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 
-from base.agents.inbox.rows import NOTICE_FYI_TTL_DAYS
 from base.agents.observation.evidence import AgentObservation, observation
 from base.agents.observation.snapshot import OpenNotice
 from base.api_contracts.agent_contract import AgentStatus, LivenessState
@@ -88,9 +87,9 @@ def notice_blocking(pool: ConnectionPool[Any], agent_id: int) -> OpenNotice | No
             "task_id, question "
             "FROM agent_notices "
             "WHERE agent_id = %s AND resolved_at IS NULL AND expire_at > now() "
-            "AND (require_response OR created_at > now() - make_interval(days => %s)) "
+            "AND require_response "
             "ORDER BY created_at DESC LIMIT 1",
-            (agent_id, NOTICE_FYI_TTL_DAYS),
+            (agent_id,),
         )
         row = cur.fetchone()
     if row is None:

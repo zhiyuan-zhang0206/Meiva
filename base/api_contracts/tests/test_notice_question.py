@@ -9,7 +9,7 @@ from base.api_contracts.notice_question import (
 )
 
 
-def choice(kind: str = "multi_select", *, other: bool = True):
+def choice(kind: str = "multi_select", *, other: bool = False):
     return parse_question(
         {
             "type": kind,
@@ -20,26 +20,27 @@ def choice(kind: str = "multi_select", *, other: bool = True):
 
 
 @pytest.mark.parametrize("kind", ["single_select", "multi_select"])
-def test_other_references_do_not_select_mentioned_options(kind: str) -> None:
+def test_choice_comment_does_not_select_mentioned_options(kind: str) -> None:
     question = choice(kind)
-    answer = parse_numbered_answer(question, "3\nBase this on option 2, with option 1 deferred.")
-    assert answer.option_ids == []
-    assert answer.other_text == "Base this on option 2, with option 1 deferred."
+    answer = parse_numbered_answer(question, "2\nBase this on option 2, with option 1 deferred.")
+    assert answer.option_ids == ["desktop"]
+    assert answer.comment == "Base this on option 2, with option 1 deferred."
     rendered = answer_reply(question, answer)
-    assert "1. Web\n2. Desktop\n3. Other" in rendered
-    assert "Selected: 3" in rendered
-    assert "Other (3): Base this on option 2" in rendered
+    assert "1. Web\n2. Desktop" in rendered
+    assert "Selected: 2" in rendered
+    assert "Comment: Base this on option 2" in rendered
+    assert "Other" not in rendered
 
 
-def test_multi_select_other_and_comment_keep_canonical_order() -> None:
+def test_multi_select_and_comment_keep_canonical_order() -> None:
     question = choice()
     answer = validate_answer(
         question,
-        NoticeAnswer(option_ids=["desktop", "web"], other_text="See 2", comment="More context"),
+        NoticeAnswer(option_ids=["desktop", "web"], comment="More context"),
     )
     assert answer.option_ids == ["web", "desktop"]
-    assert "Selected: 1, 2, 3" in answer_reply(question, answer)
-    assert "Additional note: More context" in answer_reply(question, answer)
+    assert "Selected: 1, 2" in answer_reply(question, answer)
+    assert "Comment: More context" in answer_reply(question, answer)
 
 
 def test_numbered_reply_without_other_preserves_following_lines_as_note() -> None:
@@ -75,7 +76,6 @@ def test_invalid_structured_answers_fail(answer: dict[str, object]) -> None:
     "answer",
     [
         {"option_ids": ["web", "desktop"]},
-        {"option_ids": ["web"], "other_text": "Alternative"},
     ],
 )
 def test_single_select_cannot_combine_answers(answer: dict[str, object]) -> None:
@@ -83,9 +83,15 @@ def test_single_select_cannot_combine_answers(answer: dict[str, object]) -> None
         validate_answer(choice("single_select"), NoticeAnswer.model_validate(answer))
 
 
-def test_other_is_opt_in() -> None:
-    with pytest.raises(ValueError, match="does not allow Other"):
-        validate_answer(choice(other=False), NoticeAnswer(other_text="Alternative"))
+def test_legacy_other_is_not_an_answer_option() -> None:
+    with pytest.raises(ValueError, match="Other is not an answer option"):
+        validate_answer(choice(other=True), NoticeAnswer(other_text="Alternative"))
+
+
+@pytest.mark.parametrize("kind", ["single_select", "multi_select"])
+def test_comment_does_not_replace_a_choice(kind: str) -> None:
+    with pytest.raises(ValueError):
+        validate_answer(choice(kind), NoticeAnswer(comment="Please decide later"))
 
 
 def test_open_answer_accepts_numbers_as_text() -> None:

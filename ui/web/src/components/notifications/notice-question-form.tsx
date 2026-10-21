@@ -3,7 +3,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
-import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { NoticeAnswer, NoticeQuestion } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
@@ -11,8 +10,6 @@ import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 interface Draft {
   optionIds: string[];
-  other: boolean;
-  otherText: string;
   text: string;
   comment: string;
 }
@@ -22,12 +19,10 @@ function answerFromDraft(question: NoticeQuestion, draft: Draft): NoticeAnswer |
   if (question.type === "text") {
     return draft.text.trim() ? { text: draft.text.trim() } : null;
   }
-  const count = draft.optionIds.length + Number(draft.other);
+  const count = draft.optionIds.length;
   if (!count || (question.type === "single_select" && count !== 1)) return null;
-  if (draft.other && !draft.otherText.trim()) return null;
   return {
     option_ids: question.options.filter((o) => draft.optionIds.includes(o.id)).map((o) => o.id),
-    ...(draft.other ? { other_text: draft.otherText.trim() } : {}),
     ...(comment ? { comment } : {}),
   };
 }
@@ -48,9 +43,8 @@ export function NoticeQuestionForm({
   const fieldId = useId();
   const textRef = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState<Draft>({
-    optionIds: [], other: false, otherText: "", text: "", comment: "",
+    optionIds: [], text: "", comment: "",
   });
-  const [noteOpen, setNoteOpen] = useState(false);
 
   useEffect(() => {
     onAnswerChange(answerFromDraft(question, draft));
@@ -82,10 +76,9 @@ export function NoticeQuestionForm({
     setDraft({
       ...draft,
       optionIds: single ? [id] : checked ? [...draft.optionIds, id] : draft.optionIds.filter((v) => v !== id),
-      other: single ? false : draft.other,
     });
   };
-  const optionClass = cn(FLEX, "min-h-12 items-start gap-3 rounded-lg border px-3 py-3 text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
+  const optionClass = cn(FLEX, "min-h-12 cursor-pointer items-start gap-3 rounded-xl border px-4 py-3 text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
 
   return (
     <div className="space-y-4">
@@ -94,7 +87,7 @@ export function NoticeQuestionForm({
         {question.options.map((option, index) => {
           const selected = draft.optionIds.includes(option.id);
           return (
-            <label key={option.id} className={cn(optionClass, selected ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50")}>
+            <label key={option.id} className={cn(optionClass, selected ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "border-border hover:border-muted-foreground/40 hover:bg-muted/40")}>
               <input
                 type={single ? "radio" : "checkbox"}
                 name={fieldId}
@@ -109,42 +102,18 @@ export function NoticeQuestionForm({
             </label>
           );
         })}
-        {question.allow_other && (
-          <div className="space-y-2">
-            <label className={cn(optionClass, draft.other ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50")}>
-              <input
-                type={single ? "radio" : "checkbox"}
-                name={fieldId}
-                checked={draft.other}
-                onChange={(e) => setDraft({ ...draft, other: e.target.checked, optionIds: single ? [] : draft.optionIds })}
-                className="mt-0.5 size-4 shrink-0 accent-primary"
-              />
-              <span className="font-medium">{question.options.length + 1}. {t("other")}</span>
-            </label>
-            {draft.other && (
-              <div className="space-y-2 pl-7">
-                <label htmlFor={`${fieldId}-other`} className="text-sm">{t("otherAnswer")}</label>
-                <Textarea
-                  id={`${fieldId}-other`}
-                  value={draft.otherText}
-                  onChange={(e) => setDraft({ ...draft, otherText: e.target.value })}
-                  placeholder={t("otherPlaceholder")}
-                  className="min-h-24 text-base sm:text-sm"
-                  required
-                />
-              </div>
-            )}
-          </div>
-        )}
+
       </fieldset>
-      <div className="space-y-2">
-        <Button variant="ghost" size="sm" disabled={pending} onClick={() => setNoteOpen(!noteOpen)} aria-expanded={noteOpen} aria-controls={`${fieldId}-note-area`}>
-          {t("additionalNote")}
-        </Button>
-        <div id={`${fieldId}-note-area`} hidden={!noteOpen} className="space-y-2">
-          <label htmlFor={`${fieldId}-note`} className="sr-only">{t("additionalNote")}</label>
-          <Textarea id={`${fieldId}-note`} value={draft.comment} onChange={(e) => setDraft({ ...draft, comment: e.target.value })} disabled={pending} placeholder={t("noteForAnswer")} className="text-base sm:text-sm" />
-        </div>
+      <div className="space-y-2 border-t border-border/60 pt-4">
+        <label htmlFor={`${fieldId}-comment`} className="text-sm font-medium">{t("comment")}</label>
+        <Textarea
+          id={`${fieldId}-comment`}
+          value={draft.comment}
+          onChange={(e) => setDraft({ ...draft, comment: e.target.value })}
+          disabled={pending}
+          placeholder={t("commentPlaceholder")}
+          className="min-h-24 text-base sm:text-sm"
+        />
       </div>
     </div>
   );
@@ -157,7 +126,7 @@ export function NoticeQuestionSummary({ question, answer }: { question: NoticeQu
     return (
       <div className="space-y-3 text-sm">
         {answer?.text && <p className="whitespace-pre-wrap break-words">{answer.text}</p>}
-        {answer?.comment && <p className="whitespace-pre-wrap break-words">{t("additionalNote")}: {answer.comment}</p>}
+        {answer?.comment && <p className="whitespace-pre-wrap break-words">{t("comment")}: {answer.comment}</p>}
       </div>
     );
   }
@@ -174,7 +143,7 @@ export function NoticeQuestionSummary({ question, answer }: { question: NoticeQu
         {question.allow_other && <li>{question.options.length + 1}. {t("other")}{answer?.other_text && <span className="ml-2 text-xs">{t("selected")}</span>}</li>}
       </ol>
       {answer?.other_text && <p className="whitespace-pre-wrap break-words">{t("other")}: {answer.other_text}</p>}
-      {answer?.comment && <p className="whitespace-pre-wrap break-words"><span className="text-muted-foreground">{t("additionalNote")}: </span>{answer.comment}</p>}
+      {answer?.comment && <p className="whitespace-pre-wrap break-words"><span className="text-muted-foreground">{t("comment")}: </span>{answer.comment}</p>}
     </div>
   );
 }

@@ -173,23 +173,23 @@ def test_snapshot_counts_unread_fyi(
     assert snap.unread_notice_count == 2
 
 
-def test_open_feed_priority_then_newest(db_conn: psycopg.Connection) -> None:
+def test_open_feed_priority_then_oldest(db_conn: psycopg.Connection) -> None:
     a = seed_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents SET label = 'agent-a' WHERE id = %s", (a,))
     db_conn.commit()
-    insert_notice(db_conn, a, "p2 older", priority="P2")
-    p0 = insert_notice(db_conn, a, "p0", priority="P0")
-    insert_notice(db_conn, a, "p2 newer", priority="P2")
+    insert_notice(db_conn, a, "p2 older", priority="P2", require_response=True)
+    p0 = insert_notice(db_conn, a, "p0", priority="P0", require_response=True)
+    insert_notice(db_conn, a, "p2 newer", priority="P2", require_response=True)
 
     with gateway_test_client() as client:
         resp = client.get("/api/notices/open")
     assert resp.status_code == 200
     data = resp.json()
-    assert [r["title"] for r in data] == ["p0", "p2 newer", "p2 older"]
+    assert [r["title"] for r in data] == ["p0", "p2 older", "p2 newer"]
     assert data[0]["id"] == p0
     assert data[0]["agent_label"] == "agent-a"
-    assert data[0]["require_response"] is False
+    assert data[0]["require_response"] is True
     assert data[0]["resolved_at"] is None
 
 
@@ -217,8 +217,8 @@ def test_notices_feed_returns_open_awaiting_and_resolved(
     db_conn: psycopg.Connection,
 ) -> None:
     a = seed_agent(db_conn)
-    fyi1 = insert_notice(db_conn, a, "fyi one", priority="P3")
-    fyi2 = insert_notice(db_conn, a, "fyi two", priority="P0")
+    insert_notice(db_conn, a, "fyi one", priority="P3")
+    insert_notice(db_conn, a, "fyi two", priority="P0")
     aw1 = insert_notice(db_conn, a, "decision one", priority="P1", require_response=True)
     aw2 = insert_notice(db_conn, a, "decision two", priority="P2", require_response=True)
     r1 = insert_notice(
@@ -251,8 +251,7 @@ def test_notices_feed_returns_open_awaiting_and_resolved(
     with gateway_test_client() as client:
         feed = client.get("/api/notices").json()
 
-    assert [n["title"] for n in feed["open"]] == ["fyi two", "fyi one"]
-    assert [n["id"] for n in feed["open"]] == [fyi2, fyi1]
+    assert feed["open"] == []
     assert [n["title"] for n in feed["awaiting"]] == ["decision one", "decision two"]
     assert [n["id"] for n in feed["awaiting"]] == [aw1, aw2]
     assert [n["id"] for n in feed["resolved_page"]] == [r1, r2, r3]
@@ -325,7 +324,7 @@ def test_notices_feed_excludes_resolved_from_open_lists(
         feed = client.get("/api/notices").json()
     assert feed["open"] == []
     assert feed["awaiting"] == []
-    assert [n["title"] for n in feed["resolved_page"]] == ["was decision", "was fyi"]
+    assert [n["title"] for n in feed["resolved_page"]] == ["was decision"]
 
 
 def test_task_id_flows_to_snapshot_and_feed(
@@ -349,18 +348,17 @@ def test_task_id_flows_to_snapshot_and_feed(
     with gateway_test_client() as client:
         feed = client.get("/api/notices/open").json()
     by_title = {r["title"]: r["task_id"] for r in feed}
-    assert by_title["fyi with task"] == tid
-    assert by_title["fyi no task"] is None
+    assert by_title == {"needs answer": tid}
 
 
-def test_open_feed_excludes_resolved_and_require_response(db_conn: psycopg.Connection) -> None:
+def test_open_feed_excludes_resolved_and_fyi(db_conn: psycopg.Connection) -> None:
     a = seed_agent(db_conn)
     insert_notice(db_conn, a, "open fyi")
     insert_notice(db_conn, a, "read fyi", resolved_at="2026-06-14T01:00:00Z", resolution="read")
     insert_notice(db_conn, a, "needs answer", require_response=True)
     with gateway_test_client() as client:
         data = client.get("/api/notices/open").json()
-    assert [r["title"] for r in data] == ["open fyi"]
+    assert [r["title"] for r in data] == ["needs answer"]
 
 
 def _age_notice(db_conn: psycopg.Connection, notice_id: int, days: int) -> None:
@@ -372,7 +370,7 @@ def _age_notice(db_conn: psycopg.Connection, notice_id: int, days: int) -> None:
     db_conn.commit()
 
 
-def test_open_feed_drops_expired_fyi_and_auto_resolves(
+def test_open_feed_excludes_all_fyi_without_mutating_history(
     db_conn: psycopg.Connection,
 ) -> None:
     a = seed_agent(db_conn)
@@ -384,14 +382,14 @@ def test_open_feed_drops_expired_fyi_and_auto_resolves(
 
     with gateway_test_client() as client:
         feed = client.get("/api/notices/open").json()
-    assert [r["title"] for r in feed] == ["fresh fyi"]
+    assert [r["title"] for r in feed] == ["old but needs answer"]
 
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT resolution, resolved_at IS NOT NULL FROM agent_notices WHERE id = %s",
             (stale,),
         )
-        assert cur.fetchone() == ("read", True)
+        assert cur.fetchone() == (None, False)
         cur.execute("SELECT resolved_at FROM agent_notices WHERE id = %s", (req,))
         row = cur.fetchone()
         assert row is not None
@@ -438,7 +436,7 @@ def test_open_feed_include_awaiting_excludes_expired_fyi(
 
     with gateway_test_client() as client:
         both = client.get("/api/notices/open", params={"include_awaiting": True}).json()
-    assert [it["title"] for it in both] == ["fresh fyi"]
+    assert [it["title"] for it in both] == []
 
 
 def test_open_feed_agent_filter_returns_only_that_agents_notices(
@@ -551,36 +549,20 @@ def test_answer_empty_reply_422(
     assert pending_rows(db_conn, a) == []
 
 
-def test_answer_on_fyi_marks_and_delivers_inbound(db_conn: psycopg.Connection) -> None:
-    a = seed_agent(db_conn)
-    nid = insert_notice(db_conn, a, "FYI: deploy finished")
+def test_legacy_fyi_cannot_receive_new_notice_answers(db_conn: psycopg.Connection) -> None:
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "Legacy information")
     with gateway_test_client() as client:
-        resp = client.post(
-            f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
-            json={"action": "answer", "reply": "thanks!"},
-            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
+        result = client.post(
+            f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve",
+            json={"action": "answer", "reply": "Thanks"},
+            headers=keyed_headers(str(uuid4())),
         )
-    assert resp.status_code == 201
-    assert "status" in resp.json()
-
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT resolved_at, resolution, reply FROM agent_notices WHERE id = %s", (nid,)
-        )
-        row = cur.fetchone()
-    assert row is not None
-    resolved_at, resolution, reply = row
-    assert resolved_at is not None
-    assert resolution == "answered"
-    assert reply == "thanks!"
-
-    rows = pending_rows(db_conn, a)
-    assert len(rows) == 1
-    kind, _status, inbound_text, source = rows[0]
-    assert kind == "chat"
-    assert source == "system:notice-reply"
-    assert "FYI: deploy finished" in inbound_text
-    assert "thanks!" in inbound_text
+    assert result.status_code == 409
+    assert pending_rows(db_conn, agent) == []
+    assert db_conn.execute(
+        "SELECT resolved_at FROM agent_notices WHERE id=%s", (notice,)
+    ).fetchone() == (None,)
 
 
 def test_dismiss_require_response_delivers_system_note(db_conn: psycopg.Connection) -> None:

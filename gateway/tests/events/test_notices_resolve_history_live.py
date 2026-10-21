@@ -13,123 +13,30 @@ from gateway.tests.events.test_notices_endpoint import insert_notice, pending_ro
 from tests.fixtures.gateway_config import gateway_test_client
 
 
-def test_read_with_reply_marks_and_delivers_inbound(
-    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
-) -> None:
-    a = seed_agent(db_conn)
-    nid = insert_notice(db_conn, a, "migration done", content="14k rows")
-    with gateway_test_client() as client:
-        resp = client.post(
-            f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
-            json={"action": "read", "reply": "nice, thanks"},
-            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
-        )
-    assert resp.status_code == 201
-
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT resolved_at, resolution, reply FROM agent_notices WHERE id = %s", (nid,)
-        )
-        row = cur.fetchone()
-    assert row is not None
-    resolved_at, resolution, reply = row
-    assert resolved_at is not None
-    assert resolution == "read"
-    assert reply == "nice, thanks"
-
-    rows = pending_rows(db_conn, a)
-    assert len(rows) == 1
-    kind, _status, inbound_text, source = rows[0]
-    assert kind == "chat"
-    assert source == "system:notice-reply"
-    assert "migration done" in inbound_text
-    assert "nice, thanks" in inbound_text
-
-    snap = select_one(
-        db_conn,
-        a,
-        catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
-    )
-    assert snap is not None
-    assert snap.unread_notice_count == 0
-
-
-def test_read_without_reply_marks_no_inbound(db_conn: psycopg.Connection) -> None:
-    a = seed_agent(db_conn)
-    nid = insert_notice(db_conn, a, "fyi")
-    with gateway_test_client() as client:
-        resp = client.post(
-            f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
-            json={"action": "read"},
-            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
-        )
-    assert resp.status_code == 201
-
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT resolved_at, resolution FROM agent_notices WHERE id = %s", (nid,))
-        row = cur.fetchone()
-    assert row is not None and row[0] is not None and row[1] == "read"
-    assert pending_rows(db_conn, a) == []
-
-
-def test_read_twice_second_is_silent_201(db_conn: psycopg.Connection) -> None:
-    a = seed_agent(db_conn)
-    nid = insert_notice(db_conn, a, "fyi")
-    with gateway_test_client() as client:
-        first = client.post(
-            f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
-            json={"action": "read"},
-            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
-        )
-        second = client.post(
-            f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
-            json={"action": "read"},
-            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
-        )
-    assert first.status_code == 201
-    assert second.status_code == 201
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT resolved_at, resolution, reply FROM agent_notices WHERE id = %s", (nid,)
-        )
-        row = cur.fetchone()
-    assert row is not None and row[0] is not None and row[1] == "read" and row[2] is None
-    assert pending_rows(db_conn, a) == []
-
-
-def test_read_with_reply_on_already_resolved_delivers_note(
+@pytest.mark.parametrize("reply", [None, "Acknowledged"])
+@pytest.mark.parametrize("require_response", [False, True])
+def test_new_read_operations_are_rejected_without_effects(
     db_conn: psycopg.Connection,
+    reply: str | None,
+    require_response: bool,
 ) -> None:
-    a = seed_agent(db_conn)
-    nid = insert_notice(db_conn, a, "migration done")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "Question", require_response=require_response)
     with gateway_test_client() as client:
-        first = client.post(
-            f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
-            json={"action": "read"},
-            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
+        result = client.post(
+            f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve",
+            json={"action": "read", "reply": reply},
+            headers=keyed_headers(str(uuid4())),
         )
-        second = client.post(
-            f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
-            json={"action": "read", "reply": "noted"},
-            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
-        )
-    assert first.status_code == 201
-    assert second.status_code == 201
-    rows = pending_rows(db_conn, a)
-    assert len(rows) == 1
-    kind, _status, inbound_text, source = rows[0]
-    assert kind == "chat"
-    assert source == "system:notice-reply"
-    assert "migration done" in inbound_text
-    assert "noted" in inbound_text
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT resolution, reply FROM agent_notices WHERE id = %s", (nid,))
-        row = cur.fetchone()
-    assert row is not None and row[0] == "read" and row[1] is None
+    assert result.status_code == 422
+    assert db_conn.execute(
+        "SELECT resolved_at, reply FROM agent_notices WHERE id=%s", (notice,)
+    ).fetchone() == (None, None)
+    assert pending_rows(db_conn, agent) == []
+    assert db_conn.execute("SELECT count(*) FROM notice_operation_receipts").fetchone() == (0,)
 
 
-def test_read_on_require_response_is_409(
+def test_read_keeps_question_in_snapshot(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
     a = seed_agent(db_conn)
@@ -140,7 +47,7 @@ def test_read_on_require_response_is_409(
             json={"action": "read"},
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
-    assert resp.status_code == 409
+    assert resp.status_code == 422
     snap = select_one(
         db_conn,
         a,
@@ -157,7 +64,7 @@ def test_resolve_nonexistent_409(db_conn: psycopg.Connection) -> None:
     with gateway_test_client() as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/999999/resolve",
-            json={"action": "read"},
+            json={"action": "dismiss"},
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 409
@@ -213,13 +120,13 @@ def test_open_default_limit_comes_from_display_config(
 
     monkeypatch.setattr(settings.display, "notices_open_default_limit", 2)
     a = seed_agent(db_conn)
-    insert_notice(db_conn, a, "older")
-    insert_notice(db_conn, a, "newer")
-    insert_notice(db_conn, a, "newest")
+    insert_notice(db_conn, a, "older", require_response=True)
+    insert_notice(db_conn, a, "newer", require_response=True)
+    insert_notice(db_conn, a, "newest", require_response=True)
 
     with gateway_test_client() as client:
         data = client.get("/api/notices/open").json()
-    assert [r["title"] for r in data] == ["newest", "newer"]
+    assert [r["title"] for r in data] == ["older", "newer"]
 
 
 def test_feed_defaults_come_from_display_config(
@@ -230,8 +137,8 @@ def test_feed_defaults_come_from_display_config(
     monkeypatch.setattr(settings.display, "notices_open_default_limit", 1)
     monkeypatch.setattr(settings.display, "notices_resolved_default_page", 1)
     a = seed_agent(db_conn)
-    insert_notice(db_conn, a, "open older")
-    insert_notice(db_conn, a, "open newer")
+    insert_notice(db_conn, a, "open older", require_response=True)
+    insert_notice(db_conn, a, "open newer", require_response=True)
     insert_notice(
         db_conn,
         a,
@@ -253,7 +160,7 @@ def test_feed_defaults_come_from_display_config(
 
     with gateway_test_client() as client:
         feed = client.get("/api/notices").json()
-    assert [r["title"] for r in feed["open"]] == ["open newer"]
+    assert [r["title"] for r in feed["awaiting"]] == ["open older"]
     assert [r["title"] for r in feed["resolved_page"]] == ["resolved r1"]
 
 
@@ -307,27 +214,27 @@ def test_live_returns_new_open_notices_oldest_first(
 ) -> None:
     a1 = seed_agent(db_conn)
     a2 = seed_agent(db_conn)
-    n1 = insert_notice(db_conn, a1, "FYI one", require_response=False)
+    insert_notice(db_conn, a1, "FYI one", require_response=False)
     n2 = insert_notice(db_conn, a2, "Decision", require_response=True)
-    n3 = insert_notice(db_conn, a1, "FYI two", require_response=False)
+    insert_notice(db_conn, a1, "FYI two", require_response=False)
 
     with gateway_test_client() as client:
         r = client.get("/api/notices/live", params={"after": 0})
         assert r.status_code == 200
         items = r.json()
-        assert [it["id"] for it in items] == [n1, n2, n3]
-        assert items[0]["title"] == "FYI one"
-        assert items[1]["require_response"] is True
-        assert items[1]["agent_id"] == a2
+        assert [it["id"] for it in items] == [n2]
+        assert items[0]["title"] == "Decision"
+        assert items[0]["require_response"] is True
+        assert items[0]["agent_id"] == a2
 
         r2 = client.get("/api/notices/live", params={"after": n2})
         assert r2.status_code == 200
-        assert [it["id"] for it in r2.json()] == [n3]
+        assert [it["id"] for it in r2.json()] == []
 
 
 def test_live_excludes_resolved(db_conn: psycopg.Connection) -> None:
     a1 = seed_agent(db_conn)
-    n1 = insert_notice(db_conn, a1, "Gone", require_response=False)
+    n1 = insert_notice(db_conn, a1, "Open question", require_response=True)
     insert_notice(
         db_conn,
         a1,
@@ -343,7 +250,7 @@ def test_live_excludes_resolved(db_conn: psycopg.Connection) -> None:
         assert [it["id"] for it in r.json()] == [n1]
 
 
-def test_open_feed_include_awaiting_returns_both_kinds(
+def test_old_include_awaiting_flag_cannot_restore_fyi(
     db_conn: psycopg.Connection,
 ) -> None:
     a1 = seed_agent(db_conn)
@@ -352,9 +259,9 @@ def test_open_feed_include_awaiting_returns_both_kinds(
 
     with gateway_test_client() as client:
         default = client.get("/api/notices/open").json()
-        assert [it["title"] for it in default] == ["FYI one"]
+        assert [it["title"] for it in default] == ["Decision"]
         both = client.get("/api/notices/open", params={"include_awaiting": True}).json()
-        assert {it["title"] for it in both} == {"FYI one", "Decision"}
+        assert {it["title"] for it in both} == {"Decision"}
         insert_notice(
             db_conn,
             a1,

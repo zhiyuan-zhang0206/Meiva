@@ -331,7 +331,7 @@ def _add_notices_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser
     )
     notices_list_p.add_argument("--agent", type=int, default=None, help="agent id")
     notices_list_p.add_argument("--priority", default=None, help="P0|P1|P2|P3")
-    notices_list_p.add_argument("--type", choices=("fyi", "decision"), default=None)
+    notices_list_p.add_argument("--type", choices=("decision",), default=None)
     notices_list_p.add_argument(
         "--stale", action="store_true", help="only notices of terminated agents"
     )
@@ -339,17 +339,17 @@ def _add_notices_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser
 
     notices_resolve_p = notices_sub.add_parser(
         "resolve",
-        help="resolve one notice (answer|read|dismiss)",
+        help="resolve one notice (answer|dismiss)",
     )
     notices_resolve_p.add_argument("notice_id", type=int)
     notices_resolve_p.add_argument("--agent", type=int, required=True)
-    notices_resolve_p.add_argument("--action", choices=("answer", "read", "dismiss"), required=True)
+    notices_resolve_p.add_argument("--action", choices=("answer", "dismiss"), required=True)
     notices_resolve_p.add_argument("--reply", default=None)
     notices_resolve_p.set_defaults(func=_h_notices_resolve)
 
     notices_clear_p = notices_sub.add_parser(
         "clear",
-        help="resolve every open notice of one agent (FYI->read, decision->dismiss)",
+        help="resolve every open notice of one agent (dismiss without answering)",
     )
     notices_clear_p.add_argument("--agent", type=int, required=True)
     notices_clear_p.add_argument("--force", action="store_true")

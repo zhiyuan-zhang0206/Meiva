@@ -30,7 +30,9 @@ tags:
 - `meiva notices list/resolve/clear/audit`: `resolve` reports success only when the
   gateway accepts the action. A 409 conflict is an error, including an absent
   notice, an action-kind mismatch, or an already-resolved answer/dismissal.
-  Bare reads of resolved notices retain the gateway's successful response.
+  Every notice requires a response; fresh mark-read operations are rejected.
+  `clear --agent` explicitly dismisses each open notice after confirmation
+  (`--force` skips confirmation). `clear --stale` targets only terminated agents.
   Resolution is one keyed attempt (`principal-v1`) with a fresh key per invocation.
   `audit` replays a window of producer candidates through the delivery policy and
   writes nothing; the gateway serves the report (`GET /api/notifications/audit`) and the

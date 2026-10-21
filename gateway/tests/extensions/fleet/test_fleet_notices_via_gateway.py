@@ -96,32 +96,29 @@ def _assert_second_notice_supersedes_first(nid: Any, nid2: Any) -> None:
     assert nid2.superseded == [nid]
 
 
-def test_notify_inserts_fyi_and_snapshot_counts_unread(
+def test_notify_defaults_to_response_and_snapshot_lists_question(
     sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
+    # meiva:link meiva/docs/ui.meiva.okf.md
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    # require_response defaults False -> these are FYI notices.
-    nid = meiva.ui.notify(
+    nid = meiva.ui.notify(  # pyright: ignore[reportCallIssue]
         "migration done", content="14k rows", priority="P1", idempotency_key=str(uuid4())
-    )  # type: ignore[attr-defined]
-    assert isinstance(nid, int)  # Notice is an int subclass — backward compatible
+    )
+    assert isinstance(nid, int)
     _assert_first_notice_is_sole_pending_fyi(nid)
 
-    # Posting a second notice auto-resolves the first (at most one).
-    nid2 = meiva.ui.notify("hit a rate limit", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    nid2 = meiva.ui.notify("hit a rate limit", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
     _assert_second_notice_supersedes_first(nid, nid2)
 
-    db_conn.rollback()  # notify() committed via its own cursor; refresh our view
+    db_conn.rollback()
     rows = _notices(db_conn, agent_id)
-    # First notice is now superseded; second is open.
     assert rows[0][0] == "migration done"
-    assert rows[0][5] is not None  # resolved_at set
+    assert rows[0][5] is not None
     assert rows[0][6] == "superseded"
     assert rows[1][0] == "hit a rate limit"
-    assert rows[1][5] is None  # resolved_at (open)
+    assert rows[1][5] is None
 
-    # the snapshot badge counts only the open FYI notice as unread.
     snap = select_one(
         db_conn,
         agent_id,
@@ -129,8 +126,8 @@ def test_notify_inserts_fyi_and_snapshot_counts_unread(
         default_model_reader=lambda: settings.lm.llm_model,
     )
     assert snap is not None
-    assert snap.unread_notice_count == 1
-    assert snap.notices_awaiting_response == []
+    assert snap.unread_notice_count == 0
+    assert len(snap.notices_awaiting_response) == 1
 
 
 def test_notify_require_response_rides_awaiting_worklist(
@@ -177,7 +174,7 @@ def test_sdk_question_keeps_number_order_in_snapshot(
         question={
             "type": "single_select",
             "options": [{"id": "z", "label": "First"}, {"id": "a", "label": "Second"}],
-            "allow_other": True,
+            "allow_other": False,
         },
         idempotency_key=str(uuid4()),
     )
@@ -372,12 +369,13 @@ def test_edit_notice_validation_and_guards(
     # bad priority.
     with pytest.raises(ValueError, match="priority"):
         meiva.ui.edit_notice(priority="P9")  # type: ignore[attr-defined]
-    # blocking=True on an FYI (require_response False) is rejected.
-    with pytest.raises(ValueError, match="needs a response"):
-        meiva.ui.edit_notice(blocking=True)  # type: ignore[attr-defined]
+    meiva.ui.edit_notice(blocking=True)  # type: ignore[attr-defined]
+    with pytest.raises(ValueError, match="require a user response"):
+        meiva.ui.notify("Information", require_response=False, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     # no open notice is idempotent (no-op).
     meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
-    meiva.ui.edit_notice(title="too late")  # type: ignore[attr-defined]
+    # meiva:link meiva/docs/ui.meiva.okf.md
+    meiva.ui.edit_notice(title="too late")  # pyright: ignore[reportCallIssue]
 
 
 def test_dismiss_notice_withdraws(

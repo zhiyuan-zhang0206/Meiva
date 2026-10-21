@@ -228,7 +228,8 @@ describe("FleetView (desktop)", () => {
       makeAgent({ agent_id: 405, label: "reviewer" }),
     ]);
     useNoticesMock.mockReturnValue({
-      open: [
+      open: [],
+      awaiting: [
         {
           id: 1405,
           agent_id: 405,
@@ -236,7 +237,7 @@ describe("FleetView (desktop)", () => {
           title: "Review result",
           content: null,
           priority: "P3",
-          require_response: false,
+          require_response: true,
           blocking: false,
           created_at: "2026-06-06T00:00:00Z",
           updated_at: null,
@@ -247,7 +248,6 @@ describe("FleetView (desktop)", () => {
           expire_at: "2026-06-07T00:00:00Z",
         },
       ],
-      awaiting: [],
       resolved: [],
       fetchNextPage: () => undefined,
       hasNextPage: false,
@@ -365,8 +365,8 @@ describe("FleetView (mobile)", () => {
   // The tab badge and the panel must show one number. The badge used to roll up the
   // agent snapshot while the panel read the notice feed, so the same screen could
   // say "Inbox 4" over a list of two. The badge now reads the panel's own feed: the
-  // agents below claim 1 decision + 3 unread FYI (4) and the feed carries 2, so the
-  // tab must say 2.
+  // agents below claim 1 decision + 3 unread FYI (4), but the queue only
+  // includes the response-required notice. Legacy FYI must not inflate its badge.
   // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
   it("shows the Inbox badge from the same feed the panel renders", () => {
     agentsMock.mockReturnValue([
@@ -390,7 +390,7 @@ describe("FleetView (mobile)", () => {
       isLoading: false,
     });
     wrap(<FleetView />);
-    expect(screen.getByRole("tab", { name: /Inbox 2/ })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /Inbox 1/ })).toBeTruthy();
     expect(screen.getByRole("tab", { name: /Agents 1/ })).toBeTruthy();
   });
 

@@ -18,10 +18,10 @@ are for when the user is not in a live conversation with the agent. In a live
 dialog the user reads your replies as you write them, so answer directly and
 do not post a notice.
 
-2. **Post** `meiva.ui.notify(title, content, idempotency_key=notice_key, require_response=..., blocking=...,
-   priority=...)` — post one notice. `require_response=False` is an FYI the user
-   may glance at or ignore; `require_response=True` needs an answer (and
-   `blocking=True` if you are stalled until it arrives).
+2. **Post** `meiva.ui.notify(title, content, idempotency_key=notice_key,
+   blocking=..., priority=...)` — request one answer from the user.
+   Ordinary information belongs in chat. Priority is P0 through P3;
+   `blocking=True` means progress depends on the answer.
 3. **Edit** `meiva.ui.edit_notice(...)` — revise the notice you posted that the
    user has not acted on yet (at most one is open, so no id is needed).
 4. **Dismiss** `meiva.ui.dismiss_notice()` — withdraw the open notice that is no
@@ -34,7 +34,7 @@ the `meiva_fleet` skill (the orchestration discipline). Disabled -> members abse
 
 __description__: str = (
     "Fleet supervision surface — the agent self-reports its role/label and posts "
-    "notices to the user's queue (FYI or needing a response), which it can edit "
+    "questions to the user's queue, all requiring a response, which it can edit "
     "or dismiss; the monitoring view shows all of it live."
 )
 
@@ -132,7 +132,7 @@ def notify(
     title: str,
     content: str | None = None,
     *,
-    require_response: bool = False,
+    require_response: bool = True,
     blocking: bool = False,
     priority: str = "P2",
     task: int | None = None,
@@ -142,14 +142,10 @@ def notify(
 ) -> "Notice":
     """Post one notice, replacing any previous open notice.
 
-    - `require_response=False` (default) -- an FYI; the user may read, reply,
-      or ignore it. Post sparingly: a flood of low-value notices buries the
-      ones that matter.
-    - `require_response=True` -- a decision only the user can make (an action
-      that is irreversible, outward-facing, spends real money, or reaches a
-      real person). A decision the agent that spawned you could make goes to
-      that agent via meiva.agents.send_message instead.
-    - `blocking=True` -- you cannot make progress until it is answered.
+    Every notice requires a user response. Ordinary information, progress and
+    results belong in chat. `require_response=False` is rejected.
+    `priority` is P0 (highest) through P3 (lowest), independent of `blocking`.
+    `blocking=True` means you cannot make progress until the user answers.
 
     Posting returns immediately. A user reply arrives later as an ordinary
     message; continue work you can do while waiting. You can have one open notice
@@ -157,12 +153,11 @@ def notify(
     to the current notice instead of replacing it.
 
     Args:
-        content: optional detail. Offer discrete choices as A / B / C so the
-            user can reply with one letter for legacy free-text notices.
+        content: optional background for the question in title.
         question: one structured question: type=text, or type=single_select /
             multi_select with ordered options (id, label, optional description)
-            and allow_other. Requires require_response=True. Options are numbered
-            from 1; Other follows them. The question and its context are immutable.
+            with an optional comment alongside the selection. No Other option.
+            Options are numbered from 1. The question and its context are immutable.
         task: groups your notices by task in the user's queue.
         expire_at: expiration deadline; omit it to use the configured lifetime.
         idempotency_key: reuse for the same notice across explicit retries.
@@ -181,14 +176,14 @@ def notify(
     if not title.strip():
         raise ValueError("title must be non-empty")
     validate_priority(priority)
-    if blocking and not require_response:
-        raise ValueError("blocking=True requires require_response=True (an FYI never stalls you)")
+    if not require_response:
+        raise ValueError("notices require a user response; send ordinary information in chat")
 
-    from base.api_contracts.notice_question import parse_question
+    from base.api_contracts.notice_question import ChoiceQuestion, parse_question
 
     parsed_question = parse_question(question) if question is not None else None
-    if parsed_question is not None and not require_response:
-        raise ValueError("question requires require_response=True")
+    if isinstance(parsed_question, ChoiceQuestion) and parsed_question.allow_other:
+        raise ValueError("Other is not an answer option; use a choice with an optional comment")
 
     expire_at_iso: str | None = None
     if expire_at is not None:
@@ -257,8 +252,7 @@ def edit_notice(
     priority: str = _UNSET,  # type: ignore[assignment]
     blocking: bool = _UNSET,  # type: ignore[assignment]
 ) -> None:
-    """require_response cannot be changed -- to turn an FYI into a question,
-    dismiss this notice and post a fresh one.
+    """Edit the open response-required notice without changing its question.
 
     Args:
         content: pass None to clear.

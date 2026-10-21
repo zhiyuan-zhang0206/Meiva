@@ -19,24 +19,6 @@ import { FLEX, FLEX_1 } from "@/lib/layout/layout";
 
 import { NoticeQuestionForm } from "./notice-question-form";
 
-/**
- * The reply surface for a single open notice — its content plus the resolve
- * controls, branching on `require_response`:
- *   - structured question → numbered radio/checkbox or text form + explicit submit
- *   - legacy require_response → a reply box (Enter / send = "answer") + a "Dismiss" action
- *   - FYI              → an optional note + a "Mark read" action
- * Owns the reply/pending/error state and calls `api.resolveNotice`; on success
- * it clears the box and calls `onResolved` so the caller can refetch (inspector)
- * or advance a queue. It never wakes the agent itself — that is the gateway's
- * job when the reply lands.
- *
- * Shared component: the inspector panel renders it at the bottom of its section list; the
- * fleet inbox renders it in its detail pane. The inbox drives keyboard cycling
- * (Up/Down over the open list when the reply box is empty) through `onCycle`, and
- * auto-advance-after-resolve through `onResolved`. The inspector passes neither
- * cycling callback, so those keys fall through unchanged there. Created time is
- * opt-in because the inbox already renders it in its agent context header.
- */
 export function OpenNoticeDetail({
   agentId,
   notice,
@@ -56,7 +38,6 @@ export function OpenNoticeDetail({
 }) {
   const t = useTranslations("noticeDetail");
   const { formatAbsolute } = useTimeFormat();
-  const requiresResponse = notice.require_response;
   const [reply, setReply] = useState("");
   const [structuredAnswer, setStructuredAnswer] = useState<NoticeAnswer | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -112,36 +93,26 @@ export function OpenNoticeDetail({
   };
   const dismiss = () =>
     void run({ action: "dismiss" }, t(notice.question ? "noLongerAvailable" : "alreadyDismissed"), t("dismiss"));
-  const markRead = () => {
-    const text = reply.trim();
-    void run(
-      { action: "read", ...(text ? { reply: text } : {}) },
-      t("alreadyRead"),
-      t("markRead"),
-    );
-  };
-
-  const onSend = requiresResponse ? answer : markRead;
 
   return (
-    <div className={cn("space-y-2", className)}>
+    <div className={cn("space-y-4", className)}>
       <div className="space-y-3 pb-4">
         <div className={cn("flex-wrap items-center gap-1.5", FLEX)}>
           <span
             className={cn(
-              "shrink-0 rounded px-1 text-[10px] font-semibold text-white",
+              "shrink-0 rounded px-1 text-xs font-semibold text-white",
               PRIORITY_BG[notice.priority],
             )}
           >
             {notice.priority}
           </span>
           {notice.blocking && (
-            <span className="shrink-0 rounded bg-destructive/10 px-1 text-[9px] font-medium tracking-wide text-destructive uppercase">
+            <span className="shrink-0 rounded bg-destructive/10 px-1 text-xs font-medium tracking-wide text-destructive uppercase">
               {t("blocking")}
             </span>
           )}
           <span className="text-[10px] text-muted-foreground">
-            {requiresResponse ? t("needsAnswer") : "FYI"}
+            {t("needsAnswer")}
           </span>
           {showTimestamp ? (
             <>
@@ -160,7 +131,7 @@ export function OpenNoticeDetail({
             </>
           ) : null}
         </div>
-        <h4 className="text-base font-medium break-words">{notice.title}</h4>
+        <h4 className="text-lg font-semibold leading-snug break-words">{notice.title}</h4>
         {notice.content && (
           <div className="text-sm break-words text-foreground/85">
             <ChatMarkdown content={notice.content} />
@@ -182,7 +153,7 @@ export function OpenNoticeDetail({
             ref={textareaRef}
             value={reply}
             onChange={(e) => setReply(e.target.value)}
-            onSend={onSend}
+            onSend={answer}
             onKeyDown={(e) => {
               // With an empty reply box, Up/Down cycles the caller's open list to
               // the previous/next notice (the inbox's arrow-key navigation). A
@@ -192,54 +163,27 @@ export function OpenNoticeDetail({
                 onCycle(e.key === "ArrowUp" ? -1 : 1);
               }
             }}
-            placeholder={
-              requiresResponse
-                ? t("answerPlaceholder")
-                : t("notePlaceholder")
-            }
+            placeholder={t("answerPlaceholder")}
             disabled={pending}
             aria-label={t("replyTo", { title: notice.title })}
             className={cn("min-h-[3.25rem] rounded border border-input bg-background px-2 py-1.5 font-mono text-xs focus:border-primary disabled:opacity-50", FLEX_1)}
           />
-          {requiresResponse ? (
-            <SendButton
-              state={pending ? "sending" : "send"}
-              onClick={answer}
-              disabled={pending || !reply.trim()}
-              aria-label={t("sendAnswer")}
-            />
-          ) : (
-            <SendButton
-              state={pending ? "sending" : "send"}
-              onClick={markRead}
-              disabled={pending || !reply.trim()}
-              aria-label={t("sendNote")}
-            />
-          )}
+          <SendButton
+            state={pending ? "sending" : "send"}
+            onClick={answer}
+            disabled={pending || !reply.trim()}
+            aria-label={t("sendAnswer")}
+          />
         </div>
       )}
 
       <div className={cn("min-h-4 items-center justify-between gap-2", FLEX)}>
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : <span />}
-        {!notice.question && (requiresResponse ? (
-          <button
-            type="button"
-            onClick={dismiss}
-            disabled={pending}
-            className="shrink-0 rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
-          >
-            {t("dismiss")}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={markRead}
-            disabled={pending}
-            className="shrink-0 rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
-          >
-            {pending ? t("marking") : t("markRead")}
-          </button>
-        ))}
+        {!notice.question && (
+          <Button type="button" variant="ghost" size="sm" onClick={dismiss} disabled={pending}>
+            {t("closeQuestion")}
+          </Button>
+        )}
       </div>
     </div>
   );

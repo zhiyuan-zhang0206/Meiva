@@ -37,7 +37,7 @@ you need, and what slips if they don't act. A plain delivery states the result a
 its path; it needs no ask. If it is only progress, write it to the task record or
 your working notes. Ask once; if the answer hasn't come, wait — don't resend.
 
-Report the **aggregate**, not raw lines. "Auth branch converging, one open question on token TTL" — not five collaborators' raw output. Your delegator aggregates across workers before anything reaches the user's queue.
+Report the **aggregate**, not raw lines. "Auth branch converging, one open question on token TTL" — not five collaborators' raw output. Your delegator aggregates across workers before reporting results to the user.
 
 Follow the brief's [single reporter contract](../SKILL.md#one-reporter-per-milestone).
 If the designated reporter already informed the agent that must act, do not
@@ -46,7 +46,7 @@ blockers, changed results, and your eventual delivery still need reporting.
 
 ### To the User
 
-Reach the user directly for what only they can give — an authorization, a decision, an answer: `meiva.ui.notify(require_response=True)`. Results are not the user's to triage while you have a delegator. An agent with no delegator delivers its results to the user's queue itself.
+Reach the user directly for what only they can give — an authorization, a decision, an answer: `meiva.ui.notify(require_response=True)`. Results are not the user's to triage while you have a delegator. An agent with no delegator reports ordinary results in the conversation. Only requests that need a user response belong in the notice queue.
 
 ### Artifacts: File + Message
 

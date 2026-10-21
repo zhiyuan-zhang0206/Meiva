@@ -106,10 +106,10 @@ def test_resolve_posts_action(
 ) -> None:
     from cli.commands.agents.notices import cmd_notices_resolve
 
-    assert cmd_notices_resolve(notice_id=5, agent_id=7, action="read", reply=None) == 0
+    assert cmd_notices_resolve(notice_id=5, agent_id=7, action="dismiss", reply=None) == 0
     url, kw = dial["post"][0]
     assert url == "http://gw/api/keyed/v1/agents/7/notices/5/resolve"
-    assert kw["json"] == {"action": "read", "reply": None}
+    assert kw["json"] == {"action": "dismiss", "reply": None}
     assert kw["headers"]["Idempotency-Key"]
     assert kw["headers"]["Idempotency-Scope"] == "principal-v1"
     assert "resolved" in capsys.readouterr().out
@@ -119,9 +119,9 @@ def test_resolve_posts_action(
 @pytest.mark.parametrize(
     ("action", "reply", "detail"),
     [
-        ("read", None, "notice 5 does not exist for agent 7"),
-        ("dismiss", None, "notice 5 is FYI (use 'answer' or 'read')"),
-        ("read", None, "notice 5 needs a response (use 'answer' or 'dismiss')"),
+        ("dismiss", None, "notice 5 does not exist for agent 7"),
+        ("dismiss", None, "legacy FYI entries are not notices"),
+        ("dismiss", None, "notice 5 is already resolved for agent 7"),
         ("answer", "My answer", "notice 5 is already resolved for agent 7"),
     ],
 )
@@ -175,7 +175,7 @@ def test_clear_resolves_each_open(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cmd_notices_clear(agent_id=7, force=True) == 0
     assert posted == [
         {"action": "dismiss", "reply": None},
-        {"action": "read", "reply": None},
+        {"action": "dismiss", "reply": None},
     ]
 
 

@@ -38,12 +38,12 @@ def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) ->
         assert cur.fetchone() == (1,)
 
 
-def test_distinct_later_read_replies_remain_distinct(db_conn: psycopg.Connection) -> None:
+def test_later_answer_requires_a_new_open_question(db_conn: psycopg.Connection) -> None:
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "FYI")
+    notice = insert_notice(db_conn, agent, "Question", require_response=True)
     path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
     with gateway_test_client() as client:
-        body = {"action": "read", "reply": "thanks"}
+        body = {"action": "answer", "reply": "yes"}
         first = client.post(
             path,
             json=body,
@@ -59,9 +59,12 @@ def test_distinct_later_read_replies_remain_distinct(db_conn: psycopg.Connection
             json=body,
             headers={"Idempotency-Key": "read-2", "Idempotency-Scope": "principal-v1"},
         )
-    assert first.status_code == replay.status_code == later.status_code == 201
+    assert first.status_code == replay.status_code == 201
+    assert later.status_code == 409
     assert first.json()["inbound_id"] == replay.json()["inbound_id"]
-    assert later.json()["inbound_id"] != first.json()["inbound_id"]
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
+    ).fetchone() == (1,)
 
 
 def test_creation_replay_preserves_original_result_after_superseding(

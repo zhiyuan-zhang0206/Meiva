@@ -99,7 +99,7 @@ describe("OpenNoticeDetail — require_response", () => {
     const onResolved = vi.fn();
     render(<OpenNoticeDetail agentId={7} notice={ntc()} onResolved={onResolved} />);
 
-    fireEvent.click(screen.getByText("Dismiss"));
+    fireEvent.click(screen.getByText("Close without answering"));
 
     await waitFor(() =>
       expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "dismiss" }, expect.any(String)),
@@ -120,17 +120,17 @@ describe("OpenNoticeDetail — require_response", () => {
   });
 });
 
-describe("OpenNoticeDetail — FYI", () => {
+describe("OpenNoticeDetail — reply retries", () => {
   it("reuses the original read-reply key on a manual retry after response loss", async () => {
     resolveNotice.mockRejectedValueOnce(new TypeError("response lost"))
       .mockResolvedValueOnce({ status: "idling" });
     const onResolved = vi.fn();
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ require_response: false })} onResolved={onResolved} />);
+    render(<OpenNoticeDetail agentId={7} notice={ntc()} onResolved={onResolved} />);
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "noted" } });
-    fireEvent.click(screen.getByText("Mark read"));
+    fireEvent.click(screen.getByLabelText("Send answer"));
     await waitFor(() => expect(screen.getByText(/response lost/)).toBeTruthy());
     expect(resolveNotice).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByText("Mark read"));
+    fireEvent.click(screen.getByLabelText("Send answer"));
     await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
     expect(resolveNotice.mock.calls[1]).toEqual(resolveNotice.mock.calls[0]);
     expect(resolveNotice.mock.calls[0][3]).toEqual(expect.any(String));
@@ -139,79 +139,33 @@ describe("OpenNoticeDetail — FYI", () => {
   it("allocates a new key when the reply changes after a failed submission", async () => {
     resolveNotice.mockRejectedValueOnce(new TypeError("response lost"))
       .mockResolvedValueOnce({ status: "idling" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ require_response: false })} />);
+    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "first" } });
-    fireEvent.click(screen.getByText("Mark read"));
+    fireEvent.click(screen.getByLabelText("Send answer"));
     await waitFor(() => expect(screen.getByText(/response lost/)).toBeTruthy());
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "second" } });
-    fireEvent.click(screen.getByText("Mark read"));
+    fireEvent.click(screen.getByLabelText("Send answer"));
     await waitFor(() => expect(resolveNotice).toHaveBeenCalledTimes(2));
     expect(resolveNotice.mock.calls[1][3]).not.toBe(resolveNotice.mock.calls[0][3]);
-    expect(resolveNotice.mock.calls[1][2]).toEqual({ action: "read", reply: "second" });
+    expect(resolveNotice.mock.calls[1][2]).toEqual({ action: "answer", reply: "second" });
   });
 
   it("sends one request while repeated Enter events arrive during a pending reply", () => {
     resolveNotice.mockImplementation(() => new Promise(() => {
+      // meiva:note
       // Keep the request unresolved while repeated keyboard events arrive.
     }));
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ require_response: false })} />);
+    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "noted" } });
     fireEvent.keyDown(screen.getByRole<HTMLTextAreaElement>("textbox"), { key: "Enter" });
     fireEvent.keyDown(screen.getByRole<HTMLTextAreaElement>("textbox"), { key: "Enter" });
     expect(resolveNotice).toHaveBeenCalledTimes(1);
   });
 
-  it("mark read: sends action=read with no reply when empty, and shows no Send button", async () => {
-    resolveNotice.mockResolvedValue({ status: "ok" });
-    const onResolved = vi.fn();
-    render(
-      <OpenNoticeDetail
-        agentId={7}
-        notice={ntc({ id: 22, require_response: false })}
-        onResolved={onResolved}
-      />,
-    );
-
-    expect(screen.queryByLabelText("Send answer")).toBeNull();
-    expect(screen.getByText("FYI")).toBeTruthy();
-    fireEvent.click(screen.getByText("Mark read"));
-
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 22, { action: "read" }, expect.any(String)));
-    await waitFor(() => expect(onResolved).toHaveBeenCalled());
-  });
-
-  it("mark read on an already-read notice is silent — no error, queue advances", async () => {
-    // User ruling 2026-08-28: the gateway returns 201 for a read on an
-    // already-resolved notice (idempotent close), so the UI must advance
-    // without surfacing the stale "This notice was already read." error.
-    resolveNotice.mockResolvedValue({ status: "ok" });
-    const onResolved = vi.fn();
-    render(
-      <OpenNoticeDetail
-        agentId={7}
-        notice={ntc({ id: 22, require_response: false })}
-        onResolved={onResolved}
-      />,
-    );
-
-    fireEvent.click(screen.getByText("Mark read"));
-
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 22, { action: "read" }, expect.any(String)));
-    await waitFor(() => expect(onResolved).toHaveBeenCalled());
-    expect(screen.queryByText("This notice was already read.")).toBeNull();
-    expect(screen.queryByText(/failed/i)).toBeNull();
-  });
-
-  it("mark read carries an optional note as reply", async () => {
-    resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ id: 22, require_response: false })} />);
-
-    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "noted" } });
-    fireEvent.click(screen.getByText("Mark read"));
-
-    await waitFor(() =>
-      expect(resolveNotice).toHaveBeenCalledWith(7, 22, { action: "read", reply: "noted" }, expect.any(String)),
-    );
+  it("has no mark-read action or FYI label", () => {
+    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
+    expect(screen.queryByText("Mark read")).toBeNull();
+    expect(screen.queryByText("FYI")).toBeNull();
   });
 });
 
@@ -220,7 +174,7 @@ const options = [{ id: "web", label: "Web" }, { id: "desktop", label: "Desktop" 
 describe("OpenNoticeDetail — numbered questions", () => {
   it("does not preselect or submit a single choice until explicit confirmation", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options, allow_other: true } })} />);
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options, allow_other: false } })} />);
     const submit = screen.getByRole("button", { name: "Submit answer" });
     expect(submit.hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole<HTMLInputElement>("radio", { name: "1. Web" }));
@@ -231,31 +185,27 @@ describe("OpenNoticeDetail — numbered questions", () => {
     await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", answer: { option_ids: ["desktop"] } }, expect.any(String)));
   });
 
-  it("preserves an Other draft when toggled off, and never selects numbers mentioned in it", async () => {
+  it.each(["single_select", "multi_select"] as const)("%s preserves comments independently of selections", async (type) => {
     resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "multi_select", options, allow_other: true } })} />);
-    fireEvent.click(screen.getByRole<HTMLInputElement>("checkbox", { name: "2. Desktop" }));
-    const other = screen.getByRole<HTMLInputElement>("checkbox", { name: "3. Other" });
-    fireEvent.click(other);
-    expect(screen.getByRole("button", { name: "Submit answer" }).hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByLabelText<HTMLTextAreaElement>("Your alternative answer"), { target: { value: "Based on 2, defer 1." } });
-    fireEvent.click(other);
-    fireEvent.click(other);
-    expect((screen.getByLabelText<HTMLTextAreaElement>("Your alternative answer")).value).toBe("Based on 2, defer 1.");
-    expect((screen.getByRole<HTMLInputElement>("checkbox", { name: "1. Web" })).checked).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", answer: { option_ids: ["desktop"], other_text: "Based on 2, defer 1." } }, expect.any(String)));
-  });
-
-  it("single-select Other replaces the selected option and requires its text", async () => {
-    resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options, allow_other: true } })} />);
-    fireEvent.click(screen.getByRole<HTMLInputElement>("radio", { name: "1. Web" }));
-    fireEvent.click(screen.getByRole<HTMLInputElement>("radio", { name: "3. Other" }));
-    expect(screen.getByRole("button", { name: "Submit answer" }).hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByLabelText<HTMLTextAreaElement>("Your alternative answer"), { target: { value: "Use option 2 later." } });
-    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", answer: { option_ids: [], other_text: "Use option 2 later." } }, expect.any(String)));
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type, options, allow_other: false } })} />);
+    const comment = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Comment (optional)" });
+    fireEvent.change(comment, { target: { value: "Based on 2, defer 1." } });
+    const submit = screen.getByRole("button", { name: "Submit answer" });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    const role = type === "single_select" ? "radio" : "checkbox";
+    fireEvent.click(screen.getByRole(role, { name: "1. Web" }));
+    fireEvent.click(screen.getByRole(role, { name: "2. Desktop" }));
+    expect(comment.value).toBe("Based on 2, defer 1.");
+    expect(screen.queryByRole(role, { name: /Other/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add a note" })).toBeNull();
+    fireEvent.click(submit);
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, {
+      action: "answer", answer: {
+        option_ids: type === "single_select" ? ["desktop"] : ["web", "desktop"],
+        comment: "Based on 2, defer 1.",
+      },
+    }, expect.any(String)));
+    expect(comment.disabled).toBe(true);
   });
 
   it("open questions preserve multiline text; Enter alone does not submit", async () => {

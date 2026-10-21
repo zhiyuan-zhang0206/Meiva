@@ -1,29 +1,5 @@
 "use client";
 
-// The fleet Inbox -- one panel, one stream. The supervisor's single surface for
-// "what did the org surface to me": every OPEN notice, whether it needs a
-// response (meiva.ui.notify(require_response=True) -- the decision worklist) or is
-// an FYI (require_response=False -- ambient awareness). The two used to be split
-// across a Decisions and a Reviews tab; they are the same thing (a notification
-// is a queue entry), so they share one master-detail column now.
-//
-// The open stream comes from ONE data contract now (Task #1024, R4 layer 2,
-// Q1=A): useNotices consumes GET /api/notices, which returns the open queue
-// split by kind (open = FYI, awaiting = require_response) plus the resolved
-// history — the three-pipe client merge (agent snapshot + open feed +
-// resolved feed) is gone. Both halves are sorted uniformly by priority (P0
-// first) then blocking then oldest, then folded through the same task-subtree
-// grouping the board uses (task-notify.ts). An entry differs only in its
-// action surface, which the shared <OpenNoticeDetail> branches on
-// require_response: a reply box + Send + Dismiss for a decision, an optional
-// note + Mark read for an FYI.
-//
-// Answering: Enter sends (Shift+Enter newlines); on resolve the open entry drops
-// off live (the agent_updated / notice_resolved SSE) and reappears in the greyed
-// resolved history, and the selection auto-advances to the next open notice with
-// its reply box focused -- so a stack clears with Enter, Enter, Enter. The
-// resolved history (both kinds, newest first) sits behind a collapsed disclosure
-// so it never occupies the main stream.
 import { useTranslations } from "next-intl";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
@@ -40,17 +16,10 @@ import { fmtLabel, openKey, resolvedKey, type OpenItem } from "./keys";
 import { EmptyState, QueueHeader, QueueList } from "./list";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 
-// Merge the two open kinds into one sorted list. Both come from the same
-// endpoint now (useNotices): awaiting = require_response, open = FYI.
-// One uniform sort — priority, then blocking, then oldest — so a P0 FYI can
-// outrank a P2 decision and vice versa.
-function mergeOpen(awaiting: NoticeItem[], openFyi: NoticeItem[]): OpenItem[] {
+function sortOpen(awaiting: NoticeItem[]): OpenItem[] {
   const items: OpenItem[] = [];
   for (const notice of awaiting) {
     items.push({ agentId: notice.agent_id, agentLabel: fmtLabel(notice.agent_label, notice.agent_id), notice });
-  }
-  for (const n of openFyi) {
-    items.push({ agentId: n.agent_id, agentLabel: fmtLabel(n.agent_label, n.agent_id), notice: n });
   }
   items.sort((x, y) => {
     const p = PRIORITY_RANK[x.notice.priority] - PRIORITY_RANK[y.notice.priority];
@@ -83,7 +52,6 @@ export const InboxQueue = memo(function InboxQueue({
 }) {
   const t = useTranslations("fleet");
   const {
-    open: openFyi,
     awaiting,
     resolved,
     fetchNextPage,
@@ -94,8 +62,8 @@ export const InboxQueue = memo(function InboxQueue({
     isLoading,
   } = useNotices();
   const sortedItems = useMemo(
-    () => mergeOpen(awaiting, openFyi),
-    [awaiting, openFyi],
+    () => sortOpen(awaiting),
+    [awaiting],
   );
 
   // Task-subtree grouping. `openItems` is the DISPLAY order (groups pull their

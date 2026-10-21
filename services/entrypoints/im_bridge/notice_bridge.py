@@ -1,20 +1,4 @@
-"""Telegram notice bridge (Task #884).
-
-Reads new fleet notices (an agent's ``meiva.ui.notify`` -> agent_notices rows)
-and durably accepts normal pushes for the Telegram owner chat — a channel independent of the /switch conversation flow. Pushed notices
-carry inline buttons:
-
-- [Reply] (both kinds, Task #1061 made FYI answerable too) arms a reply-mode
-  window (``services.im_bridge_notice_reply_window_seconds``, default 5
-  minutes): plain-text messages in that window resolve the notice with that
-  text as the answer, so chatting with agents and answering notices never
-  collide; /cancel exits early.
-- [OK] / [Close] resolve an FYI as read or dismiss a response-required notice.
-
-A ``/notice filter`` command restricts what gets pushed (minimum priority
-and/or a single agent). Filters persist under ``$MEIVA_HOME/state/im_bridge/``;
-normal-poll source receipts and the immutable cutover live in Postgres.
-"""
+# meiva:link services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md
 
 from __future__ import annotations
 
@@ -271,25 +255,15 @@ class NoticeBridge:
         direct-DB twin of the gateway's /api/notices/open query. Without an
         explicit limit the listing caps at services.im_bridge_notice_open_limit;
         callers may narrow it."""
-        from base.agents.inbox.rows import NOTICE_FYI_TTL_DAYS
-
         if limit is None:
             limit = self._config.im_bridge_notice_open_limit
 
         with write_transaction(self.db_pool) as conn, conn.cursor() as cur:
-            # Lazy FYI expiry, same as the gateway's open feed: expired FYIs
-            # are auto-resolved so the queue view and every later query agree.
             cur.execute(
-                "UPDATE agent_notices SET resolved_at = now(), resolution = 'read' "
-                "WHERE NOT require_response AND resolved_at IS NULL "
-                "AND created_at <= now() - make_interval(days => %s)",
-                (NOTICE_FYI_TTL_DAYS,),
-            )
-            cur.execute(
-                _SELECT_NOTICE + "WHERE n.resolved_at IS NULL AND (n.require_response OR "
-                "n.created_at > now() - make_interval(days => %s)) "
-                + "ORDER BY n.priority ASC, n.created_at DESC, n.id DESC LIMIT %s",
-                (NOTICE_FYI_TTL_DAYS, limit),
+                _SELECT_NOTICE
+                + "WHERE n.resolved_at IS NULL AND n.require_response "
+                + "ORDER BY n.priority ASC, n.blocking DESC, n.created_at ASC, n.id ASC LIMIT %s",
+                (limit,),
             )
             return [_row_to_notice(r) for r in cur.fetchall()]
 
@@ -330,20 +304,10 @@ class NoticeBridge:
         label = n.get("agent_label") or ""
         lines.append(f"[#{n['agent_id']} {label}] · {n['priority']}".rstrip())
         cb = f"{n['agent_id']}:{n['id']}"
-        buttons: list[tuple[str, str]] = []
-        if n["require_response"]:
-            buttons = [
-                ("✏️ Reply", f"{_CB_REPLY}{cb}"),  # emoji-ok: button
-                ("✖️ Dismiss", f"{_CB_DISMISS}{cb}"),  # emoji-ok: button
-            ]
-        else:
-            # FYI is answerable too (Task #1061): the reply rides the same
-            # reply-mode window and resolve action=answer as a require_response
-            # notice, so the text reaches the notice's agent either way.
-            buttons = [
-                ("✏️ Reply", f"{_CB_REPLY}{cb}"),  # emoji-ok: button
-                ("✓ Got it", f"{_CB_READ}{cb}"),  # emoji-ok: button
-            ]
+        buttons: list[tuple[str, str]] = [
+            ("✏️ Reply", f"{_CB_REPLY}{cb}"),  # emoji-ok: button
+            ("✖️ Dismiss", f"{_CB_DISMISS}{cb}"),  # emoji-ok: button
+        ]
         buttons.append(("📋 Queue", _CB_LIST))  # emoji-ok: queue-view button
         return "\n\n".join(lines), buttons
 
@@ -385,7 +349,9 @@ class NoticeBridge:
         show the user (None when the tap is not ours)."""
         if data == _CB_LIST:
             return await self.list_queue()
-        for prefix, action in ((_CB_REPLY, "reply"), (_CB_READ, "read"), (_CB_DISMISS, "dismiss")):
+        if data.startswith(_CB_READ):
+            return "Notices require a reply or an explicit dismissal."
+        for prefix, action in ((_CB_REPLY, "reply"), (_CB_DISMISS, "dismiss")):
             if data.startswith(prefix):
                 agent_id, notice_id = data[len(prefix) :].split(":", 1)
                 if action == "reply":
@@ -414,12 +380,12 @@ class NoticeBridge:
         )
 
     async def _resolve(self, action: str, agent_id: str, notice_id: str) -> str:
-        """Resolve read/dismiss via the gateway; returns a hint."""
+        # meiva:link services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md
         await self._post(
             f"/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve",
             {"action": action, "reply": None},
         )
-        return "✅ Handled" if action == "dismiss" else "✓ Marked as read"  # emoji-ok: hint
+        return "✅ Closed without answering"  # emoji-ok: hint
 
     async def list_queue(self) -> str | None:
         """List every open notice (both kinds) as its own message with

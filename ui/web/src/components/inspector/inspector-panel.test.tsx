@@ -676,7 +676,7 @@ describe("InspectorPanel", () => {
           question: {
             type: "single_select",
             options: [{ id: "z", label: "First layout" }, { id: "a", label: "Second layout" }],
-            allow_other: true,
+            allow_other: false,
           },
         },
       }),
@@ -684,8 +684,8 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByRole("radio", { name: "1. First layout" })).toBeTruthy());
     expect(screen.getByRole("radio", { name: "2. Second layout" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("radio", { name: "3. Other" }));
-    expect(screen.getByLabelText("Your alternative answer")).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: "3. Other" })).toBeNull();
+    expect(screen.getByLabelText("Comment (optional)")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Submit answer" }).hasAttribute("disabled")).toBe(true);
   });
 
@@ -753,7 +753,7 @@ describe("InspectorPanel", () => {
 
     await waitFor(() => expect(screen.getByText("Notice")).toBeTruthy());
     expect(screen.getByRole("textbox")).toBeTruthy();
-    expect(screen.getByText("Dismiss")).toBeTruthy();
+    expect(screen.getByText("Close without answering")).toBeTruthy();
     const notice = screen.getByText("Notice");
     const timelineLink = screen.getByText("Open run timeline");
     expect(
@@ -791,7 +791,7 @@ describe("InspectorPanel", () => {
     expect(send.hasAttribute("disabled")).toBe(false);
   });
 
-  it("shows FYI label when notice is not require_response", async () => {
+  it("labels every notice as needing an answer", async () => {
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         notice: {
@@ -799,7 +799,7 @@ describe("InspectorPanel", () => {
           title: "Milestone reached",
           content: null,
           priority: "P2",
-          require_response: false,
+          require_response: true,
           blocking: false,
           created_at: "2026-06-14T12:00:00Z",
         },
@@ -807,7 +807,7 @@ describe("InspectorPanel", () => {
     );
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.getByText("FYI")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Needs your answer")).toBeTruthy());
     expect(screen.queryByText("Blocking")).toBeNull();
     expect(screen.getByText("P2")).toBeTruthy();
     expect(screen.getByText("Milestone reached")).toBeTruthy();

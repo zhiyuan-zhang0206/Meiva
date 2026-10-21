@@ -24,26 +24,34 @@ meiva.ui.notify(
             {"id": "web", "label": "Web notification center"},
             {"id": "inspector", "label": "Agent inspector"},
         ],
-        "allow_other": True,
     },
     idempotency_key="notice-scope-decision",
 )
 ```
 
 Options are numbered **1, 2, ... in their declared order**, not sorted by ID,
-label, recommendation or selection. Other, when allowed, gets the final number.
-Numbers remain identical in Web, inspector, CLI, IM, history and agent inbounds.
-A reference to an option inside Other is text, never an implicit selection.
+label, recommendation or selection. The same numbers appear in Web, inspector,
+CLI, IM, history and agent inbounds.
 
-Web submits `answer` with `option_ids`, optional `other_text` and `comment`; text
-questions submit `answer.text`. Single-select accepts exactly one option or Other;
-multi-select accepts at least one option or Other and can combine them. No default
-selection or click-to-submit. Other requires nonblank text when selected.
-The gateway validates against the stored question and stores both the canonical
-answer and its readable reply in the existing resolution/inbound transaction.
+There are three answer types:
 
-CLI and IM keep their text reply entry: use option numbers separated by commas on
-the first line (`2,3`), then Other text on subsequent lines if Other was selected,
-or an optional note otherwise. Open questions accept plain multiline text.
-Invalid, duplicate, unknown or empty selections fail without resolving the notice.
-Closing a question without answering delivers a dismissal, never authorization.
+- `text`: one nonblank text answer.
+- `single_select`: exactly one declared option, plus an optional comment.
+- `multi_select`: at least one declared option, plus an optional comment.
+
+The Web always shows the comment field below choice options. Writing or editing
+it does not change the selection, and selecting options preserves the comment.
+There is no Other option or Add note button. Comments do not replace a selection.
+Nothing is preselected and selecting an option never submits the answer.
+
+Web sends `answer.option_ids` and optional `answer.comment`; text questions send
+`answer.text`. The gateway validates against the stored immutable question and
+stores the canonical answer and readable reply in the same transaction as the
+agent inbound. CLI and IM use option numbers separated by commas on the first
+line, followed by an optional multiline comment. Open questions accept plain text.
+Invalid, duplicate, unknown or empty selections leave the notice unanswered.
+Closing without answering delivers an explicit dismissal, never authorization.
+
+Legacy `allow_other` and `other_text` fields remain readable so historical answers
+retain their original meaning. New questions cannot enable Other and new answers
+cannot submit it. Historical stored data is not rewritten.
