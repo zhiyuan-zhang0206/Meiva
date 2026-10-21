@@ -22,7 +22,7 @@ from pathlib import Path
 from loguru import logger
 
 from base.host.atomic_io import write_text_atomic
-from base.host.env.harness_binaries import harness_bin_dirs
+from base.host.env.harness_binaries import harness_unit_path
 from base.host.system.boot_policy import (
     BOOT_MAX_ATTEMPTS,
     BOOT_RETRY_INTERVAL_S,
@@ -156,14 +156,10 @@ def render_unit(ctx: BootUnitContext) -> str:
         # meiva:link base/lm/harness/docs/harness.meiva.okf.md
         (
             "PATH",
-            os.pathsep.join(
-                [
-                    f"{ctx.repo}/.venv/bin",
-                    *harness_bin_dirs(Path(ctx.home_dir)),
-                    "/usr/local/bin",
-                    "/usr/bin",
-                    "/bin",
-                ]
+            harness_unit_path(
+                leading=[f"{ctx.repo}/.venv/bin", "/usr/local/bin"],
+                home=Path(ctx.home_dir),
+                what="the systemd boot unit PATH",
             ),
         ),
     )

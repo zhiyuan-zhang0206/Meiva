@@ -76,6 +76,12 @@ system dirs. The same list feeds the probe in `base/agents/birth/harness.py` and
 `launchd` job PATH in `base/host/system/cron.py`, so all three agree on where the
 CLIs live.
 
+Every unit this repository installs composes its PATH through
+`harness_binaries.harness_unit_path`, which appends the table and then refuses a
+result that omits any of it (`HarnessPathIncompleteError`, naming the unit and the
+directories): a hand-written narrow PATH fails where the unit is written, not at the
+first spawn.
+
 Each adapter then spawns the path it resolved, not the name: `codex` and `agy` cache
 the resolution, and the Claude Code session passes the SDK a `cli_path` because the
 SDK resolves a bare name with `shutil.which` against its own process environment. A

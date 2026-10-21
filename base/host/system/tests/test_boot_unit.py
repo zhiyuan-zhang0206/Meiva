@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 import subprocess
 import types
 from pathlib import Path
 
 import pytest
 
-from base.host.env.harness_binaries import HARNESS_BIN_DIRS
+from base.host.env.harness_binaries import require_harness_paths
 from base.host.system import boot_unit
 from base.host.system.boot_policy import BOOT_MAX_ATTEMPTS, BOOT_RETRY_INTERVAL_S
 from base.host.system.boot_unit import (
@@ -84,20 +85,24 @@ def test_render_unit_binds_home_and_checkout(ctx: BootUnitContext) -> None:
     assert f'Environment="MEIVA_HOME={ctx.home}"' in unit
     assert "MEIVA_HOST_STATE_DIR" not in unit
     assert f'Environment="HOME={ctx.home_dir}"' in unit
-    expected_path = os.pathsep.join(
-        [
-            f"{ctx.repo}/.venv/bin",
-            *(
-                str(Path(ctx.home_dir) / entry) if not entry.startswith("/") else entry
-                for entry in HARNESS_BIN_DIRS
-            ),
-            "/usr/local/bin",
-            "/usr/bin",
-            "/bin",
-        ]
-    )
-    assert f'Environment="PATH={expected_path}"' in unit
+    assert 'Environment="PATH=' in unit
     assert f'ExecStart=:"{ctx.repo}/.venv/bin/python" "-m" "cli.main" "start"' in unit
+
+
+# meiva:note
+# The unit's PATH is the one every service under it inherits, so it must reach the
+# directories harness CLIs install into; the check names the unit and the missing
+# directories rather than letting a spawn fail later (#5491, #5495).
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def test_the_unit_path_reaches_every_harness_directory(ctx: BootUnitContext) -> None:
+    unit = render_unit(ctx)
+    match = re.search(r'Environment="PATH=([^"]+)"', unit)
+
+    assert match is not None
+    entries = match.group(1).split(os.pathsep)
+    assert entries[0] == f"{ctx.repo}/.venv/bin"
+    assert require_harness_paths(match.group(1), home=Path(ctx.home_dir), what="the unit")
+    assert entries[-4:] == ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
 
 
 def test_render_unit_selects_every_service_by_name_sorted(ctx: BootUnitContext) -> None:
