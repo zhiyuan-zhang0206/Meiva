@@ -212,6 +212,32 @@ def test_a_helper_without_the_request_method_keeps_the_manual_path(tmp_path: Pat
     assert report.grant_for("screen-recording") is Grant.NOT_DETERMINED
 
 
+# meiva:note
+# App Management is never asked, and no build may start asking: tccd answers a request for
+# it with "Service kTCCServiceSystemPolicyAppBundles does not allow prompting for
+# unentitled binaries; returning denied" and records that policy denial against the helper,
+# so asking would raise no dialog and stamp a fresh denial on every rebuilt helper
+# (measured 2026-10-21). This test is the lock.
+def test_app_management_is_never_asked_even_as_the_only_missing_desktop_row(
+    tmp_path: Path,
+) -> None:
+    codes = _codes(0)
+    codes["kTCCServiceSystemPolicyAppBundles"] = 2
+    helper = FakeHelper(codes)
+    report = onboarding.onboard(
+        host=host(tmp_path, client=helper),
+        now=NOW,
+        automatic=False,
+        sleep=lambda _: None,
+        request_item=_granted,
+    )
+    assert helper.requests == 0
+    assert "app-management" not in {item.id for item in report.requestable()}
+    assert "app-management" not in {item.id for item in report.prompt_now()}
+    assert "app-management" in {item.id for item in report.manual()}
+    assert report.grant_for("app-management") is Grant.NOT_DETERMINED
+
+
 def test_the_summary_names_what_is_missing(tmp_path: Path) -> None:
     report = onboarding.check(host=host(tmp_path, client=FakeHelper(_codes(1))), now=NOW)
     summary = onboarding.missing_summary(report)

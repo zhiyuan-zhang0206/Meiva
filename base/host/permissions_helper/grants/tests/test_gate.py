@@ -129,6 +129,18 @@ def test_a_tri_state_row_keeps_its_denial_without_a_helper_boolean() -> None:
     assert report.prompt_now() == ()
 
 
+# meiva:note
+# App Management stays out of every ask set: no dialog can grant it (tccd refuses to prompt
+# an unentitled client and records a policy denial), so the row is manual-only by
+# construction, before and after a denial.
+def test_app_management_is_manual_only_in_every_state() -> None:
+    for grant in (Grant.NOT_DETERMINED, Grant.DENIED):
+        report = gate.evaluate(_result(**{"app-management": grant}), now=NOW)
+        assert "app-management" not in {item.id for item in report.prompt_now()}
+        assert "app-management" not in {item.id for item in report.requestable()}
+        assert "app-management" in {item.id for item in report.manual()}
+
+
 def test_the_manual_pass_reaches_a_denied_grant() -> None:
     report = gate.evaluate(_result(accessibility=Grant.DENIED), now=NOW)
     assert [item.id for item in report.requestable()] == ["accessibility"]
