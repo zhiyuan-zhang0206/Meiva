@@ -45,9 +45,11 @@ def test_required_set_is_the_product_desktop_surface() -> None:
 
 
 # meiva:note
-# App Management is the one row no dialog can grant today: the helper's requestGrants
-# asks Screen Recording and Accessibility only, and macOS will not ask again once a
-# denial is recorded, so the row must send the person to the pane by hand (#5481).
+# App Management is the one row no dialog can grant: tccd refuses to prompt this service
+# for an unentitled client ("Service kTCCServiceSystemPolicyAppBundles does not allow
+# prompting for unentitled binaries; returning denied") and records that denial, so the
+# row must stay SYSTEM_SETTINGS and must not grow a request or a helper boolean (#5481,
+# measured 2026-10-21).
 def test_app_management_sends_the_person_to_its_pane_instead_of_asking() -> None:
     item = catalog.ITEMS_BY_ID["app-management"]
     assert item.mode is RequestMode.SYSTEM_SETTINGS
@@ -57,8 +59,9 @@ def test_app_management_sends_the_person_to_its_pane_instead_of_asking() -> None
     assert item.pane == "Privacy_AppBundles"
     assert catalog.settings_url(item).endswith("?Privacy_AppBundles")
     assert "App Management" in item.verify
-    assert "no longer raises the dialog" in item.verify
+    assert "no longer fails" in item.verify
     assert "by hand" in item.verify
+    assert not item.ping_key
 
 
 def test_report_only_rows_are_never_prompted() -> None:

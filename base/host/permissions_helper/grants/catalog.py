@@ -132,10 +132,14 @@ ACCESSIBILITY_ITEM = PermissionItem(
 )
 
 # meiva:note
-# App Management has no request path this helper can take: `requestGrants` asks only
-# Screen Recording and Accessibility, and macOS stops asking once a denial is on record.
-# The row is therefore SYSTEM_SETTINGS -- an honest "turn it on in this pane" rather than
-# an Ask button that cannot raise the dialog (#5481).
+# No request path exists for this row, and the obstacle is the client, not a missing API:
+# tccd refuses to prompt this service for an unentitled binary. Asked through
+# TCCAccessRequest it answers "Service kTCCServiceSystemPolicyAppBundles does not allow
+# prompting for unentitled binaries; returning denied" (authValue=0, authReason=2) and
+# records that policy denial against the asking identity -- a self-signed or ad-hoc helper
+# carries no team identity, so it is unentitled. Calling the request anyway raises no
+# dialog and stamps a fresh denial on every rebuilt helper, so the row is SYSTEM_SETTINGS:
+# the pane toggle is the only path that grants it (#5481; measured 2026-10-21).
 # meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
 APP_MANAGEMENT_ITEM = PermissionItem(
     id="app-management",
@@ -150,8 +154,8 @@ APP_MANAGEMENT_ITEM = PermissionItem(
     pane="Privacy_AppBundles",
     verify=(
         "Privacy & Security > App Management shows Meiva's row turned on, and a real"
-        " install or update of another app no longer raises the dialog. macOS asks at most"
-        " once and never again after a denial, so this row is turned on here by hand."
+        " install or update of another app no longer fails. macOS offers this helper no"
+        " dialog for the service, so the row is turned on here by hand."
     ),
     services=("kTCCServiceSystemPolicyAppBundles",),
 )
