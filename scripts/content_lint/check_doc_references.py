@@ -137,6 +137,12 @@ _MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 # instead demand `pos == 0` (it anchors to the true string start, not to
 # wherever the search began) and never fire mid-line.
 _PLANNED = re.compile(r"\s*\(planned\)", re.IGNORECASE)
+# meiva:note
+# A CHANGELOG fragment is one entry waiting for the root file, so its links are
+# written the way they will read there — from the repository root, not from
+# `.changes/`.
+# meiva:link docs/conventions/changelog.md
+_FRAGMENT_DIR = ".changes"
 
 
 def meiva_flags() -> dict[tuple[str, ...], set[str]]:
@@ -347,11 +353,16 @@ def check_skills_prefix_refs(line: str) -> list[str]:
     return [m.group(0) for m in _SKILLS_PREFIX_REF.finditer(line)]
 
 
+def link_base(doc: Path) -> Path:
+    return REPO if doc.parent == REPO / _FRAGMENT_DIR else doc.parent
+
+
 def check_links(doc: Path, line: str, *, allow_planned: bool = False) -> list[str]:
     """Relative targets on this line that do not resolve.
 
     `allow_planned` is `future/`'s opt-out: a link immediately followed by
     `(planned)` names something the plan proposes, not a reference gone stale."""
+    base = link_base(doc)
     missing: list[str] = []
     for match in _MD_LINK.finditer(line):
         target = match.group(1)
@@ -363,7 +374,7 @@ def check_links(doc: Path, line: str, *, allow_planned: bool = False) -> list[st
             continue
         if _in_code_span(line, match.start()):
             continue
-        if (doc.parent / target.split("#", 1)[0]).exists():
+        if (base / target.split("#", 1)[0]).exists():
             continue
         if allow_planned and _PLANNED.match(line, match.end()):
             continue

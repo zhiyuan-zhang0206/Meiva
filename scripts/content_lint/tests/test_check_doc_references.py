@@ -229,3 +229,15 @@ def test_skill_prose_about_load_dir_is_clean(tmp_path: Path) -> None:
         "Scripts run from `$MEIVA_HOME/skills/<name>/` (the load dir).\n", encoding="utf-8"
     )
     assert check_doc(doc, {}) == []
+
+
+def test_a_changelog_fragment_resolves_from_the_repository_root() -> None:
+    # meiva:note
+    # A fragment is an entry of the root CHANGELOG, so it is written in that file's form.
+    assert check_doc_references.link_base(REPO / ".changes" / "5472-changelog-fragments.md") == REPO
+
+
+def test_every_other_doc_resolves_from_its_own_directory() -> None:
+    assert check_doc_references.link_base(REPO / "docs" / "conventions" / "changelog.md") == (
+        REPO / "docs" / "conventions"
+    )

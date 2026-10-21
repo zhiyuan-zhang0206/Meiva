@@ -460,6 +460,13 @@ repos:
         files: (\.md$|^cli/main\.py$|^scripts/(content_lint/check_doc_references\.py|.*\.sh)$)
         pass_filenames: false
 
+      - id: check-changelog-fragments
+        name: check changelog fragments (section, one entry, entry text)
+        language: system
+        entry: .venv/bin/python scripts/content_lint/assemble_changelog.py --check
+        files: (^\.changes/|^CHANGELOG\.md$|^scripts/content_lint/assemble_changelog\.py$)
+        pass_filenames: false
+
       - id: check-narrative-facts
         name: check narrative facts (skill catalog / IM commands / IM channels match code)
         language: system
