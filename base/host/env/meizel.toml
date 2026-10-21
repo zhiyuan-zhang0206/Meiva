@@ -1,4 +1,4 @@
-exports = ["agent_slices.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_file.py", "health_ports.py", "port_table.py", "registry.py", "tests"]
+exports = ["agent_slices.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_file.py", "harness_binaries.py", "health_ports.py", "port_table.py", "registry.py", "tests"]
 
 [uses]
 "agent_slices.py" = ["config_lite_table.py"]
@@ -6,7 +6,7 @@ exports = ["agent_slices.py", "bootstrap.py", "config_lite_table.py", "dotenv_bo
 "dotenv_boot.py" = ["bootstrap.py", "registry.py"]
 "health_ports.py" = ["port_table.py", "registry.py"]
 "registry.py" = ["config_lite_table.py"]
-"tests" = ["agent_slices.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_file.py", "registry.py"]
+"tests" = ["agent_slices.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_file.py", "harness_binaries.py", "registry.py"]
 
 [debt.cycle-edge]
 "dotenv_boot.py -> bootstrap.py" = 2

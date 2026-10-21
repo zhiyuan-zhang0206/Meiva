@@ -22,6 +22,7 @@ from pathlib import Path
 from loguru import logger
 
 from base.host.atomic_io import write_text_atomic
+from base.host.env.harness_binaries import harness_bin_dirs
 from base.host.system.boot_policy import (
     BOOT_MAX_ATTEMPTS,
     BOOT_RETRY_INTERVAL_S,
@@ -149,7 +150,22 @@ def render_unit(ctx: BootUnitContext) -> str:
     environment = (
         ("HOME", str(ctx.home_dir)),
         ("MEIVA_HOME", str(ctx.home)),
-        ("PATH", f"{ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"),
+        # meiva:note
+        # The Linux counterpart of the launchd job PATH: the root this unit starts inherits
+        # it into every service, and `claude`/`agy` install into the user's ~/.local/bin.
+        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        (
+            "PATH",
+            os.pathsep.join(
+                [
+                    f"{ctx.repo}/.venv/bin",
+                    *harness_bin_dirs(Path(ctx.home_dir)),
+                    "/usr/local/bin",
+                    "/usr/bin",
+                    "/bin",
+                ]
+            ),
+        ),
     )
     env_lines = "\n".join(
         f"Environment={quote(f'{key}={value}', 'environment value')}" for key, value in environment

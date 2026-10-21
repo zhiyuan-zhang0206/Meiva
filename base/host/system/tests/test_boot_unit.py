@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import subprocess
 import types
 from pathlib import Path
 
 import pytest
 
+from base.host.env.harness_binaries import HARNESS_BIN_DIRS
 from base.host.system import boot_unit
 from base.host.system.boot_policy import BOOT_MAX_ATTEMPTS, BOOT_RETRY_INTERVAL_S
 from base.host.system.boot_unit import (
@@ -82,7 +84,19 @@ def test_render_unit_binds_home_and_checkout(ctx: BootUnitContext) -> None:
     assert f'Environment="MEIVA_HOME={ctx.home}"' in unit
     assert "MEIVA_HOST_STATE_DIR" not in unit
     assert f'Environment="HOME={ctx.home_dir}"' in unit
-    assert f'Environment="PATH={ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"' in unit
+    expected_path = os.pathsep.join(
+        [
+            f"{ctx.repo}/.venv/bin",
+            *(
+                str(Path(ctx.home_dir) / entry) if not entry.startswith("/") else entry
+                for entry in HARNESS_BIN_DIRS
+            ),
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+        ]
+    )
+    assert f'Environment="PATH={expected_path}"' in unit
     assert f'ExecStart=:"{ctx.repo}/.venv/bin/python" "-m" "cli.main" "start"' in unit
 
 
