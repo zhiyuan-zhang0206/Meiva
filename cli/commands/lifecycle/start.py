@@ -473,6 +473,7 @@ def _report_running_tree(
     if any(spec.session == "gateway" for spec in started) and not wait.unready:
         print_gateway_hint(machine=command.machine)
         print_login_link({spec.session for spec in started})
+    _report_browser_session()
 
 
 def _critical_launch_failures(launch: Any) -> tuple[str, ...]:
@@ -530,6 +531,24 @@ def _report_pause_markers() -> None:
     with start_trace.phase("pause markers"):
         for line in pause_markers.sweep():
             print(f"  {line}")
+
+
+# meiva:note
+# The browser's restore proof, in two counts: URL restoration and the pin/group
+# reapply fail independently, so one number would hide the second.
+# meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+def _report_browser_session() -> None:
+    from base.config import settings
+    from base.paths import meiva_home
+    from services.desktop.browser import session_restore
+
+    with start_trace.phase("browser session"):
+        restored = session_restore.report(
+            home=meiva_home(),
+            chrome=session_restore.CdpChrome(settings.services.browser_cdp_port),
+        )
+        if restored is not None:
+            print(f"  {restored}")
 
 
 @delegable_start

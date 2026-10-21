@@ -80,7 +80,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.paths import chrome_mcp_socket, meiva_home
 from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
-from services.desktop.browser import page_lifecycle
+from services.desktop.browser import page_lifecycle, session_restore
 from services.desktop.browser.gateway_session import GatewaySession, stop_on_signals
 from services.desktop.browser.mcp_upstream import (
     StoppingError,
@@ -648,6 +648,19 @@ async def run(
                 )
             except StoppingError:
                 return
+            # meiva:note
+            # Chrome answers here, so the one thing the launcher could not do is
+            # due: put the pins and groups of a deliberate stop back (a no-op
+            # when Chrome restored them itself). Background on purpose -- the
+            # socket must serve agents regardless, and `meiva start` waits for
+            # the ledger's outcome before it reports.
+            # meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+            tasks.create_task(
+                contained(
+                    session_restore.reapply(home, session_restore.CdpChrome(browser_cdp_port)),
+                    "browser session restore",
+                )
+            )
             daemon = ChromeMcpDaemon(session, pages, tab_groups)
             daemon_ref[0] = daemon
             await _serve_generation(daemon, stop, gateway)

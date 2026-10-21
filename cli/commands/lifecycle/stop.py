@@ -198,6 +198,12 @@ def force_stop(
     deadline = deadline_after(timeout)
 
     # meiva:note
+    # Record the browser's tabs before the tree stop below signals the
+    # `meiva-browser` session (session_restore owns what is written and why).
+    if not keep_browser:
+        _temporary_stop.record_browser_session()
+
+    # meiva:note
     # Explicit force interrupts the host process. Agent metadata/checkpoints
     # remain untouched; the next host uses its existing owner recovery. This
     # path leaves no restart behind for the interrupted turns and remains usable offline. The
