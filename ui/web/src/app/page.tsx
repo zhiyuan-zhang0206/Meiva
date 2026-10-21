@@ -1,6 +1,6 @@
 "use client";
 
-import type { Harness } from "@/lib/harness/harness";
+import { harnessLabel, type Harness } from "@/lib/harness/harness";
 import { newOperationKey } from "@/lib/transport/operation-key";
 
 import { useQuery } from "@tanstack/react-query";
@@ -344,7 +344,7 @@ function HomeContent({
     inspectorOpen && isLarge
       ? inspectorText("title")
       : activeAgent
-        ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""}`
+        ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""} · ${harnessLabel(activeAgent.harness)}`
         : "…";
   const agentBusy = turnActive || activeAgent?.status === "running";
   const composerMode: "disabled" | "idle" | "busy" =
@@ -373,6 +373,7 @@ function HomeContent({
           <TimelineView
             key={activeId ?? "unselected"}
             items={items}
+            harness={activeAgent?.harness ?? null}
             compactBuffer={compactBuffer}
             threadKey={activeId != null ? String(activeId) : undefined}
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}
@@ -409,7 +410,7 @@ function HomeContent({
           </HeaderBar>
           <div className="relative z-20 bg-background">
             <PendingStrip items={visiblePendingMessages} maxWidthCss={composerMaxWidth} />
-            {activeAgent?.supports_vision === null && (
+            {activeAgent?.harness === "meiva" && activeAgent.supports_vision === null && (
               <p role="status" className="px-3 py-2 text-sm text-muted-foreground">
                 {t("modelCapabilitiesUnavailable")}
               </p>
@@ -420,7 +421,7 @@ function HomeContent({
               onSend={handleSend}
               onStop={handleStop}
               onUploadFiles={uploadHandler}
-              onAttachImage={activeAgent?.supports_vision === true ? attachImage : undefined}
+              onAttachImage={activeAgent?.harness === "meiva" && activeAgent.supports_vision === true ? attachImage : undefined}
               filesUploading={uploading}
               focusToken={composerFocusToken}
               contextTokens={contextTokens}
@@ -431,7 +432,7 @@ function HomeContent({
               agentId={activeId}
               agentTerminated={activeAgent?.status === "terminated"}
               suggestions={replySuggestion}
-              showContextMeter={userSettings["display.composer_context_meter"] === true}
+              showContextMeter={activeAgent?.harness === "meiva" && userSettings["display.composer_context_meter"] === true}
             >
               <UploadButton
                 agentId={activeId}

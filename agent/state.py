@@ -152,12 +152,10 @@ class BaseAgentState(BaseModel):
     # meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
     interrupted_by_restart: bool = False
     # meiva:note
-    # How many of `messages` the external harness has already received. Only a run whose
-    # harness is not `meiva` reads or writes it: `init_context` sets it past the standing
-    # head it just laid down (the harness gets that context from its handoff document, not
-    # as messages), and `harness_turn` advances it over everything it submitted plus its
-    # own reply. A resumed session therefore re-submits exactly the messages a crash left
-    # undelivered, and never the ones already in the harness transcript.
+    # How many messages the external harness has already received. An empty window starts
+    # at zero; init_context adds no native standing head. harness_turn advances the cursor
+    # over the submitted messages and its own replies. Existing windows retain their cursor
+    # so a restart does not submit the synthetic head stored by older builds.
     # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
     harness_cursor: int = 0
     turn_active: bool = False

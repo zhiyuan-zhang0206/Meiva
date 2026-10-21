@@ -157,7 +157,10 @@ async function table(): Promise<HTMLElement> {
 }
 
 function column(element: HTMLElement, name: string): HTMLElement {
-  return within(element).getByRole("list", { name });
+  return within(element).getByRole("list", {
+    name: name === MODEL_COLUMN ? /^(Model|Meiva history model)$/
+      : name === EFFORT_COLUMN ? /^(Effort|Summary effort)$/ : name,
+  });
 }
 
 function row(element: HTMLElement, name: string, option: string | RegExp): HTMLElement {
@@ -249,6 +252,21 @@ describe("spawn table", () => {
     // A model without an effort ladder leaves the column empty.
     // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
     expect(within(column(form, EFFORT_COLUMN)).queryByRole("button")).toBeNull();
+  });
+
+  it.each(["claude_code", "codex"] as const)("names %s model choices as Meiva history settings", async (harness) => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsWithTwoLadders());
+    setMockSetting("behavior.spawn_harness", harness);
+    wrap();
+    const form = await table();
+    expect(within(form).getByRole("list", { name: "Meiva history model" })).toBeTruthy();
+    expect(within(form).getByRole("list", { name: "Summary effort" })).toBeTruthy();
+    expect(screen.getByText(/These options configure Meiva history budgets and compaction/)).toBeTruthy();
+    expect(within(form).queryByRole("list", { name: "Model" })).toBeNull();
+    pick(form, HARNESS_COLUMN, "Meiva");
+    expect(within(form).getByRole("list", { name: "Model" })).toBeTruthy();
+    expect(screen.queryByText(/These options configure Meiva history budgets and compaction/)).toBeNull();
   });
 
   it("a pick that is never spawned does not become the stored config", async () => {

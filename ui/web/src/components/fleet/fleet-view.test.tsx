@@ -148,6 +148,7 @@ function noticeItem(over: Partial<NoticeItem> & { id: number }): NoticeItem {
 function makeAgent(over: Partial<AgentRow> & { agent_id: number }): AgentRow {
   return {
     spawner: "user",
+    harness: "meiva",
     fork_source_agent_id: null,
     status: "running",
     spawned_at: "2026-06-06T00:00:00Z",

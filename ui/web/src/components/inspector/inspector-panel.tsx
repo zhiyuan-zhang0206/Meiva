@@ -30,6 +30,7 @@ import { useNow } from "@/lib/format/use-now";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { useAgentPages } from "@/lib/agents/use-agent-pages";
 import { useAgentRoster } from "@/lib/agents/use-agents";
+import { AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { useInspectorHours, useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import {
@@ -42,6 +43,7 @@ import { INSPECTOR_RETENTION_MS } from "@/lib/layout/switch-budget";
 import { fleetNoticeHref, INSPECT_SECTION_ORDER } from "@/lib/inspector/inspector-widgets";
 import type {
   AgentInspectStatistics,
+  AgentRow,
   AgentInspectLive,
   HeartbeatInfo,
   OpenNotice,
@@ -361,12 +363,22 @@ function InspectReadError({ message, retryLabel, pending, onRetry }: {
 
 function ContextSection({ agentId }: { agentId: number }) {
   const t = useTranslations("inspector");
+  const { data: roster } = useAgentRoster();
+  const selected = useQuery<AgentRow>({
+    queryKey: [...AGENT_DETAIL_QUERY_KEY, agentId],
+    queryFn: ({ signal }) => api.getAgent(agentId, signal),
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
+  });
+  const harness = (roster?.agents.find((agent) => agent.agent_id === agentId) ?? selected.data)?.harness;
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const contextTokens = useTimelineStore((s) => s.tokenUsage);
   const maxContextTokens = useTimelineStore((s) => s.maxContextTokens);
   const softCompactTokens = useTimelineStore((s) => s.softCompactTokens);
   const hardCompactTokens = useTimelineStore((s) => s.hardCompactTokens);
-  if (contextTokens <= 0) return null;
+  if (harness !== "meiva" || contextTokens <= 0) return null;
   const hasWindow = maxContextTokens > 0;
   const percent = hasWindow
     ? `${((contextTokens / maxContextTokens) * 100).toFixed(1)}%`

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +11,7 @@ from langgraph.runtime import Runtime
 from agent.graph.claim.harness_turn import (
     harness_turn_node,
     interrupt_engine,
+    log_turn_usage,
     pending_messages,
     render_messages,
     turn_key,
@@ -295,3 +297,14 @@ async def test_an_interrupt_that_raises_is_reported_not_raised(
 
     assert engine.interrupts == 1
     assert len(loguru_records.events("harness_interrupt_failed")) == 1
+
+
+async def test_replayed_completion_does_not_log_provider_usage_twice(
+    loguru_records: LogRecords,
+) -> None:
+    engine = FakeEngine()
+    turn = await engine.run_turn("work", key="inbound-1")
+    ctx = runtime(engine).context
+    log_turn_usage(ctx, 6984, engine.model, turn)
+    log_turn_usage(ctx, 6984, engine.model, replace(turn, replayed=True))
+    assert len(loguru_records.events("llm_usage")) == 1

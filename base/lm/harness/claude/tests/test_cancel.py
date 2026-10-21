@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from base.lm.harness.claude.tests.fake_sdk import Block, Say
 from base.lm.harness.claude.tests.support import CLI_PID, start
 from base.lm.harness.events import TurnCompleted
@@ -43,6 +45,8 @@ async def test_surviving_child_is_reported_as_residue(tmp_path: Path) -> None:
         assert [observation.pid for observation in report.remaining] == [5150]
         assert report.remaining[0].command == TOOL_MARKER
         assert report.waited_ms >= 100.0
+        with pytest.raises(RuntimeError, match="process"):
+            await harness.session.close(reason="residue test")
     finally:
         await harness.stop()
 
@@ -71,6 +75,7 @@ async def test_processes_seen_before_the_turn_are_not_blamed(tmp_path: Path) -> 
         report = await harness.session.interrupt()
         assert report.settled is True
         assert [observation.pid for observation in report.observed] == [5150]
+        harness.probe.reap(4000)
     finally:
         await harness.stop()
 

@@ -23,5 +23,8 @@
   "harnessStatus": {
     "unavailable": "不可用"
   },
-  "newAgent": "新建 agent"
+  "newAgent": "新建 agent",
+  "historyModel": "Meiva 历史模型",
+  "historyEffort": "摘要强度",
+  "externalModelHelp": "这些选项用于 Meiva 的历史预算与压缩。{harness} 使用其适配器或 CLI 自身的模型设置。"
 }

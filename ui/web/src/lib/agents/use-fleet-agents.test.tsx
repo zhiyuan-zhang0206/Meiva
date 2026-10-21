@@ -13,7 +13,7 @@ vi.mock("./use-agents", () => ({
 
 import { useFleetAgents } from "./use-fleet-agents";
 
-const AGENTS = [{ agent_id: 7, label: "fleet worker" }] as AgentRow[];
+const AGENTS = [{ agent_id: 7, harness: "meiva", label: "fleet worker" }] as AgentRow[];
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return React.createElement(

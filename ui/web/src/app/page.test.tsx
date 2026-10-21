@@ -220,6 +220,7 @@ vi.mock("@/components/conversation/composer", () => {
     onStop,
     onUploadFiles,
     onAttachImage,
+    showContextMeter,
     children,
     details,
     maxWidthCss,
@@ -231,6 +232,7 @@ vi.mock("@/components/conversation/composer", () => {
     onStop: () => Promise<void>;
     onUploadFiles?: (files: File[]) => void;
     onAttachImage?: (file: File) => Promise<string>;
+    showContextMeter?: boolean;
     children?: React.ReactNode;
     details?: React.ReactNode;
     maxWidthCss?: string;
@@ -249,6 +251,7 @@ vi.mock("@/components/conversation/composer", () => {
       <div
         data-testid="composer"
         data-mode={mode}
+        data-context-meter={String(showContextMeter ?? false)}
         data-max-width={maxWidthCss ?? "undefined"}
         data-suggestion={suggestions?.join("|") ?? ""}
       >
@@ -307,6 +310,7 @@ function makeAgent(overrides: Partial<AgentRow>): AgentRow {
   return {
     agent_id: 1,
     spawner: "user",
+    harness: "meiva",
     fork_source_agent_id: null,
     status: "idling",
     spawned_at: "2026-05-15T00:00:00Z",
@@ -912,9 +916,25 @@ describe("pasted image routing", () => {
     expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
   });
 
+  it.each(["claude_code", "codex"] as const)("routes images as files and hides native context for %s", async (harness) => {
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5, harness, supports_vision: true })];
+    hooksState.settings["display.composer_context_meter"] = true;
+    wrap(<HomePage />);
+    expect(screen.getByTestId("composer").getAttribute("data-context-meter")).toBe("false");
+    const image = new File(["png"], "paste.png", { type: "image/png" });
+    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
+      clipboardData: { files: [image], types: ["Files"] },
+    });
+    await waitFor(() => expect(api.submitUploadedFiles).toHaveBeenCalledTimes(1));
+    expect(api.uploadFiles).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
+  });
+
   it("keeps the native image attachment path for a vision-capable agent", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: true })];
+    hooksState.settings["display.composer_context_meter"] = true;
     vi.mocked(api.uploadFiles).mockResolvedValueOnce(uploadResult);
     const image = new File(["png"], "paste.png", { type: "image/png" });
 
@@ -927,6 +947,7 @@ describe("pasted image routing", () => {
       expect(vi.mocked(api.uploadFiles)).toHaveBeenCalledWith(5, [image]),
     );
     expect(await screen.findByTestId("composer-image-thumbnail")).toBeTruthy();
+    expect(screen.getByTestId("composer").getAttribute("data-context-meter")).toBe("true");
   });
 
   it("submits on private HTTP when randomUUID is unavailable", async () => {

@@ -1,4 +1,4 @@
-exports = ["auth.py", "config.py", "mapping.py", "session.py", "transport.py"]
+exports = ["auth.py", "config.py", "mapping.py", "session.py", "tests", "transport.py"]
 
 [uses]
 "__init__.py" = ["config.py", "session.py", "transport.py"]

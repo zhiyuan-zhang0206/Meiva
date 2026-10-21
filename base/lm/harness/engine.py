@@ -27,13 +27,15 @@ class HarnessTurn:
     is_error: bool
     interrupted: bool
     prelude: tuple[HarnessTurn, ...] = ()
+    replayed: bool = False
 
 
 # meiva:note
 # The adapter contract the bridge consumes, stated structurally: the three
 # adapters share these member shapes without sharing a base class, and a test fake
 # needs only to look like one. `submit` returns an adapter-owned ticket because a
-# ticket's only shared member is its turn id, which the bridge reads.
+# tickets carry their turn id and an outcome for completed-key replay. A fresh
+# session exposes its handoff ticket so the bridge can await it before user work.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 class HarnessSession(Protocol):
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None: ...
@@ -44,6 +46,9 @@ class HarnessSession(Protocol):
 
     @property
     def session_id(self) -> str | None: ...
+
+    @property
+    def handoff_ticket(self) -> Any | None: ...
 
 
 # meiva:note

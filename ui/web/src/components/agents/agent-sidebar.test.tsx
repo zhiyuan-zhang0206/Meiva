@@ -299,6 +299,7 @@ function makeAgent(overrides: Partial<AgentRow>): AgentRow {
   return {
     agent_id: 1,
     spawner: "user",
+    harness: "meiva",
     fork_source_agent_id: null,
     status: "idling",
     spawned_at: "2026-05-15T00:00:00Z",

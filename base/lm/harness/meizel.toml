@@ -14,4 +14,4 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 "registration.py" = []
 "registry.py" = []
 "wiring.py" = ["antigravity", "bridge.py", "claude", "codex", "handoff.py", "registration.py", "registry.py"]
-"tests" = ["__init__.py", "antigravity", "codex", "handoff.py", "wiring.py"]
+"tests" = ["__init__.py", "antigravity", "claude", "codex", "handoff.py", "registry.py", "wiring.py"]

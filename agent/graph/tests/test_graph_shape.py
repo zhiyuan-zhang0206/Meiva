@@ -171,6 +171,7 @@ async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() 
 
     assert "init_context" in seen
     assert "harness_turn" in seen, "the reset resumes into the harness node"
+    assert engine.submitted == ["the compacted summary"]
     assert not NATIVE_NODES.intersection(seen), f"native turn nodes ran: {seen}"
 
 

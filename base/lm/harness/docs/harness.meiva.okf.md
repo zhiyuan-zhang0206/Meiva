@@ -35,8 +35,9 @@ invariants the host relies on:
    resume;
 8. a faulted or closed session stops being usable: the bridge retires it instead of
    submitting to it again;
-9. `close()` returns only after the session's process tree is gone, or after the
-   adapter's settle window proved it is not — residue is reported, never assumed.
+9. `close()` returns only after the session's process tree is gone, or raises when the
+   adapter's settle window still observes residue. An unobservable tree remains
+   explicitly unknown; it is not proof that every descendant exited.
 
 Adapters: [[../claude/docs/claude.meiva.okf.md]],
 [[../deepseek/docs/deepseek.meiva.okf.md]]. Contract, provider differences
@@ -109,6 +110,10 @@ Changing the field set or the section order means bumping the version.
 `tests/test_handoff.py` pins both: the field tuple is compared against
 `PINNED_HANDOFF_FIELDS` and the version against a literal, so the edit that
 changes the shape fails until the version moves with it.
+
+Completed-key replay preserves the original reply and usage but sets
+`HarnessTurn.replayed`; the graph does not log another provider charge for it.
+This cache is local to an adapter session, not durable across session retirement.
 
 ## Identity
 

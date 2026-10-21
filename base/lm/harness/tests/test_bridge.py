@@ -35,6 +35,9 @@ from base.lm.harness.wiring import HANDOFF_INSTRUCTION, bridge_for, open_session
 
 
 class FakeTicket:
+    deduplicated = False
+    settled = False
+
     def __init__(self, turn_id: str) -> None:
         self.turn_id = turn_id
 
@@ -69,6 +72,7 @@ class FakeSession:
         self.closed = False
         self.close_reason: str | None = None
         self.handoff: Handoff | None = None
+        self.handoff_ticket: FakeTicket | None = None
         self.submitted: list[tuple[str, str | None, str]] = []
         self.session_id = None
         self._queue: list[BridgeEvent] = []
@@ -84,7 +88,7 @@ class FakeSession:
             SessionStarted(session_id="session-1", model="claude-sonnet-5-5", cwd="/w")
         )
         if handoff is not None and self._opening is not None:
-            self.submit(handoff.render(), key="handoff")
+            self.handoff_ticket = self.submit(handoff.render(), key="handoff")
 
     def submit(self, text: str, *, key: str | None = None) -> FakeTicket:
         self._n += 1

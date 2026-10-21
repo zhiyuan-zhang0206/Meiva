@@ -20,6 +20,7 @@ function ag(
   return {
     agent_id,
     spawner,
+    harness: "meiva",
     fork_source_agent_id: null,
     status,
     spawned_at: ts,

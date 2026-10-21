@@ -1,6 +1,6 @@
 "use client";
 
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { MessagesSquare } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -10,6 +10,7 @@ import { cardConfigFor, TimelineRow } from "@/components/timeline/row";
 import { buttonVariants } from "@/components/ui/button";
 import { useTimelineColors } from "@/lib/timeline/use-timeline-colors";
 import { api } from "@/lib/transport/api";
+import { AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
 import { approx, formatTokensCompact } from "@/lib/format/format-number";
 import { FLEX } from "@/lib/layout/layout";
 import type { BackendTimelineItem, RunTimelineMessage, RunTimelineMessagePart, RunTimelineUnit } from "@/lib/contracts/types";
@@ -149,18 +150,31 @@ export function TimelineMessages({
     getNextPageParam: (last) => last.next_start ?? undefined,
   });
   const messages = query.data?.pages.flatMap((page) => page.messages) ?? [];
+  // meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md
+  const hasPrompt = messages.some((message) => message.parts.some((part) => part.kind === "prompt"));
+  const agent = useQuery({
+    queryKey: [...AGENT_DETAIL_QUERY_KEY, agentId],
+    queryFn: ({ signal }) => api.getAgent(agentId, signal),
+    enabled: hasPrompt,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
+  });
 
   return (
     <Section icon={<MessagesSquare className="size-3" />} title={t("messagesHeading", { count: end - start + 1 })}>
       <div className="space-y-2" data-testid="run-timeline-messages">
         {query.isPending ? <p className="text-xs text-muted-foreground">{t("messagesLoading")}</p> : null}
-        {query.isError ? (
+        {query.isError || (hasPrompt && agent.isError) ? (
           <p role="alert" className="text-xs text-destructive">
             {t("messagesFailed")}
           </p>
         ) : null}
         {messages.map((message) => {
-          const parts = unitKind === null ? message.parts : partsForUnit(unitKind, message.parts);
+          const selectedParts = unitKind === null ? message.parts : partsForUnit(unitKind, message.parts);
+          const parts = agent.data?.harness === "meiva"
+            ? selectedParts
+            : selectedParts.filter((part) => part.kind !== "prompt");
           if (parts.length === 0) return null;
           const whole =
             message.context_tokens === null || message.estimated === null

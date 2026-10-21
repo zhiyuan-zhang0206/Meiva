@@ -9,8 +9,17 @@ tags: []
 
 ## What It Is
 
-Standing context consists of the system prompt and ordered context notes.
-`init_context` establishes it on first wake and after compaction.
+Standing context belongs to the Meiva harness: its system prompt and ordered
+context notes. `init_context` establishes it on first wake and after compaction.
+External harnesses own their prompts and receive identity and workspace facts in
+the bridge handoff; their graph window contains no synthetic native head.
+
+An empty message channel is the establishment signal, without a separate mode.
+A compaction clears it and parks the summary in `context_reset.tail`; new chats
+remain pending inbounds for claim. Meiva appends that tail after the head. An
+external harness preserves only the tail and resets its submission cursor to
+zero, so the summary reaches its next turn. An intact history is a pass-through;
+a stale parked tail is discarded with a warning, without splicing into it.
 
 Notes tell the agent what changed and what to do, in its own terms.
 

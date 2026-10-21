@@ -53,6 +53,14 @@ Selected-agent detail exposes optional `last_launch_attempt_id` from metadata,
 so guarded retry callers can submit the exact observed UUID. It is an attempt
 identity, not admission or execution evidence; older details may omit it.
 
+## Harness identity
+
+Cards, directory rows and selected detail expose the required `harness` enum
+directly from `agents_meta.harness`. It is immutable identity, not a model or an
+availability inference, and does not depend on catalog access. Missing or unknown
+wire values fail validation. The frontend uses it to name the running harness
+and keep native-only prompt display out of external transcripts.
+
 ## Agent capability projection
 
 Model projections take an explicit `default_model_reader` from their caller.

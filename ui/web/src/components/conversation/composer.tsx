@@ -144,6 +144,13 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   const [caret, setCaret] = useState(() => value.length);
   const [dragOver, setDragOver] = useState(false);
   const [images, setImages] = useState<PendingImage[]>([]);
+  const imagesEnabled = onAttachImage !== undefined;
+  const [imageScope, setImageScope] = useState({ agentId, enabled: imagesEnabled });
+  // meiva:link ui/web/src/docs/frontend-data-flow/unavailable-model-capabilities.meiva.okf.md
+  if (imageScope.agentId !== agentId || imageScope.enabled !== imagesEnabled) {
+    setImageScope({ agentId, enabled: imagesEnabled });
+    setImages([]);
+  }
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [initialSendAttempt] = useState<SendAttempt | null>(() =>
@@ -213,19 +220,21 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     ta.setSelectionRange(pos, pos);
   }, [value, caret]);
 
-  const clearImages = () => {
-    setImages((prev) => {
-      for (const img of prev) URL.revokeObjectURL(img.previewUrl);
-      return [];
-    });
-  };
-  const imagesRef = useRef(images);
+  const clearImages = () => setImages([]);
+  const imagePreviewsRef = useRef(new Map<string, string>());
   useEffect(() => {
-    imagesRef.current = images;
+    for (const [key, previewUrl] of imagePreviewsRef.current) {
+      if (!images.some((image) => image.key === key)) {
+        URL.revokeObjectURL(previewUrl);
+        imagePreviewsRef.current.delete(key);
+      }
+    }
   }, [images]);
   useEffect(() => {
+    const previews = imagePreviewsRef.current;
     return () => {
-      for (const img of imagesRef.current) URL.revokeObjectURL(img.previewUrl);
+      for (const previewUrl of previews.values()) URL.revokeObjectURL(previewUrl);
+      previews.clear();
     };
   }, []);
 
@@ -266,11 +275,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
 
   const removeImage = (key: string) => {
     if (composerLocked) return;
-    setImages((prev) => {
-      const gone = prev.find((i) => i.key === key);
-      if (gone) URL.revokeObjectURL(gone.previewUrl);
-      return prev.filter((i) => i.key !== key);
-    });
+    setImages((prev) => prev.filter((image) => image.key !== key));
   };
 
   const attachImages = (files: File[]) => {
@@ -281,6 +286,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
       // A pending attachment previews from an object URL, so the page image policy must allow blob:.
       // meiva:link ui/web/src/lib/auth/docs/content-security-policy.meiva.okf.md
       const previewUrl = URL.createObjectURL(file);
+      imagePreviewsRef.current.set(key, previewUrl);
       setImages((prev) => [...prev, { key, name: file.name, previewUrl, status: "uploading" }]);
       onAttachImage(file)
         .then((u) =>

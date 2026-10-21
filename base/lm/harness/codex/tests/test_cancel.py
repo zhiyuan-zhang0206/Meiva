@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from base.lm.harness.codex.tests.fake_app_server import CODEX_PID
 from base.lm.harness.codex.tests.support import start
 from base.lm.harness.events import SessionFaulted, TurnCompleted
@@ -45,6 +47,8 @@ async def test_surviving_child_is_reported_as_residue(tmp_path: Path) -> None:
         assert [observation.pid for observation in report.remaining] == [5150]
         assert report.remaining[0].command == TOOL_MARKER
         assert report.waited_ms >= 100.0
+        with pytest.raises(RuntimeError, match="process"):
+            await harness.session.close(reason="residue test")
     finally:
         await harness.stop()
 

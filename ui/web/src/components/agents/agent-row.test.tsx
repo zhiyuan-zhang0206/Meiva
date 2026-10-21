@@ -95,6 +95,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
   return {
     agent_id,
     spawner: "user",
+    harness: "meiva",
     fork_source_agent_id: null,
     status: "running",
     spawned_at: "2026-05-07T00:00:00.000000Z",
@@ -484,6 +485,16 @@ describe("AgentRow right-click context menu", () => {
     // Resurrect items are terminated-only
     expect(screen.queryByText("Resurrect")).toBeNull();
     expect(screen.queryByText("End external takeover session")).toBeNull();
+  });
+
+  it.each(["meiva", "claude_code", "codex"] as const)("offers native compaction only on Meiva (%s)", (harness) => {
+    const { container } = render(
+      <AgentRow {...baseProps} agent={ag(1, { harness })} depth={0} ancestorsIsLast={[]} />,
+    );
+    openMenu(container.querySelector("li")!);
+    expect(screen.queryByText("Compact") !== null).toBe(harness === "meiva");
+    expect(screen.getByText("Restart")).toBeTruthy();
+    expect(screen.getByText("Terminate")).toBeTruthy();
   });
 
   it("shows the end-session item only for an open session and sends its rendered ID after confirmation", () => {

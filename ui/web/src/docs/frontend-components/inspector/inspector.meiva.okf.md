@@ -27,6 +27,12 @@ The non-embedded header carries the panel title alone (no section/category
 selector); `embedded` panels render no header at all — the mobile close X below
 has its own rule.
 
+The Context section is shown only for a Meiva harness, as reported by the shared
+roster or the already-selected detail cache when the agent is outside the roster.
+This subscription makes no additional detail request. Its token totals and thresholds describe the native model window and
+cannot represent an external CLI session. Unknown harness metadata also keeps
+this section hidden.
+
 **Empty sections render nothing** — a hidden Page section with no open page, an
 available-but-empty shell list, an empty config overlay, a
 missing notice, a widget whose payload came back empty. The first-load skeleton

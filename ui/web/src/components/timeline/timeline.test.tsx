@@ -196,12 +196,19 @@ vi.mock("@/lib/state/use-user-settings", () => ({
   }),
 }));
 
-import { TimelineView } from ".";
+import { TimelineView as HarnessTimelineView } from ".";
+import type { ComponentProps } from "react";
+
 import { LoadOlderSpinner } from "./overlays";
 import { ItemView, streamingParseIntervalMs } from "./item";
 import { formatItemTime } from "./timestamp";
 import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "./markers";
 import { resolveSavedTimelineAnchor } from "./model/use-timeline-window";
+
+type TimelineProps = ComponentProps<typeof HarnessTimelineView>;
+function TimelineView(props: Omit<TimelineProps, "harness"> & Pick<Partial<TimelineProps>, "harness">) {
+  return <HarnessTimelineView harness="meiva" {...props} />;
+}
 
 mockSettings.onChange = () => act(() => mockSettings.notify());
 
@@ -681,6 +688,49 @@ describe("ItemView: system_prompt", () => {
     expect(screen.queryByText(/Act via execute_code/)).toBeNull();
     fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.getByText(/Act via execute_code/)).toBeTruthy();
+  });
+
+  it.each(["claude_code", "codex", null] as const)(
+    "does not present a legacy local prompt as %s system instructions",
+    (harness) => {
+      const items = [
+        makeItem({ item_id: "0.0", kind: "system_prompt", payload: PROMPT, created_at: null }),
+        makeItem({ item_id: "1.0", kind: "inbound_chat", payload: "Keep the real user task", source: "user" }),
+        makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Keep the real answer" }),
+      ];
+      render(<TimelineView harness={harness} items={items} />);
+      expect(screen.queryByText(/Act via execute_code/)).toBeNull();
+      expect(screen.queryByTestId("turn-toggle")).toBeNull();
+      expect(screen.getByText("Keep the real user task")).toBeTruthy();
+      expect(screen.getByText("Keep the real answer")).toBeTruthy();
+      expect(items.map((item) => item.item_id)).toEqual(["0.0", "1.0", "2.0"]);
+      expect(items[0].payload).toBe(PROMPT);
+    },
+  );
+
+  it("filters a buffered legacy prompt without moving the remaining message's segment", () => {
+    const prompt = makeItem({ item_id: "0.0", kind: "system_prompt", payload: PROMPT, created_at: null });
+    const oldReply = makeItem({ item_id: "1.0", kind: "agent_chat", payload: "Buffered answer" });
+    const buffer: CompactTransitionBuffer = {
+      threadId: 42,
+      epoch: 3,
+      rows: [
+        { item: prompt, rank: 2, needsCanonicalRow: false },
+        { item: oldReply, rank: 1, needsCanonicalRow: true },
+      ],
+      oldestRealByRank: new Map([[1, oldReply.item_id]]),
+      tailReady: false,
+    };
+    const { container } = render(<TimelineView
+      harness="codex"
+      items={[prompt, makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Current answer" })]}
+      compactBuffer={buffer}
+    />);
+    expect(screen.queryByText(/Act via execute_code/)).toBeNull();
+    expect(screen.getByText("Buffered answer")).toBeTruthy();
+    expect(screen.getByText("Current answer")).toBeTruthy();
+    expect(container.querySelector('[data-item-id="1.0"][data-timeline-source="buffer"]')?.getAttribute("data-display-rank")).toBe("1");
+    expect(buffer.rows[0].item).toBe(prompt);
   });
 
   it("singular 'line' for a one-line prompt", () => {

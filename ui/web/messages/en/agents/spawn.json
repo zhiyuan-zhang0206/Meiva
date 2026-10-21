@@ -23,5 +23,8 @@
   "harnessStatus": {
     "unavailable": "unavailable"
   },
-  "newAgent": "Create agent"
+  "newAgent": "Create agent",
+  "historyModel": "Meiva history model",
+  "historyEffort": "Summary effort",
+  "externalModelHelp": "These options configure Meiva history budgets and compaction. {harness} uses its own adapter or CLI model settings."
 }

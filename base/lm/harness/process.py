@@ -158,4 +158,6 @@ async def settle_close(
         remaining=len(remaining),
         waited_ms=round(waited_ms, 1),
     )
-    return False
+    raise RuntimeError(
+        f"{harness} session for agent {agent_id} left {len(remaining)} process(es) running"
+    )
