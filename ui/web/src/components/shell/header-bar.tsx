@@ -9,6 +9,7 @@ import { Menu, PanelLeft } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 
+import { AlertsCountPill } from "@/components/notifications/alerts-badge";
 import { cn } from "@/lib/format/utils";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 
@@ -17,6 +18,13 @@ interface Props {
   onOpenSidebar: () => void;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+  // meiva:note
+  // The unresolved-alert count, so the collapsed rail keeps the one signal the expanded
+  // sidebar shows beside its Fleet shortcut: with the rail closed the icon row is gone and
+  // an unreviewed P0 would be invisible (user 2026-10-21). The count rides the restore
+  // button and the button's label names it, so the collapse stays quiet but not blind.
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  alertCount?: number;
   // meiva:note
   // A control that belongs to the viewport's right edge rather than to the
   // centred conversation column: the home page passes the reopen control of a
@@ -30,9 +38,10 @@ interface Props {
   maxWidthCss?: string;
 }
 
-export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSidebar, pinnedRight, children, maxWidthCss }: Props) {
+export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSidebar, alertCount = 0, pinnedRight, children, maxWidthCss }: Props) {
   const t = useTranslations("nav");
   const sidebarT = useTranslations("sidebar");
+  const alertsT = useTranslations("alerts");
 
   // meiva:note
   // While the sidebar is collapsed its restore button belongs to the viewport's
@@ -59,11 +68,18 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
         <button
           onClick={onToggleSidebar}
           className="hidden md:inline-flex absolute left-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-sidebar-accent shrink-0"
-          aria-label={sidebarT("showSidebar")}
+          aria-label={
+            alertCount > 0
+              ? `${sidebarT("showSidebar")}, ${alertsT("unresolvedAlerts", { count: alertCount })}`
+              : sidebarT("showSidebar")
+          }
           aria-pressed={false}
           data-testid="sidebar-toggle"
         >
           <PanelLeft className="size-4" />
+          {alertCount > 0 ? (
+            <AlertsCountPill count={alertCount} testId="sidebar-toggle-alert-count" />
+          ) : null}
         </button>
       ) : null}
       {pinnedRight ? (

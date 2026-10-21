@@ -107,4 +107,22 @@ describe("HeaderBar", () => {
     const label = screen.getByText("x");
     expect(label.parentElement?.className).toContain("md:pl-8");
   });
+
+  it("collapsed sidebar toggle carries the unresolved-alert count and names it", () => {
+    // meiva:note
+    // User 2026-10-21: the icon row leaves with the rail, so the one standing signal
+    // rides the restore button instead of disappearing with it.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    render(
+      <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={vi.fn()} alertCount={4} />,
+    );
+    expect(screen.getByTestId("sidebar-toggle-alert-count").textContent).toBe("4");
+    expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).toContain("4 unresolved alerts");
+  });
+
+  it("collapsed sidebar toggle stays quiet with no unresolved alerts", () => {
+    render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={vi.fn()} />);
+    expect(screen.queryByTestId("sidebar-toggle-alert-count")).toBeNull();
+    expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).not.toContain("unresolved");
+  });
 });

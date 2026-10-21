@@ -19,6 +19,7 @@ import { ContextPanelToggle } from "@/components/shell/context-panel-toggle";
 import { HomeLayout } from "@/components/shell/home-layout";
 import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { useToUser } from "@/lib/context/use-to-user";
+import { useAlerts } from "@/lib/notifications/use-alerts";
 import { useNotices } from "@/lib/notifications/use-notices";
 import { PRIORITY_RANK } from "@/lib/notifications/notices";
 import { PendingStrip } from "@/components/conversation/pending-strip";
@@ -238,6 +239,7 @@ function HomeContent({
   const timelineText = useTranslations("timeline");
   const composerFocusToken = useStore((s) => s.composerFocusToken);
   const { settings: userSettings, isLoading: userSettingsLoading } = useUserSettings();
+  const unresolvedAlerts = useAlerts().data?.meta.unresolved_count ?? 0;
   const { isNarrow, isLarge } = useBreakpoint();
   const { collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed } = useSidebarCollapsed();
   const { open: inspectorOpen } = useInspectorOpen();
@@ -391,6 +393,7 @@ function HomeContent({
             label={activeLabel}
             onOpenSidebar={() => setMobileSidebarOpen(true)}
             sidebarCollapsed={sidebarCollapsed}
+            alertCount={unresolvedAlerts}
             onToggleSidebar={() => {
               if (isNarrow) setMobileSidebarOpen(true);
               else setSidebarCollapsed(!sidebarCollapsed);
