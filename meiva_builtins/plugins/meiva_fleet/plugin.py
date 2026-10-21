@@ -148,6 +148,8 @@ def notify(
     a time: calling notify() again while one is open raises, naming that notice's
     id, and nothing is replaced behind your back. Close the open one with
     dismiss_notice, or rewrite it in place with edit_notice, then post the new one.
+    A notice whose deadline passes closes as expired: no reply arrives for it, the
+    slot is free again, and a system message says so.
 
     Args:
         content: optional background for the question in title.

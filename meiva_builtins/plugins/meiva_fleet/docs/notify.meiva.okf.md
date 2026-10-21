@@ -63,6 +63,20 @@ Resolved notice history also excludes FYIs. Historical FYI rows and read receipt
 remain stored for compatibility; they are not converted into unanswered questions.
 The schema's legacy fields are retained rather than destructively rewritten.
 
+## Expiry
+
+A notice carries an absolute `expire_at`. When it passes with the notice still
+open, the TTL reaper resolves it as `expired` and queues one system inbound
+(`system:notice-expire`) for its agent in the same transaction: the local id, the
+title, when it lapsed, that nothing is pending any more, and that the single open
+notice is free again. The message is not shaped as a reply, because the user did
+not answer.
+
+The owner is woken only while running or idling. A terminated owner keeps the
+same row in its inbox for its next life, and is never woken or resurrected for
+it. Expiry is silent for the user (user ruling 2026-10-21): the question leaves
+the queue and no notification is posted in its place.
+
 ## Owners
 
 - [[notice-questions.meiva.okf.md]] — question, selection and comment semantics.

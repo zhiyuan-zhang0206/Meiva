@@ -24,7 +24,11 @@
 # The slow phases are claimed in ``maintenance_state`` (``cadence``), so a restart
 # resumes their cadence. Owners are notified (inbound, source ``"system"``) only
 # when the agent is running or idling — a terminated agent's page expiring is
-# exactly the cleanup the TTL exists for, and must not resurrect it.
+# exactly the cleanup the TTL exists for, and must not resurrect it. The one
+# exception is notice expiry: that message reports the owner's own notice, so it
+# is queued for a terminated owner too (read on its next life) while still
+# publishing no wake. Expiry is silent for the user (ruling 2026-10-21): the
+# notice only leaves the open queue, and no new notification appears.
 #
 # Every reclaim is a CAS that loses cleanly to ``close()`` / termination. The sweep
 # has no remote calls; shell kills and work-failure redelivery live in the
@@ -54,7 +58,13 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed
 from ops import lifecycle
 from services.upkeep.ttl_reaper import cadence
-from services.upkeep.ttl_reaper.owner_notice import PASS_BATCH, notify_owner
+from services.upkeep.ttl_reaper.owner_notice import (
+    PASS_BATCH,
+    OwnerMessage,
+    notify_owner,
+    wake_owners,
+    wall_clock,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -64,13 +74,28 @@ _log = logging.getLogger(__name__)
 FIRE_LOG_PASS_BATCH = 50_000
 
 
+# meiva:note
+# What the owner reads when its notice expired: which notice, when it lapsed,
+# that nothing is pending any more, and how to ask again. Deliberately not
+# shaped like a reply ("Re: ..."), because the user did not answer and the agent
+# must not mistake a lapse for one.
+def expired_notice_message(local_id: int, title: str, expire_at: datetime) -> str:
+    return (
+        f'Notice #{local_id} "{title}" reached its expiry at {wall_clock(expire_at)} '
+        "without a response from the user, so it is resolved as expired. It no longer "
+        "waits for an answer and no longer occupies your one open notice; post a new "
+        "one with meiva.ui.notify(title, ..., idempotency_key=...) if it still matters."
+    )
+
+
 def reap_expired_notices_blocking(
     pool: ConnectionPool, db: Database, bus: EventBus
 ) -> list[tuple[int, int, lifecycle.NoticeResolutionFacts]]:
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, agent_id, title, require_response, created_at, reply, answer "
+                "SELECT id, agent_id, local_id, title, require_response, created_at, "
+                "expire_at, reply, answer "
                 "FROM agent_notices WHERE expire_at <= now() AND resolved_at IS NULL "
                 "ORDER BY expire_at, id LIMIT %s "
                 "FOR UPDATE SKIP LOCKED",
@@ -81,7 +106,18 @@ def reap_expired_notices_blocking(
             return []
         reaped: list[tuple[int, int, lifecycle.NoticeResolutionFacts]] = []
         updated_agents: set[int] = set()
-        for nid, agent_id, title, require_response, created_at, reply, answer in rows:
+        queued: list[OwnerMessage] = []
+        for (
+            nid,
+            agent_id,
+            local_id,
+            title,
+            require_response,
+            created_at,
+            expire_at,
+            reply,
+            answer,
+        ) in rows:
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agent_notices SET resolved_at = now(), resolution = 'expired' "
@@ -92,14 +128,15 @@ def reap_expired_notices_blocking(
                     continue
             if require_response:
                 updated_agents.add(agent_id)
-            notify_owner(
+            message = notify_owner(
                 conn,
-                db,
-                bus,
                 agent_id,
-                f'Re: "{title}"\n\n[This notice has expired.]',
+                expired_notice_message(local_id, title, expire_at),
                 source="system:notice-expire",
+                queue_when_terminated=True,
             )
+            if message is not None:
+                queued.append(message)
             reaped.append(
                 (
                     agent_id,
@@ -112,6 +149,7 @@ def reap_expired_notices_blocking(
                     ),
                 )
             )
+    wake_owners(db, bus, queued)
     for aid in updated_agents:
         publish_agent_updated_sync(bus, aid)
     return reaped
@@ -137,6 +175,7 @@ def reap_expired_pages_blocking(
             )
             rows = cur.fetchall()
         reaped: list[tuple[int, str, int]] = []
+        queued: list[OwnerMessage] = []
         for page_id, agent_id, name, serve_dir in rows:
             with conn.cursor() as cur:
                 cur.execute(
@@ -151,24 +190,22 @@ def reap_expired_pages_blocking(
                 # show() page: the gateway only expires the registration — the
                 # server lives in the agent's own process, so the notice tells
                 # the owner to stop it and release the port.
-                notify_owner(
+                message = notify_owner(
                     conn,
-                    db,
-                    bus,
                     agent_id,
                     f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL "
                     "expired. Stop the page's HTTP server to release its port; "
                     "re-show with meiva.ui.show() to republish.",
                 )
             else:
-                notify_owner(
+                message = notify_owner(
                     conn,
-                    db,
-                    bus,
                     agent_id,
                     f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL "
                     "expired. Serve it again with meiva.ui.serve() to republish.",
                 )
+            if message is not None:
+                queued.append(message)
             telemetry.emit(
                 "log",
                 "page_ttl_expired",
@@ -176,6 +213,7 @@ def reap_expired_pages_blocking(
                 agent_id=agent_id,
                 attributes={"agent_id": agent_id, "name": name, "page_id": page_id},
             )
+    wake_owners(db, bus, queued)
     # PageClosed is a live-UI event: publish outside the DB transaction so a
     # Redis hiccup cannot roll back the terminal UPDATE.
     for agent_id, name, _page_id in reaped:
