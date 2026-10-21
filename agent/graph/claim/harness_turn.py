@@ -11,6 +11,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
+from agent.graph.claim.turn_stamp import persist_last_active
 from agent.graph.interrupt import (
     ModelInterruptedError,
     interrupt_halt,
@@ -132,6 +133,15 @@ async def harness_turn_node(
     turns = (*turn.prelude, turn)
     for completed in turns:
         log_turn_usage(ctx, agent_id, bridge.model, completed)
+    # meiva:note
+    # The turn's last completion is the agent's last AI message, and it is stamped where
+    # the native node stamps it: before this call a harness agent's `last_message_text`
+    # stayed NULL for its whole life, so `meiva.agents.get_last_message()` answered
+    # `None` for every codex / claude / antigravity agent while its transcript held the
+    # text (#5511). The same UPDATE also clears the crash marker and the permanent-reject
+    # streak, which a completed harness turn earns exactly as a native one does.
+    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    await persist_last_active(ctx, agent_id, turns[-1].text)
     return Command[HarnessGoto](
         update={
             "messages": [AIMessage(content=completed.text) for completed in turns],
