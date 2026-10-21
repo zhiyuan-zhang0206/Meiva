@@ -611,6 +611,7 @@ def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
         allowed_origins=("https://alpha.example",),
         browser_origin="https://alpha.example",
         session_cookie_secure=False,
+        human_auth="required",
         memory_root=Path("/nonexistent/alpha-memory"),
     )
     config_beta = GatewayConfig(
@@ -620,6 +621,7 @@ def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
         allowed_origins=("http://beta.example:3000",),
         browser_origin="",
         session_cookie_secure=False,
+        human_auth="required",
         memory_root=Path("/nonexistent/beta-memory"),
     )
 

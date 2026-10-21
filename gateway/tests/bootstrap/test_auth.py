@@ -46,6 +46,7 @@ def request_with_origin(
         allowed_origins=allowed_origins,
         browser_origin="",
         session_cookie_secure=False,
+        human_auth="required",
         memory_root=Path("/nonexistent/memory"),
     )
     return Request(

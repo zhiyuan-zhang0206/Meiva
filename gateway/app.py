@@ -606,6 +606,7 @@ def openapi_schema() -> dict[str, Any]:
         allowed_origins=(),
         browser_origin="",
         session_cookie_secure=False,
+        human_auth="required",
         memory_root=Path("/nonexistent/memory"),
     )
     with process.lifetime():

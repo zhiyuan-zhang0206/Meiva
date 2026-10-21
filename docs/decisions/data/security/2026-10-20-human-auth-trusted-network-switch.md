@@ -67,3 +67,8 @@ unchanged): machine tokens and the telemetry token derive from it.
 
 Superseded in part by [the `/mcp` endpoint is a thin forwarder onto the gateway HTTP API](2026-10-20-mcp-is-a-thin-api-forwarder.md):
 `/mcp` no longer has client tokens of its own; it follows this switch like the rest of the API.
+
+On 2026-10-21 the user changed the default to `trusted_network`: new clusters skip
+the user login gate unless `MEIVA_GATEWAY_HUMAN_AUTH=required` is explicitly set.
+The two modes, machine credential checks, Host/Origin checks and existing explicit
+configuration values retain their behavior.
