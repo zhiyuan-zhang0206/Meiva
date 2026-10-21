@@ -49,14 +49,19 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.api_contracts.agent_contract import ShellKillMode
-from base.clock import Clock
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from ops.cluster import rpc as cluster_rpc
-from services.upkeep.ttl_reaper.owner_notice import PASS_BATCH, notify_owner
+from services.upkeep.ttl_reaper.owner_notice import (
+    PASS_BATCH,
+    OwnerMessage,
+    notify_owner,
+    wake_owners,
+    wall_clock,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -141,21 +146,6 @@ def human_ttl(seconds: float) -> str:
     return f"{seconds}s"
 
 
-def wall_clock(dt: datetime) -> str:
-    """Local wall-clock for the notice: HH:MM, or MM-DD HH:MM when the moment
-    is not on the cluster's today (a TTL can cross midnight).
-
-    Renders in the cluster timezone; ``None`` falls back to the host zone
-    (``dt.astimezone(None)``) — the base/config contract that ``None`` is
-    the host-zone fallback signal."""
-    tz = Clock.from_settings().zone()
-    local = dt.astimezone(tz)
-    stamp = local.strftime("%H:%M")
-    if local.date() != datetime.now(tz).date():
-        stamp = f"{local.strftime('%m-%d')} {stamp}"
-    return stamp
-
-
 def delete_shell_row(
     pool: ConnectionPool,
     db: Database,
@@ -176,6 +166,7 @@ def delete_shell_row(
     A watcher session (just a shell session running a generated script) gets
     this exact same notice — it always carries a running job, so the reclaim
     always interrupts one."""
+    queued: list[OwnerMessage] = []
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -196,13 +187,14 @@ def delete_shell_row(
                     else ""
                 )
                 detail = f" at {wall_clock(expires_at)}{ttl}"
-            notify_owner(
+            message = notify_owner(
                 conn,
-                db,
-                bus,
                 agent_id,
                 f"{label} was reclaimed after its TTL expired{detail}, interrupting a running task.",
             )
+            if message is not None:
+                queued.append(message)
+    wake_owners(db, bus, queued)
 
 
 class _MachineAbsent:
