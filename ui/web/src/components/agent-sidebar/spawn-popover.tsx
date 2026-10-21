@@ -52,7 +52,15 @@ export function SpawnPopover({ onSpawn, variant }: Props) {
         <Popover.Content
           sideOffset={6}
           align="end"
-          className={cn("z-50 w-[660px] max-w-[94vw] text-popover-foreground outline-none")}
+          // meiva:note
+          // The panel takes its width from the form (`w-fit`): the table sizes every
+          // column to its content, so a fixed 660px would only hand the slack to one of
+          // them. The stacked phone layout still wants the full width.
+          // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+          className={cn(
+            "z-50 max-w-[94vw] text-popover-foreground outline-none",
+            isNarrow ? "w-[94vw]" : "w-fit",
+          )}
         >
           <SpawnForm
             onSpawn={onSpawn}

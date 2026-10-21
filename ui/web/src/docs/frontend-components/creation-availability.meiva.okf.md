@@ -16,8 +16,9 @@ disabled with its reason.
 Creation is one table, read left to right: **Machine, Harness, Model, Effort**.
 The machine is the first column because it is the first fact — a harness is only
 available *on* a machine.
-Every agent-runner machine is a row; a host that is down keeps its row, disabled
-and titled with the reason.
+Every agent-runner machine is a row; a down host keeps its row, disabled with
+its reason.
+Each column is sized by its content; the panel follows it.
 Each column narrows the next and marks exactly one row selected as soon as the
 form renders, so opening it answers "what will the next agent be born on, and
 where" before it asks anything. The harness column speaks for the selected
@@ -33,13 +34,12 @@ table. The effort column shows
 the selected model's `reasoning_effort_options` ladder; a model that publishes
 none leaves the column empty rather than offering a synthetic default, and the
 model's concrete `reasoning_effort_default` is the row marked when nothing is
-stored. The column is titled "Effort": the header names the quantity, not the
-mechanism. The footer states the action only — one `Spawn` button, disabled with
+stored. The header names the quantity, not the mechanism. The footer states the action only — one `Spawn` button, disabled with
 the first refusal that applies (a down host, then a harness the machine cannot
 start).
 
 Below the md breakpoint the same decisions stack instead of a table: on a
-390px phone the four fixed columns left the model column 4px wide (2026-10-21).
+390px phone the four fixed columns left the model column 4px wide.
 Each decision becomes a 44px row that states the current pick and opens its list
 on a tap, and a refusal is written beside the action: a touch screen has no
 hover.
