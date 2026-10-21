@@ -272,7 +272,9 @@ def test_swiftc_hang_fails_the_build_instead_of_blocking(
     with pytest.raises(lifecycle.PermissionsHelperTimeoutError) as err:
         lifecycle.build_and_sign()
     assert f"{lifecycle.TIMEOUTS_S['swiftc']:.0f}s" in str(err.value)
-    assert not any(Path(c[0]).name == "codesign" and "--force" in c for c in recorded_argvs(recorded))
+    assert not any(
+        Path(c[0]).name == "codesign" and "--force" in c for c in recorded_argvs(recorded)
+    )
 
 
 def test_codesign_hang_fails_the_build_instead_of_blocking(

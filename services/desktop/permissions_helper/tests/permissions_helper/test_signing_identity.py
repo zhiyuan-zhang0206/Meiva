@@ -30,6 +30,8 @@ def test_first_build_provisions_the_identity_without_asking_anyone(
 
     assert lifecycle.build_and_sign() == (app, True)
 
+    argv = sign_command(recorded)
+    assert argv[argv.index("--sign") + 1] == signing_identity.IDENTITY_NAME
     assert signing_identity.keychain_path().is_file()
     assert stat.S_IMODE(signing_identity.password_path().stat().st_mode) == 0o600
     assert signing_identity.password_path().read_text().strip()
@@ -111,7 +113,7 @@ def test_a_keychain_outside_the_search_list_is_appended_not_replaced(
 def test_a_keychain_listed_through_a_symlink_is_not_added_twice(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from services.desktop.permissions_helper import lifecycle, signing_identity
+    from services.desktop.permissions_helper import lifecycle
 
     stage_bundle(monkeypatch, tmp_path, exe_present=False, identity=False)
     stage_signing_identity()
@@ -129,7 +131,7 @@ def test_a_keychain_listed_through_a_symlink_is_not_added_twice(
 def test_a_second_keychain_with_the_same_name_stops_the_build(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from services.desktop.permissions_helper import lifecycle, signing_identity
+    from services.desktop.permissions_helper import lifecycle
 
     stage_bundle(monkeypatch, tmp_path, exe_present=False)
     stale = tmp_path / "stale.keychain-db"

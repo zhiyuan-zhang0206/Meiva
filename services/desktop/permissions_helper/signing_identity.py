@@ -21,7 +21,7 @@ IDENTITY_NAME = "Meiva Local Signing"
 IDENTITY_ORG = "Meiva"
 VALID_DAYS = 3650
 KEYCHAIN_NAME = "signing.keychain-db"
-PASSWORD_NAME = "signing.keychain-pass"
+KEYCHAIN_UNLOCK_FILE = "signing.keychain-pass"
 README_NAME = "SIGNING-README.md"
 
 # meiva:note
@@ -69,7 +69,7 @@ def keychain_path() -> Path:
 
 
 def password_path() -> Path:
-    return directory() / PASSWORD_NAME
+    return directory() / KEYCHAIN_UNLOCK_FILE
 
 
 def readme_path() -> Path:
@@ -89,9 +89,7 @@ def policy() -> str:
 
 # meiva:note
 # The codesign invocation that signs `app` with the fixed identity.
-def sign_arguments(
-    app: Path, *, entitlements: Path, identifier: str
-) -> list[str]:
+def sign_arguments(app: Path, *, entitlements: Path, identifier: str) -> list[str]:
     return [
         CODESIGN,
         *_SIGN_ARGV_HEAD,
@@ -319,15 +317,15 @@ def _write_secret(path: Path, secret: str) -> None:
     path.chmod(0o600)
 
 
-def _readme_text() -> str:
-    password = password_path()
-    keychain = keychain_path()
-    return f"""\
+# meiva:note
+# The record written beside the keychain: how it was made, where its password
+# lives, and what a lost certificate costs.
+_README_TEMPLATE = """\
 # Meiva permissions helper -- signing identity
 
 The helper at `MeivaPermissionsHelper.app` is signed with one self-signed
-certificate, `{IDENTITY_NAME}` (organisation `{IDENTITY_ORG}`), stored in
-`{keychain}`. Its password is in `{password}` (owner-only). Nothing else uses
+certificate, `__IDENTITY_NAME__` (organisation `__IDENTITY_ORG__`), stored in
+`__KEYCHAIN__`. Its password is in `__PASSWORD__` (owner-only). Nothing else uses
 either file.
 
 Why: TCC keys a grant on the designated requirement. Under an ad-hoc signature
@@ -338,21 +336,21 @@ does not change when the helper is rebuilt.
 
 ## How it was created
 
-    {OPENSSL} req -x509 -newkey rsa:2048 -sha256 -nodes -days {VALID_DAYS} \\
+    __OPENSSL__ req -x509 -newkey rsa:2048 -sha256 -nodes -days __VALID_DAYS__ \\
         -config cert.cnf -keyout identity.key -out identity.crt
-    {SECURITY} create-keychain -p "$PASSWORD" {KEYCHAIN_NAME}
-    {SECURITY} set-keychain-settings {KEYCHAIN_NAME}
-    {SECURITY} unlock-keychain -p "$PASSWORD" {KEYCHAIN_NAME}
-    {SECURITY} import identity.p12 -k {KEYCHAIN_NAME} -P "$PASSWORD" \\
-        -T {CODESIGN} -T {SECURITY}
-    {SECURITY} set-key-partition-list -S apple-tool:,apple: -s -k "$PASSWORD" {KEYCHAIN_NAME}
-    {SECURITY} list-keychains -d user -s <existing keychains> {keychain}
+    __SECURITY__ create-keychain -p "$PASSWORD" __KEYCHAIN_NAME__
+    __SECURITY__ set-keychain-settings __KEYCHAIN_NAME__
+    __SECURITY__ unlock-keychain -p "$PASSWORD" __KEYCHAIN_NAME__
+    __SECURITY__ import identity.p12 -k __KEYCHAIN_NAME__ -P "$PASSWORD" \\
+        -T __CODESIGN__ -T __SECURITY__
+    __SECURITY__ set-key-partition-list -S apple-tool:,apple: -s -k "$PASSWORD" __KEYCHAIN_NAME__
+    __SECURITY__ list-keychains -d user -s <existing keychains> __KEYCHAIN__
 
 `cert.cnf` carried `basicConstraints = critical,CA:false`,
 `keyUsage = critical,digitalSignature` and `extendedKeyUsage = codeSigning`; the
-`subject.CN` is `{IDENTITY_NAME}` and the organisation is `{IDENTITY_ORG}`. The
+`subject.CN` is `__IDENTITY_NAME__` and the organisation is `__IDENTITY_ORG__`. The
 private key, certificate and PKCS#12 archive were created in a temporary
-directory beside the keychain and deleted after the import.
+directory beside the keychain and removed after the import.
 
 ## A deployment that predates this identity undoes it
 
@@ -366,21 +364,40 @@ switch a host whose deployment still runs older code.
 
 ## What breaks if it is lost
 
-The certificate *is* the helper's identity. If this keychain is deleted, the
+The certificate *is* the helper's identity. If this keychain is destroyed, the
 designated requirement changes, and every grant -- Screen Recording,
 Accessibility, AppleEvents, App Management -- must be given again by hand on
 every Mac that shares this identity. The build refuses to sign rather than
 quietly minting a replacement, so the loss is loud.
 
-To move the identity to another Mac, copy `{KEYCHAIN_NAME}` and
-`{PASSWORD_NAME}` into that Mac's `~/.meiva/helper/`, then run
+To move the identity to another Mac, copy `__KEYCHAIN_NAME__` and
+`__KEYCHAIN_UNLOCK_FILE__` into that Mac's `~/.meiva/helper/`, then run
 `python3 scripts/host_ops/tcc/helper-signing.py status` there (a machine without
 the keychain can `import` a PKCS#12 archive exported here). The same certificate
 means the same designated requirement everywhere, so one set of System Settings
 clicks covers every host.
 
-Only one keychain per machine may hold `{IDENTITY_NAME}`: `codesign` resolves the
+Only one keychain per machine may hold `__IDENTITY_NAME__`: `codesign` resolves the
 name across the whole user search list and refuses an ambiguous identity, so a
 stale test keychain with the same name breaks every build until it is removed
 from `security list-keychains -d user`.
 """
+
+
+def _readme_text() -> str:
+    values = {
+        "IDENTITY_NAME": IDENTITY_NAME,
+        "IDENTITY_ORG": IDENTITY_ORG,
+        "VALID_DAYS": str(VALID_DAYS),
+        "KEYCHAIN_NAME": KEYCHAIN_NAME,
+        "KEYCHAIN_UNLOCK_FILE": KEYCHAIN_UNLOCK_FILE,
+        "OPENSSL": OPENSSL,
+        "SECURITY": SECURITY,
+        "CODESIGN": CODESIGN,
+        "KEYCHAIN": str(keychain_path()),
+        "PASSWORD": str(password_path()),
+    }
+    text = _README_TEMPLATE
+    for key, value in values.items():
+        text = text.replace(f"__{key}__", value)
+    return text
