@@ -6896,25 +6896,6 @@
         }
       }
     },
-    "/api/memory/graph": {
-      "get": {
-        "summary": "Get Memory Graph",
-        "description": "Return concept notes and cross-links from the gateway memory bundle.",
-        "operationId": "get_memory_graph_api_memory_graph_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MemoryGraphResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/memory/note": {
       "get": {
         "summary": "Get Memory Note",
@@ -13305,160 +13286,6 @@
         "title": "MachineStatus",
         "description": "A machines-table row state — augmented with live probe results.\n\n`online` / `paused` come from each machine's ops `status_probe`: the last one\nthe heartbeat liveness pass made (the default read, see `observed_at`), or a\ndial within the configured roster deadline (a fresh read):\n- online=True + paused has a value: probe succeeded\n- online=False + paused=None: probe failed (network unreachable /\n  gateway down)\n- online=True + paused=None: ops server responded, but the operation failed\n  or its response did not match ClusterStatus (abnormal)"
       },
-      "MemoryGraphEdge": {
-        "properties": {
-          "source": {
-            "type": "string",
-            "title": "Source"
-          },
-          "target": {
-            "type": "string",
-            "title": "Target"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "containment",
-              "reference"
-            ],
-            "title": "Kind"
-          }
-        },
-        "type": "object",
-        "required": [
-          "source",
-          "target",
-          "kind"
-        ],
-        "title": "MemoryGraphEdge",
-        "description": "One directed edge in the OKF memory graph.\n\n`kind` separates the two edge families the frontend renders differently:\n`containment` (note → folder, folder → parent folder — the main\nstructure) and `reference` (a markdown cross-link between two notes)."
-      },
-      "MemoryGraphNode": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "path": {
-            "type": "string",
-            "title": "Path"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "note",
-              "folder"
-            ],
-            "title": "Kind"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "tags": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Tags"
-          },
-          "primary_tag": {
-            "type": "string",
-            "title": "Primary Tag"
-          },
-          "timestamp": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Timestamp"
-          },
-          "meiva_agent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Meiva Agent"
-          },
-          "meiva_machine": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Meiva Machine"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "path",
-          "title",
-          "kind",
-          "description",
-          "tags",
-          "primary_tag",
-          "timestamp",
-          "meiva_agent",
-          "meiva_machine"
-        ],
-        "title": "MemoryGraphNode",
-        "description": "One node in the OKF memory graph — a concept note, or a folder pseudo\nnode (the graph's structural skeleton)."
-      },
-      "MemoryGraphResponse": {
-        "properties": {
-          "nodes": {
-            "items": {
-              "$ref": "#/components/schemas/MemoryGraphNode"
-            },
-            "type": "array",
-            "title": "Nodes"
-          },
-          "edges": {
-            "items": {
-              "$ref": "#/components/schemas/MemoryGraphEdge"
-            },
-            "type": "array",
-            "title": "Edges"
-          },
-          "warnings": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Warnings"
-          }
-        },
-        "type": "object",
-        "required": [
-          "nodes",
-          "edges"
-        ],
-        "title": "MemoryGraphResponse",
-        "description": "GET /api/memory/graph response."
-      },
       "MemoryNoteResponse": {
         "properties": {
           "path": {
@@ -13536,8 +13363,7 @@
           "meiva_machine",
           "body"
         ],
-        "title": "MemoryNoteResponse",
-        "description": "GET /api/memory/note response — one parsed memory note.\n\nMirrors MemoryGraphNode plus the parsed markdown body. The body is the\nmarkdown with the YAML frontmatter removed (base.parse_note's body), so\nthe frontend renders the note itself rather than re-parsing frontmatter\n(frontmatter values arrive as structured fields: title / description /\ntags / timestamp / meiva_agent / meiva_machine)."
+        "title": "MemoryNoteResponse"
       },
       "MemoryRefreshResponse": {
         "properties": {

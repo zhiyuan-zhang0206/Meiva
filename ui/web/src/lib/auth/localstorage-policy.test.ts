@@ -32,7 +32,6 @@ const SETITEM_ALLOWLIST = new Set<string>([
 const AUTOSAVE_ALLOWLIST = new Set<string>([
   "components/fleet/fleet-view.tsx", // meiva.fleet.split
   "components/shell/home-layout.tsx", // home Agent Tree + Inspector panel split ratios (task #2556)
-  "app/memory/graph/page.tsx", // meiva.memory.graph.split (memory graph side panel, task #2145)
   "components/run-timeline/run-timeline-workspace.tsx", // meiva.run-timeline.split (run-timeline details panel width)
 ]);
 

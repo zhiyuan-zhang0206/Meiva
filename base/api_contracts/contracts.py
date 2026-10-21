@@ -207,7 +207,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/understanding/builds/{build_id}"): RouteContract(
         note="read-only: a build's job statuses, rebuild state and actual cost"
     ),
-    ("GET", "/api/memory/graph"): RouteContract(),
     ("GET", "/api/memory/note"): RouteContract(note="pure read — one note by relative path"),
     ("GET", "/api/memory/pool"): RouteContract(
         note="pure read — consolidated pool git bundle for split-runner bootstrap"
