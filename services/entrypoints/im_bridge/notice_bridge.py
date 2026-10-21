@@ -183,14 +183,13 @@ class NoticeBridge:
         self, notice: dict[str, Any], *, switches: dict[str, bool]
     ) -> bool:
         # meiva:note
-        # Two independent reasons to accept without pushing: this bridge's own
-        # `/notice filter` scope, and the user's category switch — which every other
-        # transport already honors, so a decision notice the user switched off must
-        # not reach Telegram either. Acceptance still advances the poll cursor either
-        # way; only the push is withheld.
+        # One place decides whether a notice reaches Telegram, and it says why: this
+        # bridge's `/notice filter` scope, the FYI push scope and the user's category
+        # switch. Acceptance still advances the poll cursor either way; only the push
+        # is withheld.
         # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-        category_off = bool(notice["require_response"]) and not enabled_for(_NEEDS_INPUT, switches)
-        filtered = not self._passes_filter(notice) or category_off
+        reason = self._filter_reason(notice, switches=switches)
+        filtered = reason is not None
         snapshot = {
             key: notice[key]
             for key in (
@@ -205,6 +204,7 @@ class NoticeBridge:
         }
         snapshot["filters"] = dict(self._filters)
         snapshot["switches"] = dict(switches)
+        snapshot["filtered_reason"] = reason
         intent = None
         if not filtered:
             adapter = self.core.adapters.get("telegram")
@@ -234,6 +234,7 @@ class NoticeBridge:
                 snapshot,
                 intent,
                 filtered=filtered,
+                filtered_reason=reason,
             )
         except (ConnectionDoesNotExist, ConnectionFailure, PoolTimeout) as exc:
             _log.warning(
@@ -242,8 +243,13 @@ class NoticeBridge:
             return False
         return True
 
+    # meiva:note
+    # Every unaccepted notice above the cutover is read, including the ones the
+    # filter will hold back: a filtered notice must leave a receipt that says why,
+    # or "what would the user have received" has no answer. The FYI TTL still bounds
+    # how long a held-back FYI stays in this scan.
+    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
     def _unaccepted_notices(self, limit: int | None = None) -> list[dict[str, Any]]:
-        """Unaccepted open notices above the immutable cutover, regardless of high ID."""
         from base.agents.inbox.rows import NOTICE_FYI_TTL_DAYS
 
         if limit is None:
@@ -254,7 +260,8 @@ class NoticeBridge:
                 "LEFT JOIN im_bridge_notice_acceptances a ON a.notice_id=n.id "
                 "WHERE n.id > s.legacy_floor AND a.notice_id IS NULL "
                 "AND n.resolved_at IS NULL AND (n.require_response OR "
-                "n.created_at > now() - make_interval(days => %s)) ORDER BY n.id ASC LIMIT %s",
+                "n.created_at > now() - make_interval(days => %s)) "
+                "ORDER BY n.id ASC LIMIT %s",
                 (NOTICE_FYI_TTL_DAYS, limit),
             )
             return [_row_to_notice(r) for r in cur.fetchall()]
@@ -286,15 +293,28 @@ class NoticeBridge:
             )
             return [_row_to_notice(r) for r in cur.fetchall()]
 
-    def _passes_filter(self, n: dict[str, Any]) -> bool:
-        f = self._filters or {}
-        agent = f.get("agent")
+    # meiva:note
+    # One place decides whether a notice reaches the chat, and it says why. The FYI
+    # scope is answered first because it is a decision about the notice's kind; the
+    # user's `core.needs_input` switch answers only for a notice that needs an
+    # answer, so switching that category off never reclassifies an FYI. `all`
+    # restores the pre-2026-10-18 feed from configuration alone.
+    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+    def _filter_reason(self, n: dict[str, Any], *, switches: dict[str, bool]) -> str | None:
+        if not n["require_response"]:
+            if self._config.im_bridge_notice_push_scope != "all":
+                return "fyi"
+        elif not enabled_for(_NEEDS_INPUT, switches):
+            return "needs_input_off"
+        agent = (self._filters or {}).get("agent")
         if agent is not None and int(n["agent_id"]) != int(agent):
-            return False
-        min_prio = f.get("min_priority")
-        if not min_prio or n["require_response"]:
-            return True  # decisions always push
-        return _PRIORITY_RANK.get(n["priority"], 9) <= _PRIORITY_RANK.get(min_prio, 9)
+            return "agent"
+        min_prio = (self._filters or {}).get("min_priority")
+        if min_prio and not n["require_response"]:
+            kept = _PRIORITY_RANK.get(n["priority"], 9) <= _PRIORITY_RANK.get(min_prio, 9)
+            if not kept:
+                return "priority"
+        return None
 
     @staticmethod
     def _render_notice(
