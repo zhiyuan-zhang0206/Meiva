@@ -14,6 +14,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 
+import { AlertsBadge } from "@/components/notifications/alerts-badge";
 import { PluginNavIcons } from "@/components/plugins/plugin-nav";
 import { WindowSelect } from "@/components/agents/window-select";
 import { errMsg as formatErrMsg } from "@/lib/contracts/errors";
@@ -357,6 +358,7 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
         <SidebarNavButton href="/insights" onClick={() => router.push("/insights")} label={navT("insights")}>
           <Activity className="size-4" />
         </SidebarNavButton>
+        <AlertsBadge />
         <SidebarNavButton href="/control" onClick={() => router.push("/control")} label={navT("control")}>
           <Settings className="size-4" />
         </SidebarNavButton>

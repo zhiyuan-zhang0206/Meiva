@@ -58,6 +58,10 @@ and the matching GitHub Releases.
 
 ### Fixed
 
+- The unresolved-alerts badge moved from the conversation header into the sidebar's
+  icon row beside Settings: a standing cluster state does not belong in the slot the
+  reader needs for the conversation, and the sidebar is where the other standing
+  entries already live (user report 2026-10-21).
 - Loading a conversation draws the same ring every other loading state in the timeline
   draws, at the top of the pane, instead of its own spinner glyph with a
   "Loading conversation…" label beside it: one loading vocabulary, and the words now
