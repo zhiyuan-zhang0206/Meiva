@@ -1,4 +1,4 @@
-exports = ["home_lifecycle_locks.py", "launch_failures.py", "service_selection.py", "start_serving.py", "status_journal.py", "tests"]
+exports = ["home_lifecycle_locks.py", "launch_failures.py", "pause_markers.py", "service_selection.py", "start_serving.py", "status_journal.py", "tests"]
 
 [uses]
-"tests" = ["home_lifecycle_locks.py", "launch_failures.py", "service_selection.py", "start_serving.py", "status_journal.py"]
+"tests" = ["home_lifecycle_locks.py", "launch_failures.py", "pause_markers.py", "service_selection.py", "start_serving.py", "status_journal.py"]
