@@ -87,7 +87,10 @@ Each adapter then spawns the path it resolved, not the name: `codex` and `agy` c
 the resolution, and the Claude Code session passes the SDK a `cli_path` because the
 SDK resolves a bare name with `shutil.which` against its own process environment. A
 failure names the PATH and every directory that was searched instead of a bare
-`No such file or directory`, and a configured absolute path is never redirected.
+`No such file or directory`. A successful search returns an absolute path before
+the child changes to its workspace, including when PATH contains relative entries.
+The path keeps symlinks intact; it does not resolve their targets. An explicitly
+configured path containing a separator is validated and returned unchanged.
 
 ## The handoff document
 
