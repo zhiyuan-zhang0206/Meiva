@@ -497,7 +497,7 @@ def fake_identity_reply(
     cmd: list[str],
     *,
     identity_name: str | None = None,
-    search_list: tuple[str, ...] | None = None,
+    search_list: Sequence[str] | None = None,
     rival: bool = False,
 ) -> subprocess.CompletedProcess[bytes] | None:
     # meiva:note
@@ -524,7 +524,9 @@ def fake_identity_reply(
             )
         case "list-keychains":
             listed = (
-                (str(signing_identity.keychain_path()),) if search_list is None else search_list
+                (str(signing_identity.keychain_path()),)
+                if search_list is None
+                else tuple(search_list)
             )
             text = "".join(f'    "{path}"\n' for path in listed)
         case _:
@@ -560,7 +562,7 @@ class _FakeToolOutputs:
     designated_requirement: str | None
     dr_streams: tuple[bytes, bytes] | None
     identity_name: str | None = None
-    search_list: tuple[str, ...] | None = None
+    search_list: Sequence[str] | None = None
     rival: bool = False
 
     def respond(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -604,7 +606,7 @@ def fake_tools(
     dr_streams: tuple[bytes, bytes] | None = None,
     hang: tuple[str, ...] = (),
     identity_name: str | None = None,
-    search_list: tuple[str, ...] | None = None,
+    search_list: Sequence[str] | None = None,
     rival: bool = False,
 ) -> list[_Call]:
     from services.desktop.permissions_helper import lifecycle
