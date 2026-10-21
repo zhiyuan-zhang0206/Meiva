@@ -59,14 +59,15 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
     assert published_awaiting == [["decision needed"], []]
 
 
-def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
+def test_superseding_legacy_fyi_and_question_refreshes_inbox_and_inspector_projections(
     sdk_via_inprocess_gateway: None,
     load_activity_plugin: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
 ):
-    """Each cross-type replacement announces both consumers' new state."""
+    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    # meiva:link meiva/docs/ui.meiva.okf.md
     from gateway.agents import notices as notices_router
 
     published_awaiting: list[list[str]] = []
@@ -99,9 +100,16 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
 
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    meiva.ui.notify("FYI old", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
-    meiva.ui.notify("question", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
-    meiva.ui.notify("FYI new", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_notices "
+            "(agent_id, local_id, title, priority, require_response, blocking, expire_at) "
+            "VALUES (%s, 0, 'Legacy FYI', 'P2', false, false, now() + interval '1 day')",
+            (agent_id,),
+        )
+    db_conn.commit()
+    meiva.ui.notify("question", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+    meiva.ui.notify("next question", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
@@ -111,16 +119,9 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
         )
         notice_ids = {str(title): int(notice_id) for notice_id, title in cur.fetchall()}
 
-    # NoticeResolved evicts each old Inbox row; NoticePosted adds each new
-    # one. AgentUpdated shows the question appear, then disappear when its
-    # FYI replacement supersedes it.
-    assert resolved == [notice_ids["FYI old"], notice_ids["question"]]
-    assert posted == [
-        notice_ids["FYI old"],
-        notice_ids["question"],
-        notice_ids["FYI new"],
-    ]
-    assert published_awaiting == [["question"], []]
+    assert resolved == [notice_ids["Legacy FYI"], notice_ids["question"]]
+    assert posted == [notice_ids["question"], notice_ids["next question"]]
+    assert published_awaiting == [["question"], ["next question"]]
 
 
 def test_notice_return_int_and_edit_dismiss_take_no_id(
