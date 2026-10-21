@@ -73,9 +73,13 @@ notice is free again. The message is not shaped as a reply, because the user did
 not answer.
 
 The owner is woken only while running or idling. A terminated owner keeps the
-same row in its inbox for its next life, and is never woken or resurrected for
-it. Expiry is silent for the user (user ruling 2026-10-21): the question leaves
-the queue and no notification is posted in its place.
+same row in its inbox: an agent brought back within the stale-chat window (24
+hours by default, `MEIVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS`)
+reads it, and past that window the row is retired as history without being
+delivered. It is never woken or resurrected for it, and a queued system
+notification for a dead owner is not counted as a stalled delivery. Expiry is
+silent for the user (user ruling 2026-10-21): the question leaves the queue and
+no notification is posted in its place.
 
 ## Owners
 

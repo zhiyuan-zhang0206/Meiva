@@ -90,6 +90,31 @@ def idling_agent(
     return aid
 
 
+def terminated_agent(
+    db: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
+) -> int:
+    aid = idling_agent(
+        db,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+        local_machine=local_machine,
+    )
+    with db.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' "
+            "WHERE id = %s",
+            (aid,),
+        )
+    db.commit()
+    return aid
+
+
 def _make_running_agent(
     db: psycopg.Connection,
     *,
@@ -114,7 +139,12 @@ def _make_running_agent(
 
 
 def _insert_old_inbound(
-    db: psycopg.Connection, agent_id: int, *, age_s: float, database_gate: ProcessDbGate
+    db: psycopg.Connection,
+    agent_id: int,
+    *,
+    age_s: float,
+    database_gate: ProcessDbGate,
+    source: str = "user",
 ) -> int:
     """Insert a chat inbound backdated `age_s` (timestamp-only UPDATE — the
     inbound table has no triggers on created_at). Returns the inbound id."""
@@ -122,7 +152,7 @@ def _insert_old_inbound(
         db,
         agent_id,
         "stale",
-        source="user",
+        source=source,
         bus=EventBus.from_settings(),
         database=Database.from_settings(gate=database_gate),
     )
@@ -251,6 +281,97 @@ class TestSelectStalePending:
         )
         _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S - 1, database_gate=database_gate)
         assert select_stale_pending(pool, _THRESHOLD_S) == []
+
+    def test_terminated_owner_system_notification_is_not_a_stall(
+        self,
+        redis_url: str,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
+    ) -> None:
+        # meiva:note
+        # A notice-expiry row is queued for a dead owner to read on a later life
+        # and is deliberately never woken: pending is its resting state, not a
+        # stall.
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        _insert_old_inbound(
+            db_conn,
+            aid,
+            age_s=_THRESHOLD_S + 5,
+            database_gate=database_gate,
+            source="system:notice-expire",
+        )
+        assert select_stale_pending(pool, _THRESHOLD_S) == []
+
+    def test_terminated_owner_agent_chat_is_still_a_stall(
+        self,
+        redis_url: str,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
+    ) -> None:
+        # meiva:note
+        # A peer's chat means the delivery auto-resurrect was supposed to run and
+        # did not: that is the stall this scan exists for.
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        iid = _insert_old_inbound(
+            db_conn,
+            aid,
+            age_s=_THRESHOLD_S + 5,
+            database_gate=database_gate,
+            source="agent:123",
+        )
+        assert [row[0] for row in select_stale_pending(pool, _THRESHOLD_S)] == [iid]
+
+    def test_idling_owner_system_notification_is_still_a_stall(
+        self,
+        redis_url: str,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
+    ) -> None:
+        # meiva:note
+        # An idling owner is woken for a system notification, so one still pending
+        # means the wake or the claim loop is broken.
+        aid = idling_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        iid = _insert_old_inbound(
+            db_conn,
+            aid,
+            age_s=_THRESHOLD_S + 5,
+            database_gate=database_gate,
+            source="system:notice-expire",
+        )
+        assert [row[0] for row in select_stale_pending(pool, _THRESHOLD_S)] == [iid]
 
     def test_running_owner_queues_are_not_stalls(
         self,

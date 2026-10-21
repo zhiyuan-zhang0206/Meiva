@@ -2863,7 +2863,9 @@ groups:
           description: >-
             The delivery watchdog emits one delivery_stalled event per chat inbound that stayed pending past
             MEIVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS (30s) while its owner is idling or terminated (lost
-            pub/sub wake or a claim loop that is not running). Wake re-dispatch and the dead-letter sweeps
+            pub/sub wake or a claim loop that is not running). A system notification queued for a
+            terminated owner is excluded: it waits for a later life and is never woken, so it is not a
+            lost wake. Wake re-dispatch and the dead-letter sweeps
             keep running; this rule is only the notification. Deploy windows are silenced upstream by the
             fleet-update silence, so a resume's claim tail does not page. The rule is per agent (stream
             label agent_id); meiva-ops-delivery-stalled-backlog stays as the fleet-wide volume rule.
