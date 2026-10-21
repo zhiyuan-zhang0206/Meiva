@@ -1478,20 +1478,22 @@ describe("Scroll-to-bottom button + multi-item render order", () => {
 // its first snapshot — show a spinner instead of a blank pane, and NEVER over
 // content that is already on screen (a warm switch or background refetch).
 describe("cold-load spinner", () => {
-  it("loading + no items → shows the loading spinner", () => {
+  it("loading + no items → shows the shared ring, not its own glyph and label", () => {
     render(<TimelineView items={[]} loading />);
-    expect(screen.getByText(/Loading conversation/)).toBeTruthy();
+    const spinner = screen.getByTestId("cold-load-spinner");
+    expect(spinner.querySelector('[data-testid="cold-load-ring"]')).not.toBeNull();
+    expect(screen.getByText(/Loading conversation…/).className).toContain("sr-only");
   });
 
   it("loading + items present → no spinner (keep the content on screen)", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "hi" })]} loading />);
-    expect(screen.queryByText(/Loading conversation/)).toBeNull();
+    expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
     expect(screen.getByTestId("chat-markdown").textContent).toBe("hi");
   });
 
   it("empty + not loading → no spinner (steady-state empty thread)", () => {
     render(<TimelineView items={[]} />);
-    expect(screen.queryByText(/Loading conversation/)).toBeNull();
+    expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
   });
 });
 
