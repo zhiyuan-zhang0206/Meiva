@@ -57,6 +57,12 @@ and the matching GitHub Releases.
   visibility) remain, unused by any pixel comparison.
 
 ### Fixed
+
+- The live-update banner no longer takes a row of the conversation, and a drop shorter
+  than 800 ms is not announced at all. Switching agents re-opens the merged realtime
+  stream, so the amber banner appeared inside the timeline for a few frames and pushed
+  every card down and back. The banner now floats over the list, and the store only
+  publishes a reconnect that outlasts the delay (user report 2026-10-21).
 - The gap between timeline cards no longer depends on which kinds they are: the
   timestamp and Copy took a line under the card, and only the kinds that stamp a
   timestamp or offer Copy got that line, so two plain cards sat 12px apart and two

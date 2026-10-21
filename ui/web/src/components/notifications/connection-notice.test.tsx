@@ -1,7 +1,7 @@
 // meiva:note
-// ConnectionNotice render tests — the inline timeline banner. It verifies the three
-// connection states: 'open' renders nothing, 'reconnecting' shows the amber line and
-// 'closed' the destructive line that tells the reader to refresh.
+// ConnectionNotice render tests — the live-update overlay banner. It renders whatever
+// the store says; the "is this drop worth announcing" delay lives in
+// app-connection-banner, whose own test covers the timing.
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
 import { cleanup, render, screen } from "@testing-library/react";
@@ -43,6 +43,13 @@ describe("ConnectionNotice", () => {
     expect(banner.textContent).toContain("Live updates disconnected");
     expect(banner.textContent).toContain("refresh");
     expect(banner.className).toContain("destructive");
+  });
+
+  it("floats over the conversation instead of taking a row of it", () => {
+    storeConnState = "closed";
+    const { container } = render(<ConnectionNotice />);
+    const overlay = container.firstElementChild as HTMLElement;
+    expect(overlay.className).toContain("absolute");
   });
 
   it("has aria-live='polite' for screen reader notification", () => {

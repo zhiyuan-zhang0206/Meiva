@@ -789,6 +789,7 @@ export const TimelineView = memo(function TimelineView({
       <LoadOlderSpinner loadingOlder={loadingOlder} pullProgress={olderPullProgress} pullOffset={olderPullOffset} returning={olderPullReturning} />
       {hasMoreOlder && onLoadOlder ? <LoadOlderKeyboardButton loading={loadingOlder} onClick={loadOneOlderPage} /> : null}
       <ColdLoadSpinner show={loading && items.length === 0} />
+      <ConnectionNotice />
       <ScrollArea
         className="h-full text-[13px] leading-relaxed"
         viewportClassName="[overflow-anchor:none] overscroll-y-contain"
@@ -808,7 +809,6 @@ export const TimelineView = memo(function TimelineView({
               {turnAnnouncement}
             </span>
           ) : null}
-          <ConnectionNotice />
           {virtualEnabled && virtualRange.before > 0 ? (
             <div data-timeline-spacer="before" style={{ height: virtualRange.before }} aria-hidden="true" />
           ) : null}
