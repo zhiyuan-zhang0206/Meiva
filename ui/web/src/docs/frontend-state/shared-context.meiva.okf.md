@@ -47,7 +47,8 @@ bar keeps just the controls the mode uses: its name, the pressed magnifier and t
 column's collapse; the document's home, back and refresh read the body the mode
 hides, so they leave with it. The question stays mounted but hidden in Inspector mode, preserving reply drafts
 and leaving the full body height for Inspector. Returning restores the shared
-document reading position. Below the
+document reading position. In Inspector mode, the outer scrollbar appears only
+on overflow, keeping Inspector's scrollbar reachable. Below the
 desktop breakpoint the shared context opens as a full-screen reading view from
 the header's To user action — available whenever an agent is selected. Its top
 bar pairs Back to messages with the Inspector mode toggle on the right. The

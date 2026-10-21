@@ -70,7 +70,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
           <ScanSearch className="size-3.5" />
         </button>
       </header>}
-      <ScrollArea viewportRef={documentScroll} data-testid="shared-document" className={cn(MIN_H_0, FLEX_1)} viewportClassName={inspecting ? "[&>div]:h-full" : undefined}>
+      <ScrollArea type={inspecting ? "auto" : "always"} viewportRef={documentScroll} data-testid="shared-document" className={cn(MIN_H_0, FLEX_1)} viewportClassName={inspecting ? "[&>div]:h-full" : undefined}>
         <div className={inspecting ? cn("h-full", MIN_H_0, FLEX, FLEX_COL) : undefined}>
         {noticesFailed && <p hidden={inspecting} role="status" className="px-5 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}
         {notice && <section hidden={inspecting} className="shrink-0 border-b border-border/60 px-5 py-3" aria-label={t("notification")}>

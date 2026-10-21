@@ -323,15 +323,16 @@ def test_plugin_registers_ui_notice_members(load_activity_plugin: None):
         assert name in meiva.ui.__all_for_meiva__
 
 
-def test_notify_validates_title_priority_and_blocking(load_activity_plugin: None):
+@pytest.mark.parametrize("blocking", [False, True])
+def test_notify_validates_title_priority_and_blocking(load_activity_plugin: None, blocking: bool):
     notify = meiva.ui.notify
     assert callable(notify)
     with pytest.raises(ValueError, match="title"):
         notify("   ", idempotency_key=str(uuid4()))
     with pytest.raises(ValueError, match="priority"):
         notify("ok", priority="P9", idempotency_key=str(uuid4()))
-    with pytest.raises(ValueError, match="require_response"):
-        notify("ok", blocking=True, idempotency_key=str(uuid4()))
+    with pytest.raises(ValueError, match="require a user response"):
+        notify("ok", require_response=False, blocking=blocking, idempotency_key=str(uuid4()))
 
 
 def test_fleet_spawn_preserves_caller_creation_key(

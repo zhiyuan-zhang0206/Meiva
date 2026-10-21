@@ -57,7 +57,7 @@ def test_implicit_notice_reads_use_validated_boundary_defaults(
         cur.execute(
             """INSERT INTO agent_notices
                 (agent_id, local_id, title, priority, require_response, expire_at)
-            SELECT %s, i, 'open', 'P3', false, now() + interval '1 day'
+            SELECT %s, i, 'open', 'P3', true, now() + interval '1 day'
             FROM generate_series(1, 601) i""",
             (agent_id,),
         )
@@ -65,7 +65,7 @@ def test_implicit_notice_reads_use_validated_boundary_defaults(
             """INSERT INTO agent_notices
                 (agent_id, local_id, title, priority, require_response,
                  resolved_at, resolution, expire_at)
-            SELECT %s, i + 1000, 'resolved', 'P3', false, now(), 'read', now() + interval '1 day'
+            SELECT %s, i + 1000, 'resolved', 'P3', true, now(), 'dismissed', now() + interval '1 day'
             FROM generate_series(1, 101) i""",
             (agent_id,),
         )
@@ -83,5 +83,6 @@ def test_implicit_notice_reads_use_validated_boundary_defaults(
             assert implicit.json() == explicit.json()
         feed = client.get("/api/notices")
         assert feed.status_code == 200
-        assert len(feed.json()["open"]) == open_limit
+        assert feed.json()["open"] == []
+        assert len(feed.json()["awaiting"]) == open_limit
         assert len(feed.json()["resolved_page"]) == resolved_limit
