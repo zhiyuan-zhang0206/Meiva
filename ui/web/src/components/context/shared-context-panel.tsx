@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { X } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import dynamic from "next/dynamic";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { useTranslations } from "next-intl";
@@ -50,11 +50,17 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
   // the panel should read like a mode being on).
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   return (
-    <aside className={cn("relative w-full bg-background", FLEX, MIN_H_0, FLEX_COL, mobile ? "fixed inset-0 z-50" : "h-full")} aria-label={t("sharedContext")}>
-      {mobile && <header className={cn("h-11 shrink-0 items-center justify-between border-b px-4 text-sm", FLEX)}>
-        <span>{t("sharedContext")}</span><button aria-label={t("backToMessages")} onClick={onClose} className="rounded p-1 hover:bg-accent"><X className="size-4" /></button>
+    <aside className={cn("relative w-full bg-background", FLEX, MIN_H_0, FLEX_COL, mobile ? "fixed inset-0 z-50" : "h-full")} aria-label={t("title")}>
+      {mobile && <header className={cn("h-11 shrink-0 items-center border-b px-3 text-xs", FLEX)}>
+        <button onClick={onClose} className={cn("items-center gap-2 rounded px-1 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground", FLEX)}>
+          <ArrowLeft className="size-3.5" />{t("backToMessages")}
+        </button>
       </header>}
       <div ref={documentScroll} data-testid="shared-document" className={cn(MIN_H_0, FLEX_1, inspecting ? [FLEX_COL, FLEX] : "overflow-y-auto")}>
+        {noticesFailed && <p hidden={inspecting} role="status" className="px-5 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}
+        {notice && <section hidden={inspecting} className="shrink-0 border-b border-border/60 px-5 py-3" aria-label={t("notification")}>
+          <OpenNoticeDetail key={notice.id} agentId={agentId} notice={notice} onResolved={() => dropOpenNotices(queryClient, [notice.id])} />
+        </section>}
         <ToUserDocumentView
           key={agentId}
           agentId={agentId}
@@ -71,12 +77,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
             toggleInspector();
           }}
           onCollapse={onCollapse}
-        >
-          {noticesFailed && <p hidden={inspecting} role="status" className="px-5 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}
-          {notice && <section hidden={inspecting} className="border-b border-border/60 px-5 py-4" aria-label={t("notification")}>
-            <OpenNoticeDetail key={notice.id} agentId={agentId} notice={notice} onResolved={() => dropOpenNotices(queryClient, [notice.id])} />
-          </section>}
-        </ToUserDocumentView>
+        />
         {inspecting && (
           <div data-testid="shared-inspector" className={cn(MIN_H_0, FLEX_1, FLEX)}>
             <Inspector agentId={agentId} embedded />
