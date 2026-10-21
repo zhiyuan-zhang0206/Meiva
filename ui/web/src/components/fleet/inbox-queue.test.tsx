@@ -182,6 +182,15 @@ function listTitles(): string[] {
 }
 
 describe("InboxQueue — open stream", () => {
+  it("formats queue titles without putting active links inside selection buttons", async () => {
+    setFeed({ awaiting: [n({ id: 10, title: "**Decide** [scope](https://example.com/scope)" })] });
+    renderQueue([agent({ agent_id: 7 })]);
+    const row = screen.getByTestId("notice-title");
+    await waitFor(() => expect(row.querySelector("strong")?.textContent).toBe("Decide"));
+    expect(row.querySelector("a, div, p")).toBeNull();
+    expect(screen.getByRole("link", { name: "scope" }).getAttribute("href")).toBe("https://example.com/scope");
+  });
+
   it("shows an empty state when nothing is open and nothing resolved", () => {
     setFeed();
     renderQueue([agent({ agent_id: 1 })]);
@@ -383,6 +392,24 @@ describe("InboxQueue — notice lifecycle", () => {
 });
 
 describe("InboxQueue — resolved history (collapsed disclosure)", () => {
+  it("keeps Markdown formatting in resolved titles and original choices", async () => {
+    setFeed({ resolved: [{
+      ...ni({ id: 50, title: "Choose **platform**", require_response: true, resolution: "answered" }),
+      question: { type: "single_select", options: [{ id: "web", label: "**Web**", description: "Use `browser`." }], allow_other: false },
+      answer: { option_ids: ["web"], comment: "Keep **this** literal." },
+    }] });
+    renderQueue([agent({ agent_id: 1 })]);
+    fireEvent.click(screen.getByRole("button", { name: /Resolved/ }));
+    const row = screen.getByTestId("notice-title");
+    await waitFor(() => expect(row.querySelector("strong")?.textContent).toBe("platform"));
+    fireEvent.click(row);
+    expect(screen.getByRole("heading", { name: "Choose platform" }).querySelector("strong")?.textContent).toBe("platform");
+    const options = screen.getByRole("list", { name: "Original numbered options" });
+    expect(options.querySelector("strong")?.textContent).toBe("Web");
+    expect(options.querySelector("code")?.textContent).toBe("browser");
+    expect(screen.getByText("Keep **this** literal.")).toBeTruthy();
+  });
+
   it("keeps the resolved history behind a collapsed disclosure, off the main stream", () => {
     setFeed({ resolved: [ni({ id: 50, title: "old notice", resolution: "answered", reply: "my recorded answer" })] });
     renderQueue([agent({ agent_id: 1 })]);

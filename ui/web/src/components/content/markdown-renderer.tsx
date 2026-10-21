@@ -74,10 +74,13 @@ const rehypeResolveUrls: Plugin<[UrlResolver]> = (resolve) => (tree) => {
   walk(tree);
 };
 
-const baseRehypePlugins = (resolve: UrlTransform): PluggableList => [
+// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+const inlineElements = ["a", "br", "code", "del", "em", "strong", "span", "sub", "sup", "p"];
+
+const baseRehypePlugins = (resolve: UrlTransform, inline: boolean): PluggableList => [
   rehypeRaw,
   [rehypeResolveUrls, resolve],
-  [rehypeSanitize, sanitizeSchema],
+  [rehypeSanitize, inline ? { ...sanitizeSchema, tagNames: inlineElements } : sanitizeSchema],
   rehypeSlug,
 ];
 
@@ -121,16 +124,22 @@ const components: Components = {
   },
 };
 
+const inlineComponents: Components = {
+  p: ({ children }) => <>{children}</>,
+  code: ({ children }) => <code>{children}</code>,
+};
+
 export interface ChatMarkdownProps {
   content: string;
   components?: Components;
   resolveUrl?: UrlTransform;
+  inline?: boolean;
 }
 
 // meiva:note
 // Headings gain stable, deduplicated slug ids and same-document # links keep targeting them; GFM footnote reference/definition anchor pairs still match after sanitizing; the To user panel treats page-anchor links as in-panel navigation rather than external opens.
 // meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
-export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({ content, components: overrides, resolveUrl }: ChatMarkdownProps) {
+export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({ content, components: overrides, resolveUrl, inline = false }: ChatMarkdownProps) {
   const [math, setMath] = useState<MarkdownMath | null>(null);
   const needsMath = content.includes("$");
   useEffect(() => {
@@ -147,16 +156,17 @@ export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({ content
     };
   }, [needsMath, math]);
 
+  const Wrapper = inline ? "span" : "div";
   return (
-    <div className={cn("chat-md font-sans", MIN_W_0)}>
+    <Wrapper className={cn("chat-md font-sans", MIN_W_0)}>
       <ReactMarkdown
         remarkPlugins={[...baseRemarkPlugins, ...(math?.remark ?? [])]}
-        rehypePlugins={[...baseRehypePlugins(resolveUrl ?? urlTransform), ...(math?.rehype ?? [])]}
+        rehypePlugins={[...baseRehypePlugins(resolveUrl ?? urlTransform, inline), ...(math?.rehype ?? [])]}
         urlTransform={resolveUrl ?? urlTransform}
-        components={overrides ? { ...components, ...overrides } : components}
+        components={inline || overrides ? { ...components, ...(inline ? inlineComponents : {}), ...overrides } : components}
       >
         {content}
       </ReactMarkdown>
-    </div>
+    </Wrapper>
   );
 });

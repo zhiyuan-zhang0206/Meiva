@@ -18,6 +18,32 @@ beforeAll(async () => {
 afterEach(cleanup);
 
 describe("ChatMarkdown", () => {
+  it("preserves KaTeX radicals and accessible math in inline labels", async () => {
+    render(<h4><ChatMarkdown inline content={"Choose $\\sqrt{x}$"} /></h4>);
+    const heading = screen.getByRole("heading");
+    await waitFor(() => expect(heading.querySelector(".katex svg path")).not.toBeNull());
+    expect(heading.querySelector("math msqrt")).not.toBeNull();
+    expect(heading.querySelector("div, p, pre, button")).toBeNull();
+  });
+
+  it("still sanitizes authored HTML and links in inline labels", () => {
+    render(<h4><ChatMarkdown inline content={'[unsafe](javascript:alert(1))<svg><path d="M0 0" /></svg><script>unsafe script</script> **Safe**'} /></h4>);
+    const heading = screen.getByRole("heading");
+    expect(heading.querySelector("svg, script, a[href]")).toBeNull();
+    expect(heading.textContent).not.toContain("unsafe script");
+    expect(heading.querySelector("strong")?.textContent).toBe("Safe");
+  });
+
+  it("renders inline formatting inside a heading without block elements or copy controls", () => {
+    render(<h4><ChatMarkdown inline content={"**Decision** [details](https://example.com) `option`\n\nNext paragraph\n\n```\ncode\n```"} /></h4>);
+    const heading = screen.getByRole("heading");
+    expect(heading.querySelector("strong")?.textContent).toBe("Decision");
+    expect(heading.querySelector("code")?.textContent).toBe("option");
+    expect(screen.getByRole("link", { name: "details" }).getAttribute("href")).toBe("https://example.com");
+    expect(heading.querySelector("div, p, pre, button")).toBeNull();
+    expect(heading.textContent.replace(/\s+/g, " ")).toContain("option Next paragraph");
+  });
+
   it("renders plain text", () => {
     render(<ChatMarkdown content="hello world" />);
     expect(screen.getByText("hello world")).toBeTruthy();
