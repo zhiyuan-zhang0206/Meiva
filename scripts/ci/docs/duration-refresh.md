@@ -47,8 +47,21 @@ evicts caches.
   (evicted mid-run) fails the shard instead of degrading silently.
 - With no cache (a fresh repository, an unreadable listing) the run goes on and
   prints a `test durations` warning annotation: shards split by test count, and the
-  test selector, whose 80% guard compares two sums of timings and has nothing to
+  test selector, whose budget guards compare two sums of timings and have nothing to
   compare, returns FULL (`no-durations`).
+
+## When the selector declines a subset
+
+Two guards turn a would-be subset into the eight-shard fan-out. The first is fixed
+in time: more than **nine tenths** of the whole suite is not a subset in any
+checkout. The second depends on the suite being real: once the full estimate is
+larger than what the subset job can run — the job's 20 minutes on the four workers
+it uses — more than **half** of it is over budget too. The second guard is why a
+12,125-test selection (48% of 25,291) no longer reaches a job that reaches 89% of
+itself in 19 minutes (`#5500`); a fixture of a few seconds is below that line, so
+its share says nothing about time. `classify change` prints one `test-selection:`
+line with the decision, the reason, the count and a hash of the list, because the
+values otherwise live only in step outputs.
 - Development machines have no file unless `refresh_test_durations.py` (the
   single-runner `refresh` command) built one; pytest-split then warns and splits
   evenly.

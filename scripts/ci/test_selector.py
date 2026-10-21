@@ -174,6 +174,15 @@ class Checkout:
     global_files: frozenset[str]  # root-conftest plugin modules and their package inits
 
 
+# meiva:note
+# A subset that would spend more than half of a suite bigger than the subset job's own
+# budget (20 minutes on four workers) is not a subset: on 2026-10-21 a 12,125-test
+# selection reached 89% of that job in 19 minutes. Nine tenths stays as the scale-free rule.
+# meiva:link scripts/ci/docs/duration-refresh.md
+_SUBSET_BUDGET_SHARE = 0.5
+_SUBSET_JOB_SECONDS = 20 * 60 * 4
+
+
 def selection_mode() -> str:
     """The mode CI is running: the ci.yml TEST_SELECTION_MODE value.
 
@@ -446,6 +455,12 @@ def _owner_tests(
     return selected
 
 
+def _too_close_to_full(estimate: float, full_estimate: float) -> bool:
+    if estimate > 0.8 * full_estimate:
+        return True
+    return full_estimate >= _SUBSET_JOB_SECONDS and estimate > _SUBSET_BUDGET_SHARE * full_estimate
+
+
 def select_tests(
     changed_files: list[str],
     *,
@@ -491,7 +506,7 @@ def select_tests(
             map_source_count=source_count,
             diagnostics=diagnostics,
         )
-    if estimate > 0.8 * full_estimate:
+    if _too_close_to_full(estimate, full_estimate):
         owned_estimate = estimate_seconds(
             tuple(sorted(owned & checkout.collectable)),
             durations,

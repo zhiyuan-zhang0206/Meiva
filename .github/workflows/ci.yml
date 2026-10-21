@@ -211,11 +211,23 @@ jobs:
             --event "$EVENT" \
             --json | tee "$SELECTION_TMP/selector-output.json"
           SELECTION_JSON="$SELECTION_TMP/selector-output.json" python3 - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
 
           selection = json.loads(Path(os.environ["SELECTION_JSON"]).read_text())
+          # meiva:note
+          # One visible line per run: a subset job that times out cannot be diagnosed
+          # without knowing what was selected and how large it was, and these values only
+          # travelled in step outputs (2026-10-21, #5500).
+          # meiva:link scripts/ci/docs/duration-refresh.md
+          digest = hashlib.sha256(" ".join(selection["tests"]).encode()).hexdigest()[:12]
+          print(
+              f"test-selection: decision={selection['decision']} reason={selection['reason']} "
+              f"count={selection['count']} est={selection['est_seconds']:.1f} "
+              f"full={selection['full_est_seconds']:.1f} tests_sha256={digest}"
+          )
           lines = [
               f"decision={selection['decision']}",
               f"count={selection['count']}",
