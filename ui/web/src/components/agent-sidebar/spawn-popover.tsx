@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { SpawnForm } from "@/components/agents/spawn-form";
+import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { cn } from "@/lib/format/utils";
 
 import { SidebarIconButton } from "./icon-button";
@@ -26,6 +27,7 @@ interface Props {
 
 export function SpawnPopover({ onSpawn, variant }: Props) {
   const t = useTranslations("spawn");
+  const { isNarrow } = useBreakpoint();
   const [open, setOpen] = useState(false);
 
   return (
@@ -52,7 +54,11 @@ export function SpawnPopover({ onSpawn, variant }: Props) {
           align="end"
           className={cn("z-50 w-[660px] max-w-[94vw] text-popover-foreground outline-none")}
         >
-          <SpawnForm onSpawn={onSpawn} onDone={() => setOpen(false)} />
+          <SpawnForm
+            onSpawn={onSpawn}
+            onDone={() => setOpen(false)}
+            layout={isNarrow ? "stack" : "table"}
+          />
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

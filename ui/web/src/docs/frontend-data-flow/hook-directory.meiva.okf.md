@@ -32,6 +32,7 @@ The returned `inbound_id` is the durable receipt; exhaustion leaves the draft in
 the editable composer with a receipt warning. Sending the unchanged draft reuses
 its key; changed content or attachments receive a new key.
 | `useClusterHealth` | cluster paused polling + SSE reconnect coordination |
+| `useHarnessAvailability*` (`lib/harness/use-harness-availability.ts`) | one query per agent-runner machine over `GET /api/cluster/machines/{name}/harnesses` — the probe the gateway dispatches to that machine's ops server; **one reading per page load**: the sidebar warms it on mount and `staleTime: Infinity` keeps the spawn picker's own mount from re-probing, because a probe RPCs the machine and stats binaries and login stores (user 2026-10-21); a reload asks again |
 | `useNotices` | the unified Inbox feed — one request carries the open queue (FYI + awaiting) and a keyset page of resolved history (R4 layer 2 single contract); notice_* events invalidate-refetch |
 | ~~`usePrefetchTimelines`~~ | removed (Aw-Snap fix) — the fleet-wide full-timeline prefetch retained one ~128KB system prompt + history per agent for gcTime=30min, the dominant renderer-heap source; timelines now fetch on demand when an agent is opened |
 | `useThrottledStreaming` | streaming increment throttled batching |
