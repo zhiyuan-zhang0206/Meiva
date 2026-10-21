@@ -3269,7 +3269,7 @@ describe("block-level copy actions (MessageCard overlay)", () => {
   });
 
   // meiva:note
-  // The reveal itself is CSS (`group-hover`/`group-focus-within`) and jsdom has no paint engine to evaluate it, so the tests pin the structure the browser turns into the behavior: hidden means no paint AND no hit-testing, focus inside the card reveals it for keyboard users, and a coarse pointer — which cannot hover — keeps it visible in the flow.
+  // The reveal itself is CSS (`group-hover`/`group-focus-within`) and jsdom has no paint engine to evaluate it, so the tests pin the structure the browser turns into the behavior: hidden means no paint AND no hit-testing, focus inside the card reveals it for keyboard users, and a touch brings it up for a few seconds because a phone has no hover to gate on.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   it("footer is hidden and click-through until the card is hovered or focused", () => {
     render(
@@ -3283,7 +3283,47 @@ describe("block-level copy actions (MessageCard overlay)", () => {
     expect(band?.className).toContain("group-hover/msgcard:pointer-events-auto");
     expect(band?.className).toContain("group-focus-within/msgcard:opacity-100");
     expect(band?.className).toContain("group-focus-within/msgcard:pointer-events-auto");
-    expect(band?.className).toContain("pointer-coarse:opacity-100");
+    // meiva:note
+    // Nothing keeps it painted on a coarse pointer: a phone reveals it by touch.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+    expect(band?.className).not.toContain("pointer-coarse:opacity-100");
+  });
+
+  it("reveals the footer when the block is touched, and only then", () => {
+    // meiva:note
+    // A phone has no hover, so touching the block brings the time and Copy up for
+    // a few seconds; leaving the band painted put chrome under every message for
+    // good (user 2026-10-22).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+    render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />);
+    const band = screen.getByLabelText("Copy message").parentElement;
+    const row = screen.getByLabelText("Copy message").closest(".timeline-item");
+    expect(row).not.toBeNull();
+    expect(band?.className).toContain("opacity-0");
+    fireEvent.pointerDown(row as HTMLElement, { pointerType: "touch" });
+    expect(band?.className).toContain("opacity-100");
+    expect(band?.className).toContain("pointer-events-auto");
+    fireEvent.pointerDown(row as HTMLElement, { pointerType: "mouse" });
+    expect(band?.className).toContain("opacity-100");
+  });
+
+  it("keeps the band hidden when a mouse presses the block", () => {
+    render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />);
+    const band = screen.getByLabelText("Copy message").parentElement;
+    const row = screen.getByLabelText("Copy message").closest(".timeline-item");
+    expect(row).not.toBeNull();
+    fireEvent.pointerDown(row as HTMLElement, { pointerType: "mouse" });
+    expect(band?.className).toContain("opacity-0");
+  });
+
+  it("sizes the Copy glyph to the band it shares with the stamp", () => {
+    // meiva:note
+    // The stamp is 9px and the band 12px; at the body's size-3 the glyph read as
+    // visibly bigger than the time beside it (user 2026-10-22).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+    render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />);
+    const icon = screen.getByLabelText("Copy message").querySelector("svg");
+    expect(icon?.getAttribute("class")).toContain("size-2.5");
   });
 });
 

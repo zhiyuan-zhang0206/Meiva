@@ -354,15 +354,15 @@ export const UNSTUCK_HEADER_CLS =
 // where content-visibility paint containment would clip it. A reserved line
 // existed once and made the gap depend on which kinds stamped a time; this band
 // costs no layout height at rest. Invisible and click-through until the pointer
-// hovers the block or focus enters it; a coarse pointer, with no hover to gate
-// on, keeps it visible.
+// hovers the block, focus enters it, or a touch reveals it for a few seconds
+// (`TimelineRow` adds that class: a coarse pointer has no hover to gate on, and
+// leaving it painted put a time and Copy under every message for good).
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 export const CARD_FOOTER_CLS = cn(
   "absolute right-2 bottom-0 h-3 items-center justify-end gap-1 sm:right-3",
   "pointer-events-none opacity-0 transition-opacity motion-reduce:transition-none",
   "group-hover/msgcard:pointer-events-auto group-hover/msgcard:opacity-100",
   "group-focus-within/msgcard:pointer-events-auto group-focus-within/msgcard:opacity-100",
-  "pointer-coarse:pointer-events-auto pointer-coarse:opacity-100",
   FLEX,
 );
 
