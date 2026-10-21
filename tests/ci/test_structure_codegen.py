@@ -54,10 +54,15 @@ PREPUSH = {
 }
 
 
+# meiva:note
+# `check-merge-conflict` is here twice in the config: the commit stage runs the upstream hook,
+# which returns 0 unless the repository is mid-merge, so the push stage re-declares it with
+# `--assume-in-merge`. This map is keyed by id, so the entry it holds is the push-stage one.
 PREPUSH_LOCAL_ONLY = {
     "lint-prepush-branch-diff",
     "lint-prepush-artifact-freshness",
     "lint-tests-location-full",
+    "check-merge-conflict",
 }
 LOCAL_ONLY = {"check-git-hooks-install"}
 
