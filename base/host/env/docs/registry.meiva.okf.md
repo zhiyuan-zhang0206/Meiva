@@ -23,7 +23,7 @@ keys; those declarations load at the delivery boundaries that consume them.
 
 ## Consumers
 
-- **Forwarding** (`child_env(role)`) — the parent-to-child env view of a daemon or session child. Native launchers receive an environment dict; secrets never ride argv.
+- **Forwarding** (`child_env(role)`) — the parent-to-child env view of a daemon or session child. Native launchers receive an environment dict; secrets never ride argv. `session_child_env_keys()` names the same view as a key set for a consumer that must *close* an inherited environment rather than build one — the Claude adapter blanks every other key because its SDK merges the parent environment under the mapping it is given.
 - **Keep/drop** (`env_authority_drop_set(role)` / `env_keep_set(role)`) — dotenv_boot's own-environ surgery, as set-membership queries.
 
 The consumption matrix decides which process reads each key. Capability/scope

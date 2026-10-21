@@ -77,11 +77,17 @@ package through the dependency group, so pyright still resolves the import.
   result, where the model treats it as injected content.
 - **Cancellation is asserted.** `interrupt()` reports whether the tool's child
   processes were reaped, and `settled=None` when the CLI pid is unobservable.
-- **No credential handling.** The adapter blanks credential variables in the
-  child environment and never reads, stores or forwards a secret. Everything else
-  the bridge passes rides along — the registration handle and the runner's home —
-  because the SDK merges this dict over the host environment and a tool the CLI
-  spawns needs the handle to attach as the agent it belongs to.
+- **The child environment is an allowlist.** `auth.build_env` names every key the
+  session may carry (`registry.session_child_env_keys`) and blanks every other key
+  the host process holds, because the SDK spawns the CLI with
+  `{**os.environ, **options.env}` — a key left out of the mapping is filled back in
+  from the parent, so omission is not removal. The inherited model credentials are
+  therefore empty in the session: before this rule a claude session's Bash tool
+  could read the host's `OPENAI_API_KEY` (#5512). The two Claude credential
+  variables stay blanked rather than dropped, and API-key mode restores exactly the
+  one the caller names; the adapter never reads, stores or forwards a secret. The
+  registration handle and the runner's home ride because they are on the allowlist —
+  a tool the CLI spawns needs the handle to attach as the agent it belongs to.
 - **No system-prompt override.** `system_prompt` is not set; the CLI's own preset
   stands. The handoff is a message, not a prompt edit.
 - **A killed host leaves the CLI behind.** If the host is SIGKILLed, the bundled
