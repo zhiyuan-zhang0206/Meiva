@@ -14,10 +14,10 @@ verdict keeps its pidfile meaning, and a false or absent verdict leaves that row
 disabled with its reason.
 
 Creation is one table, read left to right: **Machine, Harness, Model, Effort**.
-The machine comes first because harness availability belongs to a machine.
+The machine comes first: harness availability belongs to a machine.
 Every agent-runner is a row; down hosts stay disabled with the reason in a title.
 Each column is sized by its content; the panel follows it.
-Each column narrows the next and marks exactly one selected row on entry.
+Each column narrows the next, selecting one row on entry.
 The harness column speaks for the selected
 machine, and a stored or picked harness that machine cannot start falls through
 to the first one it can (the pick itself is left alone, so switching back
@@ -31,8 +31,7 @@ table. The effort column shows
 the selected model's `reasoning_effort_options` ladder; a model that publishes
 none leaves the column empty rather than offering a synthetic default, and the
 model's concrete `reasoning_effort_default` is the row marked when nothing is
-stored. The header names the quantity, not the mechanism.
-External harnesses use "Meiva history model" and "Summary effort" in
+stored. External harnesses use "Meiva history model" and "Summary effort" in
 both layouts, including closed sections and expanded lists. Help text explains
 their history budget and compaction purpose; CLI model settings are independent.
 The footer states the action only — one `Spawn` button, disabled with
