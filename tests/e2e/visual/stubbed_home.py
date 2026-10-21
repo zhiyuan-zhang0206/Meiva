@@ -42,6 +42,7 @@ _AGENT = {
     "last_inbound_at": "2026-08-07T00:00:00Z",
     "label": "layout-test",
     "machine": "test-host",
+    "harness": "meiva",
     "supports_vision": True,
     "liveness_state": "unknown",
     "observation": {
