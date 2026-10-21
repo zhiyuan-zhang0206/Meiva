@@ -58,6 +58,10 @@ and the matching GitHub Releases.
 
 ### Fixed
 
+- Loading a conversation draws the same ring every other loading state in the timeline
+  draws, at the top of the pane, instead of its own spinner glyph with a
+  "Loading conversation…" label beside it: one loading vocabulary, and the words now
+  live only in the screen-reader label (user report 2026-10-21).
 - The live-update banner no longer takes a row of the conversation, and a drop shorter
   than 800 ms is not announced at all. Switching agents re-opens the merged realtime
   stream, so the amber banner appeared inside the timeline for a few frames and pushed
