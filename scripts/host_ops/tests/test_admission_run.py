@@ -154,6 +154,32 @@ class TestStart:
         assert captured.err == ""
         assert recorder.calls == [["python", "eval.py", "--jobs", "8"]]
 
+    def test_an_overcommitted_single_worker_still_says_so(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, recorder = _run(
+            ["--peak-mb", "8800", "--", "python", "eval.py", "--jobs", "1"], tmp_path=tmp_path
+        )
+
+        captured = capsys.readouterr()
+        assert code == 0
+        assert "admission: jobs 1 (overcommitted, still starting one" in captured.out
+        assert recorder.calls == [["python", "eval.py", "--jobs", "1"]]
+        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+        assert (event["kind"], event["requested"], event["jobs"]) == ("overcommitted", 1, 1)
+
+    def test_a_single_worker_that_fits_prints_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, recorder = _run(
+            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "1"], tmp_path=tmp_path
+        )
+
+        captured = capsys.readouterr()
+        assert code == 0
+        assert (captured.out, captured.err) == ("", "")
+        assert recorder.calls == [["python", "eval.py", "--jobs", "1"]]
+
     def test_a_missing_declaration_fails_fast(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
