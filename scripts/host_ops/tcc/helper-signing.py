@@ -27,6 +27,10 @@ DESCRIPTION = (
 # rebuild it signed with the fixed identity, prove the designated requirement now
 # names the certificate, and restore the backup if any step fails.
 #
+# A loaded helper is never replaced in place, so the operator stops this home
+# first (`meiva stop --yes`, which also takes meiva-root and its agents down); the
+# build refuses while the job is still loaded, by design.
+#
 # A rehearsal names its own home by exporting `MEIVA_HOME` before the command --
 # the home is read when the app modules import, so this script never rewrites it.
 #
@@ -148,7 +152,7 @@ def import_identity(path: str, *, password_file: str | None) -> int:
         raise SystemExit(f"no keychain password at {source}")
     password = source.read_text().strip()
     if password_file:
-        signing_identity._write_secret(signing_identity.password_path(), password)
+        signing_identity.write_secret(signing_identity.password_path(), password)
     keychain = signing_identity.keychain_path()
     if not keychain.exists():
         signing_identity.directory().mkdir(parents=True, exist_ok=True)
@@ -187,7 +191,7 @@ def import_identity(path: str, *, password_file: str | None) -> int:
     return status()
 
 
-def switch(*, retire: bool, start: bool) -> int:
+def switch(*, start: bool) -> int:
     from base.paths import permissions_helper_app_dir
     from services.desktop.permissions_helper import lifecycle, signing_identity
 
@@ -208,8 +212,6 @@ def switch(*, retire: bool, start: bool) -> int:
     # meiva:note
     # Every failure of the swap restores the backup: this runs detached on a host
     # whose runtime it just stopped, so nobody is watching the terminal.
-    if retire:
-        _retire_helper()
     try:
         signing_identity.ensure(lifecycle.run_tool, create=True)
         built, rebuilt = lifecycle.build_and_sign()
@@ -258,24 +260,6 @@ def _start_services() -> None:
     print(f"`meiva start --all-services` exited {result.returncode}")
 
 
-# meiva:note
-# Stop this home's helper job, which is also the parent of its meiva-root.
-#
-# A loaded helper is never replaced in place, so this is the step that turns the
-# swap into a restart of everything this home supervises on the host: agents die
-# with it and `meiva start` brings them back.
-def _retire_helper() -> None:
-    from services.desktop.permissions_helper.launchd_job import helper_job_loaded
-
-    if not helper_job_loaded():
-        print("the permissions helper job is not loaded; nothing to retire")
-        return
-    from cli.commands.lifecycle._stop_extras import stop_permissions_helper
-
-    print("retiring the running permissions helper (and the meiva-root it owns) ...")
-    stop_permissions_helper(timeout_s=60.0)
-
-
 def _restore(backup: Path, home: Path, app: Path, before_dr: str) -> None:
     saved = backup / app.name
     if not saved.exists():
@@ -303,11 +287,6 @@ def main(argv: list[str]) -> int:
         help="keychain password that opens an archive being imported (default: this home's)",
     )
     parser.add_argument(
-        "--retire",
-        action="store_true",
-        help="stop the running helper first; this also stops every agent this home supervises",
-    )
-    parser.add_argument(
         "--start", action="store_true", help="run `meiva start --all-services` after the switch"
     )
     parser.add_argument(
@@ -323,7 +302,7 @@ def main(argv: list[str]) -> int:
     return {
         "status": status,
         "provision": provision,
-        "switch": lambda: switch(retire=args.retire, start=args.start),
+        "switch": lambda: switch(start=args.start),
         "export": lambda: export(args.path or ""),
         "import": lambda: import_identity((args.path or ""), password_file=args.password_file),
     }[args.command]()
