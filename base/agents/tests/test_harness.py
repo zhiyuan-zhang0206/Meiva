@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -68,8 +69,19 @@ def _antigravity_token(home: Path, *, relative: str, expiry: timedelta) -> None:
     path.write_text(json.dumps({"token": token}), encoding="utf-8")
 
 
-def _probe(home: Path) -> dict[Harness, HarnessProbe]:
-    rows = probe_local_harnesses(home, str(home / "empty-bin"), _BIN_DIRS)
+# meiva:note
+# The stub CLIs these tests install print nothing and exit 1, which is "the CLI could not
+# tell us" — the row then falls back to the stored credential, which is what the older
+# assertions describe. A test about what the CLI itself answers passes its own runner.
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+def _silent_cli(
+    argv: list[str], *, capture_output: bool, text: bool, timeout: float, env: dict[str, str]
+) -> Any:
+    return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+
+
+def _probe(home: Path, *, cli_runner: Any = _silent_cli) -> dict[Harness, HarnessProbe]:
+    rows = probe_local_harnesses(home, str(home / "empty-bin"), _BIN_DIRS, cli_runner=cli_runner)
     return {row.harness: row for row in rows}
 
 
@@ -192,6 +204,107 @@ def test_an_unreadable_sign_in_state_is_unknown_not_a_guess(tmp_path: Path) -> N
     assert row.status == "unknown"
     assert row.binary == str(tmp_path / ".local" / "bin" / "agy")
     assert "unknown" in row.reason
+
+
+def _answering_cli(*, stdout: str = "", stderr: str = "", returncode: int = 0) -> Any:
+    def runner(
+        argv: list[str], *, capture_output: bool, text: bool, timeout: float, env: dict[str, str]
+    ) -> Any:
+        return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr=stderr)
+
+    return runner
+
+
+def _silent_after_timeout() -> Any:
+    def runner(
+        argv: list[str], *, capture_output: bool, text: bool, timeout: float, env: dict[str, str]
+    ) -> Any:
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=timeout)
+
+    return runner
+
+
+# meiva:note
+# The machine's answer comes from its CLI, not from a file an installer may not have
+# written: macbook-air runs Claude Code with no ~/.claude/.credentials.json, and asking the
+# file would report a working machine as unknown — which now blocks the spawn (#5498).
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+def test_the_cli_answer_is_available_without_any_credentials_file(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "claude")
+
+    row = _probe(
+        tmp_path,
+        cli_runner=_answering_cli(stdout=json.dumps({"loggedIn": True, "authMethod": "claude.ai"})),
+    )[Harness.CLAUDE_CODE]
+
+    assert row.status == "available"
+    assert "claude auth status" in row.reason
+
+
+def test_the_cli_answer_outranks_a_stored_token(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "claude")
+    _claude_credentials(tmp_path, access=timedelta(hours=1), refresh=timedelta(days=1))
+
+    row = _probe(tmp_path, cli_runner=_answering_cli(stdout=json.dumps({"loggedIn": False})))[
+        Harness.CLAUDE_CODE
+    ]
+
+    assert row.status == "unavailable"
+    assert "no login" in row.reason
+
+
+def test_a_codex_login_answer_needs_no_auth_file(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "codex")
+
+    row = _probe(tmp_path, cli_runner=_answering_cli(stderr="Logged in using ChatGPT"))[
+        Harness.CODEX
+    ]
+
+    assert row.status == "available"
+    assert "codex login status" in row.reason
+
+
+def test_an_antigravity_catalogue_means_a_login(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "agy")
+
+    row = _probe(
+        tmp_path, cli_runner=_answering_cli(stdout="gemini-4-argon-high\tGemini 4 Argon (High)\n")
+    )[Harness.ANTIGRAVITY]
+
+    assert row.status == "available"
+    assert "agy models" in row.reason
+
+
+def test_an_antigravity_sign_in_request_is_unavailable(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "agy")
+
+    row = _probe(
+        tmp_path,
+        cli_runner=_answering_cli(
+            stderr="Error: Please sign in to view available models.", returncode=1
+        ),
+    )[Harness.ANTIGRAVITY]
+
+    assert row.status == "unavailable"
+    assert "sign-in" in row.reason
+
+
+def test_a_cli_that_cannot_answer_falls_back_to_the_stored_credential(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "claude")
+    _claude_credentials(tmp_path, access=timedelta(hours=1), refresh=timedelta(days=1))
+
+    row = _probe(tmp_path, cli_runner=_silent_after_timeout())[Harness.CLAUDE_CODE]
+
+    assert row.status == "available"
+    assert ".claude/.credentials.json" in row.reason
+
+
+def test_a_cli_that_cannot_answer_with_no_credential_stays_unknown(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "agy")
+
+    row = _probe(tmp_path, cli_runner=_silent_after_timeout())[Harness.ANTIGRAVITY]
+
+    assert row.status == "unknown"
 
 
 def test_coerce_harness_accepts_the_enum_and_refuses_unknown_names() -> None:
