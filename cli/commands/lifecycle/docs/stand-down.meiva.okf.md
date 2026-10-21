@@ -42,6 +42,24 @@ A stop nobody comes back for is caught by the existing `machine_stopped_too_long
 alert (20 minutes, one liveness pass every 30s) — the stand-down needs no timer
 of its own (task #5493).
 
+## Who reads the window
+
+The window binds the **boot job only**. The resident root keeper never consults
+it: its own marker already tells it an operator stopped this home, so a passed
+`until` re-seeds nothing. On a host that is not restarted, `--maintenance-for`
+therefore changes what the cluster reports about the machine, not whether the
+stack comes back — the deadline releases the next login, and nothing else.
+
+Both halves are the contract: a restart or a fresh login after `T` brings the
+stack back; a host left logged in stays down until `meiva start`, and the
+stopped-too-long alert is what reports the forgotten window.
+
+Measured on macbook-air (2026-10-21, task #5493): `meiva stop --maintenance-for
+10m` at 21:22:00, the root was never re-seeded across the whole window while the
+keeper stayed alive and the boot job stayed loaded, and the host was still down
+3m42s past the deadline — until an operator ran `meiva start --all-services`,
+which brought nine units up in 12 seconds.
+
 ## Where it is written
 
 `announce_stopping` in `_temporary_stop.py` writes the record beside its
