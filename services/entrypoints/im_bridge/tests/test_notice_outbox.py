@@ -54,18 +54,30 @@ class NoticeAdapter(RecordingAdapter):
         await super().send_prepared_outbound(chat_id, prepared)
 
 
-def make_core(pool: ConnectionPool) -> tuple[IMBridgeCore, NoticeAdapter]:
-    core = IMBridgeCore(im_bridge_config(), FakeGateway(), db_pool=pool, tasks=asyncio.TaskGroup())  # type: ignore[arg-type]
+def make_core(pool: ConnectionPool, **config: Any) -> tuple[IMBridgeCore, NoticeAdapter]:
+    core = IMBridgeCore(
+        im_bridge_config(**config),
+        FakeGateway(),  # type: ignore[arg-type]
+        db_pool=pool,
+        tasks=asyncio.TaskGroup(),
+    )
     adapter = NoticeAdapter()
     core.register(adapter)
     return core, adapter
 
 
-def insert_notice(conn: Connection, agent: int, local: int, title: str = "notice") -> int:
+def insert_notice(
+    conn: Connection,
+    agent: int,
+    local: int,
+    title: str = "notice",
+    *,
+    require_response: bool = True,
+) -> int:
     row = conn.execute(
         "INSERT INTO agent_notices (agent_id,local_id,title,content,priority,require_response,blocking,expire_at) "
-        "VALUES (%s,%s,%s,'body','P2',false,false,now()+interval '1 day') RETURNING id",
-        (agent, local, title),
+        "VALUES (%s,%s,%s,'body','P2',%s,false,now()+interval '1 day') RETURNING id",
+        (agent, local, title, require_response),
     ).fetchone()
     assert row is not None
     return int(row[0])
@@ -224,7 +236,7 @@ async def test_filtered_decision_commits_without_owner_and_does_not_later_replay
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    core, adapter = make_core(pool)
+    core, adapter = make_core(pool, im_bridge_notice_push_scope="all")
     core.notice_bridge.poll_store.initialize_notice_poll()
     with pool.connection() as conn:
         notice = insert_notice(
@@ -236,6 +248,7 @@ async def test_filtered_decision_commits_without_owner_and_does_not_later_replay
                 machine=machine_identity,
             ),
             0,
+            require_response=False,
         )
     adapter.recipient = None
     core.notice_bridge._filters = {"min_priority": "P1", "agent": None}
@@ -378,3 +391,127 @@ async def test_concurrent_normal_acceptances_freeze_first_target_without_duplica
         ).fetchone()
         assert status is not None and status[0] == "uncertain" and "SECRET" not in str(status)
     assert receipts(pool)[0][0] == notice
+
+
+# meiva:note
+# Which notices reach the chat is one decision with a recorded reason. The default
+# holds an FYI back (`filtered_reason='fyi'`); `all` is the configuration rollback;
+# a switched-off `core.needs_input` silences decisions on this transport too.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+@pytest.mark.parametrize(("scope", "fyi_pushed"), [("decisions", False), ("all", True)])
+async def test_push_scope_decides_whether_an_fyi_reaches_the_chat(
+    redis_url: str,
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+    scope: str,
+    fyi_pushed: bool,
+) -> None:
+    core, adapter = make_core(pool, im_bridge_notice_push_scope=scope)
+    core.notice_bridge.initialize_poll()
+    agent = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    with pool.connection() as conn:
+        fyi = insert_notice(conn, agent, 0, "internal progress note", require_response=False)
+        decision = insert_notice(conn, agent, 1, "ship it?")
+    await core.notice_bridge.poll_once()
+    for _ in range(2):
+        await core.outbound_worker.run_once()
+
+    sent = [text for _chat, text, _buttons in adapter.deliveries]
+    assert len(sent) == (2 if fyi_pushed else 1)
+    assert any("ship it?" in text for text in sent)
+    assert ("internal progress note" in " ".join(sent)) is fyi_pushed
+    by_notice = {row[0]: row for row in receipts(pool)}
+    assert by_notice[fyi][1] == ("queued" if fyi_pushed else "filtered")
+    assert by_notice[fyi][2]["filtered_reason"] == (None if fyi_pushed else "fyi")
+    assert by_notice[decision][1] == "queued"
+
+
+# meiva:note
+# The switch belongs to the "needs an answer" category, not to the notice kind: an
+# FYI keeps its own reason when that switch is off, and `all` still restores it.
+# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+@pytest.mark.parametrize(("scope", "fyi_pushed"), [("decisions", False), ("all", True)])
+async def test_a_switched_off_category_does_not_reclassify_an_fyi(
+    redis_url: str,
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+    scope: str,
+    fyi_pushed: bool,
+) -> None:
+    core, adapter = make_core(pool, im_bridge_notice_push_scope=scope)
+    core.notice_bridge.initialize_poll()
+    agent = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    with pool.connection() as conn:
+        fyi = insert_notice(conn, agent, 0, "internal progress note", require_response=False)
+        conn.execute(
+            "INSERT INTO user_settings (key, value) VALUES ('notifications.categories', "
+            "jsonb_build_object('core.needs_input', false)) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    try:
+        await core.notice_bridge.poll_once()
+        await core.outbound_worker.run_once()
+
+        row = receipts(pool)[0]
+        assert row[0] == fyi
+        assert row[1] == ("queued" if fyi_pushed else "filtered")
+        assert row[2]["filtered_reason"] == (None if fyi_pushed else "fyi")
+        assert len(adapter.deliveries) == (1 if fyi_pushed else 0)
+    finally:
+        with pool.connection() as conn:
+            conn.execute("DELETE FROM user_settings WHERE key = 'notifications.categories'")
+
+
+async def test_a_switched_off_needs_input_category_silences_decisions(
+    redis_url: str,
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    core, adapter = make_core(pool)
+    core.notice_bridge.initialize_poll()
+    agent = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    with pool.connection() as conn:
+        decision = insert_notice(conn, agent, 0, "ship it?")
+        conn.execute(
+            "INSERT INTO user_settings (key, value) VALUES ('notifications.categories', "
+            "jsonb_build_object('core.needs_input', false)) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    try:
+        await core.notice_bridge.poll_once()
+        await core.outbound_worker.run_once()
+
+        assert adapter.deliveries == []
+        row = receipts(pool)[0]
+        assert row[0] == decision and row[1] == "filtered"
+        assert row[2]["filtered_reason"] == "needs_input_off"
+    finally:
+        with pool.connection() as conn:
+            conn.execute("DELETE FROM user_settings WHERE key = 'notifications.categories'")
