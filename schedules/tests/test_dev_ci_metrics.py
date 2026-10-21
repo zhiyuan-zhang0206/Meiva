@@ -154,10 +154,30 @@ def test_consecutive_failures_counts_only_the_leading_failures() -> None:
     assert module.consecutive_failures([]) == 0
 
 
-def test_the_nightly_duration_refresh_is_watched_at_two_consecutive_failures() -> None:
+def test_every_timed_pipeline_that_updates_shared_state_is_watched() -> None:
     module = _load()
-    assert "refresh-test-durations.yml" in module._SCHEDULED_WORKFLOWS
+    assert set(module._SCHEDULED_WORKFLOWS) == {
+        "refresh-test-durations.yml",
+        "update-model-pricing.yml",
+    }
     assert module._CONSECUTIVE_FAILURES_ALERT == 2
+
+
+def test_each_watched_workflow_names_what_its_failure_costs() -> None:
+    module = _load()
+    exporter = SimpleNamespace(
+        FetchStats=Mock,
+        _run_gh=Mock(
+            return_value='{"workflow_runs": [{"conclusion": "failure"}, {"conclusion": "failure"}]}'
+        ),
+    )
+    sent: list[str] = []
+
+    module._alert_broken_scheduled_workflows(exporter, "owner/repo", notify=sent.append)
+
+    assert len(sent) == len(module._SCHEDULED_WORKFLOWS)
+    assert "test-duration model" in next(m for m in sent if "refresh-test-durations.yml" in m)
+    assert "cost figure" in next(m for m in sent if "update-model-pricing.yml" in m)
 
 
 def test_a_broken_timed_workflow_messages_the_p0_lead() -> None:
@@ -174,7 +194,7 @@ def test_a_broken_timed_workflow_messages_the_p0_lead() -> None:
     )
     sent: list[str] = []
     module._alert_broken_scheduled_workflows(exporter, "owner/repo", notify=sent.append)
-    assert len(sent) == 1
+    assert len(sent) == len(module._SCHEDULED_WORKFLOWS)
     assert "failed 2 runs in a row" in sent[0]
     assert "u2" in sent[0]
 

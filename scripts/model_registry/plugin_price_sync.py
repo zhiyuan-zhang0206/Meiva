@@ -1,24 +1,19 @@
-"""Conservative archive-to-provider source synchronization.
-
-Candidate provider files are parsed, never imported: the pricing workflow may
-resume an existing bot branch, so executing code from that branch would cross
-the workflow's trusted-main boundary. The parser accepts only the repository's
-literal ``PROVIDER = ProviderContribution(models=..., pricing=...)`` shape,
-with optional ``with_fast_variants(PROVIDER, {...})`` in ``contribute()``.
-Both rate tables are parsed without executing plugin code.
-
-Synchronization preserves the complete pricing lattice: effective periods,
-input-token tiers, and recurring UTC windows. The flat ``PriceRates`` fields
-remain the base tier covering the synchronization instant.
-"""
+# meiva:note
+# Archive-to-provider source synchronization. The archive is the reviewed ledger; a built-in
+# provider's ``PriceRates`` must carry the period, tier and window lattice the archive states
+# for its model. ``plugin_price_source`` owns what a ``provider.py`` declares; this module
+# owns how the archive reconciles it and how a rewrite lands back in the source.
+# Synchronization preserves the complete lattice: effective periods, input-token tiers and
+# recurring UTC windows. The flat ``PriceRates`` fields remain the base tier covering the
+# synchronization instant.
+# meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
 
 from __future__ import annotations
 
 import ast
 import json
 import sys
-from collections.abc import Set
-from datetime import UTC, date, datetime, time
+from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
@@ -26,27 +21,18 @@ from scripts.model_registry.plugin_price_rates import (
     FlatRates,
     archive_rates,
     cache_write_lines,
-    rates_from_nodes,
 )
-
-
-class WindowDeclaration(NamedTuple):
-    start: str
-    end: str
-    rates: FlatRates
-
-
-class TierDeclaration(NamedTuple):
-    input_tokens_min: int
-    input_tokens_max: int | None
-    rates: FlatRates
-    windows: tuple[WindowDeclaration, ...]
-
-
-class PeriodDeclaration(NamedTuple):
-    effective_from: str | None
-    effective_until: str | None
-    tiers: tuple[TierDeclaration, ...]
+from scripts.model_registry.plugin_price_source import (
+    PeriodDeclaration,
+    PriceDeclaration,
+    ProviderManifest,
+    TierDeclaration,
+    WindowDeclaration,
+    collapse_flat_periods,
+    imported_names,
+    provider_manifest,
+    validated_provenance,
+)
 
 
 class PluginSyncResult(NamedTuple):
@@ -55,326 +41,6 @@ class PluginSyncResult(NamedTuple):
     drifted_models: tuple[str, ...]
     changed_files: tuple[Path, ...]
     drifted_periods: tuple[str, ...]
-
-
-class _PriceDeclaration(NamedTuple):
-    rates: FlatRates
-    source_url: str
-    source_checked_at: str
-    vendor: str | None
-    periods: tuple[PeriodDeclaration, ...]
-
-
-class _ProviderManifest(NamedTuple):
-    models: frozenset[str]
-    prices: dict[str, _PriceDeclaration]
-    price_nodes: dict[str, ast.Call]
-
-
-def _validated_provenance(
-    source_url: object,
-    source_checked_at: object,
-    vendor: object,
-    *,
-    context: str,
-) -> tuple[str, str, str | None]:
-    if not isinstance(source_url, str) or not source_url.startswith("https://"):
-        raise RuntimeError(f"{context} source_url must be an HTTPS string")
-    if not isinstance(source_checked_at, str):
-        raise TypeError(f"{context} source_checked_at must be a YYYY-MM-DD string")
-    try:
-        checked_at = date.fromisoformat(source_checked_at)
-    except ValueError as exc:
-        raise RuntimeError(f"{context} source_checked_at must be YYYY-MM-DD") from exc
-    if checked_at.isoformat() != source_checked_at:
-        raise RuntimeError(f"{context} source_checked_at must be YYYY-MM-DD")
-    if vendor is not None and not isinstance(vendor, str):
-        raise RuntimeError(f"{context} vendor must be a string or None")
-    return source_url, source_checked_at, vendor
-
-
-def _literal(node: ast.expr, expected: type[Any], *, context: str) -> Any:
-    try:
-        value = ast.literal_eval(node)
-    except (ValueError, TypeError) as exc:
-        raise RuntimeError(f"{context} must be a literal") from exc
-    if not isinstance(value, expected):
-        raise TypeError(f"{context} must be a {expected.__name__} literal")
-    return value
-
-
-def _optional_string_literal(node: ast.expr, *, context: str) -> str | None:
-    try:
-        value = ast.literal_eval(node)
-    except (ValueError, TypeError) as exc:
-        raise RuntimeError(f"{context} must be a string or None literal") from exc
-    if value is not None and not isinstance(value, str):
-        raise TypeError(f"{context} must be a string or None literal")
-    return value
-
-
-def _integer_literal(node: ast.expr, *, context: str) -> int:
-    value = _literal(node, int, context=context)
-    if isinstance(value, bool):
-        raise TypeError(f"{context} must be an integer literal")
-    return cast(int, value)
-
-
-def _optional_integer_literal(node: ast.expr, *, context: str) -> int | None:
-    try:
-        value = ast.literal_eval(node)
-    except (ValueError, TypeError) as exc:
-        raise RuntimeError(f"{context} must be an integer or None literal") from exc
-    if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
-        raise TypeError(f"{context} must be an integer or None literal")
-    return value
-
-
-def _call_fields(
-    node: ast.expr,
-    constructor: str,
-    *,
-    required: set[str],
-    optional: Set[str] = frozenset(),
-    context: str,
-) -> tuple[ast.Call, dict[str, ast.expr]]:
-    if not (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == constructor
-        and not node.args
-    ):
-        raise RuntimeError(f"{context} must be a literal {constructor}(...) call")
-    if any(keyword.arg is None for keyword in node.keywords):
-        raise RuntimeError(f"{context} cannot contain keyword expansion")
-    fields = {cast(str, keyword.arg): keyword.value for keyword in node.keywords}
-    if len(fields) != len(node.keywords):
-        raise RuntimeError(f"{context} contains duplicate {constructor} fields")
-    missing = required - fields.keys()
-    unexpected = fields.keys() - required - optional
-    if missing:
-        raise RuntimeError(f"{context} is missing {constructor} fields {sorted(missing)}")
-    if unexpected:
-        raise RuntimeError(f"{context} has unexpected {constructor} fields {sorted(unexpected)}")
-    return node, fields
-
-
-def _tuple_items(node: ast.expr, *, context: str) -> tuple[ast.expr, ...]:
-    if not isinstance(node, ast.Tuple):
-        raise TypeError(f"{context} must be a tuple literal")
-    return tuple(node.elts)
-
-
-def _window_declaration(node: ast.expr, *, context: str) -> WindowDeclaration:
-    _call, fields = _call_fields(
-        node,
-        "PriceWindow",
-        required={"start", "end", "cache_miss", "cache_hit", "output"},
-        optional={"cache_write_5m", "cache_write_1h"},
-        context=context,
-    )
-    return WindowDeclaration(
-        start=_literal(fields["start"], str, context=f"{context} start"),
-        end=_literal(fields["end"], str, context=f"{context} end"),
-        rates=rates_from_nodes(fields, context=context),
-    )
-
-
-def _tier_declaration(node: ast.expr, *, context: str) -> TierDeclaration:
-    _call, fields = _call_fields(
-        node,
-        "PriceTier",
-        required={"input_tokens_min", "input_tokens_max", "cache_miss", "cache_hit", "output"},
-        optional={"windows", "cache_write_5m", "cache_write_1h"},
-        context=context,
-    )
-    window_nodes = (
-        _tuple_items(fields["windows"], context=f"{context} windows") if "windows" in fields else ()
-    )
-    windows = tuple(
-        _window_declaration(item, context=f"{context} window {index}")
-        for index, item in enumerate(window_nodes)
-    )
-    return TierDeclaration(
-        input_tokens_min=_integer_literal(
-            fields["input_tokens_min"], context=f"{context} input_tokens_min"
-        ),
-        input_tokens_max=_optional_integer_literal(
-            fields["input_tokens_max"], context=f"{context} input_tokens_max"
-        ),
-        rates=rates_from_nodes(fields, context=context),
-        windows=windows,
-    )
-
-
-def _period_declaration(node: ast.expr, *, context: str) -> PeriodDeclaration:
-    _call, fields = _call_fields(
-        node,
-        "PricePeriod",
-        required={"effective_from", "effective_until", "tiers"},
-        context=context,
-    )
-    return PeriodDeclaration(
-        effective_from=_optional_string_literal(
-            fields["effective_from"], context=f"{context} effective_from"
-        ),
-        effective_until=_optional_string_literal(
-            fields["effective_until"], context=f"{context} effective_until"
-        ),
-        tiers=tuple(
-            _tier_declaration(item, context=f"{context} tier {index}")
-            for index, item in enumerate(_tuple_items(fields["tiers"], context=f"{context} tiers"))
-        ),
-    )
-
-
-def _price_declaration(call: ast.expr, *, context: str) -> tuple[_PriceDeclaration, ast.Call]:
-    price_call, fields = _call_fields(
-        call,
-        "PriceRates",
-        required={"cache_miss", "cache_hit", "output", "source_url", "source_checked_at"},
-        optional={"vendor", "periods", "cache_write_5m", "cache_write_1h"},
-        context=context,
-    )
-    source_url = _literal(fields["source_url"], str, context=f"{context} source_url")
-    checked_at = _literal(fields["source_checked_at"], str, context=f"{context} source_checked_at")
-    vendor = (
-        None
-        if "vendor" not in fields
-        else _optional_string_literal(fields["vendor"], context=f"{context} vendor")
-    )
-    source_url, checked_at, vendor = _validated_provenance(
-        source_url,
-        checked_at,
-        vendor,
-        context=context,
-    )
-    period_nodes = (
-        _tuple_items(fields["periods"], context=f"{context} periods") if "periods" in fields else ()
-    )
-    periods = tuple(
-        _period_declaration(item, context=f"{context} period {index}")
-        for index, item in enumerate(period_nodes)
-    )
-    return (
-        _PriceDeclaration(
-            rates=rates_from_nodes(fields, context=context),
-            source_url=source_url,
-            source_checked_at=checked_at,
-            vendor=vendor,
-            periods=periods,
-        ),
-        price_call,
-    )
-
-
-def _mapping_keyword(call: ast.Call, name: str, *, path: Path) -> ast.Dict:
-    values = [keyword.value for keyword in call.keywords if keyword.arg == name]
-    if len(values) != 1 or not isinstance(values[0], ast.Dict):
-        raise RuntimeError(
-            f"{path}: ProviderContribution(...) must have one literal {name}= mapping"
-        )
-    return values[0]
-
-
-def _mapping_keys(mapping: ast.Dict, *, context: str) -> tuple[str, ...]:
-    if len(mapping.keys) != len(mapping.values) or any(key is None for key in mapping.keys):
-        raise RuntimeError(f"{context} cannot contain mapping expansion")
-    keys = tuple(
-        cast(str, _literal(cast(ast.expr, key), str, context=f"{context} key"))
-        for key in mapping.keys
-    )
-    if len(keys) != len(set(keys)):
-        raise RuntimeError(f"{context} contains duplicate model ids")
-    return keys
-
-
-def _fast_variant_calls(tree: ast.Module) -> list[ast.Call]:
-    functions = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "contribute"
-    ]
-    return [
-        node
-        for function in functions
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "with_fast_variants"
-    ]
-
-
-def _fast_price_nodes(tree: ast.Module, path: Path) -> dict[str, ast.expr]:
-    calls = _fast_variant_calls(tree)
-    if not calls:
-        return {}
-    if len(calls) != 1:
-        raise RuntimeError(f"{path}: expected at most one with_fast_variants declaration")
-    call = calls[0]
-    if (
-        len(call.args) != 2
-        or any(
-            keyword.arg != "reference_tps" or not isinstance(keyword.value, ast.Dict)
-            for keyword in call.keywords
-        )
-        or not isinstance(call.args[0], ast.Name)
-        or call.args[0].id != "PROVIDER"
-        or not isinstance(call.args[1], ast.Dict)
-    ):
-        raise RuntimeError(f"{path}: expected literal with_fast_variants(PROVIDER, {{...}})")
-    mapping = call.args[1]
-    keys = _mapping_keys(mapping, context=f"{path}: Fast pricing")
-    return dict(zip(keys, mapping.values, strict=True))
-
-
-def _add_fast_prices(
-    nodes: dict[str, ast.expr],
-    path: Path,
-    models: set[str],
-    prices: dict[str, _PriceDeclaration],
-    price_nodes: dict[str, ast.Call],
-) -> None:
-    for standard, value in nodes.items():
-        fast = f"{standard}-fast"
-        if standard not in models or fast in models or fast in prices:
-            raise RuntimeError(f"{path}: invalid or duplicate Fast model {fast!r}")
-        models.add(fast)
-        prices[fast], price_nodes[fast] = _price_declaration(value, context=f"{path}: {fast}")
-
-
-def provider_manifest(source: str, path: Path) -> _ProviderManifest:
-    tree = ast.parse(source, filename=str(path))
-    registrations = [
-        statement.value
-        for statement in tree.body
-        if isinstance(statement, ast.Assign)
-        and len(statement.targets) == 1
-        and isinstance(statement.targets[0], ast.Name)
-        and statement.targets[0].id == "PROVIDER"
-        and isinstance(statement.value, ast.Call)
-        and isinstance(statement.value.func, ast.Name)
-        and statement.value.func.id == "ProviderContribution"
-    ]
-    if len(registrations) != 1:
-        raise RuntimeError(
-            f"{path}: expected exactly one top-level PROVIDER = ProviderContribution(...)"
-        )
-    models_node = _mapping_keyword(registrations[0], "models", path=path)
-    pricing_node = _mapping_keyword(registrations[0], "pricing", path=path)
-    models = set(_mapping_keys(models_node, context=f"{path}: models"))
-    price_models = _mapping_keys(pricing_node, context=f"{path}: pricing")
-    if not set(price_models) <= models:
-        raise RuntimeError(f"{path}: pricing contains ids absent from models")
-    prices: dict[str, _PriceDeclaration] = {}
-    price_nodes: dict[str, ast.Call] = {}
-    for model, value in zip(price_models, pricing_node.values, strict=True):
-        prices[model], price_nodes[model] = _price_declaration(
-            value,
-            context=f"{path}: {model}",
-        )
-    _add_fast_prices(_fast_price_nodes(tree, path), path, models, prices, price_nodes)
-    return _ProviderManifest(frozenset(models), prices, price_nodes)
 
 
 def _instant(value: str | None, *, context: str) -> datetime | None:
@@ -494,7 +160,7 @@ def archive_price(
     model: str,
     entry: dict[str, Any],
     now: datetime,
-) -> tuple[_PriceDeclaration, tuple[tuple[str, FlatRates], ...]]:
+) -> tuple[PriceDeclaration, tuple[tuple[str, FlatRates], ...]]:
     periods = _archive_periods(model, entry["periods"])
     covering: list[PeriodDeclaration] = []
     upcoming: list[tuple[str, FlatRates]] = []
@@ -510,13 +176,18 @@ def archive_price(
     if len(covering) != 1:
         raise RuntimeError(f"archive {model!r} must have exactly one period covering now")
     current = _base_rates(covering[0], context=f"archive {model!r} current period")
-    source_url, checked_at, vendor = _validated_provenance(
+    source_url, checked_at, vendor = validated_provenance(
         entry["source_url"],
         entry["source_checked_at"],
         entry.get("vendor"),
         context=f"archive {model!r}",
     )
-    return _PriceDeclaration(current, source_url, checked_at, vendor, periods), tuple(upcoming)
+    return (
+        PriceDeclaration(
+            current, source_url, checked_at, vendor, collapse_flat_periods(periods, current)
+        ),
+        tuple(upcoming),
+    )
 
 
 def _render_window(window: WindowDeclaration, indent: int) -> list[str]:
@@ -574,7 +245,7 @@ def _render_period(period: PeriodDeclaration, indent: int) -> list[str]:
     return lines
 
 
-def _render_price(price: _PriceDeclaration, indent: int) -> str:
+def _render_price(price: PriceDeclaration, indent: int) -> str:
     outer = " " * indent
     inner = " " * (indent + 4)
     lines = [
@@ -586,11 +257,13 @@ def _render_price(price: _PriceDeclaration, indent: int) -> str:
         f"{inner}source_url={json.dumps(price.source_url)},",
         f"{inner}source_checked_at={json.dumps(price.source_checked_at)},",
         f"{inner}vendor={_string_or_none_literal(price.vendor)},",
-        f"{inner}periods=(",
     ]
-    for period in price.periods:
-        lines.extend(_render_period(period, indent + 8))
-    lines.extend((f"{inner}),", f"{outer})"))
+    if price.periods:
+        lines.append(f"{inner}periods=(")
+        for period in price.periods:
+            lines.extend(_render_period(period, indent + 8))
+        lines.append(f"{inner}),")
+    lines.append(f"{outer})")
     return "\n".join(lines)
 
 
@@ -615,7 +288,7 @@ def _period_label(period: PeriodDeclaration, index: int) -> str:
 
 
 def _drift_labels(
-    model: str, declared: _PriceDeclaration, target: _PriceDeclaration
+    model: str, declared: PriceDeclaration, target: PriceDeclaration
 ) -> tuple[str, ...]:
     labels: list[str] = []
     if declared.rates != target.rates:
@@ -631,11 +304,20 @@ def _drift_labels(
     return tuple(labels)
 
 
+def _rendered_calls(rendered: str) -> set[str]:
+    expression = ast.parse(f"_price = {rendered}\n", mode="exec")
+    names: set[str] = set()
+    for node in ast.walk(expression):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            names.add(node.func.id)
+    return names
+
+
 def rewrite_provider(
     source: str,
     path: Path,
-    manifest: _ProviderManifest,
-    targets: dict[str, _PriceDeclaration],
+    manifest: ProviderManifest,
+    targets: dict[str, PriceDeclaration],
 ) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
     replacements: list[tuple[int, int, str]] = []
     drifted: list[str] = []
@@ -652,6 +334,18 @@ def rewrite_provider(
         node = manifest.price_nodes[model]
         start, end = _call_offsets(source, node, path=path)
         replacements.append((start, end, _render_price(target, _entry_indent(source, node))))
+    if replacements:
+        imported = imported_names(source, path)
+        rendered: set[str] = set()
+        for _start, _end, text in replacements:
+            rendered |= _rendered_calls(text)
+        missing = sorted(rendered - imported)
+        if missing:
+            raise RuntimeError(
+                f"{path}: rendering the archive lattice calls {missing}, which this module "
+                f"does not import from the provider contract; add {missing} to its import "
+                "block and re-run"
+            )
     rewritten = source
     for start, end, replacement in sorted(replacements, reverse=True):
         rewritten = rewritten[:start] + replacement + rewritten[end:]
@@ -674,6 +368,40 @@ def _regular_file(path: Path, root: Path, *, label: str) -> Path:
     return resolved
 
 
+def _reject_duplicate_prices(seen: set[str], manifest: ProviderManifest, *, path: Path) -> None:
+    duplicate = seen & manifest.prices.keys()
+    if duplicate:
+        raise RuntimeError(f"{path}: plugin prices registered more than once: {sorted(duplicate)}")
+
+
+def _plugin_targets(
+    manifest: ProviderManifest,
+    archive_models: dict[str, dict[str, Any]],
+    *,
+    path: Path,
+    now: datetime,
+) -> tuple[dict[str, PriceDeclaration], list[tuple[str, str, FlatRates]]]:
+    targets: dict[str, PriceDeclaration] = {}
+    notes: list[tuple[str, str, FlatRates]] = []
+    for model in manifest.prices:
+        if model not in archive_models:
+            raise RuntimeError(f"{path}: archive has no entry for plugin-priced model {model!r}")
+        target, upcoming = archive_price(model, archive_models[model], now)
+        targets[model] = target
+        notes.extend(
+            (model, effective_from, rates)
+            for effective_from, rates in upcoming
+            if rates != target.rates
+        )
+    return targets, notes
+
+
+# meiva:note
+# Synchronize every built-in provider's complete price lattice. One failing provider fails the
+# pass and writes nothing: plugin prices shadow the archive entry of the same model, so a
+# half-synchronized tree would bill from a stale declaration while the diff looks complete.
+# The loop still reports every provider, so one run names everything that is wrong instead of
+# one file per run.
 def sync_plugin_rates(
     archive_path: Path,
     repo_root: Path,
@@ -681,7 +409,6 @@ def sync_plugin_rates(
     now: datetime,
     write: bool = True,
 ) -> PluginSyncResult:
-    """Synchronize every built-in provider's complete price lattice."""
     root = repo_root.resolve(strict=True)
     archive = _regular_file(archive_path, root, label="pricing archive")
     raw = cast(dict[str, Any], json.loads(archive.read_text(encoding="utf-8")))
@@ -695,30 +422,39 @@ def sync_plugin_rates(
     drifted_periods: list[str] = []
     future_notes: list[tuple[str, str, FlatRates]] = []
     seen_models: set[str] = set()
+    failures: list[str] = []
     for candidate in provider_paths:
         path = _regular_file(candidate, root, label="provider source")
         source = path.read_text(encoding="utf-8")
-        manifest = provider_manifest(source, path)
-        duplicate = seen_models & manifest.prices.keys()
-        if duplicate:
-            raise RuntimeError(f"plugin prices registered more than once: {sorted(duplicate)}")
-        seen_models.update(manifest.prices)
-        targets: dict[str, _PriceDeclaration] = {}
-        for model in manifest.prices:
-            if model not in archive_models:
-                raise RuntimeError(f"archive has no entry for plugin-priced model {model!r}")
-            target, upcoming = archive_price(model, archive_models[model], now)
-            targets[model] = target
-            future_notes.extend(
-                (model, effective_from, rates)
-                for effective_from, rates in upcoming
-                if rates != target.rates
+        try:
+            manifest = provider_manifest(source, path)
+            _reject_duplicate_prices(seen_models, manifest, path=path)
+            targets, notes = _plugin_targets(manifest, archive_models, path=path, now=now)
+            rewritten, drifted, differing_periods = rewrite_provider(
+                source, path, manifest, targets
             )
-        rewritten, drifted, differing_periods = rewrite_provider(source, path, manifest, targets)
+        except (RuntimeError, TypeError) as exc:
+            failures.append(str(exc))
+            print(f"- NOT synchronized: {exc}", file=sys.stderr)
+            continue
+        seen_models.update(manifest.prices)
+        future_notes.extend(notes)
         drifted_models.extend(drifted)
         drifted_periods.extend(differing_periods)
         if drifted:
             plans.append((path, rewritten))
+        print(
+            f"- {path.relative_to(root)}: {', '.join(manifest.declarations)} — "
+            f"{len(manifest.prices)} priced model(s), "
+            + (f"{len(drifted)} drifted" if drifted else "matches the archive")
+        )
+
+    if failures:
+        raise RuntimeError(
+            f"{len(failures)} of {len(provider_paths)} provider file(s) could not be "
+            "synchronized, so no plugin rate was written:\n"
+            + "\n".join(f"- {failure}" for failure in failures)
+        )
 
     for detail in sorted(drifted_periods):
         print(f"- Plugin pricing drift: {detail}.", file=sys.stderr)

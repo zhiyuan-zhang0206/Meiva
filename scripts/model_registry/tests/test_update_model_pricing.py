@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from scripts.model_registry import plugin_price_sync
+from scripts.model_registry import plugin_price_source, plugin_price_sync
 from scripts.model_registry import update_model_pricing as pricing_updater
 
 _DEEPSEEK_TABLE = """
@@ -288,7 +288,7 @@ def test_plugin_sync_rewrites_drift_and_is_idempotent(
     assert rewritten.count("PriceTier(") == 3
     assert rewritten.count("PriceWindow(") == 1
 
-    manifest = plugin_price_sync.provider_manifest(rewritten, provider_path)
+    manifest = plugin_price_source.provider_manifest(rewritten, provider_path)
     archive_entry = json.loads(archive_path.read_text())["models"]["fixture-model"]
     target, _upcoming = plugin_price_sync.archive_price(
         "fixture-model", archive_entry, datetime(2026, 9, 5, tzinfo=UTC)
