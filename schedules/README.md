@@ -25,6 +25,9 @@ directory. The manifest is the single expression of the built-in policy
 | `model-update-tracker` | `model-update-tracker-schedule.py` | product | **enabled** |
 | `db-write-stall-watch` | `db-write-stall-watch-schedule.py` | operator | disabled |
 
+`dev-ci-metrics` also watches the timed workflows a pull request never blocks: it
+messages the P0 lead when one of them fails two runs in a row (`_SCHEDULED_WORKFLOWS`), because a red nightly is otherwise silent.
+
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
   tracking, debt clearing, CI observability) are Meiva's own
   improvement loops — they ship and start by default.
