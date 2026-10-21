@@ -544,28 +544,19 @@ def test_inspect_notice_when_agent_has_open_require_response(db_conn: psycopg.Co
     assert notice["blocking"] is True
 
 
-def test_inspect_notice_when_agent_has_open_fyi(db_conn: psycopg.Connection) -> None:
+def test_inspect_notice_ignores_legacy_fyi(db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_notices (agent_id, local_id, title, content, priority, require_response, blocking, expire_at) "
             "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
-            "'Milestone reached', NULL, 'P2', false, false, now() + interval '1 day') "
-            "RETURNING id",
+            "'Milestone reached', NULL, 'P2', false, false, now() + interval '1 day')",
             (aid, aid),
         )
-        row = cur.fetchone()
-    assert row is not None
-    nid = row[0]
     db_conn.commit()
     with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
-    notice = body["notice"]
-    assert notice is not None
-    assert notice["id"] == nid
-    assert notice["require_response"] is False
-    assert notice["blocking"] is False
-    assert notice["content"] is None
+    assert body["notice"] is None
 
 
 def test_inspect_notice_when_agent_has_none(db_conn: psycopg.Connection) -> None:
@@ -585,10 +576,16 @@ def test_inspect_notice_resolved_not_returned(db_conn: psycopg.Connection) -> No
             "WHERE agent_id = %s), -1) + 1, 'Old', 'P3', true, false, now(), 'answered', 'done', now() + interval '1 day')",
             (aid, aid),
         )
+    db_conn.commit()
+    with gateway_test_client() as client:
+        body = client.get(f"/api/agents/{aid}/inspect/live").json()
+    assert body["notice"] is None
+
+    with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
             "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
-            "'Current', 'P1', false, false, now() + interval '1 day')",
+            "'Current', 'P1', true, false, now() + interval '1 day')",
             (aid, aid),
         )
     db_conn.commit()
@@ -596,6 +593,8 @@ def test_inspect_notice_resolved_not_returned(db_conn: psycopg.Connection) -> No
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["notice"] is not None
     assert body["notice"]["title"] == "Current"
+    assert body["notice"]["require_response"] is True
+    assert body["notice"]["blocking"] is False
 
 
 def test_inspect_notice_other_agent_not_visible(db_conn: psycopg.Connection) -> None:
