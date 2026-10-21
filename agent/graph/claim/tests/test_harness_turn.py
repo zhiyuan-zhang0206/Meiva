@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from dataclasses import replace
 from unittest.mock import MagicMock
 
@@ -7,6 +8,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_turn import (
     harness_turn_node,
@@ -17,8 +19,9 @@ from agent.graph.claim.harness_turn import (
     turn_key,
 )
 from agent.graph.llm_errors import FatalLLMStreamError
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from base.agents.context import MeivaContext
+from base.agents.context import HostedTurnResources, MeivaContext
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.config.tests.configuration import defaults
@@ -26,6 +29,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import HarnessSetupError, HarnessTurn, HarnessTurnFaultedError, Usage
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
+from base.native_process.turn_identity import HostedServiceResources
 from base.packages.plugin_providers import build_model_catalog
 
 
@@ -71,9 +75,16 @@ class FakeEngine:
         self.closed = True
 
 
-def runtime(engine: FakeEngine | None) -> Runtime[MeivaContext]:
+def runtime(
+    engine: FakeEngine | None,
+    *,
+    ops_pool: AsyncConnectionPool | None = None,
+    hosted_resources: HostedTurnResources | None = None,
+) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
+            ops_pool=ops_pool,
+            hosted_resources=hosted_resources,
             harness=Harness.CLAUDE_CODE if engine is not None else Harness.MEIVA,
             harness_bridge=engine,
             llm=MagicMock(),
@@ -83,6 +94,16 @@ def runtime(engine: FakeEngine | None) -> Runtime[MeivaContext]:
             clock_factory=Clock.from_settings,
         )
     )
+
+
+@pytest.fixture
+async def hosted_resources() -> AsyncGenerator[HostedTurnResources]:
+    """An explicit service owns the turn's watcher until the test finishes."""
+    service = HostedServiceResources()
+    try:
+        yield await service.turn()
+    finally:
+        await service.aclose()
 
 
 def inbound(text: str, inbound_id: int) -> HumanMessage:
@@ -308,3 +329,61 @@ async def test_replayed_completion_does_not_log_provider_usage_twice(
     log_turn_usage(ctx, 6984, engine.model, turn)
     log_turn_usage(ctx, 6984, engine.model, replace(turn, replayed=True))
     assert len(loguru_records.events("llm_usage")) == 1
+
+
+# meiva:note
+# `meiva.agents.get_last_message()` reads `agents_meta.last_message_text`, which only the
+# native LLM node used to write — every harness agent therefore answered `None` for its
+# whole life while its transcript held the text (#5511, measured on codex / claude /
+# antigravity agents on 2026-10-21). The harness node now stamps it where the native one
+# does, so the reader needs no branch of its own.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+async def test_a_completed_turn_stamps_the_reply_as_the_last_message(
+    hosted_resources: HostedTurnResources,
+) -> None:
+    ops_pool = make_fake_ops_pool()
+    engine = FakeEngine(reply="the answer")
+
+    await harness_turn_node(
+        AgentState(messages=[inbound("do it", 7)], harness_cursor=0),
+        runtime(engine, ops_pool=ops_pool, hosted_resources=hosted_resources),
+        config(),
+    )
+
+    updates = [
+        call.args
+        for call in ops_pool.fake_cursor.execute.call_args_list
+        if call.args and "last_active_at = now()" in str(call.args[0])
+    ]
+    assert len(updates) == 1, "a completed harness turn stamps exactly once"
+    assert "last_message_text" in str(updates[0][0])
+    assert updates[0][1][0] == "the answer", "the stamped text is the turn's reply"
+
+
+async def test_the_handoff_prelude_is_not_the_last_message(
+    hosted_resources: HostedTurnResources,
+) -> None:
+    ops_pool = make_fake_ops_pool()
+    ack = HarnessTurn(
+        turn_id="t0",
+        text="acknowledged",
+        usage=Usage(input_tokens=900, output_tokens=6),
+        cost_usd=0.02,
+        subtype="success",
+        is_error=False,
+        interrupted=False,
+    )
+    engine = FakeEngine(prelude=(ack,), reply="the answer")
+
+    await harness_turn_node(
+        AgentState(messages=[inbound("do it", 7)], harness_cursor=0),
+        runtime(engine, ops_pool=ops_pool, hosted_resources=hosted_resources),
+        config(),
+    )
+
+    updates = [
+        call.args
+        for call in ops_pool.fake_cursor.execute.call_args_list
+        if call.args and "last_message_text" in str(call.args[0])
+    ]
+    assert updates[0][1][0] == "the answer", "a prelude completes first; the reply lands last"
