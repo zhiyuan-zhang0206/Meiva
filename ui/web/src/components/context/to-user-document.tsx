@@ -2,7 +2,7 @@
 
 import { ArrowLeft, House, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { ZoomableImage } from "@/components/content/zoomable-image";
@@ -24,7 +24,8 @@ function pushedEntry(): boolean {
 // The inspector trigger is optional: `onInspect` decides whether the bar renders
 // it at all, and `inspecting` drives its pressed state.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate }: {
+export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate, children }: {
+  children?: ReactNode;
   agentId: number;
   document: ToUserDocument | undefined;
   failed: boolean;
@@ -79,13 +80,9 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   }));
   const byUrl = new Map([...resources.values()].map((resource) => [resource.url, resource]));
   // meiva:note
-  // `bodyHidden` is inspector mode: the caller renders the inspector below this
-  // bar itself, so this component returns only the bar.
-  // In inspector mode this component renders only its bar and the panel puts the
-  // inspector below it, outside this keyed subtree: the bar is the mode's one
-  // control surface (it names the mode and carries the pressed magnifier that
-  // leaves it), and the inspector must survive an agent switch without a remount
-  // (task #3894).
+  // The question slot stays mounted outside the referenced document's keyed
+  // body. Its caller hides it in Inspector mode without discarding a draft;
+  // Inspector itself lives outside this agent-keyed subtree.
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   return (
     <section className={cn(FLEX, MIN_H_0, "shrink-0", FLEX_COL)} aria-label={t("title")}>
@@ -139,6 +136,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
           ) : null}
         </div>
       </div>
+      {children}
       {bodyHidden ? null : (
         <>
           {error && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}

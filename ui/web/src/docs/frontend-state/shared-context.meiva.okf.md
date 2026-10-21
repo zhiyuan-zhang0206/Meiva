@@ -24,7 +24,13 @@ Neither the question area nor the document body has a nested scrollbar; long
 choices, comments and document content remain in one continuous reading flow.
 Question controls use the timeline's 13px body size and compact row spacing.
 Touch inputs retain their 16px baseline; a narrow desktop column still uses 13px.
-The notice bar carries the response status once; question details do not repeat it.
+One toolbar heads the complete context. The question sits directly below it,
+followed by the document; there is no separate notice bar, queue counter or
+collapse control. Plain numbered choice rows avoid a card around every option.
+A persistent comment input and the shared send button match the chat composer;
+the selection and comment form one explicit submission. Dismiss is a secondary
+header action. This keeps the user's task in one reading flow rather than
+splitting it into stacked control panels.
 Switching agents or navigating to another referenced document resets this shared
 reading position to the top.
 

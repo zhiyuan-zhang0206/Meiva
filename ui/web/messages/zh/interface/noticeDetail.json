@@ -16,10 +16,8 @@
   "other": "其他",
   "closeQuestion": "关闭此问题，不作回答",
   "submitAnswer": "提交回答",
-  "submitting": "提交中…",
   "noLongerAvailable": "此问题已无法回答，请刷新查看最新状态。",
   "originalOptions": "原始编号选项",
   "selected": "已选择",
-  "comment": "评论（选填）",
-  "commentPlaceholder": "补充背景或解释你的选择…"
+  "comment": "评论（选填）"
 }

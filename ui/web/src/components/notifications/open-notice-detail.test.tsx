@@ -99,7 +99,7 @@ describe("OpenNoticeDetail — require_response", () => {
     const onResolved = vi.fn();
     render(<OpenNoticeDetail agentId={7} notice={ntc()} onResolved={onResolved} />);
 
-    fireEvent.click(screen.getByText("Close without answering"));
+    fireEvent.click(screen.getByRole("button", { name: "Close without answering" }));
 
     await waitFor(() =>
       expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "dismiss" }, expect.any(String)),

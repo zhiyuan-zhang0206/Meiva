@@ -324,7 +324,7 @@ describe("InboxQueue — decision (require_response) action surface", () => {
     resolveNotice.mockResolvedValue({ status: "running" });
     setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
     renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    fireEvent.click(screen.getByText("Close without answering"));
+    fireEvent.click(screen.getByRole("button", { name: "Close without answering" }));
     await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 99, { action: "dismiss" }));
   });
 
@@ -377,7 +377,7 @@ describe("InboxQueue — notice lifecycle", () => {
     resolveNotice.mockResolvedValue({ status: "running" });
     setFeed({ awaiting: [n({ id: 1, title: "first" }), n({ id: 2, title: "second" })] });
     renderQueue([]);
-    fireEvent.click(screen.getByText("Close without answering"));
+    fireEvent.click(screen.getByRole("button", { name: "Close without answering" }));
     await waitFor(() => expect(dropOpenNotices).toHaveBeenCalledWith(expect.anything(), [1]));
   });
 });

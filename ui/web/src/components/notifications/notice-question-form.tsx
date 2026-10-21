@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import { Textarea } from "@/components/ui/textarea";
 import type { NoticeAnswer, NoticeQuestion } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
+import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 
 interface Draft {
   optionIds: string[];
@@ -33,7 +33,9 @@ export function NoticeQuestionForm({
   pending,
   focusAnswer,
   onAnswerChange,
+  submitAction,
 }: {
+  submitAction: ReactNode;
   question: NoticeQuestion;
   pending: boolean;
   focusAnswer: boolean;
@@ -54,19 +56,23 @@ export function NoticeQuestionForm({
     if (focusAnswer) textRef.current?.focus();
   }, [focusAnswer]);
 
+  const inputClass = cn("min-h-9 resize-none py-2 font-mono text-[13px] leading-snug md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base", FLEX_1);
   if (question.type === "text") {
     return (
-      <div className="space-y-1.5">
-        <label htmlFor={fieldId} className="text-xs font-medium">{t("openQuestion")}</label>
+      <div className={cn("items-end gap-2", FLEX)}>
         <Textarea
           id={fieldId}
+          aria-label={t("openQuestion")}
           ref={textRef}
+          rows={1}
+          focusVisible={false}
           value={draft.text}
           onChange={(e) => setDraft({ ...draft, text: e.target.value })}
           placeholder={t("openPlaceholder")}
           disabled={pending}
-          className="min-h-20 rounded-md py-1.5 text-[13px] md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base"
+          className={inputClass}
         />
+        {submitAction}
       </div>
     );
   }
@@ -78,16 +84,16 @@ export function NoticeQuestionForm({
       optionIds: single ? [id] : checked ? [...draft.optionIds, id] : draft.optionIds.filter((v) => v !== id),
     });
   };
-  const optionClass = cn(FLEX, "cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-[13px] leading-snug transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
+  const optionClass = cn(FLEX, "-mx-2 cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-[13px] leading-snug hover:bg-muted/40 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
 
   return (
-    <div className="space-y-2.5">
-      <fieldset disabled={pending} className="space-y-1.5 disabled:opacity-60">
-        <legend className="mb-1.5 text-xs text-muted-foreground">{single ? t("singleSelect") : t("multiSelect")}</legend>
+    <div className="space-y-3">
+      <fieldset disabled={pending} className="disabled:opacity-60">
+        <legend className="sr-only">{single ? t("singleSelect") : t("multiSelect")}</legend>
         {question.options.map((option, index) => {
           const selected = draft.optionIds.includes(option.id);
           return (
-            <label key={option.id} className={cn(optionClass, selected ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "border-border hover:border-muted-foreground/40 hover:bg-muted/40")}>
+            <label key={option.id} className={optionClass}>
               <input
                 type={single ? "radio" : "checkbox"}
                 name={fieldId}
@@ -96,7 +102,7 @@ export function NoticeQuestionForm({
                 className="mt-0.5 size-3.5 shrink-0 accent-primary"
               />
               <span className={cn("break-words", MIN_W_0)}>
-                <span className="font-medium">{index + 1}. {option.label}</span>
+                <span className={selected ? "font-medium" : undefined}><span className="text-muted-foreground">{index + 1}.</span> {option.label}</span>
                 {option.description && <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{option.description}</span>}
               </span>
             </label>
@@ -104,16 +110,19 @@ export function NoticeQuestionForm({
         })}
 
       </fieldset>
-      <div className="space-y-1.5">
-        <label htmlFor={`${fieldId}-comment`} className="text-xs font-medium">{t("comment")}</label>
+      <div className={cn("items-end gap-2", FLEX)}>
         <Textarea
           id={`${fieldId}-comment`}
+          aria-label={t("comment")}
+          rows={1}
+          focusVisible={false}
           value={draft.comment}
           onChange={(e) => setDraft({ ...draft, comment: e.target.value })}
           disabled={pending}
-          placeholder={t("commentPlaceholder")}
-          className="min-h-14 rounded-md py-1.5 text-[13px] md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base"
+          placeholder={t("comment")}
+          className={inputClass}
         />
+        {submitAction}
       </div>
     </div>
   );

@@ -16,10 +16,8 @@
   "other": "Other",
   "closeQuestion": "Close without answering",
   "submitAnswer": "Submit answer",
-  "submitting": "Submitting…",
   "noLongerAvailable": "This question is no longer available. Refresh to see its current status.",
   "originalOptions": "Original numbered options",
   "selected": "Selected",
-  "comment": "Comment (optional)",
-  "commentPlaceholder": "Add context or explain your choice…"
+  "comment": "Comment (optional)"
 }
