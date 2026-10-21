@@ -27,6 +27,7 @@ from typing import TextIO
 
 from loguru import logger
 
+from base.host.env.harness_binaries import HARNESS_BIN_DIRS
 from base.host.system.hostport import Host
 from base.native_process.os_platform import (
     crontab_lock,
@@ -340,6 +341,15 @@ def launchd_path_env(*, host: Host) -> str:
     """
 
     dirs: list[str] = [str(Path(meiva_binary_path(host=host)).parent)]  # ~/.local/bin or venv/bin
+    # meiva:note
+    # The harness CLIs live where a login shell finds them, not where launchd does:
+    # `claude` and `agy` install into ~/.local/bin, which this PATH used to omit, so
+    # every external harness failed to start from a launchd-hosted runner (#5491).
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    dirs += [
+        entry if Path(entry).is_absolute() else str(Path.home() / entry)
+        for entry in HARNESS_BIN_DIRS
+    ]
     brew = host.which("brew")
     dirs += [str(Path(brew).parent)] if brew else ["/opt/homebrew/bin", "/usr/local/bin"]
     dirs += ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]

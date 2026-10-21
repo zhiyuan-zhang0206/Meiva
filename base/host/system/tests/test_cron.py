@@ -148,6 +148,17 @@ def test_launchd_path_env_falls_back_without_brew(monkeypatch: pytest.MonkeyPatc
     assert "/usr/local/bin" in path
 
 
+# meiva:note
+# The runner's launchd job starts every harness, and `claude` / `agy` install into the
+# user-local bins; a job that reaches only the venv's own dir and brew cannot start them
+# (#5491). Pin the user dirs even when `meiva` itself lives under the brew prefix.
+def test_launchd_path_env_reaches_the_user_install_dirs() -> None:
+    entries = cron.launchd_path_env(host=fake_host()).split(":")
+
+    assert str(Path.home() / ".local/bin") in entries
+    assert str(Path.home() / ".npm-global/bin") in entries
+
+
 def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cron, "meiva_binary_path", _brew_meiva)
     host = fake_host(programs={"brew": "/opt/homebrew/bin/brew"})

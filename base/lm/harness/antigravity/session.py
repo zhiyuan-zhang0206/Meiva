@@ -4,11 +4,12 @@ import asyncio
 import time
 from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
+from base.host.env.harness_binaries import resolve_harness_binary
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.mapping import (
     assistant_text,
@@ -142,9 +143,9 @@ class AgySession:
     ) -> None:
         self.config = config
         self.agent_id = agent_id
+        self._environ = dict(environ) if environ else None
         self._probe: ChildProbe = probe or PsutilChildProbe()
         self._registry = registry
-        self._environ = dict(environ) if environ else None
         self._factory = transport_factory or self._default_transport
         self._events: asyncio.Queue[Any] = asyncio.Queue()
         self._pending: deque[TurnTicket] = deque()
@@ -334,7 +335,19 @@ class AgySession:
             yield event
 
     def _default_transport(self) -> AgyTransport:
-        return AgyTransport(self.config, environ=self._environ, probe=self._probe)
+        # meiva:note
+        # A bare `agy` resolves against the child's PATH, and a harness child is handed an
+        # environment with none (#5491). Pin the CLI we resolved; the rest of the argv
+        # prefix (a test's fake CLI, an operator's flags) rides unchanged.
+        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        resolved = resolve_harness_binary(
+            self.config.executable[0], path_env=(self._environ or {}).get("PATH")
+        )
+        return AgyTransport(
+            replace(self.config, executable=(resolved, *self.config.executable[1:])),
+            environ=self._environ,
+            probe=self._probe,
+        )
 
     async def _ensure_transport(self) -> AgyTransport:
         if self._closed:

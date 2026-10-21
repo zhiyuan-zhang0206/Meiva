@@ -11,6 +11,18 @@ from base.lm.harness.codex.transport import StdioAppServer
 SAMPLE_KEY = "sk-proj-sample-value"
 
 
+# meiva:note
+# A session resolves the CLI it will spawn before it builds the transport, so a test that
+# constructs one on a machine without `codex` pins its own stand-in: what these tests
+# assert is the environment the transport is handed, not where the binary lives.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def _stub_codex(root: Path) -> str:
+    stub = root / "codex"
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.chmod(0o755)
+    return str(stub)
+
+
 def test_the_key_never_reaches_the_child_by_default() -> None:
     env = build_env({"OPENAI_API_KEY": SAMPLE_KEY, "PATH": "/bin", "CODEX_HOME": "/h"})
     assert "OPENAI_API_KEY" not in env
@@ -35,7 +47,7 @@ def test_api_key_mode_passes_the_key_through() -> None:
 # meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
 def test_a_session_sanitizes_the_environment_it_hands_the_transport(tmp_path: Path) -> None:
     session = CodexSession(
-        CodexConfig(cwd=tmp_path),
+        CodexConfig(cwd=tmp_path, binary=_stub_codex(tmp_path)),
         environ={"OPENAI_API_KEY": SAMPLE_KEY, "PATH": "/bin"},
     )
     assert cast(StdioAppServer, session._transport)._environ == {"PATH": "/bin"}
@@ -43,7 +55,7 @@ def test_a_session_sanitizes_the_environment_it_hands_the_transport(tmp_path: Pa
 
 def test_api_key_mode_reaches_the_child_through_the_session(tmp_path: Path) -> None:
     session = CodexSession(
-        CodexConfig(cwd=tmp_path, api_key_mode=True),
+        CodexConfig(cwd=tmp_path, api_key_mode=True, binary=_stub_codex(tmp_path)),
         environ={"OPENAI_API_KEY": SAMPLE_KEY},
     )
     assert cast(StdioAppServer, session._transport)._environ == {"OPENAI_API_KEY": SAMPLE_KEY}
