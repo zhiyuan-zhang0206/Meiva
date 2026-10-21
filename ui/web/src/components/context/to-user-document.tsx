@@ -82,7 +82,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   // The caller owns the question and Inspector as siblings of this document,
   // so navigating its keyed body cannot discard an unfinished answer.
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
-  return (
+  return mobile && inspecting ? null : (
     <section className={cn(FLEX, MIN_H_0, "shrink-0", FLEX_COL)} aria-label={t("sharedContext")}>
       <div data-testid="document-bar" className={cn("shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_WRAP_CLASS, FLEX)}>
         {inspecting ? null : (
