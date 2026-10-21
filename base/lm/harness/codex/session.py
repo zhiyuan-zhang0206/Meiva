@@ -186,7 +186,7 @@ class CodexSession:
         self._probe: ChildProbe = probe or PsutilChildProbe()
         self._registry = registry
         self._transport: AppServerTransport = transport or StdioAppServer(
-            config.command(),
+            config.command(config.resolved_binary(environ)),
             cwd=config.cwd,
             environ=session_env(environ, api_key_mode=config.api_key_mode),
             request_timeout=config.startup_timeout_seconds,

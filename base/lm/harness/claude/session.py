@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from base.host.env.harness_binaries import resolve_harness_binary
 from base.lm.harness.claude.auth import build_env
 from base.lm.harness.claude.config import BridgeConfig
 from base.lm.harness.claude.mapping import map_message, parse_result
@@ -184,6 +185,17 @@ class ClaudeSession:
         self._probe: ChildProbe = probe or PsutilChildProbe()
         self._registry = registry
         self._environ = dict(environ)
+        # meiva:note
+        # The SDK resolves a bare `claude` with `shutil.which` against this process's own
+        # PATH, and the bridge child this session runs in is handed an environment with
+        # none (#5491). Pin the CLI we resolved; an injected SDK is a test double and must
+        # not require the binary to exist.
+        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        self._cli_path: str | None = (
+            None
+            if sdk is not None
+            else resolve_harness_binary("claude", path_env=self._environ.get("PATH"))
+        )
         self._events: asyncio.Queue[Any] = asyncio.Queue()
         self._pending: deque[TurnTicket] = deque()
         self._completed: OrderedDict[str, TurnOutcome] = OrderedDict()
@@ -375,7 +387,13 @@ class ClaudeSession:
             yield event
 
     def _build_options(self, resume: str | None) -> Any:
+        # meiva:note
+        # `cli_path` rides only when we resolved one: Python's own Claude Code SDK takes
+        # it, while a test double that models the older option set would reject it.
+        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        resolved = {} if self._cli_path is None else {"cli_path": self._cli_path}
         return self._sdk.ClaudeAgentOptions(
+            **resolved,
             model=self.config.model,
             cwd=str(self.config.cwd),
             tools=list(self.config.tools),

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -18,6 +16,7 @@ from base.api_contracts.agent_contract import (
     HarnessStatus,
 )
 from base.db import fetch_one
+from base.host.env.harness_binaries import HARNESS_BIN_DIRS, locate_harness_binary
 
 DEFAULT_HARNESS = Harness.MEIVA
 
@@ -54,14 +53,6 @@ class _LoginEvidence:
 # trimmed. Agents start without the interactive shell profile, so a missing PATH
 # entry alone is not proof that the harness is absent.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
-_FALLBACK_BIN_DIRS = (
-    ".local/bin",
-    ".npm-global/bin",
-    ".bun/bin",
-    ".claude/local",
-    "/usr/local/bin",
-    "/opt/homebrew/bin",
-)
 
 
 def coerce_harness(value: str | Harness | None) -> Harness:
@@ -328,25 +319,11 @@ if _UNPROBED:
     )
 
 
-def _locate(
-    binary: str, home: Path, path_env: str | None, bin_dirs: Sequence[str]
-) -> tuple[str | None, bool]:
-    found = shutil.which(binary, path=path_env)
-    if found is not None:
-        return str(Path(found).resolve()), True
-    for entry in bin_dirs:
-        candidate = Path(entry) if Path(entry).is_absolute() else home / entry
-        path = candidate / binary
-        if path.is_file() and os.access(path, os.X_OK):
-            return str(path), False
-    return None, False
-
-
 def _probe_external(
     harness: Harness, home: Path, path_env: str | None, bin_dirs: Sequence[str]
 ) -> HarnessProbe:
     binary = _BINARIES[harness]
-    path, on_path = _locate(binary, home, path_env, bin_dirs)
+    path, on_path = locate_harness_binary(binary, home=home, path_env=path_env, bin_dirs=bin_dirs)
     if path is None:
         searched = ", ".join(
             entry if Path(entry).is_absolute() else f"~/{entry}" for entry in bin_dirs
@@ -387,7 +364,7 @@ def probe_local_harnesses(
     bin_dirs: Sequence[str] | None = None,
 ) -> list[HarnessProbe]:
     resolved_home = Path.home() if home is None else home
-    resolved_bin_dirs = _FALLBACK_BIN_DIRS if bin_dirs is None else bin_dirs
+    resolved_bin_dirs = HARNESS_BIN_DIRS if bin_dirs is None else bin_dirs
     rows: list[HarnessProbe] = []
     for harness in Harness:
         if harness is Harness.MEIVA:

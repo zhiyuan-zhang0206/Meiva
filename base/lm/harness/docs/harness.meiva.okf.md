@@ -61,6 +61,27 @@ best-effort helper: it reads an SDK client's private transport and returns `None
 rather than guessing when the shape changes. That debt is registered in the
 [tech-debt ledger](../../../../future/tech-debt/ledger.md).
 
+## Where the CLI comes from
+
+A harness session starts from the daemon child environment, which is a positive
+allowlist and therefore carries no `PATH`: a bare `codex`/`claude`/`agy` would
+resolve against the OS default (`/usr/bin:/bin:/usr/sbin:/sbin`), so a real spawn
+failed while `which codex` in a shell succeeded. Two rules close that gap.
+
+`base/host/env/harness_binaries.py::with_harness_path` rebuilds `PATH` at the
+session delivery point (`wiring.session_environ`): the host's own entries first,
+then the directories harness CLIs install into (`~/.local/bin`, `~/.npm-global/bin`,
+`~/.bun/bin`, `~/.claude/local`, `/usr/local/bin`, `/opt/homebrew/bin`), then the
+system dirs. The same list feeds the probe in `base/agents/birth/harness.py` and the
+`launchd` job PATH in `base/host/system/cron.py`, so all three agree on where the
+CLIs live.
+
+Each adapter then spawns the path it resolved, not the name: `codex` and `agy` cache
+the resolution, and the Claude Code session passes the SDK a `cli_path` because the
+SDK resolves a bare name with `shutil.which` against its own process environment. A
+failure names the PATH and every directory that was searched instead of a bare
+`No such file or directory`, and a configured absolute path is never redirected.
+
 ## The handoff document
 
 The handoff is a wire format, not an internal dataclass: the waking agent reads
