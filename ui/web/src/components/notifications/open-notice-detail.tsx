@@ -95,8 +95,8 @@ export function OpenNoticeDetail({
     void run({ action: "dismiss" }, t(notice.question ? "noLongerAvailable" : "alreadyDismissed"), t("dismiss"));
 
   return (
-    <div className={cn("space-y-4", className)}>
-      <div className="space-y-3 pb-4">
+    <div className={cn("space-y-3 text-[13px]", className)}>
+      <div className="space-y-1.5">
         <div className={cn("flex-wrap items-center gap-1.5", FLEX)}>
           <span
             className={cn(
@@ -111,9 +111,6 @@ export function OpenNoticeDetail({
               {t("blocking")}
             </span>
           )}
-          <span className="text-[10px] text-muted-foreground">
-            {t("needsAnswer")}
-          </span>
           {showTimestamp ? (
             <>
               <span aria-hidden className="text-[10px] text-muted-foreground">·</span>
@@ -131,9 +128,9 @@ export function OpenNoticeDetail({
             </>
           ) : null}
         </div>
-        <h4 className="text-lg font-semibold leading-snug break-words">{notice.title}</h4>
+        <h4 className="text-[13px] font-semibold leading-snug break-words">{notice.title}</h4>
         {notice.content && (
-          <div className="text-sm break-words text-foreground/85">
+          <div className="text-[13px] break-words text-foreground/85">
             <ChatMarkdown content={notice.content} />
           </div>
         )}
@@ -142,9 +139,9 @@ export function OpenNoticeDetail({
       {notice.question ? (
         <>
           <NoticeQuestionForm question={notice.question} pending={pending || unavailable} focusAnswer={autoFocus} onAnswerChange={setStructuredAnswer} />
-          <div className={cn("sticky bottom-0 flex-wrap items-center justify-between gap-3 border-t border-border bg-background py-3", FLEX)}>
-            <Button variant="ghost" onClick={dismiss} disabled={pending || unavailable}>{t("closeQuestion")}</Button>
-            <Button onClick={answer} disabled={pending || unavailable || !structuredAnswer}>{pending ? t("submitting") : t("submitAnswer")}</Button>
+          <div className={cn("sticky bottom-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-background py-2", FLEX)}>
+            <Button size="sm" variant="ghost" onClick={dismiss} disabled={pending || unavailable}>{t("closeQuestion")}</Button>
+            <Button size="sm" onClick={answer} disabled={pending || unavailable || !structuredAnswer}>{pending ? t("submitting") : t("submitAnswer")}</Button>
           </div>
         </>
       ) : (
@@ -177,14 +174,14 @@ export function OpenNoticeDetail({
         </div>
       )}
 
-      <div className={cn("min-h-4 items-center justify-between gap-2", FLEX)}>
+      {(error !== null || !notice.question) && <div className={cn("items-center justify-between gap-2", FLEX)}>
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : <span />}
         {!notice.question && (
           <Button type="button" variant="ghost" size="sm" onClick={dismiss} disabled={pending}>
             {t("closeQuestion")}
           </Button>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
