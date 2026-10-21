@@ -58,6 +58,11 @@ and the matching GitHub Releases.
 
 ### Fixed
 
+- The "To user" panel scrolls with the console's own auto-hiding scrollbar instead of
+  a native one that never leaves, and its narrow-screen header offers the same
+  document icon the wide layout uses rather than the words "To user" (user report
+  2026-10-21).
+
 - The unresolved-alerts badge moved from the conversation header into the sidebar's
   icon row beside Settings: a standing cluster state does not belong in the slot the
   reader needs for the conversation, and the sidebar is where the other standing
