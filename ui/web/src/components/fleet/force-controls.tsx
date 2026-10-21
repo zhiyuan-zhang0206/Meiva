@@ -99,13 +99,23 @@ export interface ForceGroup {
 }
 
 // ── Shared defaults ──
+// meiva:note
 // ONE default set for every force graph (fleet Graph View, Task Graph): the
 // user asked for the Task Graph to reuse the Agent Graph's parameter system
 // wholesale, so both views share FORCE_DEFAULTS — only the persisted setting
 // key differs (display.graph_force_params / display.task_force_params.v2,
 // user ruling 2026-08-10 #1127: the two graphs are independent UIs and must
-// not share tuning state). Defaults reproduce the prior Graph View behavior
-// exactly, so an untouched graph is unchanged.
+// not share tuning state).
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:note
+// alphaDecay defaults to 0.08 rather than d3's 0.0228. At 0.0228 the 40-node
+// Agent Graph ran 295 ticks — 4.9 s at 60 fps — and every node travelled 108 px
+// on average before it stopped, which the user read as "too much movement"
+// while still liking the landing itself (2026-10-21). 0.08 settles in 82 ticks
+// (1.4 s) with the same layout and no overlapping nodes, and the entrance still
+// shows a landing. Only a default changes: a browser that already stored
+// display.*_force_params keeps its value, and the slider range stays 0.001-0.2.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 export const FORCE_DEFAULTS: ForceParams = {
   nodeSizeMin: 18,
   nodeSizeMax: 26,
@@ -116,7 +126,7 @@ export const FORCE_DEFAULTS: ForceParams = {
   centerForceX: 0.2,
   centerForceY: 0.2,
   collidePadding: 6,
-  alphaDecay: 0.0228,
+  alphaDecay: 0.08,
   zoomPadding: 24,
   zoomFitRatio: 1,
 };
