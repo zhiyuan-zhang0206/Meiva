@@ -5,6 +5,7 @@ import json
 import psycopg
 import pytest
 
+from base.api_contracts.agent_contract import Harness
 from gateway.app import openapi_schema
 from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
@@ -14,6 +15,7 @@ _DIRECTORY_CARD_KEYS = frozenset(
         "spawner",
         "fork_source_agent_id",
         "status",
+        "harness",
         "spawned_at",
         "last_active_at",
         "last_inbound_at",
@@ -92,21 +94,35 @@ class TestList:
             response = client.get("/api/agents", params={"scope": "future"})
         assert response.status_code == 422
 
-    def test_directory_cards_omit_detail_only_fields(self, db_conn: psycopg.Connection) -> None:
+    @pytest.mark.parametrize("harness", [Harness.MEIVA, Harness.CLAUDE_CODE, Harness.CODEX])
+    def test_directory_cards_omit_detail_only_fields(
+        self, db_conn: psycopg.Connection, harness: Harness
+    ) -> None:
+        from base.db import create_agent
+
+        agent_id = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status, harness) "
+                "VALUES (%s, 'user', 'idling', %s)",
+                (agent_id, harness.value),
+            )
+        db_conn.commit()
         with gateway_test_client() as client:
-            agent_id = spawn_via_http(client, {}).json()["id"]
             response = client.get("/api/agents")
             detail = client.get(f"/api/agents/{agent_id}")
 
         assert response.status_code == 200
         row = response.json()["agents"][0]
         assert set(row) == _DIRECTORY_CARD_KEYS
+        assert row["harness"] == harness.value
         assert row["open_impersonation_session_id"] is None
         assert row["open_impersonation_status"] is None
         assert row["observation"]["runtime_owner"] == "unknown"
         assert row["observation"]["machine_probe_at"] is None
         assert row["observation"]["machine_probe_valid_until"] is None
         assert detail.status_code == 200
+        assert detail.json()["harness"] == harness.value
         assert "fork_source_checkpoint_id" in detail.json()
         assert "last_probe_at" in detail.json()
 
