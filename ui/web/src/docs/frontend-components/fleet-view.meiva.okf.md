@@ -38,6 +38,16 @@ with only tens of milliseconds in JavaScript. `useForceLayout`'s manual path was
 built for the memory graph earlier (task #4008); this is the same treatment for
 the two Fleet canvases.
 
+### How long the entrance runs
+
+Below the threshold the settle is the visible entrance, so `alphaDecay` is what
+the reader feels. The shared default is **0.08** (82 ticks, ~1.4 s at 60 fps,
+79 px of average node travel on the 40-node agent graph) rather than d3's 0.0228
+(295 ticks, 4.9 s, 108 px). The user asked for the landing to stay and the
+movement to shrink (2026-10-21). Only the default moved: a browser holding a
+stored `display.*_force_params` keeps its own value, and the slider range stays
+0.001-0.2.
+
 ## Relationship to Other Nodes
 
 - [[ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md|Frontend Components]] — the catalog this surface was split out of; the conversation view and settings/auth components live there.

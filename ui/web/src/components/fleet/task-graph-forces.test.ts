@@ -128,7 +128,14 @@ describe("TaskGraph square layout under the shared defaults", () => {
     const atZero = meanNearestNeighbour(0);
     const atMid = meanNearestNeighbour(1000);
     const atMax = meanNearestNeighbour(sliderMax("repulsion"));
-    expect(atMid).toBeGreaterThan(atZero * 1.15);
+    // meiva:note
+    // The mid step is 1.10, not 1.15: a settle stops at alphaMin, so total force
+    // impulse scales with 1/alphaDecay, and the band's response compresses as the
+    // default cools faster. At alphaDecay 0.0228 the steps were 1.215 / 1.321; at
+    // 0.08 they are 1.137 / 1.361, i.e. the knob still spreads the board at both
+    // steps and the top step improved. The top threshold stays 1.15.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    expect(atMid).toBeGreaterThan(atZero * 1.1);
     expect(atMax).toBeGreaterThan(atMid * 1.15);
   });
 });
