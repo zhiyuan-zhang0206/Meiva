@@ -471,9 +471,21 @@ def announce_stopping(
     from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
     from base.paths import meiva_home
+    from cli.commands.lifecycle import stand_down
 
-    access = gateway_access_from_settings()  # ambient: C
+    # meiva:note
+    # The local half of the intent is written first: a boot job that starts this
+    # home later reads it and stays down (task #5493). Writing it before the
+    # gateway call is what makes an unreachable gateway cost the record nothing.
+    held = stand_down.record(
+        meiva_home(),
+        until=stand_down.window_until(maintenance_for_seconds),
+        reason=maintenance_reason,
+        machine=machine.name(),
+    )
+    print(f"[meiva stop] stand-down recorded ({held.describe()})")
     try:
+        access = gateway_access_from_settings()  # ambient: C
         name = machine.name()
         home = str(meiva_home())
         url = f"{gateway_api_base(access.gateway_url)}/api/cluster/stopping"

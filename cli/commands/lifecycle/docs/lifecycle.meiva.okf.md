@@ -22,6 +22,12 @@ form one package rather than one per verb.
 `migrations.py` are public: `data_plane/maintenance_stop` and the cutover
 scripts reach them. The `_`-prefixed modules are steps only this package calls.
 
+## Stand-down
+
+A stop leaves `run/meiva-root/stand-down.json` so the OS boot job cannot undo it;
+only an explicit start ends it. [[stand-down|Stand-down]] owns the record's shape,
+who writes it and how the boot job reads it (task #5493).
+
 ## Stop and restart
 
 `stop.py` exposes `stop` through `_temporary_stop`. Every keep-or-stop choice
