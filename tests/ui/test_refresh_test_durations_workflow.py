@@ -182,3 +182,21 @@ def test_ci_shards_never_record_or_upload_durations(suite: str) -> None:
     assert "--store-durations" not in run["run"]
     assert "--clean-durations" not in run["run"]
     assert not [step for step in steps if "duration measurement" in str(step.get("name"))]
+
+
+# meiva:note
+# The measured population shells out to node; a shard that draws those tests needs
+# ui/web/node_modules/typescript or the whole refresh fails (task #5479).
+def test_both_measurement_jobs_install_the_typescript_parser_dependencies() -> None:
+    jobs = _yaml(_WORKFLOW)["jobs"]
+    for name in ("measure-backend", "measure-e2e"):
+        steps = jobs[name]["steps"]
+        node = _step(steps, "Install Node")
+        assert node["uses"].startswith("actions/setup-node@")
+        assert node["with"]["node-version"] == 22
+        installs = [
+            step
+            for step in steps
+            if step.get("working-directory") == "ui/web" and step.get("run") == "npm ci"
+        ]
+        assert len(installs) == 1, f"{name} must install ui/web deps exactly once"
