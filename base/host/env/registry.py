@@ -386,6 +386,27 @@ def child_env(role: Literal["gateway", "runner"]) -> dict[str, str]:
     return env
 
 
+# meiva:note
+# Every key a harness session child may carry: the view `child_env("runner")` builds,
+# plus the PATH a delivery rebuilds and the two names a delivery adds (the session's
+# registration handle and the Claude config dir). A consumer that cannot *remove* an
+# inherited key — the Claude Agent SDK merges the parent process environment under its
+# own `env` — blanks every other key instead, so what the child sees is this allowlist
+# and nothing else.
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+_SESSION_DELIVERY_KEYS = frozenset({"PATH", "MEIVA_HARNESS_HANDLE", "CLAUDE_CONFIG_DIR"})
+
+
+def session_child_env_keys() -> frozenset[str]:
+    return (
+        frozenset(session_forward_keys())
+        | HOST_PASSTHROUGH_KEYS
+        | _TEMP_DIR_KEYS
+        | NETWORK_PROXY_KEYS
+        | _SESSION_DELIVERY_KEYS
+    )
+
+
 def process_environment() -> dict[str, str]:
     # meiva:note
     # The inherited environment, for a caller that must hand a child a modified view of it
