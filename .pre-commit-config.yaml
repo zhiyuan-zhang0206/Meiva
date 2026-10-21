@@ -23,6 +23,15 @@ repos:
         exclude: ^deploy/otel-collector/otel-collector\.yaml$
       - id: check-toml
       - id: check-merge-conflict
+      # meiva:note
+      # The entry above returns 0 unless the repository is mid-merge, so a conflict
+      # marker that is already committed is invisible to it — that is how #6551
+      # reached CI (task #5494). One rule, one gate: at push time the same hook runs
+      # with --assume-in-merge, so a tree carrying markers cannot leave the machine.
+      - id: check-merge-conflict
+        alias: check-committed-merge-conflict
+        args: [--assume-in-merge]
+        stages: [pre-push]
       - id: check-added-large-files
         args: [--maxkb=500]
       - id: check-case-conflict

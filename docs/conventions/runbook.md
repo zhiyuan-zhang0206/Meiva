@@ -887,6 +887,20 @@ env -u VIRTUAL_ENV uv tool install pre-commit
 ~/.local/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
+`git rebase --continue` never runs the commit hook, so a conflict resolved with the
+markers left in is committed silently (2026-10-21, #6551/#5494) — and the stock
+`check-merge-conflict` returns 0 unless the repository is *mid*-merge, so it never
+saw it either. One rule, one gate: `check-committed-merge-conflict` is that same
+hook with `--assume-in-merge`, declared for the push stage, so a tree carrying
+markers cannot leave the machine however it was built.
+
+Push with `scripts/hooks/push.sh` when the hook output can be large. OpenSSH sets
+`O_NONBLOCK` on an inherited stdio pipe for the whole push, so
+`git push 2>&1 | tail` makes pre-commit's captured output fail with
+`BlockingIOError` and the push aborts after the hooks already ran; a regular file
+never blocks, and the wrapper redirects there and retries once. Bypassing with
+`--no-verify` is not a repair.
+
 The configuration also makes plain `pre-commit install` install both stages.
 Never install from an ephemeral worktree: all worktrees of a clone share
 `git rev-parse --git-common-dir`'s `hooks/` directory, and pre-commit writes the
