@@ -40,7 +40,7 @@ The daemon creates one persistent shell for each fresh `serve()` registration an
 
 The following are mounted onto the `meiva.ui` namespace by the `meiva_fleet` plugin (non-core). See plugin-side OKF for details.
 
-- `notify(title, content=None, *, require_response=True, blocking=False, priority='P2', task=None, expire_at=None, idempotency_key, question=None) → Notice` — Post a notice to the user's inbox. One open notice per agent: while one is open, a second call raises with that notice's id and the two ways out (dismiss it, or edit it in place); nothing is replaced silently. Every notice requires a reply; `require_response=False` is rejected; `blocking=True` indicates you are blocked waiting. The returned `Notice` is an int subclass with `.pending_count` / `.pending_notices`.
+- `notify(title, content=None, *, require_response=True, blocking=False, priority='P2', task=None, expire_at=None, idempotency_key, question=None) → Notice` — Post a notice to the user's inbox. One open notice per agent: while one is open, a second call raises with that notice's id and the two ways out (dismiss it, or edit it in place); nothing is replaced silently. Every notice requires a reply; `require_response=False` is rejected; `blocking=True` indicates you are blocked waiting. The returned `Notice` is an int subclass with `.pending_count` / `.pending_notices`. A notice whose deadline passes closes as `expired`: no reply arrives, the slot frees, and a system message says so.
 - `edit_notice(*, title=..., content=..., priority=..., blocking=...)` — Edit the open notice (only pass fields to change; cannot change `require_response`; at most one is open, so no id).
 - `dismiss_notice()` — Dismiss the open notice (at most one is open, so no id).
 
