@@ -339,7 +339,6 @@ export default tseslint.config(
     files: [
       "src/components/fleet/**/*.{ts,tsx}",
       "src/app/insights/**/*.{ts,tsx}",
-      "src/app/memory/graph/**/*.{ts,tsx}",
       "src/components/agents/spawn-button.tsx",
     ],
     ignores: ["**/*.test.{ts,tsx}"],

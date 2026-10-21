@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-import threading
-from collections import OrderedDict
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -14,14 +12,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from base.api_contracts.agent_contract import IndexerUnavailable
 from base.db import Database
-from base.packages.docs.notes import Note, extract_md_links, parse_note, walk_notes
+from base.packages.docs.notes import parse_note
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.disconnect import run_until_disconnect
 from gateway.http.model_catalog import require_model_catalog
 from gateway.schemas.memory import (
-    MemoryGraphEdge,
-    MemoryGraphNode,
-    MemoryGraphResponse,
     MemoryNoteResponse,
     MemoryRefreshResponse,
     MemorySearchRequest,
@@ -74,116 +69,6 @@ async def _bounded_semaphore(semaphore: asyncio.Semaphore, budget: float) -> Asy
         yield
     finally:
         semaphore.release()
-
-
-_RESERVED_NAMES = frozenset({"index.md", "log.md", "MEMORY.md"})
-
-
-def _build_memory_graph(memory_root: Path) -> MemoryGraphResponse:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
-    if not memory_root.is_dir():
-        return MemoryGraphResponse(nodes=[], edges=[], warnings=["memory_root not found"])
-
-    warnings: list[str] = []
-    nodes: list[MemoryGraphNode] = []
-    reference_edges: list[MemoryGraphEdge] = []
-    for md_file, note in walk_notes(memory_root, skip_names=_RESERVED_NAMES, warnings=warnings):
-        nodes.append(_node_from_note(note))
-        reference_edges.extend(
-            MemoryGraphEdge(source=source, target=target, kind="reference")
-            for source, target in extract_md_links(note.body, md_file.parent, memory_root, note.rel)
-        )
-
-    note_ids = {node.id for node in nodes}
-    reference_edges = [e for e in reference_edges if e.target in note_ids]
-
-    folder_nodes, containment_edges = _folder_structure(nodes, memory_root)
-
-    return MemoryGraphResponse(
-        nodes=[*folder_nodes, *nodes],
-        edges=[*containment_edges, *reference_edges],
-        warnings=warnings,
-    )
-
-
-def _folder_id_of(rel_id: str) -> str:
-    parts = rel_id.split("/")
-    if len(parts) == 1:
-        return "/"
-    return "/".join(parts[:-1]) + "/"
-
-
-def _parent_folder_id(folder_id: str) -> str:
-    parts = folder_id.rstrip("/").split("/")
-    return "/" if len(parts) <= 1 else "/".join(parts[:-1]) + "/"
-
-
-def _folder_structure(
-    nodes: list[MemoryGraphNode], memory_root: Path
-) -> tuple[list[MemoryGraphNode], list[MemoryGraphEdge]]:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
-    if not nodes:
-        return [], []
-
-    folders: set[str] = {"/"}
-    for node in nodes:
-        folder = _folder_id_of(node.id)
-        while folder != "/":
-            folders.add(folder)
-            folder = _parent_folder_id(folder)
-
-    folder_nodes = [
-        MemoryGraphNode(
-            id=folder,
-            path=folder,
-            title=(
-                memory_root.name or "/" if folder == "/" else folder.rstrip("/").rsplit("/", 1)[-1]
-            ),
-            kind="folder",
-            description=None,
-            tags=[],
-            primary_tag="",
-            timestamp=None,
-            meiva_agent=None,
-            meiva_machine=None,
-        )
-        for folder in sorted(folders)
-    ]
-
-    edges = [
-        MemoryGraphEdge(source=node.id, target=_folder_id_of(node.id), kind="containment")
-        for node in nodes
-    ]
-    edges.extend(
-        MemoryGraphEdge(source=folder, target=_parent_folder_id(folder), kind="containment")
-        for folder in sorted(folders)
-        if folder != "/"
-    )
-    return folder_nodes, edges
-
-
-def _node_from_note(note: Note) -> MemoryGraphNode:
-    tags = list(note.tags)
-    return MemoryGraphNode(
-        id=note.rel,
-        path=note.rel + ".md",
-        title=note.title,
-        kind="note",
-        description=note.description,
-        tags=tags,
-        primary_tag=primary_tag(tags),
-        timestamp=note.timestamp,
-        meiva_agent=note.meiva_agent,
-        meiva_machine=note.meiva_machine,
-    )
-
-
-def primary_tag(tags: list[str]) -> str:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
-    domain = [t for t in tags if not t.startswith("type/")]
-    if domain:
-        return domain[0]
-    return tags[0] if tags else ""
 
 
 async def _backend_topk(
@@ -379,59 +264,6 @@ async def post_memory_refresh(request: Request) -> MemoryRefreshResponse:
         branch=config.track_branch,
     )
     return MemoryRefreshResponse(head=head)
-
-
-def _pool_revision(root: Path) -> str | None:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
-    try:
-        out = subprocess.run(  # noqa: S603
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if out.returncode != 0:
-        return None
-    return out.stdout.strip() or None
-
-
-class MemoryGraphCache:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
-    def __init__(self, *, max_entries: int = 4) -> None:
-        self._max_entries = max_entries
-        self._graphs: OrderedDict[tuple[str, str], MemoryGraphResponse] = OrderedDict()
-        self._lock = threading.Lock()
-
-    def get(self, root: Path, revision: str) -> MemoryGraphResponse:
-        key = (str(root), revision)
-        with self._lock:
-            cached = self._graphs.get(key)
-            if cached is not None:
-                self._graphs.move_to_end(key)
-                return cached
-            graph = _build_memory_graph(root)
-            self._graphs[key] = graph
-            while len(self._graphs) > self._max_entries:
-                self._graphs.popitem(last=False)
-            return graph
-
-
-@router.get(
-    "/api/memory/graph",
-    response_model=MemoryGraphResponse,
-    description=("Return concept notes and cross-links from the gateway memory bundle."),
-)
-def get_memory_graph(request: Request) -> MemoryGraphResponse:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
-    root = request.app.state.gateway_config.memory_root
-    revision = _pool_revision(root)
-    if revision is None:
-        return _build_memory_graph(root)
-    cache: MemoryGraphCache = request.app.state.memory_graph_cache
-    return cache.get(root, revision)
 
 
 @router.get(

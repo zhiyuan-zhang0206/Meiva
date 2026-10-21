@@ -73,7 +73,7 @@ describe("To user Markdown", () => {
     const { container } = show(document('# Status\n\n<style>body{color:red}</style>\n\n<script>alert(1)</script>\n\n[secret](/private/file)\n\n[site](https://example.com)'));
     expect(screen.getByRole("heading", { name: "Status" })).toBeTruthy();
     expect(container.querySelector(".chat-md.font-sans")).toBeTruthy();
-    expect(container.querySelector("iframe,style,script")).toBeNull();
+    expect(container.querySelector(".chat-md")!.querySelector("iframe,style,script")).toBeNull();
     expect(screen.queryByRole("link", { name: "secret" })).toBeNull();
     expect(screen.getByText("secret")).toBeTruthy();
     expect(screen.getByRole("link", { name: "site" }).getAttribute("target")).toBe("_blank");

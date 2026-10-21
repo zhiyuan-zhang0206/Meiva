@@ -45,7 +45,6 @@ import type { ToUserDocument, NoticesFeed,
   InventoryWriteResult,
   SkillView,
   SkillsView,
-  MemoryGraphResponse,
   MemoryNoteResponse,
   ModelsResponse,
   PackageDraftResponse,
@@ -579,9 +578,6 @@ export const api = {
   // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
   getTask: (id: number): Promise<TaskRow> => f(`/api/tasks/${id}`).then(ok<TaskRow>),
 
-  getMemoryGraph: (): Promise<MemoryGraphResponse> => {
-    return f("/api/memory/graph").then(ok<MemoryGraphResponse>);
-  },
 
   getMemoryNote: (path: string): Promise<MemoryNoteResponse> => {
     const q = new URLSearchParams({ path });

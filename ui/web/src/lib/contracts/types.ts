@@ -177,9 +177,6 @@ export type SpawnedAgent = Schemas["SpawnedAgent"];
 export type ModelsResponse = Schemas["ModelsResponse"];
 export type DefaultModelView = Schemas["DefaultModelView"];
 
-export type MemoryGraphNode = Schemas["MemoryGraphNode"];
-export type MemoryGraphEdge = Schemas["MemoryGraphEdge"];
-export type MemoryGraphResponse = Schemas["MemoryGraphResponse"];
 export type MemoryNoteResponse = Schemas["MemoryNoteResponse"];
 
 export type TerminateAgentResponse = Schemas["TerminateAgentResponse"];

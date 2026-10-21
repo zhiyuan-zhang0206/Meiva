@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   BarChart3,
   Loader2,
-  NotebookText,
   RotateCw,
   Settings,
   Waypoints,
@@ -341,13 +340,6 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
       </Popover.Root>
 
       <div className={cn("items-center gap-0.5", FLEX)}>
-        <SidebarNavButton
-          href="/memory/graph"
-          onClick={() => router.push("/memory/graph")}
-          label={navT("memoryGraph")}
-        >
-          <NotebookText className="size-4" />
-        </SidebarNavButton>
         <SidebarNavButton
           href={fleetHref(activeAgentId)}
           onClick={() => router.push(fleetHref(activeAgentId))}

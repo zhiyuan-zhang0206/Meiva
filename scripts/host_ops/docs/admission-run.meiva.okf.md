@@ -115,10 +115,17 @@ be applied.
 
 ## What it prints and records
 
-One line on stdout when the concurrency changes, nothing when the job fits:
+One line on stdout when the concurrency changes, nothing when the job fits — with one
+exception: an overcommitted job says so even when it still starts at its requested
+count, because `would start 1 of 1` reads the same whether the budget held one worker
+or none (task #5481). That line names the `jobs` count without an arrow:
 
 ```
 admission: jobs 8->2 (lowered: free 26.1 GiB - reserve 12.0 GiB = 14.1 GiB / 5.47 GiB per worker; pressure 1; total = ...)
+```
+
+```
+admission: jobs 1 (overcommitted, still starting one: free 20.8 GiB (memory) - ... )
 ```
 
 `--no-admission <reason>` is the only way past the gate, and it needs the reason:

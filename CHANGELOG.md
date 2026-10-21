@@ -23,6 +23,13 @@ and the matching GitHub Releases.
 
 ### Removed
 
+- The memory graph is gone: its sidebar entry, the `/memory/graph` page that drew
+  ~3000 notes as a force-directed graph, and `GET /api/memory/graph` with its cache,
+  schemas and tests. It had never been used for a decision and could not be reviewed at
+  that size (user ruling 2026-10-21). No data went with it — the graph was derived from
+  the memory pool on every request, and the notes, the search endpoint and the note
+  endpoint are untouched.
+
 - A message card in the Messages timeline no longer offers a fork action on hover (user
   ruling 2026-10-20): the card's hover pill carries Copy alone, and `TimelineView`'s
   `onFork`/`forkPending` props, the row plumbing behind them and the `timeline.forkFromHere`
@@ -57,6 +64,11 @@ and the matching GitHub Releases.
   visibility) remain, unused by any pixel comparison.
 
 ### Fixed
+
+- The "To user" panel scrolls with the console's own auto-hiding scrollbar instead of
+  a native one that never leaves, and its narrow-screen header offers the same
+  document icon the wide layout uses rather than the words "To user" (user report
+  2026-10-21).
 
 - The unresolved-alerts badge moved from the conversation header into the sidebar's
   icon row beside Settings: a standing cluster state does not belong in the slot the

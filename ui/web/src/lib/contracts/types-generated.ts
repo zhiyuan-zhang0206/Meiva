@@ -1951,22 +1951,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/memory/graph": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_memory_graph_api_memory_graph_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/memory/note": {
         parameters: {
             query?: never;
@@ -3132,28 +3116,6 @@ export interface components {
                 [key: string]: unknown;
             }[];
             resource?: components["schemas"]["ResourceSample"] | null;
-        };
-        MemoryGraphEdge: {
-            source: string;
-            target: string;
-            kind: "containment" | "reference";
-        };
-        MemoryGraphNode: {
-            id: string;
-            path: string;
-            title: string;
-            kind: "note" | "folder";
-            description: string | null;
-            tags: string[];
-            primary_tag: string;
-            timestamp: string | null;
-            meiva_agent: string | null;
-            meiva_machine: string | null;
-        };
-        MemoryGraphResponse: {
-            nodes: components["schemas"]["MemoryGraphNode"][];
-            edges: components["schemas"]["MemoryGraphEdge"][];
-            warnings?: string[];
         };
         MemoryNoteResponse: {
             path: string;
@@ -8039,25 +8001,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryRefreshResponse"];
-                };
-            };
-        };
-    };
-    get_memory_graph_api_memory_graph_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryGraphResponse"];
                 };
             };
         };

@@ -680,10 +680,6 @@ describe("stats / config / timeline / system status", () => {
     expect(calls[0].url).toMatch(/\/api\/commands\?agent_id=7$/);
   });
 
-  it("getMemoryGraph GETs /api/memory/graph", async () => {
-    await api.getMemoryGraph();
-    expect(calls[0].url).toMatch(/\/api\/memory\/graph$/);
-  });
 });
 
 describe("uploadFiles", () => {
