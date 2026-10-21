@@ -41,9 +41,8 @@ _CB_LIST = "notice:list"
 _PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 # meiva:note
-# The category a pushed notice belongs to. Only a notice that needs an answer is a
-# notification (`core.needs_input`); a pushed FYI is this bridge's older ambient feed
-# and carries no category, so the user's switch never silences it silently.
+# Response-required notices use `core.needs_input` on every transport. Historical
+# FYI rows are filtered independently of that category and create no outbound intent.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 _NEEDS_INPUT = core_catalog()["core.needs_input"]
 
