@@ -543,6 +543,21 @@ def cmd_start_body(
     # later start inherits it. ``reconcile`` is off only for restart's start leg.
     if retained_children is None:
         raise ValueError("start requires its caller-owned PostgreSQL child retention")
+    # meiva:note
+    # A stop that says "stopped" outranks this start when the OS boot job is the
+    # caller: the boot job exists for an accidental death, not to undo an
+    # operator's stop (task #5493). An explicit start is the one thing that ends
+    # a stand-down, so it clears the record before anything is admitted or launched.
+    with start_trace.phase("stand-down"):
+        from base.paths import meiva_home
+        from cli.commands.lifecycle import stand_down
+
+        line = stand_down.gate(meiva_home(), boot_attempt=boot_attempt)
+        if line is not None:
+            print(f"  · {line}")
+            if boot_attempt:
+                return 0
+
     # Resolve the defining modules at the lifecycle operation boundary.
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 
