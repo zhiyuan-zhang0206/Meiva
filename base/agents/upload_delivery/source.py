@@ -236,18 +236,31 @@ def served_object(
     return path, item
 
 
+# meiva:note
+# The claim is the SELECT's own UPDATE: every returned row has its next_attempt_at
+# pushed claim_seconds ahead, so a second worker reading at the same instant finds
+# nothing (task #5439 — two gateways on one database copied the same batch twice).
+# FOR UPDATE SKIP LOCKED keeps concurrent claims from waiting on each other; a failed
+# copy overwrites the claim with its own backoff (record_failure), and a worker that
+# dies mid-copy costs that batch one claim window and nothing else.
+# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
 def due(
     pool: ConnectionPool,
     limit: int = 8,
     *,
     local_machine: str,
+    claim_seconds: float,
 ) -> list[ReceiveRequest]:
-    with pool.connection() as conn:
+    with write_transaction(pool) as conn:
         rows = conn.execute(
-            "SELECT manifest, source_unit, target_unit FROM upload_delivery_batches "
+            "UPDATE upload_delivery_batches SET next_attempt_at=now()+make_interval(secs => %s) "
+            "WHERE batch_id IN ("
+            "SELECT batch_id FROM upload_delivery_batches "
             "WHERE state='pending' AND next_attempt_at<=now() AND source_unit=%s "
-            "ORDER BY next_attempt_at, batch_id LIMIT %s",
+            "ORDER BY next_attempt_at, batch_id LIMIT %s FOR UPDATE SKIP LOCKED"
+            ") RETURNING manifest, source_unit, target_unit",
             (
+                claim_seconds,
                 Jsonb(
                     current_unit(
                         local_machine=local_machine,

@@ -18,7 +18,10 @@ delay cron by hours) and on `workflow_dispatch`, on main only:
    the CI coverage module list, `--store-durations --clean-durations`, three attempts
    that each reseed the temporary duration input, so a failed attempt cannot leak a
    partial measurement. The native backend population excludes the separately owned
-   static tests, as normal CI does.
+   static tests, as normal CI does. Both jobs install Node 22 and `ui/web`'s npm deps:
+   the measured population includes the TypeScript comment-parser tests, whose parser
+   resolves `typescript` from `ui/web/node_modules`, and a shard that draws one of them
+   without that install fails the whole refresh (task #5479).
 3. `publish` downloads the artifacts and runs `merge`, which requires all 12, rejects
    empty or overlapping shards before touching anything, keeps every measured entry
    (fast and zero timings included), rounds to three decimals and writes

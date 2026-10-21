@@ -135,3 +135,60 @@ def test_load_exporter_resolves_under_scripts_ci() -> None:
         )
     finally:
         sys.path[:] = saved_path
+
+
+# meiva:note
+# Newest first: a streak ends at the first run that did not fail. A run still in
+# progress (conclusion None) is not a failure and must not inflate the streak.
+def test_consecutive_failures_counts_only_the_leading_failures() -> None:
+    module = _load()
+    runs = [
+        {"conclusion": "failure"},
+        {"conclusion": "failure"},
+        {"conclusion": "success"},
+        {"conclusion": "failure"},
+    ]
+    assert module.consecutive_failures(runs) == 2
+    assert module.consecutive_failures([{"conclusion": "success"}]) == 0
+    assert module.consecutive_failures([{"conclusion": None}, {"conclusion": "failure"}]) == 0
+    assert module.consecutive_failures([]) == 0
+
+
+def test_the_nightly_duration_refresh_is_watched_at_two_consecutive_failures() -> None:
+    module = _load()
+    assert "refresh-test-durations.yml" in module._SCHEDULED_WORKFLOWS
+    assert module._CONSECUTIVE_FAILURES_ALERT == 2
+
+
+def test_a_broken_timed_workflow_messages_the_p0_lead() -> None:
+    module = _load()
+    exporter = SimpleNamespace(
+        FetchStats=Mock,
+        _run_gh=Mock(
+            return_value=(
+                '{"workflow_runs": [{"conclusion": "failure", "html_url": "u2",'
+                ' "created_at": "t2"}, {"conclusion": "failure", "html_url": "u1",'
+                ' "created_at": "t1"}]}'
+            )
+        ),
+    )
+    sent: list[str] = []
+    module._alert_broken_scheduled_workflows(exporter, "owner/repo", notify=sent.append)
+    assert len(sent) == 1
+    assert "failed 2 runs in a row" in sent[0]
+    assert "u2" in sent[0]
+
+
+def test_a_single_failure_does_not_message() -> None:
+    module = _load()
+    exporter = SimpleNamespace(
+        FetchStats=Mock,
+        _run_gh=Mock(
+            return_value=(
+                '{"workflow_runs": [{"conclusion": "failure"}, {"conclusion": "success"}]}'
+            )
+        ),
+    )
+    sent: list[str] = []
+    module._alert_broken_scheduled_workflows(exporter, "owner/repo", notify=sent.append)
+    assert sent == []
