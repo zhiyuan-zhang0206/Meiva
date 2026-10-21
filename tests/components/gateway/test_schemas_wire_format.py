@@ -11,7 +11,7 @@ from gateway.agents.schemas import (
 
 
 def test_agent_row_wire_shape() -> None:
-    from base.api_contracts.agent_contract import AgentStatus, LivenessState
+    from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
 
     t = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
     m = AgentRow(
@@ -20,6 +20,7 @@ def test_agent_row_wire_shape() -> None:
         fork_source_agent_id=None,
         fork_source_checkpoint_id=None,
         status=AgentStatus.IDLING,
+        harness=Harness.MEIVA,
         spawned_at=t,
         last_active_at=t,
         last_inbound_at=t,
@@ -36,6 +37,7 @@ def test_agent_row_wire_shape() -> None:
     assert d["agent_id"] == 1
     assert d["label"] == "agent-1"
     assert d["spawner"] == "user"
+    assert d["harness"] == "meiva"
     assert d["supports_vision"] is True
     assert d["notices_awaiting_response"] == []
     assert d["unread_notice_count"] == 0

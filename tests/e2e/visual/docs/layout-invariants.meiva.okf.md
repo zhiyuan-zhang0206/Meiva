@@ -18,6 +18,9 @@ The suite drives the stubbed Home page (`stubbed_home.py`: a fake EventSource,
 cannot open the real cookie-gated SSE stream and `page.route` cannot stream to an
 EventSource, so an injected fake carries the snapshot → delta → reconnect
 sequence; without a growing stream every invariant would false-pass.
+The shared agent stub explicitly owns the Meiva harness, matching the required
+roster/detail contract. Its system prompt supplies the pinned work-detail block;
+an unknown or external harness correctly hides that native prompt.
 `MEIVA_MOBILE_TEST_BASE_URL` set targets that URL with real data (cookie via
 `MEIVA_TEST_SESSION_COOKIE`) and still injects the fake; unset serves the
 session-scoped `frontend_proc` build with stubbed `/api/**` (CI mode). Engine:
