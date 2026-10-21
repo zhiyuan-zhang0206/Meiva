@@ -50,10 +50,28 @@ def test_numbered_reply_without_other_preserves_following_lines_as_note() -> Non
     assert answer.comment == "Use option 2 first.\nThen option 1."
 
 
-@pytest.mark.parametrize("reply", ["", "yes", "0", "4", "1,1", "3", "3\n  "])
+@pytest.mark.parametrize("reply", ["", "yes", "4", "1,1", "3", "3\n  ", "0,1"])
 def test_numbered_choice_reply_fails_closed(reply: str) -> None:
     with pytest.raises(ValueError):
         parse_numbered_answer(choice(), reply)
+
+
+@pytest.mark.parametrize("kind", ["single_select", "multi_select"])
+def test_a_numbered_reply_can_choose_nothing(kind: str) -> None:
+    # meiva:note
+    # `0` is the numbered clients' way to say "no option" so that a comment-only
+    # answer is expressible outside the Web (user ruling 2026-10-21).
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+    question = choice(kind)
+    answer = parse_numbered_answer(question, "0\nNeither fits; hold until Monday.")
+    assert answer.option_ids == []
+    assert answer.comment == "Neither fits; hold until Monday."
+    assert "Selected: none" in answer_reply(question, answer)
+
+
+def test_a_bare_zero_is_not_an_answer() -> None:
+    with pytest.raises(ValueError, match="selection or a comment"):
+        parse_numbered_answer(choice(), "0")
 
 
 @pytest.mark.parametrize(

@@ -115,8 +115,9 @@ def question_instructions(question: NoticeQuestion) -> str:
         else "numbers separated by commas"
     )
     return (
-        f"{numbered_options(question)}\n\nReply with {mode} on the first line. "
-        "Following lines are an optional comment on your selection."
+        f"{numbered_options(question)}\n\nReply with {mode} on the first line, "
+        "or 0 to choose none. Following lines are an optional comment on your "
+        "selection."
     )
 
 
@@ -142,6 +143,16 @@ def _selected_numbers(question: ChoiceQuestion, first: str) -> list[int]:
         raise ValueError(
             "reply first line must contain option numbers separated by commas"
         ) from exc
+    # meiva:note
+    # `0` alone chooses nothing: a comment-only answer is a complete answer
+    # (user ruling 2026-10-21), and a numbered client needs one explicit token
+    # for "none" or it cannot express it at all. Mixing 0 with real numbers is
+    # ambiguous, so it is refused rather than guessed.
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+    if 0 in numbers:
+        if numbers != [0]:
+            raise ValueError("choose no option (0) or option numbers, not both")
+        return []
     limit = len(question.options)
     if any(number < 1 or number > limit for number in numbers):
         raise ValueError("reply contains an unknown option number")
