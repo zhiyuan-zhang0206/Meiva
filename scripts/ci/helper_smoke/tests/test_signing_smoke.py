@@ -11,17 +11,22 @@ from scripts.ci.helper_smoke import signing_smoke as smoke
         (
             0,
             'Executable=/x\n# designated => identifier "com.meiva.permissions-helper" '
-            'and certificate leaf = H"ab"',
-            "certificate leaf",
+            'and certificate root = H"ab"',
+            'certificate root = H"',
             None,
         ),
         (
             1,
             "code object is not signed at all",
-            "certificate leaf",
+            'certificate root = H"',
             "designated requirement readback failed",
         ),
-        (0, "identifier com.meiva.helper", "certificate leaf", "readback has no 'certificate leaf'"),
+        (
+            0,
+            "identifier com.meiva.helper",
+            'certificate root = H"',
+            "readback has no 'certificate root = H\"'",
+        ),
         (
             0,
             "<key>com.apple.security.automation.apple-events</key>",

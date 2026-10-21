@@ -50,12 +50,14 @@ _DESIGNATED_REQUIREMENT_RE = re.compile(r"^(?:# )?designated => (.+)$", re.MULTI
 # Every tool below is local and has no network leg, so a bound only catches a wedged tool. It turns that wait into a failed converge step, which the update path already knows how to abort and recover from. None of these is a performance budget -- each sits well above what the work costs.
 #
 # The bound is applied by `base.host.proc.run_bounded`, not `subprocess.run(timeout=)`, which kills only the process Python spawned and leaves its descendants running. Every git-driving module bounds git through the same helper.
+#
+# `security` is here for the keychain unlock, import and identity reads of the signing identity -- local IPC; `openssl` generates one 2048-bit key and one PKCS#12 archive, once per host.
 TIMEOUTS_S = {
     "swiftc": 300.0,  # one small file; the ceiling only catches a wedged toolchain
     "codesign": 60.0,  # signs a few-MB bundle in well under a second
     "launchctl": 30.0,  # local IPC with launchd
-    "security": 30.0,  # keychain unlock, import and identity reads are local IPC
-    "openssl": 60.0,  # generates one 2048-bit key and one PKCS#12 archive, once
+    "security": 30.0,
+    "openssl": 60.0,
 }
 
 # Stands in for the exit status of a call the bound killed. 124 is `timeout(1)`'s
@@ -206,6 +208,8 @@ def _replaces_installed(exe: Path, destination: Path | None) -> bool:
 # Compile and sign the helper with the fixed identity; return (app bundle path, rebuilt).
 #
 # Skips the compile + sign only when the installed bundle is valid and its recorded content hash matches every build input. Checkout mtimes therefore cannot churn the binary or its TCC identity. A stale installed bundle is rebuilt in place, only when `_replaces_installed` admits it. A rebuild is only a new code identity when the certificate changes: the designated requirement names the certificate, not the code hash, so the desktop grants survive it.
+#
+# The signature this build will carry is settled before anything is removed. A host whose recorded requirement names a certificate has nothing to fall back to, so a missing identity stops the build here rather than after the old artifact is gone.
 # meiva:link services/docs/agent_runner_side/permissions-helper/authorization.meiva.okf.md
 def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     build_dir = build_directory(destination)
@@ -217,10 +221,6 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
 
     if _installed_build_is_current(app, state, source_hash):
         return app, False
-    # Before anything is removed: the signature this build will carry. A host
-    # whose recorded requirement names a certificate has nothing to fall back
-    # to, so a missing identity stops the build here rather than after the old
-    # artifact is gone.
     _require_signing_identity(state)
     replacing = _replaces_installed(exe, destination)
 

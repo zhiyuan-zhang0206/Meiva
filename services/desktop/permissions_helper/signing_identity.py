@@ -1,15 +1,3 @@
-"""The certificate the permissions helper is signed with.
-
-An ad-hoc signature names the code hash, so every rebuild is a new code identity
-and macOS asks for the desktop grants again. This module owns one self-signed
-certificate with a fixed name, held in a keychain of its own, so the helper's
-designated requirement names the certificate instead and survives every rebuild.
-
-Everything here runs through a caller-supplied `run` (lifecycle's bounded
-`run_tool`), so a provisioning or signing step that fails aborts the build
-instead of falling back to an ad-hoc signature.
-"""
-
 from __future__ import annotations
 
 import os
@@ -21,6 +9,14 @@ from pathlib import Path
 import base.paths
 from services.desktop.permissions_helper import hardened_runtime
 
+# meiva:note
+# The certificate the permissions helper is signed with: one self-signed identity
+# with a fixed name, held in a keychain of its own, so the helper's designated
+# requirement names the certificate instead of the code hash and survives every
+# rebuild. Everything here runs through a caller-supplied `run` (lifecycle's
+# bounded `run_tool`), so a provisioning or signing step that fails aborts the
+# build instead of falling back to an ad-hoc signature.
+# meiva:link services/docs/agent_runner_side/permissions-helper/launchd-and-stable-signing.meiva.okf.md
 IDENTITY_NAME = "Meiva Local Signing"
 IDENTITY_ORG = "Meiva"
 VALID_DAYS = 3650
@@ -35,6 +31,7 @@ SECURITY = "/usr/bin/security"
 OPENSSL = "/usr/bin/openssl"
 CODESIGN = "/usr/bin/codesign"
 
+# meiva:note
 # What `codesign --entitlements` needs on top of the identity; the hardened
 # runtime belongs to `hardened_runtime` so one module owns that decision.
 _SIGN_ARGV_HEAD = ("--force", "--sign", IDENTITY_NAME)
@@ -58,8 +55,9 @@ PROVISION_COMMAND = "python3 scripts/host_ops/tcc/helper-signing.py provision"
 Runner = Callable[[list[str]], object]
 
 
-class SigningIdentityError(RuntimeError):
-    """The signing identity is absent or unusable; the build must not continue."""
+# meiva:note
+# The signing identity is absent or unusable; the build must not continue.
+class SigningIdentityError(RuntimeError): ...
 
 
 def directory() -> Path:
@@ -89,10 +87,11 @@ def policy() -> str:
     return f"{IDENTITY_NAME}|{IDENTITY_ORG}|{VALID_DAYS}"
 
 
+# meiva:note
+# The codesign invocation that signs `app` with the fixed identity.
 def sign_arguments(
     app: Path, *, entitlements: Path, identifier: str
 ) -> list[str]:
-    """The codesign invocation that signs `app` with the fixed identity."""
     return [
         CODESIGN,
         *_SIGN_ARGV_HEAD,
@@ -108,14 +107,14 @@ def sign_arguments(
     ]
 
 
+# meiva:note
+# Guarantee the identity can sign; `create` provisions one when none exists.
+#
+# `create=False` is the honest case for a host whose installed helper was already
+# signed with a certificate: a missing keychain there means the identity was
+# destroyed, and quietly minting a replacement would invalidate every grant
+# without saying so.
 def ensure(run: Runner, *, create: bool) -> None:
-    """Guarantee the identity can sign; `create` provisions one when none exists.
-
-    `create=False` is the honest case for a host whose installed helper was
-    already signed with a certificate: a missing keychain there means the
-    identity was destroyed, and quietly minting a replacement would invalidate
-    every grant without saying so.
-    """
     if not keychain_path().exists():
         if not create:
             raise SigningIdentityError(
@@ -127,8 +126,9 @@ def ensure(run: Runner, *, create: bool) -> None:
     require(run)
 
 
+# meiva:note
+# Create the keychain, certificate and password file, then record them.
 def provision(run: Runner) -> None:
-    """Create the keychain, certificate and password file, then record them."""
     directory().mkdir(parents=True, exist_ok=True)
     password = secrets.token_urlsafe(32)
     _write_secret(password_path(), password)
@@ -153,6 +153,7 @@ def provision(run: Runner) -> None:
                 SECURITY,
             ]
         )
+    # meiva:note
     # Without a partition list the imported key's ACL admits only the importing
     # process: `codesign` would block on a keychain prompt (or fail headless).
     run(
@@ -172,8 +173,9 @@ def provision(run: Runner) -> None:
     readme_path().write_text(_readme_text())
 
 
+# meiva:note
+# Prove the identity is present, unlocked and reachable by `codesign`.
 def require(run: Runner) -> None:
-    """Prove the identity is present, unlocked and reachable by `codesign`."""
     keychain = keychain_path()
     if not keychain.exists():
         raise SigningIdentityError(
@@ -202,8 +204,9 @@ def require(run: Runner) -> None:
         )
 
 
+# meiva:note
+# The `find-identity` row naming this certificate, or None.
 def identity_line(find_identity_output: str) -> str | None:
-    """The `find-identity` row naming this certificate, or None."""
     for line in find_identity_output.splitlines():
         if f'"{IDENTITY_NAME}"' in line:
             return line.strip()
