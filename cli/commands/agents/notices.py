@@ -1,17 +1,4 @@
-"""`meiva notices` — operator CLI for the agent notification queue (Task #949).
-
-Thin client over the gateway's notice endpoints: list any agent's open
-notices (both kinds), resolve them one by one, or clear an agent's backlog.
-The gateway owns the effect; the CLI adds only rendering + arg parsing and
-fails fast (raise_for_status()) on any HTTP error.
-
-  list                 GET /api/notices/open?include_awaiting=1
-                       (--agent / --priority / --type filters)
-  resolve <id> --agent <id> --action answer|read|dismiss [--reply TEXT]
-                       POST /api/keyed/v1/agents/<agent>/notices/<id>/resolve
-  clear --agent <id>   resolve every open notice (read for FYI, dismiss for
-                       decisions; --force skips the confirmation)
-"""
+# meiva:link cli/docs/operator-surfaces.meiva.okf.md
 
 from __future__ import annotations
 
@@ -44,7 +31,7 @@ def _dial() -> tuple[str, dict[str, str], Any, Any]:
 def _print_notice(
     n: dict[str, Any], i: int, total: int, *, agent_status: str | None = None
 ) -> None:
-    kind = "DECISION" if n["require_response"] else "FYI"
+    kind = "NOTICE"
     label = n.get("agent_label") or ""
     status = f" [{agent_status}]" if agent_status else ""
     print(
@@ -110,7 +97,7 @@ def _confirm_clear(notices: list[dict[str, Any]], *, stale: bool, agent_id: int 
     target = "stale (terminated-agent) notices" if stale else f"agent #{agent_id}"
     print(
         f"Clear {len(notices)} notice(s): {target}? "
-        "(FYI -> read, decision -> dismiss; re-run with --force to skip this prompt)"
+        "(dismiss without answering; re-run with --force to skip this prompt)"
     )
     try:
         answer = input("y/N: ").strip().lower()
@@ -151,8 +138,8 @@ def cmd_notices_list(
 
 def cmd_notices_resolve(*, notice_id: int, agent_id: int, action: str, reply: str | None) -> int:
     """`meiva notices resolve <id> --agent <id> --action ...` — resolve one notice."""
-    if action not in ("answer", "read", "dismiss"):
-        print(f"invalid action {action!r} (answer|read|dismiss)")
+    if action not in ("answer", "dismiss"):
+        print(f"invalid action {action!r} (answer|dismiss)")
         return 2
     if action == "answer" and not reply:
         print("--reply TEXT is required for action=answer")
@@ -170,10 +157,10 @@ def cmd_notices_resolve(*, notice_id: int, agent_id: int, action: str, reply: st
 
 
 def _resolve_all(notices: list[dict[str, Any]], base: str, headers: Any, dial_post: Any) -> int:
-    """Read each FYI and dismiss each decision; the number the gateway accepted."""
+    # meiva:link cli/docs/operator-surfaces.meiva.okf.md
     cleared = 0
     for n in notices:
-        action = "read" if not n["require_response"] else "dismiss"
+        action = "dismiss"
         r = dial_post(
             f"{base}/keyed/v1/agents/{n['agent_id']}/notices/{n['id']}/resolve",
             timeout=_TIMEOUT_S,
@@ -186,14 +173,7 @@ def _resolve_all(notices: list[dict[str, Any]], base: str, headers: Any, dial_po
 
 
 def cmd_notices_clear(*, agent_id: int | None, force: bool, stale: bool = False) -> int:
-    """`meiva notices clear --agent <id>` — resolve every open notice of one agent.
-
-    FYI notices get read, decisions get dismissed (answers need a human).
-    Lists what it will clear and asks for confirmation unless --force.
-
-    --stale clears every open notice of terminated agents instead (mutually
-    exclusive with --agent): the invalid backlog, keeping live agents' open
-    notices untouched (Task #1149)."""
+    # meiva:link cli/docs/operator-surfaces.meiva.okf.md
     if stale and agent_id is not None:
         print("--stale and --agent are mutually exclusive")
         return 2

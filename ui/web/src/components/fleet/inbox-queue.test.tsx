@@ -187,24 +187,16 @@ describe("InboxQueue — open stream", () => {
     expect(screen.getByText(/Nothing needs your attention/)).not.toBeNull();
   });
 
-  it("merges require_response + FYI into ONE stream, sorted P0->P3 then blocking then oldest", () => {
+  it("excludes legacy FYI entries from the response queue", () => {
     setFeed({
       open: [ni({ id: 20, title: "fyi-p0", priority: "P0" }), ni({ id: 21, title: "fyi-p3", priority: "P3" })],
       awaiting: [n({ id: 10, title: "dec-p2", priority: "P2" })],
     });
     renderQueue([agent({ agent_id: 1, label: "a" })]);
-    // One list interleaving both kinds by priority.
-    expect(listTitles()).toEqual(["fyi-p0", "dec-p2", "fyi-p3"]);
+    expect(listTitles()).toEqual(["dec-p2"]);
   });
 
-  // meiva:note
-  // Three obligation rungs ride this one list: FYI, needs an answer, and stalled
-  // on the answer. A row that does not state its rung makes a P2 decision and a P2
-  // FYI indistinguishable, so the user cannot tell which rows are waiting on them.
-  // Queries scope to the queue list: the auto-selected row's detail heading repeats
-  // its title, so an unscoped lookup matches twice.
-  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-  it("states each row's obligation rung", () => {
+  it("labels every response-required row", () => {
     setFeed({
       open: [ni({ id: 40, title: "just-fyi", priority: "P2" })],
       awaiting: [
@@ -219,7 +211,7 @@ describe("InboxQueue — open stream", () => {
         .getByText(title)
         .closest('[data-testid="inbox-row"]')
         ?.querySelector('[data-testid="notice-kind"]')?.textContent;
-    expect(rungOf("just-fyi")).toBe("FYI");
+    expect(within(list).queryByText("just-fyi")).toBeNull();
     expect(rungOf("needs-answer")).toBe("Decision");
     expect(rungOf("stalled")).toBe("Decision");
   });
@@ -331,7 +323,7 @@ describe("InboxQueue — decision (require_response) action surface", () => {
     resolveNotice.mockResolvedValue({ status: "running" });
     setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
     renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    fireEvent.click(screen.getByText("Dismiss"));
+    fireEvent.click(screen.getByText("Close without answering"));
     await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 99, { action: "dismiss" }));
   });
 
@@ -362,51 +354,29 @@ describe("InboxQueue — decision (require_response) action surface", () => {
   });
 });
 
-describe("InboxQueue — FYI action surface", () => {
-  it("a top FYI notice shows Mark read and NO Send button", () => {
+describe("InboxQueue — notice lifecycle", () => {
+  it("hides legacy FYIs and never offers Mark read", () => {
     setFeed({ open: [ni({ id: 1, title: "migration done" })] });
     renderQueue([]);
-    expect(screen.getByRole("heading", { name: "migration done" })).toBeTruthy();
-    expect(screen.getByText("Mark read")).toBeTruthy();
-    expect(screen.queryByLabelText("Send answer")).toBeNull();
+    expect(screen.queryByText("migration done")).toBeNull();
+    expect(screen.queryByText("Mark read")).toBeNull();
+    expect(screen.getByText(/Nothing needs your attention/)).toBeTruthy();
   });
 
-  it("Mark read calls resolveNotice with action:'read' and no reply", async () => {
-    resolveNotice.mockResolvedValue({ status: "running" });
-    setFeed({ open: [ni({ id: 1, agent_id: 7, title: "fyi" })] });
-    renderQueue([]);
-    fireEvent.click(screen.getByText("Mark read"));
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 1, { action: "read" }));
-  });
-
-  it("Enter in the note box sends the reply and marks read", async () => {
-    resolveNotice.mockResolvedValue({ status: "running" });
-    setFeed({ open: [ni({ id: 3, agent_id: 9, title: "decision" })] });
-    renderQueue([]);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "go with A" } });
-    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(9, 3, { action: "read", reply: "go with A" }));
-  });
-
-  it("surfaces a 409 as already-read", async () => {
+  it("surfaces a 409 as already answered", async () => {
     resolveNotice.mockRejectedValue(new Error("409 conflict"));
-    setFeed({ open: [ni({ id: 5, agent_id: 1, title: "stale" })] });
+    setFeed({ awaiting: [n({ id: 5, agent_id: 1, title: "stale" })] });
     renderQueue([]);
-    fireEvent.click(screen.getByText("Mark read"));
-    await waitFor(() => expect(screen.getByText(/already read/i)).toBeTruthy());
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "yes" } });
+    fireEvent.click(screen.getByLabelText("Send answer"));
+    await waitFor(() => expect(screen.getByText(/already answered/i)).toBeTruthy());
   });
 
-
-  it("drops the resolved notice from the open queue immediately", async () => {
+  it("drops the dismissed notice from the open queue immediately", async () => {
     resolveNotice.mockResolvedValue({ status: "running" });
-    setFeed({
-      open: [
-        ni({ id: 1, agent_id: 7, title: "first" }),
-        ni({ id: 2, agent_id: 7, title: "second" }),
-      ],
-    });
+    setFeed({ awaiting: [n({ id: 1, title: "first" }), n({ id: 2, title: "second" })] });
     renderQueue([]);
-    fireEvent.click(screen.getByText("Mark read"));
+    fireEvent.click(screen.getByText("Close without answering"));
     await waitFor(() => expect(dropOpenNotices).toHaveBeenCalledWith(expect.anything(), [1]));
   });
 });
@@ -601,10 +571,10 @@ describe("InboxQueue — error presentation (audit C3)", () => {
   });
 
   it("resolved-history failure with open entries on screen → unavailable line", () => {
-    setFeed({ resolvedError: true, open: [ni({ id: 21, title: "fyi" })] });
+    setFeed({ resolvedError: true, awaiting: [n({ id: 21, title: "question" })] });
     renderQueue([agent({ agent_id: 1 })]);
     expect(screen.getByText("Resolved history unavailable.")).not.toBeNull();
-    expect(listTitles()).toEqual(["fyi"]);
+    expect(listTitles()).toEqual(["question"]);
   });
 
   it("any cold failure with nothing at all loaded → failure screen", () => {

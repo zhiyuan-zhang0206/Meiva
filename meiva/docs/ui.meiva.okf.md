@@ -40,15 +40,18 @@ The daemon creates one persistent shell for each fresh `serve()` registration an
 
 The following are mounted onto the `meiva.ui` namespace by the `meiva_fleet` plugin (non-core). See plugin-side OKF for details.
 
-- `notify(title, content=None, *, require_response=False, blocking=False, priority='P2') → Notice` — Post a notice to the user's inbox, replacing your previous open notice (max one per agent). `require_response=True` requests a reply and is also delivered as a notification; `blocking=True` indicates you are blocked waiting. The returned `Notice` is an int subclass with `.pending_count` / `.pending_notices` / `.superseded`.
+- `notify(title, content=None, *, require_response=True, blocking=False, priority='P2') → Notice` — Post a notice to the user's inbox, replacing your previous open notice (max one per agent). Every notice requires a reply; `require_response=False` is rejected; `blocking=True` indicates you are blocked waiting. The returned `Notice` is an int subclass with `.pending_count` / `.pending_notices` / `.superseded`.
 - `edit_notice(*, title=..., content=..., priority=..., blocking=...)` — Edit the open notice (only pass fields to change; cannot change `require_response`; at most one is open, so no id).
 - `dismiss_notice()` — Dismiss the open notice (at most one is open, so no id).
 
 ### Priority
-P0 (highest) → P1 → P2 (default) → P3 (lowest). This is advisory—does not affect processing order.
+P0 (highest) → P1 → P2 (default) → P3 (lowest). The notice queue orders by priority, then blocking and age. Priority does not change agent execution order.
 
 ## Key Dependencies
 - [[ui/web/src/docs/frontend.meiva.okf.md]] — Frontend UI renders pages and notifications
 
 ## Notes
-`notify` is the only reliable channel for agents to reach users, with **queue** semantics—users consume at their own pace, delivery is delivery. Use `require_response=True` when user decision is needed (irreversible operations, spending money, contacting real people)—authorization/decision goes directly to the user from any depth; progress/conclusions are first reported to the delegator for aggregation (fleet communication dichotomy), and agent-to-agent matters use `send_message`. Out-of-band pushes (e.g., telegram) are only allowed for truly urgent matters, discipline is governed by the disturbance discipline skill.
+`notify` requests a user answer through an asynchronous queue. Ordinary information,
+progress and results belong in chat. Priority and blocking are independent; every
+notice requires a response even when the agent can continue other work. Peer
+decisions go to that peer through `send_message`.

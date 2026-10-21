@@ -17,9 +17,9 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
-from base.agents.inbox.rows import NOTICE_FYI_TTL_DAYS
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_provenance import InboundProvenance
+from base.api_contracts.notice_question import ChoiceQuestion
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
@@ -55,7 +55,7 @@ _SELECT = (
 # inferred from reply presence. The caps bound one response's payload; the
 # configurable surface is the *default* window (user ruling 2026-09-17 / #3696).
 # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
-_ACTION_RESOLUTION = {"answer": "answered", "dismiss": "dismissed", "read": "read"}
+_ACTION_RESOLUTION = {"answer": "answered", "dismiss": "dismissed"}
 _OPEN_FEED_MAX_LIMIT = 500
 _RESOLVED_PAGE_MAX_LIMIT = 100
 
@@ -96,40 +96,17 @@ def _row_to_item(r: tuple[Any, ...]) -> NoticeItem:
 
 
 def _open_notices_blocking(
-    pool: ConnectionPool, limit: int, *, include_awaiting: bool, agent_id: int | None = None
+    pool: ConnectionPool, limit: int, *, agent_id: int | None = None
 ) -> list[tuple[Any, ...]]:
-    """Sync open-notices query — via to_thread. FYI-only by default;
-    include_awaiting=True returns both kinds (the IM bridge's queue view);
-    agent_id narrows the result to one agent's open notices.
-
-    Lazy expiry (audit C1): before the SELECT, FYI notices older than
-    NOTICE_FYI_TTL_DAYS are auto-resolved 'read' in the same transaction — so
-    the open feed, the resolved history, and every later query agree. The
-    query-side cutoff below is belt-and-braces for readers that skip the
-    sweep (require_response notices never expire)."""
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_notices SET resolved_at = now(), resolution = 'read' "
-            "WHERE NOT require_response AND resolved_at IS NULL "
-            "AND created_at <= now() - make_interval(days => %s)",
-            (NOTICE_FYI_TTL_DAYS,),
-        )
-        where = (
-            "WHERE n.resolved_at IS NULL AND (n.require_response OR "
-            "n.created_at > now() - make_interval(days => %s)) "
-            if include_awaiting
-            else "WHERE NOT n.require_response AND n.resolved_at IS NULL "
-            "AND n.created_at > now() - make_interval(days => %s) "
-        )
+    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
+    with pool.connection() as conn, conn.cursor() as cur:
         agent_clause = "" if agent_id is None else "AND n.agent_id = %s "
-        params = (NOTICE_FYI_TTL_DAYS, limit)
-        if agent_id is not None:
-            params = (NOTICE_FYI_TTL_DAYS, agent_id, limit)
+        params = (limit,) if agent_id is None else (agent_id, limit)
         cur.execute(
             _SELECT
-            + where
+            + "WHERE n.require_response AND n.resolved_at IS NULL "
             + agent_clause
-            + "ORDER BY n.priority ASC, n.created_at DESC, n.id DESC LIMIT %s",
+            + "ORDER BY n.priority ASC, n.blocking DESC, n.created_at ASC, n.id ASC LIMIT %s",
             params,
         )
         return cur.fetchall()
@@ -150,43 +127,28 @@ def _resolved_notices_blocking(
 async def get_open_notices(
     request: Request,
     limit: Annotated[int | None, Query(ge=1, le=_OPEN_FEED_MAX_LIMIT)] = None,
-    include_awaiting: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
     agent_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> list[NoticeItem]:
-    """The cross-fleet open notices feed, priority-then-newest.
-
-    By default only FYI notices (require_response false) — response-required
-    ones ride the agent snapshot. include_awaiting=True returns both kinds:
-    the IM bridge's "/notice list" queue view (Task #941) lists everything
-    still open and hands each item its own processing buttons. A notice is
-    open when resolved_at IS NULL. `agent_id` narrows the feed to one agent's
-    open notices — how an agent observes its own notice's global id before a
-    guarded edit/withdraw. Omit `limit` for the configured default cap
-    (``display.notices_open_default_limit``, 200 out of the box).
-    """
+    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
     if limit is None:
         limit = settings.display.notices_open_default_limit
     rows = await asyncio.to_thread(
         _open_notices_blocking,
         request.app.state.db_pool,
         limit,
-        include_awaiting=include_awaiting,
         agent_id=agent_id,
     )
     return [_row_to_item(r) for r in rows]
 
 
 def _notices_after_blocking(pool: ConnectionPool, after: int, limit: int) -> list[tuple[Any, ...]]:
-    """Sync new-open query (both kinds) — via to_thread.
-
-    Expired FYI notices (older than NOTICE_FYI_TTL_DAYS) are excluded — the
-    IM bridge's cursor must not stall on or re-deliver notices the open feed
-    already auto-resolved (audit C1). require_response notices never expire."""
+    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            _SELECT + "WHERE n.id > %s AND n.resolved_at IS NULL AND (n.require_response OR "
-            "n.created_at > now() - make_interval(days => %s)) " + "ORDER BY n.id ASC LIMIT %s",
-            (after, NOTICE_FYI_TTL_DAYS, limit),
+            _SELECT
+            + "WHERE n.id > %s AND n.resolved_at IS NULL AND n.require_response "
+            + "ORDER BY n.id ASC LIMIT %s",
+            (after, limit),
         )
         return cur.fetchall()
 
@@ -197,15 +159,7 @@ async def get_notices_live(
     after: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int | None, Query(ge=1, le=_OPEN_FEED_MAX_LIMIT)] = None,
 ) -> list[NoticeItem]:
-    """New open notices across the fleet, both kinds, oldest-first by id.
-
-    The IM bridge polls this with the max id it has seen and pushes new
-    notices to Telegram (Task #884) — one query, no event dependency, and it
-    covers require_response notices (which publish no NoticePosted event) as
-    well as FYIs. Idempotent: rows are only ever returned while open, so a
-    poll after a notice was resolved simply stops seeing it. Omit `limit` for the
-    configured default cap (``display.notices_open_default_limit``).
-    """
+    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
     if limit is None:
         limit = settings.display.notices_open_default_limit
     rows = await asyncio.to_thread(_notices_after_blocking, request.app.state.db_pool, after, limit)
@@ -220,27 +174,7 @@ async def get_notices_feed(
     before_at: Annotated[datetime | None, Query()] = None,
     before_id: Annotated[int | None, Query()] = None,
 ) -> NoticesFeed:
-    """The unified inbox feed (Task #1024, R4 layer 2, decision Q1=A): one
-    request carries the whole Inbox panel.
-
-    - `open` — cross-fleet open FYI notices (require_response false),
-      priority then newest. Same content as GET /api/notices/open.
-    - `awaiting` — cross-fleet open require_response notices, same sort.
-      Today these ride the agent snapshot (notices_awaiting_response); the
-      merged endpoint makes them a first-class pipe so the frontend's Inbox
-      no longer merges three sources.
-    - `resolved_page` + `next_cursor` — one keyset page of the resolved
-      history (both kinds, newest resolution first): pass next_cursor back
-      as before_at / before_id for the next strictly-older page; None means
-      the end.
-
-    The standalone endpoints stay for their other consumers (IM bridge,
-    CLI). The open sweep (FYI TTL auto-resolve) runs once per call, so the
-    open list, the awaiting list and the history agree within one request.
-    The open/awaiting cap and the resolved page default to
-    ``display.notices_open_default_limit`` / ``display.notices_resolved_default_page``
-    when the caller passes none.
-    """
+    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
     if (before_at is None) != (before_id is None):
         raise HTTPException(
             status_code=422, detail="before_at and before_id must be supplied together"
@@ -250,15 +184,14 @@ async def get_notices_feed(
         limit = settings.display.notices_open_default_limit
     if resolved_limit is None:
         resolved_limit = settings.display.notices_resolved_default_page
-    resolved_where = "WHERE n.resolved_at IS NOT NULL "
+    resolved_where = "WHERE n.require_response AND n.resolved_at IS NOT NULL "
     resolved_params: list[object] = []
     if before_at is not None:
         resolved_where += "AND (n.resolved_at, n.id) < (%s, %s) "
         resolved_params.extend([before_at, before_id])
     resolved_params.append(resolved_limit)
-    open_rows, awaiting_rows, resolved_rows = await asyncio.gather(
-        asyncio.to_thread(_open_notices_blocking, pool, limit, include_awaiting=False),
-        asyncio.to_thread(_open_notices_blocking, pool, limit, include_awaiting=True),
+    awaiting_rows, resolved_rows = await asyncio.gather(
+        asyncio.to_thread(_open_notices_blocking, pool, limit),
         asyncio.to_thread(
             _resolved_notices_blocking,
             pool,
@@ -266,9 +199,6 @@ async def get_notices_feed(
             resolved_params,
         ),
     )
-    # The include_awaiting=True query returns both kinds merged; the awaiting
-    # list is exactly the require_response half (column index 6, see _SELECT).
-    awaiting = [r for r in awaiting_rows if r[6]]
     resolved_page = [_row_to_item(r) for r in resolved_rows]
     next_cursor = None
     if len(resolved_page) == resolved_limit:
@@ -276,8 +206,8 @@ async def get_notices_feed(
         if last.resolved_at is not None:
             next_cursor = NoticesCursor(before_at=last.resolved_at, before_id=last.id)
     return NoticesFeed(
-        open=[_row_to_item(r) for r in open_rows],
-        awaiting=[_row_to_item(r) for r in awaiting],
+        open=[],
+        awaiting=[_row_to_item(r) for r in awaiting_rows],
         resolved_page=resolved_page,
         next_cursor=next_cursor,
     )
@@ -291,26 +221,8 @@ async def post_notice_resolve(
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> AgentMessageEnqueued:
     # meiva:note
-    # Resolve one open notice and (when a reply is given) wake the agent with it. `action` is
-    # the explicit close verb: answer applies to both kinds — the user can reply to an FYI
-    # too (Task #1061, the reply reaches the notice's agent like a require_response answer);
-    # dismiss applies to a require_response
-    # notice, read to an FYI notice. The endpoint marks the notice resolved (resolved_at +
-    # resolution + cached reply) iff it is still open, then INSERTs a self-describing chat
-    # inbound so the agent knows which notice this answers and (for a dismissed blocking
-    # notice) stops waiting. The inbound is system-sourced, rendered inside the system-note
-    # envelope with no User envelope: a notice resolution is a notice-system event, not user
-    # speech, so no user-role message is consumed and nothing is shaped like a reply request.
-    #
-    # 409 when the notice does not exist, or `action` does not match the notice's
-    # kind (dismiss on an FYI notice, or read on one needing a response). A bare
-    # `read` on an already-resolved notice is an idempotent success (user ruling
-    # 2026-08-28: "Mark read" means "I have read it", so the already-read state
-    # ends silently, like the normal path — the same skip-not-error semantics as
-    # the batch endpoint); a note attached to that read still reaches the agent,
-    # and `answer` / `dismiss` on an already-resolved notice keep the 409 so a
-    # reply or a dismissal is never silently dropped. 422 when `action` is
-    # `answer` without a reply.
+    # Resolution and reply delivery share one durable receipt. A dismissal is a
+    # notice-system event, never user authorization or ordinary user speech.
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
     idempotency_key = notice_key(request, idempotency_key)
     action = body.action
@@ -320,6 +232,10 @@ async def post_notice_resolve(
 
     def _resolve(conn: psycopg.Connection) -> str | None:
         nonlocal resolution
+        if action == "read":
+            raise HTTPException(
+                status_code=422, detail="notices require a reply or an explicit dismissal"
+            )
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT title, require_response, resolved_at, question, expire_at, created_at "
@@ -344,31 +260,12 @@ async def post_notice_resolve(
                 replied=reply is not None or resolved_answer.answer is not None,
             )
             if resolved_at is not None:
-                # Idempotent close: a bare 'read' on an already-resolved notice
-                # silently succeeds (user ruling 2026-08-28) — the already-read
-                # state ends like the normal path, matching the batch endpoint's
-                # skip-not-error semantics. A note attached to that read still
-                # reaches the agent (the close itself is a no-op); 'answer' and
-                # 'dismiss' keep the 409 so a reply or a dismissal is never
-                # silently dropped.
-                if action == "read":
-                    return resolution_inbound(title, action, reply)
                 raise HTTPException(
                     status_code=409,
                     detail=f"notice {notice_id} is already resolved for agent {agent_id}",
                 )
-            if action == "dismiss" and not require_response:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"action 'dismiss' applies to a notice needing a response; "
-                    f"notice {notice_id} is FYI (use 'answer' or 'read')",
-                )
-            if action == "read" and require_response:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"action 'read' applies to an FYI notice; "
-                    f"notice {notice_id} needs a response (use 'answer' or 'dismiss')",
-                )
+            if not require_response:
+                raise HTTPException(status_code=409, detail="legacy FYI entries are not notices")
             if action == "answer" and reply is None:
                 raise HTTPException(status_code=422, detail="action 'answer' requires a reply")
             cur.execute(
@@ -387,8 +284,7 @@ async def post_notice_resolve(
 
     # meiva:note
     # Every notice resolution rides the notice-system source (reply / dismiss); the claim node
-    # wraps both as a system note, so no User-role message is consumed and read-without-reply
-    # delivers nothing.
+    # wraps both as a system note, so no User-role message is consumed.
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
     deliver_source = (
         "system:notice-reply"
@@ -462,22 +358,9 @@ async def post_notice_create(
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> dict:
-    """Post a notice at one of the three obligation rungs (FYI /
-    response-required / blocking), atomically superseding the agent's
-    previous open notice.
-
-    One transaction: every open notice of the agent is resolved as
-    'superseded' (with a resolve event each), then the new row is inserted.
-    Mirrors the previous SDK-side logic exactly — same supersede semantics,
-    same local_id allocation, same events — now executed server-side so the
-    two writes cannot tear.
-
-    Returns the SDK Notice shape: the new notice's local id, the pending
-    count + titles (for the SDK's pending list), and the superseded ids.
-    """
-    validate_creation(body)
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
     idempotency_key = notice_key(request, idempotency_key)
-    request_body = body.model_dump(
+    request_body: dict[str, object] = body.model_dump(
         mode="json", exclude={"question"} if body.question is None else set()
     )
 
@@ -494,7 +377,15 @@ async def post_notice_create(
         int | None,
     ]:
         with write_transaction(pool) as conn, conn.cursor() as cur:
-            previous = existing_receipt(conn, request.url.path, idempotency_key, request_body)
+            previous = existing_receipt(
+                conn,
+                request.url.path,
+                idempotency_key,
+                request_body,
+                legacy_body=(request_body | {"require_response": False})
+                if "require_response" not in body.model_fields_set
+                else None,
+            )
             if previous is not None:
                 return (
                     int(cast(int, previous["global_id"])),
@@ -506,6 +397,7 @@ async def post_notice_create(
                     True,
                     cast(int | None, previous.get("notification_id")),
                 )
+            validate_creation(body)
             validate_creation_state(conn, body)
             # Serialize all creations for an agent, including different keys:
             # no-open-notice races must not allocate the same local id.
@@ -702,6 +594,8 @@ def existing_receipt(
     path: str,
     key: str,
     body: dict[str, object],
+    *,
+    legacy_body: dict[str, object] | None = None,
 ) -> dict[str, object] | None:
     """Serialize a notice operation and reject reuse with changed inputs."""
     with conn.cursor() as cur:
@@ -714,7 +608,7 @@ def existing_receipt(
         row = cur.fetchone()
     if row is None:
         return None
-    if row[0] != body:
+    if row[0] != body and row[0] != legacy_body:
         raise HTTPException(
             status_code=409, detail="idempotency key identifies a different notice operation"
         )
@@ -771,10 +665,16 @@ def validate_creation(body: NoticeCreateIn) -> None:
     """Reject invalid notice obligations before allocating a receipt."""
     if not body.title.strip():
         raise HTTPException(status_code=422, detail="title must be non-empty")
-    if body.blocking and not body.require_response:
+    if not body.require_response:
         raise HTTPException(
             status_code=422,
-            detail="blocking=True requires require_response=True (an FYI never stalls)",
+            detail="notices require a user response; send ordinary information in chat",
+        )
+
+    if isinstance(body.question, ChoiceQuestion) and body.question.allow_other:
+        raise HTTPException(
+            status_code=422,
+            detail="Other is not an answer option; use a choice with an optional comment",
         )
 
 

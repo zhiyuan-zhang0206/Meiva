@@ -1,19 +1,4 @@
-// useNotices — the Inbox panel's single data contract (Task #1024, R4
-// layer 2, decision Q1=A). One panel = one request = one hook: GET
-// /api/notices carries the whole queue — the OPEN split by kind (open =
-// FYI, awaiting = require_response) plus one keyset page of the RESOLVED
-// history with its next_cursor. This replaces the three-pipe client merge
-// (agent snapshot + useInboxFeed + useResolvedNotices): no more hand-rolled
-// reconciliation, and "queue empty" is never indistinguishable from "couldn't
-// load" (stale-while-error on both halves).
-//
-// Liveness: the gateway broadcasts notice_posted for every new notice and
-// notice_resolved for every resolution — the R4 fold owner (lib/fold/notices)
-// invalidates the open query on both (a resolve can move a row out of
-// awaiting or open) and the resolved history on notice_resolved, so a
-// just-resolved notice drops off the open queue and reappears at the top of
-// the history in the same beat. Reconnect repair is the fold owner's central
-// invalidate-all. This hook only reads.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 
 "use client";
 
@@ -43,11 +28,11 @@ export interface NoticesFeedWire {
 }
 
 export interface NoticesFeed {
-  /** Open FYI notices (require_response=false), priority then newest. */
+  // meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
   open: NoticeItem[];
   /** Open require_response notices — the "waiting on you" worklist. */
   awaiting: NoticeItem[];
-  /** Resolved history (both kinds), newest resolution first. */
+
   resolved: NoticeItem[];
   fetchNextPage: () => void;
   hasNextPage: boolean;

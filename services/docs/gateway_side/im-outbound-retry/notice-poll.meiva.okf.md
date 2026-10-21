@@ -9,8 +9,8 @@ tags:
 
 # Normal notice outbound acceptance
 
-`NoticeBridge.poll_once` reads open fleet notices from the existing database,
-applying its existing priority/agent filter and FYI age policy. It accepts normal
+`NoticeBridge.poll_once` reads open response-required notices from the existing
+database, applying its agent filter and notification category switch. It accepts normal
 poll decisions through `NoticePollStore`; it does not call the provider.
 `IMOutboxStore` owns the shared intent insertion primitive and `IMOutboxWorker`
 owns the same queued/sending/sent/uncertain/failed lifecycle as timeline output.
@@ -70,3 +70,9 @@ Explicit `/notice` listing and its replay callbacks retain their deliberate
 immediate-send behavior in this slice. Ops `/send` fan-out, alert-transition
 identity, chunk acknowledgement/recovery and retention/reconciliation remain
 open under #4477. No new UI or client Outbox is introduced.
+
+Notice queues contain only response-required questions. Reply arms the configured
+reply window; plain-text answers in that window resolve the question, and `/cancel`
+exits reply mode. Dismiss explicitly closes without answering. Legacy mark-read
+callbacks cannot resolve a notice. Priority and agent filters remain persisted
+under the bridge state directory. Ordinary results stay in conversation.

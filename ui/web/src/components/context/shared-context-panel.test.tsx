@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const snapshot = vi.hoisted(() => ({ inspectorOpen: false }));
@@ -14,12 +15,17 @@ vi.mock("@/lib/inspector/inspector-panel-store", () => ({
   useInspectorOpen: () => ({ open: snapshot.inspectorOpen, toggle: vi.fn() }),
 }));
 vi.mock("./to-user-document", () => ({
-  ToUserDocumentView: ({ bodyHidden }: { bodyHidden?: boolean }) => (
+  ToUserDocumentView: function Document({ bodyHidden, onInspect, onNavigate }: { bodyHidden?: boolean; onInspect: () => void; onNavigate: () => void }) {
+    useEffect(onNavigate, [onNavigate]);
+    return (
     <div>
       <div data-testid="document-bar" />
+      <button onClick={onInspect}>Inspect</button>
+      <button onClick={onNavigate}>Navigate</button>
       {bodyHidden ? null : <div data-testid="document-view" />}
     </div>
-  ),
+    );
+  },
 }));
 vi.mock("@/components/inspector/inspector-panel", () => ({
   InspectorPanel: () => <div data-testid="inspector-view" />,
@@ -111,6 +117,38 @@ it("keeps the notice area inside the document body", () => {
   const body = screen.getByTestId("shared-document");
   expect(body.contains(screen.getByTestId("notice-detail"))).toBe(true);
   expect(screen.getByText("needsReply")).toBeTruthy();
+});
+
+it("hides the mounted question in Inspector mode and restores its reading position", async () => {
+  const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: false, onClose: vi.fn() };
+  const { rerender } = render(<SharedContextPanel {...props} />);
+  const body = screen.getByTestId("shared-document");
+  const detail = screen.getByTestId("notice-detail");
+  body.scrollTop = 420;
+  fireEvent.click(screen.getByRole("button", { name: "Inspect" }));
+  snapshot.inspectorOpen = true;
+  rerender(<SharedContextPanel {...props} />);
+  expect(await screen.findByTestId("inspector-view")).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "notification" })).toBeNull();
+  expect(screen.getByTestId("notice-detail")).toBe(detail);
+  body.scrollTop = 0;
+  snapshot.inspectorOpen = false;
+  rerender(<SharedContextPanel {...props} />);
+  expect(screen.getByRole("region", { name: "notification" })).toBeTruthy();
+  expect(body.scrollTop).toBe(420);
+});
+
+it("starts a new agent or referenced document at the top of the shared reading area", () => {
+  const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: false, onClose: vi.fn() };
+  const { rerender } = render(<SharedContextPanel {...props} />);
+  const body = screen.getByTestId("shared-document");
+  body.scrollTop = 420;
+  fireEvent.click(screen.getByRole("button", { name: "Navigate" }));
+  expect(body.scrollTop).toBe(0);
+  body.scrollTop = 500;
+  rerender(<SharedContextPanel {...props} agentId={8} />);
+  expect(screen.getByTestId("shared-document")).toBe(body);
+  expect(body.scrollTop).toBe(0);
 });
 
 it("uses the shared column title bar for the notice header", () => {

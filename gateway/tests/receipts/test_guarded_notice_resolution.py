@@ -30,9 +30,9 @@ def test_required_identity_rejects_before_effects(
     client: TestClient, db_conn: psycopg.Connection, headers: dict[str, str]
 ) -> None:
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "FYI")
+    notice = insert_notice(db_conn, agent, "Question", require_response=True)
     result = client.post(
-        _path(agent, notice), json={"action": "read", "reply": "yes"}, headers=headers
+        _path(agent, notice), json={"action": "answer", "reply": "yes"}, headers=headers
     )
     assert result.status_code == 422
     assert db_conn.execute(
@@ -42,22 +42,26 @@ def test_required_identity_rejects_before_effects(
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (0,)
 
 
-def test_concurrent_read_reply_replays_one_inbound(
+def test_concurrent_answer_reply_replays_one_inbound(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "FYI")
+    notice = insert_notice(db_conn, agent, "Question", require_response=True)
     path = _path(agent, notice)
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = [
-            pool.submit(client.post, path, json={"action": "read", "reply": "yes"}, headers=HEADERS)
+            pool.submit(
+                client.post, path, json={"action": "answer", "reply": "yes"}, headers=HEADERS
+            )
             for _ in range(4)
         ]
         results = [future.result(timeout=10) for future in futures]
     assert all(result.status_code == 201 for result in results), [r.text for r in results]
     assert len({r.json()["inbound_id"] for r in results}) == 1
     assert (
-        client.post(path, json={"action": "read", "reply": "changed"}, headers=HEADERS).status_code
+        client.post(
+            path, json={"action": "answer", "reply": "changed"}, headers=HEADERS
+        ).status_code
         == 409
     )
     assert db_conn.execute(
@@ -101,9 +105,9 @@ def test_consumed_original_reply_does_not_resurrect(
     client: TestClient, db_conn: psycopg.Connection, remove: bool
 ) -> None:
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "A")
+    notice = insert_notice(db_conn, agent, "A", require_response=True)
     path = _path(agent, notice)
-    body = {"action": "read", "reply": "yes"}
+    body = {"action": "answer", "reply": "yes"}
     first = client.post(path, json=body, headers=HEADERS)
     assert first.status_code == 201
     inbound_id = first.json()["inbound_id"]
@@ -130,9 +134,9 @@ def test_authentication_is_rechecked_on_replay(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "FYI")
+    notice = insert_notice(db_conn, agent, "Question", require_response=True)
     path = _path(agent, notice)
-    body = {"action": "read", "reply": "yes"}
+    body = {"action": "answer", "reply": "yes"}
     first = client.post(path, json=body, headers=HEADERS)
     assert first.status_code == 201
     assert (

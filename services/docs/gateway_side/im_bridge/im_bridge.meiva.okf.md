@@ -56,3 +56,5 @@ See [[weixin-inbound-identity]].
 
 See [[im-bridge-lifecycle]] for service-owned tasks, explicit retry boundaries
 and strict local state restoration.
+
+Notices require a response: users reply or dismiss. Ordinary information stays in chat.

@@ -106,16 +106,7 @@ class SystemNoteIn(BaseModel):
 
 
 class ResolveNoticeIn(BaseModel):
-    """POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve request body.
-
-    `action` is the explicit close verb (never inferred from whether `reply` is
-    present): `answer` / `dismiss` apply to a require_response notice, `read`
-    applies to an FYI notice. `answer` is a structured response to an immutable question. `reply` is the
-    legacy free-text response or a numbered CLI/IM answer; it cannot accompany
-    `answer`. Answer requires one of them. Optional dismiss/read notes remain
-    free text. The server validates the original question and delivers a
-    self-describing system:notice-reply inbound.
-    """
+    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
 
     model_config = ConfigDict(extra="forbid")
     action: Literal["answer", "dismiss", "read"]
@@ -130,38 +121,21 @@ class ResolveNoticeIn(BaseModel):
 
 
 class NoticeCreateIn(BaseModel):
-    """POST /api/agents/{id}/notices request body — the unified notice write API
-    (R3 door ④).
-
-    Mirrors the SDK meiva.ui.notify() contract: `priority` P0-P3, `blocking`
-    meaningful only when `require_response` is true (an FYI never stalls).
-    `task_id` optionally groups the notice under a task in the user's queue.
-    `expire_at` specifies the notice lifetime; omitted uses the configured default TTL.
-    """
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
 
     model_config = ConfigDict(extra="forbid")
     title: str
     content: str | None = None
     priority: Priority = Priority.P2
-    require_response: bool = False
-    blocking: bool = False
+    require_response: Annotated[bool, Field(strict=True)] = True
+    blocking: Annotated[bool, Field(strict=True)] = False
     task_id: int | None = None
     expire_at: datetime | None = None
     question: NoticeQuestion | None = None
 
-    @model_validator(mode="after")
-    def validate_question_obligation(self) -> "NoticeCreateIn":
-        if self.question is not None and not self.require_response:
-            raise ValueError("question requires require_response=True")
-        return self
-
 
 class NoticeEditIn(BaseModel):
-    """PATCH /api/agents/{id}/notices/current/guarded-v1 request body (with
-    `observed_notice_id`) — revise the agent's open notice (the SDK
-    meiva.ui.edit_notice contract). All fields optional;
-    pass only what changes. `require_response` cannot be changed (turn an FYI
-    into a question by dismissing and posting fresh)."""
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
 
     title: str | None = None
     content: str | None = None
@@ -170,18 +144,7 @@ class NoticeEditIn(BaseModel):
 
 
 class NoticeItem(BaseModel):
-    """One agent_notices row — element of GET /api/notices/open (the FYI feed:
-    require_response false, resolved_at None) and the resolved page of
-    GET /api/notices (the cross-fleet resolution history). Joined to the agent label.
-
-    Served as an independent feed kept off the agent snapshot — the snapshot
-    carries the open require_response notices inline + an unread FYI count, so a
-    large FYI backlog never bloats the fleet-wide broadcast.
-
-    `resolution` is NULL while open, else one of answered / dismissed / read /
-    withdrawn / superseded; `reply` is the cached readable reply (NULL when none). `question` keeps the
-    original numbered options and `answer` keeps the validated structured reply.
-    """
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
 
     id: int
     agent_id: int
@@ -213,17 +176,7 @@ class NoticesCursor(BaseModel):
 
 
 class NoticesFeed(BaseModel):
-    """GET /api/notices — the unified inbox feed (Task #1024, R4 layer 2,
-    decision Q1=A). One request carries the whole Inbox panel: the OPEN
-    queue split by kind (open = FYI notices that need no response, awaiting
-    = require_response notices that ride the agent snapshot today) plus one
-    keyset page of the RESOLVED history.
-
-    The contract shape was chosen so a panel = one request = one hook:
-    the client no longer merges three independent pipes (agent snapshot +
-    /api/notices/open + the resolved history). `next_cursor` is None when
-    `resolved_page` is the last page (short page or exhausted); pass it back
-    as before_at/before_id for the next strictly-older page."""
+    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
 
     open: list[NoticeItem]
     awaiting: list[NoticeItem]

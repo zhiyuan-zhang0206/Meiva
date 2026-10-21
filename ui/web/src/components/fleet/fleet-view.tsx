@@ -128,7 +128,7 @@ export function FleetView() {
   // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
   const noticeFeed = useNotices();
   const inboxCount = useMemo(
-    () => noticeFeed.awaiting.length + noticeFeed.open.length,
+    () => noticeFeed.awaiting.length,
     [noticeFeed],
   );
 

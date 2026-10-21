@@ -1,108 +1,67 @@
 ---
 type: doc
-title: Notify — the user's notice inbox
-description: "meiva.ui.notify namespace: post notices to the user's inbox (FYI / response required / blocking), edit pending notices, dismiss expired ones. A notice that needs a reply is also delivered as a notification; the only reliable channel for an agent's results and decisions."
+title: Notify — questions requiring a user response
+description: Response-required notices with independent priority and blocking attributes, three question types, and transactional replies.
 tags:
 - fleet
 - notify
 - user-communication
 ---
 
-# Notify — the user's notice inbox
+# Notice contract
 
-## Responsibility
+A notice always requires a user response. Ordinary information, progress and
+results belong in chat; there is no FYI queue or mark-read action.
 
-The notice system is the only reliable channel for agents to reach users: the
-inbox shows only what `meiva.ui.notify` posted, never the agent's ordinary text.
-A notice that needs a reply is also delivered as a notification; an FYI notice
-stays in the inbox.
+Two independent attributes describe each notice:
 
-## Three notice tiers
+| Attribute | Meaning |
+|---|---|
+| `priority` | P0 (highest), P1, P2 (default), P3 (lowest) |
+| `blocking` | Whether the agent cannot progress until the answer arrives |
 
-| Tier | Parameters | Purpose | Agent Behavior |
-|------|------------|---------|----------------|
-| **FYI** | `require_response=False` | Milestones, minor issues already bypassed, directional choices | Continues working, does not wait for a reply |
-| **Response Required** | `require_response=True` | Decisions only a human can make (irreversible operations, spending money, sending messages to real people) | Can continue doing other things |
-| **Blocking** | `require_response=True, blocking=True` | Same as above + agent cannot proceed until a reply | Ends turn after posting the notice, idles waiting |
+Any priority can be blocking or nonblocking. The queue sorts by priority, then
+blocking, then oldest first. A nonblocking notice still needs an answer.
 
-**Communication bisection** (roll-up, #620): **authorization / decisions** (irreversible, spending money, messaging real people) reach the user directly from any depth via `notify`; **progress / conclusions** go to one's delegator via `send_message` for aggregation—the user queue holds only manager-level rollups or deliveries from delegator-less agents; peer-decidable things go to the peer. Default to queueing, never push—out-of-band push only when truly urgent, see [[meiva_builtins/plugins/meiva_fleet/skills/reduce-context-switch-for-human/docs/reduce-context-switch-for-human.meiva.okf.md|interruption discipline skill]].
+## Creation and editing
 
-## API
+`meiva.ui.notify(title, content=None, *, require_response=True, blocking=False,
+priority='P2', task=None, expire_at=None, idempotency_key, question=None)` posts
+one notice and atomically supersedes the agent's previous open notice.
+`require_response=False` is rejected before any effect. Existing callers may
+still supply `require_response=True`; it is not an optional obligation.
 
-### `meiva.ui.notify(title, content=None, *, require_response=False, blocking=False, priority='P2', task=None, expire_at=None, idempotency_key, question=None) -> Notice`
+The title names the question and content supplies background. `question` is
+`text`, `single_select` or `multi_select`; see [[notice-questions.meiva.okf.md]].
+Omitting it keeps the legacy free-text answer surface. Choice questions accept
+an optional comment alongside their selected options. New Other options are
+rejected. The task must exist, the title must be nonblank, and invalid priorities
+fail at the boundary.
 
-Post a notice, automatically superseding any previously unresolved notice from the same agent (resolution=`"superseded"`).
+Retain the required idempotency key across retries and use an absolute expiration
+deadline. The returned integer `Notice` includes `.pending_count`,
+`.pending_notices` and `.superseded`.
 
-- `idempotency_key` (required): retain this operation key for the same notice across retries; use an absolute expiration deadline. Missing or invalid keys fail before HTTP.
-- `title` (required): A one-line title; this is exactly what the user sees in their queue.
-- `content` (optional): Detailed content displayed when the user opens the notice. For a structured question, use this as background and put the question itself in `title`; legacy notices may still offer A/B/C in plain text.
-- `question` (optional): one `text`, `single_select`, or `multi_select` question. Choice questions carry ordered `options` (`id`, `label`, optional `description`) and `allow_other`. Requires `require_response=True`.
-- `priority`: `"P0"` (highest) to `"P3"` (lowest), suggesting how the user should sort.
-- `task` (optional, #663): the owning task's ID—the human queue groups by the notice's **own** task, not just the owner agent; validated at post time (`ValueError` if absent, no dangling FK); immutable after posting (`edit_notice` rejects it).
-- Returns a `Notice` object—integer id (for reference) + `.pending_count`, `.pending_notices`, `.superseded`.
+`edit_notice` changes the current notice's priority or blocking status. A structured
+question freezes its title, background and option order. `dismiss_notice` withdraws
+the observed current notice. Both use observed identity and durable receipts, so
+retrying cannot affect a replacement notice.
 
-**Constraints**: title non-empty; priority one of `"P0"`..`"P3"`; `blocking=True` requires `require_response=True`; at most one active notice per agent; the named `task` must exist.
+## Replies and history
 
-### `meiva.ui.edit_notice(*, title=..., content=..., priority=..., blocking=...) -> None`
+The user answers or explicitly closes without answering. Answering stores the
+selection and comment together and delivers one `system:notice-reply` inbound.
+Closing delivers `system:notice-dismiss` and grants no authorization. Lost-response
+retries reuse their operation key and replay the original acceptance.
 
-Modify the current pending notice. Pass only changed fields. Structured questions freeze `title`, `content`, and the ordered question when posted; replace the notice to change their meaning. Priority and blocking can still be edited. The call observes the open notice id first and edits exactly that row under one key; an ambiguous response is retried under the same key and replays the original acceptance, never editing a newer notice.
+The live feed, inspector and IM queue contain only response-required rows. The
+feed's legacy `open` field stays empty; `awaiting` is the active question queue.
+Resolved notice history also excludes FYIs. Historical FYI rows and read receipts
+remain stored for compatibility; they are not converted into unanswered questions.
+The schema's legacy fields are retained rather than destructively rewritten.
 
-- Cannot change `require_response` (to change it, dismiss + re-notify)
-- `content=None` clears the content
-- `blocking=True` is only valid for notices with `require_response=True`
-- No open notice → idempotent no-op
+## Owners
 
-### `meiva.ui.dismiss_notice() -> None`
-
-Withdraw the current open notice (resolution=`"withdrawn"`); no open notice is a no-op. An ambiguous response is surfaced without automatic replay, which could withdraw a newer notice. Inspect current state before an explicit new intent.
-
-### ~~`meiva.ui.list_notices`~~ (removed 2026-08-02)
-
-At most one notice is open per agent (notify auto-resolves the previous), so the agent-facing list verb had no consumer-side reason to exist — its dominant usage was recovering the id for edit/dismiss, which no longer take ids. The unified inbox (frontend) remains the consumer of the resolved history; agents who need their own notice rows can query the table directly.
-
-## Numbered questions
-
-A notice carries one immutable `text`, `single_select`, or `multi_select` question.
-Options keep their declared 1-based order; Other follows them with the final number.
-Web submits structured answers and CLI/IM use the same validator for numbered
-text replies. See [[notice-questions.meiva.okf.md]] for examples, answer
-rules and the text-client grammar. Existing notices remain free-text.
-
-## Data Model
-
-```
-agent_notices (table)
-├── agent_id          — the agent that sent the notice
-├── local_id          — local per-agent incrementing sequence number (UNIQUE(agent_id, local_id))
-├── task_id           — the owning task (nullable FK → agent_tasks, added in #663; validated at post time, immutable after posting)
-├── title, content    — title and content
-├── priority          — P0..P3
-├── require_response  — whether a response is required (NOT NULL)
-├── blocking          — whether it blocks (CHECK: NOT blocking OR require_response)
-├── created_at
-├── updated_at        — last edit / status change
-├── resolved_at       — NULL means unresolved (CHECK: (resolved_at IS NULL) = (resolution IS NULL))
-├── resolution        — 'answered' | 'dismissed' | 'read' | 'withdrawn' | 'superseded'
-├── question          — immutable JSONB question; NULL for legacy notices
-├── answer            — validated JSONB answer; NULL until answered
-└── reply             — cached readable reply (free text for legacy notices, server projection for structured answers); delivery uses system:notice-reply
-```
-
-`task_id` propagates to the gateway notice read path (snapshots, `NoticeItem`, `notice_posted` SSE) and the `notice_posted`/`notice_resolved` events—the frontend groups the needs-you queue by the notice's own task, falling back to owner-join grouping without one.
-
-Five resolution values (guarded by the `agent_notices_resolution_legal` CHECK, restricted by `require_response`):
-- `answered` — the user answered a require_response notice (reply = answer)
-- `dismissed` — the user dismissed a require_response notice without answering
-  (delivery: a `system:notice-dismiss` system-sourced inbound — a system event,
-  not user speech — so the agent stops waiting without a User-role message)
-- `answered` / `read` with a reply deliver `system:notice-reply` — the reply is
-  notice-system content, not user speech, so no User-role message is consumed
-- `read` — the user viewed an FYI notice (reply optional; only for NOT require_response)
-- `withdrawn` — agent withdrew it (`meiva.ui.dismiss_notice`)
-- `superseded` — replaced by a new notify from the same agent
-
-## Relationships to Other Subsystems
-
-- [[self.meiva.okf.md]] — notify acts on behalf of the agent for its owner
-- [[neighbors.meiva.okf.md]] — judging "can a peer decide or must a human decide" depends on neighbor discovery
-- [[meiva_builtins/plugins/meiva_fleet/docs/meiva_fleet.meiva.okf.md]] — overview
+- [[notice-questions.meiva.okf.md]] — question, selection and comment semantics.
+- [[gateway/agents/docs/notice-receipts.meiva.okf.md]] — transactional acceptance.
+- [[meiva/docs/ui.meiva.okf.md]] — SDK surface.

@@ -14,7 +14,7 @@ QUESTION = {
         {"id": "web", "label": "Web", "description": None},
         {"id": "desktop", "label": "Desktop", "description": None},
     ],
-    "allow_other": True,
+    "allow_other": False,
 }
 
 
@@ -39,8 +39,8 @@ def post_question(client: TestClient, agent: int, question: dict[str, object] | 
 @pytest.mark.parametrize(
     "body",
     [
-        {"action": "answer", "answer": {"option_ids": ["desktop"], "other_text": "Use 1 later."}},
-        {"action": "answer", "reply": "2,3\nUse 1 later."},
+        {"action": "answer", "answer": {"option_ids": ["desktop"], "comment": "Use 1 later."}},
+        {"action": "answer", "reply": "2\nUse 1 later."},
     ],
 )
 def test_answer_round_trip_and_retry_deliver_one_numbered_inbound(
@@ -59,15 +59,15 @@ def test_answer_round_trip_and_retry_deliver_one_numbered_inbound(
     assert row is not None
     assert row[0] == "answered"
     assert row[1]["option_ids"] == ["desktop"]
-    assert row[1]["other_text"] == "Use 1 later."
-    assert "1. Web\n2. Desktop\n3. Other" in row[2]
-    assert "Selected: 2, 3" in row[2]
+    assert row[1]["comment"] == "Use 1 later."
+    assert "1. Web\n2. Desktop" in row[2]
+    assert "Selected: 2" in row[2]
     inbound = db_conn.execute(
         "SELECT source,content FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchall()
     assert len(inbound) == 1
     assert inbound[0][0] == "system:notice-reply"
-    assert "Other (3): Use 1 later." in inbound[0][1]
+    assert "Comment: Use 1 later." in inbound[0][1]
     resolved = client.get("/api/notices").json()["resolved_page"]
     assert next(n for n in resolved if n["id"] == notice)["answer"] == row[1]
 
@@ -178,7 +178,7 @@ def test_invalid_question_does_not_supersede_the_current_question(
         assert response.status_code == 422
     response = client.post(
         f"/api/agents/{agent}/notices",
-        json={"title": "FYI with a question", "question": QUESTION},
+        json={"title": "FYI with a question", "require_response": False, "question": QUESTION},
         headers=keyed_headers(str(uuid4())),
     )
     assert response.status_code == 422
@@ -195,3 +195,48 @@ def test_inspector_carries_the_same_question(
     response = client.get(f"/api/agents/{agent}/inspect/live")
     assert response.status_code == 200, response.text
     assert response.json()["notice"]["question"] == QUESTION
+
+
+@pytest.mark.parametrize(
+    "changes", [{"require_response": False}, {"question": QUESTION | {"allow_other": True}}]
+)
+def test_creation_rejects_non_response_and_other_before_effects(
+    client: TestClient,
+    db_conn: psycopg.Connection,
+    changes: dict[str, object],
+) -> None:
+    agent = seed_agent(db_conn)
+    response = client.post(
+        f"/api/agents/{agent}/notices",
+        json={"title": "Choose scope", **changes},
+        headers=keyed_headers(str(uuid4())),
+    )
+    assert response.status_code == 422
+    assert db_conn.execute(
+        "SELECT count(*) FROM agent_notices WHERE agent_id=%s", (agent,)
+    ).fetchone() == (0,)
+
+
+def test_notice_defaults_to_response_and_cannot_be_marked_read(
+    client: TestClient,
+    db_conn: psycopg.Connection,
+) -> None:
+    agent = seed_agent(db_conn)
+    response = client.post(
+        f"/api/agents/{agent}/notices",
+        json={"title": "Which scope?", "blocking": True, "priority": "P3"},
+        headers=keyed_headers(str(uuid4())),
+    )
+    assert response.status_code == 201, response.text
+    notice = next(n for n in client.get("/api/notices/open").json() if n["agent_id"] == agent)
+    assert notice["require_response"] is True
+    assert notice["blocking"] is True and notice["priority"] == "P3"
+    rejected = client.post(
+        f"/api/keyed/v1/agents/{agent}/notices/{notice['id']}/resolve",
+        json={"action": "read"},
+        headers=keyed_headers(str(uuid4())),
+    )
+    assert rejected.status_code == 422
+    assert db_conn.execute(
+        "SELECT resolved_at FROM agent_notices WHERE id=%s", (notice["id"],)
+    ).fetchone() == (None,)

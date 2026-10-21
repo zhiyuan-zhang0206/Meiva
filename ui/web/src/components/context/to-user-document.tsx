@@ -5,7 +5,6 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { ZoomableImage } from "@/components/content/zoomable-image";
 import type { ToUserDocument } from "@/lib/contracts/types";
 import { readReferences, withReferences } from "@/lib/context/reference-url";
@@ -25,7 +24,7 @@ function pushedEntry(): boolean {
 // The inspector trigger is optional: `onInspect` decides whether the bar renders
 // it at all, and `inspecting` drives its pressed state.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse }: {
+export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate }: {
   agentId: number;
   document: ToUserDocument | undefined;
   failed: boolean;
@@ -36,6 +35,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   bodyHidden?: boolean;
   onInspect?: () => void;
   onCollapse?: () => void;
+  onNavigate?: () => void;
 }) {
   const t = useTranslations("toUser");
   const tInspector = useTranslations("inspector");
@@ -46,6 +46,8 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   const current = references.length ? linked.data : document;
   const loading = references.length ? linked.isFetching : pending;
   const error = references.length ? linked.isError : failed;
+  const referencePath = references.join("/");
+  useEffect(() => { onNavigate?.(); }, [referencePath, onNavigate]);
   const content = current?.content;
   const show = useCallback((next: string[], mode: "push" | "replace") => {
     setReferences(next);
@@ -86,7 +88,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   // (task #3894).
   // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   return (
-    <section className={cn(FLEX, MIN_H_0, bodyHidden ? "shrink-0" : FLEX_1, FLEX_COL)} aria-label={t("title")}>
+    <section className={cn(FLEX, MIN_H_0, "shrink-0", FLEX_COL)} aria-label={t("title")}>
       <div data-testid="document-bar" className={cn("shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_WRAP_CLASS, FLEX)}>
         {inspecting ? null : (
           <>
@@ -145,7 +147,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
               {loading ? t("loading") : error ? t("unavailable") : current?.legacy_html ? t("legacyHtml") : t("empty")}
             </div>
           ) : (
-        <ScrollArea key={references.join("/")} className={cn("text-[13px] leading-relaxed", MIN_H_0, FLEX_1)} viewportClassName="p-5">
+        <div key={references.join("/")} className={cn("p-5 text-[13px] leading-relaxed")}>
           <ChatMarkdown content={content} resolveUrl={(href) => {
             const resource = resources.get(href);
             return resource?.url ?? (/^(https?:|mailto:|#)/i.test(href) ? href : "about:blank");
@@ -165,7 +167,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
               }}>{children}</a>;
             },
           }} />
-        </ScrollArea>
+        </div>
       )}
         </>
       )}

@@ -28,7 +28,7 @@ function idleQuery(data?: ToUserDocument) {
 }
 function show(
   value: ToUserDocument,
-  { mobile = false, linked, onInspect, onCollapse, inspecting = false }: { mobile?: boolean; linked?: ToUserDocument; onInspect?: () => void; onCollapse?: () => void; inspecting?: boolean } = {},
+  { mobile = false, linked, onInspect, onCollapse, onNavigate, inspecting = false }: { mobile?: boolean; linked?: ToUserDocument; onInspect?: () => void; onCollapse?: () => void; onNavigate?: () => void; inspecting?: boolean } = {},
 ) {
   linkedQuery.mockReturnValue(idleQuery(linked));
   return render(
@@ -42,6 +42,7 @@ function show(
       inspecting={inspecting}
       onInspect={onInspect}
       onCollapse={onCollapse}
+      onNavigate={onNavigate}
     />,
   );
 }
@@ -109,16 +110,21 @@ describe("To user navigation history", () => {
   const nested = () => document("# Nested document");
 
   it("puts the opened document in the URL and follows Back and Forward to it", () => {
-    show(root(), { linked: nested() });
+    const onNavigate = vi.fn();
+    show(root(), { linked: nested(), onNavigate });
+    expect(onNavigate).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("link", { name: "Details" }));
+    expect(onNavigate).toHaveBeenCalledTimes(2);
     expect(chain()).toEqual([linkId]);
     expect(screen.getByRole("heading", { name: "Nested document" })).toBeTruthy();
 
     travel("/?agent_id=7");
+    expect(onNavigate).toHaveBeenCalledTimes(3);
     expect(chain()).toEqual([]);
     expect(screen.getByRole("link", { name: "Details" })).toBeTruthy();
 
     travel(`/?agent_id=7&reference=${linkId}`);
+    expect(onNavigate).toHaveBeenCalledTimes(4);
     expect(chain()).toEqual([linkId]);
     expect(screen.getByRole("heading", { name: "Nested document" })).toBeTruthy();
   });

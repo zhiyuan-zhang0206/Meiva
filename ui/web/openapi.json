@@ -2847,7 +2847,6 @@
     "/api/notices/open": {
       "get": {
         "summary": "Get Open Notices",
-        "description": "The cross-fleet open notices feed, priority-then-newest.\n\nBy default only FYI notices (require_response false) — response-required\nones ride the agent snapshot. include_awaiting=True returns both kinds:\nthe IM bridge's \"/notice list\" queue view (Task #941) lists everything\nstill open and hands each item its own processing buttons. A notice is\nopen when resolved_at IS NULL. `agent_id` narrows the feed to one agent's\nopen notices — how an agent observes its own notice's global id before a\nguarded edit/withdraw. Omit `limit` for the configured default cap\n(``display.notices_open_default_limit``, 200 out of the box).",
         "operationId": "get_open_notices_api_notices_open_get",
         "parameters": [
           {
@@ -2866,16 +2865,6 @@
                 }
               ],
               "title": "Limit"
-            }
-          },
-          {
-            "name": "include_awaiting",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Include Awaiting"
             }
           },
           {
@@ -2927,7 +2916,6 @@
     "/api/notices/live": {
       "get": {
         "summary": "Get Notices Live",
-        "description": "New open notices across the fleet, both kinds, oldest-first by id.\n\nThe IM bridge polls this with the max id it has seen and pushes new\nnotices to Telegram (Task #884) — one query, no event dependency, and it\ncovers require_response notices (which publish no NoticePosted event) as\nwell as FYIs. Idempotent: rows are only ever returned while open, so a\npoll after a notice was resolved simply stops seeing it. Omit `limit` for the\nconfigured default cap (``display.notices_open_default_limit``).",
         "operationId": "get_notices_live_api_notices_live_get",
         "parameters": [
           {
@@ -2991,7 +2979,6 @@
     "/api/notices": {
       "get": {
         "summary": "Get Notices Feed",
-        "description": "The unified inbox feed (Task #1024, R4 layer 2, decision Q1=A): one\nrequest carries the whole Inbox panel.\n\n- `open` — cross-fleet open FYI notices (require_response false),\n  priority then newest. Same content as GET /api/notices/open.\n- `awaiting` — cross-fleet open require_response notices, same sort.\n  Today these ride the agent snapshot (notices_awaiting_response); the\n  merged endpoint makes them a first-class pipe so the frontend's Inbox\n  no longer merges three sources.\n- `resolved_page` + `next_cursor` — one keyset page of the resolved\n  history (both kinds, newest resolution first): pass next_cursor back\n  as before_at / before_id for the next strictly-older page; None means\n  the end.\n\nThe standalone endpoints stay for their other consumers (IM bridge,\nCLI). The open sweep (FYI TTL auto-resolve) runs once per call, so the\nopen list, the awaiting list and the history agree within one request.\nThe open/awaiting cap and the resolved page default to\n``display.notices_open_default_limit`` / ``display.notices_resolved_default_page``\nwhen the caller passes none.",
         "operationId": "get_notices_feed_api_notices_get",
         "parameters": [
           {
@@ -3091,7 +3078,6 @@
     "/api/agents/{agent_id}/notices": {
       "post": {
         "summary": "Post Notice Create",
-        "description": "Post a notice at one of the three obligation rungs (FYI /\nresponse-required / blocking), atomically superseding the agent's\nprevious open notice.\n\nOne transaction: every open notice of the agent is resolved as\n'superseded' (with a resolve event each), then the new row is inserted.\nMirrors the previous SDK-side logic exactly — same supersede semantics,\nsame local_id allocation, same events — now executed server-side so the\ntwo writes cannot tear.\n\nReturns the SDK Notice shape: the new notice's local id, the pending\ncount + titles (for the SDK's pending list), and the superseded ids.",
         "operationId": "post_notice_create_api_agents__agent_id__notices_post",
         "parameters": [
           {
@@ -10455,6 +10441,7 @@
           "allow_other": {
             "type": "boolean",
             "title": "Allow Other",
+            "description": "Legacy stored flag; new questions cannot enable Other.",
             "default": false
           }
         },
@@ -13910,7 +13897,8 @@
                 "type": "null"
               }
             ],
-            "title": "Other Text"
+            "title": "Other Text",
+            "description": "Legacy stored answer; new answers cannot supply other_text."
           },
           "text": {
             "anyOf": [
@@ -13965,7 +13953,7 @@
           "require_response": {
             "type": "boolean",
             "title": "Require Response",
-            "default": false
+            "default": true
           },
           "blocking": {
             "type": "boolean",
@@ -14027,8 +14015,7 @@
         "required": [
           "title"
         ],
-        "title": "NoticeCreateIn",
-        "description": "POST /api/agents/{id}/notices request body — the unified notice write API\n(R3 door ④).\n\nMirrors the SDK meiva.ui.notify() contract: `priority` P0-P3, `blocking`\nmeaningful only when `require_response` is true (an FYI never stalls).\n`task_id` optionally groups the notice under a task in the user's queue.\n`expire_at` specifies the notice lifetime; omitted uses the configured default TTL."
+        "title": "NoticeCreateIn"
       },
       "NoticeItem": {
         "properties": {
@@ -14194,8 +14181,7 @@
           "created_at",
           "expire_at"
         ],
-        "title": "NoticeItem",
-        "description": "One agent_notices row — element of GET /api/notices/open (the FYI feed:\nrequire_response false, resolved_at None) and the resolved page of\nGET /api/notices (the cross-fleet resolution history). Joined to the agent label.\n\nServed as an independent feed kept off the agent snapshot — the snapshot\ncarries the open require_response notices inline + an unread FYI count, so a\nlarge FYI backlog never bloats the fleet-wide broadcast.\n\n`resolution` is NULL while open, else one of answered / dismissed / read /\nwithdrawn / superseded; `reply` is the cached readable reply (NULL when none). `question` keeps the\noriginal numbered options and `answer` keeps the validated structured reply."
+        "title": "NoticeItem"
       },
       "NoticeOption": {
         "properties": {
@@ -14291,8 +14277,7 @@
           "resolved_page",
           "next_cursor"
         ],
-        "title": "NoticesFeed",
-        "description": "GET /api/notices — the unified inbox feed (Task #1024, R4 layer 2,\ndecision Q1=A). One request carries the whole Inbox panel: the OPEN\nqueue split by kind (open = FYI notices that need no response, awaiting\n= require_response notices that ride the agent snapshot today) plus one\nkeyset page of the RESOLVED history.\n\nThe contract shape was chosen so a panel = one request = one hook:\nthe client no longer merges three independent pipes (agent snapshot +\n/api/notices/open + the resolved history). `next_cursor` is None when\n`resolved_page` is the last page (short page or exhausted); pass it back\nas before_at/before_id for the next strictly-older page."
+        "title": "NoticesFeed"
       },
       "NotificationAuditResponse": {
         "properties": {
@@ -15513,8 +15498,7 @@
         "required": [
           "action"
         ],
-        "title": "ResolveNoticeIn",
-        "description": "POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve request body.\n\n`action` is the explicit close verb (never inferred from whether `reply` is\npresent): `answer` / `dismiss` apply to a require_response notice, `read`\napplies to an FYI notice. `answer` is a structured response to an immutable question. `reply` is the\nlegacy free-text response or a numbered CLI/IM answer; it cannot accompany\n`answer`. Answer requires one of them. Optional dismiss/read notes remain\nfree text. The server validates the original question and delivers a\nself-describing system:notice-reply inbound."
+        "title": "ResolveNoticeIn"
       },
       "ResolvedConfigView": {
         "properties": {

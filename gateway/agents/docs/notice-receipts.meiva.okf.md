@@ -12,19 +12,21 @@ Notice creation and resolution require `Idempotency-Key` and
 `notice_operation_receipts` owns each normalized request and its immutable
 result, scoped by concrete HTTP path and the credential-aware key. The receipt
 and all notice/reply mutations commit together. Concurrent retries serialize
-in Postgres; changed inputs conflict (409). Missing keys fail before mutation. A deliberate later read with a reply uses
-a new key, while replay of the same key returns its original inbound.
+in Postgres; changed inputs conflict (409). Missing keys fail before mutation. Replay of the same key returns its original inbound. A fresh read operation is rejected.
 
 A resolution receipt holds its original optional inbound id. Retry repairs
 its wake tail, with the exact pending-row resurrection guard preventing revival
 of completed work. An answer or dismissal which originally succeeded replays
-instead of returning an already-resolved conflict. Bare reads also have a
-receipt without manufacturing an inbound.
+instead of returning an already-resolved conflict. Historical read receipts still replay; they do not admit a new read operation.
 
 A creation receipt keeps the original local id, pending summary and superseded
 ids. Replaying after another notice was posted does not supersede it or publish
 an old posted event. Current task existence and expiration checks run only for
 new operations; an accepted notice retains its receipt after those facts change.
+Receipt lookup also precedes the new response-required and no-Other checks.
+Legacy creation retries with omitted `require_response` can match their old
+normalized false default; explicit changed inputs still conflict. New FYI and
+Other creation requests fail before effects or receipt allocation.
 All creations for an agent lock its row to serialize local id allocation.
 
 Receipts have no TTL pruning: expiration cannot turn a known operation into a
@@ -83,8 +85,7 @@ Question rows carry immutable question JSON; priority and blocking remain editab
 Answer resolution validates the submitted selection against the locked question,
 canonicalizes selected IDs into its original number order, and commits answer JSON,
 readable reply, notice state, inbound and operation receipt together. Text-only
-clients use the same validator after parsing the numbered first line. A reference
-inside Other does not select that number. Replay keeps the original inbound and
+clients use the same validator after parsing the numbered first line. Numbers inside the optional comment never select an option. Replay keeps the original inbound and
 answer without validating against later state; new expired-question answers fail.
 Legacy operation normalization omits absent question/answer fields so old accepted
 receipt requests retain their equality across this additive schema upgrade.

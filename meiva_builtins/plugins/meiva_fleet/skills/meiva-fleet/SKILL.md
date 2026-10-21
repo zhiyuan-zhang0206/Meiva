@@ -163,7 +163,7 @@ The **user** is the only one who can authorize what no agent may decide alone �
 
 ## Reporting
 
-Your replies to the delegator are the ambient record — how the work progressed shows in your message trail and the task's results. `meiva.ui.notify` is the push: when something rises above ambient — worth a glance or needing an answer — promote it to the user's queue. Don't promote routine progress; don't bury a decision that needs an answer.
+Your replies to the delegator are the ambient record — how the work progressed shows in your message trail and the task's results. `meiva.ui.notify` is the push: when a question needs a user answer, post it to the user's queue. Ordinary information and results stay in chat. Don't promote routine progress; don't bury a decision that needs an answer.
 
 ### Message discipline: milestone-based, no noise
 
@@ -193,11 +193,10 @@ A worker publishes a result by **writing a file and sending the path** to whoeve
 ### Asking one numbered question
 
 For discrete decisions, supply `question={"type": "single_select",
-"options": [{"id": "stable-id", "label": "Choice", "description": "Optional detail"}],
-"allow_other": True}` to `meiva.ui.notify(..., require_response=True)`.
+"options": [{"id": "stable-id", "label": "Choice", "description": "Optional detail"}]}` to `meiva.ui.notify(..., require_response=True)`.
 Use `type="multi_select"` for multiple selections. For an open question use `question={"type": "text"}`. Put the question in `title`
 and context in `content`. One notice is one question; await its answer before
-asking another. Options keep their declared 1-based numbers and Other is last.
+asking another. Options keep their declared 1-based numbers. Both choice types accept an optional comment.
 Question/context changes require a replacement notice. Interpret both explicit
-selections and the user's Other/note, preserving references such as "option 2";
+selections and the user's comment, preserving references such as "option 2";
 mentions inside text are not selections. A dismissal is not approval.
