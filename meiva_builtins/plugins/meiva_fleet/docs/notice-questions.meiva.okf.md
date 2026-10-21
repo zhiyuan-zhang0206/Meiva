@@ -57,8 +57,10 @@ Web sends `answer.option_ids` and optional `answer.comment`; text questions send
 stores the canonical answer and readable reply in the same transaction as the
 agent inbound. CLI and IM use option numbers separated by commas on the first
 line, followed by an optional multiline comment. Open questions accept plain text.
-Those replies still name at least one number: a comment-only answer is a Web
-affordance, and a numbered client that wants no option has to answer in the Web.
+A numbered reply writes `0` on that first line to choose nothing, then the
+comment below it — the same comment-only answer the Web form submits, so no
+channel is narrower than another. Mixing `0` with option numbers is refused, and
+`0` alone carries nothing, so it is refused too.
 Invalid, duplicate or unknown selections leave the notice unanswered.
 Closing without answering delivers an explicit dismissal, never authorization.
 
