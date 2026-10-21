@@ -9,6 +9,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { OpenNoticeDetail } from "@/components/notifications/open-notice-detail";
 import { ToUserDocumentView } from "./to-user-document";
 import type { NoticeItem } from "@/lib/contracts/types";
@@ -59,9 +60,9 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
               {noticeCollapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />}
             </button>
           </div>
-          {!noticeCollapsed && <div className="max-h-[32vh] overflow-y-auto px-3 pb-3">
+          {!noticeCollapsed && <ScrollArea className="max-h-[32vh]" viewportClassName="px-3 pb-3">
             <OpenNoticeDetail key={notice.id} agentId={agentId} notice={notice} onResolved={() => dropOpenNotices(queryClient, [notice.id])} />
-          </div>}
+          </ScrollArea>}
         </section>}
         <ToUserDocumentView
           key={agentId}

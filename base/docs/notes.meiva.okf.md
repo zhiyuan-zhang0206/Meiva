@@ -38,7 +38,7 @@ different tags-normalization rules; now the delimiter scan lives once in
   `(source_id, target_id)` edges, resolved relative to the source file's
   directory; `http(s)`/`#`/empty targets skipped, and a link that resolves
   outside `root` is dropped instead of raising (an out-of-root link used to
-  500 the whole `/api/memory/graph` endpoint).
+  500 the graph view that has since been removed).
 
 ## Notes
 

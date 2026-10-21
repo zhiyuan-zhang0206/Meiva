@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { ZoomableImage } from "@/components/content/zoomable-image";
 import type { ToUserDocument } from "@/lib/contracts/types";
 import { readReferences, withReferences } from "@/lib/context/reference-url";
@@ -144,7 +145,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
               {loading ? t("loading") : error ? t("unavailable") : current?.legacy_html ? t("legacyHtml") : t("empty")}
             </div>
           ) : (
-        <div key={references.join("/")} className={cn("overflow-auto p-5 text-[13px] leading-relaxed", MIN_H_0, FLEX_1)}>
+        <ScrollArea key={references.join("/")} className={cn("text-[13px] leading-relaxed", MIN_H_0, FLEX_1)} viewportClassName="p-5">
           <ChatMarkdown content={content} resolveUrl={(href) => {
             const resource = resources.get(href);
             return resource?.url ?? (/^(https?:|mailto:|#)/i.test(href) ? href : "about:blank");
@@ -164,7 +165,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
               }}>{children}</a>;
             },
           }} />
-        </div>
+        </ScrollArea>
       )}
         </>
       )}
