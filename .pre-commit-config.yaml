@@ -32,6 +32,9 @@ repos:
         alias: check-committed-merge-conflict
         args: [--assume-in-merge]
         stages: [pre-push]
+        # Over every file, not the push's changed set: which file carries a marker is not
+        # knowable from the diff of the branch that produced it.
+        always_run: true
       - id: check-added-large-files
         args: [--maxkb=500]
       - id: check-case-conflict
