@@ -58,7 +58,11 @@ the operating choices below do not redefine either component.
   open tabs to `<home>/run/browser-session.json` before the services phase
   signals the browser, and the next `meiva start` relaunches Chrome with
   `--restore-last-session`, re-applies the recorded pins and tab groups, and
-  prints `browser session: restored N/M tabs; pin/group reapplied K/J`. A crash
+  prints `browser session: restored N/M tabs; pin/group reapplied K/J`. `K/J`
+  counts the recorded pins and grouped tabs that are **in place**, not the ones
+  this pass changed — Chrome restores some of them itself, and a run that
+  repaired nothing would otherwise report `0/J` for a correct layout and read
+  as a failure. A crash
   never restores, and `--keep-browser` records nothing. The ledger holds URLs,
   titles, pins and group titles only — never cookies, tokens or headers. Do not
   reach for Chrome's "continue where you left off" preference instead: measured

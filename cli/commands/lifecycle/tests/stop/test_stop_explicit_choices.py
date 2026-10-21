@@ -112,6 +112,63 @@ def test_shell_sessions_are_closed_exactly_when_the_operator_does_not_keep_them(
     assert effects.pty_sessions_stopped() is not keep_shell_sessions
 
 
+def test_a_kept_browser_leaves_no_pending_restore_to_consume(
+    home: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: OperatorDatabaseFactory,
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
+    # meiva:note
+    # A kept browser owes the next start nothing, and the ledger's `pending` field is
+    # what says so: a start consults the field, never the file's mtime. The tab record
+    # an earlier restore left on disk stays as it is, and no `browser session` line is
+    # printed — a guard that let the record path run would print one ("nothing to
+    # record" on a host with no browser) before it could write anything.
+    from base.paths import meiva_home
+    from services.desktop.browser import session_restore
+
+    ledger_home = meiva_home()
+    session_restore.write(
+        ledger_home,
+        session_restore.Ledger(
+            tabs=(
+                session_restore.Tab(
+                    url="https://a.example/",
+                    title="A",
+                    pinned=True,
+                    group=None,
+                    index=0,
+                    window=0,
+                ),
+            ),
+            captured_at="2026-10-22T00:00:00+00:00",
+            layout=True,
+            pending=None,
+            reapply={"applied": 1, "expected": 1},
+        ),
+    )
+    capsys.readouterr()
+
+    _stop_effects(
+        monkeypatch,
+        command_runtime=command_runtime,
+        operator_database=operator_database,
+        operator_pipeline=operator_pipeline,
+        roles="agent-runner",
+        keep_infra=None,
+        keep_browser=True,
+    )
+
+    stored = session_restore.read(ledger_home)
+    assert stored is not None
+    assert stored.pending is None
+    assert stored.report_pending is False
+    assert "browser session" not in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("keep_browser", [True, False])
 def test_the_browser_is_stopped_exactly_when_the_operator_does_not_keep_it(
     keep_browser: bool,
