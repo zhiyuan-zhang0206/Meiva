@@ -521,6 +521,17 @@ def readiness_verdict(launch: Any, wait: Any, *, ready_timeout: float) -> int | 
     return None
 
 
+# meiva:note
+# A pause marker left by a previous release claims this home is stopped; readiness just made that
+# false, so the sweep removes it here and names it in the start's own output.
+def _report_pause_markers() -> None:
+    from base.deploy.lifecycle import pause_markers
+
+    with start_trace.phase("pause markers"):
+        for line in pause_markers.sweep():
+            print(f"  {line}")
+
+
 @delegable_start
 def cmd_start_body(
     database_factory: OperatorDatabaseFactory,
@@ -552,8 +563,7 @@ def cmd_start_body(
         from base.paths import meiva_home
         from cli.commands.lifecycle import stand_down
 
-        line = stand_down.gate(meiva_home(), boot_attempt=boot_attempt)
-        if line is not None:
+        if (line := stand_down.gate(meiva_home(), boot_attempt=boot_attempt)) is not None:
             print(f"  · {line}")
             if boot_attempt:
                 return 0
@@ -640,6 +650,8 @@ def cmd_start_body(
         return rc
 
     _assert_archive_after_readiness(wait, roles=state.roles, machine=state.command.machine)
+
+    _report_pause_markers()
 
     with start_trace.phase("finalize"):
         if not start_serving.mark_serving(serving_generation, runtime=runtime.identity()):

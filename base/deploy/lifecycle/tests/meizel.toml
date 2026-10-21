@@ -2,6 +2,7 @@ exports = ["serving_entrypoint.py", "serving_root.py"]
 
 [uses]
 "conftest.py" = ["serving_root.py"]
+"test_pause_markers.py" = ["pause_lock_child.py"]
 "test_start_serving.py" = ["serving_entrypoint.py"]
 
 [debt.env-patch]
