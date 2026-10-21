@@ -172,6 +172,29 @@ describe("OpenNoticeDetail — reply retries", () => {
 const options = [{ id: "web", label: "Web" }, { id: "desktop", label: "Desktop" }];
 
 describe("OpenNoticeDetail — numbered questions", () => {
+  it.each(["single_select", "multi_select"] as const)("renders %s notice Markdown while preserving selection and comment submission", async (type) => {
+    resolveNotice.mockResolvedValue({ status: "ok" });
+    const { container } = render(<OpenNoticeDetail agentId={7} notice={ntc({
+      title: "Choose **coverage** for `preview`",
+      content: "Review **scope**:\n\n- Conversation\n- Questions",
+      question: { type, options: [{ id: "web", label: "**Web** `app`", description: "Use [docs](https://example.com/docs) and *keyboard*." }], allow_other: false },
+    })} />);
+    await waitFor(() => expect(screen.getByRole("heading").querySelector("strong")?.textContent).toBe("coverage"));
+    expect(screen.getByRole("heading").querySelector("code")?.textContent).toBe("preview");
+    expect(screen.getByRole("list").textContent).toContain("Conversation");
+    const choice = screen.getByRole(type === "single_select" ? "radio" : "checkbox", { name: /^1\. Web app Use docs and keyboard\s*\.$/ });
+    expect(choice.closest("label")?.querySelector("strong")?.textContent).toBe("Web");
+    expect(choice.closest("label")?.querySelector("em")?.textContent).toBe("keyboard");
+    expect(container.querySelector("label div, label p, h4 div, h4 p")).toBeNull();
+    expect(screen.getByRole("link", { name: "docs" }).getAttribute("href")).toBe("https://example.com/docs");
+    fireEvent.click(choice);
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Keep **this** literal." } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, {
+      action: "answer", answer: { option_ids: ["web"], comment: "Keep **this** literal." },
+    }, expect.any(String)));
+  });
+
   it("does not preselect or submit a single choice until explicit confirmation", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
     render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options, allow_other: false } })} />);
