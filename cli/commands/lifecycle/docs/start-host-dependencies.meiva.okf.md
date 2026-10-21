@@ -46,8 +46,8 @@ tool
 | `curl` | frontend service selected: the frontend readiness probe | `scripts/provision/host_utils.sh` (apt; macOS ships both) | install → re-probe; still missing → refuse |
 | `swiftc` | macOS with the permissions helper: compiles the helper app | the host; this repository cannot install it | refuse before converge |
 | `codesign` | macOS with the permissions helper: signs the helper app | the host; this repository cannot install it | refuse before converge |
-| `security` | macOS with the permissions helper: unlocks the keychain holding its signing certificate | the host; this repository cannot install it | refuse before converge |
-| `openssl` | macOS with the permissions helper: creates that certificate on the host's first build | the host; this repository cannot install it | refuse before converge |
+| `security` | macOS with the permissions helper: unlocks the keychain that holds the certificate it is signed with | the host; this repository cannot install it | refuse before converge |
+| `openssl` | macOS with the permissions helper, first build on the host: creates that certificate | the host; this repository cannot install it | refuse before converge |
 | `sh` | always: every supervised service and OS job line launches through /bin/sh | the host; this repository cannot install it | refuse before converge |
 | `git` | always: enumerates tracked migrations and digests the checkout on every start | `scripts/provision/install-cli-tools.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
 | `gh` | split agent-runner that consolidates the memory pool through GitHub PRs (not a gateway, MEIVA_MEMORY_KEEP_LOCAL unset, MEIVA_REQUIRE_GITHUB_PR on) | `scripts/provision/install-cli-tools.sh` (apt/Homebrew) | install → re-probe; still missing → refuse |
