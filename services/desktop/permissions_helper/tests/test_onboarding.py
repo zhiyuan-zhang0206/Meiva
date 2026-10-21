@@ -183,6 +183,7 @@ def test_a_denied_grant_is_not_asked_again_until_a_person_asks(tmp_path: Path) -
     assert [item.id for item in second.manual()] == [
         "screen-recording",
         "accessibility",
+        "app-management",
         "desktop-folder",
         "documents-folder",
         "downloads-folder",
@@ -214,7 +215,7 @@ def test_a_helper_without_the_request_method_keeps_the_manual_path(tmp_path: Pat
 def test_the_summary_names_what_is_missing(tmp_path: Path) -> None:
     report = onboarding.check(host=host(tmp_path, client=FakeHelper(_codes(1))), now=NOW)
     summary = onboarding.missing_summary(report)
-    assert summary.startswith("3 permission(s) still missing")
+    assert summary.startswith("4 permission(s) still missing")
     assert "Screen Recording" not in summary
     assert onboarding.observations(report)["desktop-folder"] == "denied"
 

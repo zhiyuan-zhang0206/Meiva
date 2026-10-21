@@ -38,6 +38,18 @@ attempted it yet, not that something is wrong.
 
 Every surface reads the matrix through run_preflight and the helper's ping, never through a second query implementation. File, Automation and report-only rows come from one helper-spawned TCCAccessPreflight child in the same call. Screen Recording and Accessibility are read on two planes: the TCC record (the same preflight child) and the running helper's own boolean (`preflight_screen`, `ax_trusted`).
 
+## App Management is a row no dialog can be asked for
+
+`kTCCServiceSystemPolicyAppBundles` (the "Meiva would like to access data from
+other apps" prompt) is the one row with no request path: `request_grants` asks
+Screen Recording and Accessibility, and macOS stops asking once a denial is on
+record. The row is therefore `SYSTEM_SETTINGS`, the only mode that tells the
+person to open Privacy & Security > App Management themselves; reporting it as
+prompted would claim a dialog the helper cannot raise. The pane anchor
+(`Privacy_AppBundles`) is read from this macOS build's
+`SecurityPrivacyExtension.appex/Contents/Resources/TCCServiceList.plist`, which
+maps the service to that reveal key.
+
 ## A grant the record holds but the helper has not read is stale
 
 The TCC record says granted / denied / not_determined; the running helper's boolean says whether this process can use the grant right now. Record granted with a false boolean reads stale: macOS already holds the grant, the long-lived process has not re-read it, and the fix is a helper restart -- reporting it as denied would send the user to System Settings for a grant that is already there, and reporting the host as complete would claim an unusable grant. Record denied stays denied and record not_determined stays not_determined, whatever the boolean says; a true boolean is granted on both planes.
