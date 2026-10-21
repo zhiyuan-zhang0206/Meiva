@@ -162,18 +162,11 @@ def requested_jobs(argv: Sequence[str]) -> tuple[int, int | None]:
     return 1, None
 
 
-def read_disk(path: str = DATA_VOLUME) -> Reading:
+def read_df(path: str) -> tuple[float, int] | None:
     # meiva:note
-    # Both subprocess calls run fixed argv (`df -P <volume>`, `ps -g <pid>`, the operator's
-    # own job), never a string built from input.
-    #
-    # Two sources for one quantity: statvfs and `df -P`. A split wider than
-    # UNSTABLE_PCT_DELTA points means one of them is mid-refresh, so the caller keeps the
-    # requested concurrency and says so instead of acting on a bad read.
-    stats = os.statvfs(path)
-    total = stats.f_blocks * stats.f_frsize
-    free = stats.f_bavail * stats.f_frsize
-    statvfs_pct = 100.0 * (total - free) / total if total else 0.0
+    # The second source for one quantity, in (percent used, free bytes). None when the tool
+    # is absent or its output does not parse: an optional cross-check that cannot answer
+    # leaves the primary statvfs reading standing, instead of ending the launch.
     try:
         fields = (
             subprocess.run(  # noqa: S603
@@ -182,15 +175,40 @@ def read_disk(path: str = DATA_VOLUME) -> Reading:
             .stdout.splitlines()[1]
             .split()
         )
-        df_pct = float(fields[4].rstrip("%"))
-        df_free = int(fields[3]) * 1024
-    except (IndexError, ValueError):
+        return float(fields[4].rstrip("%")), int(fields[3]) * 1024
+    except (IndexError, ValueError, OSError):
+        return None
+
+
+def read_disk(
+    path: str = DATA_VOLUME,
+    df_reader: Callable[[str], tuple[float, int] | None] = read_df,
+) -> Reading:
+    # meiva:note
+    # Both subprocess calls run fixed argv (`df -P <volume>`, `ps -g <pid>`, the operator's
+    # own job), never a string built from input.
+    #
+    # Two sources for one quantity: statvfs and `df -P`. A split wider than
+    # UNSTABLE_PCT_DELTA points means one of them is mid-refresh, so the caller keeps the
+    # requested concurrency and says so instead of acting on a bad read. One source that
+    # does not answer at all is not a disagreement: statvfs is the primary reading, so the
+    # second reader goes in as a parameter and its silence is reported, never raised.
+    stats = os.statvfs(path)
+    total = stats.f_blocks * stats.f_frsize
+    free = stats.f_bavail * stats.f_frsize
+    statvfs_pct = 100.0 * (total - free) / total if total else 0.0
+    second = df_reader(path)
+    if second is None:
         df_pct, df_free = statvfs_pct, free
+        detail = f"statvfs {statvfs_pct:.1f}% (df unavailable)"
+    else:
+        df_pct, df_free = second
+        detail = f"df {df_pct:.1f}%"
     return Reading(
         free_gib=min(free, df_free) / GIB,
         source="disk",
         unstable=abs(df_pct - statvfs_pct) > UNSTABLE_PCT_DELTA,
-        detail=f"df {df_pct:.1f}%",
+        detail=detail,
     )
 
 
@@ -248,9 +266,16 @@ def read_gpu(command: Sequence[str] = NVIDIA_SMI) -> tuple[float, float] | None:
     # separate memory: it never enters the host budget (overflowing it is a CUDA OOM, not a
     # machine-memory crisis), it is judged against the card. None when the tool is absent,
     # so a CPU-only host reports unknown instead of a fake zero.
-    done = subprocess.run(  # noqa: S603
-        list(command), capture_output=True, text=True, check=False
-    )
+    try:
+        done = subprocess.run(  # noqa: S603
+            list(command), capture_output=True, text=True, check=False
+        )
+    except OSError:
+        # meiva:note
+        # A host without the tool answers None, not a traceback: this reading is recorded,
+        # never priced, so its absence is unknown. Raising here would kill a job the gate
+        # had just decided to start (macOS and every non-NVIDIA host take this path).
+        return None
     if done.returncode != 0:
         return None
     used: list[float] = []
@@ -283,15 +308,20 @@ def read_pressure() -> int:
             check=False,
         ).stdout.strip()
         return int(out)
-    except ValueError:
+    except (ValueError, OSError):
         return 1
 
 
-def swap_line() -> str:
+def swap_line(
+    platform: str = sys.platform,
+    sysctl: Sequence[str] = ("sysctl", "-n", "vm.swapusage"),
+) -> str:
     # meiva:note
     # Printed for the reader, never a criterion: used/total is dominated by stale pages.
-    if sys.platform != "darwin":
-        values = {}
+    # The platform and the command are parameters for the same reason main()'s readers are:
+    # a test drives both branches without patching this module.
+    if platform != "darwin":
+        values: dict[str, float] = {}
         with contextlib.suppress(OSError):
             for line in Path(MEM_INFO).read_text(encoding="utf-8").splitlines():
                 if line.startswith(("SwapTotal:", "SwapFree:")):
@@ -301,9 +331,12 @@ def swap_line() -> str:
             used = values["SwapTotal"] - values.get("SwapFree", 0.0)
             return f"swap {used:.1f}/{values['SwapTotal']:.1f} GiB"
         return "swap unknown"
-    done = subprocess.run(
-        ["sysctl", "-n", "vm.swapusage"], capture_output=True, text=True, check=False
-    )
+    try:
+        done = subprocess.run(  # noqa: S603
+            list(sysctl), capture_output=True, text=True, check=False
+        )
+    except OSError:
+        return "unknown"
     return done.stdout.strip() if done.returncode == 0 else "unknown"
 
 
