@@ -4,7 +4,6 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
-import { Button } from "@/components/ui/button";
 import { AutoExpandTextarea } from "@/components/ui/auto-expand-textarea";
 import { SendButton } from "@/components/ui/send-button";
 import { api } from "@/lib/transport/api";
@@ -127,6 +126,16 @@ export function OpenNoticeDetail({
               </span>
             </>
           ) : null}
+          <button
+            type="button"
+            onClick={dismiss}
+            disabled={pending || unavailable}
+            aria-label={t("closeQuestion")}
+            title={t("closeQuestion")}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            {t("dismiss")}
+          </button>
         </div>
         <h4 className="text-[13px] font-semibold leading-snug break-words">{notice.title}</h4>
         {notice.content && (
@@ -137,13 +146,21 @@ export function OpenNoticeDetail({
       </div>
 
       {notice.question ? (
-        <>
-          <NoticeQuestionForm question={notice.question} pending={pending || unavailable} focusAnswer={autoFocus} onAnswerChange={setStructuredAnswer} />
-          <div className={cn("sticky bottom-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-background py-2", FLEX)}>
-            <Button size="sm" variant="ghost" onClick={dismiss} disabled={pending || unavailable}>{t("closeQuestion")}</Button>
-            <Button size="sm" onClick={answer} disabled={pending || unavailable || !structuredAnswer}>{pending ? t("submitting") : t("submitAnswer")}</Button>
-          </div>
-        </>
+        <NoticeQuestionForm
+          question={notice.question}
+          pending={pending || unavailable}
+          focusAnswer={autoFocus}
+          onAnswerChange={setStructuredAnswer}
+          submitAction={
+            <SendButton
+              state={pending ? "sending" : "send"}
+              onClick={answer}
+              disabled={pending || unavailable || !structuredAnswer}
+              aria-label={t("submitAnswer")}
+              title={t("submitAnswer")}
+            />
+          }
+        />
       ) : (
         <div className={cn("items-end gap-2", FLEX)}>
           <AutoExpandTextarea
@@ -174,14 +191,7 @@ export function OpenNoticeDetail({
         </div>
       )}
 
-      {(error !== null || !notice.question) && <div className={cn("items-center justify-between gap-2", FLEX)}>
-        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : <span />}
-        {!notice.question && (
-          <Button type="button" variant="ghost" size="sm" onClick={dismiss} disabled={pending}>
-            {t("closeQuestion")}
-          </Button>
-        )}
-      </div>}
+      {error && <p role="alert" className="text-[13px] text-destructive">{error}</p>}
     </div>
   );
 }

@@ -749,7 +749,7 @@ describe("InspectorPanel", () => {
 
     await waitFor(() => expect(screen.getByText("Notice")).toBeTruthy());
     expect(screen.getByRole("textbox")).toBeTruthy();
-    expect(screen.getByText("Close without answering")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close without answering" })).toBeTruthy();
     const notice = screen.getByText("Notice");
     const timelineLink = screen.getByText("Open run timeline");
     expect(

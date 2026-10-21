@@ -5,9 +5,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const snapshot = vi.hoisted(() => ({ inspectorOpen: false }));
 
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
-vi.mock("next/link", () => ({
-  default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a>,
-}));
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -15,13 +12,14 @@ vi.mock("@/lib/inspector/inspector-panel-store", () => ({
   useInspectorOpen: () => ({ open: snapshot.inspectorOpen, toggle: vi.fn() }),
 }));
 vi.mock("./to-user-document", () => ({
-  ToUserDocumentView: function Document({ bodyHidden, onInspect, onNavigate }: { bodyHidden?: boolean; onInspect: () => void; onNavigate: () => void }) {
+  ToUserDocumentView: function Document({ bodyHidden, onInspect, onNavigate, children }: { children: React.ReactNode; bodyHidden?: boolean; onInspect: () => void; onNavigate: () => void }) {
     useEffect(onNavigate, [onNavigate]);
     return (
     <div>
       <div data-testid="document-bar" />
       <button onClick={onInspect}>Inspect</button>
       <button onClick={onNavigate}>Navigate</button>
+      {children}
       {bodyHidden ? null : <div data-testid="document-view" />}
     </div>
     );
@@ -34,9 +32,7 @@ vi.mock("@/components/notifications/open-notice-detail", () => ({
   OpenNoticeDetail: () => <div data-testid="notice-detail" />,
 }));
 vi.mock("@/lib/notifications/use-notices", () => ({ dropOpenNotices: vi.fn() }));
-vi.mock("@/lib/inspector/inspector-widgets", () => ({ fleetNoticeHref: (id: number) => `/fleet?notice=${id}` }));
 
-import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
 import type { NoticeItem } from "@/lib/contracts/types";
 import type { useToUser } from "@/lib/context/use-to-user";
 import { SharedContextPanel } from "./shared-context-panel";
@@ -116,7 +112,7 @@ it("keeps the notice area inside the document body", () => {
   renderPanel({ notices: [notice()] });
   const body = screen.getByTestId("shared-document");
   expect(body.contains(screen.getByTestId("notice-detail"))).toBe(true);
-  expect(screen.getByText("needsReply")).toBeTruthy();
+  expect(screen.queryByText("needsReply")).toBeNull();
 });
 
 it("hides the mounted question in Inspector mode and restores its reading position", async () => {
@@ -151,13 +147,14 @@ it("starts a new agent or referenced document at the top of the shared reading a
   expect(body.scrollTop).toBe(0);
 });
 
-it("uses the shared column title bar for the notice header", () => {
+it("places the question between the sole toolbar and the document, even without document data", () => {
   renderPanel({ notices: [notice()] });
-  const tokens = screen.getByTestId("notice-bar").className.split(/\s+/);
-  expect(tokens).toEqual(expect.arrayContaining(["relative", BAR_HEIGHT_CLASS]));
-  expect(tokens).toEqual(expect.arrayContaining(BAR_DIVIDER_CLASS.split(" ")));
-  expect(tokens).not.toContain("border-b");
-  expect(screen.getByRole("region", { name: "notification" }).className.split(/\s+/)).not.toContain("border-b");
+  const bar = screen.getByTestId("document-bar");
+  const question = screen.getByTestId("notice-detail");
+  const document = screen.getByTestId("document-view");
+  expect(bar.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(question.compareDocumentPosition(document) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByTestId("notice-bar")).toBeNull();
 });
 
 it("closes the reading view from the mobile header", () => {

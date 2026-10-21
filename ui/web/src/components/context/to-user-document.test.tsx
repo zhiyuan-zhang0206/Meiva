@@ -105,6 +105,24 @@ describe("To user Markdown", () => {
   });
 });
 
+it("keeps an answer draft mounted through document navigation, empty content and Inspector mode", () => {
+  linkedQuery.mockReturnValue(idleQuery(document("Nested")));
+  const props = { agentId: 7, document: document("[Details](details.md)"), failed: false, pending: false, refresh: vi.fn(), mobile: false };
+  const child = <textarea aria-label="Answer draft" defaultValue="Keep this answer" />;
+  const { rerender } = render(<ToUserDocumentView {...props}>{child}</ToUserDocumentView>);
+  const input = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Answer draft" });
+  fireEvent.click(screen.getByRole("link", { name: "Details" }));
+  expect(screen.getByText("Nested")).toBeTruthy();
+  expect(screen.getByRole("textbox", { name: "Answer draft" })).toBe(input);
+  rerender(<ToUserDocumentView {...props} inspecting bodyHidden>{child}</ToUserDocumentView>);
+  expect(screen.getByRole("textbox", { name: "Answer draft" })).toBe(input);
+  travel("/?agent_id=7");
+  rerender(<ToUserDocumentView {...props} document={undefined}>{child}</ToUserDocumentView>);
+  expect(screen.getByText("empty")).toBeTruthy();
+  expect(screen.getByRole("textbox", { name: "Answer draft" })).toBe(input);
+  expect(input.value).toBe("Keep this answer");
+});
+
 describe("To user navigation history", () => {
   const root = () => document("[Details](details.md)");
   const nested = () => document("# Nested document");
