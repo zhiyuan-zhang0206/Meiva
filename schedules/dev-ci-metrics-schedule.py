@@ -4,6 +4,7 @@ import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -21,6 +22,12 @@ CRON = "20 6 * * *"
 _REPORT_AGENT_ENV = "MEIVA_CI_METRICS_REPORT_AGENT"
 _REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
 _REPO_ROOT = Path(base.__file__).resolve().parents[1]
+# meiva:note
+# Timed workflows do not block a pull request, so a red one is silent by default: the
+# nightly duration refresh failed 6 of 8 runs and nothing said so (task #5479). Two
+# consecutive failures is already "this pipeline is broken", not "one bad night".
+_SCHEDULED_WORKFLOWS = ("refresh-test-durations.yml",)
+_CONSECUTIVE_FAILURES_ALERT = 2
 
 
 def _report_agent() -> int:
@@ -69,6 +76,61 @@ def _run_exporter(exporter: Any, repo: str) -> None:
         raise RuntimeError("ci-runs-export exited non-zero")
 
 
+def _workflow_runs(
+    exporter: Any, repo: str, workflow: str, limit: int = 10
+) -> list[dict[str, Any]]:
+    payload = exporter._run_gh(
+        [f"repos/{repo}/actions/workflows/{workflow}/runs?per_page={limit}"],
+        exporter.FetchStats(),
+    )
+    runs = json.loads(payload).get("workflow_runs")
+    if not isinstance(runs, list):
+        raise TypeError(f"{workflow}: the runs listing carried no workflow_runs")
+    return runs
+
+
+# meiva:note
+# Newest first: a streak ends at the first run that did not fail.
+def consecutive_failures(runs: list[dict[str, Any]]) -> int:
+    streak = 0
+    for run in runs:
+        if run.get("conclusion") != "failure":
+            break
+        streak += 1
+    return streak
+
+
+# meiva:note
+# The one outbound call, injected by tests: patching meiva.agents from a test hides
+# what it replaces from the locality checker.
+def _message_p0_lead(message: str) -> None:
+    meiva.agents.send_message(_report_agent(), message)
+
+
+def _alert_broken_scheduled_workflows(
+    exporter: Any, repo: str, *, notify: Callable[[str], None] = _message_p0_lead
+) -> None:
+    for workflow in _SCHEDULED_WORKFLOWS:
+        try:
+            runs = _workflow_runs(exporter, repo, workflow)
+        except Exception as exc:
+            print(f"dev-ci-metrics: {workflow} runs unreadable: {type(exc).__name__}: {exc}")
+            continue
+        streak = consecutive_failures(runs)
+        if streak < _CONSECUTIVE_FAILURES_ALERT:
+            continue
+        newest = runs[0]
+        print(f"dev-ci-metrics: {workflow} failed {streak} runs in a row")
+        notify(
+            f"Scheduled workflow {workflow} failed {streak} runs in a row. It does not "
+            "block a pull request, so a red run is silent by default: while it keeps "
+            "failing, CI keeps splitting shards with the previous test-duration model.\n"
+            f"Newest run: {newest.get('html_url')} ({newest.get('created_at')})\n"
+            "Find the failing step; the fix is accepted only after two consecutive "
+            "successful nights.",
+        )
+
+
 def _fire(slot_end: datetime, _payload: None) -> None:
     try:
         exporter = _load_exporter()
@@ -78,6 +140,7 @@ def _fire(slot_end: datetime, _payload: None) -> None:
             slot_end.astimezone(ZoneInfo(cluster_timezone())).date() - timedelta(days=1)
         ).isoformat()
         runs, failed = _day_counts(_snapshot(exporter), day, repo)
+        _alert_broken_scheduled_workflows(exporter, repo)
         print(
             f"[{datetime.now(UTC).isoformat()}] dev-ci-metrics: {day} — {runs} runs, {failed} failed"
         )
