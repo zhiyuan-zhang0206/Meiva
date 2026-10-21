@@ -11,6 +11,7 @@ behavior and domain contracts remain in component-local `docs/` and the
 - [Documentation maintenance](doc-maintenance.md) and [SDK docstrings](sdk-docstring-discipline.md)
 - [Technical-debt inspection](engineering/tech-debt.md) and [automated-check boundary](engineering/lint-vs-sweeper.md)
 - [Defensive patterns](defensive-patterns.md) and [runtime runbook](runbook.md)
+- [Changelog fragments](changelog.md)
 
 Historical choices belong in [decisions](../decisions/README.md), incident analyses
 in [postmortems](../postmortems/README.md), and unimplemented plans in `future/`.

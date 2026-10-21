@@ -7,7 +7,13 @@ PR test selector (`scripts/ci/test_selector.py`) both classify a diff through it
 
 from __future__ import annotations
 
+# meiva:note
+# A changelog fragment under `.changes/` is an entry waiting for the root
+# CHANGELOG, so it is documentation: a fragment-only diff selects no backend lane
+# and the path has an owner in the test selector.
+# meiva:link docs/conventions/changelog.md
 _DOC_ROOTS = (
+    ".changes/",
     "docs/",  # project documentation, including contributor guidance and frozen history
     "future/",  # the plans axis
     "assets/",  # README-embedded artifacts

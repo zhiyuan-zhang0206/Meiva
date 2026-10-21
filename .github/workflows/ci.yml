@@ -362,7 +362,7 @@ jobs:
         # the first failure.
         run: |
           status=0
-          for hook in check-doc-references check-narrative-facts lint-doc-symbols lint-doc-anchors lint-doc-roster lint-agents-md-size lint-skill-descriptions lint-skill-md-size lint-meiva-okf; do
+          for hook in check-doc-references check-changelog-fragments check-narrative-facts lint-doc-symbols lint-doc-anchors lint-doc-roster lint-agents-md-size lint-skill-descriptions lint-skill-md-size lint-meiva-okf; do
             uv run pre-commit run --all-files "$hook" || status=1
           done
           exit $status

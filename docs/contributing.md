@@ -30,7 +30,10 @@ default home and can target a running deployment.
 
 ## Change and verify
 
-Implement a focused change with its related tests and current documentation.
+Implement a focused change with its related tests and current documentation. A
+notable change also carries its changelog entry as one file under `.changes/`
+(see [changelog fragments](conventions/changelog.md)); `CHANGELOG.md` is folded
+from those files at release, never appended to in a PR.
 Keep shared facts in their owning module; use existing third-party capabilities
 rather than creating a second framework or registry. Resolve generated-file
 conflicts by regenerating from the source, not editing derived output.
