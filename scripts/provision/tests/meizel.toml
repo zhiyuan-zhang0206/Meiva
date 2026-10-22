@@ -1,0 +1,4 @@
+exports = ["lock_holder.py"]
+
+[uses]
+"test_apt_lock.py" = ["lock_holder.py"]

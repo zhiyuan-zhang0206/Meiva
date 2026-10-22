@@ -26,9 +26,11 @@ _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
         "split the file into focused modules, fix, resubmit",
     ),
     (
-        r"archive cache is empty|no offline fallback|apt-get install",
-        "runner-side network flake (pgdg/apt family)",
-        "rerun the failed job — no code change; resubmit if the queue already failed",
+        r"apt lock: .* is still held|the cached archives cannot satisfy|"
+        r"could not get lock /var/lib/dpkg/lock-frontend|archive cache is empty|"
+        r"no offline fallback|playwright install-deps|apt-get install",
+        "infrastructure: apt/dpkg system-deps install (unreachable mirror or held lock)",
+        "infrastructure failure, not a code failure — rerun the failed job; attempt 1 is retried automatically",
     ),
     (
         r"truncate-isolation|comment-stripping regex",
@@ -78,7 +80,7 @@ def _job_log_tail(job_id: int, repo: str, *, host: Host) -> str:
     return result.stdout[-_DIAGNOSE_LOG_TAIL:]
 
 
-def _classify_check(name: str, log: str) -> tuple[str, str]:
+def classify_check(name: str, log: str) -> tuple[str, str]:
     for pattern, label, action in _FAILURE_SIGNATURES:
         if re.search(pattern, log, re.IGNORECASE):
             return label, action
@@ -185,7 +187,7 @@ def _failing_check_entries(
         check_name = str(check.get("name") or "unnamed check")
         job = next((j for j in failed_jobs if j.get("name") == check_name), None)
         log = _job_log_tail(int(job["job_id"]), repo, host=host) if job else ""
-        classification, action = _classify_check(check_name, log)
+        classification, action = classify_check(check_name, log)
         entry: dict[str, object] = {
             "check": check_name,
             "conclusion": check.get("conclusion"),
