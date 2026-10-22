@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from time import monotonic, time
 from typing import Protocol, cast
@@ -99,6 +99,7 @@ def _caller_facts(raw: object) -> CallerFacts | None:
 
 
 type ChildSpawn = Callable[..., Awaitable[asyncio.subprocess.Process]]
+type ArgvTransform = Callable[[str, Sequence[str]], Sequence[str]]
 
 
 class Supervisor(LeftBehindMixin, StoppingMixin):
@@ -125,6 +126,12 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         self._run_dir = run_dir
         self._log_dir = run_dir / "logs"
         self._config = config if config is not None else SupervisorConfig()
+        # meiva:note
+        # Opaque per-unit launch rewriting, installed by the assembly before start:
+        # whatever a unit's runtime needs (a memory-capped scope, a wrapper) is the
+        # assembly's knowledge, never this supervisor's. None launches the manifest
+        # exactly as written.
+        self._argv_transform: ArgvTransform | None = None
         self._units: dict[str, UnitRuntime] = {
             manifest.id: UnitRuntime(manifest=manifest) for manifest in registry.units
         }
@@ -612,6 +619,13 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             return
         self._clear_restart_failure(runtime)
 
+    # meiva:note
+    # The assembly owns the decision (config, platform, availability probe); the
+    # supervisor only applies what it is given, so nothing here reads ambient config
+    # and no platform name appears in this file.
+    def set_argv_transform(self, transform: ArgvTransform | None) -> None:
+        self._argv_transform = transform
+
     async def _spawn(self, runtime: UnitRuntime) -> None:
         """Fork+exec one fresh generation of `runtime`.
 
@@ -633,8 +647,13 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         try:
             env = inherited_process_env() | dict(manifest.env)
             launcher = self.spawn or asyncio.create_subprocess_exec
+            argv = (
+                self._argv_transform(manifest.id, list(manifest.exec))
+                if self._argv_transform is not None
+                else list(manifest.exec)
+            )
             proc = await launcher(
-                *manifest.exec,
+                *argv,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=log_fd,
                 stderr=asyncio.subprocess.STDOUT,

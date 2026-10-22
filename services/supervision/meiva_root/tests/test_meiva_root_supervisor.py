@@ -5,6 +5,7 @@ import contextlib
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -275,3 +276,53 @@ def test_concrete_group_signal_error_is_not_hidden(monkeypatch: pytest.MonkeyPat
     finally:
         child.kill()
         child.wait(timeout=5)
+
+
+# meiva:note
+# The assembly decides, the supervisor applies. These tests own both halves: an
+# unconfigured unit launches exactly as written, and a configured transform is applied
+# to that unit only -- no accidental wrapping of every unit.
+async def test_an_unconfigured_unit_is_launched_without_a_rewrite(tmp_path: Path) -> None:
+    seen: list[tuple[str, ...]] = []
+
+    async def launcher(*argv: str, **options: Any) -> Any:
+        seen.append(tuple(argv))
+        raise OSError("launcher probe: nothing is started")
+
+    owner = _probe_supervisor(tmp_path, launcher)
+    await owner.start()
+    try:
+        assert seen == [(sys.executable, "-u", str(_CHILD), "sleep")]
+    finally:
+        await owner.shutdown()
+
+
+async def test_a_configured_transform_rewrites_only_its_unit(tmp_path: Path) -> None:
+    seen: list[tuple[str, ...]] = []
+
+    async def launcher(*argv: str, **options: Any) -> Any:
+        seen.append(tuple(argv))
+        raise OSError("launcher probe: nothing is started")
+
+    def wrap(unit_id: str, argv: Sequence[str]) -> Sequence[str]:
+        return [f"wrapped:{unit_id}", *argv] if unit_id == "worker" else list(argv)
+
+    owner = _probe_supervisor(tmp_path, launcher)
+    owner.set_argv_transform(wrap)
+    await owner.start()
+    try:
+        assert seen == [("wrapped:worker", sys.executable, "-u", str(_CHILD), "sleep")]
+    finally:
+        await owner.shutdown()
+
+
+def _probe_supervisor(tmp_path: Path, launcher: Any) -> Supervisor:
+    unit = UnitManifest(
+        "worker", (sys.executable, "-u", str(_CHILD), "sleep"), RestartPolicy.ALWAYS, "root", ()
+    )
+    return Supervisor(
+        UnitRegistry([unit]),
+        run_dir=tmp_path,
+        config=SupervisorConfig(stop_timeout_s=0.2),
+        spawn=launcher,
+    )
