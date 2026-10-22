@@ -167,6 +167,15 @@ def _installed_build_is_current(app: Path, state: BuildState | None, source_hash
     return state is not None and state["source_hash"] == source_hash and is_valid_app(app)
 
 
+# meiva:note
+# The build record of the installed helper, or None when this home has none: the one place
+# that knows where the installed artifact keeps it.
+def installed_build_state() -> BuildState | None:
+    from base.paths import permissions_helper_app_dir
+
+    return read_build_state(permissions_helper_app_dir() / BUILD_STATE_NAME)
+
+
 def build_directory(destination: Path | None) -> Path:
     """Choose an immutable artifact destination outside the installed bundle tree."""
     from base.paths.home import default_home
