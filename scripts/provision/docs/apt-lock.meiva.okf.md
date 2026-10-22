@@ -26,9 +26,13 @@ inspected, which is a permission problem and not a lock. A missing lock file
 counts as free and is never created here: apt creates it with the ownership the
 platform expects.
 
-`wait_apt_lock.sh` is the shell face the composite actions call; it turns exit 1
-into a GitHub `::error::` naming the held lock, so the step fails saying what
-happened. Both `install-playwright-deps` and `install-pg-redis` wait inside each
+`wait_apt_lock.sh` is the shell face the composite actions call. It is
+**advisory**: exit 1 means the lock would not clear within the ceiling and exit 2
+that it could not be inspected, and both are reported as GitHub `::warning::`
+with the holder named — the install step then continues to the cached `.deb`
+path rather than failing on the lock. Only that cached install failing fails the
+step, and its message says whether the lock was still held or the cache itself
+came up short. Both `install-playwright-deps` and `install-pg-redis` wait inside each
 attempt that unpacks packages — `--download-only` does not take the lock and is
 deliberately exempt.
 

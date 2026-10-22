@@ -53,13 +53,20 @@ runs:
         # minutes instead of eating the caller's whole step cap, and a
         # transient stall self-heals here.
         # A previous attempt's apt outlives `timeout` (it kills the sudo child, not the
-        # apt it started), so attempt 2 can land on a held dpkg lock and be read as
-        # another bad mirror — 2026-10-22 turned one unreachable archive into "the
-        # cached archives cannot satisfy the system deps" this way. Wait for the lock,
-        # bounded, and stop with the holder named instead of guessing at the cache.
+        # apt it started), so attempt 2 can land on a held dpkg lock and be read as another
+        # bad mirror. Two things keep that from turning into a hard failure: the retry first
+        # clears its own leftover apt (otherwise two attempts take turns holding the lock and
+        # no number of retries helps), and the lock wait is ADVISORY — a lock that will not
+        # clear still falls through to the cached .deb path below, which is what saves the
+        # job when the mirror is slow. The wait still names the holder, which is the useful
+        # part of the diagnosis.
         ok=0
+        lock_held=0
         for attempt in 1 2 3; do
-          bash "$GITHUB_WORKSPACE/scripts/provision/wait_apt_lock.sh" 120
+          if [ "$attempt" -gt 1 ]; then
+            sudo pkill -f 'apt-get|/usr/bin/dpkg' || true
+          fi
+          bash "$GITHUB_WORKSPACE/scripts/provision/wait_apt_lock.sh" 120 || lock_held=1
           if timeout 150 uv run playwright install-deps chromium; then
             ok=1
             break
@@ -80,9 +87,13 @@ runs:
             exit 1
           fi
           echo "::warning::playwright install-deps failed; installing ${#debs[@]} cached .deb(s) with dpkg"
-          bash "$GITHUB_WORKSPACE/scripts/provision/wait_apt_lock.sh" 120
+          bash "$GITHUB_WORKSPACE/scripts/provision/wait_apt_lock.sh" 120 || lock_held=1
           if ! sudo dpkg -i "${debs[@]}"; then
-            echo "::error::dpkg could not install the ${#debs[@]} cached .deb(s); its own error is above. This is an install failure — it does not prove the cache is insufficient" >&2
+            if [ "$lock_held" -ne 0 ]; then
+              echo "::error::dpkg failed while the dpkg lock was still held — the cache is not implicated; dpkg's own error is above" >&2
+            else
+              echo "::error::dpkg could not install the ${#debs[@]} cached .deb(s) with the lock free — its own error is above, and this is an install or cache failure, not a lock one" >&2
+            fi
             exit 1
           fi
         fi
