@@ -114,6 +114,14 @@ NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
 # whose generation has not yet answered a probe.
 DEFAULT_STARTUP_GRACE_S = 20.0
 
+# meiva:note
+# How long the root health monitor holds the FIRST restart of an outage while this
+# machine carries a live impersonation lease, so a takeover session is not cut off
+# mid-work (task #5551). The configured value is
+# `daemon.health_restart_lease_grace_s`; this is the default of an assembly that
+# supplies none, and later attempts of the same outage are never held.
+HEALTH_RESTART_LEASE_GRACE_S = 30.0
+
 # How long a unit capability bundle (`meiva cluster db-authority issue-unit`,
 # `base.host.db_authority.unit.issue_bundle`) stays installable by default
 # (`--ttl-hours`): a day covers the trip to one unit. The most it may ask for is

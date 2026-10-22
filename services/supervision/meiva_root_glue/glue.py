@@ -15,7 +15,7 @@ from types import MappingProxyType
 from base.agents.context.clients import ClientSet
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
-from base.config import ConfigBoot
+from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
@@ -27,13 +27,14 @@ from base.deploy.progress_timeout import (
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import build_pipeline
-from services.supervision.meiva_root.health import HealthConfig, HealthMonitor
+from services.supervision.meiva_root.health import HealthConfig, HealthMonitor, LeaseProbe
 from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry
 from services.supervision.meiva_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.supervision.meiva_root.wiring import WiringContext, WiringParticipant
 from services.supervision.meiva_root_glue.diagnostic_probes import (
     build_diagnostics,
     database_recovery_probe,
+    live_lease_probe,
 )
 from services.supervision.meiva_root_glue.diagnostics import (
     DiagnosticMonitor,
@@ -96,7 +97,9 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     return assemble(
         context,
         registry,
+        health_config=HealthConfig(lease_grace_s=settings.daemon.health_restart_lease_grace_s),
         db_recovery_probe=database_recovery_probe(database),
+        lease_probe=live_lease_probe(database, machine.name()),
         rounds_factory=lambda monitor: RootHealthRounds(
             monitor,
             DiagnosticMonitor(build_diagnostics(requested, database=database, machine=machine)),
@@ -118,6 +121,7 @@ def assemble(
     rounds_factory: Callable[[HealthMonitor], RootHealthRounds] | None = None,
     startup_graces: Mapping[str, float] | None = None,
     db_recovery_probe: Probe | None = None,
+    lease_probe: LeaseProbe | None = None,
 ) -> list[WiringParticipant]:
     """Build the two monitors over `registry` and attach their status surfaces."""
     monitor = HealthMonitor(
@@ -127,6 +131,7 @@ def assemble(
         tasks=context.participant_tasks,
         startup_graces=startup_graces,
         db_recovery_probe=db_recovery_probe,
+        lease_probe=lease_probe,
     )
     check = TreeSelfCheck(
         context.supervisor, config=selfcheck_config, tasks=context.participant_tasks
