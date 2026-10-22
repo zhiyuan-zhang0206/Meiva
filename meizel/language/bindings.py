@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
-__all__ = ["Bindings", "module_bindings", "provides"]
+__all__ = ["Bindings", "is_imported_binding", "module_bindings", "provides"]
 
 # Names every module object has, and the builtins its code resolves when it binds no such name.
 _ALWAYS = frozenset(dir(types.ModuleType("m"))) | frozenset(dir(builtins))
@@ -23,11 +23,23 @@ class Bindings:
 
     names: frozenset[str]
     dynamic: bool
+    defined: frozenset[str] = frozenset()
+    imported: frozenset[str] = frozenset()
+    all_names: frozenset[str] = frozenset()
 
 
 def provides(bindings: Bindings, name: str) -> bool:
     """Whether setting or deleting `name` on the module acts on something that exists."""
     return bindings.dynamic or name in bindings.names or name in _ALWAYS
+
+
+def is_imported_binding(bindings: Bindings, name: str) -> bool:
+    return (
+        not bindings.dynamic
+        and name in bindings.imported
+        and name not in bindings.defined
+        and name not in bindings.all_names
+    )
 
 
 def module_bindings(root: Path, file: str) -> Bindings:
@@ -46,14 +58,45 @@ def _read(path: str, mtime_ns: int, size: int) -> Bindings:
         tree = ast.parse(Path(path).read_bytes(), filename=path)
     except (OSError, SyntaxError, ValueError):
         return Bindings(frozenset(), dynamic=True)
-    names: set[str] = set()
+    defined: set[str] = set()
+    imported: set[str] = set()
+    all_names: set[str] = set()
     dynamic = False
     for node in _in_module_scope(tree):
-        names.update(_names_bound(node))
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            imported.update(_names_bound(node))
+        else:
+            defined.update(_names_bound(node))
+        all_names.update(_all_entries(node))
         dynamic |= _serves_names(node)
     if path.endswith("__init__.py"):
-        names.add("__path__")  # the import system sets it on a package
-    return Bindings(frozenset(names), dynamic)
+        defined.add("__path__")  # the import system sets it on a package
+    names = frozenset(defined | imported)
+    return Bindings(
+        names,
+        dynamic,
+        defined=frozenset(defined),
+        imported=frozenset(imported),
+        all_names=frozenset(all_names),
+    )
+
+
+def _all_entries(node: ast.AST) -> list[str]:
+    value: ast.expr | None = None
+    if (
+        isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets)
+    ) or (
+        isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "__all__"
+    ):
+        value = node.value
+    if isinstance(value, ast.List | ast.Tuple | ast.Set):
+        return [
+            e.value for e in value.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)
+        ]
+    return []
 
 
 def _names_bound(node: ast.AST) -> list[str]:

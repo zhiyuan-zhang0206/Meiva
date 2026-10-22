@@ -38,8 +38,8 @@ def remove_entries(text: str, removals: dict[str, dict[str, set[str]]]) -> str:
         header = HEADER.match(lines[index])
         if header:
             section = header.group(1)
-        reason = _EXTERNAL_ENTRY.match(lines[index]) if section == "external" else None
-        if reason and unquote(reason.group(1)) in removals.get("external", {}):
+        reason = _EXTERNAL_ENTRY.match(lines[index]) if section in {"external", "purity"} else None
+        if reason and unquote(reason.group(1)) in removals.get(section, {}):
             index += 1
             continue
         entry = ENTRY.match(lines[index])
@@ -85,6 +85,11 @@ def _collect(analysis: Analysis) -> tuple[Removals, list[str]]:
     for directory, name in analysis.stale_loads:
         removals.setdefault(directory, {}).setdefault("loads", {})[name] = {"*"}
         changes.append(f"{manifest_path(directory)}: removed [loads] {name}")
+    for directory, child in analysis.stale_exports:
+        removals.setdefault(directory, {}).setdefault("", {}).setdefault("exports", set()).add(
+            child
+        )
+        changes.append(f"{manifest_path(directory)}: removed [exports] {child}")
     for directory, manifest in analysis.manifests.items():
         for section, key, target in manifest.dangling:
             table = removals.setdefault(directory, {}).setdefault(

@@ -9,11 +9,13 @@ __all__ = [
     "Code",
     "DebtKey",
     "Diagnostic",
+    "EnumSubsetUse",
     "Fact",
     "FactKind",
     "MeizelError",
     "Patch",
     "Problem",
+    "PurityItem",
     "Restricted",
 ]
 
@@ -60,6 +62,17 @@ class Code(StrEnum):
     ENV_PATCH = "env-patch"
     UNRESOLVED_PATCH = "unresolved-patch"
     MISSING_PATCH_TARGET = "missing-patch-target"
+    IMPURE_EDGE = "impure-edge"
+    IMPURE_CALL = "impure-call"
+    UNFROZEN_VALUE = "unfrozen-value"
+    UNTYPED_EXPORT = "untyped-export"
+    IMPURE_TEST_FIXTURE = "impure-test-fixture"
+    STALE_EXPORT = "stale-export"
+    PASSTHROUGH_FUNCTION = "pass-through-function"
+    NESTED_ATTR_WRITE = "nested-attr-write"
+    NESTED_PATCH_TARGET = "nested-patch-target"
+    DOMAIN_SUBSET_LEAK = "domain-subset-leak"
+    WIDE_FANOUT = "wide-fanout"
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +107,23 @@ class Patch:
     form: str
     target: str
     code: Code
+    imported: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class PurityItem:
+    line: int
+    code: Code
+    key: str
+    message: str
+    hint: str
+
+
+@dataclass(frozen=True, slots=True)
+class EnumSubsetUse:
+    line: int
+    cls_name: str
+    members: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)

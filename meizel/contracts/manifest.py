@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -22,9 +22,18 @@ from meizel.graph.model import Code, Diagnostic
 from meizel.graph.universe import MANIFEST, Universe, is_private_module
 from meizel.roles import check_table
 
-__all__ = ["Manifest", "load_manifests", "manifest_path"]
+__all__ = [
+    "PURITY_LEVELS",
+    "Manifest",
+    "effective_purity",
+    "first",
+    "load_manifests",
+    "manifest_path",
+    "within",
+]
 
-_TOP_KEYS = ("exports", "uses", "loads", "external", "roles", TABLE_KEY)
+PURITY_LEVELS = ("none", "strict-to-be", "strict")
+_TOP_KEYS = ("exports", "uses", "loads", "external", "roles", "purity", TABLE_KEY)
 _EdgeReader = Callable[[str, tuple[str, ...], int], tuple[str, ...]]
 
 
@@ -50,6 +59,8 @@ class Manifest:
     loads: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     external: dict[str, str] = field(default_factory=dict[str, str])
     roles: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
+    purity_default: str | None = None
+    purity: dict[str, str] = field(default_factory=dict[str, str])
     debt: DebtTable = field(default_factory=dict[Code, dict[str, int]])
     back: frozenset[tuple[str, str]] = frozenset()
     dangling: list[tuple[str, str | None, str | None]] = field(
@@ -166,6 +177,8 @@ class _Reader:
         self.manifest.external = self.read_external(document.get("external", {}))
         if "roles" in document:
             self.read_roles(document["roles"])
+        if "purity" in document:
+            self.read_purity(document["purity"])
         if TABLE_KEY in document:
             line = self.manifest.line_of(TABLE_KEY)
             self.manifest.debt = parse_debt(
@@ -232,6 +245,35 @@ class _Reader:
             else:
                 result[key] = reason.strip()
         return result
+
+    def read_purity(self, value: object) -> None:
+        line = self.manifest.line_of("purity")
+        allowed = ", ".join(PURITY_LEVELS)
+        if isinstance(value, str):
+            if value not in PURITY_LEVELS:
+                self.report(
+                    line, Code.MANIFEST_SYNTAX, f"purity must be one of {allowed}, got {value!r}"
+                )
+            else:
+                self.manifest.purity_default = value
+            return
+        if not isinstance(value, dict):
+            self.report(line, Code.MANIFEST_SYNTAX, "purity must be a string or a table")
+            return
+        for key, level in cast("dict[str, object]", value).items():
+            key_line = self.manifest.line_of(key)
+            if not isinstance(level, str) or level not in PURITY_LEVELS:
+                self.report(
+                    key_line,
+                    Code.MANIFEST_SYNTAX,
+                    f"[purity] {key!r} must be one of {allowed}",
+                )
+            elif key == ".":
+                self.manifest.purity_default = level
+            elif self.child(key, "[purity]", key_line):
+                self.manifest.purity[key] = level
+            else:
+                self.manifest.dangling.append(("purity", key, None))
 
     def read_exports(self, value: object) -> None:
         line = self.manifest.line_of("exports")
@@ -344,3 +386,36 @@ def load_manifests(universe: Universe) -> tuple[dict[str, Manifest], list[Diagno
         manifests[directory] = reader.manifest
         diagnostics.extend(reader.diagnostics)
     return manifests, diagnostics
+
+
+def _is_test_path(path: str) -> bool:
+    parts = path.split("/")
+    name = parts[-1]
+    return (
+        "tests" in parts[:-1]
+        or name == "conftest.py"
+        or name.startswith("test_")
+        or name.endswith("_test.py")
+    )
+
+
+def effective_purity(
+    path: str, manifests: Mapping[str, Manifest], *, include_tests: bool = False
+) -> str:
+    is_test = not include_tests and _is_test_path(path)
+    directory = path.rpartition("/")[0]
+    while True:
+        rel = path[len(directory) + 1 :] if directory else path
+        child = first(rel)
+        manifest = manifests.get(directory)
+        if manifest is not None:
+            if child in manifest.purity and (not is_test or child in {rel, "tests"}):
+                return manifest.purity[child]
+            if manifest.purity_default is not None and (
+                not is_test or directory.rsplit("/", 1)[-1] == "tests"
+            ):
+                return manifest.purity_default
+        if not directory:
+            break
+        directory = directory.rpartition("/")[0]
+    return "none"

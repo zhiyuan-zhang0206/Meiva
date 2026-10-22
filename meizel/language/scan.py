@@ -10,11 +10,21 @@ from pathlib import Path
 from typing import Any, cast
 
 from meizel import allowances
-from meizel.graph.model import Code, Fact, FactKind, MeizelError, Patch, Problem, Restricted
+from meizel.graph.model import (
+    Code,
+    EnumSubsetUse,
+    Fact,
+    FactKind,
+    MeizelError,
+    Patch,
+    Problem,
+    PurityItem,
+    Restricted,
+)
 from meizel.graph.scopes import Scope, collect_scope, dotted_chain, parameter_names
 from meizel.graph.universe import Universe
-from meizel.language import fixtures
-from meizel.language.bindings import module_bindings, provides
+from meizel.language import fixtures, purity
+from meizel.language.bindings import is_imported_binding, module_bindings, provides
 from meizel.language.python_commands import PythonCommands
 from meizel.language.restricted import EXTERNAL_FORMS, const_str
 
@@ -116,6 +126,8 @@ class FileScan:
     problems: list[Problem] = field(default_factory=list[Problem])
     fixtures: fixtures.FixtureState = field(default_factory=fixtures.FixtureState)
     imported: set[str] = field(default_factory=set[str])
+    purity: list[PurityItem] = field(default_factory=list[PurityItem])
+    enum_subsets: list[EnumSubsetUse] = field(default_factory=list[EnumSubsetUse])
 
 
 class Scanner(PythonCommands):
@@ -123,6 +135,7 @@ class Scanner(PythonCommands):
         super().__init__(universe, path, tree, walrus=walrus)
         self.test_file = fixtures.is_test_file(path)
         self.fixture_state = fixtures.FixtureState()
+        self.purity_state = purity.make_state(universe.root)
         self.fn_depth = 0
         self.patches: list[Patch] = []
         self._handlers: dict[type[ast.AST], Callable[[Any], None]] = {
@@ -140,6 +153,7 @@ class Scanner(PythonCommands):
             ast.AnnAssign: self.visit_store,
             ast.Delete: self.visit_store,
             ast.Expr: self.visit_expr,
+            ast.Compare: self.visit_compare,
             ast.List: self.visit_sequence,
             ast.Tuple: self.visit_sequence,
         }
@@ -154,7 +168,29 @@ class Scanner(PythonCommands):
             problems=self.problems,
             fixtures=self.fixture_state,
             imported=self.imported,
+            purity=self.purity_state.items,
+            enum_subsets=purity.finalize_subsets(
+                self.purity_state.enum_subsets, self.purity_state.defined_classes
+            ),
         )
+
+    def visit_compare(self, node: ast.Compare) -> None:
+        purity.record_enum_subsets(self.purity_state.enum_subsets, node)
+        self.children(node)
+
+    def visit_import(self, node: ast.Import) -> None:
+        super().visit_import(node)
+        purity.record_import(self.purity_state, node)
+
+    def visit_import_from(self, node: ast.ImportFrom) -> None:
+        super().visit_import_from(node)
+        purity.record_import_from(self.purity_state, node)
+
+    def visit_name(self, node: ast.Name) -> None:
+        super().visit_name(node)
+        if isinstance(node.ctx, ast.Load):
+            origin, _ = self.scope.find(node.id)
+            purity.record_env_access(self.purity_state, origin, node.lineno)
 
     # --- traversal -----------------------------------------------------------------
 
@@ -189,6 +225,7 @@ class Scanner(PythonCommands):
             return
         self.restricted_attribute(origin, attrs, node.lineno)
         self.module_uses(origin, attrs, node.lineno)
+        purity.record_env_access(self.purity_state, ".".join([origin, *attrs]), node.lineno)
 
     # --- scopes --------------------------------------------------------------------
 
@@ -210,6 +247,11 @@ class Scanner(PythonCommands):
             test_file=self.test_file,
             top_level=self.fn_depth == 0,
         )
+        purity.record_function(
+            self.purity_state,
+            node,
+            top_level=self.fn_depth == 0 and not self.scope.is_class,
+        )
         parent = self.scope.parent if self.scope.is_class else self.scope
         inner = Scope(parent)
         inner.shadowed.update(parameter_names(args))
@@ -221,6 +263,7 @@ class Scanner(PythonCommands):
     def visit_class_def(self, node: ast.ClassDef) -> None:
         for outer in (*node.decorator_list, *node.bases, *node.keywords):
             self.visit(outer)
+        purity.record_class(self.purity_state, node, self.dotted)
         inner = Scope(self.scope, is_class=True)
         collect_scope(inner, node.body, self.package, walrus=self.walrus)
         self.enter(inner, node.body)
@@ -239,6 +282,7 @@ class Scanner(PythonCommands):
 
     def visit_assign(self, node: ast.Assign) -> None:
         self.stores(node.targets, node.lineno, "assignment")
+        purity.record_assign(self.purity_state, node, self.dotted)
         at_module = self.scope.parent is None
         if at_module and any(
             isinstance(t, ast.Name) and t.id == "pytest_plugins" for t in node.targets
@@ -257,6 +301,8 @@ class Scanner(PythonCommands):
             self.stores(node.targets, node.lineno, "del")
         elif not isinstance(node, ast.AnnAssign) or node.value is not None:
             self.stores([node.target], node.lineno, "assignment")
+            if isinstance(node, ast.AnnAssign):
+                purity.record_assign(self.purity_state, node, self.dotted)
         self.children(node)
 
     # --- attribute writes ----------------------------------------------------------
@@ -270,6 +316,7 @@ class Scanner(PythonCommands):
                 self.stores([target.value], line, form)
             elif isinstance(target, ast.Attribute):
                 self.written(target.value, (target.attr,), line, form)
+                purity.record_attr_write(self.purity_state.items, target, line)
             elif isinstance(target, ast.Subscript):
                 self.dict_write(target, line)
 
@@ -289,6 +336,16 @@ class Scanner(PythonCommands):
             name = const_str(target.slice)
             self.written(owner, (name,) if name else (), line, "__dict__ write")
 
+    def is_imported_patch_target(self, dotted: str, name: str) -> bool:
+        if not name or not self.u.is_first_party_name(dotted):
+            return False
+        module = self.u.resolve_module(dotted)
+        if module is None or module.file is None or module.file == self.path:
+            return False
+        if self.u.resolve_module(f"{dotted}.{name}") is not None:
+            return False
+        return is_imported_binding(module_bindings(self.u.root, module.file), name)
+
     def written(self, owner: ast.expr, names: tuple[str, ...], line: int, form: str) -> None:
         dotted = self.dotted(owner)
         if dotted is None:
@@ -298,7 +355,10 @@ class Scanner(PythonCommands):
             return
         for name in names or ("",):
             target = f"{dotted}.{name}" if name else dotted
-            self.patches.append(Patch(line, form, target, self.patch_code(dotted)))
+            imported = self.is_imported_patch_target(dotted, name)
+            self.patches.append(
+                Patch(line, form, target, self.patch_code(dotted), imported=imported)
+            )
         self.require_target(owner, names, line, form)
 
     def is_builtin_attribute_call(self, node: ast.Call) -> bool:
@@ -361,6 +421,14 @@ class Scanner(PythonCommands):
             self.shell_call(node)
         self.spawn_call(callee, node)
         fixtures.record_call(self.fixture_state, node, callee)
+        unshadowed_open = (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "open"
+            and self.scope.find("open") == (None, False)
+        )
+        purity.record_call(
+            self.purity_state, node, callee, self.dotted, unshadowed_open=unshadowed_open
+        )
         self.children(node)
 
     def spawn_call(self, callee: str | None, node: ast.Call) -> None:
@@ -387,7 +455,17 @@ class Scanner(PythonCommands):
         first = node.args[0] if node.args else None
         form = "patch" if kind == "patch" else f"patch.{kind}"
         if kind == "patch" or const_str(first) is not None:
-            self.string_target(first, node.lineno, form, self.patched_names(node, kind))
+            names = self.patched_names(node, kind)
+            self.string_target(first, node.lineno, form, names)
+            if kind != "dict":
+                purity.record_nested_patch(
+                    self.purity_state.items,
+                    first,
+                    names[0] if names else None,
+                    node.lineno,
+                    form,
+                    is_module=False,
+                )
             if kind == "dict":
                 self.patched_sys_modules(node)
         elif kind == "dict":
@@ -399,6 +477,15 @@ class Scanner(PythonCommands):
             self.patch_fact(first, names, node.lineno, form)
             self.record_patch(first, names, node.lineno, form)
             self.require_target(first, names, node.lineno, form)
+            is_mod = self.module_file(first) is not None or self.dotted(first) in self.imported
+            purity.record_nested_patch(
+                self.purity_state.items,
+                first,
+                names[0] if names else None,
+                node.lineno,
+                form,
+                is_module=is_mod,
+            )
 
     @staticmethod
     def patched_names(node: ast.Call, kind: str) -> tuple[str, ...]:
@@ -434,11 +521,31 @@ class Scanner(PythonCommands):
         elif const_str(node.args[0]) is not None:
             name = const_str(node.args[1]) if len(node.args) > 1 else None
             self.string_target(node.args[0], node.lineno, form, (name,) if name else ())
+            purity.record_nested_patch(
+                self.purity_state.items,
+                node.args[0],
+                name,
+                node.lineno,
+                form,
+                is_module=False,
+            )
         else:
             name = const_str(node.args[1]) if len(node.args) > 1 else None
             self.patch_fact(node.args[0], (name,) if name else (), node.lineno, "monkeypatch")
             self.record_patch(node.args[0], (name,) if name else (), node.lineno, form)
             self.require_target(node.args[0], (name,) if name else (), node.lineno, form)
+            is_mod = (
+                self.module_file(node.args[0]) is not None
+                or self.dotted(node.args[0]) in self.imported
+            )
+            purity.record_nested_patch(
+                self.purity_state.items,
+                node.args[0],
+                name,
+                node.lineno,
+                form,
+                is_module=is_mod,
+            )
 
     def monkeypatch_item(self, node: ast.Call, form: str) -> None:
         if self.is_sys_modules(node.args[0]):
@@ -471,7 +578,10 @@ class Scanner(PythonCommands):
         code = Code.UNRESOLVED_PATCH if dotted is None else self.patch_code(dotted)
         base = " ".join(ast.unparse(target).split())[:80] if dotted is None else dotted
         for name in names or ("",):
-            self.patches.append(Patch(line, form, f"{base}.{name}" if name else base, code))
+            imported = False if dotted is None else self.is_imported_patch_target(dotted, name)
+            self.patches.append(
+                Patch(line, form, f"{base}.{name}" if name else base, code, imported=imported)
+            )
 
     def string_target(
         self, target: ast.expr | None, line: int, form: str, names: tuple[str, ...] = ()
