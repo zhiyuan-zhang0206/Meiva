@@ -11,6 +11,7 @@ class PageShellBackend:
         self.keys: list[tuple[str, tuple[str, ...]]] = []
         self.killed: list[str] = []
         self.new_result = True
+        self.service_available_result = True
         self.supports_send = True
         self.send_error: Exception | None = None
 
@@ -24,6 +25,9 @@ class PageShellBackend:
         if self.new_result:
             self.sessions.add(name)
         return self.new_result
+
+    def service_available(self) -> bool:
+        return self.service_available_result
 
     def send(self, name: str, text: str) -> None:
         if not self.supports_send:
