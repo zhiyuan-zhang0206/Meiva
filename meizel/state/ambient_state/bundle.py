@@ -1,14 +1,3 @@
-"""The bundle-leak rule: a `@root_bundle` class never leaves the module that defines it.
-
-A composition root may gather what it wires into one frozen dataclass marked
-`base.config.wiring.root_bundle` and unpack it locally. Annotating that class anywhere else, as a
-parameter, a return value or an attribute, hands library code the whole bundle, so it can reach
-any member: a service locator under another name. In every module but the defining one, such an
-annotation (resolved through the module's `from ... import`) is a site, frozen like the other
-ambient-state sites as `path::bundle-leak:<Class>`; the files that define bundles are the only
-ones that may name them. A re-export through a second module is not followed (a known gap).
-"""
-
 from __future__ import annotations
 
 import ast

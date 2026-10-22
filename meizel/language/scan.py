@@ -6,8 +6,10 @@ import ast
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, cast
 
+from meizel import allowances
 from meizel.graph.model import Code, Fact, FactKind, MeizelError, Patch, Problem, Restricted
 from meizel.graph.scopes import Scope, collect_scope, dotted_chain, parameter_names
 from meizel.graph.universe import Universe
@@ -32,7 +34,12 @@ _ARGV_LIST_AT = {
     "subprocess.check_call": 0,
     "subprocess.check_output": 0,
     "subprocess.Popen": 0,
-    "base.host.proc.run_bounded": 0,
+    **dict.fromkeys(
+        allowances.load(Path(__file__).resolve().parents[2]).names(
+            "python-commands", "argv-wrappers"
+        ),
+        0,
+    ),
     "os.execv": 1,
     "os.execve": 1,
     "os.execvp": 1,

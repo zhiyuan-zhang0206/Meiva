@@ -87,7 +87,6 @@ _DECLARATIVE = re.compile(
     r"(\.|^)(include_router|add_api_route|add_exception_handler|add_middleware|middleware|mount"
     r"|add_argument|add_parser|set_defaults|add_subparsers|add_typer|command)$"
 )
-_SETTINGS_NAMES = frozenset({"settings"})
 _CACHE_DECORATORS = frozenset({"lru_cache", "cache", "alru_cache", "memoize", "cache_result"})
 _LOOP_GETTERS = frozenset({"get_running_loop", "get_event_loop", "new_event_loop"})
 _CLASSVAR = "ClassVar"
@@ -170,7 +169,8 @@ def _is_exempt_callee(call: ast.Call, module: Module, callee: str) -> bool:
 
 def _settings_read(node: ast.Name, module: Module) -> str | None:
     origin = module.imports.get(node.id, ("", None))[0]
-    return READ if origin.startswith("base.config") else None
+    is_cfg = any(origin == cfg or origin.startswith(f"{cfg}.") for cfg in allow.CONFIG_MODULES)
+    return READ if is_cfg else None
 
 
 def _attribute_read(node: ast.Attribute | ast.Name, module: Module) -> str | None:
@@ -192,7 +192,7 @@ def _call_read(node: ast.Call, module: Module) -> str | None:
 
 def _read_of(node: ast.AST, module: Module) -> str | None:
     """The rule an expression node triggers by reading the environment, if any."""
-    if isinstance(node, ast.Name) and node.id in _SETTINGS_NAMES:
+    if isinstance(node, ast.Name) and node.id in allow.SETTINGS_NAMES:
         return _settings_read(node, module)
     if isinstance(node, ast.Attribute | ast.Name):
         return _attribute_read(node, module)

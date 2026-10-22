@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+from meizel.state.ambient_state import allowlist as allow
 from meizel.state.ambient_state.rootrule import FromSettingsRule
 
 RULE = FromSettingsRule(
     rule="ambient-endpoint",
-    class_name="ServiceEndpoints",
-    modules={"base.daemon.endpoints"},
+    class_name=allow.ENDPOINT_HANDLE_CLASS,
+    modules=allow.ENDPOINT_HANDLE_MODULES,
     registry="ENDPOINT_PACKAGES",
 )
 AMBIENT_ENDPOINT = RULE.rule
 FIX = (
-    "take the daemon's `ServiceEndpoint` (or the `ServiceEndpoints` table) from the composition "
-    "root named in ENDPOINT_PACKAGES; only the root calls `ServiceEndpoints.from_settings()`"
+    f"take the daemon's endpoint (or the `{allow.ENDPOINT_HANDLE_CLASS}` table) from the composition "
+    f"root named in ENDPOINT_PACKAGES; only the root calls `{RULE.site}()`"
 )
 hits = RULE.hits

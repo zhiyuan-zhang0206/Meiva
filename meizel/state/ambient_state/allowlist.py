@@ -23,6 +23,7 @@ Three families are kept, and only these (user ruling 2026-10-02):
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from meizel import allowances
@@ -31,6 +32,28 @@ from meizel.state.ambient_state.roots import package_roots
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _POLICY = allowances.load(_REPO_ROOT)
 _RULE = "ambient-state"
+
+
+def _parse_handles(entries: tuple[str, ...]) -> tuple[str, frozenset[str]]:
+    if not entries:
+        return "", frozenset()
+    classes = {entry.partition(":")[2] for entry in entries}
+    if len(classes) != 1 or "" in classes:
+        raise ValueError(f"handle entries must share one `module:Class` class: {entries}")
+    return next(iter(classes)), frozenset(entry.partition(":")[0] for entry in entries)
+
+
+SKILL_SCRIPT_PATTERNS = tuple(re.compile(p) for p in _POLICY.names(_RULE, "skill-script-patterns"))
+CONFIG_MODULES = _POLICY.names(_RULE, "config-modules")
+CONFIG_READERS = frozenset(_POLICY.names(_RULE, "config-readers"))
+SETTINGS_NAMES = frozenset(_POLICY.names(_RULE, "config-readers")[:1])
+DB_MODULES = frozenset(_POLICY.names(_RULE, "db-modules"))
+DB_PRIMITIVES = frozenset(_POLICY.names(_RULE, "db-primitives"))
+DB_HANDLE_CLASS, DB_HANDLE_MODULES = _parse_handles(_POLICY.names(_RULE, "db-handles"))
+BUS_HANDLE_CLASS, BUS_HANDLE_MODULES = _parse_handles(_POLICY.names(_RULE, "bus-handles"))
+ENDPOINT_HANDLE_CLASS, ENDPOINT_HANDLE_MODULES = _parse_handles(
+    _POLICY.names(_RULE, "endpoint-handles")
+)
 
 # ── 1. write-only facades ──────────────────────────────────────────────────
 
@@ -76,37 +99,6 @@ ALLOWED: dict[str, str] = _POLICY.reasons(_RULE, "sites")
 # `ambient_roots.toml` (`settings = [...]`, see roots.py) when it is sliced; leaving needs
 # a decision record. A declared root that no longer exists fails as stale.
 SLICED_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "settings")
-
-# ── 5. database-handle packages ────────────────────────────────────────────
-
-# Packages that take a `Database` from their composition root and dial nothing ambiently:
-# package dir -> the modules that may call `Database.from_settings()` (scripts/structure/
-# ambient_state/dbhandle.py). A package declares `db = [...]` in its own `ambient_roots.toml`
-# (see roots.py) in the change that migrates its last ambient dial; the declaration is the lock.
-# A declared root that no longer exists fails as stale.
 DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "db")
-
-# ── 6. endpoint-table packages ─────────────────────────────────────────────
-
-# Packages that take their daemon's `ServiceEndpoint` (or the `ServiceEndpoints` table) from
-# their composition root: package dir -> the modules that may call
-# `ServiceEndpoints.from_settings()` (meizel/state/ambient_state/endpointrule.py). A package
-# declares `endpoints = [...]` in its own `ambient_roots.toml` (see roots.py); a declared root
-# that no longer exists fails as stale.
 ENDPOINT_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "endpoints")
-
-# ── 7. event-bus packages ───────────────────────────────────────────────────
-
-# Packages that take an `EventBus` handle from their composition root: package dir -> the
-# modules that may call `EventBus.from_settings()` (meizel/state/ambient_state/busrule.py).
-# A package declares `bus = [...]` in its own `ambient_roots.toml` (see roots.py); a declared
-# root that no longer exists fails as stale.
 BUS_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "bus")
-
-# ── 8. clock packages ────────────────────────────────────────────────────────
-
-# Packages that take a `Clock` from their composition root: package dir -> the modules that may
-# call `Clock.from_settings()` (meizel/state/ambient_state/clockrule.py). A package declares
-# `clock = [...]` in its own `ambient_roots.toml` (see roots.py); a declared root that no longer
-# exists fails as stale.
-CLOCK_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "clock")

@@ -1,12 +1,3 @@
-"""The shape the endpoint, bus and clock rules share: `Handle.from_settings()` only in the roots.
-
-A kernel handle (`ServiceEndpoints`, `EventBus`, `Clock`) is built from the live settings by its
-`from_settings()` constructor. In a package listed in the rule's registry that call may sit only
-in the modules named for the package (its composition roots, or the entry point of a command or
-probe that is its own root); anywhere else it is a site, frozen like the other ambient-state sites
-as `path::<rule>:<Class>.from_settings`.
-"""
-
 from __future__ import annotations
 
 import ast

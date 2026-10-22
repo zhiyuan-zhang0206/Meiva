@@ -121,15 +121,16 @@ class Decision:
     allowed: dict[str, str] = field(default_factory=dict[str, str])
 
 
+_POSTGRES_DIAL_OWNERS = frozenset(_POLICY.names("single-owner", "postgres-dial-owners"))
+
 DECISIONS: dict[str, Decision] = {
     "postgres-dial": Decision(
-        owners=frozenset({"base/db/connections.py"}),
+        owners=_POSTGRES_DIAL_OWNERS,
         find=_postgres_dials,
         fix=(
-            "dial through base.db.connect() / base.db.pool() (the cluster's own URL) "
-            "or base.db.connect_url() (an explicit target the caller names), which own "
-            "the transport posture (prepare_threshold=None, keepalives, statement ceiling "
-            "or unbounded, sslmode, pooled-session scrub)"
+            f"dial through the owning module ({', '.join(sorted(_POSTGRES_DIAL_OWNERS))}), "
+            "which owns the transport posture (prepare_threshold=None, keepalives, "
+            "statement ceiling or unbounded, sslmode, pooled-session scrub)"
         ),
         allowed=_POLICY.reasons("single-owner", "postgres-dial"),
     ),

@@ -1,62 +1,12 @@
-"""Require a sys.path guard before sibling imports in script-mode Python files.
-
-Run: `.venv/bin/python -m meizel.language.no_script_sibling_imports [path ...]`
-(defaults to scanning the whole repo; an explicit path that does not exist is an
-error (stderr + exit 1) rather than a silent no-op). Also run automatically via
-pre-commit.
-
-## Why
-
-The 2026-08-22 runner hardening sets `PYTHONSAFEPATH=1`: Python no longer
-prepends the script's own directory to sys.path. A script-mode file
-(`python path/to/script.py`) that imports a same-directory sibling therefore
-breaks with ModuleNotFoundError — the 2026-08-23 `daily_scan.py` crash
-(`import collect`) was exactly this, and `lint_meiva_okf.py` had hit the same
-wall the day before.
-
-The fix is a guard that restores the script's directory before the sibling
-import:
-
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120
-
-(`str(Path(__file__).resolve().parent)` is equivalent.) A guard that derives
-the directory from `__file__` survives moves; a hardcoded path does not.
-
-## The rule
-
-A script-mode file (an `if __name__ == "__main__":` block or a python / uv
-shebang) may not import a same-directory sibling unless a
-`sys.path.insert` / `sys.path.append` call runs first:
-
-- at module top level (including inside top-level `if` / `try` / `with`
-  containers, e.g. `if str(_HERE) not in sys.path:`), before the import, or
-- earlier in the same function for an in-function import (module-top guards
-  always protect in-function imports — module top runs before any call).
-
-## Scope boundaries
-
-- **Module-only files are out of scope** (no main block, no shebang): they are
-  reached through guarded importers and never run as scripts (e.g. a sibling
-  a guarded entry script imports before running). A module that grows a main
-  block or shebang enters scope automatically.
-- **Tests are excluded**: pytest inserts the test directory into sys.path
-  itself, so sibling imports in tests are module mode, not script mode.
-- **`from sibling.submodule import X` where `sibling` is a same-dir FILE is
-  not flagged**: a file cannot be a package, so the import cannot resolve to
-  the sibling — it must come from elsewhere on sys.path (e.g. a top-level
-  package of the same name). A sibling PACKAGE directory is a hazard for any
-  dotted path and is flagged.
-- Imports inside `if TYPE_CHECKING:` are not flagged (never executed).
-"""
-
 import ast
 import re
 import sys
 from pathlib import Path
 
-from meizel import lint_common
+from meizel import allowances, lint_common
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_PATH_IMPORT_SCOPE = allowances.load(_REPO_ROOT).names("path-imports", "scope")
 
 # Directories that are never scanned (vendored / generated / scratch).
 _EXCLUDED_DIRS = frozenset(
@@ -243,17 +193,12 @@ def scan_file(path: Path, *, root: Path | None = None) -> list[str]:
 
 
 def _fix_hint(rel: str) -> str:
-    """How to fix an unguarded sibling import at ``rel``.
-
-    Under meiva_builtins/ the structure gate refuses path imports (Rule 6), so a
-    guard there would only trade one failure for another: the shared code moves
-    into a governed package instead.
-    """
-    if rel.startswith("meiva_builtins/"):
-        return (
-            "Under meiva_builtins/ a sys.path guard is itself refused (structure Rule 6): "
-            "move the shared code into a governed package and import it normally."
-        )
+    for prefix in _PATH_IMPORT_SCOPE:
+        if rel.startswith(prefix):
+            return (
+                f"Under {prefix} a sys.path guard is itself refused (structure Rule 6): "
+                "move the shared code into a governed package and import it normally."
+            )
     return (
         "Add a guard before it: "
         "sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120"

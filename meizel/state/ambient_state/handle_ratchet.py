@@ -24,7 +24,6 @@ Sites = dict[tuple[str, str], list[str]]
 
 
 def package_of(rel: str) -> str:
-    """Diagnostic grouping: the first two path components, `base/agents`, `gateway/routers`."""
     parts = rel.split("/")
     return "/".join(parts[:2]) if len(parts) > 2 else parts[0]
 
@@ -53,9 +52,9 @@ def scan(repo_root: Path) -> Sites:
 
 
 FIX = {
-    SHIM: "take a `Database` from the composition root instead",
-    SELF_BUILT: "take a `Database` from the composition root instead",
-    BUS_BUILT: "take an `EventBus` from the composition root instead",
+    SHIM: "take a database handle from the composition root instead",
+    SELF_BUILT: "take a database handle from the composition root instead",
+    BUS_BUILT: "take an event-bus handle from the composition root instead",
 }
 
 
