@@ -115,14 +115,19 @@ def run_readonly_query(
         return subprocess.CompletedProcess(cmd, _TIMED_OUT_RC, b"", detail)
 
 
-def source_content_hash() -> str:
+def source_content_hash(*, service_dir: Path | None = None) -> str:
     """Hash every input that determines the built helper bundle."""
+    root = _SERVICE_DIR if service_dir is None else service_dir
+    source = root / "helper" / "main.swift"
+    plist = root / "helper" / "Info.plist"
+    entitlements = root / "helper" / "helper.entitlements"
+    locales = root / "helper" / "locales"
     digest = hashlib.sha256()
-    digest.update(SOURCE.read_bytes())
-    digest.update(INFO_PLIST.read_bytes())
-    digest.update(ENTITLEMENTS.read_bytes())
-    for path in sorted(p for p in LOCALES.rglob("*") if p.is_file()):
-        digest.update(path.relative_to(LOCALES).as_posix().encode() + path.read_bytes())
+    digest.update(source.read_bytes())
+    digest.update(plist.read_bytes())
+    digest.update(entitlements.read_bytes())
+    for path in sorted(p for p in locales.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(locales).as_posix().encode() + path.read_bytes())
     # A signing-policy change is a new artifact, never an in-place re-sign.
     digest.update(" ".join(hardened_runtime.SIGNING_OPTIONS).encode())
     digest.update(signing_identity.policy().encode())
