@@ -19,6 +19,7 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[2]
 _SEEDED = (
+    "base/deploy/git/check_git_hooks.py",
     "scripts/setup-worktree.sh",
     "scripts/provision/check_git_hooks.py",
     "scripts/host_ops/guard_editable_venv.py",

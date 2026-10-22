@@ -1,4 +1,4 @@
-"tests.path_scoped.cli_tests" = [
+"cli.database.tests.cli_tests" = [
     "test_skill_install.py",
     "test_settings_failure.py",
     "test_memory_cmd.py",

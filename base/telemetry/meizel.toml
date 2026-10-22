@@ -14,14 +14,3 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 "tests" = ["__init__.py", "audit_events.py", "delivery", "emitter.py", "event_store.py", "metrics", "observability.py", "otlp", "pipeline_build.py", "process_logging.py", "station_endpoint.py", "trace_mirror.py", "tracing.py"]
 "trace_mirror.py" = ["delivery"]
 "tracing.py" = ["delivery", "observability.py", "otlp", "trace_mirror.py"]
-
-[debt.private-name]
-"tests/_lower_exit_child.py -> tracing.py#_arm_tracing" = 1
-"tests/_lower_exit_child.py -> tracing.py#_state" = 2
-"tests/process_logging/test_event_pipeline_adapter.py -> process_logging.py#_event_sink" = 2
-"tests/test_tracing.py -> tracing.py#_arm_tracing" = 2
-"tests/test_tracing.py -> tracing.py#_state" = 35
-"tests/test_tracing_lifecycle.py -> tracing.py#_arm_tracing" = 2
-"tests/test_tracing_lifecycle.py -> tracing.py#_state" = 1
-"tests/tracing/test_arm_thread_base_exception_marks_attempt_spent.py -> tracing.py#_state" = 14
-"tests/tracing/test_strip_content_removes_llm_content_keeps_metadata.py -> tracing.py#_state" = 2

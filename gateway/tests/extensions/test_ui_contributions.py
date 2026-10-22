@@ -8,7 +8,7 @@ import gateway.app as gateway_app
 from base import paths
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.enable_config import write_local
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 @pytest.fixture(autouse=True)

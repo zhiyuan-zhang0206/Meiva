@@ -31,7 +31,7 @@ from gateway import app as gateway_app
 from gateway.cluster import server
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.config import gateway_config_from_boot
-from tests.fixtures.gateway_config import gateway_test_app, gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_client
 
 
 def test_both_gateway_entries_use_the_same_first_load_fact() -> None:

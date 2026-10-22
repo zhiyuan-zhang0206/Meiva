@@ -1,5 +1,6 @@
-"""`AgentSlices.resolve`: an agent's pin wins for the fields it holds, every other field is the live
-cluster default."""
+# meiva:note
+# `AgentSlices.resolve`: an agent's pin wins for the fields it holds, every other field is the live
+# cluster default.
 
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from base.config.agent_pins import resolve_agent_config_pins
 from base.host.env.agent_slices import AgentBrain, AgentSlices, ModelOverrides, agent_setting
 from base.host.env.config_lite_table import FIELD_DOMAINS
 
+# meiva:note
 # The agent's pins and the plugin-config view ride the dataclass beside the slices.
 _NOT_SLICES = {"pins", "plugin_pins", "_plugin_view", "_default_reader"}
 
@@ -38,7 +40,8 @@ def _read_slice(slices: AgentSlices, name: str) -> Any:
 
 
 def _expected(name: str, pins: dict[str, Any]) -> Any:
-    """What the agent holding `pins` reads for `name`: its pin, else the live default."""
+    # meiva:note
+    # What the agent holding `pins` reads for `name`: its pin, else the live default.
     value = pins[name] if name in pins else getattr(getattr(settings, FIELD_DOMAINS[name]), name)
     return tuple(cast("list[Any]", value)) if isinstance(value, list) else value
 
@@ -59,7 +62,8 @@ def _pinned_value(name: str) -> Any:
 def test_every_slice_field_is_a_per_agent_setting() -> None:
     fields_by_name = config_registry.fields()
     for name in _slice_fields():
-        assert fields_by_name[name].info.json_schema_extra["per_agent"] is True, name  # type: ignore[index]
+        extra = fields_by_name[name].info.json_schema_extra
+        assert isinstance(extra, dict) and extra["per_agent"] is True, name
 
 
 def test_unpinned_fields_read_the_live_cluster_defaults() -> None:
@@ -132,6 +136,7 @@ def test_read_serves_a_setting_no_slice_names_from_the_pin_else_the_live_default
     assert pinned.read("sandbox", "exec_timeout_seconds") == 123.5
 
 
+# meiva:note
 # The completion-notice policy is read by the gateway's notice delivery from the agent's stored
 # overlay (`effective_completion_notice_policy`), not inside a turn.
 _PER_AGENT_OUTSIDE_THE_SLICES = {"completion_notice_policy"}

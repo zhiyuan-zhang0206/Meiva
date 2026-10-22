@@ -42,6 +42,10 @@ _BOOTS_NOTHING = {
         "CI runs it on a bare python3, and its one application import "
         "(`base.deploy.release.python_lock`) is stdlib-only: it can never reach the config boot"
     ),
+    "scripts/provision/check_git_hooks.py": (
+        "pre-commit runs it under `language: system` (`python3`), and its one application import "
+        "(`base.deploy.git.check_git_hooks`) is stdlib-only: it can never reach the config boot"
+    ),
 }
 
 _PYTHON_ENTRY = re.compile(r"(?:python3?|\.venv/bin/python)\s+(scripts/[\w./-]+\.py)")

@@ -20,7 +20,7 @@ from base.host.net.auth import (
 from gateway.http.config import GatewayConfig
 from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 

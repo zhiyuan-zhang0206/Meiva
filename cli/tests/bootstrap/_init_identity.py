@@ -9,7 +9,7 @@ from cli import init_intent, start_intent
 
 
 def prepare_init_identity(args: argparse.Namespace) -> Path:
-    home = start_intent._home()
+    home = start_intent.resolve_home()
     ensure_private_dir(home)
     with file_lock(home / "start-intent.lock", timeout_s=30):
         init_intent.initialize_home(args, home)

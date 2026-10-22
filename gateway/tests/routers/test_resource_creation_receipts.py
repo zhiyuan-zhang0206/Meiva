@@ -9,7 +9,7 @@ from base.api_contracts.idempotency import keyed_headers
 from base.db.code_version_gate import ProcessDbGate
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import router as schedules
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 _SCHEDULE_BODY = {"name": "receipt", "script": "pass"}
 

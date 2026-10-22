@@ -20,8 +20,8 @@ from cli.commands.data_plane.tests.data_plane_records import data_plane_config a
 from cli.commands.tests import test_single_box as _single_box
 from cli.commands.tests.test_single_box import Born, _refused
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 configured = _single_box.configured
 born = _single_box.born

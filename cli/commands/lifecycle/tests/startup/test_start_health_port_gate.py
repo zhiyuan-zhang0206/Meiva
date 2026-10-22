@@ -46,10 +46,10 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
 from cli.commands.probe import ReadinessWait
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.supervision.roster.service_spec import AGENT_RUNNER, GATEWAY, ServiceSpec
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 # The gate IS the subject here, so stand the global autouse net down for this
 # module (cli/commands/tests/health_port_guard.py:_guard_health_port_gate reports every port free).

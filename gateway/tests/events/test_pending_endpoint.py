@@ -7,7 +7,7 @@ from base.agents.inbox.insert import insert_inbound_message
 from base.agents.inbox.rows import list_pending_inbounds
 from base.db import Database
 from base.events.live.bus import EventBus
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def _seed_agent(db_conn: psycopg.Connection) -> int:

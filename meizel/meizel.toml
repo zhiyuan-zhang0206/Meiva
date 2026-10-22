@@ -1,4 +1,4 @@
-exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state"]
+exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state", "tests"]
 
 [uses]
 "__main__.py" = ["contracts"]
@@ -8,4 +8,4 @@ exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_c
 "owners" = ["allowances.py", "lint_common.py", "roles.py"]
 "roles.py" = ["graph"]
 "state" = ["allowances.py", "lint_common.py", "roles.py"]
-"tests" = ["allowances.py", "contracts", "graph", "lint_common.py", "roles.py"]
+"tests" = ["allowances.py", "contracts", "graph", "lint_common.py", "owners", "roles.py", "state"]

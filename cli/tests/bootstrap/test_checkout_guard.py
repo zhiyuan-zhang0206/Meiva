@@ -10,8 +10,8 @@ from base.paths.home import home_checkout_error
 from cli import fleet_update, init_intent, preflight, start_intent
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _home_with_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -190,7 +190,7 @@ def test_a_test_home_is_taken_from_any_checkout(
 ) -> None:
     monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(start_intent, "checkout", lambda: tmp_path / "dev")
-    assert start_intent._home() == (tmp_path / "home").resolve()
+    assert start_intent.resolve_home() == (tmp_path / "home").resolve()
 
 
 def test_the_fleet_updater_runs_the_homes_own_cli_on_every_host() -> None:

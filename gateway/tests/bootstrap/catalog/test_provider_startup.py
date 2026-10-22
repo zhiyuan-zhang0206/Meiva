@@ -21,7 +21,7 @@ from gateway.http.model_catalog import (
     load_model_catalog,
     require_catalog,
 )
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def test_catalog_failure_preserves_identity_and_traceback() -> None:

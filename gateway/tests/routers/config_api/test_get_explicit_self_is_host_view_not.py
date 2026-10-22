@@ -12,6 +12,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config, settings
 from base.host.env import dotenv_file
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_config_api import REMOTE, seed_machine
 from gateway.tests.routers.test_config_api import (
     clean_overrides as clean_overrides,
@@ -22,7 +23,6 @@ from gateway.tests.routers.test_config_api import (
 from ops import env_audit as audit
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import ConfigAuditReadResult
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_get_explicit_self_is_host_view_not_cluster(

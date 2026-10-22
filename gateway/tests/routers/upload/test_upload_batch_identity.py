@@ -11,7 +11,7 @@ from base.agents.messages.inbound_images import image_mime_for, parse_upload_url
 from base.lm.catalog import ModelCatalog
 from gateway.routers.upload import batches as upload_batches
 from gateway.routers.upload.batches import UploadItem
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 
 
 def _headers(key: str) -> dict[str, str]:

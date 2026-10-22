@@ -14,19 +14,19 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from tests.components.gateway.test_cluster_endpoints import (
+from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.routers.cluster_endpoints.cluster_support import (
     fake_admin_events as fake_admin_events,
 )
-from tests.components.gateway.test_cluster_endpoints import (
+from gateway.tests.routers.cluster_endpoints.cluster_support import (
     pinned_session_names as pinned_session_names,
 )
-from tests.components.gateway.test_cluster_endpoints import (
+from gateway.tests.routers.cluster_endpoints.cluster_support import (
     seed_agent_on_machine,
     seed_away_machine,
     seed_drain_owner,
     seed_in_progress_task,
 )
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _existing_row(cur: psycopg.Cursor) -> TupleRow:
@@ -537,7 +537,7 @@ class TestMachinePauseResume:
 # it, the second spawn of the pause test took the reserved id and the insert failed
 # on `agents_pkey`. The sequence is placed by hand here so the collision is a test
 # outcome, not a property of how many agents happened to be born before this file.
-# meiva:link tests/components/gateway/test_cluster_endpoints.py
+# meiva:link gateway/tests/routers/cluster_endpoints/cluster_support.py
 def test_a_spawn_never_takes_the_reserved_drain_owner_id(
     db_conn: psycopg.Connection,
     *,

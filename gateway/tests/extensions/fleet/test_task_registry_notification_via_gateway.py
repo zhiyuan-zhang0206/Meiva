@@ -6,13 +6,13 @@ import pytest
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
 from gateway.routers import tasks
+from gateway.tests.auth.gateway_config import gateway_test_client
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
 )
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import seed_agent
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_gateway_enqueue_failure_rolls_back_assignment(

@@ -13,8 +13,8 @@ from base.packages.extensions import materialize
 from base.telemetry import converge_report
 from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.extensions.materialize import materialize_cluster_extensions
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _capture_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:

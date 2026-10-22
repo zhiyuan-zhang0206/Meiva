@@ -23,11 +23,11 @@ from base.lm.catalog import ModelCatalog
 from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from gateway.routers.memory import MemorySearchInputs
 from gateway.tests.agents.gateway_auth import gateway_credentials
+from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_client
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import ChunkHit
 from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
-from tests.fixtures.gateway_config import gateway_test_app, gateway_test_client
 
 _active_app: list[FastAPI] = []
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_memory_search import (
     SEARCH_PERMITS,
     _search,
@@ -26,7 +27,6 @@ from gateway.tests.routers.test_memory_search import (
     memory_search_app_db as memory_search_app_db,
 )
 from services.derived.memory_indexer.backends.base import ChunkHit
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 class TestEventLoopIsolation:

@@ -20,9 +20,9 @@ from cli.commands.cluster import unit_join
 from cli.commands.lifecycle import root_driver
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _GATEWAY = {"gateway", "agent-runner"}
 

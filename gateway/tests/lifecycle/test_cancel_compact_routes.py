@@ -7,7 +7,7 @@ import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
-from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 
 
 @pytest.fixture

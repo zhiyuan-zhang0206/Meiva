@@ -12,12 +12,12 @@ from base.agents.birth import transaction
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.agents import creation as agent_creation
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, SECRET
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from ops.cluster import rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
-from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 CASES = [
     ("guide", {"nl": "one intent"}),

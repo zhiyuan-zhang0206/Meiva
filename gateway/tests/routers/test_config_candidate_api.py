@@ -10,7 +10,7 @@ from base.config import runtime_config
 from base.config.admin.candidate import EnvPatchValidation
 from base.host.env import dotenv_file
 from gateway.routers.configuration import runtime as config_router
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 @pytest.fixture

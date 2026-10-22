@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.structure import placement
-from scripts.structure.placement_evidence import IncompleteReferenceEvidenceError
+from scripts.structure.placement import IncompleteReferenceEvidenceError
 
 _PATH = "scripts/tests/test_probe.py"
 

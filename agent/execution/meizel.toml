@@ -1,7 +1,8 @@
-exports = ["child.py"]
+exports = ["agent_traceback.py", "child.py", "protocol.py"]
 
 [uses]
-"tests" = ["child.py"]
+"child.py" = ["agent_traceback.py", "protocol.py"]
+"tests" = ["child.py", "protocol.py"]
 
 [external]
 "child.py" = "executes the agent-authored code of one execute_code call"

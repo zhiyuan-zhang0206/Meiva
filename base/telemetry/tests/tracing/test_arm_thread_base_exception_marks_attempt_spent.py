@@ -65,8 +65,8 @@ def test_arm_thread_base_exception_marks_attempt_spent(
     initialize_tracing(machine=machine_identity(), home=tmp_path)
     wait_init_resolved()
 
-    assert tracing_mod._state["arm_failed"] is True
-    assert tracing_mod._state["initialized"] is False
+    assert tracing_mod.state["arm_failed"] is True
+    assert tracing_mod.state["initialized"] is False
 
     initialize_tracing(
         machine=machine_identity(), home=tmp_path
@@ -107,13 +107,13 @@ def test_timeout_then_late_arm_recording_comes_up_midlife(
     warned = warned_fields(loguru_records)
     assert len(warned) == 1
     assert warned[0]["action"] == "init_resolved_timeout"
-    assert tracing_mod._state["timeout_reported"] is True
-    assert tracing_mod._state["initialized"] is False
+    assert tracing_mod.state["timeout_reported"] is True
+    assert tracing_mod.state["initialized"] is False
 
     # ...the arm completes late: recording comes up mid-life...
     release.set()
     wait_init_resolved()
-    assert tracing_mod._state["initialized"] is True
+    assert tracing_mod.state["initialized"] is True
 
     # ...and later calls skip the wait entirely, so the span opens for real.
     ensure_init_resolved()
@@ -147,8 +147,8 @@ def test_ensure_init_resolved_instant_without_arming(
     )  # declined: collector unreachable, no arm thread
     ensure_init_resolved()  # must return at once, not hang on an unset event
 
-    assert tracing_mod._state["arm_thread"] is None
-    assert tracing_mod._state["initialized"] is False
+    assert tracing_mod.state["arm_thread"] is None
+    assert tracing_mod.state["initialized"] is False
 
 
 def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -268,7 +268,7 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    tracing_mod._state["initialized"] = True
+    tracing_mod.state["initialized"] = True
     posts = capture_otlp_json_posts(monkeypatch)
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
     provider = TracerProvider()
@@ -497,7 +497,7 @@ def test_turn_span_noop_when_initialize_skipped(monkeypatch: pytest.MonkeyPatch)
     turn_span stays no-op — otherwise it opens a span against an
     uninitialized provider."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    assert tracing_mod._state["initialized"] is False
+    assert tracing_mod.state["initialized"] is False
 
     def _explode(*_a, **_kw):
         raise AssertionError("must not open a span when uninitialized")
@@ -512,7 +512,7 @@ def test_turn_span_opens_root_with_session_id(monkeypatch: pytest.MonkeyPatch):
     """When enabled and initialized, turn_span opens an OTel root span with
     the given name and stamps the session and turn attributes."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    tracing_mod._state["initialized"] = True
+    tracing_mod.state["initialized"] = True
 
     span = FakeSpan()
     tracer = FakeTracer(span)
@@ -551,7 +551,7 @@ def test_claim_idle_wait_span_noop_when_initialize_skipped(
     """trace_enabled=True but initialize_tracing never ran: no-op, same as
     turn_span — a span opened against the unset proxy tracer is silently lost."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    assert tracing_mod._state["initialized"] is False
+    assert tracing_mod.state["initialized"] is False
 
     def _explode(*_a, **_kw):
         raise AssertionError("must not open a span when uninitialized")
@@ -571,7 +571,7 @@ def test_claim_idle_wait_span_ends_node_span_and_opens_idle_wait(
     the real dispatch) and an explicit `claim idle-wait` span is opened for
     the wait."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    tracing_mod._state["initialized"] = True
+    tracing_mod.state["initialized"] = True
 
     node_span = NodeFakeSpan("execute_task claim")
     monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)
@@ -593,7 +593,7 @@ def test_claim_idle_wait_span_never_ends_non_node_span(
     ending it would truncate the whole turn trace. The wait then stays inside
     the current span (pre-fix behavior)."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    tracing_mod._state["initialized"] = True
+    tracing_mod.state["initialized"] = True
 
     root_span = NodeFakeSpan("meiva-agent-42")
     monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: root_span)
@@ -614,7 +614,7 @@ def test_claim_idle_wait_span_skips_non_recording_span(
     is not ended and no idle-wait span is opened — the helper only acts on a
     real recording node span."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    tracing_mod._state["initialized"] = True
+    tracing_mod.state["initialized"] = True
 
     node_span = NodeFakeSpan("execute_task claim", recording=False)
     monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)

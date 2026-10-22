@@ -1,7 +1,8 @@
-"""Co-located gateway and runner units each load their own .env: the boot pass
-loads `$MEIVA_HOME/.env`, forces this unit's cluster declarations over a polluted
-parent environment and drops the cluster values it does not declare. The home
-resolution itself is covered by base/tests/config/test_home_resolution.py."""
+# meiva:note
+# Co-located gateway and runner units each load their own .env: the boot pass
+# loads `$MEIVA_HOME/.env`, forces this unit's cluster declarations over a polluted
+# parent environment and drops the cluster values it does not declare. The home
+# resolution itself is covered by base/tests/config/test_home_resolution.py.
 
 from __future__ import annotations
 
@@ -44,6 +45,7 @@ def restore_authority_env() -> Iterator[None]:
         | env_keep_set("gateway")
         | env_keep_set("agent")
     )
+    # meiva:note
     # Snapshot EVERY touched key (absent = None, restored as a pop): the
     # authority pass can rewrite a touched key's value, and a key added by a
     # test must not leak into the next one.
@@ -56,9 +58,11 @@ def restore_authority_env() -> Iterator[None]:
             os.environ[key] = val
 
 
+# meiva:note
 # ── enforce_cluster_env_authority: this cluster's .env wins over a polluted parent ──
 
 
+# meiva:note
 # The suite's own cluster-identity keys — the test process's "unit .env"
 # declarations. `_point_env_at` merges them into the pointed-at env file so
 # `enforce_cluster_env_authority` takes its FORCE branch for them (a declared
@@ -84,10 +88,13 @@ def _point_env_at(monkeypatch: pytest.MonkeyPatch, env_file: Path, tmp_path: Pat
 def test_enforce_overrides_leaked_derived_key(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A sibling cluster's health port leaked into os.environ (load_dotenv leaves an
-    already-set key untouched) is corrected by this cluster's own .env — the bug
-    where a preview service bound the production health port."""
-    monkeypatch.setitem(os.environ, "MEIVA_AGENT_HOST_HEALTH_PORT", "8102")  # main's, leaked
+    # meiva:note
+    # A sibling cluster's health port leaked into os.environ (load_dotenv leaves an
+    # already-set key untouched) is corrected by this cluster's own .env — the bug
+    # where a preview service bound the production health port.
+    # meiva:note
+    # main's, leaked
+    monkeypatch.setitem(os.environ, "MEIVA_AGENT_HOST_HEALTH_PORT", "8102")
     env_file = tmp_path / ".env"
     env_file.write_text("MEIVA_AGENT_HOST_HEALTH_PORT=18035\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
@@ -96,11 +103,12 @@ def test_enforce_overrides_leaked_derived_key(
 
 
 def test_enforce_ignores_non_enforced_keys(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Only the derived + identity keys are forced from the file — an
-    unrelated env var in the file never overrides the live environment.
-    MEIVA_LLM_OVERRIDE is deliberately chosen: an e2e-only override read straight
-    from os.environ, not a Settings field, so it has no owning sub-model to
-    enforce (a Settings-backed key like MEIVA_LABELER_MODEL would be forced)."""
+    # meiva:note
+    # Only the derived + identity keys are forced from the file — an
+    # unrelated env var in the file never overrides the live environment.
+    # MEIVA_LLM_OVERRIDE is deliberately chosen: an e2e-only override read straight
+    # from os.environ, not a Settings field, so it has no owning sub-model to
+    # enforce (a Settings-backed key like MEIVA_LABELER_MODEL would be forced).
     monkeypatch.setitem(os.environ, "MEIVA_LLM_OVERRIDE", "env-live")
     env_file = tmp_path / ".env"
     env_file.write_text("MEIVA_LLM_OVERRIDE=env-file\n")
@@ -112,10 +120,11 @@ def test_enforce_ignores_non_enforced_keys(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_enforce_forces_identity_key_declared_in_env_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A machine-identity key the unit's own .env declares wins verbatim over an
-    inherited value — same authority rule as the DERIVED cluster keys. A unit's
-    machine identity (serve flags, name) is a per-unit fact; the .env is its
-    home."""
+    # meiva:note
+    # A machine-identity key the unit's own .env declares wins verbatim over an
+    # inherited value — same authority rule as the DERIVED cluster keys. A unit's
+    # machine identity (serve flags, name) is a per-unit fact; the .env is its
+    # home.
     monkeypatch.setitem(os.environ, "MEIVA_MACHINE_NAME", "leaked-prod-host")
     env_file = tmp_path / ".env"
     env_file.write_text("MEIVA_MACHINE_NAME=file-host\n")
@@ -127,12 +136,13 @@ def test_enforce_forces_identity_key_declared_in_env_file(
 def test_enforce_drops_undeclared_identity_key(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An inherited machine-identity key the unit's .env does NOT declare is
-    dropped — the #771 leak: prod's MEIVA_MACHINE_SERVE_GATEWAY=true riding a
-    login shell into an isolated child flipped `config_source_is_local()` to
-    True, skipped the settings-lite placeholders, and the DERIVED drop then
-    failed Settings with Field required. Dropped, the resolver falls through to
-    False."""
+    # meiva:note
+    # An inherited machine-identity key the unit's .env does NOT declare is
+    # dropped — the #771 leak: prod's MEIVA_MACHINE_SERVE_GATEWAY=true riding a
+    # login shell into an isolated child flipped `config_source_is_local()` to
+    # True, skipped the settings-lite placeholders, and the DERIVED drop then
+    # failed Settings with Field required. Dropped, the resolver falls through to
+    # False.
     monkeypatch.setitem(os.environ, "MEIVA_MACHINE_SERVE_GATEWAY", "true")
     monkeypatch.setitem(os.environ, "MEIVA_MACHINE_SERVE_AGENT_RUNNER", "true")
     monkeypatch.setitem(os.environ, "MEIVA_MACHINE_NAME", "leaked-prod-host")
@@ -148,13 +158,14 @@ def test_enforce_drops_undeclared_identity_key(
 def test_enforce_keeps_timezone_supplied_by_env_alone(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An inherited MEIVA_TIMEZONE the unit .env does NOT declare survives the
-    authority pass — the gateway-hosted schedule runner receives the cluster
-    timezone from its spawn env, and dropping it left the runner on the
-    America/Los_Angeles field default (2026-08-21: schedule #3 fired at PT
-    midnight instead of Shanghai midnight after the 08-12 ruling). The gateway
-    is the cluster's timezone authority; a pure agent-runner re-injects the
-    authoritative value via /api/bootstrap at Settings build regardless."""
+    # meiva:note
+    # An inherited MEIVA_TIMEZONE the unit .env does NOT declare survives the
+    # authority pass — the gateway-hosted schedule runner receives the cluster
+    # timezone from its spawn env, and dropping it left the runner on the
+    # America/Los_Angeles field default (2026-08-21: schedule #3 fired at PT
+    # midnight instead of Shanghai midnight after the 08-12 ruling). The gateway
+    # is the cluster's timezone authority; a pure agent-runner re-injects the
+    # authoritative value via /api/bootstrap at Settings build regardless.
     monkeypatch.setitem(os.environ, "MEIVA_TIMEZONE", "Asia/Shanghai")
     _point_env_at(monkeypatch, tmp_path / "no-timezone.env", tmp_path)
     dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
@@ -164,11 +175,12 @@ def test_enforce_keeps_timezone_supplied_by_env_alone(
 def test_enforce_forces_declared_tempo_urls_over_forwarded_snapshot(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The host-scope tempo URLs the unit's .env declares win over an inherited
-    copy. Session children receive host-scope facts by env forward, so a parent
-    that booted before the .env change hands its stale pair to every child and
-    the station's converge re-renders with the old URL (2026-09-14 wave, task
-    #3339)."""
+    # meiva:note
+    # The host-scope tempo URLs the unit's .env declares win over an inherited
+    # copy. Session children receive host-scope facts by env forward, so a parent
+    # that booted before the .env change hands its stale pair to every child and
+    # the station's converge re-renders with the old URL (2026-09-14 wave, task
+    # #3339).
     monkeypatch.setitem(os.environ, "MEIVA_TELEMETRY_TEMPO_QUERY_URL", "http://10.55.0.9:3200")
     monkeypatch.setitem(os.environ, "MEIVA_TELEMETRY_TEMPO_ENDPOINT", "http://10.55.0.9:14318")
     env_file = tmp_path / ".env"
@@ -185,8 +197,9 @@ def test_enforce_forces_declared_tempo_urls_over_forwarded_snapshot(
 def test_enforce_keeps_tempo_urls_supplied_by_env_alone(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Undeclared tempo URLs stay untouched — env-only supply remains legitimate
-    (a not-yet-enrolled unit, the test suites)."""
+    # meiva:note
+    # Undeclared tempo URLs stay untouched — env-only supply remains legitimate
+    # (a not-yet-enrolled unit, the test suites).
     monkeypatch.setitem(os.environ, "MEIVA_TELEMETRY_TEMPO_QUERY_URL", "http://tempo.test:3200")
     env_file = tmp_path / ".env"
     env_file.write_text("MEIVA_TIMEZONE=Asia/Shanghai\n")
@@ -210,16 +223,19 @@ def test_declared_service_path_wins_over_forwarded_snapshot(
 def test_spawned_child_reads_forwarded_timezone_without_env_key(
     tmp_path: Path,
 ) -> None:
-    """The 2026-08-21 incident chain, end to end: a schedule-runner child
-    spawned with MEIVA_TIMEZONE in its env resolves settings.general.timezone to
-    that value even when its unit .env does not declare the key. Before the
-    never-drop exemption the authority pass popped the forwarded value and the
-    America/Los_Angeles field default won — schedule #3 fired at PT midnight
-    instead of Shanghai midnight."""
+    # meiva:note
+    # The 2026-08-21 incident chain, end to end: a schedule-runner child
+    # spawned with MEIVA_TIMEZONE in its env resolves settings.general.timezone to
+    # that value even when its unit .env does not declare the key. Before the
+    # never-drop exemption the authority pass popped the forwarded value and the
+    # America/Los_Angeles field default won — schedule #3 fired at PT midnight
+    # instead of Shanghai midnight.
     child_env = dict(os.environ)
-    child_env["MEIVA_HOME"] = str(tmp_path)  # a unit .env with no MEIVA_TIMEZONE
+    # meiva:note
+    # a unit .env with no MEIVA_TIMEZONE
+    child_env["MEIVA_HOME"] = str(tmp_path)
     child_env["MEIVA_TIMEZONE"] = "Asia/Shanghai"
-    out = subprocess.run(  # noqa: S603 -- fixed argv, this interpreter runs the child script
+    out = subprocess.run(  # noqa: S603
         [
             sys.executable,
             str(Path(__file__).with_name("_env_import_child.py")),
@@ -238,11 +254,13 @@ def test_spawned_child_reads_forwarded_timezone_without_env_key(
 def test_enforce_keeps_gateway_url_supplied_by_env_alone(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The host-scoped gateway URL key stays exempt from the identity drop: a
-    not-yet-enrolled runner (and the test suites) supply MEIVA_GATEWAY_URL from
-    the environment alone, and popping it would silently un-configure the
-    bootstrap fetch (should_fetch_from_gateway goes False)."""
+    # meiva:note
+    # The host-scoped gateway URL key stays exempt from the identity drop: a
+    # not-yet-enrolled runner (and the test suites) supply MEIVA_GATEWAY_URL from
+    # the environment alone, and popping it would silently un-configure the
+    # bootstrap fetch (should_fetch_from_gateway goes False).
     monkeypatch.setitem(os.environ, "MEIVA_GATEWAY_URL", "http://gw:8000")
+    # meiva:note
     # Hand-built env file WITHOUT the gateway-URL lines: `_point_env_at`'s suite
     # merge declares MEIVA_GATEWAY_URL, which would take the DERIVED force branch
     # and hide what this test pins (the URL keys survive undeclared).
@@ -260,6 +278,7 @@ def test_enforce_keeps_gateway_url_supplied_by_env_alone(
     assert os.environ["MEIVA_GATEWAY_URL"] == "http://gw:8000"
 
 
+# meiva:note
 # ── enforce_cluster_env_authority: undeclared DERIVED keys are dropped ──
 #
 # A DERIVED key in the unit's own .env is forced over a polluted parent env; a
@@ -276,9 +295,10 @@ def test_enforce_keeps_gateway_url_supplied_by_env_alone(
 def test_enforce_drops_app_port_absent_from_env_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An inherited MEIVA_APP_PORT with no declaration in this unit's .env is
-    removed, so a sibling cluster's value cannot stand in a pure runner (the
-    pure-runner case: cluster data-plane keys arrive via bootstrap)."""
+    # meiva:note
+    # An inherited MEIVA_APP_PORT with no declaration in this unit's .env is
+    # removed, so a sibling cluster's value cannot stand in a pure runner (the
+    # pure-runner case: cluster data-plane keys arrive via bootstrap).
     monkeypatch.setitem(os.environ, "MEIVA_APP_PORT", "3001")
     _point_env_at(monkeypatch, tmp_path / "no-port.env", tmp_path)
     dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
@@ -288,8 +308,9 @@ def test_enforce_drops_app_port_absent_from_env_file(
 def test_enforce_keeps_app_port_declared_in_env_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A gateway's own .env declaration wins verbatim over an inherited value —
-    the cluster-isolation authority rule unchanged."""
+    # meiva:note
+    # A gateway's own .env declaration wins verbatim over an inherited value —
+    # the cluster-isolation authority rule unchanged.
     monkeypatch.setitem(os.environ, "MEIVA_APP_PORT", "3001")
     env_file = tmp_path / ".env"
     env_file.write_text("MEIVA_APP_PORT=18113\n")
@@ -301,14 +322,15 @@ def test_enforce_keeps_app_port_declared_in_env_file(
 def test_enforce_drops_every_undeclared_derived_key(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The absent-key drop is general, not pgbouncer-only: any DERIVED
-    data-plane key this unit's .env does not declare is removed from the
-    environment, so a sibling cluster's value sourced into the shell
-    (MEIVA_APP_PORT / MEIVA_EVENTS_CHANNEL / ...) cannot stand in a pure runner's
-    process. The gateway's bootstrap fetch re-injects the real values at
-    Settings build. (Identity keys — MEIVA_DB_URL / MEIVA_CLUSTER_SECRET /
-    MEIVA_GATEWAY_URL — are exempt: the suite's own .env merge declares them, see
-    `_point_env_at`.)"""
+    # meiva:note
+    # The absent-key drop is general, not pgbouncer-only: any DERIVED
+    # data-plane key this unit's .env does not declare is removed from the
+    # environment, so a sibling cluster's value sourced into the shell
+    # (MEIVA_APP_PORT / MEIVA_EVENTS_CHANNEL / ...) cannot stand in a pure runner's
+    # process. The gateway's bootstrap fetch re-injects the real values at
+    # Settings build. (Identity keys — MEIVA_DB_URL / MEIVA_CLUSTER_SECRET /
+    # MEIVA_GATEWAY_URL — are exempt: the suite's own .env merge declares them, see
+    # `_point_env_at`.)
     monkeypatch.setitem(os.environ, "MEIVA_APP_PORT", "3001")
     monkeypatch.setitem(os.environ, "MEIVA_EVENTS_CHANNEL", "meiva:events:leaked")
     monkeypatch.setitem(os.environ, "MEIVA_MEMORY_SEARCH_PORT", "19531")
@@ -320,14 +342,16 @@ def test_enforce_drops_every_undeclared_derived_key(
 
 
 def test_enforce_keeps_placeholder_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The placeholder DB URL is exempt from the drop: a process tree that
-    carries it (planted by a lite boot) keeps it, and popping it would replace
-    the named refusal with a no-default Settings failure.
-
-    Uses a hand-built env file WITHOUT the identity merge: the placeholder only
-    exists in the environment, and the point of the test is that the drop
-    leaves it alone."""
+    # meiva:note
+    # The placeholder DB URL is exempt from the drop: a process tree that
+    # carries it (planted by a lite boot) keeps it, and popping it would replace
+    # the named refusal with a no-default Settings failure.
+    #
+    # Uses a hand-built env file WITHOUT the identity merge: the placeholder only
+    # exists in the environment, and the point of the test is that the drop
+    # leaves it alone.
     monkeypatch.setitem(os.environ, "MEIVA_DB_URL", dotenv_boot.PLACEHOLDER_DB_URL)
+    # meiva:note
     # Declare every OTHER identity key (the suite's .env merge in
     # `_point_env_at` does this too) so the drop pass leaves them alone: the
     # run's later Settings() builds need MEIVA_REDIS_URL present, and a pop here
@@ -353,7 +377,8 @@ def test_enforce_keeps_placeholder_url(monkeypatch: pytest.MonkeyPatch, tmp_path
 def test_enforce_drops_undeclared_redis_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, url: str
 ) -> None:
-    """Initialization declares real local URLs before constructing Settings."""
+    # meiva:note
+    # Initialization declares real local URLs before constructing Settings.
     monkeypatch.delenv("MEIVA_PROCESS_PROFILE", raising=False)
     monkeypatch.delenv(dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, raising=False)
     monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", url)
@@ -375,16 +400,17 @@ def test_enforce_drops_undeclared_redis_url(
 def test_enforce_keeps_placeholder_url_over_a_declaring_env_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The placeholder outranks an `.env` that DOES declare MEIVA_DB_URL.
-
-    This is the case that matters and the one the test above cannot reach: the
-    force-assign loop would otherwise overwrite the placeholder a lite boot had
-    planted, and the drop loop's guard never sees it. A process tree that
-    carries the placeholder must not come out of the pass holding a real
-    database URL.
-
-    Other declared cluster keys must still be forced from the file — the guard is
-    about the placeholder, not about disabling the authority pass."""
+    # meiva:note
+    # The placeholder outranks an `.env` that DOES declare MEIVA_DB_URL.
+    #
+    # This is the case that matters and the one the test above cannot reach: the
+    # force-assign loop would otherwise overwrite the placeholder a lite boot had
+    # planted, and the drop loop's guard never sees it. A process tree that
+    # carries the placeholder must not come out of the pass holding a real
+    # database URL.
+    #
+    # Other declared cluster keys must still be forced from the file — the guard is
+    # about the placeholder, not about disabling the authority pass.
     monkeypatch.setitem(os.environ, "MEIVA_DB_URL", dotenv_boot.PLACEHOLDER_DB_URL)
     monkeypatch.setitem(os.environ, "MEIVA_EVENTS_CHANNEL", "leaked-from-a-sibling")
     env_file = tmp_path / "declares-db.env"
@@ -409,14 +435,16 @@ def test_enforce_keeps_placeholder_url_over_a_declaring_env_file(
     )
 
 
+# meiva:note
 # ── Per-process profile: gateway pop vs agent/runner survival ──
 
 
 def test_enforce_drops_a_leaked_redis_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The exemption is placeholder-EXACT: a sibling unit's real MEIVA_REDIS_URL
-    leaked in via the parent env is still dropped when this unit's .env does
-    not declare one. Neither launcher-context key is present: the #4334 redis
-    exemption needs an agent-launched tree, and this is a plain shell."""
+    # meiva:note
+    # The exemption is placeholder-EXACT: a sibling unit's real MEIVA_REDIS_URL
+    # leaked in via the parent env is still dropped when this unit's .env does
+    # not declare one. Neither launcher-context key is present: the #4334 redis
+    # exemption needs an agent-launched tree, and this is a plain shell.
     monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
     monkeypatch.delitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, raising=False)
     monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", "redis://sibling:6379/0")
@@ -435,18 +463,23 @@ def test_enforce_drops_a_leaked_redis_url(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert "MEIVA_REDIS_URL" not in os.environ
 
 
+# meiva:note
 # ── Per-process profile: gateway pop vs agent/runner survival ──
 
 
 @pytest.mark.parametrize(
     "profile,key_should_survive",
     [
+        # meiva:note
         # profile=gateway → agent-runner cluster keys are popped
         ("gateway", False),
+        # meiva:note
         # profile=agent → agent-runner cluster keys survive (agent needs them)
         ("agent", True),
+        # meiva:note
         # profile=runner → agent-runner cluster keys survive (daemon needs them)
         ("runner", True),
+        # meiva:note
         # no profile → no pop (bare checkout / test / script)
         (None, True),
     ],
@@ -457,14 +490,15 @@ def test_gateway_profile_pops_only_for_gateway(
     profile: str | None,
     key_should_survive: bool,
 ) -> None:
-    """Agent-runner cluster-scoped keys are popped from os.environ ONLY when
-    MEIVA_PROCESS_PROFILE=gateway. Agent processes (profile=agent), runner daemons
-    (profile=runner), and unprofiled processes (tests, bare checkouts) keep them.
-
-    This is the regression test for the bug where _is_gateway_process() used
-    MEIVA_MACHINE_SERVE_GATEWAY (a unit capability flag true on every single-box
-    process) instead of MEIVA_PROCESS_PROFILE (an explicit process-type marker).
-    """
+    # meiva:note
+    # Agent-runner cluster-scoped keys are popped from os.environ ONLY when
+    # MEIVA_PROCESS_PROFILE=gateway. Agent processes (profile=agent), runner daemons
+    # (profile=runner), and unprofiled processes (tests, bare checkouts) keep them.
+    #
+    # This is the regression test for the bug where _is_gateway_process() used
+    # MEIVA_MACHINE_SERVE_GATEWAY (a unit capability flag true on every single-box
+    # process) instead of MEIVA_PROCESS_PROFILE (an explicit process-type marker).
+    # meiva:note
     # Pick a representative agent-runner cluster-scoped key that is in
     # AGENT_RUNNER_CLUSTER_ALIASES. DEEPSEEK_API_KEY is cluster-pinned
     # agent-runner — the gateway must NOT carry it in os.environ.
@@ -476,6 +510,7 @@ def test_gateway_profile_pops_only_for_gateway(
     else:
         monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
 
+    # meiva:note
     # The .env file needs the identity keys so enforce_cluster_env_authority
     # takes its FORCE branch and doesn't wipe them. DEEPSEEK_API_KEY is declared
     # too — a single-box unit's .env carries every cluster field (its first
@@ -487,6 +522,7 @@ def test_gateway_profile_pops_only_for_gateway(
     env_file.write_text("\n".join(_IDENTITY_LINES) + f"\n{test_key}=sk-test-value\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
 
+    # meiva:note
     # The gateway pop removes EVERY agent-runner cluster alias from os.environ
     # (MEIVA_EXEC_TIMEOUT_SECONDS among them). monkeypatch only restores keys IT
     # set, so without this snapshot the worker's os.environ loses those keys
@@ -511,6 +547,7 @@ def test_gateway_profile_pops_only_for_gateway(
                 "(gateway process does not need agent keys)"
             )
     finally:
+        # meiva:note
         # Restore the aliases the gateway pop removed, so the worker's
         # os.environ survives this test intact (monkeypatch would restore only
         # the keys IT set — MEIVA_EXEC_TIMEOUT_SECONDS etc. would stay gone and
@@ -522,23 +559,26 @@ def test_gateway_profile_pops_only_for_gateway(
                 os.environ[_k] = _v
 
 
+# meiva:note
 # ── Labeler boot: profile-less spawn keeps the LLM provider keys (task #1230) ──
 
 
 def test_labeler_boot_without_profile_marker_reads_provider_key_from_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """End to end: the labeler's session env (the gateway session-forward
-    allowlist — cluster-scope provider keys deliberately NOT forwarded, and no
-    MEIVA_PROCESS_PROFILE marker after the services.supervision.roster.spec opt-out, task #1230) boots
-    against a unit .env that declares DEEPSEEK_API_KEY; the key must resolve
-    through the DeepSeek provider plugin's DEEPSEEK_API_KEY environment seam.
-
-    This is the regression test for the labeler's RuntimeError('DEEPSEEK_API_KEY
-    not set') retry loop: the .env re-source (F-s4-4 force branch) restores the
-    key, and the gateway-profile pop must NOT remove it again — the pop only
-    runs for processes carrying MEIVA_PROCESS_PROFILE=gateway, and the labeler's
-    spec no longer sets it."""
+    # meiva:note
+    # End to end: the labeler's session env (the gateway session-forward
+    # allowlist — cluster-scope provider keys deliberately NOT forwarded, and no
+    # MEIVA_PROCESS_PROFILE marker after the services.supervision.roster.spec opt-out, task #1230) boots
+    # against a unit .env that declares DEEPSEEK_API_KEY; the key must resolve
+    # through the DeepSeek provider plugin's DEEPSEEK_API_KEY environment seam.
+    #
+    # This is the regression test for the labeler's RuntimeError('DEEPSEEK_API_KEY
+    # not set') retry loop: the .env re-source (F-s4-4 force branch) restores the
+    # key, and the gateway-profile pop must NOT remove it again — the pop only
+    # runs for processes carrying MEIVA_PROCESS_PROFILE=gateway, and the labeler's
+    # spec no longer sets it.
+    # meiva:note
     # The labeler's session env carries no provider key and no profile marker.
     monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
     had_key = "DEEPSEEK_API_KEY" in os.environ
@@ -553,6 +593,7 @@ def test_labeler_boot_without_profile_marker_reads_provider_key_from_env(
 
         assert os.environ["DEEPSEEK_API_KEY"] == "sk-labeler-test"
 
+        # meiva:note
         # A fresh (profile-less) Settings reads the key — the exact read the
         # labeler daemon performs via build_chat_model -> plugin require_key.
         from base.config import Settings
@@ -561,6 +602,7 @@ def test_labeler_boot_without_profile_marker_reads_provider_key_from_env(
         assert fresh.lm.deepseek_api_key is not None
         assert fresh.lm.deepseek_api_key.get_secret_value() == "sk-labeler-test"
     finally:
+        # meiva:note
         # The authority pass force-assigned the key from the temp .env; the
         # autouse restore_authority_env fixture only restores keys that existed
         # before the test, so restore the prior state by hand (a leaked key here
@@ -574,10 +616,11 @@ def test_labeler_boot_without_profile_marker_reads_provider_key_from_env(
 def test_gateway_marker_still_drops_provider_keys_for_other_daemons(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The mirror image: a daemon that DOES carry MEIVA_PROCESS_PROFILE=gateway
-    (heartbeat, events-maintenance, im-bridge, ...) still loses the provider
-    keys at boot — the labeler's opt-out must not spread the keys into every
-    gateway-profile daemon (anti-spread, task #1230)."""
+    # meiva:note
+    # The mirror image: a daemon that DOES carry MEIVA_PROCESS_PROFILE=gateway
+    # (heartbeat, events-maintenance, im-bridge, ...) still loses the provider
+    # keys at boot — the labeler's opt-out must not spread the keys into every
+    # gateway-profile daemon (anti-spread, task #1230).
     monkeypatch.setitem(os.environ, "MEIVA_PROCESS_PROFILE", "gateway")
     monkeypatch.delitem(os.environ, "DEEPSEEK_API_KEY", raising=False)
     env_file = tmp_path / ".env"
@@ -592,13 +635,14 @@ def test_gateway_marker_still_drops_provider_keys_for_other_daemons(
 def test_agent_profile_keeps_an_unmodeled_provider_key_from_dotenv(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The authority pass leaves a plugin key in the agent parent's live env.
-
-    Provider bindings deliberately do not add Settings fields, so the agent
-    process (and its exec children, which run the same boot) read their declared
-    key from the unit's `.env`.
-    """
+    # meiva:note
+    # The authority pass leaves a plugin key in the agent parent's live env.
+    #
+    # Provider bindings deliberately do not add Settings fields, so the agent
+    # process (and its exec children, which run the same boot) read their declared
+    # key from the unit's `.env`.
     monkeypatch.setitem(os.environ, "MEIVA_PROCESS_PROFILE", "agent")
+    # meiva:note
     # Register the original absence before load_meiva_env adds this key directly.
     monkeypatch.setitem(os.environ, "TESTP_API_KEY", "before-load")
     monkeypatch.delitem(os.environ, "TESTP_API_KEY", raising=False)
@@ -614,9 +658,10 @@ def test_agent_profile_keeps_an_unmodeled_provider_key_from_dotenv(
 def test_agent_profile_keeps_launcher_runner_url_and_drops_admin_passwords(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The gateway's .env holds the database endpoint and Redis admin passwords,
-    but an agent must retain the launcher's runner projection and scrub every
-    unprojected data-plane password."""
+    # meiva:note
+    # The gateway's .env holds the database endpoint and Redis admin passwords,
+    # but an agent must retain the launcher's runner projection and scrub every
+    # unprojected data-plane password.
     monkeypatch.setitem(os.environ, "MEIVA_PROCESS_PROFILE", "agent")
     monkeypatch.setitem(os.environ, "MEIVA_REDIS_ADMIN_PASSWORD", "redis-admin-only")
     monkeypatch.setitem(os.environ, "MEIVA_REDIS_PASSWORD", "redis-runtime-only")
@@ -648,8 +693,9 @@ _NO_DB_URL_IDENTITY_LINES = tuple(
 
 
 def point_env_at_without_db_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """An env file that declares every identity key EXCEPT MEIVA_DB_URL — the
-    pure agent-runner shape (#4334)."""
+    # meiva:note
+    # An env file that declares every identity key EXCEPT MEIVA_DB_URL — the
+    # pure agent-runner shape (#4334).
     env_file = tmp_path / "no-db.env"
     env_file.write_text(
         "MEIVA_AGENT_HOST_HEALTH_PORT=18035\n" + "\n".join(_NO_DB_URL_IDENTITY_LINES) + "\n"
@@ -660,11 +706,12 @@ def point_env_at_without_db_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 def test_agent_profile_keeps_undeclared_launcher_runner_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """#4036/#4334: on a unit whose `.env` does NOT declare MEIVA_DB_URL (a pure
-    agent-runner), the launcher-injected runner projection must survive the
-    drop — it is the agent child's only DB source in settings-lite / CLI
-    paths, and popping it left the placeholder URL (probe population
-    check misread as an environment failure)."""
+    # meiva:note
+    # #4036/#4334: on a unit whose `.env` does NOT declare MEIVA_DB_URL (a pure
+    # agent-runner), the launcher-injected runner projection must survive the
+    # drop — it is the agent child's only DB source in settings-lite / CLI
+    # paths, and popping it left the placeholder URL (probe population
+    # check misread as an environment failure).
     monkeypatch.setitem(os.environ, "MEIVA_PROCESS_PROFILE", "agent")
     point_env_at_without_db_url(monkeypatch, tmp_path)
     monkeypatch.setitem(
@@ -672,6 +719,7 @@ def test_agent_profile_keeps_undeclared_launcher_runner_url(
         "MEIVA_DB_URL",
         "postgresql://meiva_runner:runner-password@127.0.0.1:5433/meiva",
     )
+    # meiva:note
     # Companion (review nit): the exemption must not spill — inherited keys the
     # `.env` does not declare still drop in the SAME pass.
     monkeypatch.setitem(os.environ, "MEIVA_APP_PORT", "3001")
@@ -690,8 +738,9 @@ def test_agent_profile_keeps_undeclared_launcher_runner_url(
 def test_agent_profile_drops_undeclared_owner_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The keep is runner-shaped: an inherited OWNER url on an undeclared unit
-    is still dropped in an agent profile (sibling-leak protection unchanged)."""
+    # meiva:note
+    # The keep is runner-shaped: an inherited OWNER url on an undeclared unit
+    # is still dropped in an agent profile (sibling-leak protection unchanged).
     monkeypatch.setitem(os.environ, "MEIVA_PROCESS_PROFILE", "agent")
     point_env_at_without_db_url(monkeypatch, tmp_path)
     monkeypatch.setitem(
@@ -706,9 +755,10 @@ def test_agent_profile_drops_undeclared_owner_url(
 def test_plain_process_drops_undeclared_runner_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The keep is agent-profile-only: without a launcher context (live or
-    recorded) an inherited runner url is dropped like any other undeclared
-    cluster value."""
+    # meiva:note
+    # The keep is agent-profile-only: without a launcher context (live or
+    # recorded) an inherited runner url is dropped like any other undeclared
+    # cluster value.
     monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
     monkeypatch.delitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, raising=False)
     point_env_at_without_db_url(monkeypatch, tmp_path)
@@ -726,10 +776,11 @@ def test_plain_process_drops_undeclared_runner_url(
 def test_agent_profile_drops_malformed_undeclared_db_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Review nit (#3111): a malformed inherited MEIVA_DB_URL — `urlsplit` itself
-    rejects it (invalid IPv6) — is not a projection; the drop loop absorbs it
-    like any other unrecognized value. Before the hardening it raised out of
-    `load_meiva_env` (`ValueError: Invalid IPv6 URL`; e2e repro on the PR)."""
+    # meiva:note
+    # Review nit (#3111): a malformed inherited MEIVA_DB_URL — `urlsplit` itself
+    # rejects it (invalid IPv6) — is not a projection; the drop loop absorbs it
+    # like any other unrecognized value. Before the hardening it raised out of
+    # `load_meiva_env` (`ValueError: Invalid IPv6 URL`; e2e repro on the PR).
     monkeypatch.setitem(os.environ, "MEIVA_PROCESS_PROFILE", "agent")
     point_env_at_without_db_url(monkeypatch, tmp_path)
     monkeypatch.setitem(os.environ, "MEIVA_DB_URL", "postgresql://[::1")
@@ -739,5 +790,6 @@ def test_agent_profile_drops_malformed_undeclared_db_url(
     assert "MEIVA_DB_URL" not in os.environ
 
 
+# meiva:note
 # The "CLI launcher context (#4334)" section moved to
 # test_dotenv_boot_launcher_context.py (structure-lint split).

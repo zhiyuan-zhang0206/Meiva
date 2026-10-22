@@ -5,7 +5,7 @@ import pytest
 from loguru import logger
 
 from agent.execution import child
-from agent.graph.exec.protocol import ResultPayload
+from agent.execution.protocol import ResultPayload
 from base.agents.sdk import call_policy
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkNamespace
 from meiva.sdk_surface import install

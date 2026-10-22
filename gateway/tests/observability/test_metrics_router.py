@@ -8,7 +8,7 @@ import pytest
 
 from base.telemetry.metrics.tests.telemetry_stream import TelemetryStream
 from gateway.events import metrics as metrics_router
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 _UNITS = {
     "syntax_fix",

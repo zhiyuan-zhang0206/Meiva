@@ -31,7 +31,7 @@ from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import Clock
 from base.config import settings
 from base.db import create_agent
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps

@@ -112,7 +112,7 @@ def run_program(tmp_path: Path, gateway: Gateway, *args: str) -> subprocess.Comp
     }
     return subprocess.run(
         [sys.executable, "-m", "cli.commands.management.fleet_gateway", *args],
-        cwd=Path(fleet_update.__file__).resolve().parents[1],
+        cwd=fleet_update.REPO,
         env=env,
         capture_output=True,
         text=True,

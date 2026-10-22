@@ -32,7 +32,7 @@ class RecordingGateway:
         return
 
 
-pytestmark = pytest.mark.usefixtures("_installed_machine_identity")
+pytestmark = pytest.mark.usefixtures("installed_machine_identity")
 
 # A skill carrying every optional field the standard defines — the compatibility
 # claim in one fixture. Meiva honors name + description and preserves the rest on

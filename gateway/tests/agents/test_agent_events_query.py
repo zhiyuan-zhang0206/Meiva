@@ -15,7 +15,7 @@ import psycopg
 import pytest
 
 from gateway.events import telemetry_rows
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def _row(

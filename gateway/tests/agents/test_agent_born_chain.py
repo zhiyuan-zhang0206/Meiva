@@ -5,7 +5,7 @@ from typing import Any
 import psycopg
 from fastapi.testclient import TestClient
 
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def _seed_agent(

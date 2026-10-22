@@ -17,7 +17,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
-from agent.graph.exec.protocol import RequestPayload
+from agent.execution.protocol import RequestPayload
 from base.log import logger
 
 WATCHDOG_MARGIN_S = 5.0
@@ -263,7 +263,7 @@ def apply_oom_preference(
 
 
 def run_code(code: str, payload: Any) -> None:
-    from agent.graph.agent_traceback import (
+    from agent.execution.agent_traceback import (
         format_agent_traceback,
         format_full_traceback,
         register_agent_source,
@@ -392,7 +392,7 @@ def _run(
     request_path: str, result_path: str, boot_started_at: float, *, config: Any, context: Any
 ) -> None:
     child = import_runtime(boot_started_at)
-    from agent.graph.exec.protocol import ResultPayload, read_request, write_result
+    from agent.execution.protocol import ResultPayload, read_request, write_result
 
     line_buffered_output()
     _install_signal_handlers()
@@ -532,8 +532,8 @@ def write_crashed_result(
         "sdk_calls": None,
     }
     try:
-        from agent.graph.exec.protocol import ResultPayload as RuntimeResultPayload
-        from agent.graph.exec.protocol import write_result as runtime_write_result
+        from agent.execution.protocol import ResultPayload as RuntimeResultPayload
+        from agent.execution.protocol import write_result as runtime_write_result
 
         runtime_write_result(
             Path(result_path),

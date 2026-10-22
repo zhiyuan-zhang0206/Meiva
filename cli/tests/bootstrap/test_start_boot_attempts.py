@@ -18,7 +18,7 @@ def _boot_time(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _boot(home: Path, code: int) -> int:
-    return start_intent._run_boot_attempt(home, lambda: code)
+    return start_intent.run_boot_attempt(home, lambda: code)
 
 
 def test_the_parser_marks_a_boot_start_only_when_asked() -> None:
@@ -82,7 +82,7 @@ def test_a_start_after_the_budget_still_runs_and_success_clears_the_count(
         ran.append(1)
         return 0
 
-    assert start_intent._run_boot_attempt(tmp_path, recovered) == 0
+    assert start_intent.run_boot_attempt(tmp_path, recovered) == 0
     assert ran == [1]
     assert boot_policy.begin_attempt(tmp_path) == 1
 
@@ -101,8 +101,8 @@ def test_run_start_hands_the_boot_flag_to_the_start_and_wraps_it(
         return start()
 
     monkeypatch.setattr(start_intent, "start_once", once)
-    monkeypatch.setattr(start_intent, "_run_boot_attempt", wrapped)
-    monkeypatch.setattr(start_intent, "_home", lambda: tmp_path)
+    monkeypatch.setattr(start_intent, "run_boot_attempt", wrapped)
+    monkeypatch.setattr(start_intent, "resolve_home", lambda: tmp_path)
 
     def run(args: Any) -> int:
         return start_intent.run_start(

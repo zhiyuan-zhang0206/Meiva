@@ -14,9 +14,9 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from gateway.tests.test_agents_endpoints import inbound_rows, returned_id, terminate_hosted
 from gateway.tests.test_agents_endpoints import withdrawn_model as withdrawn_model
-from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 class TestSystemNote:

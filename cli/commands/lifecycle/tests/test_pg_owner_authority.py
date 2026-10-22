@@ -51,10 +51,10 @@ from cli.commands.data_plane.tests.data_plane_records import data_plane_config a
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.derived.memory_indexer.backends.pgvector import prepare_table
 from services.derived.memory_indexer.embeddings.factory import get_descriptor
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _OWNER_PASSWORD = "owner-login-fixture"  # noqa: S105 — test fixture, not a real credential
 _GROUPS = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)

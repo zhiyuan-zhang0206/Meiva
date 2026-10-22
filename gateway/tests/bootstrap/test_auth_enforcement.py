@@ -14,6 +14,11 @@ from base.host.net.auth import bearer_header, cookie_name
 from gateway.app import create_app
 from gateway.http.config import GatewayConfig
 from gateway.http.middleware.error_handlers import cors_headers
+from gateway.tests.auth.gateway_config import (
+    gateway_test_app,
+    gateway_test_client,
+    gateway_test_process,
+)
 from gateway.tests.bootstrap.test_auth import (
     SECRET,
     auth,
@@ -23,11 +28,6 @@ from gateway.tests.bootstrap.test_auth import (
     session_cookie,
 )
 from gateway.tests.bootstrap.test_auth import patch_secret as patch_secret
-from tests.fixtures.gateway_config import (
-    gateway_test_app,
-    gateway_test_client,
-    gateway_test_process,
-)
 
 # ── Unauthenticated requests get 401 ──────────────────────────────────
 

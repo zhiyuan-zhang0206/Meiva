@@ -23,7 +23,7 @@ from base.db import Database
 from base.packages.plugins.surface import stats
 from base.telemetry.observability import cluster_label
 from gateway.schemas.stats import StatsWindowHours, window_delta
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 class _EventRows:

@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .support import SmokeError, _run, _save, fail, pid_alive, wait_for
+from .support import SmokeError, fail, pid_alive, run, save, wait_for
 
 _F12_ROUND_WAIT_S = 10.0
 
@@ -23,7 +23,7 @@ _LOG_STAMP_RE = re.compile(r"^(?P<stamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{
 
 
 def _f12_chain_line(pid: int) -> str:
-    proc = _run(["ps", "-o", "pid=,ppid=,pgid=,lstart=,command=", "-p", str(pid)], check=False)
+    proc = run(["ps", "-o", "pid=,ppid=,pgid=,lstart=,command=", "-p", str(pid)], check=False)
     return proc.stdout.strip() or f"{pid} <gone>"
 
 
@@ -213,7 +213,7 @@ def f12_finish(
     violations = f12_expect_attribution(samples, expectations)
     if violations:
         samples["violations"] = violations
-    _save(evidence, f"{label}-sampling.json", json.dumps(samples, indent=2))
+    save(evidence, f"{label}-sampling.json", json.dumps(samples, indent=2))
     if violations:
         fail(label, f"attribution violations: {'; '.join(violations)}")
 
@@ -229,7 +229,7 @@ def _f12_join_tccd(
     """
     first = min(point["smoke_ts"] for point in samples["points"].values())
     span = max(2, int((time.time() - first) / 60) + 2)
-    log_text = _run(
+    log_text = run(
         [
             "/usr/bin/log",
             "show",
@@ -242,6 +242,6 @@ def _f12_join_tccd(
         ],
         timeout=120.0,
     ).stdout
-    _save(evidence, name, log_text)
+    save(evidence, name, log_text)
     samples["tccd"] = f12_join(samples, f12_parse_window(log_text))
     samples["summary"] = f12_attribution_summary(samples)

@@ -6,7 +6,7 @@ from typing import Any
 
 import psycopg
 
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 _NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 

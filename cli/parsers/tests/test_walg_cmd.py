@@ -16,6 +16,7 @@ import pytest
 
 from base.config import ConfigBoot, settings
 from cli.commands.data_plane import walg as walg_cmd
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
 from services.backup.walg import config as walg_config
@@ -28,7 +29,6 @@ from services.backup.walg.tests.support import (
     archiving_postgres,
     make_sandbox,
 )
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 @pytest.fixture(autouse=True)

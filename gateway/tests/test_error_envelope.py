@@ -38,7 +38,7 @@ from gateway.http.middleware.error_handlers import (
 )
 from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.schemas.errors import ErrorEnvelope
-from tests.fixtures.gateway_config import GatewayTestClient
+from gateway.tests.auth.gateway_config import GatewayTestClient
 
 _middleware_app = FastAPI()
 

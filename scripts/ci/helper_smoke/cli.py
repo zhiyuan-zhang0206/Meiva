@@ -22,8 +22,6 @@ from .support import (
     UNIT_IDS,
     UNIT_PROBE,
     SmokeError,
-    _run,
-    _save,
     bootout,
     fail,
     job_pid,
@@ -36,6 +34,8 @@ from .support import (
     refusal,
     relaunched_helper,
     root_call,
+    run,
+    save,
     status_if_conflict,
     status_if_keeper_running,
     status_if_running,
@@ -125,7 +125,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             REPO_ROOT / "services" / "desktop" / "permissions_helper" / "helper" / "Info.plist",
             app / "Contents" / "Info.plist",
         )
-        _run(
+        run(
             [
                 "swiftc",
                 "-O",
@@ -143,15 +143,15 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             timeout=300.0,
         )
         exe.chmod(0o755)
-        _run(
+        run(
             ["codesign", "--force", "--sign", "-", "--identifier", BUNDLE_ID, str(app)],
             timeout=120.0,
         )
-        _save(
+        save(
             evidence,
             "build.txt",
-            _run(["swiftc", "--version"]).stdout
-            + _run(["codesign", "-dvv", str(app)], check=False).stderr,
+            run(["swiftc", "--version"]).stdout
+            + run(["codesign", "-dvv", str(app)], check=False).stderr,
         )
         phase_pass("build", f"ad-hoc signed helper at {app}")
 
@@ -238,7 +238,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         # ---- launch --------------------------------------------------------
         bootout(label)
         helper_sock.unlink(missing_ok=True)
-        _run(["launchctl", "bootstrap", launchctl_domain(), str(plist_path)], timeout=60.0)
+        run(["launchctl", "bootstrap", launchctl_domain(), str(plist_path)], timeout=60.0)
         wait_for("helper socket", helper_sock.exists, _HELPER_WAIT_S, "launch")
         ping = wait_for(
             "helper ping",
@@ -248,10 +248,10 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         )
         helper_pid = wait_for("helper job pid", lambda: job_pid(label), _HELPER_WAIT_S, "launch")
         recorded_pids.add(helper_pid)
-        _save(
+        save(
             evidence,
             "launchctl-print.txt",
-            _run(["launchctl", "print", f"{launchctl_domain()}/{label}"], check=False).stdout,
+            run(["launchctl", "print", f"{launchctl_domain()}/{label}"], check=False).stdout,
         )
         phase_pass("launch", f"helper pid {helper_pid}, ping={ping}")
 
@@ -278,15 +278,15 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             unit_ppid = ppid_of(unit_pid)
             if unit_ppid != root_pid:
                 fail("chain", f"unit {unit_id} ppid {unit_ppid} != root pid {root_pid}")
-        _save(
+        save(
             evidence,
             "ps-chain.txt",
             ps_line(helper_pid, root_pid, *initial_units.values())
             + f"\nhelper ppid={helper_ppid} root ppid={root_ppid}"
             + "".join(f" {unit_id} ppid={ppid_of(pid)}" for unit_id, pid in initial_units.items()),
         )
-        _save(evidence, "root-status-initial.json", json.dumps(status, indent=2))
-        _save(evidence, "keeper-status-initial.json", json.dumps(helper_root_status(), indent=2))
+        save(evidence, "root-status-initial.json", json.dumps(status, indent=2))
+        save(evidence, "keeper-status-initial.json", json.dumps(helper_root_status(), indent=2))
         phase_pass(
             "chain",
             f"launchd -> helper {helper_pid} -> root {root_pid} -> units {list(initial_units.values())}",
@@ -337,11 +337,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                     fail(
                         "attribute", f"unit {unit_id} ppid {results['ppid']} != root pid {root_pid}"
                     )
-                _save(evidence, f"unit-results-{unit_id}.json", json.dumps(results, indent=2))
-                _save(
-                    evidence, f"unit-log-{unit_id}.txt", tail(run_dir / "logs" / f"{unit_id}.log")
-                )
-            log_text = _run(
+                save(evidence, f"unit-results-{unit_id}.json", json.dumps(results, indent=2))
+                save(evidence, f"unit-log-{unit_id}.txt", tail(run_dir / "logs" / f"{unit_id}.log"))
+            log_text = run(
                 [
                     "/usr/bin/log",
                     "show",
@@ -354,7 +352,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 ],
                 timeout=120.0,
             ).stdout
-            _save(evidence, "tccd-attribution-window.txt", log_text)
+            save(evidence, "tccd-attribution-window.txt", log_text)
             attributed = attribution_rows(log_text)
             prompting = [
                 line
@@ -400,7 +398,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         )
         if int(conflict["conflict"]["pid"]) != root_pid:
             fail("conflict", f"conflict pid {conflict['conflict']['pid']} != orphan {root_pid}")
-        _save(evidence, "keeper-status-conflict.json", json.dumps(conflict, indent=2))
+        save(evidence, "keeper-status-conflict.json", json.dumps(conflict, indent=2))
         if args.sample_conflict:
             conflict_f12["points"]["h2"] = f12_point(
                 workdir, "h2", ab_units, [new_helper_pid, *ab_chain]
@@ -414,7 +412,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         )
         if "native recovery is required" not in refusals[0] or "force" not in refusals[1]:
             fail("conflict", f"root_stop over the orphan root was not refused: {refusals}")
-        _save(evidence, "conflict-refusals.txt", "\n".join(refusals))
+        save(evidence, "conflict-refusals.txt", "\n".join(refusals))
 
         # Native recovery: the orphan closes its own tree through its control
         # socket; once the run dir is free the keeper seeds a fresh root itself.
@@ -451,8 +449,8 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         recorded_pids.update(reseeded_units.values())
         if ppid_of(reseeded_pid) != new_helper_pid:
             fail("conflict", "reseeded root is not the relaunched helper's child")
-        _save(evidence, "keeper-status-reseeded.json", json.dumps(reseeded, indent=2))
-        _save(
+        save(evidence, "keeper-status-reseeded.json", json.dumps(reseeded, indent=2))
+        save(
             evidence,
             "conflict-reseed.txt",
             ps_line(new_helper_pid, reseeded_pid, *reseeded_units.values())
@@ -494,7 +492,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     # `--check` that inherited the socket variable took macmini's desktop surface).
     def check_second_instance(exe: Path) -> None:
         before = helper_sock.stat()
-        second = _run(
+        second = run(
             [str(exe)],
             check=False,
             timeout=30.0,
@@ -507,7 +505,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             },
         )
         after = helper_sock.stat()
-        _save(evidence, "second-instance.txt", second.stdout + second.stderr)
+        save(evidence, "second-instance.txt", second.stdout + second.stderr)
         if second.returncode != 0:
             fail(
                 "second-instance",

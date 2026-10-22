@@ -11,6 +11,7 @@ import pytest
 
 from base import config
 from base.host.net.auth import bearer_header
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.mcp_calls import enable_endpoint as enable_endpoint
 from gateway.tests.mcp_calls import (
     initialize,
@@ -19,7 +20,6 @@ from gateway.tests.mcp_calls import (
     tool_call,
     tool_result,
 )
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 _TOOLS_LIST = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}

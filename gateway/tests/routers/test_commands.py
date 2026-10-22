@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from base.packages.composer_commands import Command, CommandCatalog
+from gateway.tests.auth.gateway_config import gateway_test_client
 from ops.cluster import rpc as cluster_rpc
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _one_command(

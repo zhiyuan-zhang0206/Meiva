@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from base.config import settings
 from base.db import create_agent
 from gateway.routers import page_acceptance, pages
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 
 SECRET = "page-receipt-test-secret"  # noqa: S105 -- isolated credential fixture
 HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}

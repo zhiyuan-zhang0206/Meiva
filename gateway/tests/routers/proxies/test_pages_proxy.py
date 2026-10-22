@@ -38,7 +38,7 @@ from base.packages.docs.pages_copy import (
 )
 from gateway.routers import pages as pages_router
 from gateway.tests.agents.gateway_auth import without_credentials
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 

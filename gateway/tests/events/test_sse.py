@@ -34,7 +34,7 @@ from base.events.live.projection import (
     LabelUpdated,
 )
 from gateway.events.sse import decode_frames_for_test, event_stream
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 @dataclass

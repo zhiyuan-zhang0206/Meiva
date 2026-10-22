@@ -7,8 +7,8 @@ from base.config import runtime_config, settings
 from base.config.domains.display import DisplaySettings
 from base.config.domains.tests.test_display_config import DISPLAY_RANGES
 from base.host.env import dotenv_file
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.test_notices_endpoint import seed_agent
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.mark.parametrize(("name", "minimum", "maximum"), DISPLAY_RANGES)

@@ -23,6 +23,7 @@ from base.db import Database
 from base.host.db_authority.unit import UnitIdentity
 from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     SECRET,
     post,
@@ -37,7 +38,6 @@ from ops import upload_delivery as receiver
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 # meiva:note
 # The recovery worker's claim lease for a constructed worker: these tests drive one

@@ -18,7 +18,7 @@ import pytest
 
 from base.db import create_agent
 from base.host.env.agent_slices import ModelOverrides
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 
 
 @pytest.fixture

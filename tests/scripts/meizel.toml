@@ -1,5 +1,3 @@
-exports = ["test_alert_rules.py"]
-
 [uses]
 "test_alert_rules.py" = ["test_alert_rules_signals.py"]
 

@@ -24,7 +24,7 @@ exports = ["capture"]
 "test_tracing_lifecycle.py#monkeypatch.setenv os.environ.TRACELOOP_TRACE_CONTENT" = 1
 
 [debt.first-party-patch]
-"_lower_exit_child.py#assignment base.telemetry.tracing._arm_tracing" = 1
+"_lower_exit_child.py#assignment base.telemetry.tracing.arm_tracing" = 1
 "test_audit_events_record.py#monkeypatch.setattr base.telemetry.emit_prepared" = 3
 "test_audit_events_record.py#monkeypatch.setattr base.telemetry.event_id" = 1
 "test_emitter_lifecycle.py#monkeypatch.setattr base.telemetry.delivery.reporting.report_no_pipeline" = 1
@@ -54,8 +54,8 @@ exports = ["capture"]
 "test_tracing.py#monkeypatch.setattr base.telemetry.tracing.endpoint_reachable" = 2
 "test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.otlp.trace_workers.report_no_pipeline" = 2
 "test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing.INIT_RESOLVED_TIMEOUT_S" = 1
-"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing._arm_tracing" = 2
-"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing._state" = 1
+"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing.arm_tracing" = 2
+"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing.state" = 1
 
 [debt.restricted-python]
 "test_telemetry_otlp_exit_delivery.py#python -c" = 1

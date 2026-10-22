@@ -24,8 +24,8 @@ from gateway.cluster import snapshots
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.snapshots import Snapshot
+from gateway.tests.auth.gateway_config import gateway_test_client
 from ops.cluster import rpc as cluster_rpc
-from tests.fixtures.gateway_config import gateway_test_client
 
 _ROW = tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]
 _NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)

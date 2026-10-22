@@ -328,3 +328,12 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "tests the session OS-job leak guard, tests/_os_jobs.py",
     ),
 }
+
+
+# meiva:note
+# Return the reason a top-level path stays in tests/ by design, or None.
+def stays_by_design(rel: str) -> str | None:
+    for path, reason in BY_DESIGN.items():
+        if rel == path or (path.endswith("/") and rel.startswith(path)):
+            return reason
+    return None

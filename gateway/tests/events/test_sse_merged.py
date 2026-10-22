@@ -29,10 +29,10 @@ from gateway.events.merged import (
     parse_agents,
     parse_channels,
 )
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.test_sse import FakeRequest
 from gateway.tests.events.test_sse import redis_client as redis_client
 from ops.alerts import AlertRow
-from tests.fixtures.gateway_config import gateway_test_client
 
 Channels = dict[str, list[dict[str, Any]]]
 

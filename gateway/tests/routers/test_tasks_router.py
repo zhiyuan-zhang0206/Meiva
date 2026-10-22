@@ -31,8 +31,8 @@ from starlette.requests import Request
 from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.idempotency import keyed_headers
 from gateway.routers.tasks import get_tasks
+from gateway.tests.auth.gateway_config import gateway_test_client
 from ops import lifecycle as ops_lifecycle
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def make_agent(db: psycopg.Connection) -> int:

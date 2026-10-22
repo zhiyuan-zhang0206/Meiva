@@ -18,11 +18,11 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
 )
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_fakes import FakeResult, git_aware
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.supervision.roster.service_spec import ServiceSpec
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_cmd_start_needs_no_tty(

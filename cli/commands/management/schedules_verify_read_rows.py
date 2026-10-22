@@ -6,10 +6,14 @@ from typing import Any
 
 from cli.commands.management import schedules_verify as verify
 
+_LEGACY_READ = "_read_schedule_rows"
+
 
 def read_rows(out: str) -> None:
     rows: list[tuple[int, str, str]]
-    read_schedule_rows: Any = verify._read_schedule_rows
+    read_schedule_rows: Any = getattr(verify, "read_schedule_rows", None) or getattr(
+        verify, _LEGACY_READ
+    )
     if "database_factory" in inspect.signature(read_schedule_rows).parameters:
         from cli.database import operator_database_factory
         from cli.database.runtime import CommandRuntime

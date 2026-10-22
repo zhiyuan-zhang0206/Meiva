@@ -8,7 +8,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths import meiva_home
 from gateway.cluster.process_boot import LOADED_IMAGE
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def _health() -> dict[str, object]:

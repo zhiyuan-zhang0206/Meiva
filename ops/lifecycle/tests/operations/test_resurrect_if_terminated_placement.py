@@ -342,9 +342,9 @@ class TestResurrectIfTerminatedNotificationGuard:
     async def test_missing_trigger_row_falls_through(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        database: Database,
         event_bus: EventBus,
         *,
-        database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
         """No row -> None -> the normal path runs; stale-work adjudication stays
@@ -378,7 +378,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
 
         status = await lifecycle.resurrect_if_terminated(
-            _db(database_gate=database_gate),
+            database,
             event_bus,
             5,
             trigger_inbound_id=10**12,

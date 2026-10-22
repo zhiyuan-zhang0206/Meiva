@@ -3,8 +3,10 @@ from typing import Any
 
 import pytest
 
-from tests.components.gateway.test_cluster_endpoints import fake_admin_events as fake_admin_events
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.routers.cluster_endpoints.cluster_support import (
+    fake_admin_events as fake_admin_events,
+)
 
 
 def _row(

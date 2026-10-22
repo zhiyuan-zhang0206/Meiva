@@ -13,9 +13,9 @@ from cli.commands.lifecycle.tests.converge_host.context_inputs import (
     capable_helper_context,
     screen_capture_environment,
 )
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 _BRING_UP = "permissions helper build + sign + load"
 

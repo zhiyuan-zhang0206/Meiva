@@ -30,7 +30,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database
 from base.paths import meiva_home
 from base.telemetry.delivery.receipts import DrainStatus
-from base.telemetry.process_logging import _event_sink, add_event_sink
+from base.telemetry.process_logging import add_event_sink, event_sink
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ def sink_logger(database: Database, machine_identity: MachineIdentity):
     add_event_sink(producer=producer, machine_reader=machine_identity.name)
     _global_logger.remove()
     sink_id = _global_logger.add(
-        partial(_event_sink, producer=producer), level="INFO", enqueue=False, catch=False
+        partial(event_sink, producer=producer), level="INFO", enqueue=False, catch=False
     )
     _global_logger.configure(extra={"agent_id": "-"})
     try:

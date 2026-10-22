@@ -1,3 +1,5 @@
+exports = ["synthetic.py"]
+
 [uses]
 "codes" = ["synthetic.py"]
 "conftest.py" = ["synthetic.py"]
@@ -13,3 +15,6 @@
 "test_restricted.py" = ["synthetic.py"]
 "test_roles.py" = ["synthetic.py"]
 "test_rule.py" = ["synthetic.py"]
+
+[debt.first-party-patch]
+"synthetic.py#monkeypatch.setattr meizel.owners.decisions.DECISIONS" = 1

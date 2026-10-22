@@ -30,9 +30,9 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli.commands.management import schedules as _sched
 from cli.commands.management import schedules_verify as _verify
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 _CLUSTER_AUTH = "verify-test-value"
 _ACCESS = GatewayAccess(gateway_url="http://gw", cluster_secret=_CLUSTER_AUTH, remote_plane=False)
@@ -508,7 +508,7 @@ def test_verify_rows_file_sweeps_the_dump_without_the_db_or_a_report(
     def no_report(**_kwargs: object) -> None:
         raise AssertionError("a rows-file sweep must not report")
 
-    monkeypatch.setattr(_verify, "_report_verify", no_report)
+    monkeypatch.setattr(_verify, "report_verify", no_report)
     rows = tmp_path / "rows.json"
     rows.write_text(json.dumps([[3, "ok", "import os\n"], [4, "stale", "import zz_meiva_gone\n"]]))
     assert (
@@ -626,7 +626,7 @@ def _verify_failed(events: EmittedEvents) -> dict[str, object]:
 def test_report_verify_emits_one_event_naming_the_reds(emitted_events: EmittedEvents) -> None:
     """A red run emits one `schedule_verify_failed` event; the counts are the
     event's metric fields and the detail names each failing script."""
-    _verify._report_verify(
+    _verify.report_verify(
         checked=2,
         reds=[(7, "drifted", "shared.watcher")],
         tool_error=None,
@@ -639,7 +639,7 @@ def test_report_verify_emits_one_event_naming_the_reds(emitted_events: EmittedEv
 
 
 def test_report_verify_tool_error_names_the_error(emitted_events: EmittedEvents) -> None:
-    _verify._report_verify(
+    _verify.report_verify(
         checked=0, reds=[], tool_error="RuntimeError: db down", producer=emitted_events.producer
     )
     event = _verify_failed(emitted_events)
@@ -664,7 +664,7 @@ def test_verify_reads_every_schedule_through_the_gateway() -> None:
         assert kwargs["headers"] == machine.gateway_auth_headers(_ACCESS)
         return httpx.Response(200, json=bodies[url], request=httpx.Request("GET", url))
 
-    rows = _verify._read_schedule_rows(_ACCESS, get)
+    rows = _verify.read_schedule_rows(_ACCESS, get)
 
     assert rows == [(2, "a", "print(1)\n"), (9, "b", "")]
     assert seen == [
@@ -677,7 +677,7 @@ def test_verify_reads_every_schedule_through_the_gateway() -> None:
         return httpx.Response(401, json={}, request=httpx.Request("GET", url))
 
     with pytest.raises(httpx.HTTPStatusError):
-        _verify._read_schedule_rows(_ACCESS, refuse)
+        _verify.read_schedule_rows(_ACCESS, refuse)
 
 
 # ── parser wiring ──

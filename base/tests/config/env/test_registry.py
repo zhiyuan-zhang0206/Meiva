@@ -1,14 +1,14 @@
-"""Derivation-rule tests for the env registry (R2 convergence point A).
-
-The old seam tests (test_profile_env_keys.py) held hand-written snapshots
-against the field registry. The snapshots are gone — the registry's projections
-(`base/host/env/registry.py`) are pure functions of the Settings class metadata.
-These tests pin the DERIVATION RULES instead: each projection is re-computed
-here independently from the raw metadata (`FIELD_REFS` + scope/capability/alias),
-so a future change to a rule (e.g. reverting to capability-derived sets — the
-#1570 P0 shape) is a deliberate, test-breaking change. Structural invariants
-(A1/A3) are pinned alongside.
-"""
+# meiva:note
+# Derivation-rule tests for the env registry (R2 convergence point A).
+#
+# The old seam tests (test_profile_env_keys.py) held hand-written snapshots
+# against the field registry. The snapshots are gone — the registry's projections
+# (`base/host/env/registry.py`) are pure functions of the Settings class metadata.
+# These tests pin the DERIVATION RULES instead: each projection is re-computed
+# here independently from the raw metadata (`FIELD_REFS` + scope/capability/alias),
+# so a future change to a rule (e.g. reverting to capability-derived sets — the
+# #1570 P0 shape) is a deliberate, test-breaking change. Structural invariants
+# (A1/A3) are pinned alongside.
 
 from __future__ import annotations
 
@@ -16,17 +16,22 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, Literal
 
 import pytest
 
+# meiva:note
 # Ensure settings-lite so we can import config without a real .env
 os.environ["MEIVA_CONFIG_FETCH"] = (
-    "skip"  # assignment, not setdefault: a setdefault would silently keep an inherited value (the login-shell .env leak class) instead of pinning settings-lite
+    # meiva:note
+    # assignment, not setdefault: a setdefault would silently keep an inherited value (the login-shell .env leak class) instead of pinning settings-lite
+    "skip"
 )
 
 
 def _fields() -> dict:
-    """The raw flat field registry (name -> _FieldRef with scope/capability)."""
+    # meiva:note
+    # The raw flat field registry (name -> _FieldRef with scope/capability).
     from base.config import FIELD_REFS, field_alias, schema_extra
 
     return {
@@ -42,7 +47,8 @@ def _fields() -> dict:
 def _aliases_with(
     *, scope: tuple[str, ...] | None = None, capability: str | None = None
 ) -> frozenset[str]:
-    """Independent recomputation of a scope/capability slice of the registry."""
+    # meiva:note
+    # Independent recomputation of a scope/capability slice of the registry.
     out = set()
     for _name, meta in _fields().items():
         if scope is not None and meta["scope"] not in scope:
@@ -54,24 +60,29 @@ def _aliases_with(
 
 
 class TestScopeDerivationRules:
-    """The scope-derived projections must equal an independent registry scan —
-    a new field with the right scope metadata lands in every correct projection
-    (A3); a rule change (e.g. deriving from capability — the #1570 P0 shape) is
-    a deliberate, test-breaking change."""
+    # meiva:note
+    # The scope-derived projections must equal an independent registry scan —
+    # a new field with the right scope metadata lands in every correct projection
+    # (A3); a rule change (e.g. deriving from capability — the #1570 P0 shape) is
+    # a deliberate, test-breaking change.
 
     def test_cluster_scope_is_cluster_pinned_plus_cluster_default(self) -> None:
         from base.host.env.registry import cluster_scope_aliases
 
         expected = _aliases_with(scope=("cluster-pinned", "cluster-default"))
         assert cluster_scope_aliases() == expected
-        assert len(expected) > 150  # the six-gap class lives in this set
+        # meiva:note
+        # the six-gap class lives in this set
+        assert len(expected) > 150
 
     def test_session_forward_is_host_scope(self) -> None:
         from base.host.env.registry import MEIVA_HOME_ENV, session_forward_keys
 
+        # meiva:note
         # The home is no Settings field; it rides every child as a declared key.
         expected = _aliases_with(scope=("host",)) | {MEIVA_HOME_ENV}
         assert session_forward_keys() == expected
+        # meiva:note
         # The F-s3-4 headline: per-agent identity never rides a daemon session.
         assert "MEIVA_AGENT_ID" not in session_forward_keys()
 
@@ -85,26 +96,28 @@ class TestScopeDerivationRules:
 
     @pytest.mark.parametrize("role", ["gateway", "runner"])
     def test_child_env_carries_the_login_identity(
-        self, monkeypatch: pytest.MonkeyPatch, role: str
+        self, monkeypatch: pytest.MonkeyPatch, role: Literal["gateway", "runner"]
     ) -> None:
-        """A PTY child without USER reads a logged-in macOS Claude Code CLI as
-        "Not logged in" (its keychain lookup keys on the account name)."""
+        # meiva:note
+        # A PTY child without USER reads a logged-in macOS Claude Code CLI as
+        # "Not logged in" (its keychain lookup keys on the account name).
         from base.host.env.registry import child_env
 
         monkeypatch.setenv("USER", "operator")
         monkeypatch.setenv("LOGNAME", "operator")
-        env = child_env(role)  # type: ignore[arg-type] — parametrized daemon role
+        env = child_env(role)
         assert env["USER"] == "operator"
         assert env["LOGNAME"] == "operator"
 
     def test_child_env_carries_the_machine_network_proxy_configuration(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Issue #2095: the machine's proxy configuration is ambient host config —
-        the egress a building child (`npm run build` fetching Google Fonts for
-        next/font) cannot re-source itself — so every role's child env carries it,
-        in both spellings (a shell exports HTTP(S)_PROXY; npm/node/curl read the
-        lowercase set), non-empty only (an empty ALL_PROXY means "direct")."""
+        # meiva:note
+        # Issue #2095: the machine's proxy configuration is ambient host config —
+        # the egress a building child (`npm run build` fetching Google Fonts for
+        # next/font) cannot re-source itself — so every role's child env carries it,
+        # in both spellings (a shell exports HTTP(S)_PROXY; npm/node/curl read the
+        # lowercase set), non-empty only (an empty ALL_PROXY means "direct").
         from base.host.env.registry import NETWORK_PROXY_KEYS, child_env, network_proxy_configured
 
         assert {
@@ -125,6 +138,7 @@ class TestScopeDerivationRules:
         monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
         monkeypatch.setenv("no_proxy", "localhost,127.0.0.1")
         monkeypatch.setenv("ALL_PROXY", "")
+        # meiva:note
         # The family's single reader (the Feishu ws handshake asks it): any
         # non-empty proxy key, either spelling.
         assert network_proxy_configured() is True
@@ -137,10 +151,12 @@ class TestScopeDerivationRules:
     def test_the_cluster_secret_rides_no_forwarded_view(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The human bearer stays on the gateway: no daemon / session child receives
-        it, even when the launcher's environment carries it."""
+        # meiva:note
+        # The human bearer stays on the gateway: no daemon / session child receives
+        # it, even when the launcher's environment carries it.
         from base.host.env.registry import child_env, session_forward_keys
 
+        # meiva:note
         # `child_env` reads the live environment, so the environment is the seam here.
         monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "human-bearer")
         assert "MEIVA_CLUSTER_SECRET" not in session_forward_keys()
@@ -154,6 +170,7 @@ class TestScopeDerivationRules:
             capability="agent-runner", scope=("cluster-pinned", "cluster-default")
         )
         assert agent_runner_cluster_aliases() == expected
+        # meiva:note
         # Disjoint from the host-scope session view (host-scope agent-runner
         # keys are deliberately kept on the gateway — single-box daemons).
         from base.host.env.registry import session_forward_keys
@@ -165,8 +182,9 @@ class TestDaemonChildEnv:
     def test_child_env_refuses_the_agent_role(self) -> None:
         from base.host.env.registry import child_env
 
+        removed_role: Any = "agent"
         with pytest.raises(ValueError, match="daemon role"):
-            child_env("agent")  # type: ignore[arg-type] — the removed agent view
+            child_env(removed_role)
 
     def test_session_view_carries_the_gateway_url_and_port(self) -> None:
         from base.host.env.registry import session_forward_keys
@@ -175,9 +193,10 @@ class TestDaemonChildEnv:
 
 
 class TestConsumptionMatrixDeclarations:
-    """The explicit consumption-matrix rows (identity / derived / seed / health
-    ports) stay exactly the declared facts — declared by FIELD NAME so an alias
-    rename follows automatically."""
+    # meiva:note
+    # The explicit consumption-matrix rows (identity / derived / seed / health
+    # ports) stay exactly the declared facts — declared by FIELD NAME so an alias
+    # rename follows automatically.
 
     def test_identity_keys_are_the_home_owned_identity_and_tool_fields(self) -> None:
         from base.host.env.registry import env_identity_keys
@@ -192,6 +211,7 @@ class TestConsumptionMatrixDeclarations:
             "MEIVA_GATEWAY_URL",
             "MEIVA_REDIS_BIN_DIR",
         }
+        # meiva:note
         # memory_remote is cluster-pinned (a remote is cluster config) but still
         # machine identity.
         expected |= {"MEIVA_MEMORY_REMOTE"}
@@ -246,21 +266,25 @@ class TestConsumptionMatrixDeclarations:
 
 
 class TestRegistryInvariants:
-    """A1/A2: every key the projections touch is registered exactly once, and
-    the projections are pure functions of the registry (no hand-written set)."""
+    # meiva:note
+    # A1/A2: every key the projections touch is registered exactly once, and
+    # the projections are pure functions of the registry (no hand-written set).
 
     def test_passthrough_rows_never_collide_with_settings_aliases(self) -> None:
-        """A1: a key declared as both a Settings alias and a passthrough row is
-        the duplicate-declaration drift class — the registry refuses it at the
-        first projection call."""
+        # meiva:note
+        # A1: a key declared as both a Settings alias and a passthrough row is
+        # the duplicate-declaration drift class — the registry refuses it at the
+        # first projection call.
         from base.host.env.registry import child_env
 
+        # meiva:note
         # Exercises _ensure_validated(); raises RuntimeError on a collision.
         child_env("gateway")
 
     def test_every_projection_key_is_registered(self) -> None:
-        """A1: no orphan keys — every alias a projection emits is either a
-        Settings field alias or a declared passthrough row."""
+        # meiva:note
+        # A1: no orphan keys — every alias a projection emits is either a
+        # Settings field alias or a declared passthrough row.
         import base.host.env.registry as er
 
         registered = set(_aliases_with(scope=())) | _all_aliases()
@@ -293,25 +317,27 @@ def _all_aliases() -> frozenset[str]:
 
 
 def test_env_registry_imports_on_clean_env_without_config_package() -> None:
-    """Task #1099 regression: importing base.host.env.registry first (a first `meiva start`
-    prepares identity before any settings) must not circular-import through the
-    config package.
-
-    Before the fix, `base.config.config_registry` built `FIELD_INFOS` at module
-    level, which ran `build_registry()` during the module import; its deferred
-    `base.config` package import re-entered the half-initialized registry
-    module (the package __init__ re-imports `field_alias` from it) and raised
-    ``ImportError: cannot import name 'field_alias' from partially initialized
-    module``. A fresh subprocess with no pre-imported `base.config`
-    reproduces that boot order.
-    """
-    result = subprocess.run(  # noqa: S603 -- fixed argv, this interpreter runs the child script
+    # meiva:note
+    # Task #1099 regression: importing base.host.env.registry first (a first `meiva start`
+    # prepares identity before any settings) must not circular-import through the
+    # config package.
+    #
+    # Before the fix, `base.config.config_registry` built `FIELD_INFOS` at module
+    # level, which ran `build_registry()` during the module import; its deferred
+    # `base.config` package import re-entered the half-initialized registry
+    # module (the package __init__ re-imports `field_alias` from it) and raised
+    # ``ImportError: cannot import name 'field_alias' from partially initialized
+    # module``. A fresh subprocess with no pre-imported `base.config`
+    # reproduces that boot order.
+    result = subprocess.run(  # noqa: S603
         [
             sys.executable,
             str(Path(__file__).with_name("_env_import_child.py")),
             "registry_imports_first",
         ],
-        cwd=Path(__file__).resolve().parents[4],  # repo root
+        # meiva:note
+        # repo root
+        cwd=Path(__file__).resolve().parents[4],
         capture_output=True,
         text=True,
         timeout=120,
