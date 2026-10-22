@@ -146,3 +146,43 @@ def test_disabled_backend_does_not_read_identity(monkeypatch: pytest.MonkeyPatch
         raise MachineNameMissing("identity remains cold")
 
     assert telemetry_otlp.OtlpBackend(export_allowed=reject)._enabled() is False
+
+
+# meiva:note
+# The exit seam must not start an exporter it never started: by then the SDK's executors
+# are already shut down, so the attempt fails and reports itself through a pipeline that is
+# closing — a warning plus traceback in a watcher's log for a process whose work finished
+# (#5578). `stop()` therefore marks the backend closing *before* its own drain, which is
+# where that bring-up used to happen.
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+def test_stop_marks_the_exporter_closing_before_the_drain() -> None:
+    from datetime import UTC, datetime
+
+    from base.telemetry.delivery.receipts import Event
+    from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
+
+    seen: list[bool] = []
+    pipeline = ExportingEventPipeline(
+        writer=lambda _events, exporter: seen.append(exporter._closing),
+        export_allowed=lambda: True,
+    )
+    pipeline.enqueue(
+        Event(
+            ts=datetime.now(UTC),
+            trace_id=None,
+            span_id=None,
+            agent_id=None,
+            machine="test",
+            cluster="test",
+            process="test",
+            category="log",
+            event_name="log",
+            level="info",
+            source="test",
+            target_agent_id=None,
+            attributes={},
+        )
+    )
+    pipeline.stop(timeout=5.0)
+
+    assert seen == [True]
