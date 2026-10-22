@@ -163,7 +163,28 @@ def test_a_probe_that_could_not_run_refuses_the_window(
     cluster.hosts["lin"]["facts_rc"] = 1
     assert run("down") == 2
     assert [kind for kind, _ in cluster.effects if kind == "stop"] == []
-    assert "facts exit status" in capsys.readouterr().out
+    assert "facts exited 1" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("error", "wanted"),
+    [("archive", "archive could not be read"), ("unpack", "archive could not be unpacked")],
+)
+def test_a_target_commit_that_cannot_be_read_refuses_by_name(
+    env: tuple[Cluster, Callable[..., int]],
+    capsys: pytest.CaptureFixture[str],
+    error: str,
+    wanted: str,
+) -> None:
+    # meiva:note
+    # The archive and its unpack have their own exit status, so a window says which step failed
+    # instead of reporting the fingerprint as unreadable.
+    cluster, run = env
+    cluster.hosts["gw"]["probe_error"] = error
+    assert run("down") == 2
+    assert [kind for kind, _ in cluster.effects if kind == "stop"] == []
+    out = capsys.readouterr().out
+    assert wanted in out and "gw owes" in out
 
 
 def test_a_rebuilt_gateway_keeps_its_data_plane_choice(

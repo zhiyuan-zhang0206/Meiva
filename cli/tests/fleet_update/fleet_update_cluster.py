@@ -128,7 +128,12 @@ class Cluster:
             host["up"] = True
             self.host_up[alias] = True
         elif kind == "smoke":
-            self.smoked.append(command.partition(" - smoke ")[2].split()[0].strip("'"))
+            name = command.partition(" - smoke ")[2].split()[0].strip("'")
+            self.smoked.append(name)
+            # meiva:note
+            # A smoke runs on the gateway, so the host it is about is the one in the command:
+            # a test stages that machine's red smoke without touching the gateway's own line.
+            return self.fail.get(("smoke", name), 0)
         elif kind == "refresh":
             assert "--force" not in command
         return 0
@@ -221,6 +226,8 @@ class Cluster:
     # The helper facts one host reports; a test stages a host by editing its dict, exactly as
     # the owner module would report it, so no assertion needs a real machine.
     def _helper_facts(self, alias: str, host: dict[str, Any]) -> str:
+        if error := host.get("probe_error"):
+            return f"h_error={error}"
         helper = host.get("helper", "present")
         lines = [f"h_rc={host.get('facts_rc', 0)}", f"h_helper={helper}"]
         if helper != "present":

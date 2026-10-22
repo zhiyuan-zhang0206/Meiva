@@ -18,9 +18,14 @@ REBUILD_STOP = "--stop-extras --close-shell-sessions --stop-browser --keep-no-se
 
 
 class Runner(Protocol):
+    # meiva:note
+    # What a window step needs from its host channel: run a command (effect or read) and say a
+    # line. The gate needs only the first; the verification stage also reports as it goes.
     def run(
         self, alias: str, script: str, *, effect: bool = True, stdin: str | None = None
     ) -> str: ...
+
+    def say(self, line: str) -> None: ...
 
 
 PROBE = f"""{_HOME}
@@ -125,12 +130,19 @@ REQUIRED_FACTS = ("helper", "valid", "loaded", "stale", "cert_root", "expected_h
 # owed field that comes back that way refuses the window instead of passing for "nothing to do".
 _ABSENT_OWES = ("helper",)
 
+_PROBE_ERRORS = {
+    "archive": "the target commit's archive could not be read",
+    "unpack": "the target commit's archive could not be unpacked",
+}
+
 
 def unreadable_facts(facts: dict[str, str]) -> list[str]:
     owed = _ABSENT_OWES if facts.get("h_helper") == "absent" else REQUIRED_FACTS
     bad = [name for name in owed if facts.get(f"h_{name}", "") in ("", "-")]
-    if facts.get("h_rc", "") != "0":
-        bad.insert(0, "facts exit status")
+    if error := facts.get("h_error", ""):
+        bad.insert(0, _PROBE_ERRORS.get(error, f"probe failed ({error})"))
+    elif facts.get("h_rc", "") != "0":
+        bad.insert(0, f"facts exited {facts.get('h_rc', 'without a status')}")
     return bad
 
 

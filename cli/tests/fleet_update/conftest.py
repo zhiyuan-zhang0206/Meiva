@@ -71,6 +71,9 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Calla
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "baselines")
     monkeypatch.setattr(fleet_update, "ssh", cluster.ssh)
+    # meiva:note
+    # The verification takes the clock from its caller, so the one fake clock the window already
+    # uses reaches it without a second patch.
     monkeypatch.setattr(fleet_update, "time", cluster)
     monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
     logs = str(tmp_path / "logs")

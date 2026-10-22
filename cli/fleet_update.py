@@ -15,7 +15,6 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import PIPE, STDOUT
@@ -32,12 +31,18 @@ from scripts.host_ops.fleet_gate import (
     refusals,
     stop_completed,
 )
+from scripts.host_ops.fleet_verify import POLL_S as POLL_S
+from scripts.host_ops.fleet_verify import (
+    FailedError,
+    HostFailure,
+    outcome,
+    verify,
+)
 
 REPO = REPO_CODE = Path(__file__).resolve().parents[1]
 HOME = 'H="$HOME/.meiva"; S="$H/source"; cd "$S" || exit 1'
 MEIVA = 'MEIVA_HOME="$H" "$S/.venv/bin/meiva"'
 _PYTHON = f'{HOME}; MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
-POLL_S = 5
 
 # meiva:note
 # Five lines a minute: enough for an operator to watch the window move, few enough not to bury the
@@ -77,10 +82,6 @@ VERIFY_SCRIPTS = Path(__file__).parent / "commands" / "management"
 
 def program_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
-
-
-class FailedError(RuntimeError):
-    pass
 
 
 def ssh(alias: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
@@ -177,7 +178,7 @@ def _preflight(
     # non-destructive effect the window deliberately accepts before the gate: the gate's own
     # question is about that commit, and the cheap refusals above have already passed.
     if args.dry_run:
-        s.say("helper gate: not judged in --dry-run (the target commit is not fetched)")
+        s.say("helper gate: NOT evaluated (dry run: the target commit is not fetched)")
         return [], resolved, serving, set[str]()
     everyone = [args.gateway, *args.runner]
     for alias in everyone:
@@ -437,78 +438,6 @@ launchctl bootout "gui/$(id -u)/{label}" || echo "bootout of {label} failed"
 rm -rf "$D"; exit "$rc\""""
 
 
-def machine_names(s: Session, aliases: list[str]) -> dict[str, str]:
-    ask = f'{_PYTHON} -c "from base.config import ConfigBoot; from base.cluster.machine.boot import machine_from_boot; print(machine_from_boot(ConfigBoot()).name())"'
-    names: dict[str, str] = {}
-    for alias in aliases:
-        reported = s.run(alias, ask, effect=False).split()
-        if not reported:
-            raise FailedError(f"{alias}: the host printed no machine name")
-        names[alias] = reported[-1]
-    if len(set(names.values())) != len(names):
-        raise FailedError(f"two listed hosts report one machine name: {names}")
-    return names
-
-
-# meiva:link cli/docs/fleet-update.meiva.okf.md
-def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[dict[str, Any]], str]:
-    names = machine_names(s, [args.gateway, *args.runner])
-    wanted = set(names.values())
-    deadline = time.monotonic() + args.roster_timeout
-    while True:
-        out = s.run(
-            args.gateway,
-            f"{program} roster",
-            effect=False,
-            stdin=program_text(VERIFY_SCRIPTS / "fleet_gateway.py"),
-        )
-        rows = json.loads(out.splitlines()[-1])
-        if missing := sorted(wanted - {row["name"] for row in rows}):
-            raise FailedError(f"no roster row for {missing} (host aliases to names: {names})")
-        listed = [row for row in rows if row["name"] in wanted]
-        offline = [row["name"] for row in listed if not row["online"] or row["identity_mismatch"]]
-        commits = {(row["head_sha"], row["running_sha"]) for row in listed}
-        commit = listed[0]["head_sha"]
-        if not offline and commit is not None and commits == {(commit, commit)}:
-            _report_unlisted(s, rows, wanted)
-            return listed, commit
-        if time.monotonic() >= deadline:
-            _report_unlisted(s, rows, wanted)
-            raise FailedError(
-                f"roster after {args.roster_timeout}s: offline {offline}; commits {commits}"
-            )
-        time.sleep(POLL_S)
-
-
-def _report_unlisted(s: Session, rows: list[dict[str, Any]], wanted: set[str]) -> None:
-    for row in rows:
-        if row["name"] not in wanted:
-            s.say(
-                f"roster: {row['name']} is not listed, not checked: online={row['online']} "
-                f"head={row['head_sha']} running={row['running_sha']}"
-            )
-
-
-def _refresh(s: Session, args: argparse.Namespace) -> None:
-    for alias in [args.gateway, *args.runner]:
-        out = s.run(alias, f"{HOME}; {MEIVA} packages refresh")
-        if out:
-            s.say(f"packages refresh [{alias}] {out.splitlines()[-1].strip()}")
-
-
-def _drift_checks(s: Session, args: argparse.Namespace) -> None:
-    checks = [(args.gateway, "schedules verify --no-notify")]
-    checks += [(alias, "plugins verify") for alias in [args.gateway, *args.runner]]
-    failed: list[str] = []
-    for alias, verb in checks:
-        try:
-            s.run(alias, f"{HOME}; {MEIVA} {verb}", effect=True)
-        except FailedError as exc:
-            failed.append(f"`meiva {verb}` {exc}")
-    if failed:
-        raise FailedError("drift check failed: " + "; ".join(failed))
-
-
 # meiva:note
 # Exit code 2 already means "refused before doing anything"; a run where some
 # hosts came up and others did not is its own outcome, so automation can tell
@@ -517,16 +446,6 @@ def _drift_checks(s: Session, args: argparse.Namespace) -> None:
 PARTIAL_FAILURE_EXIT = 3
 
 _INCOMPLETE = 'cat "$HOME/.meiva/state/converge-incomplete.json" 2>/dev/null'
-
-
-@dataclass(frozen=True)
-class HostFailure:
-    alias: str
-    step: str
-    reason: str
-
-    def line(self) -> str:
-        return f"{self.alias} failed at {self.step!r}: {self.reason}"
 
 
 def _host_failure(s: Session, alias: str, exc: FailedError) -> HostFailure:
@@ -544,9 +463,14 @@ def _host_failure(s: Session, alias: str, exc: FailedError) -> HostFailure:
 # abort that leaves the remaining hosts untouched.
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
+    # meiva:note
+    # Start every host, then verify every host: one failure never erases what the window learned
+    # about the others, and each listed host ends with its own line.
     failures: list[HostFailure] = []
+    hosts = [args.gateway, *args.runner]
     start_flags = _start_flags(args)
-    for alias in [args.gateway, *args.runner]:
+    started: set[str] = set()
+    for alias in hosts:
         macos = s.os[alias] == "Darwin"
         try:
             s.run(
@@ -559,25 +483,27 @@ def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
             failure = _host_failure(s, alias, exc)
             failures.append(failure)
             s.say(f"PARTIAL: {failure.line()}")
-    if failures:
-        _silence(s, args, "close")
-        return failures
-    program = f"{_PYTHON} -"
-    if s.dry_run:
-        s.run(args.gateway, f"{program} smoke MACHINE {args.smoke_timeout}  # each agent-runner")
-        _refresh(s, args)
-        _drift_checks(s, args)
-        _silence(s, args, "close")
-        return []
-    rows, commit = _roster(s, args, program)
-    for name in [row["name"] for row in rows if row["serve_agent_runner"]]:
-        smoke = f"{program} smoke {shlex.quote(name)} {args.smoke_timeout}"
-        s.run(args.gateway, smoke, stdin=program_text(VERIFY_SCRIPTS / "fleet_gateway.py"))
-    _refresh(s, args)
-    _drift_checks(s, args)
+        else:
+            started.add(alias)
+    verified, skipped, commit = verify(
+        s,
+        args,
+        hosts=hosts,
+        started=started,
+        program=f"{_PYTHON} -",
+        gateway_stdin=program_text(VERIFY_SCRIPTS / "fleet_gateway.py"),
+        clock=time,
+    )
+    failures += verified
+    # meiva:note
+    # The planned-outage silence ends here even on a partial up: hosts that came back healthy
+    # must not spend the rest of the silence with their alerts suppressed.
     _silence(s, args, "close")
-    s.say(f"up complete: every listed machine runs {commit[:12]}")
-    return []
+    for alias in hosts:
+        s.say(f"matrix: {alias} {outcome(alias, failures, skipped)}")
+    if not failures:
+        s.say(f"up complete: every listed machine runs {commit[:12]}")
+    return failures
 
 
 # meiva:note
