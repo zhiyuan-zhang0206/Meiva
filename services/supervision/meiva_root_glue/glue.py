@@ -75,7 +75,7 @@ def agent_host_memory_caps(
     max_mb: int,
     swap_max_mb: int,
     platform: str,
-    scope_available: Callable[[], bool],
+    scope_available: Callable[[int, int], bool],
 ) -> dict[str, UnitMemoryCap]:
     if max_mb <= 0:
         return {}
@@ -121,10 +121,24 @@ def memory_scoped_argv(
     ]
 
 
-def _systemd_user_scope_available() -> bool:
+# meiva:note
+# The probe carries the SAME attributes the launch will use. A bare `systemd-run ... true`
+# proves the binary exists, not that this systemd accepts MemoryMax or MemorySwapMax -- and
+# a refused attribute is exactly how the launch would fail.
+def _systemd_user_scope_available(max_mb: int, swap_max_mb: int) -> bool:
     try:
-        done = subprocess.run(
-            ["systemd-run", "--user", "--scope", "--collect", "true"],
+        done = subprocess.run(  # noqa: S603
+            [
+                "systemd-run",
+                "--user",
+                "--scope",
+                "--collect",
+                "-p",
+                f"MemoryMax={max_mb}M",
+                "-p",
+                f"MemorySwapMax={swap_max_mb}M",
+                "true",
+            ],
             capture_output=True,
             timeout=_SCOPE_PROBE_TIMEOUT_S,
             check=False,
