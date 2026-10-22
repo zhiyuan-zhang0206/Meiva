@@ -35,7 +35,7 @@ returns to a lower layer would close a cycle.
 
 ## Recorded debt
 
-Some edges against the direction exist today (`meiva` using `agent`, `gateway` using `cli`, tests
+Some edges against the direction exist today (`gateway` using `cli`, tests
 that reach up). They are not exemptions: each fact on such an edge is a recorded `cycle-edge` debt in
 the manifest of the directory whose graph has the cycle, counted per source and target file, so a new
 import on the same edge is a new violation and the recorded ones can only shrink. `python -m meizel debt`

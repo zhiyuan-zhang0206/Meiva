@@ -14,9 +14,12 @@ from pydantic import BaseModel, Field
 import base.packages.plugins.loading.registry as extensions_registry
 import meiva
 from agent import state as state_module
-from agent.extensions.plugin_state_codec import decode_plugin_delta, load_snapshot
 from agent.messages import NoteTag, system_note_message
 from base.agents import impersonation as leases
+from base.agents.context.external_attachment.plugin_state_codec import (
+    decode_plugin_delta,
+    load_snapshot,
+)
 from base.agents.impersonation import history
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity

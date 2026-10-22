@@ -214,8 +214,8 @@ def test_sdk_attachment_can_pause_heartbeat(
     machine_identity: MachineIdentity,
 ):
     import meiva
-    from agent.extensions import plugin_state_codec
-    from agent.state import BaseAgentState
+    from base.agents.context.external_attachment import plugin_state_codec
+    from base.agents.context.external_attachment.state_schema import BaseAgentState
     from base.agents.sdk import call_policy
     from meiva import impersonation
     from meiva.tests.fixtures.pin_agent import pin_agent

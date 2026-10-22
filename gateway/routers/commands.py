@@ -24,8 +24,7 @@ _AGENT_SKILL_VIEW_TIMEOUT_S = 3.0
 
 def _local_commands() -> list[CommandItem]:
     """The gateway-local catalog: the unscoped view and the availability fallback."""
-    from base.packages.composer_commands import CommandCatalog
-    from meiva import skills
+    from base.packages.composer_commands import CommandCatalog, load_skill_names
 
     return [
         CommandItem(
@@ -33,7 +32,7 @@ def _local_commands() -> list[CommandItem]:
             description=c["description"],
             instruction_hint=c["instruction_hint"],
         )
-        for c in CommandCatalog(skills=skills.names).discover()
+        for c in CommandCatalog(skills=load_skill_names).discover()
     ]
 
 

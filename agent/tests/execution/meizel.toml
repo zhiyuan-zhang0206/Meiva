@@ -18,7 +18,7 @@
 "test_exec_child.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
-"child_external_cli.py#assignment agent.extensions.plugin_state_codec.load_snapshot" = 1
+"child_external_cli.py#assignment base.agents.context.external_attachment.plugin_state_codec.load_snapshot" = 1
 "child_external_cli.py#assignment meiva.impersonation.attachment.control.require_active" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1

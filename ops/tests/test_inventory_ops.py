@@ -18,9 +18,8 @@ from pathlib import Path
 
 import pytest
 
-import meiva.mcps.config as mcp_cfg_mod
+import base.packages.mcp_config as mcp_cfg_mod
 from base.cluster.machine import MachineIdentity
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugins import enable_config, mcp_enabled

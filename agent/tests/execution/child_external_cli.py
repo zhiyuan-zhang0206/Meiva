@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Any
 
 import meiva
-from agent.extensions import plugin_state_codec
 from agent.state import build_agent_state, plugin_state_schema
+from base.agents.context.external_attachment import plugin_state_codec
 from base.packages.plugins.loading.registry import build_registry
 from meiva import impersonation
 from meiva.impersonation import attachment as attachment_module
