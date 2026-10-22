@@ -2174,7 +2174,9 @@ groups:
             $labels.attributes_machine }} on every pass for at least 3 minutes (machine_probe_failed events,
             payload consecutive_failures). Normal recovery (restart, brief network blip) stays under the 3
             minute grace window. Escalates to the error rule at 10 minutes. A paused machine (`meiva cluster
-            pause`) is not probed and cannot fire this.
+            pause`) is not probed and cannot fire this. Graded by what the host was carrying when it went
+            quiet (task #5520): a host that reports agent_count 0 and carries no service role is a laptop
+            that left the room, not an outage; a missing agent_count counts as carrying, never as zero.
         data:
           - refId: A
             datasourceUid: loki
@@ -2188,7 +2190,9 @@ groups:
               expr: >-
                 sum by (attributes_machine) (count_over_time({service_name="unknown_service",
                 event_name="machine_probe_failed"} | json | cluster=".meiva" | category="telemetry" |
-                attributes_consecutive_failures < 11 [2m]))
+                attributes_consecutive_failures < 11 |
+                (attributes_carries_service = "true" or attributes_agent_count > 0 or
+                attributes_agent_count = "") [2m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -2256,7 +2260,9 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_machine) (count_over_time({service_name="unknown_service",
-                event_name="machine_probe_failed"} | json | cluster=".meiva" | category="telemetry" [2m]))
+                event_name="machine_probe_failed"} | json | cluster=".meiva" | category="telemetry" |
+                (attributes_carries_service = "true" or attributes_agent_count > 0 or
+                attributes_agent_count = "") [2m]))
               instant: true
               queryType: instant
             relativeTimeRange:

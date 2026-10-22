@@ -101,6 +101,12 @@ class HeartbeatBackoffRaised(TypedDict):
     interval_seconds: int
 
 
+# meiva:note
+# The grading inputs of `machine_probe_failed` (task #5520): `agent_count` is the
+# agent count of the last kept ClusterStatus, None when the host never answered —
+# a rule grading on it must read None as "may be carrying", never as zero, or the
+# case we cannot see at all goes silent. `carries_service` is true when the
+# machines row lists any role besides agent-runner (gateway, observability).
 class MachineProbeFailed(TypedDict):
     """`machine_probe_failed` payload — services/wake/heartbeat/liveness.py.
 
@@ -112,6 +118,8 @@ class MachineProbeFailed(TypedDict):
 
     machine: str
     consecutive_failures: int
+    agent_count: int | None
+    carries_service: bool
 
 
 # meiva:note
