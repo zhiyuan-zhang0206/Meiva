@@ -119,6 +119,12 @@ class PtySessionBackend(SessionBackend):
             return False
         return True
 
+    def service_available(self) -> bool:
+        # meiva:note
+        # The generation probe is the one question an absent service answers differently: `list` and `has` report an absent service as "no sessions", so a caller that read those would admit nothing and still call the service healthy. A live service always reports a generation.
+        # meiva:link base/sessions/docs/session-backend.meiva.okf.md
+        return client.host_generation() is not None
+
     def send(self, name: str, text: str) -> None:
         self._call("send", name, client.send, name, text.encode())
 

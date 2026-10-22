@@ -50,6 +50,15 @@ class SessionBackend(abc.ABC):
         """
         ...
 
+    # meiva:note
+    # True when this backend can admit a new session right now: a backend that hands the
+    # session to a service probes it, one that launches the process itself has nothing to
+    # check and answers True. A caller that just failed to create a session asks this to
+    # separate "the service is not there yet" (try again later) from "this request cannot
+    # succeed" (give up).
+    def service_available(self) -> bool:
+        return True
+
     @abc.abstractmethod
     def kill_session(
         self,
