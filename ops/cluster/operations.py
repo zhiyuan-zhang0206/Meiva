@@ -167,7 +167,7 @@ def _project_skill_roots(cwd: Path | None) -> list[Path]:
     return [] if cwd is None else project_skill_roots(cwd)
 
 
-def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]:
+def _narrow_commands(commands: list[Any], wanted: list[str] | None, loaded: list[Any]) -> list[Any]:
     """Keep explicit commands plus skill commands selected as prompt capabilities.
 
     This intentionally mirrors ``agent.graph.prompt.capabilities.resolve_prompt_skills``:
@@ -181,9 +181,7 @@ def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]
 
     from base.packages.skills.names import match_key
     from base.packages.skills.tree import identifier, target
-    from meiva import skills
 
-    loaded = skills.names()
     by_ident = {match_key(identifier(skill)): skill for skill in loaded}
     by_name = {match_key(skill["name"]): skill for skill in loaded}
     selected_targets = {
@@ -207,15 +205,13 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     project skills into a later agent's result.  The
     result also carries this runner's enabled MCP names as phase-2 groundwork.
     """
-    from base.packages.composer_commands import CommandCatalog
+    from base.packages.composer_commands import CommandCatalog, load_skill_names
+    from base.packages.mcp_config import load_mcp_config
     from base.packages.plugins.mcp_enabled import read_enabled
-    from meiva import skills
-    from meiva.mcps.config import load_mcp_config
-    from meiva.sdk_surface import skill_sources
 
     cwd, wanted = agent_skill_view_inputs(pool, agent_id)
-    with skill_sources.scoped(lambda: _project_skill_roots(cwd)):
-        commands = _narrow_commands(CommandCatalog(skills=skills.names).discover(), wanted)
+    loaded = load_skill_names(_project_skill_roots(cwd))
+    commands = _narrow_commands(CommandCatalog(skills=lambda: loaded).discover(), wanted, loaded)
     merged_mcp = load_mcp_config(include_disabled=True)
     mcp_overlay = read_enabled()
     return AgentSkillViewResult(

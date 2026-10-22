@@ -11,8 +11,8 @@ from unittest.mock import patch
 import pytest
 
 import meiva
-from agent.extensions import plugin_state_codec
 from agent.tests.impersonation.external_attachment import attached_runtime as attached_runtime
+from base.agents.context.external_attachment import plugin_state_codec
 from base.agents.impersonation import manifest
 from base.agents.impersonation.status import LOG_PROTOCOL_VERSION
 from base.config import ConfigBoot

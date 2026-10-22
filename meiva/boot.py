@@ -505,9 +505,9 @@ def boot_external_process(
 
 
 def plugin_state_codec() -> Any:
-    import importlib
+    from base.agents.context.external_attachment import plugin_state_codec as _codec
 
-    return importlib.import_module("agent.extensions.plugin_state_codec")
+    return _codec
 
 
 def _external_database_factory(

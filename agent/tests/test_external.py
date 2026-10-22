@@ -14,12 +14,6 @@ from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 import base.agents.impersonation.manifest as impersonation_manifest
 import meiva
 from agent import state as state_module
-from agent.extensions import plugin_state_codec
-from agent.extensions.plugin_state_codec import (
-    apply_plugin_delta,
-    decode_plugin_delta,
-    encode_plugin_delta,
-)
 from agent.tests.impersonation.external_attachment import (
     ExampleMessagesPlugin,
     ExamplePlugin,
@@ -27,6 +21,12 @@ from agent.tests.impersonation.external_attachment import (
 )
 from agent.tests.impersonation.external_attachment import attached_runtime as attached_runtime
 from base import telemetry
+from base.agents.context.external_attachment import plugin_state_codec
+from base.agents.context.external_attachment.plugin_state_codec import (
+    apply_plugin_delta,
+    decode_plugin_delta,
+    encode_plugin_delta,
+)
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.packages.plugin_providers import build_model_catalog
