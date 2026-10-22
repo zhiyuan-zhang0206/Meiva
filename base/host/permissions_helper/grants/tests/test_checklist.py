@@ -40,7 +40,7 @@ def test_a_missing_row_carries_the_restart_note_where_macos_needs_one() -> None:
 def test_the_text_checklist_names_the_missing_item_and_the_recheck_verb() -> None:
     text = checklist.render_text(_report(**{"desktop-folder": Grant.DENIED}))
     assert "Desktop folder" in text
-    assert "1 of 11 required authorizations are not granted." in text
+    assert "1 of 12 required authorizations are not granted." in text
     assert "meiva permissions status" in text
     assert "x-apple.systempreferences" in text
 
@@ -54,7 +54,7 @@ def test_a_complete_host_says_so_and_lists_no_actions() -> None:
 def test_the_payload_counts_only_required_rows() -> None:
     payload = checklist.payload(_report(**{"documents-folder": Grant.DENIED}))
     assert payload["state"] == "action_required"
-    assert payload["required_total"] == 11
+    assert payload["required_total"] == 12
     assert payload["required_missing"] == 1
     assert len(payload["items"]) == len(CATALOG)
     assert payload["headline"] == checklist.headline(_report(**{"documents-folder": Grant.DENIED}))
