@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
 from base.agents.to_user import read_document
+from base.api_contracts.agent_contract import Harness
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from base.packages.skills.tree import identifier, target
@@ -85,6 +86,8 @@ def _format_timeout_display(timeout_s: float) -> str:
 
 def exec_timeout_note(ctx: MeivaContext) -> HumanMessage | None:
 
+    if ctx.harness is not Harness.MEIVA:
+        return None
     if _established_agent_id(ctx, "exec-timeout") is None:
         return None
     timeout_s = ctx.require_agent().read("sandbox", "exec_timeout_seconds")
@@ -221,7 +224,13 @@ def preloaded_skills_note(ctx: MeivaContext) -> HumanMessage | None:
     if rendered is None:
         return None
     sections, _injected = rendered
-    content = _PRELOADED_SKILLS_FRAMING + "\n\n" + "\n\n---\n\n".join(sections)
+    framing = _PRELOADED_SKILLS_FRAMING
+    if ctx.harness is not Harness.MEIVA:
+        framing = framing.replace(
+            "meiva.help(meiva.skills.<path>) or meiva.files.read.",
+            "meiva.help(meiva.skills.<path>) or your native file-reading tool.",
+        )
+    content = framing + "\n\n" + "\n\n---\n\n".join(sections)
     return system_note_message(
         content=content, tag=NoteTag.PRELOADED_SKILLS, created_at=datetime.now(UTC)
     )

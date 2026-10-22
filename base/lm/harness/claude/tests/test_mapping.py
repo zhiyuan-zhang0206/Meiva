@@ -5,6 +5,7 @@ from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.events import (
     AssistantText,
     RateLimitObserved,
+    ReasoningDelta,
     SessionStarted,
     TextDelta,
     ToolResult,
@@ -20,12 +21,12 @@ def test_text_delta_maps_to_delta_event() -> None:
     assert map_message(message, turn_id="t1") == [TextDelta(turn_id="t1", text="bro")]
 
 
-def test_stream_events_that_are_not_text_deltas_are_ignored() -> None:
+def test_thinking_delta_maps_and_unrelated_stream_events_are_ignored() -> None:
     thinking = fake.StreamEvent(
         event={"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "x"}}
     )
     start = fake.StreamEvent(event={"type": "message_start"})
-    assert map_message(thinking, turn_id="t1") == []
+    assert map_message(thinking, turn_id="t1") == [ReasoningDelta(turn_id="t1", text="x")]
     assert map_message(start, turn_id="t1") == []
 
 

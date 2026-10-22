@@ -10,16 +10,6 @@ tags:
 
 `components/timeline/` renders the BackendTimelineItem list (chat / code / output / reasoning / system marker) and is the only item-list surface of a thread. Directory: `index`, `segments` (compact grouping), `use-compact-transition-anchor` (reading position), `use-timeline-window` (bounded DOM), `card`, `item`, `buttons`, `markers`, `timestamp`, `reasoning-clock`, `runs` (turn grouping), `run-block`.
 
-## Harness prompts
-
-The selected agent's required `harness` field controls prompt visibility.
-Only `meiva` renders `system_prompt` items; an unknown/loading identity does
-not briefly display them. Claude Code and Codex own their system prompts;
-older graph checkpoints contain a synthetic Meiva prompt that the bridge never
-sent. The view filters that item after combining live, paged and compact-buffer
-rows, without rewriting checkpoints, cached items, source coordinates or message
-counts. Real messages and other historical notes remain visible.
-
 ## Streaming rows
 
 Memoization, clock ownership and announcements:

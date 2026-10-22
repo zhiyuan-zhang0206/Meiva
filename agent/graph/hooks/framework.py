@@ -45,3 +45,17 @@ def hooks_at(point: HookPoint, extensions: ExtensionRegistry) -> list[tuple[str 
             *((None, hook) for hook in framework if hook is not repair_dangling_tool_pairing),
         ]
     return [*extensions.hooks(point), *((None, hook) for hook in framework)]
+
+
+def harness_pre_turn_hooks(
+    extensions: ExtensionRegistry,
+) -> list[tuple[str | None, GraphHook]]:
+    return [
+        *(
+            (plugin, hook)
+            for plugin, hook in extensions.hooks("before_llm")
+            if getattr(hook, "name", "") != "_SilentIdleContinueHook"
+        ),
+        (None, SkillRecallHook()),
+        (None, newly_installed_skills),
+    ]

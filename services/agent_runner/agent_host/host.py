@@ -478,6 +478,7 @@ class AgentHost:
             registrations=self._registrations,
             registration_ttl_seconds=self._policy.harness_registration_ttl_seconds(),
             machine=self._machine,
+            contributions=tuple(hc for _, hc in self._extensions.harness_contributions(harness)),
         )
 
     def _evict(self) -> None:

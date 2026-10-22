@@ -49,7 +49,7 @@ def dump_async_tasks() -> None:
 
 
 # meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
-_STALL_GUARD_EXEMPT = frozenset({"claim"})
+_STALL_GUARD_EXEMPT = frozenset({"claim", "harness_turn"})
 
 
 def _real_stderr() -> TextIO | None:

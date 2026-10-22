@@ -8,6 +8,8 @@ from typing import cast
 from base.lm.harness.codex.transport import JsonObject, as_int, as_object, as_text
 from base.lm.harness.events import (
     BridgeEvent,
+    ReasoningDelta,
+    ReasoningText,
     TextDelta,
     ToolResult,
     ToolUse,
@@ -32,11 +34,20 @@ def text_delta(params: Mapping[str, object], turn_id: str) -> list[BridgeEvent]:
     return [TextDelta(turn_id=turn_id, text=delta)]
 
 
+def reasoning_delta(params: Mapping[str, object], turn_id: str) -> list[BridgeEvent]:
+    delta = as_text(params.get("delta"))
+    if not delta:
+        return []
+    return [ReasoningDelta(turn_id=turn_id, text=delta)]
+
+
 def item_event(params: Mapping[str, object], *, phase: str, turn_id: str) -> list[BridgeEvent]:
     item = as_object(params.get("item"))
     if not item:
         return []
     kind = as_text(item.get("type"))
+    if kind == "reasoning":
+        return _reasoning(item, phase, turn_id)
     if kind == "commandExecution":
         return _command(item, phase, turn_id)
     if kind == "fileChange":
@@ -47,6 +58,22 @@ def item_event(params: Mapping[str, object], *, phase: str, turn_id: str) -> lis
         return _dynamic_tool(item, phase, turn_id)
     if kind == "webSearch":
         return _web_search(item, phase, turn_id)
+    return []
+
+
+def _reasoning(item: Mapping[str, object], phase: str, turn_id: str) -> list[BridgeEvent]:
+    if phase != "completed":
+        return []
+    for field in ("summary", "content"):
+        raw = item.get(field)
+        if isinstance(raw, list):
+            parts = [
+                s.strip() for s in cast("list[object]", raw) if isinstance(s, str) and s.strip()
+            ]
+            if parts:
+                return [ReasoningText(turn_id=turn_id, text="\n\n".join(parts))]
+        elif isinstance(raw, str) and raw.strip():
+            return [ReasoningText(turn_id=turn_id, text=raw.strip())]
     return []
 
 
@@ -135,14 +162,19 @@ def _command(item: Mapping[str, object], phase: str, turn_id: str) -> list[Bridg
 
 def _file_change(item: Mapping[str, object], phase: str, turn_id: str) -> list[BridgeEvent]:
     identifier = as_text(item.get("id")) or ""
-    paths = _paths(item.get("changes"))
+    raw_changes = item.get("changes")
+    paths = _paths(raw_changes)
+    changes = _changes(raw_changes)
     if phase == "started":
+        tool_input: dict[str, object] = {"paths": paths}
+        if changes:
+            tool_input["changes"] = changes
         return [
             ToolUse(
                 turn_id=turn_id,
                 tool_use_id=identifier,
                 name="patch",
-                tool_input={"paths": paths},
+                tool_input=tool_input,
             )
         ]
     status = as_text(item.get("status")) or ""
@@ -226,6 +258,31 @@ def _paths(value: object) -> list[str]:
         if path is not None:
             paths.append(path)
     return paths
+
+
+def _changes(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    entries = cast("list[object]", value)
+    changes: list[dict[str, object]] = []
+    has_detail = False
+    for entry in entries:
+        obj = as_object(entry)
+        path = as_text(obj.get("path"))
+        if path is None:
+            continue
+        change: dict[str, object] = {"path": path}
+        kind_raw = obj.get("kind")
+        kind = as_text(kind_raw) or as_text(as_object(kind_raw).get("type"))
+        if kind is not None:
+            change["kind"] = kind
+            has_detail = True
+        diff = as_text(obj.get("diff")) or as_text(obj.get("patch"))
+        if diff is not None:
+            change["diff"] = diff
+            has_detail = True
+        changes.append(change)
+    return changes if has_detail else []
 
 
 def _arguments(value: object) -> dict[str, object]:

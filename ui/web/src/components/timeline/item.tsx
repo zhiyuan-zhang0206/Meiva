@@ -33,7 +33,6 @@ import { cn } from "@/lib/format/utils";
 
 import { EphemeralSystemMarker, MarkerBody, classifyMarker } from "./markers";
 import { isLiveReasoning } from "./model/reasoning-clock";
-import { inboundKind } from "./model/runs";
 import { FLEX } from "@/lib/layout/layout";
 
 // Cap how often a streaming item re-parses its content (markdown / Prism).
@@ -372,13 +371,13 @@ export const ItemView = memo(function ItemView({
           payload={item.payload}
           images={item.images}
           plainMessage={!!item.impersonation}
-          markdown={["agent", "external_agent"].includes(inboundKind(item.source))}
+          markdown
         />
       );
     case "inbound_compact_summary":
       return <EnvelopeContent payload={item.payload} images={item.images} markdown />;
     case "inbound_compact_request":
-      return <EnvelopeContent payload={item.payload} images={item.images} />;
+      return <EnvelopeContent payload={item.payload} images={item.images} markdown />;
 
     case "attach":
       return (
@@ -415,7 +414,13 @@ export const ItemView = memo(function ItemView({
               item.interrupted && "border-b border-dashed border-amber-500/60 pb-1",
             )}
           >
-            <PythonCode code={streamingPayload} streaming={streaming} />
+            {item.source && item.source !== "execute_code" ? (
+              <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0 text-foreground/90">
+                {streamingPayload}
+              </pre>
+            ) : (
+              <PythonCode code={streamingPayload} streaming={streaming} />
+            )}
           </div>
           {item.interrupted ? <InterruptedNotice /> : null}
         </>
@@ -456,12 +461,10 @@ export const ItemView = memo(function ItemView({
       return <EnvelopeContent payload={item.payload} showCopy />;
 
     case "system_prompt":
-      // The agent's system prompt (state.messages[0]) — thousands of lines, so it
-      // stays collapsed by default. Body-only monospace dump.
       return (
-        <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed text-muted-foreground/90 m-0">
-          {item.payload}
-        </pre>
+        <div className="text-[12px] leading-relaxed text-muted-foreground/90">
+          <ChatMarkdown content={item.payload} />
+        </div>
       );
 
     case "system_marker": {
@@ -471,7 +474,7 @@ export const ItemView = memo(function ItemView({
       if (cls.kind === "ephemeral") {
         return <EphemeralSystemMarker source={item.source} payload={item.payload} />;
       }
-      return <MarkerBody payload={item.payload} markdown={cls.kind === "memory"} />;
+      return <MarkerBody payload={item.payload} markdown />;
     }
   }
 

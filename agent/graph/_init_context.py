@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -18,13 +18,95 @@ from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.impersonation.notes import HandoffNotes
 from base.api_contracts.agent_contract import Harness
+from base.lm.harness.handoff import ClusterFact, Handoff
+from base.lm.harness.wiring import HANDOFF_INSTRUCTION, handoff_for
 from base.log import logger
+from base.paths import workspace_dir
 
 from .claim import route_target
 from .node_log import node_lifecycle
-from .prompt.capabilities import indexed_skill_identifiers
-from .prompt.context_notes import context_notes
-from .prompt.system_prompt import build_system_prompt
+from .prompt.capabilities import disabled_by_sdk_config, indexed_skill_identifiers
+from .prompt.context_notes import (
+    context_notes,
+    machine_clause,
+    own_label,
+)
+from .prompt.system_prompt import build_harness_system_prompt, build_system_prompt
+
+
+def _cluster_facts(ctx: MeivaContext) -> tuple[ClusterFact, ...]:
+    if ctx.ops_pool is None or ctx.identity is None:
+        machine = machine_clause(ctx)
+        return (ClusterFact(machine, "agent-runner"),) if machine else ()
+    try:
+        with ctx.sql.cursor() as cur:
+            cur.execute(
+                "SELECT name, role, description FROM machines WHERE paused_at IS NULL ORDER BY name"
+            )
+            rows = cur.fetchall()
+    except Exception:
+        logger.opt(exception=True).warning(
+            "Failed to query machines table for handoff cluster facts; using local machine clause"
+        )
+        machine = machine_clause(ctx)
+        return (ClusterFact(machine, "agent-runner"),) if machine else ()
+    facts: list[ClusterFact] = []
+    for name, role, description in rows:
+        if isinstance(role, list):
+            role_str = ", ".join(str(r) for r in cast(list[object], role)) or "host"
+        else:
+            role_str = str(role or "host")
+        desc = f"{role_str} ({description})" if description else role_str
+        facts.append(ClusterFact(str(name), desc))
+    return tuple(facts)
+
+
+def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
+    slices = ctx.require_agent()
+    catalog = ctx.require_catalog()
+    extensions = ctx.plugin_registry()
+    prompt_body = build_harness_system_prompt(
+        extensions,
+        slices,
+        agent_id=agent_id,
+        catalog=catalog,
+    )
+    instruction_parts = [p for p in (prompt_body, HANDOFF_INSTRUCTION) if p]
+    instruction = "\n\n".join(instruction_parts)
+    label = (
+        own_label(ctx, agent_id) if ctx.ops_pool is not None and ctx.identity is not None else None
+    )
+    cluster = _cluster_facts(ctx)
+    handoff = handoff_for(
+        ctx.harness,
+        agent_id=agent_id,
+        machine=machine_clause(ctx) or "",
+        workspace=workspace_dir(agent_id),
+        instruction=instruction,
+        label=label,
+        cluster=cluster,
+        contributions=tuple(hc for _, hc in extensions.harness_contributions(ctx.harness)),
+    )
+    filtered_entries = tuple(
+        entry
+        for entry in handoff.entries
+        if entry.name == "meiva"
+        or not disabled_by_sdk_config(
+            entry.name.removeprefix("meiva."),
+            slices.prompt.sdk_disable,
+        )
+    )
+    return Handoff(
+        agent_id=handoff.agent_id,
+        instruction=handoff.instruction,
+        machine=handoff.machine,
+        workspace=handoff.workspace,
+        label=handoff.label,
+        cluster=handoff.cluster,
+        entries=filtered_entries,
+        overlaps=handoff.overlaps,
+        discipline=handoff.discipline,
+    )
 
 
 # meiva:link agent/graph/docs/context-notes/context-notes.meiva.okf.md
@@ -71,17 +153,6 @@ async def init_context_node(
                 )
             return Command[NodeName](goto=route_target(runtime.context, reset.resume))
 
-        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-        if runtime.context.harness is not Harness.MEIVA:
-            return Command[NodeName](
-                update={
-                    "messages": list(reset.tail),
-                    "harness_cursor": 0,
-                    "context_reset": ContextReset(),
-                },
-                goto=route_target(runtime.context, reset.resume),
-            )
-
         # Container mode (eval harness): no ops_pool, so no inbound queue, no
         # workspace, and nothing the notes describe. The head is the system
         # prompt alone, keeping an eval's context deterministic. Same signal
@@ -117,6 +188,24 @@ async def init_context_node(
         # order would mark it known and drop it silently until the next
         # compaction.
         indexed = indexed_skill_identifiers(runtime.context.require_agent().prompt)
+
+        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+        if runtime.context.harness is not Harness.MEIVA:
+            agent_id = agent_id_from_config(config)
+            handoff = _build_grounded_handoff(runtime.context, agent_id=agent_id)
+            set_handoff = getattr(runtime.context.harness_bridge, "set_handoff", None)
+            if callable(set_handoff):
+                set_handoff(handoff)
+            return Command[NodeName](
+                update={
+                    "messages": [SystemMessage(content=handoff.render()), *notes, *reset.tail],
+                    "capabilities": CapabilitiesState(indexed=indexed),
+                    "harness_cursor": 0,
+                    "context_reset": ContextReset(),
+                },
+                goto=route_target(runtime.context, reset.resume),
+            )
+
         head: list[BaseMessage] = [
             SystemMessage(
                 content=build_system_prompt(

@@ -1,7 +1,12 @@
 import pytest
 
 
-def _agents_meta_row(liveness_state: str | None) -> tuple[object, ...]:
+def _agents_meta_row(
+    liveness_state: str | None,
+    *,
+    harness: str = "meiva",
+    observed_model: str | None = None,
+) -> tuple[object, ...]:
     config_overlay, machine, status = {}, "machine", "idling"
     last_active_at = last_heartbeat_at = spawned_at = paused_until = None
     last_probe_at = machine_probe_at = None
@@ -16,6 +21,8 @@ def _agents_meta_row(liveness_state: str | None) -> tuple[object, ...]:
         liveness_state,
         last_probe_at,
         machine_probe_at,
+        harness,
+        observed_model,
     )
 
 
@@ -44,3 +51,18 @@ def test_inspector_rejects_missing_or_unknown_liveness(state: str | None) -> Non
     cur.fetchone.side_effect = [_agents_meta_row(state), (False,)]
     with pytest.raises(ValueError):
         db_rows_blocking(pool, 1)
+
+
+def test_inspector_populates_observed_model_for_external_harness() -> None:
+    from unittest.mock import MagicMock
+
+    from gateway.inspect._live import db_rows_blocking
+
+    pool = MagicMock()
+    cur = pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+    cur.fetchone.side_effect = [
+        _agents_meta_row("online", harness="codex", observed_model="gpt-5.4"),
+        (False,),
+    ]
+    result = db_rows_blocking(pool, 1)
+    assert result.config_overlay["llm_model"] == "gpt-5.4"

@@ -34,7 +34,9 @@ def handoff(tmp_path: Path) -> Handoff:
     return Handoff(agent_id=7, instruction="Acknowledge only.", machine="test", workspace=tmp_path)
 
 
-async def test_claude_cancel_during_handoff_does_not_start_the_user_turn(tmp_path: Path) -> None:
+async def test_claude_cancel_during_first_turn_co_delivers_handoff_and_disconnects(
+    tmp_path: Path,
+) -> None:
     sdk = FakeSDK([[Block()], [Say("should not run")]])
     session = ClaudeSession(BridgeConfig(cwd=tmp_path), environ={}, sdk=sdk, probe=ScriptedProbe())
     bridge = HarnessBridge(
@@ -52,7 +54,7 @@ async def test_claude_cancel_during_handoff_does_not_start_the_user_turn(tmp_pat
         await bridge.interrupt()
         await asyncio.sleep(0)
         await asyncio.sleep(0)
-        assert sdk.clients[0].queries == [handoff(tmp_path).render().strip()]
+        assert sdk.clients[0].queries == [f"{handoff(tmp_path).render().strip()}\n\nuser work"]
         assert sdk.clients[0].disconnected
         assert session.pending_turns == ()
         assert bridge.session_id is None
@@ -62,7 +64,7 @@ async def test_claude_cancel_during_handoff_does_not_start_the_user_turn(tmp_pat
         await bridge.close()
 
 
-async def test_codex_cancel_during_handoff_does_not_start_the_user_turn(tmp_path: Path) -> None:
+async def test_codex_cancel_during_first_turn_closes_transport(tmp_path: Path) -> None:
     server = FakeAppServer(pid=None)
     session = CodexSession(CodexConfig(cwd=tmp_path), environ={}, transport=server)
     bridge = HarnessBridge(
@@ -90,7 +92,7 @@ async def test_codex_cancel_during_handoff_does_not_start_the_user_turn(tmp_path
         await bridge.close()
 
 
-async def test_failed_handoff_never_submits_user_work(tmp_path: Path) -> None:
+async def test_failed_first_turn_retires_the_session(tmp_path: Path) -> None:
     sdk = FakeSDK(
         [
             [Emit(ResultMessage(is_error=True, subtype="error_during_execution"))],
@@ -106,9 +108,9 @@ async def test_failed_handoff_never_submits_user_work(tmp_path: Path) -> None:
         registration_ttl_seconds=3600,
     )
     try:
-        with pytest.raises(HarnessTurnFaultedError, match="handoff"):
+        with pytest.raises(HarnessTurnFaultedError, match="failed"):
             await asyncio.wait_for(bridge.run_turn("user work", key="inbound-1"), timeout=2)
-        assert sdk.clients[0].queries == [handoff(tmp_path).render().strip()]
+        assert sdk.clients[0].queries == [f"{handoff(tmp_path).render().strip()}\n\nuser work"]
         assert sdk.clients[0].disconnected
     finally:
         await bridge.close()

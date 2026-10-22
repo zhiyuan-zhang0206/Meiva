@@ -11,9 +11,15 @@ from base.api_contracts.agent_contract import Harness
 from base.lm.harness.engine import HarnessSession, HarnessTurn
 from base.lm.harness.events import (
     AssistantText,
+    BridgeEvent,
+    ReasoningDelta,
+    ReasoningText,
     SessionClosed,
     SessionFaulted,
     SessionStarted,
+    TextDelta,
+    ToolResult,
+    ToolUse,
     TurnCompleted,
 )
 from base.lm.harness.handoff import Handoff
@@ -75,9 +81,8 @@ class HarnessBridge:
     # first turn and resumed by the adapter from the registry, and it is the only
     # consumer of that session's event stream: the graph runs one turn at a time per
     # agent, so a second reader would split the stream rather than add one.
-    # A fresh session finishes its handoff before user work is submitted, so cancelling
-    # the handoff cannot promote an already queued user task. Its completion stays a
-    # separate prelude with its own usage.
+    # On a fresh session, the handoff document is co-delivered in the first turn's
+    # submission rather than run as a separate prelude turn.
     # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
     def __init__(
         self,
@@ -101,7 +106,6 @@ class HarnessBridge:
         self._registration_ttl = timedelta(seconds=registration_ttl_seconds)
         self._created_at: str | None = None
         self._session: HarnessSession | None = None
-        self._handoff_turn_id: str | None = None
         self._model: str | None = None
         self._digest: str | None = None
         self._closed = False
@@ -114,6 +118,9 @@ class HarnessBridge:
     @property
     def handoff(self) -> Handoff | None:
         return self._handoff
+
+    def set_handoff(self, handoff: Handoff) -> None:
+        self._handoff = handoff
 
     @property
     def session_id(self) -> str | None:
@@ -133,17 +140,20 @@ class HarnessBridge:
         self._register("")
         session = self._factory(handle)
         try:
-            await session.start(handoff=self._handoff)
+            await session.start()
         except BaseException:
             await self._retire(session, "session start failed")
             raise
-        self._handoff = None
         self._session = session
-        opening = session.handoff_ticket
-        self._handoff_turn_id = None if opening is None else str(opening.turn_id)
         return session
 
-    async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
+    async def run_turn(
+        self,
+        text: str,
+        *,
+        key: str,
+        on_event: Callable[[BridgeEvent], None] | None = None,
+    ) -> HarnessTurn:
         try:
             session = await self.ensure()
         except HarnessClosedError:
@@ -151,29 +161,22 @@ class HarnessBridge:
         except Exception as exc:
             raise HarnessSetupError(f"{self.harness.value} session could not start: {exc}") from exc
         self._register(session.session_id or "")
+        handoff, self._handoff = self._handoff, None
+        if handoff is not None and not getattr(session, "resumed", False):
+            rendered = handoff.render().strip()
+            if not text.startswith(rendered):
+                text = f"{rendered}\n\n{text}" if text else rendered
         try:
-            prelude = await self._await_handoff(session)
             try:
                 ticket: Any = session.submit(text, key=key)
             except Exception as exc:
                 raise HarnessSetupError(f"{self.harness.value} refused the turn: {exc}") from exc
             if ticket.deduplicated and ticket.settled:
-                turn = replace(_completed(await ticket.outcome(), ""), replayed=True)
-            else:
-                turn = await self._await_turn(session, str(ticket.turn_id))
-            return replace(turn, prelude=prelude)
+                return replace(_completed(await ticket.outcome(), ""), replayed=True)
+            return await self._await_turn(session, str(ticket.turn_id), on_event=on_event)
         except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError):
             await self._retire(session, reason="turn faulted")
             raise
-
-    async def _await_handoff(self, session: HarnessSession) -> tuple[HarnessTurn, ...]:
-        if self._handoff_turn_id is None:
-            return ()
-        opening = await self._await_turn(session, self._handoff_turn_id)
-        self._handoff_turn_id = None
-        if opening.is_error or opening.interrupted:
-            raise HarnessTurnFaultedError(f"{self.harness.value} handoff did not complete")
-        return (opening,)
 
     async def interrupt(self) -> Any:
         session = self._session
@@ -206,7 +209,6 @@ class HarnessBridge:
     async def _retire(self, session: HarnessSession, reason: str) -> None:
         if self._session is session:
             self._session = None
-            self._handoff_turn_id = None
             self._created_at = None
         self._retire_registration()
         try:
@@ -246,25 +248,59 @@ class HarnessBridge:
         if self._registrations is not None:
             self._registrations.delete(self._agent_id)
 
-    async def _await_turn(self, session: HarnessSession, turn_id: str) -> HarnessTurn:
+    async def _await_turn(
+        self,
+        session: HarnessSession,
+        turn_id: str,
+        *,
+        on_event: Callable[[BridgeEvent], None] | None = None,
+    ) -> HarnessTurn:
         streamed: dict[str, list[str]] = {}
         async for event in session.events():
-            if isinstance(event, SessionStarted):
-                self._model = event.model
-                self._register(event.session_id)
-            elif isinstance(event, TurnCompleted):
-                if event.turn_id == turn_id:
-                    return _completed(event, "".join(streamed.get(event.turn_id, [])))
-            elif isinstance(event, AssistantText):
-                streamed.setdefault(event.turn_id, []).append(event.text)
-            elif isinstance(event, SessionFaulted):
-                if event.turn_id is None or event.turn_id == turn_id:
-                    raise HarnessTurnFaultedError(event.error)
-            elif isinstance(event, SessionClosed):
-                raise HarnessClosedError(
-                    f"harness session closed before turn {turn_id} completed: {event.reason}"
-                )
+            done = self._consume_event(event, turn_id, streamed, on_event=on_event)
+            if done is not None:
+                if done.is_error:
+                    raise HarnessTurnFaultedError(
+                        f"{self.harness.value} turn {done.turn_id} failed ({done.subtype})"
+                    )
+                return done
         raise HarnessClosedError(f"harness event stream ended before turn {turn_id} completed")
+
+    def _consume_event(
+        self,
+        event: BridgeEvent,
+        turn_id: str,
+        streamed: dict[str, list[str]],
+        *,
+        on_event: Callable[[BridgeEvent], None] | None = None,
+    ) -> HarnessTurn | None:
+        if isinstance(event, SessionStarted):
+            self._model = event.model
+            self._register(event.session_id)
+            return None
+        if isinstance(event, TurnCompleted):
+            if event.turn_id == turn_id:
+                return _completed(event, "".join(streamed.get(event.turn_id, [])))
+            return None
+        if isinstance(event, AssistantText):
+            streamed.setdefault(event.turn_id, []).append(event.text)
+        if (
+            isinstance(
+                event,
+                (AssistantText, ReasoningDelta, ReasoningText, TextDelta, ToolUse, ToolResult),
+            )
+            and event.turn_id == turn_id
+            and on_event is not None
+        ):
+            on_event(event)
+            return None
+        if isinstance(event, SessionFaulted) and event.turn_id in {None, turn_id}:
+            raise HarnessTurnFaultedError(event.error)
+        if isinstance(event, SessionClosed):
+            raise HarnessClosedError(
+                f"harness session closed before turn {turn_id} completed: {event.reason}"
+            )
+        return None
 
 
 def _completed(event: Any, streamed: str) -> HarnessTurn:
@@ -276,4 +312,6 @@ def _completed(event: Any, streamed: str) -> HarnessTurn:
         subtype=event.subtype,
         is_error=event.is_error,
         interrupted=event.interrupted,
+        num_turns=max(int(getattr(event, "num_turns", 1) or 1), 1),
+        steps=tuple(getattr(event, "steps", ()) or ()),
     )

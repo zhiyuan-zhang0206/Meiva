@@ -12,17 +12,39 @@ the window spend over the panel range.
 from __future__ import annotations
 
 from base.events.contract import LLM_USAGE_KEYS
-from base.telemetry.metrics.logql import EVENT_NAME_SELECTOR
+from base.telemetry.metrics.logql import (
+    EVENT_NAME_SELECTOR,
+    HARNESS_ORDER,
+    SUBSCRIPTION_HARNESS_RE,
+    harness_source_filter,
+)
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
 _LLM_ATTR = {k: f"attributes_{k}" for k in LLM_USAGE_KEYS}
+_COST_HARNESS_LABELS = [
+    "meiva (actual API)",
+    *(f"{h} (virtual)" for h in HARNESS_ORDER[1:]),
+]
+_STAT_COST_LABELS = [
+    "actual (API)",
+    "virtual (sub total)",
+    *(f"{h} (virtual)" for h in HARNESS_ORDER[1:]),
+]
 
 
-def _llm_cost(window: str) -> str:
-    """Usage-time LLM cost snapshots over one Grafana/Loki range vector."""
+def _llm_harness_cost(window: str, harness: str) -> str:
+    filt = harness_source_filter(_LLM_ATTR["source"], harness)
     return (
         f"sum(sum_over_time({EVENT_NAME_SELECTOR} | json | "
-        f"category={{category}} | "
+        f"category={{category}} | {filt} | "
+        f"unwrap {_LLM_ATTR['cost_usd']} [{window}]))"
+    )
+
+
+def _llm_virtual_sub_cost(window: str) -> str:
+    return (
+        f"sum(sum_over_time({EVENT_NAME_SELECTOR} | json | "
+        f'category={{category}} | {_LLM_ATTR["source"]}=~"{SUBSCRIPTION_HARNESS_RE}" | '
         f"unwrap {_LLM_ATTR['cost_usd']} [{window}]))"
     )
 
@@ -41,9 +63,13 @@ def core_metrics() -> list[MetricSpec]:
             panel="stat",
             # cost_usd rides in every llm_usage payload (task #2626) — unwrap it
             # instead of mirroring MODEL_PRICING into SQL (405 ruling, 2026-08-14).
-            query=_llm_cost("$__range"),
+            query=_llm_harness_cost("$__range", HARNESS_ORDER[0]),
+            targets=[
+                _llm_virtual_sub_cost("$__range"),
+                *(_llm_harness_cost("$__range", h) for h in HARNESS_ORDER[1:]),
+            ],
             query_type="logql",
-            target_names=["llm cost"],
+            target_names=_STAT_COST_LABELS,
             field_defaults={"decimals": 2},
             width=8,
             height=4,
@@ -59,16 +85,24 @@ def core_metrics() -> list[MetricSpec]:
             title="LLM cost estimate — day pace",
             description=(
                 "Projected full-day LLM spend from usage-time cost snapshots over the "
-                "dashboard time window. Formula: window spend × 86,400 / elapsed "
-                "seconds in the panel range."
+                "dashboard time window, separated into actual API spend (meiva) and "
+                "virtual subscription cost (claude_code, codex, antigravity). "
+                "Formula: window spend × 86,400 / elapsed seconds in the panel range."
             ),
             event_name="llm_usage",
             category="telemetry",
             unit="currencyUSD",
             panel="stat",
-            query=f"({_llm_cost('$__range')}) * 86400 / $__range_s",
+            query=f"({_llm_harness_cost('$__range', HARNESS_ORDER[0])}) * 86400 / $__range_s",
+            targets=[
+                f"({_llm_virtual_sub_cost('$__range')}) * 86400 / $__range_s",
+                *(
+                    f"({_llm_harness_cost('$__range', h)}) * 86400 / $__range_s"
+                    for h in HARNESS_ORDER[1:]
+                ),
+            ],
             query_type="logql",
-            target_names=["today est."],
+            target_names=_STAT_COST_LABELS,
             field_defaults={"decimals": 2},
             width=8,
             height=4,
@@ -84,16 +118,24 @@ def core_metrics() -> list[MetricSpec]:
             title="LLM cost estimate — 30-day pace",
             description=(
                 "Projected 30-day LLM spend from usage-time cost snapshots over the "
-                "dashboard time window. Formula: window spend × 2,592,000 / elapsed "
-                "seconds in the panel range."
+                "dashboard time window, separated into actual API spend (meiva) and "
+                "virtual subscription cost (claude_code, codex, antigravity). "
+                "Formula: window spend × 2,592,000 / elapsed seconds in the panel range."
             ),
             event_name="llm_usage",
             category="telemetry",
             unit="currencyUSD",
             panel="stat",
-            query=f"({_llm_cost('$__range')}) * 2592000 / $__range_s",
+            query=f"({_llm_harness_cost('$__range', HARNESS_ORDER[0])}) * 2592000 / $__range_s",
+            targets=[
+                f"({_llm_virtual_sub_cost('$__range')}) * 2592000 / $__range_s",
+                *(
+                    f"({_llm_harness_cost('$__range', h)}) * 2592000 / $__range_s"
+                    for h in HARNESS_ORDER[1:]
+                ),
+            ],
             query_type="logql",
-            target_names=["month est."],
+            target_names=_STAT_COST_LABELS,
             field_defaults={"decimals": 2},
             width=16,
             height=4,
@@ -110,15 +152,21 @@ def core_metrics() -> list[MetricSpec]:
             description=(
                 "Usage-time LLM cost snapshots grouped into $__interval buckets, "
                 "normalized to a per-minute USD rate (bucket sum / interval "
-                "seconds * 60)."
+                "seconds * 60), separated into actual API cost (meiva) and "
+                "virtual subscription cost per external harness."
             ),
             event_name="llm_usage",
             category="telemetry",
             unit="currencyUSD",
             panel="barchart",
-            query=_llm_cost("$__interval") + " / ($__interval_ms / 60000)",
+            query=_llm_harness_cost("$__interval", HARNESS_ORDER[0])
+            + " / ($__interval_ms / 60000)",
+            targets=[
+                _llm_harness_cost("$__interval", h) + " / ($__interval_ms / 60000)"
+                for h in HARNESS_ORDER[1:]
+            ],
             query_type="logql",
-            target_names=["cost usd"],
+            target_names=_COST_HARNESS_LABELS,
             thresholds=[],
             options={"tooltip": {"mode": "single", "sort": "none"}},
             panel_id=41,

@@ -23,6 +23,7 @@ from typing import Any, LiteralString, NamedTuple, cast
 
 import psycopg
 
+from base.api_contracts.agent_contract import HARNESS_BILLING, HarnessBilling
 from base.events.contract import (
     AGENT_SPAWNED_KEYS,
     CODE_KEYS,
@@ -215,16 +216,28 @@ def _llm_cache_input(scope: _Scope, conn: psycopg.Connection[Any]) -> dict[int |
     return {int(a) if a is not None else None: int(i) for a, i in rows}
 
 
+SUBSCRIPTION_LLM_SOURCES = tuple(
+    sorted(h.value for h, b in HARNESS_BILLING.items() if b is HarnessBilling.SUBSCRIPTION)
+)
+_SUBSCRIPTION_SOURCES_SQL = ", ".join(repr(s) for s in SUBSCRIPTION_LLM_SOURCES)
+
+
 def _llm_cost_sums(
     scope: _Scope, conn: psycopg.Connection[Any]
 ) -> dict[int | None, dict[str, LlmCostSums]]:
     """Recorded costs and explicitly unpriced calls per agent and model."""
     cost = _n(LLM_USAGE_KEYS["cost_usd"])
     unpriced = _n(LLM_USAGE_KEYS["unpriced"], "integer")
+    cost_expr = (
+        f"COALESCE(sum({cost}) FILTER (WHERE COALESCE({LLM_USAGE_KEYS['source']}, '') "
+        f"NOT IN ({_SUBSCRIPTION_SOURCES_SQL})), 0)"
+        if scope.params["agent"] is None
+        else f"COALESCE(sum({cost}), 0)"
+    )
     sums = scope.run(
         conn,
         f"t.agent_id, COALESCE({LLM_USAGE_KEYS['model']}, ''), "
-        f"COALESCE(sum({cost}), 0), "
+        f"{cost_expr}, "
         f"count(*) FILTER (WHERE {cost} IS NULL AND {unpriced} = 1)",
         "t.event_name = 'llm_usage'",
         "GROUP BY t.agent_id, 2",

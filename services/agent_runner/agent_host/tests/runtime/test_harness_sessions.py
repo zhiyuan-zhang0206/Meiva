@@ -22,7 +22,7 @@ class ClosingEngine:
         self.cancelled = False
         self.closed = False
 
-    async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
+    async def run_turn(self, text: str, *, key: str, on_event: object = None) -> HarnessTurn:
         raise AssertionError("retirement must not run another turn")
 
     async def interrupt(self) -> object:

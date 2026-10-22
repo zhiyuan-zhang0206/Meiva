@@ -37,7 +37,12 @@ from base.cluster.machine import MachineIdentity
 from base.config.agent_pins import resolve_agent_config_pins
 from base.host.env.agent_slices import PluginConfigView
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
-from meiva.boot import boot_external_process, initialize_context, plugin_state_codec
+from meiva.boot import (
+    bind_launched_context,
+    boot_external_process,
+    initialize_context,
+    plugin_state_codec,
+)
 from meiva.sdk_surface import process_context
 from meiva.self.harness.registration import (
     HarnessRegistration,
@@ -94,9 +99,16 @@ class ProcessProbe:
     in_exec_turn: Callable[[], bool]
 
 
+def _prior_process_context() -> MeivaContext | None:
+    bound = process_context.bound_context()
+    if bound is not None or process_context.is_host_process():
+        return bound
+    return bind_launched_context()
+
+
 PROCESS_PROBE = ProcessProbe(
     is_host=process_context.is_host_process,
-    ambient=process_context.ambient_context,
+    ambient=_prior_process_context,
     in_exec_turn=process_context.in_exec_turn,
 )
 

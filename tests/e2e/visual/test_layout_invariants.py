@@ -489,7 +489,7 @@ def test_pinned_work_detail_seal(
         header = page.locator(header_selector)
         if header.get_attribute("aria-expanded") == "false":
             header.click()
-        row.locator("pre").evaluate("el => { el.style.minHeight = '1200px'; }")
+        row.locator("div").first.evaluate("el => { el.style.minHeight = '1200px'; }")
         row.evaluate("""el => {
           const viewport = el.closest('[data-radix-scroll-area-viewport]');
           viewport.scrollTop += el.getBoundingClientRect().top

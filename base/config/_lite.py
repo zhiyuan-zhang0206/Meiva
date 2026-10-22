@@ -407,6 +407,11 @@ class ConfigBoot:
                 if self.environment is not None:
                     return
                 raise RuntimeError("configuration owner was already prepared")
+            if os.environ.get("MEIVA_HARNESS_HANDLE"):
+                for key in [k for k, v in os.environ.items() if k.startswith("MEIVA_") and v == ""]:
+                    os.environ.pop(key, None)
+                if not os.environ.get("MEIVA_DB_URL"):
+                    load_meiva_env()
             environment = dict(os.environ)
             profile = environment.get(MEIVA_PROCESS_PROFILE_ENV)
             if profile is not None and profile not in PROCESS_PROFILES:
@@ -669,6 +674,9 @@ class ConfigBoot:
         exactly the fault it exists to repair (#3621 / 405 ruling). A caller that
         needs the eager chain regardless, such as the test session, calls
         `ensure_eager()` instead of relying on the flag."""
+        if os.environ.get("MEIVA_HARNESS_HANDLE"):
+            for key in [k for k, v in os.environ.items() if k.startswith("MEIVA_") and v == ""]:
+                os.environ.pop(key, None)
         mode = os.environ.get(BOOT_MODE_ENV)
         if mode is not None and mode != BOOT_MODE_EAGER:
             raise ValueError(

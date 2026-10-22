@@ -29,6 +29,18 @@ class HandoffInjected:
 
 
 @dataclass(frozen=True, slots=True)
+class ReasoningDelta:
+    turn_id: str
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReasoningText:
+    turn_id: str
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
 class TextDelta:
     turn_id: str
     text: str
@@ -81,6 +93,16 @@ class Usage:
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
 
+    def __add__(self, other: Usage) -> Usage:
+        return Usage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            cache_creation_input_tokens=(
+                self.cache_creation_input_tokens + other.cache_creation_input_tokens
+            ),
+            cache_read_input_tokens=self.cache_read_input_tokens + other.cache_read_input_tokens,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class TurnCompleted:
@@ -97,6 +119,7 @@ class TurnCompleted:
     cost_usd: float | None
     cumulative_cost_usd: float | None
     permission_denials: tuple[str, ...]
+    steps: tuple[Usage, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +138,8 @@ BridgeEvent = (
     SessionStarted
     | SessionBound
     | HandoffInjected
+    | ReasoningDelta
+    | ReasoningText
     | TextDelta
     | AssistantText
     | ToolUse
@@ -127,9 +152,9 @@ BridgeEvent = (
 
 
 # meiva:note
-# `TextDelta` alone is droppable: a consumer that falls behind may skip text, but
-# never a turn boundary, a tool result or a session binding, because losing one of
-# those loses structure rather than detail.
+# `TextDelta` and `ReasoningDelta` alone are droppable: a consumer that falls behind
+# may skip incremental stream deltas, but never a turn boundary, a tool result or a
+# session binding, because losing one of those loses structure rather than detail.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 def is_droppable(event: object) -> bool:
-    return isinstance(event, TextDelta)
+    return isinstance(event, (TextDelta, ReasoningDelta))

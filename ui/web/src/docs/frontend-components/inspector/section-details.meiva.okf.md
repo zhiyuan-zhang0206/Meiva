@@ -29,7 +29,9 @@ price snapshot exist — those contribute 0 and are surfaced rather than hidden,
 never silently partial; LLM calls; tokens in / out combined; cache-hit percent
 (`N/A` when unmetered). Activity: TPS (the LLM stage's), then the absolute
 durations the header window covers — LLM output, code execution, and idle
-(`alive − active`). Without life (`alive_seconds = 0`) the three duration cells
+(`alive − active`). For external harnesses (`harness !== "meiva"`), TPS, LLM
+output, and code execution are omitted because those belong to the native
+`execute_code` loop. Without life (`alive_seconds = 0`) the duration cells
 show em dashes while TPS stays visible. Durations use the shared tiering —
 `45s` / `15m` / `1h` / `1h 30m` / `24d 3h` (day tier past 24h) — and TPS renders
 one decimal, `0` → em dash. Token counts roll `≥1000M` to `B` and past `1000B` to

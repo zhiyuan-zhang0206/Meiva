@@ -9,7 +9,7 @@ tags: [contracts]
 
 ## Query measurement scope
 
-The pack is admitted by the core metric catalog under plugin `core`, using the same query validation as plugin metrics. LogQL selectors match indexed event names and agent identities; JSON decoding supplies flattened `attributes_*` fields. Selector regexes are full-string matches, unlike substring line filters. The execution envelope measures transfer activity, not an outcome; counting it as an unknown failure would dominate the outcome graph. Multi-series targets need explicit legend names because aggregate queries carry no identifying labels. Historical production row counts are not current contracts.
+The pack is admitted by the core metric catalog under plugin `core`, using the same query validation as plugin metrics. LogQL selectors match indexed event names and agent identities; JSON decoding supplies flattened `attributes_*` fields. Selector regexes are full-string matches, unlike substring line filters. The execution envelope measures transfer activity, not an outcome; counting it as an unknown failure would dominate the outcome graph. Multi-series targets need explicit legend names because aggregate queries carry no identifying labels. Cache-hit and token panels split `llm_usage` series by harness (`attributes_source` in `meiva`, `claude_code`, `codex`, `antigravity`, with empty `attributes_source` attributed to `meiva`), and cost panels separate actual API spend (`meiva`) from virtual subscription reference cost (`claude_code`, `codex`, `antigravity`). Historical production row counts are not current contracts.
 
 ## Compaction effectiveness denominator
 

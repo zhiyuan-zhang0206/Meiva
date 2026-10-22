@@ -133,7 +133,7 @@ class FakeEngine:
         self.closed = False
         self.reason: str | None = None
 
-    async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
+    async def run_turn(self, text: str, *, key: str, on_event: object = None) -> HarnessTurn:
         raise AssertionError("these tests never run a turn")
 
     async def interrupt(self) -> object:

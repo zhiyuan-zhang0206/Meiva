@@ -8,10 +8,12 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
+from base.api_contracts.agent_contract import Harness
 from base.api_contracts.metric_spec import MetricSpec
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import DecisionProviderContribution, ProviderContribution
+from base.lm.harness.handoff import HarnessContribution
 from base.packages.plugins.contributions import Contribution
 from base.packages.plugins.surface.inspector import InspectWidgetSpec
 
@@ -90,6 +92,7 @@ class PluginContributions:
     sdk_wraps: tuple[SdkWrap, ...] = ()
     skill_sources: tuple[Callable[[], list[Path]], ...] = ()
     sdk_expansions: tuple[str, ...] = ()
+    harness_contributions: tuple[HarnessContribution, ...] = ()
     config: type[BaseModel] | None = None
     flags: tuple[str, ...] = ()
 
@@ -248,6 +251,14 @@ class ExtensionRegistry:
     def inspect_widgets(self) -> Iterator[InspectWidgetSpec]:
         for _plugin, contributions in self.plugins:
             yield from contributions.inspect_widgets
+
+    def harness_contributions(
+        self, harness: Harness | None = None
+    ) -> Iterator[tuple[str, HarnessContribution]]:
+        for plugin, contributions in self.plugins:
+            for hc in contributions.harness_contributions:
+                if harness is None or harness in hc.harnesses:
+                    yield plugin, hc
 
     def records(self, plugin: str) -> tuple[Contribution, ...]:
         return tuple(r for name, c in self.plugins if name == plugin for r in c.as_records(plugin))

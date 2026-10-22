@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -26,6 +26,8 @@ class HarnessTurn:
     subtype: str
     is_error: bool
     interrupted: bool
+    num_turns: int = 1
+    steps: tuple[Usage, ...] = ()
     prelude: tuple[HarnessTurn, ...] = ()
     replayed: bool = False
 
@@ -60,6 +62,12 @@ class TurnEngine(Protocol):
     @property
     def model(self) -> str | None: ...
 
-    async def run_turn(self, text: str, *, key: str) -> HarnessTurn: ...
+    async def run_turn(
+        self,
+        text: str,
+        *,
+        key: str,
+        on_event: Callable[[BridgeEvent], None] | None = None,
+    ) -> HarnessTurn: ...
     async def interrupt(self) -> Any: ...
     async def close(self, *, reason: str = "closed") -> None: ...

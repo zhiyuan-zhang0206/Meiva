@@ -969,6 +969,21 @@ describe("InspectorPanel liveness identity rows", () => {
     expect(within(livenessSection!).getByText("claude-opus-4-8")).toBeTruthy();
   });
 
+  it("hides TPS, LM Output, and Code Execution in Activity for external harnesses", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "codex" }));
+    getAgentInspectLive.mockResolvedValue(liveFixture());
+    getAgentInspectStatistics.mockResolvedValue(fixture());
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Cost")).toBeTruthy());
+    const activitySection = screen.getByText("Activity").closest("section");
+    expect(within(activitySection!).getByText("Cost")).toBeTruthy();
+    expect(within(activitySection!).getByText("LLM calls")).toBeTruthy();
+    expect(within(activitySection!).getByText("Idle")).toBeTruthy();
+    expect(within(activitySection!).queryByText("TPS")).toBeNull();
+    expect(within(activitySection!).queryByText("LM output")).toBeNull();
+    expect(within(activitySection!).queryByText("Code execution")).toBeNull();
+  });
+
   it("falls back to an em dash when the roster has not loaded", async () => {
     getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
     getAgentInspectLive.mockResolvedValue(liveFixture({ config_overlay: { auto_compact_fraction: 0.7 } }));
