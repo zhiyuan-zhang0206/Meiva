@@ -21,7 +21,7 @@ ignore the rest.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import cast
 
 import yaml
 
@@ -92,7 +92,7 @@ def parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
         raise FrontmatterError(f"frontmatter must be key: value pairs, got {type(parsed).__name__}")
 
     fields: dict[str, str] = {}
-    for key, value in cast("dict[str, Any]", parsed).items():
+    for key, value in cast("dict[str, object]", parsed).items():
         key_str = str(key)
         if value is None:
             fields[key_str] = ""
@@ -106,7 +106,7 @@ def parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
     return fields, body
 
 
-def parse_frontmatter_typed(content: str) -> tuple[dict[str, Any], str] | None:
+def parse_frontmatter_typed(content: str) -> tuple[dict[str, object], str] | None:
     """Lenient, type-preserving frontmatter parser for note pools (memory/OKF).
 
     Shares the delimiter scan with `parse_frontmatter` (same normalization, same
@@ -127,4 +127,4 @@ def parse_frontmatter_typed(content: str) -> tuple[dict[str, Any], str] | None:
         return None
     if not isinstance(parsed, dict):
         return None
-    return cast("dict[str, Any]", parsed), body
+    return cast("dict[str, object]", parsed), body

@@ -18,3 +18,4 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 "config.py" = "strict"
 "errors.py" = "strict"
 "protocol.py" = "strict"
+"targets.py" = "strict"

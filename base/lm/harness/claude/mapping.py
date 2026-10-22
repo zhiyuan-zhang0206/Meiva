@@ -40,14 +40,14 @@ class ResultFields:
     permission_denials: tuple[str, ...]
 
 
-def map_message(message: Any, *, turn_id: str | None) -> list[BridgeEvent]:
+def map_message(message: object, *, turn_id: str | None) -> list[BridgeEvent]:
     handler = _HANDLERS.get(type(message).__name__)
     if handler is None:
         return []
     return handler(message, turn_id)
 
 
-def parse_result(message: Any) -> ResultFields:
+def parse_result(message: object) -> ResultFields:
     return ResultFields(
         session_id=_text(getattr(message, "session_id", None)),
         subtype=_text(getattr(message, "subtype", None)) or "unknown",

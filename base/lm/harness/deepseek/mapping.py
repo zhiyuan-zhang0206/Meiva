@@ -38,7 +38,7 @@ class PromptFields:
     interrupted: bool
 
 
-def map_update(update: Mapping[str, Any], *, turn_id: str) -> list[BridgeEvent]:
+def map_update(update: Mapping[str, object], *, turn_id: str) -> list[BridgeEvent]:
     kind = update.get("sessionUpdate")
     if kind == "agent_message_chunk":
         text = _text_of(update.get("content"))
@@ -55,7 +55,7 @@ def assistant_text(text: str, *, turn_id: str) -> AssistantText | None:
     return AssistantText(turn_id=turn_id, text=trimmed) if trimmed else None
 
 
-def parse_prompt_result(result: Mapping[str, Any]) -> PromptFields:
+def parse_prompt_result(result: Mapping[str, object]) -> PromptFields:
     raw = result.get("stopReason")
     stop_reason = raw if isinstance(raw, str) and raw else "unknown"
     return PromptFields(
@@ -79,7 +79,7 @@ _SUBTYPES = {
 }
 
 
-def _tool_use(update: Mapping[str, Any], *, turn_id: str) -> ToolUse:
+def _tool_use(update: Mapping[str, object], *, turn_id: str) -> ToolUse:
     raw_input = update.get("rawInput")
     return ToolUse(
         turn_id=turn_id,
@@ -89,7 +89,7 @@ def _tool_use(update: Mapping[str, Any], *, turn_id: str) -> ToolUse:
     )
 
 
-def _tool_result(update: Mapping[str, Any], *, turn_id: str) -> list[BridgeEvent]:
+def _tool_result(update: Mapping[str, object], *, turn_id: str) -> list[BridgeEvent]:
     status = str(update.get("status", ""))
     if status not in {"completed", "failed", "cancelled"}:
         return []

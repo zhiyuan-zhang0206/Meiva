@@ -1,13 +1,5 @@
+purity = "strict"
 exports = ["settings.py"]
 
 [uses]
 "settings.py" = ["health_ports_fields.py", "runtime.py"]
-
-[purity]
-"." = "strict-to-be"
-"__init__.py" = "strict"
-"runtime.py" = "strict"
-"settings.py" = "strict"
-
-[debt.untyped-export]
-"health_ports_fields.py#def health_port_field" = 1

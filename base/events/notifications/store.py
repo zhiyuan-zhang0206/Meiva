@@ -51,7 +51,7 @@ _SELECT_RECENT = (
 _SELECT_LATEST = "SELECT COALESCE(MAX(id), 0) FROM notification_events"
 
 
-def parse_overrides(value: Any) -> dict[str, bool]:
+def parse_overrides(value: object) -> dict[str, bool]:
     if value is None:
         return {}
     if not isinstance(value, dict):

@@ -1,4 +1,4 @@
-exports = ["audit.py", "catalog.py", "notices.py", "outbox.py", "policy.py", "publish.py", "store.py", "tests"]
+exports = ["audit.py", "catalog.py", "notices.py", "outbox.py", "policy.py", "publish.py", "store.py"]
 
 [uses]
 "audit.py" = ["catalog.py", "notices.py", "policy.py", "store.py"]
@@ -8,3 +8,7 @@ exports = ["audit.py", "catalog.py", "notices.py", "outbox.py", "policy.py", "pu
 "policy.py" = ["catalog.py"]
 "publish.py" = ["catalog.py", "policy.py", "store.py"]
 "tests" = ["audit.py", "catalog.py", "notices.py", "outbox.py", "policy.py", "publish.py"]
+
+[purity]
+"catalog.py" = "strict"
+"policy.py" = "strict"

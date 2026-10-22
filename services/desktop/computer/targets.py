@@ -110,7 +110,7 @@ class AppTarget:
         raise ComputerUseError("app target must contain exactly pid or bundle_id")
 
 
-def app_selector(value: Any) -> str | None:
+def app_selector(value: object) -> str | None:
     """Validate an optional exact display-name or bundle-ID selector."""
     if value is None:
         return None
