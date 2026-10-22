@@ -652,15 +652,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
                 if self._argv_transform is not None
                 else list(manifest.exec)
             )
-            proc = await launcher(
-                *argv,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=log_fd,
-                stderr=asyncio.subprocess.STDOUT,
-                env=env,
-                close_fds=True,
-                process_group=0,
-            )
+            proc = await self._launch(launcher, argv, manifest.exec, log_fd=log_fd, env=env)
         finally:
             os.close(log_fd)
         try:
@@ -702,6 +694,36 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             proc.pid,
             " ".join(manifest.exec),
         )
+
+    # meiva:note
+    # A rewrite the machine cannot honor must cost the unit one failed launch, never the
+    # unit itself: when the transformed argv fails to start, the manifest's own argv is
+    # tried once, unchanged. This is what makes the memory budget safe to enable on a
+    # host whose launcher merely looked available at assembly time.
+    async def _launch(
+        self,
+        launcher: ChildSpawn,
+        argv: Sequence[str],
+        plain: Sequence[str],
+        *,
+        log_fd: int,
+        env: Mapping[str, str],
+    ) -> asyncio.subprocess.Process:
+        options = {
+            "stdin": asyncio.subprocess.DEVNULL,
+            "stdout": log_fd,
+            "stderr": asyncio.subprocess.STDOUT,
+            "env": env,
+            "close_fds": True,
+            "process_group": 0,
+        }
+        try:
+            return await launcher(*argv, **options)
+        except OSError as exc:
+            if list(argv) == list(plain):
+                raise
+            _log.warning("rewritten launch failed (%s); starting the manifest argv unchanged", exc)
+            return await launcher(*plain, **options)
 
     async def _watch(self, runtime: UnitRuntime, generation: Generation) -> None:
         """Reap one direct child and make an unexpected exit eligible for replacement."""

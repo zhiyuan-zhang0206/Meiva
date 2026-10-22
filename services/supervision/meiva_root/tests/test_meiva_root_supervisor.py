@@ -311,7 +311,13 @@ async def test_a_configured_transform_rewrites_only_its_unit(tmp_path: Path) -> 
     owner.set_argv_transform(wrap)
     await owner.start()
     try:
-        assert seen == [("wrapped:worker", sys.executable, "-u", str(_CHILD), "sleep")]
+        # meiva:note
+        # The launcher refuses everything here, so the rewrite is followed by the
+        # unchanged fallback: the transform reached only the unit it named, twice.
+        assert seen == [
+            ("wrapped:worker", sys.executable, "-u", str(_CHILD), "sleep"),
+            (sys.executable, "-u", str(_CHILD), "sleep"),
+        ]
     finally:
         await owner.shutdown()
 
@@ -326,3 +332,25 @@ def _probe_supervisor(tmp_path: Path, launcher: Any) -> Supervisor:
         config=SupervisorConfig(stop_timeout_s=0.2),
         spawn=launcher,
     )
+
+
+# meiva:note
+# The rewrite is a preference, not a requirement: a launcher that refuses the wrapped
+# argv must cost one failed attempt, not a unit that never starts.
+async def test_a_refused_rewrite_falls_back_to_the_manifest_argv(tmp_path: Path) -> None:
+    seen: list[tuple[str, ...]] = []
+
+    async def launcher(*argv: str, **options: Any) -> Any:
+        seen.append(tuple(argv))
+        raise OSError("this machine cannot run that launcher")
+
+    owner = _probe_supervisor(tmp_path, launcher)
+    owner.set_argv_transform(lambda unit_id, argv: [f"wrapped:{unit_id}", *argv])
+    await owner.start()
+    try:
+        assert seen == [
+            ("wrapped:worker", sys.executable, "-u", str(_CHILD), "sleep"),
+            (sys.executable, "-u", str(_CHILD), "sleep"),
+        ]
+    finally:
+        await owner.shutdown()
