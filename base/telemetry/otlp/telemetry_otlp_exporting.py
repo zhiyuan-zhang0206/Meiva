@@ -34,6 +34,7 @@ class ExportingEventPipeline(EventPipeline):
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("event drain timeout must be finite and non-negative")
         deadline = time.monotonic() + timeout
+        self._exporter.begin_close()
         result = super().stop(remaining_time(deadline, time.monotonic()))
         if result.status is DrainStatus.UNFINISHED:
             return result

@@ -143,6 +143,16 @@ def init_telemetry(
         process_state["pipeline"] = pipeline
 
 
+# meiva:note
+# Whether this process bound an event pipeline at all. A failure report can only reach a
+# reader through that binding, so an owner uses this to decide whether its own diagnostic is
+# reportable — a process with no pipeline (a watcher child, a one-shot script) has nowhere
+# for it to go (#5578).
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+def pipeline_bound() -> bool:
+    return process_state["pipeline"] is not None
+
+
 def _as_utc(ts: datetime | None) -> datetime:
     """Normalize one event timestamp onto the stream's single clock: UTC.
 
