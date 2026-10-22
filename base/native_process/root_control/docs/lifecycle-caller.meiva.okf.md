@@ -57,7 +57,8 @@ reading every unit's file. So the requester records that fact itself, as an
 
 - one row per **batch** — `meiva stop` records `down` (or `force-down` when it
   escalates) with every unit it is about to take down; `meiva start` records `up`
-  with the units it is about to resume;
+  with the units it is about to resume, and a cold start records the whole roster
+  it is about to launch;
 - written **before** the first request leaves the process, so a request that
   hangs, is refused, or outlives its caller still names the caller;
 - `caller` carries the same block the wire carries — one fact, two readers;
@@ -99,10 +100,12 @@ not — stop with the old checkout, or kill the root, before pulling.
 
 ## Known boundaries
 
-- A cold start (`meiva start` with no live root) boots the tree from the
-  manifest without an `up` request per unit, so it records no
-  `lifecycle_request` row. The record covers operator requests against a live
-  root.
+- A cold start (`meiva start` with no live root) sends no `up` request to any
+  root, so nothing on the wire carries a caller. It records one `up` row with
+  the roster it is about to launch **before** the manifest is published and the
+  root spawned, so a start that dies during bring-up still names who asked for
+  it (task #5535). A warm start keeps the per-batch rows `reconcile_units`
+  writes.
 - `meiva stop` sends `down` with `force=True`, so its rows carry
   `verb="force-down"` while a restart's down leg carries `"down"`. The field is
   faithful to the wire verb; use `caller.argv` for the command that was run.
