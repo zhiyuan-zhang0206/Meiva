@@ -72,8 +72,8 @@ VARIANT_ATTR = "__meiva_doc_variants__"
 # meiva:link docs/decisions/agents/context/2026-10-18-per-model-sdk-help.md
 
 
-def doc_variants(**texts: str) -> Callable[[Any], Any]:
-    def attach(target: Any) -> Any:
+def doc_variants[T](**texts: str) -> Callable[[T], T]:
+    def attach(target: T) -> T:
         setattr(target, VARIANT_ATTR, dict(texts))
         return target
 
@@ -134,7 +134,7 @@ class ModelHelpProfile:
         return cls.for_model(current_model(), catalog=sdk_settings.model_catalog())
 
 
-def help(*targets: Any) -> None:
+def help(*targets: object) -> None:
     """Print documentation for one or more SDK targets, e.g. `meiva.help(meiva.shell)`.
 
     With no targets, show the SDK overview. Members unavailable to your model
@@ -147,7 +147,7 @@ def help(*targets: Any) -> None:
 # builder passes the render parameters `meiva.help` deliberately does not take. An empty
 # profile renders the surface model-independently, which is what the static overview wants.
 def render(
-    *targets: Any,
+    *targets: object,
     compact_classes: bool = False,
     profile: ModelHelpProfile | None = None,
 ) -> None:
@@ -167,7 +167,7 @@ def render(
         _print_target(target, render)
 
 
-def is_meiva_target(obj: Any) -> bool:
+def is_meiva_target(obj: object) -> bool:
     """True for an Meiva module or agent-visible Meiva routine/class binding.
 
     The module-name fast path treats an object's `__module__` value as a trusted
@@ -462,7 +462,7 @@ def _format_pep224_const(name: str, const: "Constant") -> str:
     return "\n".join(lines)
 
 
-def format_documented_const_stub(name: str, const: Any) -> str:
+def format_documented_const_stub(name: str, const: object) -> str:
     """`meiva.const()`-wrapped value: `name: BaseType = value` + docstring.
 
     A multi-line string constant (e.g. a skill body) renders as a triple-quoted
@@ -583,7 +583,7 @@ def format_docstring(doc: str, *, indent: str) -> str:
     return f"{indent}{triple}{lines[0]}\n{indented_body}\n{indent}{triple}"
 
 
-def format_signature(target: Any) -> str:
+def format_signature(target: object) -> str:
     """Stringified signature, cleaned up:
     - `from __future__ import annotations` quote noise on annotations:
       `: 'str | None'` → `: str | None`, `-> 'int'` → `-> int`. The closing
@@ -596,7 +596,7 @@ def format_signature(target: Any) -> str:
       'running'>` → `AgentStatus.RUNNING` (the repr is not valid Python in an
       otherwise source-shaped stub)."""
     try:
-        sig = str(inspect.signature(target))
+        sig = str(inspect.signature(cast(Callable[..., Any], target)))
     except (ValueError, TypeError):
         return "(...)"
     sig = _re.sub(r"(: |-> )'([^']*)'(?=[,)= ]|$)", r"\1\2", sig)

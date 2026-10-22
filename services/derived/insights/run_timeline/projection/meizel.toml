@@ -8,3 +8,37 @@ exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 "reader.py" = ["derive.py", "jobs.py", "model.py", "nodes.py", "source.py", "store.py"]
 "source.py" = ["model.py"]
 "store.py" = ["model.py"]
+
+[debt.impure-call]
+"nodes.py#import psycopg" = 3
+"reader.py#import fastapi" = 1
+"reader.py#import psycopg" = 1
+"reader.py#import psycopg_pool" = 1
+"reader.py#uuid.uuid4" = 1
+"source.py#import psycopg" = 2
+"store.py#import psycopg" = 3
+
+[debt.impure-edge]
+"backfill.py#base/agents/history/checkpoint_segment.py" = 1
+"backfill.py#base/clock/configuration.py" = 1
+"backfill.py#base/config/__init__.py" = 1
+"backfill.py#base/db/__init__.py" = 1
+"backfill.py#base/db/code_version_gate.py" = 1
+"backfill.py#base/db/config.py" = 1
+"backfill.py#base/log/__init__.py" = 1
+"backfill.py#base/native_process/code_version.py" = 1
+"backfill.py#base/native_process/loaded_commit.py" = 1
+"derive.py#base/agents/history/checkpoint.py" = 1
+"derive.py#base/agents/history/hierarchy/units.py" = 1
+"jobs.py#base/agents/history/checkpoint.py" = 1
+"jobs.py#base/agents/history/checkpoint_segment.py" = 1
+"jobs.py#base/db/__init__.py" = 1
+"jobs.py#base/db/transaction.py" = 1
+"nodes.py#base/agents/history/hierarchy/store.py" = 1
+"nodes.py#base/db/__init__.py" = 1
+"reader.py#base/agents/history/checkpoint.py" = 1
+"reader.py#base/db/__init__.py" = 1
+
+[debt.wide-params]
+"nodes.py#def window_nodes" = 1
+"reader.py#def __init__" = 1

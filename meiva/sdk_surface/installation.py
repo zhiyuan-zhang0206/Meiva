@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -96,9 +96,9 @@ class Loading:
 LOADING = Loading()
 
 
-def slot() -> Any:
+def slot() -> Installation | Loading | None:
     """The raw holder value: an `Installation`, a `Loading` marker, or None."""
-    return getattr(meiva_module(), SLOT, None)
+    return cast(Installation | Loading | None, getattr(meiva_module(), SLOT, None))
 
 
 def installed() -> Installation | None:

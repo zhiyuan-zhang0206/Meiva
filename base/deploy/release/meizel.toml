@@ -4,5 +4,26 @@ exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "st
 "tests" = ["collector_artifact.py", "editable_install.py"]
 
 [purity]
+"." = "strict-to-be"
 "__init__.py" = "strict"
 "start_inputs.py" = "strict"
+
+[debt.impure-call]
+"collector_artifact.py#Path.open" = 1
+"collector_artifact.py#Path.read_bytes" = 1
+"collector_artifact.py#Path.write_text" = 1
+"collector_artifact.py#import shutil" = 1
+"collector_artifact.py#import tempfile" = 1
+"editable_install.py#Path.exists" = 3
+"editable_install.py#Path.read_text" = 2
+"python_lock.py#Path.open" = 1
+
+[debt.impure-edge]
+"collector_artifact.py#base/host/net/ports.py" = 1
+"collector_artifact.py#base/host/net/resilience.py" = 1
+
+[debt.unfrozen-value]
+"collector_artifact.py#class DownloadProgress" = 1
+
+[debt.wide-params]
+"collector_artifact.py#def stream_download" = 1

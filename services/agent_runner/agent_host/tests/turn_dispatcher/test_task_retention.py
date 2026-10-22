@@ -2,14 +2,10 @@ import asyncio
 
 import pytest
 
-from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 
 
-async def test_stop_keeps_the_original_unfinished_turn_slot(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.01)
+async def test_stop_keeps_the_original_unfinished_turn_slot() -> None:
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def turn(_agent: int) -> None:
@@ -20,7 +16,7 @@ async def test_stop_keeps_the_original_unfinished_turn_slot(
             except asyncio.CancelledError:
                 continue
 
-    scheduler = TurnScheduler(turn)
+    scheduler = TurnScheduler(turn, cancel_unwind_timeout_s=0.01)
     original = scheduler.wake(7)
     assert original is not None
     try:

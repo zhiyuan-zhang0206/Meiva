@@ -64,9 +64,9 @@ from __future__ import annotations
 import functools
 import inspect
 import sys
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Awaitable, Callable, Generator, Mapping
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
 from .installation import WrapLayer, installed
 
@@ -129,7 +129,11 @@ def _target_member(parent: Any, attr: str, target: str) -> Any:
     return getattr(parent, attr)
 
 
-def _install_metadata(chained: Callable, wrapper: Callable, current: Callable) -> None:
+def _install_metadata(
+    chained: Callable[..., object],
+    wrapper: Callable[..., object],
+    current: Callable[..., object],
+) -> None:
     """Make `chained` present as the function it replaces.
 
     - name / qualname / module come from `current`, so the SDK stub renders
@@ -180,7 +184,7 @@ def _base_callable(current: Callable[..., Any]) -> Callable[..., Any]:
 
 def apply_wrap(
     target: str,
-    wrapper: Callable[..., Any],
+    wrapper: Callable[..., object],
     plugin: str,
     layers: dict[str, list[WrapLayer]],
 ) -> Callable[[], None]:
@@ -236,7 +240,7 @@ def apply_wrap(
 
         async def async_chained(*args: Any, **kwargs: Any) -> Any:
             with invocation() as inner:
-                return await wrapper(inner, *args, **kwargs)
+                return await cast(Awaitable[object], wrapper(inner, *args, **kwargs))
 
         chained = async_chained
 
@@ -269,7 +273,7 @@ def _installed_layers() -> Mapping[str, tuple[WrapLayer, ...]]:
     return {} if current is None else current.wrap_layers
 
 
-def stack(target: str) -> list[tuple[str, Callable[..., Any]]]:
+def stack(target: str) -> list[tuple[str, Callable[..., object]]]:
     """The wrap layers on `target`, innermost first (= registration / load order).
 
     Each entry is `(plugin, wrapper)`. Empty list when nothing wrapped `target` (or
@@ -278,7 +282,7 @@ def stack(target: str) -> list[tuple[str, Callable[..., Any]]]:
     return [(layer.plugin, layer.wrapper) for layer in _installed_layers().get(target, ())]
 
 
-def wrappers() -> dict[str, list[tuple[str, Callable[..., Any]]]]:
+def wrappers() -> dict[str, list[tuple[str, Callable[..., object]]]]:
     """Every wrapped target -> its `stack(target)`. The whole-machine wrap map,
     the runtime answer to "what did plugins inject" that plugin-injection docs
     are generated from instead of hand-maintained."""

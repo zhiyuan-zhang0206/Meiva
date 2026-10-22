@@ -10,6 +10,7 @@
 
 [purity]
 "." = "strict-to-be"
+"__init__.py" = "strict"
 "config.py" = "strict"
 "mapping.py" = "strict"
 

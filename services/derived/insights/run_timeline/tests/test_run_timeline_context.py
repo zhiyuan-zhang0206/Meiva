@@ -251,7 +251,7 @@ class Views:
         return found.idx, found.ts, segment, view
 
 
-def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch, catalog: ModelCatalog):
+def call(view: HistoryView, at: int, catalog: ModelCatalog):
 
     def breakdown(
         _pool: object,
@@ -280,23 +280,22 @@ def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch, catalog: M
             ],
         )
 
-    monkeypatch.setattr(context, "context_breakdown_response", breakdown)
     app_state = SimpleNamespace(
         db=cast(Database, object()),
         db_pool=object(),
         run_timeline_reader=Views(view),
         catalog=catalog,
         default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
+        context_breakdown_response=breakdown,
     )
     request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=app_state)))
     return context.get_run_timeline_context(request, 7, at)
 
 
 def test_the_context_is_the_breakdown_of_that_request_summed_from_its_messages(
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
 ) -> None:
-    result = call(two_sessions(), 3, monkeypatch, model_catalog)
+    result = call(two_sessions(), 3, model_catalog)
     assert (result.request, result.session, result.sessions) == (4, 1, 2)
     assert result.ts == T0 + timedelta(minutes=10)
     assert result.total_input_tokens == 40
@@ -304,16 +303,14 @@ def test_the_context_is_the_breakdown_of_that_request_summed_from_its_messages(
     kinds = {c.kind: c.tokens for c in result.categories}
     assert set(kinds) == {"system_prompt", "user_input"}
     assert sum(kinds.values()) == 40
-    first = call(two_sessions(), 0, monkeypatch, model_catalog)
+    first = call(two_sessions(), 0, model_catalog)
     assert (first.session, first.total_input_tokens) == (0, 100)
 
 
-def test_an_agent_with_no_request_has_no_context(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
+def test_an_agent_with_no_request_has_no_context(model_catalog: ModelCatalog) -> None:
     messages: list[BaseMessage] = [human("hello", 0)]
     read = read_times(messages, timeline_inputs=_TIMELINE_INPUTS)
     view = HistoryView.of(FullHistory(messages, (None,), (0,)), [], MessageUsage(messages), read)
     with pytest.raises(HTTPException) as caught:
-        call(view, 0, monkeypatch, model_catalog)
+        call(view, 0, model_catalog)
     assert caught.value.status_code == 404

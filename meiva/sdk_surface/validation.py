@@ -19,7 +19,7 @@ validates its own arguments instead:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Literal, cast, overload
 
 
 def _type_names(expected: type | tuple[type, ...]) -> str:
@@ -32,13 +32,13 @@ def _type_names(expected: type | tuple[type, ...]) -> str:
     return ", ".join(names[:-1]) + f" or {names[-1]}"
 
 
-def coerce_str(
-    value: object,
+def coerce_str[T](
+    value: T,
     name: str,
     *,
     allow_none: bool = False,
     allow_types: tuple[type, ...] = (),
-) -> Any:
+) -> T:
     """Normalize one string-expected argument at an meiva.* entry point.
 
     `str` passes through; a one-element `list`/`tuple` whose element is a
@@ -54,38 +54,73 @@ def coerce_str(
     """
     if value is None:
         if allow_none:
-            return None
+            return value
         raise TypeError(f"{name} must be a string, got None")
     if isinstance(value, str):
         return value
-    if isinstance(value, (list, tuple)) and len(value) == 1 and isinstance(value[0], str):
-        return value[0]
+    type_name = type(cast(object, value)).__name__
+    if isinstance(value, (list, tuple)):
+        seq = cast(tuple[object, ...], value)
+        if len(seq) == 1 and isinstance(seq[0], str):
+            return cast(T, seq[0])
     if allow_types and isinstance(value, allow_types):
-        if isinstance(value, (list, tuple)) and not all(isinstance(part, dict) for part in value):
-            raise TypeError(
-                f"{name} must be a string or a list of dicts, got a "
-                f"{type(value).__name__} of {type(value[0]).__name__} elements"
-            )
-        return value
-    raise TypeError(f"{name} must be a string, got {type(value).__name__}")
+        if isinstance(value, (list, tuple)):
+            seq = cast(tuple[object, ...], value)
+            if not all(isinstance(part, dict) for part in seq):
+                raise TypeError(
+                    f"{name} must be a string or a list of dicts, got a "
+                    f"{type_name} of {type(seq[0]).__name__} elements"
+                )
+        return cast(T, value)
+    raise TypeError(f"{name} must be a string, got {type_name}")
 
 
+@overload
 def coerce_typed(
     value: object,
+    name: str,
+    expected: type[bool],
+    *,
+    allow_none: Literal[False] = False,
+) -> bool: ...
+
+
+@overload
+def coerce_typed(
+    value: object,
+    name: str,
+    expected: type[int],
+    *,
+    allow_none: Literal[False] = False,
+) -> int: ...
+
+
+@overload
+def coerce_typed[T](
+    value: T,
     name: str,
     expected: type | tuple[type, ...],
     *,
     allow_none: bool = False,
-) -> Any:
-    """Strictly check one argument that is inherently not a string.
+) -> T: ...
 
-    The declared-type union (`expected`) is checked with isinstance; a
-    one-element list/tuple is NOT unwrapped here — the value must already be
-    the expected type. `allow_none` marks an optional parameter.
-    """
+
+# meiva:note
+# Strictly check one argument that is inherently not a string.
+#
+# The declared-type union (`expected`) is checked with isinstance; a
+# one-element list/tuple is NOT unwrapped here — the value must already be
+# the expected type. `allow_none` marks an optional parameter.
+def coerce_typed[T](
+    value: T,
+    name: str,
+    expected: type | tuple[type, ...],
+    *,
+    allow_none: bool = False,
+) -> T:
     if value is None:
         if allow_none:
-            return None
+            return value
         raise TypeError(f"{name} must be {_type_names(expected)}, got None")
     if isinstance(value, expected):
         return value

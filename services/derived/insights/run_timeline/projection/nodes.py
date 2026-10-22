@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from psycopg import Connection
 from psycopg.rows import dict_row
@@ -19,7 +18,7 @@ from services.derived.insights.run_timeline.schemas import (
 
 
 def _bounds(
-    conn: Connection[Any],
+    conn: Connection,
     agent_id: int,
     sessions: int,
     tail: list[Fact],
@@ -73,7 +72,7 @@ ORDER BY n.depth, n.span_start
 
 def window_nodes(
     db: Database,
-    conn: Connection[Any],
+    conn: Connection,
     agent_id: int,
     sessions: int,
     count: int,

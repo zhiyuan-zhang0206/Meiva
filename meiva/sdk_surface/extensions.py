@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
 
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
@@ -32,7 +31,7 @@ def load_extensions(
     catalog: ModelCatalog | None = None,
     authority: ConfigAuthority | None = None,
     clock_factory: Callable[[], Clock] | None = None,
-    producer: Callable[[], Any] | None = None,
+    producer: Callable[[], object] | None = None,
     validate_state: StateGate | None = None,
 ) -> LoadedExtensions:
     """Read plugins_config.json, import the enabled plugins' faces, install what they declare.

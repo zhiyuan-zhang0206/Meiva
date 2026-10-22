@@ -80,10 +80,7 @@ async def test_stuck_fixture_releases_after_failed_assertion() -> None:
 
 # meiva:note
 # The existing single-flight slot survives a delayed to_thread unwind.
-async def test_settlement_precedes_next_turn_after_cancel_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.01)
+async def test_settlement_precedes_next_turn_after_cancel_timeout() -> None:
     entered, next_turn = asyncio.Event(), asyncio.Event()
     release = threading.Event()
     events: list[str] = []
@@ -102,7 +99,7 @@ async def test_settlement_precedes_next_turn_after_cancel_timeout(
             events.append("turn2")
             next_turn.set()
 
-    scheduler = TurnScheduler(run)
+    scheduler = TurnScheduler(run, cancel_unwind_timeout_s=0.01)
     try:
         scheduler.wake(1)
         await asyncio.wait_for(entered.wait(), 2)

@@ -1,7 +1,3 @@
 exports = ["ownership_support.py"]
 
 [uses]
-
-[debt.first-party-patch]
-"test_hosted_ownership.py#monkeypatch.setattr agent.ownership.corpse_reap.publish_agent_updated" = 1
-"test_hosted_ownership.py#monkeypatch.setattr agent.ownership.corpse_reap.record_audit_async" = 1

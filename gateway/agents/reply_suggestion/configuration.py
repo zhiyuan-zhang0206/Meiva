@@ -40,13 +40,14 @@ def reply_suggestion_service(
     db: Database,
     catalog_reader: Callable[[], ModelCatalog],
     rendering: TimelineReadInputs,
+    model_builder: Callable[..., object] = build_chat_model,
 ) -> ReplySuggestionService:
 
     policy = reply_suggestion_policy(config)
 
     def draft_model(model: str, catalog: ModelCatalog) -> Any:
 
-        return build_chat_model(
+        return model_builder(
             model,
             reasoning_effort=ReasoningEffort.NONE,
             timeout=DRAFT_TIMEOUT_S,

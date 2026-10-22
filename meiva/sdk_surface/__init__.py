@@ -50,10 +50,10 @@ framework module such as this package.
 """
 
 import sys as _sys
-from typing import Any, cast
+from types import ModuleType
 
 
-def meiva_module() -> Any:
+def meiva_module() -> ModuleType:
     """The `meiva` package module itself — reached through `sys.modules` so
     these private modules never create an import cycle during `import meiva`."""
-    return cast(Any, _sys.modules["meiva"])
+    return _sys.modules["meiva"]

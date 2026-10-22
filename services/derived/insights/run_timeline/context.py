@@ -60,7 +60,10 @@ def get_run_timeline_context(
     local = idx - segment.offset
     history = view.history
     body_start = history.segment_starts[0]
-    breakdown = context_breakdown_response(
+    breakdown_fn = getattr(
+        request.app.state, "context_breakdown_response", context_breakdown_response
+    )
+    breakdown = breakdown_fn(
         request.app.state.db_pool,
         agent_id,
         request_breakdown(

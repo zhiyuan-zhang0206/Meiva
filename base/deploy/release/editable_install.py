@@ -220,7 +220,7 @@ def editable_console_script_violations(source_root: Path) -> tuple[str, ...]:
     return (f"{console_script} editable console script missing",)
 
 
-def current_interpreter_source_root() -> Path | None:
+def current_interpreter_source_root(executable: str | Path | None = None) -> Path | None:
     """Return this interpreter's checkout root when it is under ``.venv``.
 
     The supported layout is ``<root>/.venv/bin/python``. A system interpreter or shim carries
@@ -230,7 +230,7 @@ def current_interpreter_source_root() -> Path | None:
     # A virtualenv's Python is normally a symlink to its base interpreter. The
     # lexical executable path carries the ``.venv`` identity; resolving it
     # before the layout check would lose that boundary.
-    interpreter = Path(sys.executable)
+    interpreter = Path(sys.executable if executable is None else executable)
     try:
         venv = interpreter.parents[1]
         source_root = interpreter.parents[2]

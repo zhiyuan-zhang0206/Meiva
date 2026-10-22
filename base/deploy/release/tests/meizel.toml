@@ -1,5 +1,2 @@
 [uses]
 "test_editable_install.py" = ["_guard_probe_child.py"]
-
-[debt.first-party-patch]
-"test_editable_install.py#monkeypatch.setattr base.deploy.release.editable_install.sys.executable" = 2
