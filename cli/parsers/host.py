@@ -69,6 +69,14 @@ def missing_choices(args: argparse.Namespace, choices: Sequence[tuple[str, str]]
     return [form for dest, form in choices if getattr(args, dest) is None]
 
 
+def refuse_conflict(verb: str, error: ValueError) -> int:
+    # meiva:note
+    # A contradictory answer is the operator's answer, not a crash: one line naming
+    # the conflict and both ways out, under the exit status the exception already had.
+    print(f"meiva {verb}: {error}", file=sys.stderr)
+    return 1
+
+
 def refuse_usage(verb: str, problems: Sequence[str]) -> int:
     # meiva:note
     # Name every missing or inapplicable choice at once, then exit as a usage error.
@@ -132,23 +140,26 @@ def h_stop(
     except ValueError as error:
         return refuse_usage("stop", [str(error)])
 
-    return cmd_stop(
-        keep_infra=args.keep_infra,
-        require_confirmation=not args.assume_yes,
-        keep_browser=args.keep_browser,
-        keep_shell_sessions=args.keep_shell_sessions,
-        teardown_extras=not args.keep_extras,
-        preserve_sessions=frozenset(args.keep_service),
-        force=args.mode == "force",
-        timeout=args.timeout,
-        maintenance_for_seconds=maintenance_for_seconds,
-        maintenance_reason=args.reason,
-        retained_children=retained_children,
-        database_factory=args.database_factory,
-        producer=args.producer,
-        machine=args.runtime.machine,
-        helper=args.runtime.helper,
-    )
+    try:
+        return cmd_stop(
+            keep_infra=args.keep_infra,
+            require_confirmation=not args.assume_yes,
+            keep_browser=args.keep_browser,
+            keep_shell_sessions=args.keep_shell_sessions,
+            teardown_extras=not args.keep_extras,
+            preserve_sessions=frozenset(args.keep_service),
+            force=args.mode == "force",
+            timeout=args.timeout,
+            maintenance_for_seconds=maintenance_for_seconds,
+            maintenance_reason=args.reason,
+            retained_children=retained_children,
+            database_factory=args.database_factory,
+            producer=args.producer,
+            machine=args.runtime.machine,
+            helper=args.runtime.helper,
+        )
+    except ValueError as error:
+        return refuse_conflict("stop", error)
 
 
 _RESTART_TREE_CHOICES = (
@@ -193,32 +204,38 @@ def h_restart(
     if args.only is not None:
         from cli.commands.lifecycle.stop import cmd_restart_agent_host
 
-        return cmd_restart_agent_host(
-            force=args.mode == "force",
-            timeout=args.timeout,
-            start_timeout=args.start_timeout,
-            database_factory=args.database_factory,
-            command=args.runtime,
-        )
+        try:
+            return cmd_restart_agent_host(
+                force=args.mode == "force",
+                timeout=args.timeout,
+                start_timeout=args.start_timeout,
+                database_factory=args.database_factory,
+                command=args.runtime,
+            )
+        except ValueError as error:
+            return refuse_conflict("restart", error)
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from cli.commands.lifecycle.stop import cmd_restart
 
-    return cmd_restart(
-        only_services=tuple(args.only_service or ()),
-        disabled_services=tuple(args.disable_service or ()),
-        all_services=args.all_services,
-        keep_shell_sessions=args.keep_shell_sessions,
-        keep_browser=args.keep_browser,
-        restart_extras=not args.keep_extras,
-        force=args.mode == "force",
-        timeout=args.timeout,
-        start_timeout=args.start_timeout,
-        retained_children=retained_children,
-        database_factory=args.database_factory,
-        producer=args.producer,
-        command=args.runtime,
-    )
+    try:
+        return cmd_restart(
+            only_services=tuple(args.only_service or ()),
+            disabled_services=tuple(args.disable_service or ()),
+            all_services=args.all_services,
+            keep_shell_sessions=args.keep_shell_sessions,
+            keep_browser=args.keep_browser,
+            restart_extras=not args.keep_extras,
+            force=args.mode == "force",
+            timeout=args.timeout,
+            start_timeout=args.start_timeout,
+            retained_children=retained_children,
+            database_factory=args.database_factory,
+            producer=args.producer,
+            command=args.runtime,
+        )
+    except ValueError as error:
+        return refuse_conflict("restart", error)
 
 
 def _h_status(args: argparse.Namespace) -> int:
