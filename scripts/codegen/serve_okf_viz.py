@@ -9,21 +9,24 @@ import os
 import socket
 import sys
 from pathlib import Path
-from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent.parent
 TEMPLATE = REPO / "scripts" / "codegen" / "okf-d3-template.html"
 
 sys.path.insert(0, str(REPO))
 
-from base.packages.docs.okf_graph import build_graph_data, render_html  # noqa: E402
+from base.packages.docs.okf_graph import (  # noqa: E402
+    OkfGraphData,
+    build_graph_data,
+    render_html,
+)
 
 
-def build() -> dict[str, Any]:
+def build() -> OkfGraphData:
     return build_graph_data(REPO)
 
 
-def inject(data: dict[str, Any], out: Path) -> None:
+def inject(data: OkfGraphData, out: Path) -> None:
     html = render_html(data, TEMPLATE.read_text(encoding="utf-8"))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
