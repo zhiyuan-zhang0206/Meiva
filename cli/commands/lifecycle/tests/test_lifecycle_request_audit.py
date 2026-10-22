@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import cli.commands.lifecycle.root_driver as driver
@@ -237,3 +238,31 @@ def test_the_driver_records_the_units_before_it_asks() -> None:
     assert capture.events[0].attributes["verb"] == "up"
     assert capture.events[0].attributes["units"] == ["gateway"]
     assert client.up_calls == ["gateway"]
+
+
+def test_a_cold_start_records_the_units_before_the_root_is_spawned(tmp_path: Path) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def record(verb: str, units: Sequence[str]) -> None:
+        calls.append((verb, list(units)))
+
+    def spawn(*_args: object, **_kwargs: object) -> dict[str, Any]:
+        calls.append(("spawn", []))
+        return _status("running", "gateway")
+
+    driver.bring_up_cold_root(
+        (_spec("gateway"),),
+        tmp_path,
+        tmp_path,
+        tmp_path / "manifests.json",
+        {},
+        object(),
+        {},
+        None,
+        retained_children=[],
+        helper=None,
+        record=record,
+        spawn=spawn,
+    )
+
+    assert calls == [("up", ["gateway"]), ("spawn", [])]

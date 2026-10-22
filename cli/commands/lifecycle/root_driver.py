@@ -7,7 +7,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
@@ -540,6 +540,42 @@ def admit_live_start(
     return True
 
 
+# meiva:note
+# The cold path's one ordering fact: the operator's `up` row precedes the published
+# manifest and the spawned root, so a bring-up that dies still names who asked for it
+# (task #5535). `record`/`spawn` are parameters because that order is what a test can hold.
+def bring_up_cold_root(
+    roster: tuple[ServiceSpec, ...],
+    run_dir: Path,
+    repo: Path,
+    manifests: Path,
+    manifest: Mapping[str, object],
+    client: Any,
+    env: dict[str, str],
+    runtime: StartRuntime | None,
+    *,
+    retained_children: list[subprocess.Popen[bytes]],
+    helper: HelperFactory | None,
+    record: Callable[[str, Sequence[str]], None] = record_lifecycle_request,
+    spawn: Callable[..., dict[str, Any]] = bring_up_root,
+) -> dict[str, Any]:
+    from services.supervision.meiva_root_glue.manifests import write_manifest
+
+    record("up", [spec.session for spec in roster])
+    write_manifest(manifests, manifest)
+    with start_trace.phase("root spawn"):
+        return spawn(
+            run_dir,
+            repo,
+            manifests,
+            client,
+            env,
+            runtime,
+            retained_children=retained_children,
+            helper=helper,
+        )
+
+
 def ensure_root_service_tree(
     roster: tuple[ServiceSpec, ...],
     repo: Path,
@@ -553,7 +589,6 @@ def ensure_root_service_tree(
 ) -> LaunchOutcome:
     """Reuse an identical generation; changing its inputs requires prior stop."""
     from base.paths import meiva_home, root_manifests_path, root_run_dir
-    from services.supervision.meiva_root_glue.manifests import write_manifest
 
     run_dir = root_run_dir(meiva_home())
     if runtime is not None:
@@ -582,18 +617,18 @@ def ensure_root_service_tree(
                 ensure_frontend_deps(repo)
         if status is None:
             require_root_absent()
-            write_manifest(manifests, manifest)
-            with start_trace.phase("root spawn"):
-                status = bring_up_root(
-                    run_dir,
-                    repo,
-                    manifests,
-                    client,
-                    env,
-                    runtime,
-                    retained_children=retained_children,
-                    helper=helper,
-                )
+            status = bring_up_cold_root(
+                roster,
+                run_dir,
+                repo,
+                manifests,
+                manifest,
+                client,
+                env,
+                runtime,
+                retained_children=retained_children,
+                helper=helper,
+            )
             require_root_owner(status, helper=helper)
             require_same_generation(manifest, status, roster, reconcile=reconcile)
         with start_trace.phase("units up"):
