@@ -119,4 +119,4 @@ A minimal **runnable** case that failed before the fix:
   implementation) + adversarial battery. Incident → machine.
 - #2753: guard = three test files + red/green both sides.
 - #2749: guard = the module-set regression (`_CORE_DEFINITION_MODULES`).
-- Doc-only example: CHANGELOG-style text → `doc_only`.
+- Doc-only example: a prose edit under `docs/` → `doc_only`.
