@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -283,17 +284,57 @@ def _restore(backup: Path, home: Path, app: Path, before_dr: str) -> None:
 # This host's helper facts, one `key=value` per line, for a caller that compares machines
 # without importing this package: a wave gate reads them as opaque strings, and only this
 # module decides what "stale", "loaded" and the certificate root mean.
-def facts() -> int:
+# meiva:note
+# The helper source hash a commit would build, from git objects: the wave asks about a commit
+# no host has checked out yet, and the recipe for what the hash covers stays right here.
+def _expected_hash_at(rev: str | None) -> str:
+    from services.desktop.permissions_helper import lifecycle
+
+    if rev is None:
+        try:
+            return lifecycle.source_content_hash()
+        except OSError as error:
+            print(f"facts: {error}", file=sys.stderr)
+            return "-"
+    archive = subprocess.run(  # noqa: S603
+        [
+            "/usr/bin/git",
+            "-C",
+            str(REPO_ROOT),
+            "archive",
+            rev,
+            "services/desktop/permissions_helper/helper",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    if archive.returncode != 0:
+        print(
+            f"facts: cannot read {rev}: {archive.stderr.decode(errors='replace').strip()}",
+            file=sys.stderr,
+        )
+        return "-"
+    with tempfile.TemporaryDirectory() as scratch:
+        subprocess.run(  # noqa: S603
+            ["/usr/bin/tar", "-x", "-C", scratch], input=archive.stdout, check=False
+        )
+        try:
+            return lifecycle.source_content_hash(
+                service_dir=Path(scratch) / "services" / "desktop" / "permissions_helper"
+            )
+        except OSError as error:
+            print(f"facts: {error}", file=sys.stderr)
+            return "-"
+
+
+def facts(rev: str | None = None) -> int:
     from base.paths import permissions_helper_app_dir
     from services.desktop.permissions_helper import lifecycle
     from services.desktop.permissions_helper.lifecycle import PermissionsHelperBuildError
 
     home = permissions_helper_app_dir()
     app = home / "MeivaPermissionsHelper.app"
-    try:
-        expected = lifecycle.source_content_hash()
-    except OSError:
-        expected = "-"
+    expected = _expected_hash_at(rev)
     print(f"expected_hash={expected}")
     record = lifecycle.installed_build_state()
     recorded = record["source_hash"] if record is not None else "-"
@@ -333,6 +374,10 @@ def main(argv: list[str]) -> int:
         "--start", action="store_true", help="run `meiva start --all-services` after the switch"
     )
     parser.add_argument(
+        "--rev",
+        help="facts: read the helper inputs from this commit, not from this checkout",
+    )
+    parser.add_argument(
         "--detach",
         action="store_true",
         help="re-run this command in its own session, so the switch survives the runtime it stops",
@@ -344,7 +389,7 @@ def main(argv: list[str]) -> int:
         parser.error(f"{args.command} needs a PKCS#12 path")
     return {
         "status": status,
-        "facts": facts,
+        "facts": lambda: facts(args.rev),
         "provision": provision,
         "switch": lambda: switch(start=args.start),
         "export": lambda: export(args.path or ""),
