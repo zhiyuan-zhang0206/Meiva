@@ -75,6 +75,12 @@ class Cluster:
         # are named before anything stops.
         # meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
         self.lease_reads: list[int] = []
+        # meiva:note
+        # The helper every host reports: current for the target commit and not running, so a
+        # test stages only the one host it is about (a stale or loaded helper, another
+        # certificate) and the rest stay as a healthy fleet would report them.
+        self.helper_hash = "a" * 64
+        self.helper_cert_root = "f" * 40
 
     def monotonic(self) -> float:
         return self.now
@@ -185,6 +191,9 @@ class Cluster:
             if journal is not None:
                 emit(json.dumps(journal))
             return 0
+        if "helper-signing.py" in command and "facts --rev" in command:
+            emit(self._helper_facts(alias, host))
+            return 0
         if "converge-incomplete.json" in command:
             return self._incomplete(alias, emit)
         if "verify" in command:
@@ -207,6 +216,28 @@ class Cluster:
         if kind == "refresh":
             emit("  summary: applied 2, conflict 1")
         return self._effect(kind, alias, host, command)
+
+    # meiva:note
+    # The helper facts one host reports; a test stages a host by editing its dict, exactly as
+    # the owner module would report it, so no assertion needs a real machine.
+    def _helper_facts(self, alias: str, host: dict[str, Any]) -> str:
+        helper = host.get("helper", "present")
+        lines = [f"h_helper={helper}"]
+        if helper != "present":
+            return "\n".join(lines)
+        facts = {
+            "recorded_hash": host.get("recorded_hash", self.helper_hash),
+            "expected_hash": self.helper_hash,
+            "loaded": host.get("loaded", "no"),
+            "valid": "yes",
+            "cert_root": host.get("cert_root", self.helper_cert_root),
+            "signed_at": "2026-10-22T00:00:00+00:00",
+        }
+        lines += [f"h_{name}={value}" for name, value in facts.items()]
+        lines.append(
+            "h_stale=no" if facts["recorded_hash"] == facts["expected_hash"] else "h_stale=yes"
+        )
+        return "\n".join(lines)
 
     def _incomplete(self, alias: str, emit: Callable[[str], None]) -> int:
         recorded = self.incomplete.get(alias)

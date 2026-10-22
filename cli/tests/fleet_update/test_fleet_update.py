@@ -17,6 +17,7 @@ import pytest
 from base.native_process.root_control import instance_lock
 from cli import fleet_update
 from cli.tests.fleet_update.fleet_update_cluster import Cluster, git
+from scripts.host_ops import fleet_gate
 
 
 @pytest.mark.parametrize("command", ["run", "split"])
@@ -516,7 +517,7 @@ def _host_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, journal: str | N
 
 def _probed(shell: str) -> dict[str, str]:
     result = subprocess.run(
-        [shell, "-c", fleet_update.PROBE], capture_output=True, text=True, check=True
+        [shell, "-c", fleet_gate.PROBE], capture_output=True, text=True, check=True
     )
     return {
         key: value for key, _, value in (line.partition("=") for line in result.stdout.splitlines())

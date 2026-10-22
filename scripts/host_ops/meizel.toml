@@ -1,4 +1,4 @@
-exports = ["check_worktree_remove.py", "onboarding"]
+exports = ["check_worktree_remove.py", "fleet_gate.py", "onboarding"]
 
 [uses]
 "admission_run.py" = ["admission_ledger.py"]

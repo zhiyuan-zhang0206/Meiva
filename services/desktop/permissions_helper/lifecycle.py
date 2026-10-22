@@ -117,11 +117,13 @@ def run_readonly_query(
 
 def source_content_hash(*, service_dir: Path | None = None) -> str:
     """Hash every input that determines the built helper bundle."""
-    root = _SERVICE_DIR if service_dir is None else service_dir
-    source = root / "helper" / "main.swift"
-    plist = root / "helper" / "Info.plist"
-    entitlements = root / "helper" / "helper.entitlements"
-    locales = root / "helper" / "locales"
+    if service_dir is None:
+        source, plist, entitlements, locales = SOURCE, INFO_PLIST, ENTITLEMENTS, LOCALES
+    else:
+        source = service_dir / "helper" / "main.swift"
+        plist = service_dir / "helper" / "Info.plist"
+        entitlements = service_dir / "helper" / "helper.entitlements"
+        locales = service_dir / "helper" / "locales"
     digest = hashlib.sha256()
     digest.update(source.read_bytes())
     digest.update(plist.read_bytes())
