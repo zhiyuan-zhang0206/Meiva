@@ -55,3 +55,19 @@ neither spend nor replenish it. A `CODE_BEHIND_MINIMUM_EXIT_CODE` exit requires
 updating the host; root warns without restarting it. The count is process-local
 and resets across root restarts. Explicit operator up/restart retains authority.
 Service restart never authorizes replaying agent execution or UNKNOWN work.
+
+## A wrapped launch that dies early
+
+Deployment wiring may install one opaque argv transform (`set_argv_transform`);
+the generic root names no platform and reads no ambient configuration to decide.
+The rewrite is a preference, not a requirement: a launcher that refuses the
+transformed argv costs one failed attempt, after which the manifest's argv is
+tried unchanged and the unit runs unbounded rather than missing.
+
+A wrapper that *starts* and then dies is invisible as a launch failure — the
+generation ends like any other, and the ladder above would replay the same
+rewrite forever. A rewritten generation that exits with a positive code inside
+ten seconds therefore retires the rewrite for the rest of this root's life, and
+the warning says so: memory cap not applied, the unit runs unbounded. Negative
+codes are signal deaths, so an ordinary stop never costs the cap. Each unit's
+status row reports `launch_rewrite` (`on` | `off` | `off(retired)`).

@@ -64,6 +64,11 @@ it) takes the same default at its admitted start: `running`, source `selection`.
 Residue from an older scheme is discarded, never consulted; a fleet update's
 full stop/start leaves no mixed state.
 
+## Launch rewriting
+
+The assembly may rewrite a unit's launch argv; one that starts and then dies is
+retired: [[services/supervision/meiva_root/docs/restart-policy.meiva.okf.md]].
+
 ## Left-behind generations
 
 Root records the native birth of every unit process it spawns
