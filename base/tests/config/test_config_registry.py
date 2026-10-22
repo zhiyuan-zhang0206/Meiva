@@ -258,6 +258,11 @@ def test_host_fields_declare_remote_writable_bool() -> None:
             )
 
 
+# meiva:note
+# `exec_oom_score_adj` is deliberately absent: it decides whom the kernel kills first, so
+# letting a remote caller (including an agent's own session) raise it would let the process
+# being protected loosen its own protection. It stays a local `.env` knob on the host that
+# carries the agents (#6657).
 _REMOTE_WRITABLE_ALLOWLIST = frozenset(
     {
         "browser_enabled",
