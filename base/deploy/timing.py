@@ -111,6 +111,12 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.DEFAULT_STARTUP_GRACE_S,
         "the root health monitor startup grace for a unit that has no readiness tier",
     ),
+    "HEALTH_RESTART_LEASE_GRACE_S": Clock(
+        "deploy",
+        lambda: deploy.HEALTH_RESTART_LEASE_GRACE_S,
+        "how long the root health monitor holds the first restart of an outage for a "
+        "live impersonation lease (task #5551)",
+    ),
     # --- unit-bundle family (default in base/deploy/progress_timeout.py, cap in
     # base/host/db_authority/unit.py) ---
     "UNIT_BUNDLE_TTL_S": Clock(

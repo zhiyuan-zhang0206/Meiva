@@ -18,14 +18,27 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from threading import Event, Thread
 from typing import Final, Protocol
 
 from base.daemon.health import DaemonProbe, ProbeVerdict
-from base.deploy.progress_timeout import DEFAULT_STARTUP_GRACE_S, ROOT_HEALTH_INTERVAL_S
+from base.deploy.progress_timeout import (
+    DEFAULT_STARTUP_GRACE_S,
+    HEALTH_RESTART_LEASE_GRACE_S,
+    ROOT_HEALTH_INTERVAL_S,
+)
 from base.native_process.ownership import OwnedProcess
-from services.supervision.meiva_root.failure_state import UnitFailureFacts, derive_kind, describe
+from services.supervision.meiva_root.failure_state import (
+    LeaseGraceState,
+    LeaseProbe,
+    UnitFailureFacts,
+    clear_lease_grace,
+    consider_lease,
+    derive_kind,
+    describe,
+    report_lease_recovered,
+)
 from services.supervision.meiva_root.manifest import UnknownUnitError
 from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry
 from services.supervision.meiva_root.stopping import UnitStopTimeoutError
@@ -104,6 +117,12 @@ class HealthConfig:
     max_restart_attempts: int = 3
     restart_backoff_s: tuple[float, ...] = DEFAULT_RESTART_BACKOFF_S
 
+    # meiva:note
+    # How long the first attempt of one outage yields to a live impersonation lease; zero
+    # disables the courtesy. The root passes `daemon.health_restart_lease_grace_s`; the
+    # default here is the deploy family's own constant, never a restated literal.
+    lease_grace_s: float = HEALTH_RESTART_LEASE_GRACE_S
+
     def __post_init__(self) -> None:
         if not math.isfinite(self.startup_grace_s) or self.startup_grace_s < 0:
             raise ValueError("startup_grace_s must be nonnegative")
@@ -117,6 +136,8 @@ class HealthConfig:
             raise ValueError("restart_backoff_s must hold at least one delay")
         if any(not math.isfinite(value) or value < 0 for value in self.restart_backoff_s):
             raise ValueError("restart_backoff_s delays must be finite and nonnegative")
+        if not math.isfinite(self.lease_grace_s) or self.lease_grace_s < 0:
+            raise ValueError("lease_grace_s must be finite and nonnegative")
 
 
 @dataclass(slots=True)
@@ -141,6 +162,8 @@ class UnitHealth:
     # `db_recovery_pending` is a dependency-recovery grant this unit has not spent
     # yet; it survives the rounds that cannot act on it (task #5315).
     next_restart_at: float | None = None
+
+    grace: LeaseGraceState = field(default_factory=LeaseGraceState)
     breaker_open: bool = False
     breaker_since: float | None = None
     db_recovery_pending: bool = False
@@ -280,11 +303,13 @@ class HealthMonitor:
         gate: HealthGate | None = None,
         startup_graces: Mapping[str, float] | None = None,
         db_recovery_probe: Probe | None = None,
+        lease_probe: LeaseProbe | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._registry = registry
         self._config = config if config is not None else HealthConfig()
         self._gate = gate
+        self._lease_probe = lease_probe
         self._db_recovery_probe = db_recovery_probe
         self._db_runner = ProbeRunner()
         self._db_verdict: ProbeVerdict | None = None
@@ -498,6 +523,13 @@ class HealthMonitor:
         state.last_detail = result.detail
 
         if result.alive:
+            report_lease_recovered(
+                state.grace,
+                unit_id=unit_id,
+                attempt=state.restart_attempts + 1,
+                window_s=self._config.lease_grace_s,
+                now=monotonic(),
+            )
             self._note_alive_ownership(unit_id, state)
             self._reset(state)
             _log.debug("[health] unit %s: alive (%s)", unit_id, result.detail)
@@ -549,6 +581,21 @@ class HealthMonitor:
         breaker_open = state.restart_attempts >= self._config.max_restart_attempts
         if not self._attempt_due(state):
             return
+        deadline = consider_lease(
+            state.grace,
+            probe=self._lease_probe,
+            window_s=self._config.lease_grace_s,
+            unit_id=unit_id,
+            attempt=state.restart_attempts + 1,
+            now=monotonic(),
+        )
+        if deadline is not None:
+            state.next_restart_at = deadline
+            return
+        # meiva:note
+        # The window closed without a recovery: this outage's courtesy is over, and the
+        # restart that follows must not later report itself as a cancelled one.
+        state.grace.waiting = None
         recovery = state.db_recovery_pending
         state.db_recovery_pending = False
         state.restart_attempts += 1
@@ -735,3 +782,4 @@ class HealthMonitor:
         state.restart_attempts = 0
         state.next_restart_at = None
         state.db_recovery_pending = False
+        clear_lease_grace(state.grace)

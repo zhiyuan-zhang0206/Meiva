@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from typing import Any
 
@@ -78,8 +79,10 @@ class _Supervisor:
         self.generation = (OwnedProcess(42, 100.0, None), 0.0)
         self.facts = UnitFailureFacts(intent_running=True, restart_failed=None)
         self.deferrals: dict[str, str] = {}
+        self.restart_calls: list[str] = []
 
     async def restart(self, unit_id: str) -> dict[str, object]:
+        self.restart_calls.append(unit_id)
         return {"verb": "restart", "units": []}
 
     def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float]:
@@ -303,3 +306,155 @@ async def test_a_held_down_unit_stops_the_database_dial(clock: _Clock) -> None:
     dials = database.calls
     await monitor.run_round()
     assert database.calls == dials
+
+
+# meiva:note
+# Lease courtesy (task #5551) runs on real time: a window a round could outlast must be
+# long, and a test that wants the window over sleeps past a short one. Nothing here
+# patches the module clock.
+LEASE_EVENT = "root_health_restart_lease_grace"
+OPEN_WINDOW_S = 5.0
+SHORT_WINDOW_S = 0.05
+PAST_THE_WINDOW_S = 0.12
+
+
+def _lease_monitor(
+    supervisor: _Supervisor,
+    probe: Callable[[], DaemonProbe],
+    *,
+    lease_probe: Callable[[], tuple[str, str] | None] | None,
+    lease_grace_s: float = OPEN_WINDOW_S,
+) -> HealthMonitor:
+    registry = ProbeRegistry()
+    registry.register("svc", probe)
+    values: dict[str, Any] = {
+        "interval_s": 0.01,
+        "startup_grace_s": 0.0,
+        "max_restart_attempts": 3,
+        "restart_backoff_s": (0.0,),
+        "lease_grace_s": lease_grace_s,
+    }
+    return HealthMonitor(
+        supervisor, registry, config=HealthConfig(**values), lease_probe=lease_probe
+    )
+
+
+def _live_lease() -> tuple[str, str]:
+    return ("6f1d2c3a-lease", "external_agent:antigravity / Gemini: takeover")
+
+
+async def test_the_first_restart_yields_once_to_a_live_lease(recorder: _Recorder) -> None:
+    supervisor = _Supervisor()
+    monitor = _lease_monitor(
+        supervisor, _Cell(DaemonProbe.down("healthz unreachable")), lease_probe=_live_lease
+    )
+    await monitor.run_round()
+    assert supervisor.restart_calls == []
+    held = recorder.events(LEASE_EVENT)
+    assert [(e["unit"], e["outcome"], e["attempt"], e["waited_s"]) for e in held] == [
+        ("svc", "deferred", 1, OPEN_WINDOW_S)
+    ]
+    assert held[0]["lease_id"] == "6f1d2c3a-lease"
+    assert held[0]["holder"] == "external_agent:antigravity / Gemini: takeover"
+    assert held[0]["level"] == "warning"
+    # meiva:note
+    # The courtesy buys time, it does not spend the outage restart budget.
+    assert monitor.snapshot()["svc"].restart_attempts == 0
+    await monitor.run_round()
+    assert supervisor.restart_calls == []
+    assert len(recorder.events(LEASE_EVENT)) == 1
+
+
+async def test_the_window_ending_still_restarts(recorder: _Recorder) -> None:
+    supervisor = _Supervisor()
+    monitor = _lease_monitor(
+        supervisor,
+        _Cell(DaemonProbe.down("healthz unreachable")),
+        lease_probe=_live_lease,
+        lease_grace_s=SHORT_WINDOW_S,
+    )
+    await monitor.run_round()
+    assert supervisor.restart_calls == []
+    await asyncio.sleep(PAST_THE_WINDOW_S)
+    await monitor.run_round()
+    assert supervisor.restart_calls == ["svc"]
+    assert monitor.snapshot()["svc"].restart_attempts == 1
+
+
+async def test_a_later_attempt_of_the_same_outage_is_never_held(recorder: _Recorder) -> None:
+    supervisor = _Supervisor()
+    monitor = _lease_monitor(
+        supervisor,
+        _Cell(DaemonProbe.down("healthz unreachable")),
+        lease_probe=_live_lease,
+        lease_grace_s=SHORT_WINDOW_S,
+    )
+    await monitor.run_round()
+    await asyncio.sleep(PAST_THE_WINDOW_S)
+    await monitor.run_round()
+    assert supervisor.restart_calls == ["svc"]
+    await monitor.run_round()
+    assert supervisor.restart_calls == ["svc", "svc"]
+    assert len(recorder.events(LEASE_EVENT)) == 1
+
+
+async def test_a_unit_that_answers_inside_the_window_cancels_the_restart(
+    recorder: _Recorder,
+) -> None:
+    supervisor = _Supervisor()
+    probe = _Cell(DaemonProbe.down("healthz unreachable"))
+    monitor = _lease_monitor(supervisor, probe, lease_probe=_live_lease, lease_grace_s=1.0)
+    await monitor.run_round()
+    await asyncio.sleep(0.02)
+    probe.verdict = DaemonProbe.up("ok")
+    await monitor.run_round()
+    assert supervisor.restart_calls == []
+    held = recorder.events(LEASE_EVENT)
+    assert [(e["outcome"], e["attempt"]) for e in held] == [
+        ("deferred", 1),
+        ("recovered", 1),
+    ]
+    # meiva:note
+    # The opening line names the window it granted; the closing one names the wait that
+    # actually happened, which is why they are not the same number.
+    assert held[0]["waited_s"] == 1.0
+    assert 0.0 < held[1]["waited_s"] < 1.0
+    await monitor.run_round()
+    assert supervisor.restart_calls == []
+    assert len(recorder.events(LEASE_EVENT)) == 2
+
+
+async def test_a_broken_lease_probe_never_stops_a_restart(recorder: _Recorder) -> None:
+    def broken() -> tuple[str, str] | None:
+        raise RuntimeError("database unreachable")
+
+    supervisor = _Supervisor()
+    monitor = _lease_monitor(
+        supervisor, _Cell(DaemonProbe.down("healthz unreachable")), lease_probe=broken
+    )
+    await monitor.run_round()
+    assert supervisor.restart_calls == ["svc"]
+    assert recorder.events(LEASE_EVENT) == []
+
+
+async def test_no_lease_means_the_restart_is_not_delayed(recorder: _Recorder) -> None:
+    supervisor = _Supervisor()
+    monitor = _lease_monitor(
+        supervisor, _Cell(DaemonProbe.down("healthz unreachable")), lease_probe=lambda: None
+    )
+    await monitor.run_round()
+    assert supervisor.restart_calls == ["svc"]
+    assert recorder.events(LEASE_EVENT) == []
+
+
+async def test_zero_disables_the_courtesy(recorder: _Recorder) -> None:
+    supervisor = _Supervisor()
+    monitor = _lease_monitor(
+        supervisor,
+        _Cell(DaemonProbe.down("healthz unreachable")),
+        lease_probe=_live_lease,
+        lease_grace_s=0.0,
+    )
+    await monitor.run_round()
+    assert supervisor.restart_calls == ["svc"]
+    assert recorder.events(LEASE_EVENT) == []
