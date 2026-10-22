@@ -91,7 +91,7 @@ def test_disable_preserves_invalid_requirements_as_a_close_operation(unit_home: 
 def test_enable_and_list_validate_declarations_without_host_probes(
     unit_home: Path, requires: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import meiva.mcps.config as cfg_mod
+    import base.packages.mcp_config as cfg_mod
     from base.packages.plugins.mcp_enabled import read_enabled
 
     def unexpected_probe(*, host: Host) -> bool:

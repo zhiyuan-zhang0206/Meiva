@@ -13,11 +13,10 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.types.json import Jsonb
 
 from base.db import create_agent
-from base.packages import composer_commands
+from base.packages import composer_commands, mcp_config
 from base.packages.extensions import install_registry
 from base.packages.plugins import mcp_enabled
 from base.paths import meiva_home, skills_dir
-from meiva.mcps import config as mcp_config
 from ops.cluster import operations as cluster
 
 

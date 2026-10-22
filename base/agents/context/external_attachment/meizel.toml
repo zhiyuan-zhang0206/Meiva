@@ -1,6 +1,9 @@
-exports = ["core.py", "identity.py"]
+exports = ["core.py", "identity.py", "nodes.py", "plugin_state_codec.py", "state_channels.py", "state_schema.py"]
 
 [uses]
 "__init__.py" = ["core.py", "identity.py"]
 "core.py" = ["identity.py"]
 "identity.py" = []
+"plugin_state_codec.py" = ["state_schema.py"]
+"state_channels.py" = ["nodes.py"]
+"state_schema.py" = ["state_channels.py"]

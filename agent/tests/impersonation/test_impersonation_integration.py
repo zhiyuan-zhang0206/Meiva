@@ -8,7 +8,6 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent import impersonation, impersonation_handoff
-from agent.extensions.plugin_state_codec import encode_plugin_delta
 from agent.impersonation import settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.tests.impersonation.handoff_inputs import (
@@ -25,6 +24,7 @@ from agent.tests.impersonation.handoff_inputs import (
 from agent.tests.impersonation.handoff_inputs import handoff_clients as handoff_clients
 from base.agents import impersonation as leases
 from base.agents.context.clients import ClientSet
+from base.agents.context.external_attachment.plugin_state_codec import encode_plugin_delta
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority

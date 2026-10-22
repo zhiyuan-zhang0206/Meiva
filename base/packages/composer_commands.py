@@ -11,8 +11,16 @@ from base.host.runtime_interpreter import external_plugin_read_root
 from base.log import logger
 from base.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
 from base.packages.skills.names import display_name, match_key
-from base.packages.skills.tree import Skill, identifier, target
-from base.paths import meiva_home, repo_plugins_dir, repo_root
+from base.packages.skills.tree import Skill, flatten, identifier, target
+from base.packages.skills.tree_builder import scan_tree
+from base.paths import meiva_home, repo_plugins_dir, repo_root, skills_dir
+
+
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+def load_skill_names(provider_roots: Sequence[Path] = ()) -> list[Skill]:
+    from base.packages.extensions.install_registry import loadable_skill_names
+
+    return flatten(scan_tree(skills_dir(meiva_home()), loadable_skill_names(), provider_roots))
 
 
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md
