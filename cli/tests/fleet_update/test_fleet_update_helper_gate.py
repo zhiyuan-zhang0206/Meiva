@@ -38,6 +38,38 @@ def test_a_helper_every_host_already_carries_lets_the_window_run(
     assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
 
 
+def test_a_host_with_no_helper_is_no_blind_spot(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    # meiva:note
+    # A Linux host carries no permissions helper at all, so `absence` is its whole answer: the
+    # window runs, and only a host that must actually rebuild is retired for it. Reading the
+    # missing facts as "could not tell" refuses every wave that has a Linux gateway.
+    cluster, run = env
+    cluster.hosts["gw"]["helper"] = "absent"
+    cluster.hosts["mac"]["recorded_hash"] = "b" * 64
+    cluster.hosts["mac"]["loaded"] = "yes"
+    assert run("down", "--stop-extras", "--rebuild-extras") == 0
+    retired = {
+        alias
+        for alias, command in cluster.commands
+        if '" stop' in command and "--stop-browser" in command
+    }
+    assert retired == {"mac"}
+    assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
+
+
+def test_the_tracked_table_is_keyed_by_ssh_alias() -> None:
+    # meiva:note
+    # The gate looks each host up by the alias the window names (`mba`), never by the machine
+    # name that host boots into (`macbook-air`): a table keyed by the other name tells every
+    # window that the host has no baseline, so the two names must not drift apart again.
+    table = json.loads(
+        (fleet_update.REPO / "deploy" / "fleet" / "helper-identities.json").read_text()
+    )
+    assert set(table) == {"mba", "macmini", "company-air", "company-mini"}
+
+
 def test_a_helper_signed_by_another_certificate_refuses(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
