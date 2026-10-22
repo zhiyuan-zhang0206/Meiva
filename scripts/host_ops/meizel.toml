@@ -1,7 +1,8 @@
-exports = ["check_worktree_remove.py", "fleet_gate.py", "onboarding"]
+exports = ["check_worktree_remove.py", "fleet_gate.py", "fleet_verify.py", "onboarding"]
 
 [uses]
 "admission_run.py" = ["admission_ledger.py"]
+"fleet_verify.py" = ["fleet_gate.py"]
 "tests" = ["admission_run.py", "guard_editable_venv.py", "host_memory_sample.py", "update_schedule_script.py"]
 
 [external]
