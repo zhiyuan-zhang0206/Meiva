@@ -105,7 +105,6 @@ _TITLES = {
 _DEFAULT_FILES_PER_GROUP = 10  # output layout only: the header always shows the full count
 _OMITTED_DIRECTORIES = 6  # how many directories the "more files" line breaks the rest into
 
-_HISTORY_FILES = frozenset({"CHANGELOG.md"})
 _STRUCTURE_FILES = frozenset({"pyproject.toml", ".pre-commit-config.yaml"})
 _STRUCTURE_PREFIXES = (
     "scripts/structure/",
@@ -145,7 +144,7 @@ def _is_test(path: str) -> bool:
 
 def group_of(path: str, kind: str) -> str:
     """The one group a hit belongs to: the file decides first, then the kind of hit."""
-    if is_frozen(path) or path in _HISTORY_FILES:
+    if is_frozen(path):
         return "history"
     if is_doc_file(path):
         return "docs"

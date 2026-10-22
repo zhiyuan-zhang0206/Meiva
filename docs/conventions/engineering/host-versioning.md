@@ -15,14 +15,10 @@ tasks #2915 / #3267).
   humans only: `meiva packages status`, log lines. Gates never see the suffix.
 - **Fallback:** a checkout-less runtime (wheel install) falls back to
   `[project].version` in `pyproject.toml`, the repository's single product
-  version, bumped only at a release milestone (see
-  [CHANGELOG](../../../CHANGELOG.md)). That milestone folds the pending entries
-  with [the changelog fold](../changelog.md) —
-  `scripts/content_lint/assemble_changelog.py --write` — before it writes the
-  version, so the release commit holds every entry and `.changes/` is empty. It never selects the gate version in a
-  checkout; it survives so the gate still has a value off a git checkout. When
-  neither exists the caller surfaces "unknown" — never a guessed number a gate
-  would trust.
+  version, bumped only at a release milestone. It never selects the gate version
+  in a checkout; it survives so the gate still has a value off a git checkout.
+  When neither exists the caller surfaces "unknown" — never a guessed number a
+  gate would trust.
 
 ## What packages declare
 
