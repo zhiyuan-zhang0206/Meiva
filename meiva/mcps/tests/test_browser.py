@@ -420,9 +420,8 @@ async def test_release_agent_chrome_pages_sends_release_and_reports_ok(
 
 
 async def test_release_agent_chrome_pages_no_service_returns_false(
-    monkeypatch: pytest.MonkeyPatch, browser_home: Path
+    browser_home: Path,
 ) -> None:
     """No browser service on this machine (socket absent) must degrade to a
     clean False — the exit path never raises on the cleanup nicety."""
-    monkeypatch.setattr(browser_mod, "_RELEASE_TIMEOUT_S", 0.5)
     assert await browser_mod.release_agent_chrome_pages(7, browser_home) is False

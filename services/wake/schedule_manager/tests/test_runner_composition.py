@@ -1,4 +1,3 @@
-from base.paths.tests.homes import unit_home as unit_home
 import sys
 import threading
 from collections.abc import Callable
@@ -8,19 +7,20 @@ from typing import Any
 import psycopg
 import pytest
 
-from meiva.sdk_surface import process_context
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.clock import Clock
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.config import ConfigBoot
 from base.daemon.schedules.inputs import ScheduleInputs
+from base.daemon.schedules.inputs import schedule_entry as runner_inputs_entry
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths.tests.homes import unit_home as unit_home
 from base.telemetry import EventPipeline
-from schedules.entry import schedule_entry as runner_inputs_entry
+from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import runner
 
 

@@ -17,15 +17,10 @@ from base.db.config import db_config_from_boot
 from base.paths.home import resolve_meiva_home
 from base.native_process.code_version import CodeVersion
 from base.telemetry import build_pipeline, process_name
-from base.daemon.schedules.inputs import ScheduleInputs
+from base.daemon.schedules.inputs import ScheduleInputs, schedule_entry
 from meiva.sdk_surface import process_context
 
 __all__ = ["fresh_schedule_entry", "schedule_entry"]
-
-
-@contextmanager
-def schedule_entry(inputs: ScheduleInputs) -> Generator[ScheduleInputs]:
-    yield inputs
 
 
 @contextmanager

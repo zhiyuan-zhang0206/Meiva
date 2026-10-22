@@ -20,6 +20,9 @@ from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Any
 
+from base.agents.lifecycle import (
+    release_agent_chrome_pages as release_agent_chrome_pages,
+)
 from base.host.net.resilience import Policy, aretry
 
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one
@@ -197,56 +200,3 @@ async def connect_browser_direct(home: Path) -> tuple[BrowserLineSession, AsyncE
     stack = AsyncExitStack()
     stack.push_async_callback(session.close)
     return session, stack
-
-
-# Exit-hook release bound: ONE total budget for the entire dial -> request ->
-# reply round-trip. The agent process is already exiting and must not stall on
-# this cleanup if the daemon happens to be wedged (three separate 3 s timeouts
-# would add up to ~9 s on the exit path). The service's page TTL sweep is the
-# only cleanup for deaths that never reach the exit hook.
-_RELEASE_TIMEOUT_S = 3.0
-
-
-async def release_agent_chrome_pages(agent_id: int, home: Path) -> bool:
-    """Best-effort: ask the browser-mcp service of `home` to close this agent's pages.
-
-    Called after an agent's termination commits so a terminated worker does not
-    leave its tabs (or its ``Meiva #<id>`` tab group) in the user's shared Chrome.
-    The service closes every page created by ``agent_id`` — never another
-    agent's or the user's — and is idempotent.
-    A machine without the browser service (no socket), a daemon that is down
-    (`OSError`) or one that does not answer in time returns False; a protocol
-    error propagates. Deaths that never reach termination cleanup are left to
-    the service's page TTL sweep (24h by default).
-    """
-    try:
-        from base.config import settings
-        from base.paths import chrome_mcp_socket
-
-        return await asyncio.wait_for(
-            _release_roundtrip(
-                str(chrome_mcp_socket(home, settings.services.browser_cdp_port)), agent_id
-            ),
-            timeout=_RELEASE_TIMEOUT_S,
-        )
-    except (OSError, TimeoutError):
-        return False
-
-
-async def _release_roundtrip(sock: str, agent_id: int) -> bool:
-    """One dial -> request -> reply round-trip; the caller owns the timeout."""
-    reader, writer = await asyncio.open_unix_connection(path=sock, limit=LINE_LIMIT)
-    try:
-        writer.write(
-            (
-                json.dumps({"id": 1, "method": "release_agent_page", "agent_id": agent_id}) + "\n"
-            ).encode()
-        )
-        await writer.drain()
-        line = await reader.readline()
-        if not line:
-            return False
-        resp: dict[str, Any] = json.loads(line)
-        return resp.get("ok") is True
-    finally:
-        await _close_writer(writer)

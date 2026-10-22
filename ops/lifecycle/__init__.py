@@ -11,8 +11,8 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-from agent.ownership.hosted_cleanup import release_browser_pages
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.lifecycle import release_browser_pages
 from base.agents.messages.inbound import WakeTriggerKind
 from base.api_contracts.agent_contract import (
     AgentStatus,

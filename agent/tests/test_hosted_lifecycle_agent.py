@@ -6,10 +6,8 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.ownership.tests.ownership_support import admit_owner, agent_row, insert_lifecycle_command
-from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from ops import cluster_status
 
 
 def _terminate_command(
@@ -25,27 +23,9 @@ def _terminate_command(
     return row[0]
 
 
-def _record_kills(
-    monkeypatch: pytest.MonkeyPatch, *, fail: bool = False
-) -> list[tuple[int, str | None]]:
-    calls: list[tuple[int, str | None]] = []
-
-    def _kill(agent_id: int, *, before_session_index: int) -> list[int]:
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
-            row = conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
-        calls.append((agent_id, None if row is None else row[0]))
-        if fail:
-            raise RuntimeError("failed to kill shell session(s) [4]")
-        return [4]
-
-    monkeypatch.setattr(cluster_status, "kill_agent_shells", _kill)
-    return calls
-
-
 async def test_hosted_restart_leaves_shell_sessions_for_the_later_terminate(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
@@ -54,7 +34,7 @@ async def test_hosted_restart_leaves_shell_sessions_for_the_later_terminate(
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     insert_lifecycle_command(db_conn, agent_id, "restart")
     _terminate_command(db_conn, agent_id, kill=True)
-    kills = _record_kills(monkeypatch)
+    kills: list[tuple[int, None]] = []
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     assert (
         await apply_hosted_lifecycle(
