@@ -84,12 +84,6 @@ def test_python_package_declares_a_stable_release_state() -> None:
     assert not [item for item in classifiers if "Alpha" in item or "Beta" in item]
 
 
-def test_changelog_names_the_current_version() -> None:
-    text = _text("CHANGELOG.md")
-    assert f"Meiva is at {_product_version()};" in text
-    assert "pre-1.0" not in text
-
-
 def test_security_policy_names_the_current_version() -> None:
     assert f"Meiva {_product_version()} ships from `main`" in _text("SECURITY.md")
 

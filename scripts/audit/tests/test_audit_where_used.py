@@ -45,7 +45,6 @@ FILES = {
     "docs/unrelated.md": "Call `run` in your shell. A `Motor` here is not an engine.\n",
     "notes.md": "engine.py is where the loop is.\n",
     "docs/decisions/2026-01-01-engine.md": "We moved pkg.engine here.\n",
-    "CHANGELOG.md": "- pkg/engine.py was added.\n",
     "scripts/structure/baseline/pkg.json": '{"complexity": {"pkg/engine.py::run": 12}}\n',
     "pyproject.toml": '[tool.x]\nfiles = ["pkg/engine.py"]\n',
     "serve.sh": "python -m pkg.engine --flag\n",
@@ -182,8 +181,7 @@ def test_structure_registrations_and_frozen_history_are_their_own_groups() -> No
     report = _report("pkg.engine")
 
     assert _paths(report, "structure") == {"pyproject.toml", "scripts/structure/baseline/pkg.json"}
-    assert _paths(report, "history") == {"docs/decisions/2026-01-01-engine.md", "CHANGELOG.md"}
-    assert "CHANGELOG.md" not in _paths(report, "docs")
+    assert _paths(report, "history") == {"docs/decisions/2026-01-01-engine.md"}
     symbol = _report("pkg.engine:run")
     assert _paths(symbol, "structure") == {"scripts/structure/baseline/pkg.json"}
 

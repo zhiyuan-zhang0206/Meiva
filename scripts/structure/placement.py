@@ -60,7 +60,6 @@ _ROOT_FILES = (
     ".pre-commit-config.yaml",
     "AGENTS.md",
     ".gitleaks.toml",
-    "CHANGELOG.md",
 )
 _PATH_ROOTS = (*CODE_TOPS, *_ARTIFACT_TOPS, *_ROOT_FILES)
 
