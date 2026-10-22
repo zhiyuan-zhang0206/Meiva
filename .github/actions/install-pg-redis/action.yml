@@ -122,7 +122,17 @@ runs:
         # Install phase. With a warm cache this is local work; apt still needs a
         # usable index to resolve the names, which is the one thing an index
         # outage takes away.
-        if ! retry "apt-get install" sudo timeout 300 apt-get install -y "${archives[@]}" "${net[@]}" "${pkgs[@]}"; then
+        #
+        # The wait belongs inside the attempt, not before the loop: what collides with
+        # a retry is the *previous attempt's* apt, which `timeout` does not reap. A held
+        # lock used to surface here as one more failed install and was reported as an
+        # incomplete cache.
+        install_with_dpkg_lock_free() {
+          bash "$GITHUB_WORKSPACE/scripts/provision/wait_apt_lock.sh" 120
+          sudo timeout 300 apt-get install -y "${archives[@]}" "${net[@]}" "${pkgs[@]}"
+        }
+
+        if ! retry "apt-get install" install_with_dpkg_lock_free; then
           # Last resort: no index, but the cached closure is on disk as .debs.
           # dpkg needs neither an index nor the network — it unpacks all of them
           # and configures in dependency order, and exits non-zero (failing the
@@ -135,8 +145,9 @@ runs:
             exit 1
           fi
           echo "::warning::apt-get install failed; installing ${#debs[@]} cached .deb(s) directly with dpkg"
+          bash "$GITHUB_WORKSPACE/scripts/provision/wait_apt_lock.sh" 120
           if ! sudo dpkg -i "${debs[@]}"; then
-            echo "::error::the cached archives could not satisfy the install either — the closure is incomplete" >&2
+            echo "::error::dpkg could not install the ${#debs[@]} cached .deb(s); its own error is above. This is an install failure — it does not prove the closure is incomplete" >&2
             exit 1
           fi
         fi

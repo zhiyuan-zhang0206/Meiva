@@ -22,3 +22,10 @@ The suite's usage-ledger fixtures fix their day relative to now: the
 turned every backend shard red).
 
 Every remote read degrades instead of erroring: a failed or timed-out `gh` call, unreadable JSON or a non-zero exit yields None or empty text, never an exception; failed per-job log enrichment leaves the rollup's classification standing, and a PR whose view cannot be read still returns a diagnosis carrying `gh_error`.
+
+Runner-side install failures are classified as `infrastructure: ...` with a rerun
+as the suggested action, never as a code failure: an unreachable archive or a
+held dpkg lock fails a check exactly like a red test, and the label is what keeps
+the two apart in the report. That family covers both install actions and the
+lock wait documented in `scripts/provision/docs/apt-lock.meiva.okf.md`;
+`ci-rerun.yml` retries attempt 1 on its own.
