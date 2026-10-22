@@ -487,6 +487,42 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             "conflict", f"orphan {root_pid} refused + closed natively; reseeded root {reseeded_pid}"
         )
 
+    # meiva:note
+    # `serve()` unlinks the socket file before it binds, so a second copy of this
+    # binary rewrites the path under the live daemon and orphans its listening fd --
+    # every later connect fails until the machine restarts (2026-10-22: a stray
+    # `--check` that inherited the socket variable took macmini's desktop surface).
+    def check_second_instance(exe: Path) -> None:
+        before = helper_sock.stat()
+        second = _run(
+            [str(exe)],
+            check=False,
+            timeout=30.0,
+            env={
+                "HOME": str(Path.home()),
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                "MEIVA_PERMISSIONS_HELPER_SOCKET": str(helper_sock),
+                "MEIVA_PERMISSIONS_HELPER_ROOT_SEED": str(run_dir / "seed.json"),
+                "MEIVA_PERMISSIONS_HELPER_SKIP_REGISTRATION": "1",
+            },
+        )
+        after = helper_sock.stat()
+        _save(evidence, "second-instance.txt", second.stdout + second.stderr)
+        if second.returncode != 0:
+            fail(
+                "second-instance",
+                f"the second launch did not refuse (exit {second.returncode}): "
+                f"{(second.stderr or second.stdout).strip()[-400:]}",
+            )
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            fail("second-instance", "the second launch replaced the live socket file")
+        if ping_or_none(helper_client) is None:
+            fail("second-instance", "the live helper stopped answering after the second launch")
+        phase_pass(
+            "second-instance",
+            f"refused in place; socket inode {after.st_ino} kept and the live helper still answers",
+        )
+
     def cleanup() -> None:
         bootout(label)
         deadline = time.monotonic() + 5.0
@@ -509,6 +545,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         root_pid, initial_units = check_chain()
         check_attribution()
         check_conflict()
+        check_second_instance(exe)
 
         print("\nSMOKE PASS: " + ", ".join(phases))
         return 0
