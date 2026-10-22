@@ -235,7 +235,7 @@ def force_stop(
         )
 
     if teardown_extras:
-        _temporary_stop.stop_extras(deadline)
+        _temporary_stop.stop_extras(deadline, retained=root_preserve)
 
     # 2) stop the data plane (data persists on disk).
     _stop_data_plane(
@@ -270,6 +270,12 @@ def do_stop(
     helper: HelperFactory | None,
 ) -> int:
     """Shared stop kernel; only explicit force escalates a service stop."""
+    _temporary_stop.require_extras_retirable(
+        teardown_extras=teardown_extras,
+        keep_shell_sessions=keep_shell_sessions,
+        keep_browser=keep_browser,
+        preserve_sessions=preserve_sessions,
+    )
     if force:
         return force_stop(
             _repo,
