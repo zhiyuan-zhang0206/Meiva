@@ -16,5 +16,5 @@ exports = ["analysis.py", "cli.py", "debt.py", "enumerations.py", "generated.py"
 "ledger.py" = ["debt.py", "manifest.py"]
 "manifest.py" = ["debt.py"]
 "policy.py" = ["manifest.py"]
-"rule.py" = ["debt.py", "manifest.py"]
+"rule.py" = ["debt.py", "manifest.py", "policy.py"]
 "sync.py" = ["analysis.py", "manifest.py", "manifest_text.py"]

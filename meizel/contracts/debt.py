@@ -27,6 +27,7 @@ __all__ = [
     "CYCLE_EDGE",
     "DEBTABLE",
     "PATCH_CODES",
+    "PURITY_CODES",
     "TABLE_KEY",
     "DebtTable",
     "edge_key",
@@ -55,7 +56,20 @@ PATCH_CODES = (
     Code.ENV_PATCH,
     Code.UNRESOLVED_PATCH,
 )
-_FILE_CODES = frozenset({Code.RESTRICTED, *PATCH_CODES})
+PURITY_CODES = (
+    Code.IMPURE_EDGE,
+    Code.IMPURE_CALL,
+    Code.UNFROZEN_VALUE,
+    Code.UNTYPED_EXPORT,
+    Code.IMPURE_TEST_FIXTURE,
+    Code.STALE_EXPORT,
+    Code.PASSTHROUGH_FUNCTION,
+    Code.NESTED_ATTR_WRITE,
+    Code.NESTED_PATCH_TARGET,
+    Code.DOMAIN_SUBSET_LEAK,
+    Code.WIDE_FANOUT,
+)
+_FILE_CODES = frozenset({Code.RESTRICTED, *PATCH_CODES, *PURITY_CODES})
 DEBTABLE = _EDGE_CODES | _FILE_CODES
 TABLE_KEY = "debt"
 

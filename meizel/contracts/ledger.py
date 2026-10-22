@@ -41,6 +41,9 @@ def _excess(
     return [replace(d, hints=(*d.hints, *notes)) for d in found]
 
 
+_WHOLE_REPO_CODES = frozenset({Code.STALE_EXPORT, Code.DOMAIN_SUBSET_LEAK})
+
+
 def _paid(
     manifest: Manifest,
     groups: Tally,
@@ -48,6 +51,8 @@ def _paid(
 ) -> list[Diagnostic]:
     found: list[Diagnostic] = []
     for code, rows in sorted(manifest.debt.items(), key=lambda item: str(item[0])):
+        if code in _WHOLE_REPO_CODES and not in_scope(""):
+            continue
         for key, recorded in sorted(rows.items()):
             source = source_of(manifest.directory, code, key)
             remaining = len(groups.get((manifest.directory, code, key), ()))

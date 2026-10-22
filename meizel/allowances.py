@@ -53,6 +53,12 @@ RULES: dict[str, dict[str, str]] = {
     },
     "type-checking": {"files": REASONS},
     "single-owner": {"postgres-dial-owners": NAMES},
+    "purity": {
+        "impure-imports": NAMES,
+        "impure-calls": NAMES,
+        "impure-fixtures": NAMES,
+        "max-uses": NAMES,
+    },
 }
 PER_NAME = frozenset({"single-owner"})
 
@@ -122,7 +128,16 @@ def _rule(rule: str, table: object, policy: Policy, problems: list[str]) -> None
         if shape == REASONS:
             policy.listed[(rule, section)] = _reasons(value, where, problems)
         elif shape == NAMES:
-            policy.named[(rule, section)] = _names(value, where, problems)
+            if (
+                rule == "purity"
+                and section == "max-uses"
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 1
+            ):
+                policy.named[(rule, section)] = (str(value),)
+            else:
+                policy.named[(rule, section)] = _names(value, where, problems)
         else:
             known = ", ".join(sorted(RULES[rule]))
             problems.append(f"[{rule}] has no section {section!r}; the sections are {known}")

@@ -451,3 +451,59 @@ skills-scope = [
 argv-wrappers = [
     "base.host.proc.run_bounded",
 ]
+
+[purity]
+impure-imports = [
+    "ctypes",
+    "fastapi",
+    "fcntl",
+    "httpx",
+    "multiprocessing",
+    "playwright",
+    "psycopg",
+    "psycopg_pool",
+    "pty",
+    "redis",
+    "requests",
+    "shutil",
+    "signal",
+    "socket",
+    "starlette",
+    "subprocess",
+    "tempfile",
+    "termios",
+    "urllib",
+    "uvicorn",
+    "watchdog",
+    "watchfiles",
+]
+impure-calls = [
+    "datetime.datetime.now",
+    "datetime.datetime.utcnow",
+    "datetime.now",
+    "datetime.utcnow",
+    "io.open",
+    "open",
+    "os.environ",
+    "os.getcwd",
+    "os.getenv",
+    "os.kill",
+    "os.killpg",
+    "time.monotonic",
+    "time.sleep",
+    "time.time",
+    "uuid.uuid1",
+    "uuid.uuid4",
+]
+impure-fixtures = [
+    "aops_pool",
+    "database",
+    "database_gate",
+    "db_conn",
+    "event_bus",
+    "monkeypatch",
+    "operator_database",
+    "pool",
+    "redis_url",
+]
+max-uses = ["8"]

@@ -12,9 +12,17 @@ from pathlib import Path
 from meizel.contracts.debt import file_key
 from meizel.contracts.ledger import reconcile
 from meizel.contracts.manifest import Manifest, load_manifests, manifest_path
+from meizel.contracts.policy import Policy, load_policy
 from meizel.contracts.policy import check as check_policy
-from meizel.contracts.policy import load_policy
-from meizel.contracts.rule import Projection, judge, project, relative
+from meizel.contracts.rule import (
+    Projection,
+    judge,
+    paid_strict_to_be,
+    project,
+    purity_diagnostics,
+    relative,
+    stale_exports,
+)
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
 from meizel.graph.universe import Universe, load_universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
@@ -50,6 +58,7 @@ class Analysis:
     stale_edges: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
     stale_loads: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     stale_externals: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    stale_exports: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
 
 
 def _init_worker(universe: Universe) -> None:
@@ -186,13 +195,20 @@ def _patch_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
     for scan in scans:
         owner = scan.path.rpartition("/")[0]
         for patch in scan.patches:
+            suffix = " (imported binding)" if patch.imported else ""
+            hints = [_PATCH_HINT[patch.code]]
+            if patch.imported:
+                hints.append(
+                    "target is an imported binding on this module rather than defined here; "
+                    "patch the defining module or inject the dependency"
+                )
             found.append(
                 Diagnostic(
                     scan.path,
                     patch.line,
                     patch.code,
-                    f"{patch.form} on {_PATCH_WHAT[patch.code]} {patch.target}",
-                    (_PATCH_HINT[patch.code],),
+                    f"{patch.form} on {_PATCH_WHAT[patch.code]} {patch.target}{suffix}",
+                    tuple(hints),
                     DebtKey(owner, file_key(owner, scan.path, f"{patch.form} {patch.target}")),
                 )
             )
@@ -234,6 +250,7 @@ class StaleDeclarations:
     edges: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
     loads: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     externals: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    exports: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
 
 
 def _stale_diagnostics(
@@ -319,6 +336,7 @@ def diagnose(scan: FileScan, manifests: dict[str, Manifest]) -> list[Diagnostic]
     loaders, externals = _declared_loads(manifests), _declared_externals(manifests)
     found.extend(_source_diagnostics([scan], loaders, externals))
     found.extend(_patch_diagnostics([scan]))
+    found.extend(purity_diagnostics([scan], [scan], manifests, Policy(), include_manifests=False))
     return _distinct(found)
 
 
@@ -351,14 +369,20 @@ def analyze(
     diagnostics.extend(found)
     diagnostics.extend(_source_diagnostics([scans[p] for p in judged], loaders, externals))
     diagnostics.extend(_patch_diagnostics(scans[p] for p in judged))
+    purity_diags = purity_diagnostics(scans.values(), [scans[p] for p in judged], manifests, policy)
     stale = StaleDeclarations()
     if scope is None:
+        export_diags, unused_exports = stale_exports(manifests, projections)
+        purity_diags.extend(export_diags)
         stale = StaleDeclarations(
             _stale_edges(manifests, needed),
             _stale_loads(scans, loaders),
             _stale_externals(scans, externals),
+            unused_exports,
         )
         diagnostics.extend(_stale_diagnostics(manifests, stale))
+        diagnostics.extend(paid_strict_to_be(manifests, purity_diags))
+    diagnostics.extend(purity_diags)
     diagnostics = _distinct(diagnostics)
     return Analysis(
         universe,
@@ -373,4 +397,5 @@ def analyze(
         stale.edges,
         stale.loads,
         stale.externals,
+        stale.exports,
     )
