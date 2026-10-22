@@ -17,6 +17,7 @@ import sys
 import textwrap
 import types
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -58,8 +59,8 @@ def _fake_module(source: str, name: str = "fakemod") -> types.ModuleType:
     return mod
 
 
-def _render(target: object | list[object], *, compact_classes: bool = False) -> str:
-    targets = target if isinstance(target, list) else [target]
+def _render(target: object, *, compact_classes: bool = False) -> str:
+    targets = cast("list[object]", target) if isinstance(target, list) else [target]
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         render(*targets, compact_classes=compact_classes)
@@ -578,8 +579,6 @@ def test_resolve_child_returns_constant_for_module_attr_string() -> None:
 def test_documented_const_path_under_home_renders_tilde_relative() -> None:
     """The snapshot test pins meiva.memory.PATH to an already-~-relative value,
     so it cannot catch a regression here — this locks the rewrite itself."""
-    from pathlib import Path
-
     c = meiva.const(Path.home() / ".meiva" / "memory", doc="x")
     out = format_documented_const_stub("PATH", c)
     assert "PATH: PosixPath = ~/.meiva/memory" in out

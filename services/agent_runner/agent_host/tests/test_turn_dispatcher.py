@@ -4,11 +4,8 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import pytest
-
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
-from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import (
     TurnScheduler,
 )
@@ -217,12 +214,9 @@ class TestFailureIsolation:
 
 
 class TestUncancellableTurn:
-    async def test_aclose_returns_even_when_a_turn_refuses_to_unwind(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
+    async def test_aclose_returns_even_when_a_turn_refuses_to_unwind(self) -> None:
         stuck = StuckTurn()
-        sched = TurnScheduler(stuck)
+        sched = TurnScheduler(stuck, cancel_unwind_timeout_s=0.05)
         sched.wake(7)
         await asyncio.wait_for(stuck.entered.wait(), 2)
 
@@ -235,11 +229,10 @@ class TestUncancellableTurn:
         assert sched.active_agents == frozenset(), "aclose must not leave the registry populated"
 
     async def test_the_straggler_is_named_in_the_event_river(
-        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
+        self, loguru_records: LogRecords
     ) -> None:
-        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
         turn = StuckTurn()
-        sched = TurnScheduler(turn)
+        sched = TurnScheduler(turn, cancel_unwind_timeout_s=0.05)
         sched.wake(31)
         await asyncio.wait_for(turn.entered.wait(), 2)
 
@@ -255,13 +248,11 @@ class TestUncancellableTurn:
         assert isinstance(reports[0]["waited_s"], float)
 
     async def test_a_turn_that_unwinds_cleanly_reports_nothing(
-        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
+        self, loguru_records: LogRecords
     ) -> None:
-        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
-
         rec = Recorder()
         rec.gate(7)
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, cancel_unwind_timeout_s=0.05)
         sched.wake(7)
         await settle()
         await asyncio.wait_for(sched.aclose(), 5)
@@ -273,16 +264,15 @@ class TestUncancellableTurn:
         ] == []
 
     async def test_the_report_carries_the_real_activity_clock(
-        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
+        self, loguru_records: LogRecords
     ) -> None:
-        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
         silent_since = datetime.now(UTC) - timedelta(minutes=20)
 
         async def _clock(_agent_id: int) -> datetime:
             return silent_since
 
         turn = StuckTurn()
-        sched = TurnScheduler(turn, activity_clock=_clock)
+        sched = TurnScheduler(turn, activity_clock=_clock, cancel_unwind_timeout_s=0.05)
         sched.wake(5)
         await asyncio.wait_for(turn.entered.wait(), 2)
 
@@ -299,15 +289,13 @@ class TestUncancellableTurn:
         assert idle_s > 1000, "a 20-minute-silent agent must not read as freshly active"
 
     async def test_a_failing_clock_read_still_reports_the_wedge(
-        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
+        self, loguru_records: LogRecords
     ) -> None:
-        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
-
         async def _broken_clock(_agent_id: int) -> datetime:
             raise RuntimeError("db unreachable")
 
         turn = StuckTurn()
-        sched = TurnScheduler(turn, activity_clock=_broken_clock)
+        sched = TurnScheduler(turn, activity_clock=_broken_clock, cancel_unwind_timeout_s=0.05)
         sched.wake(9)
         await asyncio.wait_for(turn.entered.wait(), 2)
 
@@ -324,17 +312,19 @@ class TestUncancellableTurn:
         assert report["idle_s"] is None
 
     async def test_a_hanging_clock_read_does_not_delay_shutdown(
-        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
+        self, loguru_records: LogRecords
     ) -> None:
-        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
-        monkeypatch.setattr(dispatcher, "CLOCK_READ_TIMEOUT_S", 0.05)
-
         async def _hanging_clock(_agent_id: int) -> datetime:
             await asyncio.sleep(3600)
             raise AssertionError("unreachable")
 
         turn = StuckTurn()
-        sched = TurnScheduler(turn, activity_clock=_hanging_clock)
+        sched = TurnScheduler(
+            turn,
+            activity_clock=_hanging_clock,
+            cancel_unwind_timeout_s=0.05,
+            clock_read_timeout_s=0.05,
+        )
         sched.wake(12)
         await asyncio.wait_for(turn.entered.wait(), 2)
 

@@ -436,10 +436,9 @@ async def test_recorder_rejects_invalid_sampling_before_the_original_call(
     wrapped = metering.make_recorder(original, "plugin.write", sampling_owner)
     assert inspect.signature(wrapped) == inspect.signature(original)
     with pytest.raises(TypeError, match="invalid sampling configuration"):
-        if async_call:
-            await wrapped()
-        else:
-            wrapped()
+        res = wrapped()
+        if inspect.isawaitable(res):
+            await res
     assert calls == []
 
 
@@ -558,9 +557,11 @@ async def test_invalid_identity_snapshot_prevents_sdk_body(
         if wrapper == "async":
             await metering.make_recorder(body, "probe.async", sampling_owner)()
         elif wrapper == "mcp":
-            metering.make_mcp_recorder(lambda *_: executed.append("mcp"), sampling_owner)(
-                None, "probe", "tool"
-            )
+
+            def _mcp_body(*_args: object) -> None:
+                executed.append("mcp")
+
+            metering.make_mcp_recorder(_mcp_body, sampling_owner)(None, "probe", "tool")
         else:
             metering.make_recorder(lambda: executed.append("sync"), "probe.sync", sampling_owner)()
     assert caught.value is failure
