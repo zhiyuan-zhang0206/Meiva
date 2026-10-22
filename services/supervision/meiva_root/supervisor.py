@@ -12,7 +12,7 @@ import os
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from time import monotonic, time
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import psutil
 
@@ -51,6 +51,10 @@ from services.supervision.meiva_root.unit_ledger import GenerationRecord
 from services.supervision.meiva_root.unit_records import Generation, UnitRuntime
 
 _log = logging.getLogger(__name__)
+
+# meiva:note
+# A refused wrapper is refused within milliseconds; ten seconds covers a slow answer.
+REWRITE_STARTUP_WINDOW_S = 10.0
 
 
 class HealthSource(Protocol):
@@ -127,11 +131,16 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         self._log_dir = run_dir / "logs"
         self._config = config if config is not None else SupervisorConfig()
         # meiva:note
-        # Opaque per-unit launch rewriting, installed by the assembly before start:
-        # whatever a unit's runtime needs (a memory-capped scope, a wrapper) is the
-        # assembly's knowledge, never this supervisor's. None launches the manifest
-        # exactly as written.
+        # Opaque launch rewriting from the assembly; None launches the manifest as written.
         self._argv_transform: ArgvTransform | None = None
+
+        # meiva:note
+        # A rewrite that starts and then dies is not a launch failure the supervisor can
+        # see: the wrapper exits, this looks like an ordinary unit exit, and the restart
+        # policy would replay the same rewrite forever -- a unit that never comes up.
+        # One early non-zero exit therefore retires the rewrite for this process's whole
+        # life, and the unit runs unbounded from then on, loudly.
+        self._rewrite_retired = False
         self._units: dict[str, UnitRuntime] = {
             manifest.id: UnitRuntime(manifest=manifest) for manifest in registry.units
         }
@@ -620,9 +629,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         self._clear_restart_failure(runtime)
 
     # meiva:note
-    # The assembly owns the decision (config, platform, availability probe); the
-    # supervisor only applies what it is given, so nothing here reads ambient config
-    # and no platform name appears in this file.
+    # The assembly owns the decision; no ambient config or platform name enters this file.
     def set_argv_transform(self, transform: ArgvTransform | None) -> None:
         self._argv_transform = transform
 
@@ -647,12 +654,23 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         try:
             env = inherited_process_env() | dict(manifest.env)
             launcher = self.spawn or asyncio.create_subprocess_exec
+            plain = list(manifest.exec)
             argv = (
-                self._argv_transform(manifest.id, list(manifest.exec))
-                if self._argv_transform is not None
-                else list(manifest.exec)
+                self._argv_transform(manifest.id, plain)
+                if self._argv_transform is not None and not self._rewrite_retired
+                else plain
             )
-            proc = await self._launch(launcher, argv, manifest.exec, log_fd=log_fd, env=env)
+            proc = await self._launch(
+                launcher,
+                argv,
+                plain,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=log_fd,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env,
+                close_fds=True,
+                process_group=0,
+            )
         finally:
             os.close(log_fd)
         try:
@@ -665,6 +683,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             started_at=monotonic(),
             seq=runtime.spawn_seq,
             identity=identity,
+            rewritten=argv != plain,
         )
         runtime.generation = generation
         runtime.state = UnitState.RUNNING
@@ -696,38 +715,43 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         )
 
     # meiva:note
-    # A rewrite the machine cannot honor must cost the unit one failed launch, never the
-    # unit itself: when the transformed argv fails to start, the manifest's own argv is
-    # tried once, unchanged. This is what makes the memory budget safe to enable on a
-    # host whose launcher merely looked available at assembly time.
+    # A rewrite the machine cannot honor costs one failed launch, never the unit: when the
+    # transformed argv cannot start, the manifest's argv is tried once, unchanged.
     async def _launch(
-        self,
-        launcher: ChildSpawn,
-        argv: Sequence[str],
-        plain: Sequence[str],
-        *,
-        log_fd: int,
-        env: Mapping[str, str],
+        self, launcher: ChildSpawn, argv: Sequence[str], plain: Sequence[str], **options: Any
     ) -> asyncio.subprocess.Process:
-        options = {
-            "stdin": asyncio.subprocess.DEVNULL,
-            "stdout": log_fd,
-            "stderr": asyncio.subprocess.STDOUT,
-            "env": env,
-            "close_fds": True,
-            "process_group": 0,
-        }
+        if list(argv) == list(plain):
+            return await launcher(*plain, **options)
         try:
             return await launcher(*argv, **options)
         except OSError as exc:
-            if list(argv) == list(plain):
-                raise
-            _log.warning("rewritten launch failed (%s); starting the manifest argv unchanged", exc)
+            _log.warning(
+                "the rewritten launch never started (%s); memory cap not applied, "
+                "the unit runs unbounded",
+                exc,
+            )
             return await launcher(*plain, **options)
 
     async def _watch(self, runtime: UnitRuntime, generation: Generation) -> None:
         """Reap one direct child and make an unexpected exit eligible for replacement."""
         returncode = await generation.proc.wait()
+        # meiva:note
+        # A wrapped generation that exits non-zero inside the window never ran the unit: the
+        # wrapper failed, so retiring it keeps an unusable cap from becoming a restart loop.
+        if (
+            generation.rewritten
+            and not self._rewrite_retired
+            and returncode
+            and monotonic() - generation.started_at <= REWRITE_STARTUP_WINDOW_S
+        ):
+            self._rewrite_retired = True
+            _log.warning(
+                "unit %s: the rewritten launch exited %s within %.0fs; memory cap not "
+                "applied, the unit runs unbounded for the rest of this root's life",
+                runtime.manifest.id,
+                returncode,
+                REWRITE_STARTUP_WINDOW_S,
+            )
         if runtime.generation is generation:
             runtime.last_exit = _describe_exit(returncode)
             runtime.state = UnitState.STOPPED
