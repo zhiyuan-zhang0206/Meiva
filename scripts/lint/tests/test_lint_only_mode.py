@@ -166,6 +166,7 @@ CASES = [
         no_plugin_wrap,
         "meiva_builtins/plugins/demo/plugin.py",
         "meiva.files.read = my_read\n",
+        explicit_root=True,
     ),
     Case(
         pool_keepalives,
