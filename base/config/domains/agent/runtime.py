@@ -25,6 +25,29 @@ class AgentRuntimeSettings(EnvSettings):
         )
     )
 
+    exec_oom_score_adj: int = Field(
+        default=800,
+        alias="MEIVA_EXEC_OOM_SCORE_ADJ",
+        description=(
+            "OOM preference an execute_code child gives itself on Linux: 0 leaves it at the"
+            " inherited score, 1000 makes it the kernel's first choice. A worker is rerunnable"
+            " and the machine's browser, editor and desktop apps are not, yet systemd's user"
+            " units already run at +300, so a worker left at 0 made the kernel kill the browser"
+            " first (2026-10-22: an 8.29 GiB export on ubuntu killed chrome and typeless). Set"
+            " 0 on a host where agent work is the main load and must not be preferred victims."
+        ),
+        ge=0,
+        le=1000,
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     checkpoint_interval: int = Field(
         default=4,
         alias="MEIVA_CHECKPOINT_INTERVAL",

@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
@@ -229,6 +229,37 @@ def _take_result_state_update(child: ChildContext, payload: Any, *, state_inject
         return
 
     payload.state_update = update or None
+
+
+# meiva:note
+# The machine's shared applications must outlive a runaway exec. systemd hands user units
+# oom_score_adj=300 (browser, editor, input method), so a worker left at the inherited 0 is
+# *safer* for the kernel than the apps it starves: on 2026-10-22 an 8.29 GiB export killed
+# chrome and typeless on ubuntu while its own score stayed 0 (#5543). Raising only our own
+# score puts the kernel's first choice on the process we can simply run again.
+OOM_SCORE_ADJ_ENV = "MEIVA_EXEC_OOM_SCORE_ADJ"
+DEFAULT_OOM_SCORE_ADJ = 800
+OOM_SCORE_ADJ_PATH = Path("/proc/self/oom_score_adj")
+
+
+# meiva:note
+# Raise only this process's score: a value the kernel reads before it decides whom to kill.
+# Returns what was written, or None when the preference is off or the file does not exist.
+def apply_oom_preference(
+    env: Mapping[str, str] | None = None, path: Path = OOM_SCORE_ADJ_PATH
+) -> int | None:
+    raw = (env if env is not None else os.environ).get(OOM_SCORE_ADJ_ENV)
+    try:
+        score = DEFAULT_OOM_SCORE_ADJ if raw in (None, "") else int(raw)
+    except ValueError:
+        score = DEFAULT_OOM_SCORE_ADJ
+    score = min(max(score, 0), 1000)
+    if score == 0:
+        return None
+    with contextlib.suppress(OSError):
+        path.write_text(str(score), encoding="utf-8")
+        return score
+    return None
 
 
 def run_code(code: str, payload: Any) -> None:
@@ -455,6 +486,7 @@ def main() -> None:
         )
         raise SystemExit(2)
     clients: Any = None
+    apply_oom_preference()
     try:
         line_buffered_output()
         _install_signal_handlers()
