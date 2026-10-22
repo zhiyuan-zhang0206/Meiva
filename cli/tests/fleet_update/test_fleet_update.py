@@ -17,7 +17,7 @@ import pytest
 from base.native_process.root_control import instance_lock
 from cli import fleet_update
 from cli.tests.fleet_update.fleet_update_cluster import Cluster, git
-from scripts.host_ops import fleet_gate
+from scripts.host_ops import fleet_gate, fleet_verify
 
 
 @pytest.mark.parametrize("command", ["run", "split"])
@@ -64,12 +64,15 @@ def test_run_reports_up_failure_without_repeating_down(
 ) -> None:
     cluster, run = env
     cluster.fail[failing] = 1
-    assert run("run") == 1
+    # meiva:note
+    # A failed smoke or drift check is a partial up (3): the window did not refuse, and every
+    # other host is still reported. Down never repeats, which is what this test is about.
+    assert run("run") == 3
     assert [a for k, a in cluster.effects if k == "stop"] == ["mac", "lin", "gw"]
     assert [a for k, a in cluster.effects if k == "switch"] == ["gw", "mac", "lin"]
     output = capsys.readouterr().out
-    assert "Failed phase: up" in output and "rerun `up`" in output
-    assert cluster.silence_open
+    assert "up incomplete" in output and "Failed phase" not in output
+    assert not cluster.silence_open
 
 
 # meiva:note
@@ -187,9 +190,9 @@ def test_a_red_drift_check_fails_up_with_its_detail(
     cluster, run = env
     assert run("down") == 0
     cluster.fail[failing] = 1
-    assert run("up") == 1
+    assert run("up") == 3
     out = capsys.readouterr().out
-    assert detail in out and "FAILED: drift check failed" in out
+    assert detail in out and f"matrix: {failing[1]} failed at" in out
     assert {"smoke", "refresh"} <= {k for k, _ in cluster.effects}
     assert [a for k, a in cluster.effects if k == "plugins-verify"] == ["gw", "mac", "lin"]
 
@@ -201,12 +204,11 @@ def test_every_red_drift_check_is_reported_not_only_the_first(
     assert run("down") == 0
     cluster.fail[("schedules-verify", "gw")] = 1
     cluster.fail[("plugins-verify", "lin")] = 1
-    assert run("up") == 1
-    failed_line = next(
-        line for line in capsys.readouterr().out.splitlines() if "drift check failed" in line
-    )
-    assert "schedules verify" in failed_line and "plugins verify" in failed_line
-    assert "gw:" in failed_line and "lin:" in failed_line
+    assert run("up") == 3
+    lines = capsys.readouterr().out.splitlines()
+    failed = [line for line in lines if "matrix:" in line and "failed at" in line]
+    assert any("gw" in line and "schedules verify" in line for line in failed)
+    assert any("lin" in line and "plugins verify" in line for line in failed)
 
 
 _RED_ROW = (
@@ -343,10 +345,25 @@ def test_a_roster_that_never_agrees_fails_with_its_last_state(
     cluster, run = env
     assert run("down") == 0
     cluster.roster_lag = 10**6
-    assert run("up", "--roster-timeout", "30") == 1
+    assert run("up", "--roster-timeout", "30") == 3
     assert cluster.roster_reads == 30 // fleet_update.POLL_S + 1
-    assert "roster after 30s: offline ['gw', 'mac', 'lin']" in capsys.readouterr().out
-    assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
+    out = capsys.readouterr().out
+    assert "roster after 30s: offline ['gw', 'mac', 'lin']" in out
+    # meiva:note
+    # A roster that never agrees leaves every host unverified, and every host still gets a line
+    # saying why: skipping the refresh as well would hide the one stage that still ran.
+    assert "smoke" not in {k for k, _ in cluster.effects}
+    assert "refresh" in {k for k, _ in cluster.effects}
+    assert (
+        len(
+            [
+                line
+                for line in out.splitlines()
+                if line.startswith("matrix:") and "failed at 'roster'" in line
+            ]
+        )
+        == 3
+    )
 
 
 _LAPTOP_OFF = {"row": (False, False, None, None, True)}
@@ -373,9 +390,20 @@ def test_a_listed_machine_that_is_offline_fails(
     assert run("down") == 0
     cluster.laptop = _LAPTOP_OFF
     cluster.silent.add("lin")
-    assert run("up", "--roster-timeout", "10") == 1
-    assert "roster after 10s: offline ['lin']" in capsys.readouterr().out
-    assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
+    assert run("up", "--roster-timeout", "10") == 3
+    out = capsys.readouterr().out
+    assert "roster after 10s: offline ['lin']" in out
+    assert "smoke" not in {k for k, _ in cluster.effects}
+    assert (
+        len(
+            [
+                line
+                for line in out.splitlines()
+                if line.startswith("matrix:") and "failed at 'roster'" in line
+            ]
+        )
+        == 3
+    )
 
 
 def test_the_roster_name_comes_from_the_host_not_its_ssh_alias(
@@ -394,9 +422,20 @@ def test_a_listed_host_with_no_roster_row_is_an_error(
     cluster, run = env
     assert run("down") == 0
     cluster.hidden.add("lin")
-    assert run("up") == 1
-    assert "no roster row for ['lin']" in capsys.readouterr().out
-    assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
+    assert run("up") == 3
+    out = capsys.readouterr().out
+    assert "no roster row for ['lin']" in out
+    assert "smoke" not in {k for k, _ in cluster.effects}
+    assert (
+        len(
+            [
+                line
+                for line in out.splitlines()
+                if line.startswith("matrix:") and "failed at 'roster'" in line
+            ]
+        )
+        == 3
+    )
 
 
 def test_packages_refresh_reports_and_never_forces(
@@ -626,7 +665,7 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(
     monkeypatch.setattr(fleet_update, "ssh", ssh)
     args = argparse.Namespace(dry_run=False, log_dir=tmp_path / "logs", half="up")
 
-    names = fleet_update.machine_names(fleet_update.Session(args), ["mac"])
+    names = fleet_verify.machine_names(fleet_update.Session(args), ["mac"])
 
     assert names == {"mac": "mac-mini"}
 
@@ -658,15 +697,18 @@ def test_the_window_is_one_silence_opened_before_the_first_stop_and_closed_after
     assert cluster.effects[-1] == ("silence-close", "gw")
 
 
-def test_a_failed_up_leaves_the_silence_to_its_expiry(
+def test_a_partial_up_ends_the_planned_outage_silence(
     env: tuple[Cluster, Callable[..., int]],
 ) -> None:
+    # meiva:note
+    # Hosts that did come back healthy must not spend the rest of the window with their alerts
+    # suppressed because one other host failed to verify.
     cluster, run = env
     assert run("down") == 0
     cluster.fail[("schedules-verify", "gw")] = 1
-    assert run("up") == 1
-    assert cluster.silence_open
-    assert "silence-close" not in {k for k, _ in cluster.effects}
+    assert run("up") == 3
+    assert not cluster.silence_open
+    assert "silence-close" in {k for k, _ in cluster.effects}
 
 
 @pytest.mark.parametrize(
