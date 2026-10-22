@@ -87,10 +87,10 @@ def agent_host_memory_caps(
             max_mb,
         )
         return {}
-    if not scope_available():
+    if not scope_available(max_mb, swap_max_mb):
         _log.warning(
-            "agent-host memory cap configured (%d MiB) but systemd cannot create a user "
-            "scope here; the unit runs unbounded rather than failing to start",
+            "agent-host memory cap configured (%d MiB) but this systemd cannot carry the "
+            "scope attributes it needs; the unit runs unbounded rather than failing to start",
             max_mb,
         )
         return {}

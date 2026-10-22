@@ -354,3 +354,44 @@ async def test_a_refused_rewrite_falls_back_to_the_manifest_argv(tmp_path: Path)
         ]
     finally:
         await owner.shutdown()
+
+
+# meiva:note
+# The dangerous shape is not "the launcher refuses" but "the launcher starts, then exits
+# non-zero": that reads as an ordinary unit exit, so the restart policy would replay the
+# same wrapper forever and the unit would never come up. One early exit must retire the
+# rewrite and the next generation must launch the manifest argv.
+async def test_an_early_non_zero_exit_retires_the_rewrite(tmp_path: Path) -> None:
+    seen: list[tuple[str, ...]] = []
+    plain = (sys.executable, "-u", str(_CHILD), "code_gate_exit", str(tmp_path / "gate"))
+
+    async def launcher(*argv: str, **options: Any) -> Any:
+        seen.append(tuple(argv))
+        # meiva:note
+        # Record what was asked for, but always run the manifest argv: the point is a
+        # process that starts and then exits non-zero straight away.
+        return await asyncio.create_subprocess_exec(*plain, **options)
+
+    unit = UnitManifest("worker", plain, RestartPolicy.ALWAYS, "root", ())
+    owner = Supervisor(
+        UnitRegistry([unit]),
+        run_dir=tmp_path,
+        config=SupervisorConfig(stop_timeout_s=0.2),
+        spawn=launcher,
+    )
+    owner.set_argv_transform(lambda unit_id, argv: [f"wrapped:{unit_id}", *argv])
+    await owner.start()
+    try:
+        for _ in range(200):
+            if (await row(owner))["state"] == "stopped":
+                break
+            await asyncio.sleep(0.02)
+        await owner.restart("worker")
+        for _ in range(200):
+            if len(seen) >= 2:
+                break
+            await asyncio.sleep(0.02)
+        assert seen[0][0] == "wrapped:worker"
+        assert seen[1] == plain
+    finally:
+        await owner.shutdown()

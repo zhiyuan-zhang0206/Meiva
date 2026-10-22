@@ -39,6 +39,10 @@ class Generation:
 
     Root, its only reaper, reaped it or will. No old group number is signalled."""
     closing: bool = False
+    # meiva:note
+    # Launched through the assembly's argv rewrite rather than the manifest, so an early
+    # non-zero exit can be read as "the wrapper is unusable on this host".
+    rewritten: bool = False
     exited: asyncio.Event = field(default_factory=asyncio.Event)
 
 

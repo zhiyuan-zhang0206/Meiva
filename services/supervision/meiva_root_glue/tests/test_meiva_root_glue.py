@@ -341,7 +341,10 @@ async def test_reference_station_and_writer_share_one_entry_gate(
 def test_agent_host_cap_is_off_by_default() -> None:
     assert (
         glue.agent_host_memory_caps(
-            max_mb=0, swap_max_mb=0, platform="linux", scope_available=lambda: True
+            max_mb=0,
+            swap_max_mb=0,
+            platform="linux",
+            scope_available=lambda _max_mb, _swap_mb: True,
         )
         == {}
     )
@@ -350,7 +353,10 @@ def test_agent_host_cap_is_off_by_default() -> None:
 def test_agent_host_cap_declines_where_cgroups_do_not_exist() -> None:
     assert (
         glue.agent_host_memory_caps(
-            max_mb=18432, swap_max_mb=0, platform="darwin", scope_available=lambda: True
+            max_mb=18432,
+            swap_max_mb=0,
+            platform="darwin",
+            scope_available=lambda _max_mb, _swap_mb: True,
         )
         == {}
     )
@@ -359,7 +365,10 @@ def test_agent_host_cap_declines_where_cgroups_do_not_exist() -> None:
 def test_agent_host_cap_declines_when_systemd_cannot_scope() -> None:
     assert (
         glue.agent_host_memory_caps(
-            max_mb=18432, swap_max_mb=0, platform="linux", scope_available=lambda: False
+            max_mb=18432,
+            swap_max_mb=0,
+            platform="linux",
+            scope_available=lambda _max_mb, _swap_mb: False,
         )
         == {}
     )
@@ -367,7 +376,10 @@ def test_agent_host_cap_declines_when_systemd_cannot_scope() -> None:
 
 def test_agent_host_cap_applies_when_every_precondition_holds() -> None:
     caps = glue.agent_host_memory_caps(
-        max_mb=18432, swap_max_mb=0, platform="linux", scope_available=lambda: True
+        max_mb=18432,
+        swap_max_mb=0,
+        platform="linux",
+        scope_available=lambda _max_mb, _swap_mb: True,
     )
     assert caps == {"agent-host": glue.UnitMemoryCap(max_mb=18432, swap_max_mb=0)}
 
