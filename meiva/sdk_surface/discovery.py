@@ -23,10 +23,6 @@ def is_container(obj: object) -> bool:
     return inspect.ismodule(obj) or inspect.isclass(obj) or isinstance(obj, SimpleNamespace)
 
 
-def is_element(obj: object) -> bool:
-    return inspect.isroutine(obj)
-
-
 @dataclass(frozen=True)
 class Constant:
     """Module-level constant exposed via PEP 224 attribute docstring.
@@ -193,7 +189,7 @@ def resolve_child(
         if name in docs or name in annotations:
             return Constant(type_str=annotations.get(name, ""), doc=docs.get(name, ""))
         return None
-    if is_container(attr) or is_element(attr) or is_documented_const(attr):
+    if is_container(attr) or inspect.isroutine(attr) or is_documented_const(attr):
         return attr
     return Constant(
         type_str=annotations.get(name, type(attr).__name__),

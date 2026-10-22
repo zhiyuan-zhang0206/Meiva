@@ -16,6 +16,3 @@ exports = ["constants.py", "packing.py"]
 "packing.py#base/lm/catalog/__init__.py" = 1
 "packing.py#base/lm/factory.py" = 1
 "packing.py#base/lm/provider_api.py" = 1
-
-[debt.unfrozen-value]
-"packing.py#class _PackingState" = 1

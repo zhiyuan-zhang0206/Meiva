@@ -51,7 +51,7 @@ def within(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(f"{prefix}/")
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class Manifest:
     directory: str
     exports: tuple[str, ...] = ()
@@ -126,6 +126,17 @@ class _Reader:
     def __init__(self, universe: Universe, directory: str, lines: list[str]) -> None:
         self.universe = universe
         self.directory = directory
+        self.lines = lines
+        self.exports: tuple[str, ...] = ()
+        self.uses: dict[str, tuple[str, ...]] = {}
+        self.loads: dict[str, tuple[str, ...]] = {}
+        self.external: dict[str, str] = {}
+        self.roles: dict[str, tuple[str, ...]] = {}
+        self.purity_default: str | None = None
+        self.purity: dict[str, str] = {}
+        self.debt: DebtTable = {}
+        self.back: frozenset[tuple[str, str]] = frozenset()
+        self.dangling: list[tuple[str, str | None, str | None]] = []
         self.manifest = Manifest(directory, lines=lines)
         self.diagnostics: list[Diagnostic] = []
         self.children = frozenset(universe.children.get(directory, ()))
@@ -172,21 +183,33 @@ class _Reader:
             if key not in _TOP_KEYS:
                 self.report(self.manifest.line_of(key), Code.MANIFEST_KEY, f"unknown key {key!r}")
         self.read_exports(document.get("exports", []))
-        self.manifest.uses = self.read_table(document.get("uses", {}), "uses", self.read_use)
-        self.manifest.loads = self.read_table(document.get("loads", {}), "loads", self.read_load)
-        self.manifest.external = self.read_external(document.get("external", {}))
+        self.uses = self.read_table(document.get("uses", {}), "uses", self.read_use)
+        self.loads = self.read_table(document.get("loads", {}), "loads", self.read_load)
+        self.external = self.read_external(document.get("external", {}))
         if "roles" in document:
             self.read_roles(document["roles"])
         if "purity" in document:
             self.read_purity(document["purity"])
         if TABLE_KEY in document:
             line = self.manifest.line_of(TABLE_KEY)
-            self.manifest.debt = parse_debt(
+            self.debt = parse_debt(
                 document[TABLE_KEY], lambda text: self.report(line, Code.MANIFEST_DEBT, text)
             )
-            self.manifest.back = frozenset(
-                local_edge(key) for key in self.manifest.debt.get(CYCLE_EDGE, ())
-            )
+            self.back = frozenset(local_edge(key) for key in self.debt.get(CYCLE_EDGE, ()))
+        self.manifest = Manifest(
+            directory=self.directory,
+            exports=self.exports,
+            uses=self.uses,
+            loads=self.loads,
+            external=self.external,
+            roles=self.roles,
+            purity_default=self.purity_default,
+            purity=self.purity,
+            debt=self.debt,
+            back=self.back,
+            dangling=self.dangling,
+            lines=self.lines,
+        )
         self.check_cycles()
 
     def read_roles(self, table: object) -> None:
@@ -198,7 +221,7 @@ class _Reader:
         roles, problems = check_table(table)
         for key, message in problems:
             self.report(self.manifest.line_of(key), Code.MANIFEST_ROLES, message)
-        self.manifest.roles = roles
+        self.roles = roles
         listed = {name for names in roles.values() for name in names}
         for name in sorted(listed):
             if name not in self.universe.dirs:
@@ -234,7 +257,7 @@ class _Reader:
                     line, Code.MANIFEST_CHILD, f"[external] key {key!r} must be a Python file"
                 )
             elif not self.child(key, "[external]", line):
-                self.manifest.dangling.append(("external", key, None))
+                self.dangling.append(("external", key, None))
                 continue
             elif not isinstance(reason, str) or not reason.strip():
                 self.report(
@@ -255,7 +278,7 @@ class _Reader:
                     line, Code.MANIFEST_SYNTAX, f"purity must be one of {allowed}, got {value!r}"
                 )
             else:
-                self.manifest.purity_default = value
+                self.purity_default = value
             return
         if not isinstance(value, dict):
             self.report(line, Code.MANIFEST_SYNTAX, "purity must be a string or a table")
@@ -269,11 +292,11 @@ class _Reader:
                     f"[purity] {key!r} must be one of {allowed}",
                 )
             elif key == ".":
-                self.manifest.purity_default = level
+                self.purity_default = level
             elif self.child(key, "[purity]", key_line):
-                self.manifest.purity[key] = level
+                self.purity[key] = level
             else:
-                self.manifest.dangling.append(("purity", key, None))
+                self.dangling.append(("purity", key, None))
 
     def read_exports(self, value: object) -> None:
         line = self.manifest.line_of("exports")
@@ -288,8 +311,8 @@ class _Reader:
             elif self.child(name, "exports", line):
                 kept.append(name)
             else:
-                self.manifest.dangling.append(("exports", None, name))
-        self.manifest.exports = tuple(kept)
+                self.dangling.append(("exports", None, name))
+        self.exports = tuple(kept)
 
     def read_table(
         self, table: object, section: str, reader: _EdgeReader
@@ -306,7 +329,7 @@ class _Reader:
                 values = self.names(value, f"[{section}] {key!r}", line)
                 result[key] = reader(key, values, line)
             else:
-                self.manifest.dangling.append((section, key, None))
+                self.dangling.append((section, key, None))
         return result
 
     def read_use(self, source: str, targets: tuple[str, ...], line: int) -> tuple[str, ...]:
@@ -321,7 +344,7 @@ class _Reader:
             elif self.child(target, f"[uses] {source!r}", line, deep=True):
                 kept.append(target)
             else:
-                self.manifest.dangling.append(("uses", source, target))
+                self.dangling.append(("uses", source, target))
         return tuple(kept)
 
     def read_load(self, source: str, targets: tuple[str, ...], line: int) -> tuple[str, ...]:
@@ -337,7 +360,7 @@ class _Reader:
                     Code.MANIFEST_CHILD,
                     f"[loads] {source!r}: {target!r} is not a tracked directory",
                 )
-                self.manifest.dangling.append(("loads", source, target))
+                self.dangling.append(("loads", source, target))
         return tuple(kept)
 
     def check_cycles(self) -> None:

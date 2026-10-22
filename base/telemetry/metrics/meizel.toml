@@ -15,6 +15,7 @@ exports = ["aggregate.py", "aggregate_sql.py", "ci_runs_metrics.py", "core", "ev
 [purity]
 "ci_runs_metrics.py" = "strict"
 "event_sql.py" = "strict"
+"grafana_dashboard.py" = "strict"
 "logql.py" = "strict"
 "plugin_metrics.py" = "strict"
 "plugin_metrics_sql.py" = "strict"

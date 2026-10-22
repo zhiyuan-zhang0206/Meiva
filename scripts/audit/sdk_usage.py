@@ -11,9 +11,24 @@ import json
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from pydantic import AwareDatetime, BaseModel, Field
+
+
+class _SdkUsageReport(TypedDict):
+    start: str
+    end: str
+    observed_events: int
+    sampled_events: int
+    weighted_calls: int
+    eligible_module_calls: int
+    coverage_target_pct: float
+    selected_sdk_modules: list[str]
+    suggested_meiva_sdk_expand: str | None
+    modules: list[dict[str, Any]]
+    methods: list[dict[str, Any]]
+    limitations: str
 
 
 class CallAttributes(BaseModel):
@@ -91,19 +106,18 @@ def _rank_modules(
     return selected, eligible, ranking
 
 
+# meiva:note
+# Select whole modules until cumulative eligible call volume reaches coverage.
+# Sampling weights estimate event volume; distinct-agent counts remain observed
+# lower bounds. Skills/MCPs are capability catalogs, and top-level functions are
+# already described by the overview, so none earns a full SDK expansion here.
 def report(
     events: list[CallEvent],
     start: datetime,
     end: datetime,
     coverage: float = 70,
     agent_ids: set[int] | None = None,
-) -> dict[str, Any]:
-    """Select whole modules until cumulative eligible call volume reaches coverage.
-
-    Sampling weights estimate event volume; distinct-agent counts remain observed
-    lower bounds. Skills/MCPs are capability catalogs, and top-level functions are
-    already described by the overview, so none earns a full SDK expansion here.
-    """
+) -> _SdkUsageReport:
     if start.tzinfo is None or end.tzinfo is None or start > end:
         raise ValueError("window must be timezone-aware and start <= end")
     if not 0 < coverage <= 100:

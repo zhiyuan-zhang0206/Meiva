@@ -22,8 +22,5 @@ exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "st
 "collector_artifact.py#base/host/net/ports.py" = 1
 "collector_artifact.py#base/host/net/resilience.py" = 1
 
-[debt.unfrozen-value]
-"collector_artifact.py#class DownloadProgress" = 1
-
 [debt.wide-params]
 "collector_artifact.py#def stream_download" = 1

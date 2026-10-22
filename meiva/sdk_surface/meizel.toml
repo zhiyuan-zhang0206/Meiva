@@ -73,17 +73,6 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py
 "wraps.py#base/log/__init__.py" = 1
 "wraps.py#base/packages/plugins/activation.py" = 2
 
-[debt.pass-through-function]
-"discovery.py#is_element" = 1
-
-[debt.unfrozen-value]
-"install.py#class _Build" = 1
-
-[debt.untyped-export]
-"process_context.py#def get_state" = 1
-"process_context.py#def get_state_update" = 1
-"settings.py#def agent_setting" = 1
-
 [debt.wide-exports]
 "meizel.toml#exports" = 1
 

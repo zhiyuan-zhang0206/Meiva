@@ -239,7 +239,9 @@ class HarnessAttachment(ExternalAttachment):
         return process_context.get_state_update()
 
     def _clear_state_update(self) -> None:
-        process_context.get_state_update().clear()
+        update = process_context.get_state_update()
+        if isinstance(update, dict):
+            update.clear()
 
     def _restore_prior_context(self) -> None:
         if self._bound and self._prior_context is not None:

@@ -23,7 +23,7 @@ _ADD_COLUMN = re.compile(
 )
 
 
-@dataclass
+@dataclass(frozen=True)
 class Drift:
     extra_tables: list[str] = field(default_factory=list[str])
     missing_tables: list[str] = field(default_factory=list[str])
@@ -117,7 +117,7 @@ def schema_columns(sql: str) -> dict[str, list[str]]:
     return tables
 
 
-def live_columns(conn: psycopg.Connection[Any]) -> dict[str, dict[str, str]]:
+def live_columns(conn: psycopg.Connection) -> dict[str, dict[str, str]]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT table_name, column_name, is_nullable, column_default "
@@ -132,17 +132,23 @@ def live_columns(conn: psycopg.Connection[Any]) -> dict[str, dict[str, str]]:
 def compare(schema: dict[str, list[str]], live: dict[str, dict[str, str]]) -> Drift:
     schema_lower = {name.lower(): cols for name, cols in schema.items()}
     live_lower = {name.lower(): cols for name, cols in live.items()}
-    drift = Drift()
-    drift.extra_tables = sorted(set(live_lower) - set(schema_lower))
-    drift.missing_tables = sorted(set(schema_lower) - set(live_lower))
+    extra_tables = sorted(set(live_lower) - set(schema_lower))
+    missing_tables = sorted(set(schema_lower) - set(live_lower))
+    extra_columns: list[tuple[str, str, str]] = []
+    missing_columns: list[tuple[str, str]] = []
     for table in sorted(set(schema_lower) & set(live_lower)):
         declared = {column.lower() for column in schema_lower[table]}
         present = {column.lower() for column in live_lower[table]}
         for column in sorted(present - declared):
-            drift.extra_columns.append((table, column, live_lower[table][column]))
+            extra_columns.append((table, column, live_lower[table][column]))
         for column in sorted(declared - present):
-            drift.missing_columns.append((table, column))
-    return drift
+            missing_columns.append((table, column))
+    return Drift(
+        extra_tables=extra_tables,
+        missing_tables=missing_tables,
+        extra_columns=extra_columns,
+        missing_columns=missing_columns,
+    )
 
 
 # meiva:link scripts/audit/docs/schema-drift.meiva.okf.md
@@ -207,11 +213,14 @@ def _allowlisted(drift: Drift, allow: Path | None) -> Drift:
     allowed = {
         line.strip() for line in allow.read_text(encoding="utf-8").splitlines() if line.strip()
     }
-    drift.extra_tables = [name for name in drift.extra_tables if name not in allowed]
-    drift.extra_columns = [
-        column for column in drift.extra_columns if f"{column[0]}.{column[1]}" not in allowed
-    ]
-    return drift
+    return Drift(
+        extra_tables=[name for name in drift.extra_tables if name not in allowed],
+        missing_tables=drift.missing_tables,
+        extra_columns=[
+            column for column in drift.extra_columns if f"{column[0]}.{column[1]}" not in allowed
+        ],
+        missing_columns=drift.missing_columns,
+    )
 
 
 def _as_json(drift: Drift, declared: set[str]) -> dict[str, Any]:

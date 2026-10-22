@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import base64
 import stat
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.lm.attach.constants import (
@@ -83,7 +83,6 @@ def _new_delivered_flags() -> list[bool]:
     return []
 
 
-@dataclass
 class _PackingState:
     """The ordered pack output while files are accepted or skipped.
 
@@ -94,14 +93,15 @@ class _PackingState:
     pair each delivered image with its own caption line structurally.
     """
 
-    media_blocks: list[dict[str, object]] = field(default_factory=_new_media_blocks)
-    caption_lines: list[str] = field(default_factory=lambda: [wrap_system_note(_ATTACH_NOTICE)])
-    line_blocks: list[dict[str, object]] = field(default_factory=_new_media_blocks)
-    delivered_flags: list[bool] = field(default_factory=_new_delivered_flags)
-    delivered: list[str] = field(default_factory=_new_delivered_paths)
-    skipped: list[tuple[str, str]] = field(default_factory=_new_skipped_paths)
-    delivered_bytes: int = 0
-    delivered_images: int = 0
+    def __init__(self) -> None:
+        self.media_blocks = _new_media_blocks()
+        self.caption_lines: list[str] = [wrap_system_note(_ATTACH_NOTICE)]
+        self.line_blocks = _new_media_blocks()
+        self.delivered_flags = _new_delivered_flags()
+        self.delivered = _new_delivered_paths()
+        self.skipped = _new_skipped_paths()
+        self.delivered_bytes = 0
+        self.delivered_images = 0
 
     def skip(self, index: int, label: str | None, attachment: _SkippedAttachment) -> None:
         self.skipped.append((attachment.path, attachment.reason))
@@ -131,9 +131,9 @@ class _PackingState:
             _content_block(model, attachment.media_type, attachment.mime, data, catalog=catalog)
         )
         self.delivered.append(attachment.path_text)
-        self.delivered_bytes += len(data)
+        self.delivered_bytes = self.delivered_bytes + len(data)
         if attachment.media_type == "image":
-            self.delivered_images += 1
+            self.delivered_images = self.delivered_images + 1
         line = _caption_line(index, attachment.path_text, attachment.mime, len(data), label, None)
         self.caption_lines.append(line)
         self.line_blocks.append({"type": "text", "text": line})

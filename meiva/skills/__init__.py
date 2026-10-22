@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from base.packages.skills.tree import Skill, flatten, identifier
 from base.paths import meiva_home, skills_dir
@@ -167,7 +167,8 @@ def _note_skill_read(skill_identifier: str) -> None:
     update = process_context.get_state_update()
     if not isinstance(update, dict):
         return  # agent code replaced the slot; the exec child reports that at exit
-    reads: list[str] = update.setdefault("skill_reads", [])
+    state = cast("dict[str, Any]", update)
+    reads: list[str] = state.setdefault("skill_reads", [])
     if skill_identifier not in reads:
         reads.append(skill_identifier)
 

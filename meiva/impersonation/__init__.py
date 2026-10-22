@@ -1,11 +1,36 @@
 """Attach an external controller to an active Meiva takeover session."""
 
-from typing import Any
+from __future__ import annotations
+
+from types import TracebackType
+from typing import Any, Protocol, Self
 
 __all_for_meiva__ = []
 
 
-def attach(session_id: int | str, *, agent_id: int | None = None) -> Any:
+class _Attachment(Protocol):
+    agent_id: int
+    session_id: int
+    lease_id: str
+    _event_gate: Any
+
+    def flush(self) -> None: ...
+
+    def close(self) -> None: ...
+
+    def native_snapshot(self) -> Any: ...
+
+    def __enter__(self) -> Self: ...
+
+    def __exit__(
+        self,
+        _kind: type[BaseException] | None,
+        _error: BaseException | None,
+        _trace: TracebackType | None,
+    ) -> None: ...
+
+
+def attach(session_id: int | str, *, agent_id: int | None = None) -> _Attachment:
     """Borrow an active, unexpired agent identity in this local Python process.
 
     Use the session's integer id together with its owning agent id, or the

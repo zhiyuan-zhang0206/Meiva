@@ -221,7 +221,7 @@ def _apply(
     return promoted
 
 
-@dataclass
+@dataclass(frozen=True)
 class _Build:
     """The mutable ledger `install` fills while it applies plugins; frozen into the Installation."""
 
@@ -302,7 +302,7 @@ def install(
                 _run(partial)
                 load_report.reporter(report)(plugin, exc)
                 continue
-            build.namespaces = claimed
+            build.namespaces.update(claimed)
             build.expansions.extend(paths)
             admitted.append((plugin, contributions))
         metered = metering.install(sampling_owner, producer=producer)

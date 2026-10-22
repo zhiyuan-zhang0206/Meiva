@@ -148,7 +148,7 @@ def attached_runtime(
 @pytest.fixture
 def attached_mcp_runtime(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
-) -> Iterator[tuple[dict[str, Any], attachment_module.Attachment]]:
+) -> Iterator[tuple[dict[str, Any], Any]]:
     """Provide the MCP caller's real borrowed identity and close its lifetime."""
     lease, _, _ = attached_runtime
     attachment = impersonation.attach("lease")

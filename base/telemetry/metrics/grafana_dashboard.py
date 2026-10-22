@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import copy
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -428,15 +428,14 @@ def _row(section_title: str, row_id: int, grid: dict[str, int]) -> dict[str, Any
     }
 
 
+# meiva:note
+# Render the complete dashboard JSON from the two metric registries.
+# Only specs with ``grafana`` in ``output`` render. Core panels must carry
+# ``section`` (a registered section title) and ``panel_id``; plugin panels
+# get their ids allocated per plugin block.
 def render_dashboard(
     core_specs: Iterable[MetricSpec], plugin_specs: Iterable[MetricSpec]
-) -> dict[str, Any]:
-    """Render the complete dashboard JSON from the two metric registries.
-
-    Only specs with ``grafana`` in ``output`` render. Core panels must carry
-    ``section`` (a registered section title) and ``panel_id``; plugin panels
-    get their ids allocated per plugin block.
-    """
+) -> dict[str, object]:
     core = [spec for spec in core_specs if "grafana" in spec.output]
     plugins = [spec for spec in plugin_specs if "grafana" in spec.output]
 
@@ -517,8 +516,9 @@ def render_dashboard(
     }
 
 
-def render_to_json(dashboard: dict[str, Any]) -> str:
-    """Deterministic serialization of a rendered dashboard (sorted keys, the
-    provisioning file's one-space indent, trailing newline) — byte-identical
-    for identical input, so the write path can hash-compare to skip churn."""
+# meiva:note
+# Deterministic serialization of a rendered dashboard (sorted keys, the
+# provisioning file's one-space indent, trailing newline) — byte-identical
+# for identical input, so the write path can hash-compare to skip churn.
+def render_to_json(dashboard: Mapping[str, object]) -> str:
     return json.dumps(dashboard, indent=1, sort_keys=True) + "\n"

@@ -10,7 +10,6 @@ import psycopg
 import pytest
 
 from base.db import Database
-from base.telemetry.delivery import reporting
 from base.telemetry.delivery.mirror import event_row
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.metrics import observed_metrics as metrics
@@ -73,10 +72,9 @@ def test_absent_usage_price_and_optional_fields_stay_unknown() -> None:
     assert (fact.tokens_in, fact.tokens_out, fact.tokens_cached) == (0, 0, 0)
 
 
-def test_unrelated_large_logs_are_not_serialized_again(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unrelated_large_logs_are_not_serialized_again() -> None:
     encode = Mock(side_effect=AssertionError("unrelated body must not be serialized"))
-    monkeypatch.setattr(metrics, "event_row", encode)
-    assert metrics.observe_event(_event("log", body="large diagnostic")) is None
+    assert metrics.observe_event(_event("log", body="large diagnostic"), row_fn=encode) is None
     encode.assert_not_called()
 
 
@@ -213,19 +211,18 @@ def test_missing_agent_fails_batch_explicitly_without_partial_commit(
 
 
 def test_one_malformed_fact_does_not_discard_other_supported_rows(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
 ) -> None:
     write = Mock(return_value=1)
     report = Mock()
-    monkeypatch.setattr(metrics, "write_observations", write)
-    monkeypatch.setattr(reporting, "report_no_pipeline", report)
     metrics.project_events(
         database,
         [
             _event("turn_end", duration_seconds="invalid", ok=True),
             _event("turn_end", duration_seconds=1.25, ok=False),
         ],
+        write_observations_fn=write,
+        report_fn=report,
     )
     assert len(write.call_args.args[0]) == 1
     assert write.call_args.args[0][0].turn_duration_seconds == 1.25

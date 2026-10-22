@@ -43,9 +43,6 @@ exports = ["tests"]
 "module.py#Path.stat" = 1
 "roots.py#Path.read_text" = 1
 
-[debt.private-name]
-"tests/test_handle_ratchet.py -> handle_ratchet.py#_REPO_ROOT" = 2
-
 [debt.wide-public-surface]
 "__init__.py#public-surface" = 1
 "module.py#public-surface" = 1

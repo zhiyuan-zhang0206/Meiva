@@ -6,6 +6,8 @@ A mitigation, not a boundary: a clean result means "no known pattern
 matched", not "safe".
 """
 
+from typing import Any, cast
+
 from base.agents.messages import injection_scan
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.log import logger
@@ -57,8 +59,9 @@ def record_finding(source: str, triggers: list[str]) -> None:
         raise TypeError(
             f"meiva.state_update must stay a dict, got {type(update).__name__} (security finding)"
         )
-    update[_FINDINGS_CHANNEL] = [
-        *update.get(_FINDINGS_CHANNEL, []),
+    state = cast("dict[str, Any]", update)
+    state[_FINDINGS_CHANNEL] = [
+        *state.get(_FINDINGS_CHANNEL, []),
         SecurityFindingEntry(source=source, triggers=triggers),
     ]
 

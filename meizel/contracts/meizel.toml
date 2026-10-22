@@ -66,20 +66,6 @@ exports = ["analysis.py", "cli.py", "debt.py", "enumerations.py", "generated.py"
 "sync.py#Path.unlink" = 1
 "sync.py#Path.write_text" = 1
 
-[debt.nested-attr-write]
-"manifest.py#self.manifest.back" = 1
-"manifest.py#self.manifest.debt" = 1
-"manifest.py#self.manifest.exports" = 1
-"manifest.py#self.manifest.external" = 1
-"manifest.py#self.manifest.loads" = 1
-"manifest.py#self.manifest.purity_default" = 2
-"manifest.py#self.manifest.roles" = 1
-"manifest.py#self.manifest.uses" = 1
-
-[debt.unfrozen-value]
-"declare.py#class Plan" = 1
-"manifest.py#class Manifest" = 1
-
 [debt.wide-exports]
 "meizel.toml#exports" = 1
 
