@@ -71,10 +71,7 @@ def is_top_level_test(rel: str) -> bool:
 
 def stays_by_design(rel: str) -> str | None:
     """The reason a top-level path has no package to move to, or None."""
-    for path, reason in tests_location_allowed.BY_DESIGN.items():
-        if rel == path or (path.endswith("/") and rel.startswith(path)):
-            return reason
-    return None
+    return tests_location_allowed.stays_by_design(rel)
 
 
 def _entry_errors(where: str, rel: str, repo_root: Path) -> list[str]:

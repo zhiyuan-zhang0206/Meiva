@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from tests.scripts.test_alert_rules import (
+from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
     INFRA_RULE_METRICS,
     RULES,
     assert_latency_query_scopes_to_route_class,

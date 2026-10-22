@@ -71,8 +71,6 @@ def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def test_launchd_plist_runs_the_refresh_pass_on_the_tick(tmp_path: Path) -> None:
-    from base.config import settings
-
     content = job.launchd_plist_content(
         tick_reader=lambda: 900, host=fake_host(platform=DARWIN_ARM64)
     )
@@ -84,8 +82,7 @@ def test_launchd_plist_runs_the_refresh_pass_on_the_tick(tmp_path: Path) -> None
     assert values[0:2] == ["/bin/sh", "-c"]
     assert command is not None
     assert "'/work tree/.venv/bin/meiva' packages refresh --from-job" in command
-    tick = settings.packages.refresh_tick_seconds
-    assert f"<key>StartInterval</key>\n    <integer>{tick}</integer>" in content
+    assert "<key>StartInterval</key>\n    <integer>900</integer>" in content
     assert "<key>RunAtLoad</key>\n    <false/>" in content
     assert f"{tmp_path}/.meiva/logs/packages-refresh.log" in content
 
@@ -216,9 +213,6 @@ def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_register_is_skipped_when_refresh_disabled(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.packages, "refresh_enabled", False)
     monkeypatch.setattr(
         cron,
         "register_platform_job",
@@ -227,7 +221,7 @@ def test_register_is_skipped_when_refresh_disabled(
 
     job.register_packages_job(
         enabled_reader=lambda: True,
-        refresh_enabled_reader=lambda: settings.packages.refresh_enabled,
+        refresh_enabled_reader=lambda: False,
         tick_reader=lambda: 900,
         host=fake_host(),
     )
@@ -236,19 +230,16 @@ def test_register_is_skipped_when_refresh_disabled(
 def test_register_dispatches_to_the_platform(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from base.config import settings
-
     calls: list[str] = []
 
     def register(what: str, **_platforms: object) -> None:
         calls.append(f"register {what}")
 
-    monkeypatch.setattr(settings.packages, "refresh_enabled", True)
     monkeypatch.setattr(cron, "register_platform_job", register)
 
     job.register_packages_job(
         enabled_reader=lambda: True,
-        refresh_enabled_reader=lambda: settings.packages.refresh_enabled,
+        refresh_enabled_reader=lambda: True,
         tick_reader=lambda: 900,
         host=fake_host(),
     )

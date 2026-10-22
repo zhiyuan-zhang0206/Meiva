@@ -78,10 +78,9 @@ def ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:
 
 
 # meiva:note
-# The hook checker in THIS checkout. A checkout that carries no `scripts/` tree (an
-# installed wheel) has no file here, and the step stays silent.
+# The hook checker in THIS checkout.
 GIT_HOOKS_SCAN = (
-    Path(__file__).resolve().parents[3] / "scripts" / "provision" / "check_git_hooks.py"
+    Path(__file__).resolve().parents[3] / "base" / "deploy" / "git" / "check_git_hooks.py"
 )
 
 

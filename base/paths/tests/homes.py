@@ -31,9 +31,9 @@ def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
     the absence, and they object only if their premise was written down; the
     rest stay green while quietly testing a different world.
 
-    The opt-in for the installed meaning is `_installed_machine_identity` in
-    `tests/path_scoped/cli_tests.py` — a module takes it with one line:
-    `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
+    The opt-in for the installed meaning is `installed_machine_identity` in
+    `cli/database/tests/cli_tests.py` — a module takes it with one line:
+    `pytestmark = pytest.mark.usefixtures("installed_machine_identity")`.
     """
     monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     yield tmp_path

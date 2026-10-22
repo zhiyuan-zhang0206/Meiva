@@ -22,9 +22,9 @@ from base.telemetry import EventPipeline
 from cli.commands.converge import health_preflight as _hp
 from cli.commands.converge.spec import ConvergeCtx
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 _PG_URL = "postgresql://meiva:sek@127.0.0.1:5433/meiva"
 _REDIS_URL = "redis://:sek@127.0.0.1:6380/0"

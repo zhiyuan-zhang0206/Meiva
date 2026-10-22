@@ -1,0 +1,4 @@
+exports = ["rule_helpers.py"]
+
+[uses]
+"test_billing_rule_fires_on_the_first_occurrence.py" = ["rule_helpers.py"]

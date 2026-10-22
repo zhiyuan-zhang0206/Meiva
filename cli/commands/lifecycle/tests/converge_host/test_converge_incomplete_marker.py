@@ -10,9 +10,9 @@ from base.telemetry import EventPipeline
 from cli.commands.converge import incomplete
 from cli.commands.lifecycle import converge_host
 from cli.commands.lifecycle.status import print_converge_section
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 _STEP = "permissions helper build + sign + load"
 

@@ -35,6 +35,8 @@ from cli.commands.lifecycle.tests.identity.restart_inputs import (
 )
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_fakes import (
     FakeResult,
     git_aware,
@@ -42,8 +44,6 @@ from cli.database.tests.command_fakes import (
 from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.desktop.browser import orphan
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 _real_reap_cluster_chrome = _stop_commands.reap_cluster_chrome
 

@@ -105,14 +105,16 @@ def fail(phase: str, detail: str) -> NoReturn:
     raise SmokeError(phase, detail)
 
 
-def _run(
+# meiva:note
+# Fixed argv lists built in this file, no untrusted input.
+def run(
     cmd: list[str],
     *,
     check: bool = True,
     timeout: float = 120.0,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.run(  # noqa: S603 - fixed argv lists built in this file, no untrusted input
+    proc = subprocess.run(  # noqa: S603
         cmd, capture_output=True, text=True, timeout=timeout, check=False, env=env
     )
     if check and proc.returncode != 0:
@@ -142,11 +144,11 @@ def pid_alive(pid: int) -> bool:
 
 
 def ps_line(*pids: int) -> str:
-    proc = _run(["ps", "-o", "pid=,ppid=,lstart=,command=", "-p", ",".join(str(p) for p in pids)])
+    proc = run(["ps", "-o", "pid=,ppid=,lstart=,command=", "-p", ",".join(str(p) for p in pids)])
     return proc.stdout.strip()
 
 
-def _save(evidence: Path, name: str, text: str) -> None:
+def save(evidence: Path, name: str, text: str) -> None:
     (evidence / name).write_text(text + "\n")
 
 
@@ -155,11 +157,11 @@ def launchctl_domain() -> str:
 
 
 def bootout(label: str) -> None:
-    _run(["launchctl", "bootout", f"{launchctl_domain()}/{label}"], check=False, timeout=30)
+    run(["launchctl", "bootout", f"{launchctl_domain()}/{label}"], check=False, timeout=30)
 
 
 def job_pid(label: str) -> int | None:
-    proc = _run(["launchctl", "list"], check=False, timeout=30)
+    proc = run(["launchctl", "list"], check=False, timeout=30)
     for line in proc.stdout.splitlines():
         parts = line.split("\t")
         if len(parts) >= 3 and parts[2].strip() == label:
@@ -248,7 +250,7 @@ def unit_entry(status: dict, unit_id: str) -> dict:
 
 
 def ppid_of(pid: int) -> int:
-    proc = _run(["ps", "-o", "ppid=", "-p", str(pid)])
+    proc = run(["ps", "-o", "ppid=", "-p", str(pid)])
     return int(proc.stdout.strip())
 
 

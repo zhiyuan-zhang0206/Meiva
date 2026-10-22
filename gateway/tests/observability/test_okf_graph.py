@@ -17,7 +17,7 @@ import pytest
 from base import config
 from base.host.net.auth import bearer_header
 from gateway.tests.agents.gateway_auth import without_credentials
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 

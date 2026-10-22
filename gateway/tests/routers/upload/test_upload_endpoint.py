@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 
 
 def _upload(

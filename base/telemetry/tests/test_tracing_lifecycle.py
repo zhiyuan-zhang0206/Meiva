@@ -25,7 +25,7 @@ def fresh_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
         "arm_failed": False,
         "timeout_reported": False,
     }
-    monkeypatch.setattr(tracing, "_state", state)
+    monkeypatch.setattr(tracing, "state", state)
     yield state
     if "_expected_error" in state:
         with pytest.raises(BaseException) as raised:
@@ -51,7 +51,7 @@ def test_first_use_timeout_still_allows_late_arm_success(
         if not stopped.is_set():
             fresh_state["initialized"] = True
 
-    monkeypatch.setattr(tracing, "_arm_tracing", initialize)
+    monkeypatch.setattr(tracing, "arm_tracing", initialize)
     monkeypatch.setattr(tracing, "INIT_RESOLVED_TIMEOUT_S", 0.01)
     tracing.start_arm_thread("http://collector", machine_identity(), Path(".meiva"))
     owner = fresh_state["arm_owner"]
@@ -112,7 +112,7 @@ def test_unknown_late_arm_error_is_visible_then_original_stop_raises(
         seen.append(details["exc"])
         observed.set()
 
-    monkeypatch.setattr(tracing, "_arm_tracing", initialize)
+    monkeypatch.setattr(tracing, "arm_tracing", initialize)
     monkeypatch.setattr(lifecycle, "report_no_pipeline", report)
     tracing.start_arm_thread("http://collector", machine_identity(), Path(".meiva"))
     owner = fresh_state["arm_owner"]

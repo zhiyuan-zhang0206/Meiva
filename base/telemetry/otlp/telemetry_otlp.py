@@ -757,9 +757,4 @@ class OtlpBackend:
 
 def metrics_resource() -> Any:
     """Build the metric resource through the legacy monkeypatch seam."""
-    original_cluster_label = telemetry_otlp_metrics.cluster_label
-    telemetry_otlp_metrics.cluster_label = cluster_label
-    try:
-        return telemetry_otlp_metrics.metrics_resource()
-    finally:
-        telemetry_otlp_metrics.cluster_label = original_cluster_label
+    return telemetry_otlp_metrics.metrics_resource(cluster_label)

@@ -27,11 +27,11 @@ from base.host.system.tests.fake_commands import fake_host
 from base.native_process.root_control import client
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.database.runtime import CommandRuntime
-from cli.database.tests.command_fakes import FakeResponse, FakeResult, _sess, patch_gateway_http
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.command_fakes import FakeResponse, FakeResult, patch_gateway_http, sess
 from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
 from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _launched(names: frozenset[str] | None) -> Callable[[Path], frozenset[str] | None]:
@@ -130,8 +130,8 @@ def test_status_runs_without_error(
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert _sess("gateway") in out
-    assert _sess("frontend") in out
+    assert sess("gateway") in out
+    assert sess("frontend") in out
 
 
 def test_status_gateway_excludes_ops(
@@ -159,8 +159,8 @@ def test_status_gateway_excludes_ops(
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert _sess("gateway") in out
-    assert _sess("ops") not in out
+    assert sess("gateway") in out
+    assert sess("ops") not in out
 
 
 def test_status_agent_runner_shows_ops(
@@ -184,8 +184,8 @@ def test_status_agent_runner_shows_ops(
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert _sess("ops") in out
-    assert _sess("gateway") not in out
+    assert sess("ops") in out
+    assert sess("gateway") not in out
 
 
 def test_status_shows_browser_skip_reason(
@@ -223,7 +223,7 @@ def test_status_shows_browser_skip_reason(
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert _sess("browser") in out
+    assert sess("browser") in out
     assert "skipped: no display" in out
 
 
@@ -264,7 +264,7 @@ def test_status_shows_the_gate_entry_row(
         == 0
     )
     out = capsys.readouterr().out
-    row = next(line for line in out.splitlines() if line.startswith(_sess("gate") + " "))
+    row = next(line for line in out.splitlines() if line.startswith(sess("gate") + " "))
     assert "✓" in row and "✗" in row
     assert "owned listener not ready" in row
     assert "gate (fleet UI entry):" not in out
@@ -381,10 +381,10 @@ def test_status_reads_root_units(
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("meiva-")}
-    assert rows[_sess("gateway")][1] == "✓"
-    assert rows[_sess("frontend")][1] == "✓"
-    assert _sess("gateway-watchdog") not in rows
-    assert _sess("agent-runner-watchdog") not in rows
+    assert rows[sess("gateway")][1] == "✓"
+    assert rows[sess("frontend")][1] == "✓"
+    assert sess("gateway-watchdog") not in rows
+    assert sess("agent-runner-watchdog") not in rows
 
 
 def test_status_root_mode_survives_an_unreachable_root(
@@ -426,7 +426,7 @@ def test_status_root_mode_survives_an_unreachable_root(
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("meiva-")}
-    assert rows[_sess("gateway")][1] == "✗"
+    assert rows[sess("gateway")][1] == "✗"
 
 
 def test_service_row_shows_live_unit_with_skip_reason(
@@ -633,7 +633,7 @@ def test_cmd_status_shows_gateway_snapshot_by_default(
     )
     assert rc == 0
     out = capsys.readouterr().out
-    assert _sess("gateway") in out  # local probe section still present
+    assert sess("gateway") in out  # local probe section still present
     assert "gateway cluster status" in out  # gateway supplement section
     assert "test-host" in out
 

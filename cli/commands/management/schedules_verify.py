@@ -84,7 +84,7 @@ _Get = Callable[..., httpx.Response]
 # Read through the gateway: the list route names every row, the per-id route carries
 # the script. The sweep needs a reachable gateway; a refused or failed call is the
 # tool-error path.
-def _read_schedule_rows(
+def read_schedule_rows(
     access: GatewayAccess, get: _Get | None = None
 ) -> list[tuple[int, str, str]]:
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
@@ -104,8 +104,12 @@ def _read_schedule_rows(
     return rows
 
 
+_read_schedule_rows = read_schedule_rows
+
+
 def _read_rows_file(path: str) -> list[tuple[int, str, str]]:
-    """The rows `_read_schedule_rows` returned, dumped as a JSON list of `[id, name, script]`."""
+    # meiva:note
+    # The rows `read_schedule_rows` returned, dumped as a JSON list of `[id, name, script]`.
     data: Any = json.loads(Path(path).read_text(encoding="utf-8"))
     return [(int(row[0]), str(row[1]), str(row[2])) for row in data]
 
@@ -208,24 +212,25 @@ def cmd_schedules_verify(
     ports = ports or VerifyPorts(
         read_rows=partial(_read_rows_file, rows_file)
         if rows_file
-        else lambda: _read_schedule_rows(access()),
+        else lambda: read_schedule_rows(access()),
         check_script=check_script,
-        report=partial(_report_verify, producer=producer),
+        report=partial(report_verify, producer=producer),
     )
     return _verify_sweep(notify=notify, ports=ports)
 
 
-def _report_verify(
+def report_verify(
     *,
     checked: int,
     reds: list[tuple[int, str, str]],
     tool_error: str | None,
     producer: Callable[[], EventPipeline],
 ) -> None:
-    """Emit one `schedule_verify_failed` event for a non-clean sweep.
-
-    The event is the signal a Grafana rule reads; a clean sweep emits nothing,
-    so the alert resolves on its own once reds stop recurring."""
+    # meiva:note
+    # Emit one `schedule_verify_failed` event for a non-clean sweep.
+    #
+    # The event is the signal a Grafana rule reads; a clean sweep emits nothing,
+    # so the alert resolves on its own once reds stop recurring.
     if tool_error is not None:
         detail = f"tool-error: {tool_error}"
     else:

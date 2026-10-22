@@ -36,8 +36,8 @@ from cli.commands.cluster.tests.health_probe_inputs import (
     schema_verdicts as schema_verdicts,
 )
 from cli.commands.cluster.tests.health_probe_inputs import signals as signals
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _launched_without(names: set[str]) -> None:

@@ -243,7 +243,7 @@ def initialize_home(args: argparse.Namespace, home: Path) -> str:
 
 def run_init(args: argparse.Namespace) -> int:
     try:
-        home = start_intent._home()
+        home = start_intent.resolve_home()
         ensure_private_dir(home)
         with file_lock(home / "start-intent.lock", timeout_s=30):
             verdict = initialize_home(args, home)

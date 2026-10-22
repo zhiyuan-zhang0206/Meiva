@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from base.telemetry.observability import cluster_label
 from gateway.cluster import alert_classes
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 @pytest.fixture

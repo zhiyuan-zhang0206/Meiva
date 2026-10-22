@@ -1,6 +1,8 @@
-exports = ["test_tasks_router.py"]
+exports = ["alerts_api", "cluster_endpoints", "test_tasks_router.py"]
 
 [uses]
+"alerts_api" = []
+"cluster_endpoints" = []
 "config_api" = ["test_config_api.py"]
 "memory_search" = ["test_memory_search.py"]
 "test_task_patch_receipts.py" = ["test_tasks_router.py"]

@@ -37,9 +37,9 @@ from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
 from cli.commands.data_plane.pgbouncer import stop_pgbouncer
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _BEARER = "test_bearer_abc123"
 _REDIS_ADMIN = "test_redis_admin_abc123"

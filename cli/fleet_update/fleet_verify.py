@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from scripts.host_ops.fleet_gate import Runner
+from .fleet_gate import Runner
 
 POLL_S = 5
 

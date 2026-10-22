@@ -21,8 +21,8 @@ from gateway.http.auth.request_principal import (
 )
 from gateway.http.config import gateway_config_from_boot
 from gateway.http.middleware.cors import request_host, trusted_request_hosts
-from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
-from tests.fixtures.gateway_config import gateway_test_app, gateway_test_process
+from gateway.tests.auth.gateway_auth import disable_default_gateway_credentials
+from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_process
 
 CLUSTER_KEY = "trusted-network-test-secret"
 ALLOWED_ORIGIN = "http://10.0.0.5:3000"

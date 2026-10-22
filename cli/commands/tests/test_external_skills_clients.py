@@ -12,12 +12,12 @@ from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.telemetry import EventPipeline
+from cli.commands.converge.tests.external_skills import skill_ctx
 from cli.commands.extensions import external_skills as bridge
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_config_machine as command_config_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.factories.external_skills import skill_ctx
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 # meiva:note
 # One (home directory, ledger key) pair per supported surface; the bridge publishes

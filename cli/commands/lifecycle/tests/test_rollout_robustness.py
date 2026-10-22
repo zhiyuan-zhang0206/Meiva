@@ -27,9 +27,9 @@ from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.telemetry import EventPipeline
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 # ─── Defect 1: the fan-out reconciled against a live probe ───────────────────
 

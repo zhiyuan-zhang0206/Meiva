@@ -29,7 +29,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.db import create_agent
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)
 

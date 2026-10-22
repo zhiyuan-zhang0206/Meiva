@@ -1,4 +1,4 @@
-"tests.path_scoped.cli_tests" = [
+"cli.database.tests.cli_tests" = [
     "test_agent_profile_launch_env.py",
     "test_checkpoint_migration_phase.py",
     "test_commands_start.py",

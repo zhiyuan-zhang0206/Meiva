@@ -25,9 +25,9 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.agents import creation, forward
+from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 @pytest.fixture

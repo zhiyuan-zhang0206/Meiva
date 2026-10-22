@@ -4,44 +4,39 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-import psycopg
 import pytest
 
-from base import cluster
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config.service_read import ConfigAuthority
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
 from base.deploy.git import cluster_drift, running_sha
 from base.deploy.lifecycle.start_serving import RootBirth
-from base.lm.catalog import ModelCatalog
 from base.native_process import loaded_commit
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.root_control import client as root_client
 from gateway.app import openapi_schema
-from gateway.events import telemetry_rows
+from gateway.tests.routers.cluster_endpoints.cluster_support import (
+    fake_admin_events as fake_admin_events,
+)
+from gateway.tests.routers.cluster_endpoints.cluster_support import (
+    pinned_session_names as pinned_session_names,
+)
+from gateway.tests.routers.cluster_endpoints.cluster_support import (
+    seed_agent_on_machine as seed_agent_on_machine,
+)
+from gateway.tests.routers.cluster_endpoints.cluster_support import (
+    seed_away_machine as seed_away_machine,
+)
+from gateway.tests.routers.cluster_endpoints.cluster_support import (
+    seed_drain_owner as seed_drain_owner,
+)
+from gateway.tests.routers.cluster_endpoints.cluster_support import (
+    seed_in_progress_task as seed_in_progress_task,
+)
 from ops import cluster_status
 from tests.fixtures.gateway_config import gateway_test_client
-
-
-@pytest.fixture
-def fake_admin_events(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[str, Any]]]:
-    """Patch telemetry_rows.query_events for the admin-events route; record the
-    kwargs and return canned rows."""
-
-    calls: list[dict[str, Any]] = []
-    rows: list[dict[str, Any]] = []
-
-    def _query(_conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
-        calls.append(kwargs)
-        return rows, False
-
-    monkeypatch.setattr(telemetry_rows, "query_events", _query)
-    return {"calls": calls, "rows": rows}
 
 
 # meiva:note
@@ -55,24 +50,6 @@ def serving_gate(serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_p
 
     monkeypatch.setattr(start_serving, "run_dir", run_dir)
     start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
-
-
-@pytest.fixture(autouse=True)
-def pinned_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin the session-name composer for gateway cluster tests so composed
-    session names are deterministic regardless of the dev host config.
-    Patches ``session_name`` directly so ``machine_name()``
-    stay untouched (other gateway tests call them via ``set_machine_identity``
-    + ``status_snapshot()`` and assert the injected value).
-    Produces names like ``meiva-test-agent-host``.
-
-    ``session_name`` is patched at its source (``base.cluster``) because the
-    naming scheme is one fact for the whole process — the ``ops`` cluster modules
-    reach it through that module precisely so one setattr pins it for all of them.
-    The pause tests patch ``base.sessions.backend.get_backend`` to a recording
-    fake, so the composed names are what the assertions read.
-    """
-    monkeypatch.setattr(cluster, "session_name", lambda svc: f"meiva-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
 
 
 # meiva:note
@@ -325,106 +302,3 @@ class TestClusterEndpoints:
             )
         assert windowed.status_code == 200
         assert marked[-1] == ("runner-b", "~/.meiva", 2700, "pgbouncer audit")
-
-
-# ─── admin events query ──────────────────────────────────────────────────────
-
-
-# ─── admin: DELETE /api/cluster/machines/{name} ──────────────────────────────
-
-
-# ─── agent roster: GET /api/cluster/machines ─────────────────────────────────
-
-
-# ─── machines pause / resume (Task #1283) ────────────────────────────────────
-
-
-def seed_away_machine(
-    db_conn: psycopg.Connection, *, name: str = "away", local_row: bool = True
-) -> None:
-    """Machines rows for the pause tests, isolated from other tests' rows: the
-    paused target (`name`, agent-runner) plus, when `local_row`, this gateway
-    host's own row (gateway-only in the DB — the roster's local lightweight
-    path, so no probe dial; the test identity itself carries agent-runner so
-    spawn_agent works)."""
-    with db_conn.cursor() as cur:
-        cur.execute("TRUNCATE machines")
-        if local_row:
-            cur.execute(
-                "INSERT INTO machines (name, role, gateway_url) "
-                "VALUES ('test-host', ARRAY['gateway'], NULL)"
-            )
-        cur.execute(
-            "INSERT INTO machines (name, role, gateway_url) "
-            "VALUES (%s, ARRAY['agent-runner'], NULL)",
-            (name,),
-        )
-    db_conn.commit()
-
-
-def seed_agent_on_machine(
-    db_conn: psycopg.Connection,
-    machine: str,
-    *,
-    status: str = "idling",
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> int:
-    """One live agent row homed on `machine` (test spawn helper + machine
-    stamp; the row-creation path moved gateway-side, Task #1236 follow-up)."""
-    from base.agents.tests.units import spawn_agent
-
-    aid = spawn_agent(
-        spawner="user",
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET machine = %s, status = %s WHERE id = %s",
-            (machine, status, aid),
-        )
-    db_conn.commit()
-    return aid
-
-
-# meiva:note
-# The pause endpoint reassigns a paused machine's tasks to a fixed drain owner
-# (`_MACHINE_PAUSE_DRAIN_OWNER`, #405), so the row has to exist here as the FK
-# target. Writing an id by hand does not move the id sequence, and the next spawn
-# then takes a number that is already in the table: with two spawns, the second
-# took 405 and the insert failed on `agents_pkey`. Whether that happens depends on
-# how many agents the tests before this one created, which is how a green suite
-# went red after unrelated tests were added. Moving the sequence past every id the
-# table holds makes the manual row a reservation instead of a trap.
-# meiva:link gateway/tests/routers/cluster_endpoints/test_admin_machine_delete.py
-def seed_drain_owner(db_conn: psycopg.Connection, agent_id: int = 405) -> None:
-    """The drain-owner agent row the pause endpoint reassigns tasks to (the
-    FK target `agent_tasks.owner -> agents(id)`)."""
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agents (id) VALUES (%s) ON CONFLICT (id) DO NOTHING",
-            (agent_id,),
-        )
-        cur.execute(
-            "SELECT setval(pg_get_serial_sequence('agents', 'id'), (SELECT max(id) FROM agents))"
-        )
-    db_conn.commit()
-
-
-def seed_in_progress_task(db_conn: psycopg.Connection, owner: int, title: str) -> int:
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_tasks (title, description, status, owner, created_by) "
-            "VALUES (%s, 'desc', 'in_progress', %s, 'user') RETURNING id",
-            (title, owner),
-        )
-        row = cur.fetchone()
-        assert row is not None
-        (task_id,) = row
-    db_conn.commit()
-    return task_id

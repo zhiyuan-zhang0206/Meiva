@@ -14,8 +14,8 @@ from base.db import create_agent
 from base.host.net.auth import bearer_header
 from gateway.agents.history import timeline
 from gateway.tests.agents.gateway_auth import without_credentials
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.history.test_timeline import test_client as test_client
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 
 def test_retained_read_requires_auth_and_serializes_for_authenticated_caller(

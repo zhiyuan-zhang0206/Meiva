@@ -12,8 +12,8 @@ from cli.commands.data_plane import bringup as dp
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import remote_cluster_record
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 
 # ─── meiva stop: nothing to tear down locally ──────────────────────────────────
 

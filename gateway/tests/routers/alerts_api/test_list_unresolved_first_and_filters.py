@@ -10,7 +10,8 @@ from fastapi.testclient import TestClient
 
 from base.config import settings
 from gateway.alerts import router as alerts_router
-from tests.components.gateway.test_alerts_api import (
+from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.routers.alerts_api.alerts_support import (
     alert,
     capture_im,
     ingest,
@@ -18,13 +19,12 @@ from tests.components.gateway.test_alerts_api import (
     seed_alert_rows,
     webhook,
 )
-from tests.components.gateway.test_alerts_api import (
+from gateway.tests.routers.alerts_api.alerts_support import (
     alerts_auth_and_im as alerts_auth_and_im,
 )
-from tests.components.gateway.test_alerts_api import (
+from gateway.tests.routers.alerts_api.alerts_support import (
     client as client,
 )
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_list_unresolved_first_and_filters(db_conn: psycopg.Connection, client: TestClient) -> None:

@@ -32,9 +32,9 @@ from base.host.env import dotenv_file
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from gateway.routers.configuration import runtime as config_router
+from gateway.tests.auth.gateway_config import gateway_test_client
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import ConfigWriteOpResult, FieldWriteResult
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_get_config_serializes_required_fields():

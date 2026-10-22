@@ -10,8 +10,8 @@ import pytest
 
 from base.paths import meiva_home
 from cli.commands.observability import grafana_render
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 @pytest.fixture()

@@ -12,14 +12,14 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import settings
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, SECRET
 from gateway.tests.lifecycle.creation.test_sdk_strong_creation import httpx_response_of, sdk
 from meiva.gateway_client import use_client
 from ops.cluster import rpc
 from ops.lifecycle.launch import validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
-from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 
 @pytest.mark.usefixtures("retry_waits")

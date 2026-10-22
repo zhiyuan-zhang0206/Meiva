@@ -2,9 +2,9 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 
 [uses]
 "db" = ["ownership"]
-"execution" = ["graph", "process_boot.py", "state.py"]
+"execution" = ["process_boot.py", "state.py"]
 "extensions" = ["state.py"]
-"graph" = ["db", "hooks", "impersonation.py", "impersonation_handoff.py", "llm", "messages", "nodes.py", "ownership", "state.py", "state_channels.py"]
+"graph" = ["db", "execution", "hooks", "impersonation.py", "impersonation_handoff.py", "llm", "messages", "nodes.py", "ownership", "state.py", "state_channels.py"]
 "hooks" = ["messages", "nodes.py", "state.py", "state_channels.py"]
 "impersonation.py" = ["impersonation_handoff.py", "impersonation_process.py", "nodes.py", "state.py"]
 "impersonation_handoff.py" = ["messages"]
@@ -24,6 +24,3 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "tests/execution/test_exec_child_signals.py -> execution/child.py#_run" = 1
 "tests/state_slot/test_exec_node_preserves_state_update_on_lifecycle.py -> graph/exec/node.py#_exec_node_impl" = 1
 "tests/test_state_slot.py -> graph/exec/node.py#_exec_node_impl" = 1
-
-[debt.undeclared-edge]
-"graph/exec/_subprocess.py -> execution/child.py" = 1

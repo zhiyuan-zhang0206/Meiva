@@ -9,9 +9,9 @@ from base.agents.tasks.priority import Priority
 from base.api_contracts.idempotency import keyed_headers
 from gateway.routers import tasks
 from gateway.schemas.tasks import TaskUpdateRequest
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_tasks_router import make_agent, make_task
 from ops import lifecycle
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _count(db: psycopg.Connection, table: str) -> int:

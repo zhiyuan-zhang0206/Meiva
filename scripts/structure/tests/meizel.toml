@@ -1,6 +1,11 @@
 exports = ["patch_repo.py"]
 
 [uses]
+"test_cache.py" = ["patch_repo.py"]
+"test_dependency_regressions.py" = ["patch_repo.py"]
+"test_facts.py" = ["patch_repo.py"]
+"test_file_loaders.py" = ["patch_repo.py"]
+"test_mock_objects.py" = ["patch_repo.py"]
 "test_placement.py" = ["patch_repo.py"]
 "test_placement_dependencies.py" = ["patch_repo.py"]
 "test_tests_location.py" = ["child_registered_checks.py"]

@@ -20,12 +20,12 @@ from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import router as agent_router
 from gateway.app import lifespan
 from gateway.tests.agents.gateway_auth import without_credentials
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
 from gateway.tests.lifecycle.creation.test_guarded_creation import PATH, SECRET
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from meiva.gateway_client import spawn, use_client
 from meiva.sdk_surface import agent_identity
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
-from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 
 @pytest.fixture

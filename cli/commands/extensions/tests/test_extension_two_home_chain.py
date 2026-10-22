@@ -14,8 +14,8 @@ from base.packages.extensions import materialize as mat
 from base.packages.extensions import registry as reg
 from cli.commands.extensions.skill import cmd_skill_install
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 class _DbGateway:

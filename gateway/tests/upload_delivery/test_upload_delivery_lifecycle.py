@@ -18,12 +18,12 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.telemetry.tests.capture.event_capture import capturing_events
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import post, proof_for, request_for
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     uploaded_agent as uploaded_agent,
 )
 from gateway.upload_delivery import worker
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 # meiva:note
 # The recovery worker's claim lease for a constructed worker: these tests drive one

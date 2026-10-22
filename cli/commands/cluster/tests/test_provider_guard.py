@@ -10,7 +10,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.config import settings
 from base.db.tests.fakes import patch_database
 from cli.commands.cluster import _provider_guard
-from tests.path_scoped.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_database as operator_database
 
 
 def _secret(value: str) -> SecretStr:

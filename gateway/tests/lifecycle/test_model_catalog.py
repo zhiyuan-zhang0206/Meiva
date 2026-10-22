@@ -2,7 +2,7 @@ from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.schemas.models import ModelsResponse
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def get_models(*, local_machine: MachineIdentity) -> ModelsResponse:

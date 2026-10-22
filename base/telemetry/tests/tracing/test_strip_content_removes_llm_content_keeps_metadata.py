@@ -366,7 +366,7 @@ def test_initialize_skips_when_collector_unreachable(
     initialize_tracing(machine=machine_identity(), home=tmp_path)
 
     assert calls == []
-    assert tracing_mod._state["initialized"] is False
+    assert tracing_mod.state["initialized"] is False
     warned = warned_fields(loguru_records)
     assert warned
     assert warned[0].get("action") == "recording_disabled_collector_unreachable"
@@ -385,7 +385,7 @@ def test_initialize_skips_when_disk_over_watermark(
     initialize_tracing(machine=machine_identity(), home=tmp_path)
 
     assert calls == []
-    assert tracing_mod._state["initialized"] is False
+    assert tracing_mod.state["initialized"] is False
     warned = warned_fields(loguru_records)
     assert warned, "a degradation warning must be logged"
     attrs = warned[0]

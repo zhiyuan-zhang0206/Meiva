@@ -8,9 +8,9 @@ import pytest
 
 from base.config import settings
 from gateway.inspect import router as inspect_router
+from gateway.tests.auth.gateway_config import gateway_test_client
 from ops.cluster import rpc as cluster_rpc
 from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _insert_agent_row(db: psycopg.Connection, label: str = "t") -> int:

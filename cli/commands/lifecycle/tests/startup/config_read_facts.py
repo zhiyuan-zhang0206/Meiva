@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Mapping
-
-from scripts.structure.imports import bindings
+from collections import Counter
+from collections.abc import Iterator, Mapping
 
 _CONTEXT = "base.agents.context.MeivaContext"
 _RUNTIME = "langgraph.runtime.Runtime"
@@ -13,6 +12,207 @@ _AUTHORITY_GETTER = "meiva.sdk_surface.settings.config_authority"
 _BOOT = "base.config.ConfigBoot"
 _BOOT_VIEW = "base.config.ConfigBoot.view"
 
+type _ScopeNode = (
+    ast.FunctionDef
+    | ast.AsyncFunctionDef
+    | ast.ClassDef
+    | ast.Lambda
+    | ast.ListComp
+    | ast.SetComp
+    | ast.DictComp
+    | ast.GeneratorExp
+)
+_SCOPE_NODES = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.Lambda,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
+_BINDING_NODES = (
+    ast.Name,
+    ast.Assign,
+    ast.AnnAssign,
+    ast.Import,
+    ast.ImportFrom,
+    ast.Attribute,
+    ast.For,
+    ast.AsyncFor,
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.ExceptHandler,
+)
+
+
+def _scope_parts(node: _ScopeNode) -> tuple[tuple[ast.AST, ...], tuple[ast.AST, ...]]:
+    if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
+        outer = (node.generators[0].iter,)
+        inner: list[ast.AST] = []
+        for offset, generator in enumerate(node.generators):
+            if offset:
+                inner.append(generator.iter)
+            inner.extend((generator.target, *generator.ifs))
+        inner.extend((node.key, node.value) if isinstance(node, ast.DictComp) else (node.elt,))
+        return outer, tuple(inner)
+    if isinstance(node, ast.ClassDef):
+        outer = (*node.decorator_list, *node.bases, *node.keywords, *node.type_params)
+        return outer, tuple(node.body)
+    if isinstance(node, ast.Lambda):
+        return (node.args,), (node.body,)
+    outer = (node.args, *node.decorator_list, *node.type_params)
+    if node.returns is not None:
+        outer = (*outer, node.returns)
+    return outer, tuple(node.body)
+
+
+def _local_nodes(tree: ast.AST) -> Iterator[ast.AST]:
+    children = (
+        iter(_scope_parts(tree)[1])
+        if isinstance(tree, _SCOPE_NODES)
+        else ast.iter_child_nodes(tree)
+    )
+    pending = [(children, False)]
+    while pending:
+        children, scope_root = pending[-1]
+        child = next(children, None)
+        if child is None:
+            pending.pop()
+            continue
+        if isinstance(child, ast.Name):
+            if isinstance(child.ctx, ast.Store):
+                yield child
+            continue
+        if isinstance(child, ast.Constant) or not child._fields:
+            continue
+        if isinstance(child, _BINDING_NODES):
+            yield child
+        if isinstance(child, _SCOPE_NODES):
+            outer, inner = _scope_parts(child)
+            pending.append((iter(inner if scope_root else outer), not scope_root))
+        elif child._fields:
+            pending.append((ast.iter_child_nodes(child), False))
+
+
+def _import_origins(node: ast.Import | ast.ImportFrom, path: str) -> dict[str, str]:
+    if isinstance(node, ast.Import):
+        return {
+            (alias.asname or alias.name.split(".")[0]): (
+                alias.name if alias.asname else alias.name.split(".")[0]
+            )
+            for alias in node.names
+        }
+    if node.level:
+        if not path:
+            return {}
+        package = path.removesuffix(".py").split("/")[:-1]
+        if node.level > len(package):
+            return {}
+        anchor = package[: len(package) - (node.level - 1)]
+        base = ".".join([*anchor, *([node.module] if node.module else [])])
+    else:
+        base = node.module or ""
+    return {
+        (alias.asname or alias.name): (f"{base}.{alias.name}" if base else alias.name)
+        for alias in node.names
+        if alias.name != "*"
+    }
+
+
+class _Scope:
+    def __init__(self, tree: ast.AST, path: str, parent: _Scope | None = None) -> None:
+        self.parent = parent
+        self.is_class = isinstance(tree, ast.ClassDef)
+        self.values: dict[str, ast.expr] = {}
+        self.origins: dict[str, str] = {}
+        self.import_counts: Counter[str] = Counter()
+        self.attribute_writes: list[ast.Attribute] = []
+        self.stores: Counter[str] = Counter()
+        for node in _local_nodes(tree):
+            self._bind(node, path)
+        if isinstance(tree, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+            args = tree.args
+            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+                self.stores[arg.arg] += 1
+            for arg in (args.vararg, args.kwarg):
+                if arg is not None:
+                    self.stores[arg.arg] += 1
+
+    def _bind(self, node: ast.AST, path: str) -> None:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            self.stores[node.id] += 1
+        elif isinstance(node, ast.Assign | ast.AnnAssign):
+            self._bind_assignment(node)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            self._bind_import(node, path)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store | ast.Del):
+            self.attribute_writes.append(node)
+        elif (
+            isinstance(
+                node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.ExceptHandler
+            )
+            and node.name is not None
+        ):
+            self.stores[node.name] += 1
+
+    def _bind_assignment(self, node: ast.Assign | ast.AnnAssign) -> None:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    self.values[target.id] = node.value
+        elif isinstance(node.target, ast.Name) and node.value:
+            self.values[node.target.id] = node.value
+
+    def _bind_import(self, node: ast.Import | ast.ImportFrom, path: str) -> None:
+        for name, origin in _import_origins(node, path).items():
+            previous = self.origins.get(name, origin)
+            self.origins[name] = origin if previous == origin else ""
+            self.import_counts[name] += 1
+            self.stores[name] += 1
+
+    def unmodified_origin(self, node: ast.expr) -> str:
+        origin = self.origin(node)
+        scope: _Scope | None = self
+        while origin and scope is not None:
+            for written in scope.attribute_writes:
+                target = scope.origin(written)
+                if target and (origin == target or origin.startswith(target + ".")):
+                    return ""
+            scope = scope.parent
+        return origin
+
+    def value(self, node: ast.expr) -> ast.expr:
+        if not isinstance(node, ast.Name):
+            return node
+        if node.id not in self.stores and self.parent is not None:
+            return self.parent.value(node)
+        return self.values.get(node.id, node) if self.stores[node.id] == 1 else node
+
+    def origin(self, node: ast.expr, seen: frozenset[str] = frozenset()) -> str:
+        if isinstance(node, ast.Attribute):
+            base = self.origin(node.value, seen)
+            return f"{base}.{node.attr}" if base else ""
+        if not isinstance(node, ast.Name) or node.id in seen:
+            return ""
+        if node.id not in self.stores and self.parent is not None:
+            return self.parent.origin(node, seen)
+        if self.stores[node.id] == 1 and node.id in self.values:
+            return self.origin(self.values[node.id], seen | {node.id})
+        return (
+            self.origins.get(node.id, "")
+            if self.stores[node.id] == self.import_counts[node.id]
+            else ""
+        )
+
+    def nested_parent(self) -> _Scope:
+        scope = self
+        while scope.is_class and scope.parent is not None:
+            scope = scope.parent
+        return scope
+
 
 class _ReaderFacts(ast.NodeVisitor):
     def __init__(self, tree: ast.AST, fields: Mapping[str, str], path: str) -> None:
@@ -21,11 +221,11 @@ class _ReaderFacts(ast.NodeVisitor):
             id(child): parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)
         }
         self.fields = fields
-        self.scope = bindings.Scope(tree, path)
-        self.annotations: dict[bindings.Scope, dict[str, tuple[ast.expr, bindings.Scope]]] = {}
+        self.scope = _Scope(tree, path)
+        self.annotations: dict[_Scope, dict[str, tuple[ast.expr, _Scope]]] = {}
         self.reads: list[tuple[str, str | None]] = []
 
-    def _annotation(self, node: ast.expr, scope: bindings.Scope) -> str:
+    def _annotation(self, node: ast.expr, scope: _Scope) -> str:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             node = ast.parse(node.value, mode="eval").body
         if isinstance(node, ast.Subscript):
@@ -34,9 +234,9 @@ class _ReaderFacts(ast.NodeVisitor):
             return f"{owner}[{argument}]" if owner and argument else ""
         return scope.unmodified_origin(node)
 
-    def _written(self, node: ast.expr, scope: bindings.Scope) -> bool:
+    def _written(self, node: ast.expr, scope: _Scope) -> bool:
         expression = ast.unparse(node)
-        current: bindings.Scope | None = scope
+        current: _Scope | None = scope
         while current is not None:
             for written in current.attribute_writes:
                 target = ast.unparse(written)
@@ -45,9 +245,7 @@ class _ReaderFacts(ast.NodeVisitor):
             current = current.parent
         return False
 
-    def _type(
-        self, node: ast.expr, scope: bindings.Scope, seen: frozenset[str] = frozenset()
-    ) -> str:
+    def _type(self, node: ast.expr, scope: _Scope, seen: frozenset[str] = frozenset()) -> str:
         if self._written(node, scope):
             return ""
         if isinstance(node, ast.Name):
@@ -68,7 +266,7 @@ class _ReaderFacts(ast.NodeVisitor):
             return self._call_type(node, scope, seen)
         return ""
 
-    def _bound_type(self, node: ast.Name, scope: bindings.Scope, seen: frozenset[str]) -> str:
+    def _bound_type(self, node: ast.Name, scope: _Scope, seen: frozenset[str]) -> str:
         if node.id in seen:
             return ""
         if node.id not in scope.stores and scope.parent is not None:
@@ -81,7 +279,7 @@ class _ReaderFacts(ast.NodeVisitor):
         annotation = self.annotations.get(scope, {}).get(node.id)
         return self._annotation(*annotation) if annotation else ""
 
-    def _call_type(self, node: ast.Call, scope: bindings.Scope, seen: frozenset[str]) -> str:
+    def _call_type(self, node: ast.Call, scope: _Scope, seen: frozenset[str]) -> str:
         if self._written(node.func, scope):
             return ""
         origin = scope.unmodified_origin(node.func)
@@ -99,13 +297,13 @@ class _ReaderFacts(ast.NodeVisitor):
             return _AGENT
         return ""
 
-    def _nested(self, node: bindings.ScopeNode) -> None:
+    def _nested(self, node: _ScopeNode) -> None:
         parent = self.scope
-        outer, inner = bindings.scope_parts(node)
+        outer, inner = _scope_parts(node)
         for expression in outer:
             self.visit(expression)
-        self.scope = bindings.Scope(node, self.path, parent.nested_parent())
-        annotations: dict[str, tuple[ast.expr, bindings.Scope]] = {}
+        self.scope = _Scope(node, self.path, parent.nested_parent())
+        annotations: dict[str, tuple[ast.expr, _Scope]] = {}
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
             for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs):
                 if arg.annotation is not None:
@@ -147,7 +345,7 @@ class _ReaderFacts(ast.NodeVisitor):
             )
         self.generic_visit(node)
 
-    def _receiver_key(self, node: ast.expr, scope: bindings.Scope) -> str:
+    def _receiver_key(self, node: ast.expr, scope: _Scope) -> str:
         if isinstance(node, ast.Name):
             if node.id not in scope.stores and scope.parent is not None:
                 return self._receiver_key(node, scope.parent)

@@ -9,10 +9,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.test_idempotency import agent_id as agent_id
 from gateway.tests.test_idempotency import client as client
 from gateway.tests.test_idempotency import count_inbounds
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_authenticated_admin_retry_and_scoped_reconcile(

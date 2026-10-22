@@ -42,9 +42,9 @@ from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_fr
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.backup.artifact import passphrase
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 pytestmark = pytest.mark.skipif(
     not (Path(base_pooler.pgbouncer_bin()).exists() or shutil.which(base_pooler.pgbouncer_bin())),

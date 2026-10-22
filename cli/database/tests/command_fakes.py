@@ -17,19 +17,20 @@ __all__ = [
     "FakeResponse",
     "FakeResult",
     "_FakeSessionBackend",
-    "_sess",
     "_spec",
     "fake_session_backends",
     "gateway_role_pinned",
     "git_aware",
     "hermetic_gateway_base",
     "patch_gateway_http",
+    "sess",
 ]
 
 
-def _sess(service: str) -> str:
-    """Expected composed session name (`meiva-<service>` — no cluster segment;
-    the per-home session backend scopes sessions)."""
+def sess(service: str) -> str:
+    # meiva:note
+    # Expected composed session name (`meiva-<service>` — no cluster segment;
+    # the per-home session backend scopes sessions).
     return f"meiva-{service}"
 
 

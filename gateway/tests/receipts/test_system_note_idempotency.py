@@ -9,7 +9,7 @@ from base.db import Database, fetch_one, pool
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from gateway.agents.system_note import system_note_blocking
-from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 
 
 def test_system_note_replay_and_immutable_policy(db_conn: psycopg.Connection) -> None:

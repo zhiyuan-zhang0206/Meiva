@@ -5,12 +5,12 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from scripts.structure import placement, placement_evidence, tests_location
+from scripts.structure import placement, placement_evidence, tests_location_allowed
 
 
 def suggest(rel: str, repo_root: Path) -> str:
     """Where the test at repo-relative `rel` belongs, as one paragraph."""
-    if (reason := tests_location.stays_by_design(rel)) is not None:
+    if (reason := tests_location_allowed.stays_by_design(rel)) is not None:
         return f"{rel}: stays at the top level by design ({reason})."
     tree = ast.parse((repo_root / rel).read_text(encoding="utf-8"), filename=rel)
     result = placement_evidence.subject_lca(tree, rel, placement.ModuleIndex(repo_root))

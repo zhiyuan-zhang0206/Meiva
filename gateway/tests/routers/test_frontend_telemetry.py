@@ -20,7 +20,7 @@ import pytest
 
 from base import telemetry
 from gateway.routers import frontend_telemetry as ft_router
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 # One valid interaction as the browser sends it.
 PAGE = "fleet"

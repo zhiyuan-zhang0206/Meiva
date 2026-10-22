@@ -1,4 +1,4 @@
-exports = ["allowlist.py"]
+exports = ["allowlist.py", "tests"]
 
 [uses]
 "__init__.py" = ["allowlist.py", "bundle.py", "busrule.py", "clockrule.py", "dbhandle.py", "endpointrule.py", "roots.py", "scan.py", "sliced.py"]

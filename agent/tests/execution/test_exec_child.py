@@ -234,7 +234,7 @@ def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agent.execution import child as exec_child
-    from agent.graph.exec import protocol
+    from agent.execution import protocol
 
     result = tmp_path / "result.json"
 
@@ -497,8 +497,8 @@ def test_child_overlay_phases_framework_then_plugin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
 ) -> None:
     from agent.execution import child as exec_child
-    from agent.graph.exec import protocol
-    from agent.graph.exec.protocol import RequestPayload, ResultPayload
+    from agent.execution import protocol
+    from agent.execution.protocol import RequestPayload, ResultPayload
 
     events: list[str] = []
     results: list[ResultPayload] = []

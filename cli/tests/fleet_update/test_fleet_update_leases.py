@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -181,7 +180,7 @@ def test_up_never_reads_the_lease_table(
 
 
 def test_the_gateway_runs_the_shipped_program_source() -> None:
-    owner = Path(fleet_update.__file__).parent / "commands" / "management" / "fleet_leases.py"
+    owner = fleet_update.VERIFY_SCRIPTS / "fleet_leases.py"
     assert owner.read_text(encoding="utf-8") == fleet_update.program_text(
         fleet_update.VERIFY_SCRIPTS / "fleet_leases.py"
     )

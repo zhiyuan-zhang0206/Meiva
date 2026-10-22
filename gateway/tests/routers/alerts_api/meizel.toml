@@ -1,4 +1,12 @@
+exports = ["alerts_support.py"]
+
+[uses]
+"test_list_unresolved_first_and_filters.py" = ["alerts_support.py"]
+
 [debt.first-party-patch]
+"alerts_support.py#monkeypatch.setattr base.config.settings.alerts.im_notify_enabled" = 1
+"alerts_support.py#monkeypatch.setattr base.config.settings.alerts.webhook_token" = 1
+"alerts_support.py#monkeypatch.setattr gateway.alerts.router.notify_alert_group" = 2
 "test_list_unresolved_first_and_filters.py#monkeypatch.setattr base.config.settings.display.alerts_default_limit" = 1
 "test_list_unresolved_first_and_filters.py#monkeypatch.setattr gateway.alerts.router.event_stream" = 1
 "test_list_unresolved_first_and_filters.py#monkeypatch.setattr gateway.alerts.router.notify_alert_group" = 1

@@ -13,7 +13,7 @@ from base.config.domains.storage.data_plane import self_machine_host
 from base.host.env import bootstrap
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def test_fetch_bootstrap_config_against_live_endpoint(

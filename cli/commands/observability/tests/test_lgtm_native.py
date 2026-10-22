@@ -30,9 +30,9 @@ from cli.commands.observability import lgtm_native
 from cli.commands.observability.tests.lgtm_inputs import darwin_host as darwin_host
 from cli.commands.observability.tests.lgtm_inputs import verifying_host
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def _repo() -> Path:

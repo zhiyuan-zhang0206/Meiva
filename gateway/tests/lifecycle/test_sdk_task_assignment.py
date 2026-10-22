@@ -12,6 +12,7 @@ from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.lifecycle.test_task_assignments import HEADERS, PATH, SECRET
 from gateway.tests.lifecycle.test_task_assignments import body as body
 from gateway.tests.lifecycle.test_task_assignments import client as client
@@ -19,7 +20,6 @@ from meiva.gateway_client import use_client
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.task_registry import TaskAssignment
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _response(response: Any) -> httpx.Response:

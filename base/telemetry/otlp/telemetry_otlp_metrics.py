@@ -130,7 +130,7 @@ def metric_views() -> list[Any]:
     return views
 
 
-def metrics_resource() -> Any:
+def metrics_resource(cluster_label_fn: Callable[[], str] | None = None) -> Any:
     """The metrics-side OTel Resource: `service.name=meiva-<process>` (the
     bounded process dimension) + a per-process-instance `service.instance.id`.
     Without it every series lands as job="unknown_service" and two same-named
@@ -151,13 +151,14 @@ def metrics_resource() -> Any:
 
     from base.telemetry.delivery.state import process_name
 
+    read_cluster = cluster_label if cluster_label_fn is None else cluster_label_fn
     return Resource.create(
         {
             "service.namespace": "meiva",
             "service.name": f"meiva-{process_name()}",
             "service.instance.id": str(uuid.uuid4()),
             "service.version": version("meiva"),
-            "cluster": cluster_label(),
+            "cluster": read_cluster(),
         }
     )
 

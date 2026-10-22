@@ -23,7 +23,7 @@ from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.idempotency import keyed_headers
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 @pytest.fixture

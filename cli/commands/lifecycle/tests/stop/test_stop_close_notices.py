@@ -34,11 +34,11 @@ from cli.commands.lifecycle.tests.stop.stop_support import home as home
 from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_service
 from cli.commands.lifecycle.tests.stop.stop_support import written as written
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_busy_fixture_waits_for_the_job_after_a_login_helper(

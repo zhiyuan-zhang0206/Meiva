@@ -30,12 +30,12 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from gateway.tests.auth.gateway_config import gateway_test_client
 from meiva import ui
 from meiva.gateway_client import use_client
 from meiva.sdk_surface import agent_identity
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva.ui import InvalidPageName, PageClosed
-from tests.fixtures.gateway_config import gateway_test_client
 
 _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)
 

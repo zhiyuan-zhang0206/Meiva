@@ -35,10 +35,10 @@ returns to a lower layer would close a cycle.
 
 ## Recorded debt
 
-Some edges against the direction exist today (for example, `cli` using `scripts`, or tests
-that reach up). They are not exemptions: each fact on such an edge is a recorded `cycle-edge` debt in
-the manifest of the directory whose graph has the cycle, counted per source and target file, so a new
-import on the same edge is a new violation and the recorded ones can only shrink. `python -m meizel debt`
+Legacy locality violations (such as test-only patches or remaining cross-package test edges) are not
+exemptions: each fact is a recorded debt in the manifest of the directory that owns it, counted per
+source and target, so a new violation fails `meizel check` and the recorded ones can only shrink. All
+`cycle-edge` debts across the repository have been eliminated (`0` remaining). `python -m meizel debt`
 shows what is left. See [recorded debt](../../meizel/docs/checker/debt.meiva.okf.md).
 
 ## Packages outside the stack

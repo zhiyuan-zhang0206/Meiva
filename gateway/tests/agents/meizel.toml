@@ -40,6 +40,3 @@ exports = ["gateway_auth.py"]
 "test_conversation_snapshot.py#monkeypatch.setattr gateway.agents.history.timeline.load_checkpoint_messages" = 1
 "test_conversation_snapshot.py#monkeypatch.setattr gateway.agents.state.load_checkpoint_messages" = 1
 "test_external_agent_source.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
-
-[debt.third-party-patch]
-"gateway_auth.py#monkeypatch.setattr starlette.testclient.TestClient.__init__" = 2

@@ -14,7 +14,7 @@ import os
 import traceback as _traceback
 from collections.abc import Callable
 from functools import partial
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 import loguru
 
@@ -24,7 +24,13 @@ from base.log.sinks import add_sink
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.emitter import category_for_kind, emit, init_telemetry
 
-__all__ = ["LoadedImage", "add_event_sink", "init_cli_process", "init_gateway_process"]
+__all__ = [
+    "LoadedImage",
+    "add_event_sink",
+    "event_sink",
+    "init_cli_process",
+    "init_gateway_process",
+]
 
 # The one host-stall companion whose EVENT level is rewritten: psycopg logs
 # its own `query cancellation failed: ...` WARNING when a `_try_cancel`
@@ -129,7 +135,7 @@ def message_to_params(
 
 # loguru level name -> unified `events` level (lowercase; TRACE/SUCCESS collapse
 # onto the four documented levels).
-_LOG_LEVELS: dict[str, str] = {
+_LOG_LEVELS: dict[str, Literal["debug", "info", "warning", "error", "critical"]] = {
     "TRACE": "debug",
     "DEBUG": "debug",
     "INFO": "info",
@@ -140,27 +146,28 @@ _LOG_LEVELS: dict[str, str] = {
 }
 
 
-def _event_sink(
+def event_sink(
     message: loguru.Message, *, producer: Callable[[], EventPipeline] | None = None
 ) -> None:
-    """Route one loguru record into the unified event pipeline.
-
-    This is the loguru-side adapter: field derivation lives in
-    `message_to_params`, and the event itself is enqueued to
-    `base.telemetry` — the emitter batches it into the unified event stream
-    (see `base/telemetry/emitter.py`). The enqueue is non-blocking (bounded queue; shed
-    records are counted and reported as `event_log_drop`), so even the
-    synchronous `enqueue=False` registration costs the producer nothing.
-
-    Derivation bugs (empty event=, unbound agent_id) raise — a caller bug
-    must not silently fall through; production registrations add the handler
-    with `catch=True`, which keeps the raise off the calling thread while the
-    JSONL file sink still holds the line."""
+    # meiva:note
+    # Route one loguru record into the unified event pipeline.
+    #
+    # This is the loguru-side adapter: field derivation lives in
+    # `message_to_params`, and the event itself is enqueued to
+    # `base.telemetry` — the emitter batches it into the unified event stream
+    # (see `base/telemetry/emitter.py`). The enqueue is non-blocking (bounded queue; shed
+    # records are counted and reported as `event_log_drop`), so even the
+    # synchronous `enqueue=False` registration costs the producer nothing.
+    #
+    # Derivation bugs (empty event=, unbound agent_id) raise — a caller bug
+    # must not silently fall through; production registrations add the handler
+    # with `catch=True`, which keeps the raise off the calling thread while the
+    # JSONL file sink still holds the line.
     ts, agent_id, level, event, payload, source = message_to_params(message)
     emit(
         category_for_kind(event),
         event,
-        level=_LOG_LEVELS.get(level, "info"),  # type: ignore[arg-type] — get() widens to str
+        level=_LOG_LEVELS.get(level, "info"),
         agent_id=agent_id,
         source=source,
         attributes=payload,
@@ -246,7 +253,7 @@ def add_event_sink(
     if _event_sink_id is not None and _event_sink_id in live_handlers:
         return _event_sink_id
     _event_sink_id = add_sink(
-        partial(_event_sink, producer=producer),
+        partial(event_sink, producer=producer),
         level="INFO",
         enqueue=False,
         catch=True,

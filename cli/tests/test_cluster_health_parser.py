@@ -36,9 +36,9 @@ from cli.commands.cluster.tests.test_cluster_health import (
     isolated_cluster_home as isolated_cluster_home,
 )
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_health_probe_dispatch_preserves_observation_options(

@@ -30,8 +30,8 @@ from cli.commands.data_plane import _pooler_stop, maintenance_stop
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler, native_birth
 from cli.commands.data_plane.config import DataPlaneConfig
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 
 _ABSENT_REDIS = "redis://127.0.0.1:1"
 _BIND_ATTEMPTS = 5

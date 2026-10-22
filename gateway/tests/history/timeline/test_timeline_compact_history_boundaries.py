@@ -5,9 +5,9 @@ import pytest
 from langchain_core.messages import BaseMessage
 
 from base.db import create_agent
+from gateway.tests.auth.gateway_config import GatewayTestClient
 from gateway.tests.history.test_timeline import CompactHistoryCases
 from gateway.tests.history.test_timeline import test_client as test_client
-from tests.fixtures.gateway_config import GatewayTestClient
 
 
 class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):

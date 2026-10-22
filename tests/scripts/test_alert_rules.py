@@ -2,21 +2,38 @@ from __future__ import annotations
 
 import re
 import types
-from pathlib import Path
 from typing import Any, NotRequired, Required, Union, get_args, get_origin, get_type_hints
 
 import pytest
-import yaml
 
 from base.events.contract import EVENTS, payload_keys, telemetry_events
 from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 from base.telemetry.otlp.telemetry_otlp_metrics import strip_unit_suffix, unit_for
-from tests.scripts.test_alert_rules_signals import SIGNALS
-
-RULES = (
-    Path(__file__).resolve().parent.parent.parent
-    / "deploy/lgtm/config/grafana/provisioning/alerting/rules.yml"
+from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
+    INFRA_RULE_METRICS as INFRA_RULE_METRICS,
 )
+from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
+    RULES as RULES,
+)
+from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
+    assert_latency_query_scopes_to_route_class as assert_latency_query_scopes_to_route_class,
+)
+from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
+    assert_reduce_keeps_route_label as assert_reduce_keeps_route_label,
+)
+from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
+    load_groups as _load_groups,
+)
+from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
+    load_rules as load_rules,
+)
+from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
+    rule_query_exprs as rule_query_exprs,
+)
+from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
+    threshold_params as threshold_params,
+)
+from tests.scripts.test_alert_rules_signals import SIGNALS
 
 _EXPECTED_UIDS = {
     "meiva-ops-warning-error-spike",
@@ -56,49 +73,6 @@ _EXPECTED_UIDS = {
     "meiva-ops-backup-dump-failed",
     "meiva-ops-tempo-backend-down",
 }
-
-INFRA_RULE_METRICS = {
-    "meiva-ops-host-cpu-saturated": "system_cpu_utilization_ratio",
-    "meiva-ops-host-memory-pressure": "system_memory_utilization_ratio",
-    "meiva-ops-host-disk-watermark": "system_filesystem_utilization_ratio",
-    "meiva-ops-host-disk-watermark-93": "system_filesystem_utilization_ratio",
-    "meiva-ops-host-disk-watermark-95": "system_filesystem_utilization_ratio",
-    "meiva-ops-pg-connection-saturation": "postgresql_backends",
-    "meiva-ops-redis-memory": "redis_memory_used_bytes",
-}
-
-
-def _load_groups() -> list[dict[str, Any]]:
-    doc = yaml.safe_load(RULES.read_text(encoding="utf-8"))
-    assert doc is not None
-    groups = doc["groups"]
-    assert len(groups) == 2
-    assert [group["name"] for group in groups] == ["meiva-ops", "meiva-ops-slow"]
-    assert [group["folder"] for group in groups] == ["Meiva", "Meiva"]
-    assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [53, 13]
-    return groups
-
-
-def load_rules() -> list[dict[str, Any]]:
-    groups = _load_groups()
-    return [rule for group in groups for rule in group["rules"]]
-
-
-def rule_query_exprs(rule: dict[str, Any], datasource_uid: str) -> list[str]:
-    return [
-        d["model"]["expr"]
-        for d in rule["data"]
-        if d.get("datasourceUid") == datasource_uid and d.get("queryType") == ""
-    ]
-
-
-def threshold_params(rule: dict[str, Any]) -> list[list[Any]]:
-    return [
-        d["model"]["conditions"][0]["evaluator"]["params"]
-        for d in rule["data"]
-        if d["model"].get("type") == "threshold"
-    ]
 
 
 def test_rules_have_expected_uids() -> None:
@@ -472,20 +446,6 @@ def test_trace_watermark_rule_filters_degradation_action() -> None:
     assert any('category="telemetry"' in e for e in exprs)
     assert any("[24h]" in e for e in exprs)
     assert threshold_params(rules["meiva-ops-trace-disk-watermark"]) == [[0]]
-
-
-def assert_latency_query_scopes_to_route_class(expr: str, route_class: str) -> None:
-    assert 'event_name="gateway_latency"' in expr
-    assert f'| attributes_route_class="{route_class}"' in expr
-    assert "attributes_route !~" not in expr
-    assert "unwrap attributes_p95_ms" in expr
-    assert "max by (attributes_route)" in expr
-
-
-def assert_reduce_keeps_route_label(rule: dict[str, Any]) -> None:
-    reduce_node = next(d for d in rule["data"] if d["model"].get("type") == "reduce")
-    assert reduce_node["model"].get("mode") == "byLabels"
-    assert "attributes_route" in reduce_node["model"].get("includeLabels", [])
 
 
 def test_inbound_consumed_unknown_rule_counts_the_event_over_a_day() -> None:

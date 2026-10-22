@@ -16,10 +16,10 @@ from base.telemetry import EventPipeline
 from cli.commands.converge import spec as converge_host
 from cli.commands.extensions import external_skills as external_skills_module
 from cli.commands.extensions.external_skill_host import filesystem as filesystem_module
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_config_machine as command_config_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 SKILL_NAME = "operating-meiva-cluster"
 

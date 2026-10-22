@@ -1,6 +1,6 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
-"tests.path_scoped.gateway_tests" = [
+"gateway.tests.auth.gateway_tests" = [
     ".",
 ]
 "base.paths.tests.homes" = ["."]
@@ -25,7 +25,7 @@
 "services.entrypoints.im_bridge.tests.conftest" = [
     "agents/test_weixin_message_identity.py",
 ]
-"tests.fixtures.unit.gateway" = [
+"gateway.tests.auth.unit_gateway" = [
     "agents/test_weixin_message_identity.py",
     "events/test_weixin_ingress_command_http.py",
 ]

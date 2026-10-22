@@ -10,8 +10,8 @@ from base.api_contracts.agent_contract import AgentStatus, LivenessState
 from base.events.live.tests.fakes import patch_sync_redis
 from base.telemetry.tests.capture.event_capture import capturing_events
 from gateway.schemas.fleet_graph import FleetGraphNode, FleetGraphResponse
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.fleet_graph.staleness_support import use_heartbeat_age
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _fresh_heartbeat_age(pool: object, *, now: datetime) -> float:

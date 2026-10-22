@@ -16,8 +16,8 @@ import pytest
 
 from base.native_process.root_control import instance_lock
 from cli import fleet_update
+from cli.fleet_update import fleet_gate, fleet_verify
 from cli.tests.fleet_update.fleet_update_cluster import Cluster, git
-from scripts.host_ops import fleet_gate, fleet_verify
 
 
 @pytest.mark.parametrize("command", ["run", "split"])

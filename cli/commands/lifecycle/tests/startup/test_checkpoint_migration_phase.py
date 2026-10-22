@@ -13,8 +13,8 @@ from base.db.tests.fakes import patch_database
 from base.deploy.schema import migration_layout
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _seed_checkpoint_versions(conn: psycopg.Connection) -> None:

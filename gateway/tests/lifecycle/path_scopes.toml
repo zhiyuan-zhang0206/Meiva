@@ -1,6 +1,6 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
-"tests.path_scoped.integration_tests" = [
+"gateway.tests.auth.integration_tests" = [
     "test_agent_launch_visibility.py",
 ]
 "base.config.tests.config_authority" = [

@@ -12,6 +12,7 @@ from fastapi import Request
 from base.config import settings
 from gateway.routers import memory as memory_router
 from gateway.schemas.memory import MemorySearchRequest
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_memory_search import (
     Judge,
     StubProvider,
@@ -28,7 +29,6 @@ from gateway.tests.routers.test_memory_search import (
 )
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import ChunkHit
-from tests.fixtures.gateway_config import gateway_test_client
 
 _CANDIDATES = 30
 _POOL_SIZE = 150

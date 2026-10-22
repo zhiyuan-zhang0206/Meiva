@@ -6,4 +6,4 @@ exports = ["agent_slices.py", "bootstrap.py", "config_lite_table.py", "dotenv_bo
 "dotenv_boot.py" = ["bootstrap.py", "registry.py"]
 "health_ports.py" = ["port_table.py", "registry.py"]
 "registry.py" = ["config_lite_table.py"]
-"tests" = ["agent_slices.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_file.py", "harness_binaries.py", "registry.py"]
+"tests" = ["bootstrap.py", "dotenv_boot.py", "harness_binaries.py"]
