@@ -100,3 +100,31 @@ def test_the_session_path_wins_over_the_host_path() -> None:
         {"PATH": "/opt/harness/bin:/usr/bin:/bin"}, AuthConfig(), host={"PATH": "/usr/bin:/bin"}
     )
     assert env["PATH"] == "/opt/harness/bin:/usr/bin:/bin"
+
+
+# meiva:note
+# The guard is asserted on the value plane, not only on the names: the transport spawns the
+# CLI with `{**os.environ, **options.env}`, so any host secret that survives under *some*
+# key reaches the session even when nobody listed that name. Composing the spawn the way the
+# transport does and scanning every value is the assertion that still holds when a future
+# allowlist entry starts carrying one (#5512, acceptance reworded by 405 on 2026-10-22: the
+# three provider keys stay present with an empty value — not ABSENT — and "empty" is what
+# makes them unusable).
+# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+def test_no_spawned_value_carries_a_host_secret() -> None:
+    secrets = ("sk-host-openai-value", "host-codex-value", "sk-ant-host-value")
+    host = {
+        "OPENAI_API_KEY": secrets[0],
+        "CODEX_API_KEY": secrets[1],
+        "ANTHROPIC_API_KEY": secrets[2],
+        "SOME_UNLISTED_KNOB": f"wrapped-{secrets[0]}",
+        "PATH": "/usr/bin:/bin",
+    }
+    env = build_env({"HOME": "/home/zzy"}, AuthConfig(), host=host)
+    spawned = {**host, **env}
+    leaked = {
+        key: value
+        for key, value in spawned.items()
+        if value and any(secret in value for secret in secrets)
+    }
+    assert leaked == {}
