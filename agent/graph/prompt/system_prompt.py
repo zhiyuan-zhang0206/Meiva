@@ -606,7 +606,54 @@ def build_system_prompt(
     return "\n\n".join(parts).rstrip("\n") + "\n"
 
 
+HARNESS_NATIVE_OVERLAP_NAMESPACES: frozenset[str] = frozenset({"cwd", "files", "shell", "web"})
+
+HARNESS_EXCLUDED_PLUGIN_SECTIONS: frozenset[str] = frozenset({"coding_tools_section"})
+
+
+def harness_sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+    configured = tuple(slices.read("agent", "sdk_expand_in_system_prompt"))
+    wanted = [
+        path
+        for path in effective_sdk_expand(
+            slices.prompt.sdk_disable,
+            configured_expansions=configured,
+        )
+        if path.split(".", 1)[0] not in HARNESS_NATIVE_OVERLAP_NAMESPACES
+    ]
+    if not wanted:
+        return ""
+    import meiva
+    from meiva.sdk_surface.help import ModelHelpProfile
+    from meiva.sdk_surface.help import render as render_help
+
+    pieces: list[str] = []
+    seen_targets: set[int] = set()
+    profile = ModelHelpProfile.for_model(slices.brain.llm_model, catalog=catalog)
+    for path in wanted:
+        if disabled_by_sdk_config(path, slices.prompt.sdk_disable):
+            continue
+        target: object = meiva
+        try:
+            for segment in path.split("."):
+                target = getattr(target, segment)
+        except AttributeError:
+            continue
+        if id(target) in seen_targets:
+            continue
+        seen_targets.add(id(target))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            render_help(target, compact_classes=True, profile=profile)
+        pieces.append(buf.getvalue().rstrip())
+    if not pieces:
+        return ""
+    body = "\n\n".join(pieces)
+    return f"# Expanded SDK reference\n\nFull contracts for your most-used namespaces.\n\n{body}"
+
+
 HARNESS_FRAMEWORK_SECTIONS: tuple[Callable[..., str], ...] = (
+    harness_sdk_expand_section,
     keep_it_simple_section,
     harness_user_reply_section,
     communication_style_section,
@@ -622,15 +669,6 @@ HARNESS_FRAMEWORK_SECTIONS: tuple[Callable[..., str], ...] = (
     _long_running_operation_section,
     temporal_awareness_section,
     invest_in_the_future_section,
-)
-
-HARNESS_PLUGIN_SECTION_NAMES: frozenset[str] = frozenset(
-    {
-        "fleet_self_section",
-        "reduce_context_switch_section",
-        "memory_discipline_section",
-        "engineering_workflow_section",
-    }
 )
 
 
@@ -654,6 +692,7 @@ def build_harness_system_prompt(
         capabilities_section,
     )
     catalog_sections = (
+        harness_sdk_expand_section,
         keep_it_simple_section,
         communication_style_section,
         user_tone_section,
@@ -678,11 +717,26 @@ def build_harness_system_prompt(
         if contribution:
             parts.append(contribution)
 
-    for _plugin, section_fn in extensions.system_prompt_sections():
-        if section_fn.__name__ not in HARNESS_PLUGIN_SECTION_NAMES:
+    for plugin, section_fn in extensions.system_prompt_sections():
+        if section_fn.__name__ in HARNESS_EXCLUDED_PLUGIN_SECTIONS:
             continue
         contribution = section_fn(slices, catalog=catalog)
         if contribution:
             parts.append(contribution)
+            activation.record(
+                plugin,
+                "systemPromptSections",
+                section_fn.__name__,
+                model=slices.brain.llm_model,
+                detail=(
+                    f"chars={len(contribution)} "
+                    f"sha={hashlib.sha256(contribution.encode()).hexdigest()[:12]}"
+                ),
+            )
+
+    if slices.read("agent", "prompt_knowledge_cutoff_enabled"):
+        cutoff = catalog.knowledge_cutoffs.get(slices.brain.llm_model)
+        if cutoff:
+            parts.append(f"Knowledge cutoff: {cutoff}")
 
     return "\n\n".join(parts).strip()

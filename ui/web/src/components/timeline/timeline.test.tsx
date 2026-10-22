@@ -950,32 +950,38 @@ describe("ItemView: Markdown-authored inbound bodies", () => {
     expect(screen.getByTestId("chat-markdown").textContent).toBe("## Goal");
   });
 
-  it("inter-agent message body goes through ChatMarkdown; the human message stays plain", () => {
+  it("inter-agent and human inbound_chat bodies go through ChatMarkdown", () => {
     render(
       <TimelineView
         items={[
           makeItem({ item_id: "1.0", kind: "inbound_chat", source: "agent:7", payload: "Agent 7:\n\nsee **this**" }),
-          makeItem({ item_id: "2.0", kind: "inbound_chat", source: "user", payload: "User:\n\nkeep **raw**" }),
+          makeItem({ item_id: "2.0", kind: "inbound_chat", source: "user", payload: "User:\n\nrender **markdown**" }),
         ]}
       />,
     );
     revealCollapsedCards();
-    expect(screen.getAllByTestId("chat-markdown").map((n) => n.textContent)).toEqual(["see **this**"]);
-    expect(screen.getByText("keep **raw**")).toBeTruthy();
+    expect(screen.getAllByTestId("chat-markdown").map((n) => n.textContent)).toEqual([
+      "see **this**",
+      "render **markdown**",
+    ]);
   });
 
-  it("memory marker body goes through ChatMarkdown; a guidance note stays raw", () => {
+  it("system_prompt and system_marker bodies go through ChatMarkdown", () => {
     render(
       <TimelineView
         items={[
+          makeItem({ item_id: "0.0", kind: "system_prompt", payload: "# Role\n\nFollow **rules**" }),
           makeItem({ item_id: "1.0", kind: "system_marker", source: "memory", payload: "- [Title](a.md)" }),
-          makeItem({ item_id: "2.0", kind: "system_marker", source: "sdk_hint", payload: "use **raw** text" }),
+          makeItem({ item_id: "2.0", kind: "system_marker", source: "sdk_hint", payload: "use **markdown** text" }),
         ]}
       />,
     );
     revealCollapsedCards();
-    expect(screen.getAllByTestId("chat-markdown").map((n) => n.textContent)).toEqual(["- [Title](a.md)"]);
-    expect(screen.getByText("use **raw** text")).toBeTruthy();
+    expect(screen.getAllByTestId("chat-markdown").map((n) => n.textContent)).toEqual([
+      "# Role\n\nFollow **rules**",
+      "- [Title](a.md)",
+      "use **markdown** text",
+    ]);
   });
 });
 

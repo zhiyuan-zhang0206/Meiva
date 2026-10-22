@@ -28,7 +28,6 @@ from .node_log import node_lifecycle
 from .prompt.capabilities import disabled_by_sdk_config, indexed_skill_identifiers
 from .prompt.context_notes import (
     context_notes,
-    harness_context_notes,
     machine_clause,
     own_label,
 )
@@ -72,8 +71,7 @@ def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
         agent_id=agent_id,
         catalog=catalog,
     )
-    notes = harness_context_notes(extensions, ctx)
-    instruction_parts = [p for p in (prompt_body, *notes, HANDOFF_INSTRUCTION) if p]
+    instruction_parts = [p for p in (prompt_body, HANDOFF_INSTRUCTION) if p]
     instruction = "\n\n".join(instruction_parts)
     label = (
         own_label(ctx, agent_id) if ctx.ops_pool is not None and ctx.identity is not None else None
@@ -155,22 +153,6 @@ async def init_context_node(
                 )
             return Command[NodeName](goto=route_target(runtime.context, reset.resume))
 
-        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-        if runtime.context.harness is not Harness.MEIVA:
-            agent_id = agent_id_from_config(config)
-            handoff = _build_grounded_handoff(runtime.context, agent_id=agent_id)
-            set_handoff = getattr(runtime.context.harness_bridge, "set_handoff", None)
-            if callable(set_handoff):
-                set_handoff(handoff)
-            return Command[NodeName](
-                update={
-                    "messages": [SystemMessage(content=handoff.render()), *reset.tail],
-                    "harness_cursor": 0,
-                    "context_reset": ContextReset(),
-                },
-                goto=route_target(runtime.context, reset.resume),
-            )
-
         # Container mode (eval harness): no ops_pool, so no inbound queue, no
         # workspace, and nothing the notes describe. The head is the system
         # prompt alone, keeping an eval's context deterministic. Same signal
@@ -206,6 +188,24 @@ async def init_context_node(
         # order would mark it known and drop it silently until the next
         # compaction.
         indexed = indexed_skill_identifiers(runtime.context.require_agent().prompt)
+
+        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+        if runtime.context.harness is not Harness.MEIVA:
+            agent_id = agent_id_from_config(config)
+            handoff = _build_grounded_handoff(runtime.context, agent_id=agent_id)
+            set_handoff = getattr(runtime.context.harness_bridge, "set_handoff", None)
+            if callable(set_handoff):
+                set_handoff(handoff)
+            return Command[NodeName](
+                update={
+                    "messages": [SystemMessage(content=handoff.render()), *notes, *reset.tail],
+                    "capabilities": CapabilitiesState(indexed=indexed),
+                    "harness_cursor": 0,
+                    "context_reset": ContextReset(),
+                },
+                goto=route_target(runtime.context, reset.resume),
+            )
+
         head: list[BaseMessage] = [
             SystemMessage(
                 content=build_system_prompt(
