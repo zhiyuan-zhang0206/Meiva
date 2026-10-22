@@ -130,6 +130,40 @@ async def probe_machine(name: str, probe: Callable[..., Awaitable[object]]) -> P
         return _UNREACHED
 
 
+# meiva:note
+# What a machine was carrying when its probe failed — the two facts the offline
+# rules grade on (task #5520). Read here, at failure time, because the row is
+# still there: `machine_status_snapshot.status` is deliberately kept across a
+# failed attempt, so the last reachable answer still names its agent_count.
+#
+# `agent_count` is None when no snapshot has ever been kept (a machine that
+# never answered) — not zero. The rules must treat "unknown" as "may be
+# carrying" and still alert; reading unknown as zero would turn the worst case
+# (we cannot see the host at all) into silence, which is the failure mode this
+# grading exists to avoid.
+#
+# `carries_service` is true when the machines row lists any role besides
+# `agent-runner` (gateway, observability-station): those hosts are expected to
+# be up regardless of how many agents sit on them.
+def _carried_load(pool: ConnectionPool, name: str) -> dict[str, Any]:
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT CASE WHEN jsonb_typeof(s.status->'agent_count') = 'number' "
+            "            THEN (s.status->>'agent_count')::int END AS agent_count, "
+            "       EXISTS (SELECT 1 FROM unnest(COALESCE(m.role, '{}'::text[])) AS r "
+            "               WHERE r <> 'agent-runner') AS carries_service "
+            "FROM machines m "
+            "LEFT JOIN machine_status_snapshot s ON s.machine_name = m.name "
+            "WHERE m.name = %s",
+            (name,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return {"agent_count": None, "carries_service": False}
+    agent_count, carries_service = row
+    return {"agent_count": agent_count, "carries_service": bool(carries_service)}
+
+
 async def _record_probe(
     pool: ConnectionPool, name: str, *, ok: bool, host_online: bool | None
 ) -> None:
@@ -159,7 +193,11 @@ async def _record_probe(
             "machine_probe_failed",
             level="warning",
             source="system",
-            attributes={"machine": name, "consecutive_failures": consecutive_failures},
+            attributes={
+                "machine": name,
+                "consecutive_failures": consecutive_failures,
+                **_carried_load(pool, name),
+            },
         )
 
 
