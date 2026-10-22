@@ -118,14 +118,28 @@ def probe_helper(s: Runner, alias: str, new: str) -> dict[str, str]:
 REQUIRED_FACTS = ("helper", "valid", "loaded", "stale", "cert_root", "expected_hash")
 
 
+# meiva:note
+# Two shapes answer `helper`: a host that carries none (a Linux machine) owes that statement and
+# nothing else, because there is nothing there to rebuild or to compare; a host that carries one
+# owes every fact. A missing, empty or `-` value is how a probe that could not run reads, so any
+# owed field that comes back that way refuses the window instead of passing for "nothing to do".
+_ABSENT_OWES = ("helper",)
+
+
 def unreadable_facts(facts: dict[str, str]) -> list[str]:
-    bad = [name for name in REQUIRED_FACTS if facts.get(f"h_{name}", "") in ("", "-")]
+    owed = _ABSENT_OWES if facts.get("h_helper") == "absent" else REQUIRED_FACTS
+    bad = [name for name in owed if facts.get(f"h_{name}", "") in ("", "-")]
     if facts.get("h_rc", "") != "0":
         bad.insert(0, "facts exit status")
     return bad
 
 
+# meiva:note
+# Only a helper that is there can be rebuilt: `absent` is not a staleness the wave can act on,
+# and counting it would retire a host's extras for nothing.
 def needs_rebuild(facts: dict[str, str]) -> bool:
+    if facts.get("h_helper") != "present":
+        return False
     return facts.get("h_stale") != "no" or facts.get("h_valid") != "yes"
 
 
