@@ -21,6 +21,18 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT
 from typing import Any, cast
 
+from scripts.host_ops.fleet_gate import (
+    REBUILD_STOP,
+    baselines,
+    failed_stop,
+    host_refusals,
+    probe_helper,
+    probe_host,
+    rebuilding_hosts,
+    refusals,
+    stop_completed,
+)
+
 REPO = REPO_CODE = Path(__file__).resolve().parents[1]
 HOME = 'H="$HOME/.meiva"; S="$H/source"; cd "$S" || exit 1'
 MEIVA = 'MEIVA_HOME="$H" "$S/.venv/bin/meiva"'
@@ -41,20 +53,6 @@ CLEAN = (
     "are not caused by this update (a changed .gitignore can reveal them): check them, then "
     'move them away (do not delete) and rerun down."; exit 1; }'
 )
-PROBE = f"""{HOME}
-printf '%s\\n' "head=$(git rev-parse HEAD)"
-printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
-test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
-test -e "$H/updates/active" && echo active=yes || echo active=no
-printf '%s\\n' "op=$(cat "$H/run/lifecycle-op.json" 2>/dev/null)"
-"$S/.venv/bin/python" -c 'import fcntl, sys
-try:
-    fcntl.flock(open(sys.argv[1], "rb"), fcntl.LOCK_SH | fcntl.LOCK_NB)
-    print("root=down")
-except FileNotFoundError:
-    print("root=down")
-except OSError:
-    print("root=up")' "$H/run/meiva-root/meiva-root.lock" 2>/dev/null"""
 _OP_EVIDENCE = """H="$HOME/.meiva"
 p=$(cat "$H/run/agent_host.pid" 2>/dev/null)
 if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo host=up; else echo host=down; fi
@@ -135,41 +133,6 @@ class Session:
         return "\n".join(lines)
 
 
-def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
-    reasons: list[str] = []
-    if facts["dirty"] != "0":
-        reasons.append(f"{alias}: $HOME/.meiva/source has uncommitted changes")
-    if facts["hook"] == "yes":
-        reasons.append(f"{alias}: a post-checkout hook (the guard recurses); move it aside")
-    if facts["active"] == "yes":
-        reasons.append(
-            f"{alias}: $HOME/.meiva/updates/active names an unfinished release operation"
-        )
-    return reasons
-
-
-# meiva:note
-# The journal a probe line reports; an unreadable record is no journal, never a crash inside the
-# gate that is deciding whether to refuse.
-def _journal_of(text: str) -> dict[str, Any] | None:
-    try:
-        parsed: Any = json.loads(text)
-    except ValueError:
-        return None
-    return cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else None
-
-
-# meiva:note
-# One host's probe facts, and whether it was serving when the window began: a host is already
-# stopped only when its last lifecycle operation is a completed, successful stop and its
-# meiva-root is not running; any other host was up.
-def probe_host(s: Session, alias: str) -> tuple[dict[str, str], bool]:
-    lines = s.run(alias, PROBE, effect=False).splitlines()
-    facts = {key: value for key, _, value in (line.partition("=") for line in lines)}
-    stopped = facts.get("root") == "down" and _stop_completed(_journal_of(facts.get("op", "")))
-    return facts, not stopped
-
-
 # meiva:note
 # OLD is the one commit every host agrees on that is not NEW; hosts that disagree, or an OLD the
 # operator's checkout does not carry, refuse the window. OLD only feeds the `.python-version`
@@ -196,18 +159,38 @@ def _old_target(
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 def _preflight(
     s: Session, args: argparse.Namespace, new: str
-) -> tuple[list[str], str | None, list[str]]:
+) -> tuple[list[str], str | None, list[str], set[str]]:
     reasons: list[str] = []
     heads: dict[str, str] = {}
     serving: list[str] = []
     for alias in [args.gateway, *args.runner]:
         facts, was_serving = probe_host(s, alias)
         heads[alias] = facts["head"]
-        reasons += _host_refusals(alias, facts)
+        reasons += host_refusals(alias, facts)
         if was_serving:
             serving.append(alias)
     more, resolved = _old_target(s, args, heads, new)
-    return [*reasons, *more], resolved, serving
+    if reasons or more:
+        return [*reasons, *more], resolved, serving, set[str]()
+    # meiva:note
+    # The helper gate reads NEW, so every host must hold it first. This fetch is a
+    # non-destructive effect the window deliberately accepts before the gate: the gate's own
+    # question is about that commit, and the cheap refusals above have already passed.
+    if args.dry_run:
+        s.say("helper gate: not judged in --dry-run (the target commit is not fetched)")
+        return [], resolved, serving, set[str]()
+    everyone = [args.gateway, *args.runner]
+    for alias in everyone:
+        s.run(alias, f'{HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
+    probes = {alias: probe_helper(s, alias, new) for alias in everyone}
+    rebuild = bool(getattr(args, "rebuild_extras", False))
+    table = baselines(REPO)
+    return (
+        refusals(probes, table, rebuild=rebuild),
+        resolved,
+        serving,
+        rebuilding_hosts(probes, rebuild=rebuild),
+    )
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
@@ -333,7 +316,7 @@ def _lease_window(s: Session, args: argparse.Namespace) -> None:
 # macOS the failing attempt that spends it exits 0 (launchd has no attempt limit), so a failed
 # recovery would read as success and never reach `needs manual:`.
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
-def _recover_after_failed_stop(
+def _recover_afterfailed_stop(
     s: Session,
     args: argparse.Namespace,
     serving: list[str],
@@ -349,7 +332,7 @@ def _recover_after_failed_stop(
         if up:
             continue
         down.append(alias)
-        if alias not in stopped and not (alias == failed and _failed_stop(journal)):
+        if alias not in stopped and not (alias == failed and failed_stop(journal)):
             continue
         try:
             flags = _start_flags(args)
@@ -381,35 +364,16 @@ def _host_up_and_journal(s: Session, alias: str) -> tuple[bool, dict[str, Any] |
     return up, cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else None
 
 
-# meiva:note
-# The host's own journal is the evidence of how its stop ended: a stop that is complete with
-# rc 0 succeeded; any other stop record is a failed or unfinished stop. Another operation, or no
-# journal, says nothing about a stop.
-def _stop_completed(journal: dict[str, Any] | None) -> bool:
-    if journal is None or journal.get("operation") != "stop":
-        return False
-    result = cast("dict[str, Any]", journal["result"]) if "result" in journal else {}
-    return journal.get("complete") is True and result.get("rc") == 0
-
-
-def _failed_stop(journal: dict[str, Any] | None) -> bool:
-    return (
-        journal is not None and journal.get("operation") == "stop" and not _stop_completed(journal)
-    )
-
-
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 def down(s: Session, args: argparse.Namespace) -> None:
     new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}").stdout.strip()
     if not new:
         raise FailedError(f"refused: {args.new} is not a commit in {REPO}; git fetch origin")
-    reasons, _old, serving = _preflight(s, args, new)
+    reasons, _old, serving, rebuilding = _preflight(s, args, new)
     if reasons:
         raise FailedError("refused: " + "; ".join(reasons))
     _announce_leases(s, args)
     everyone = [args.gateway, *args.runner]
-    for alias in everyone:
-        s.run(alias, f'{HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
     _stored_schedules(s, args, new)
     chosen = [args.shell, args.browser, args.extras, *_flags(args, args.kept)]
     stop_flags = " ".join([*chosen, f"--mode {args.mode}", f"--timeout {args.stop_timeout}"])
@@ -422,15 +386,20 @@ def down(s: Session, args: argparse.Namespace) -> None:
         for alias in [*args.runner, args.gateway]:
             current = alias
             flags = f"{stop_flags} {args.infra}" if alias == args.gateway else stop_flags
+            if alias in rebuilding:
+                s.say(f"{alias}: retiring extras so its next start can rebuild the helper")
+                flags = f"{REBUILD_STOP} --mode {args.mode} --timeout {args.stop_timeout}"
+                if alias == args.gateway:
+                    flags = f"{flags} {args.infra}"
             s.run(alias, f"{HOME}; {MEIVA} stop --yes {flags}")
-            if not s.dry_run and not _stop_completed(_host_up_and_journal(s, alias)[1]):
+            if not s.dry_run and not stop_completed(_host_up_and_journal(s, alias)[1]):
                 raise FailedError(
                     f"{alias}: stop exited 0 but its journal records no completed stop"
                 )
             stopped.append(alias)
     except FailedError as exc:
         if not s.dry_run:
-            _recover_after_failed_stop(s, args, serving, stopped, current)
+            _recover_afterfailed_stop(s, args, serving, stopped, current)
         raise FailedError(f"{exc}{_STOP_HINT}") from exc
     for alias in everyone:
         s.run(
@@ -694,6 +663,13 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--log-dir", type=Path, required=True)
         if half != "up":
             p.add_argument("--new", required=True, help="commit to switch every host to")
+            p.add_argument(
+                "--rebuild-extras",
+                action="store_true",
+                help="accept rebuilding a loaded, stale permissions helper on the hosts that "
+                "need it (they retire extras first; each rebuilt helper's desktop grants are "
+                "re-applied by hand)",
+            )
         for scope in _SCOPES[half]:
             for dest in _HALF_PAIRS[scope]:
                 for flag in _PAIRS[dest]:
@@ -750,6 +726,12 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     if problems := _missing_choices(args):
         listed = "".join(f"\n  {problem}" for problem in problems)
         parser.exit(2, f"refused: every choice is explicit; missing or conflicting:{listed}\n")
+    if getattr(args, "rebuild_extras", False) and getattr(args, "extras", None) == "--keep-extras":
+        parser.exit(
+            2,
+            "refused: --rebuild-extras retires and rebuilds the helper; it excludes "
+            "--keep-extras\n",
+        )
     args.runner = args.runner or []
     args.dry_run = args.execution == "--dry-run"
     return args

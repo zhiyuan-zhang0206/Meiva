@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+_CERT_ROOT = re.compile(r'certificate root = H"([0-9a-f]{40})"')
 DESCRIPTION = (
     "The permissions helper's signing identity: inspect it, provision it, switch the install."
 )
@@ -277,9 +279,50 @@ def _restore(backup: Path, home: Path, app: Path, before_dr: str) -> None:
         print("WARNING: the restored requirement differs from the pre-switch one", file=sys.stderr)
 
 
+# meiva:note
+# This host's helper facts, one `key=value` per line, for a caller that compares machines
+# without importing this package: a wave gate reads them as opaque strings, and only this
+# module decides what "stale", "loaded" and the certificate root mean.
+def facts() -> int:
+    from base.paths import permissions_helper_app_dir
+    from services.desktop.permissions_helper import lifecycle
+    from services.desktop.permissions_helper.lifecycle import PermissionsHelperBuildError
+
+    home = permissions_helper_app_dir()
+    app = home / "MeivaPermissionsHelper.app"
+    try:
+        expected = lifecycle.source_content_hash()
+    except OSError:
+        expected = "-"
+    print(f"expected_hash={expected}")
+    record = lifecycle.installed_build_state()
+    recorded = record["source_hash"] if record is not None else "-"
+    signed_at = record["signed_at"] if record is not None else "-"
+    print(f"recorded_hash={recorded}")
+    print(f"signed_at={signed_at}")
+    if not app.exists():
+        print("helper=absent")
+        return 0
+    print("helper=present")
+    print(f"valid={'yes' if lifecycle.is_valid_app(app) else 'no'}")
+    print(f"loaded={'yes' if lifecycle.is_loaded() else 'no'}")
+    print(f"stale={'no' if record is not None and recorded == expected else 'yes'}")
+    root = "-"
+    try:
+        match = _CERT_ROOT.search(lifecycle.read_dr(app))
+    except PermissionsHelperBuildError as error:
+        print(f"facts: {error}", file=sys.stderr)
+    else:
+        root = match[1] if match is not None else "-"
+    print(f"cert_root={root}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=DESCRIPTION)
-    parser.add_argument("command", choices=("status", "provision", "import", "export", "switch"))
+    parser.add_argument(
+        "command", choices=("status", "facts", "provision", "import", "export", "switch")
+    )
     parser.add_argument("path", nargs="?", help="PKCS#12 archive for import/export")
 
     parser.add_argument(
@@ -301,6 +344,7 @@ def main(argv: list[str]) -> int:
         parser.error(f"{args.command} needs a PKCS#12 path")
     return {
         "status": status,
+        "facts": facts,
         "provision": provision,
         "switch": lambda: switch(start=args.start),
         "export": lambda: export(args.path or ""),

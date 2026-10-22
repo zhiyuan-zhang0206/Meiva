@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -61,6 +62,14 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Calla
         git(repo, "commit", "-qm", message)
     cluster = Cluster(git(repo, "rev-parse", "HEAD~1"), git(repo, "rev-parse", "HEAD"))
     monkeypatch.setattr(fleet_update, "REPO", repo)
+    # meiva:note
+    # The shipped table names real machines; a test cluster has its own aliases, so the table
+    # in this repository is written the way an operator's pull request would write it.
+    table = repo / "deploy" / "fleet" / "helper-identities.json"
+    table.parent.mkdir(parents=True, exist_ok=True)
+    table.write_text(json.dumps(dict.fromkeys(cluster.hosts, cluster.helper_cert_root)))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "baselines")
     monkeypatch.setattr(fleet_update, "ssh", cluster.ssh)
     monkeypatch.setattr(fleet_update, "time", cluster)
     monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
