@@ -36,8 +36,22 @@ Imports stay one-directional: this module raises the registry's `InvalidMetricQu
 
 from __future__ import annotations
 
+from base.api_contracts.agent_contract import HARNESS_BILLING, Harness, HarnessBilling
 from base.telemetry.loki_index_labels import EVENT_STREAM_SERVICE_NAME
 from base.telemetry.metrics.plugin_metrics_sql import InvalidMetricQuery
+
+HARNESS_ORDER: tuple[str, ...] = tuple(h.value for h in Harness)
+SUBSCRIPTION_HARNESSES: tuple[str, ...] = tuple(
+    h.value for h in Harness if HARNESS_BILLING[h] is HarnessBilling.SUBSCRIPTION
+)
+SUBSCRIPTION_HARNESS_RE = "|".join(SUBSCRIPTION_HARNESSES)
+
+
+def harness_source_filter(source_attr: str, harness: str) -> str:
+    if harness == Harness.MEIVA.value:
+        return f'{source_attr}!~"{SUBSCRIPTION_HARNESS_RE}"'
+    return f'{source_attr}="{harness}"'
+
 
 EVENT_STREAM_MATCHER = f'service_name="{EVENT_STREAM_SERVICE_NAME}"'
 """The event-stream matcher every LogQL template must select on — the OTLP

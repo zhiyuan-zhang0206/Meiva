@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_turn import (
+    format_tool_use,
     harness_turn_node,
     interrupt_engine,
     log_turn_usage,
@@ -26,7 +27,19 @@ from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
-from base.lm.harness import HarnessSetupError, HarnessTurn, HarnessTurnFaultedError, Usage
+from base.lm.harness import (
+    AssistantText,
+    BridgeEvent,
+    HarnessSetupError,
+    HarnessTurn,
+    HarnessTurnFaultedError,
+    ReasoningDelta,
+    ReasoningText,
+    TextDelta,
+    ToolResult,
+    ToolUse,
+    Usage,
+)
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.turn_identity import HostedServiceResources
@@ -44,6 +57,7 @@ class FakeEngine:
         reply: str = "the answer",
         usage: Usage | None = None,
         prelude: tuple[HarnessTurn, ...] = (),
+        events: tuple[BridgeEvent, ...] = (),
     ) -> None:
         self.harness = Harness.CLAUDE_CODE
         self.model = "claude-sonnet-5-5"
@@ -53,9 +67,19 @@ class FakeEngine:
         self._reply = reply
         self._usage = usage
         self._prelude = prelude
+        self._events = events
 
-    async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
+    async def run_turn(
+        self,
+        text: str,
+        *,
+        key: str,
+        on_event: Callable[[BridgeEvent], None] | None = None,
+    ) -> HarnessTurn:
         self.submitted.append((text, key))
+        if on_event is not None:
+            for event in self._events:
+                on_event(event)
         return HarnessTurn(
             turn_id="t1",
             text=self._reply,
@@ -80,6 +104,7 @@ def runtime(
     *,
     ops_pool: AsyncConnectionPool | None = None,
     hosted_resources: HostedTurnResources | None = None,
+    publisher: MagicMock | None = None,
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
@@ -88,7 +113,7 @@ def runtime(
             harness=Harness.CLAUDE_CODE if engine is not None else Harness.MEIVA,
             harness_bridge=engine,
             llm=MagicMock(),
-            event_publisher=MagicMock(),
+            event_publisher=publisher or MagicMock(),
             agent=AgentSlices.resolve(default_reader=defaults()),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
@@ -134,7 +159,14 @@ def test_a_shrunk_window_submits_nothing_rather_than_resending() -> None:
 
 
 def test_own_replies_are_never_pending() -> None:
-    state = AgentState(messages=[inbound("hello", 11), AIMessage(content="hi")], harness_cursor=0)
+    state = AgentState(
+        messages=[
+            inbound("hello", 11),
+            AIMessage(content="hi"),
+            ToolMessage(content="out", tool_call_id="call_1"),
+        ],
+        harness_cursor=0,
+    )
 
     assert [message.content for message in pending_messages(state)] == ["hello"]
 
@@ -254,7 +286,13 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
     loguru_records: LogRecords,
 ) -> None:
     class FaultingEngine(FakeEngine):
-        async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
+        async def run_turn(
+            self,
+            text: str,
+            *,
+            key: str,
+            on_event: Callable[[BridgeEvent], None] | None = None,
+        ) -> HarnessTurn:
             raise HarnessTurnFaultedError("cli died")
 
     state = AgentState(messages=[inbound("do it", 7)], harness_cursor=0)
@@ -273,7 +311,13 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 async def test_a_session_that_cannot_start_settles_the_turn_as_a_fatal_stream_abort() -> None:
     class UnstartableEngine(FakeEngine):
-        async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
+        async def run_turn(
+            self,
+            text: str,
+            *,
+            key: str,
+            on_event: Callable[[BridgeEvent], None] | None = None,
+        ) -> HarnessTurn:
             raise HarnessSetupError("claude_code session could not start: no sdk")
 
     state = AgentState(messages=[inbound("do it", 7)], harness_cursor=0)
@@ -387,3 +431,223 @@ async def test_the_handoff_prelude_is_not_the_last_message(
         if call.args and "last_message_text" in str(call.args[0])
     ]
     assert updates[0][1][0] == "the answer", "a prelude completes first; the reply lands last"
+
+
+async def test_intra_turn_events_project_to_live_sse_and_committed_messages() -> None:
+    import json
+
+    engine = FakeEngine(
+        reply="all done",
+        events=(
+            TextDelta(turn_id="t1", text="Checking "),
+            TextDelta(turn_id="t1", text="files..."),
+            ToolUse(
+                turn_id="t1",
+                tool_use_id="call_1",
+                name="Bash",
+                tool_input={"command": "ls -la"},
+            ),
+            ToolResult(
+                turn_id="t1",
+                tool_use_id="call_1",
+                content="README.md\n",
+                is_error=False,
+            ),
+            TextDelta(turn_id="t1", text="all done"),
+        ),
+    )
+    emitted: list[str] = []
+
+    def record_emit(raw: str) -> None:
+        emitted.append(str(json.loads(raw)["role"]))
+
+    publisher = MagicMock()
+    publisher.emit.side_effect = record_emit
+    rt = runtime(engine, publisher=publisher)
+    state = AgentState(
+        messages=[SystemMessage(content="handoff"), inbound("list files", 7)],
+        harness_cursor=0,
+    )
+
+    command = await harness_turn_node(state, rt, config())
+
+    assert command.update is not None
+    committed = command.update["messages"]
+    assert [(type(m), m.content) for m in committed] == [
+        (AIMessage, "Checking files..."),
+        (ToolMessage, "README.md\n"),
+        (AIMessage, "all done"),
+    ]
+    assert committed[0].tool_calls[0]["name"] == "Bash"
+    assert committed[0].tool_calls[0]["args"] == {"code": "ls -la"}
+    assert committed[1].additional_kwargs["sdk_calls"] == [{"method": "Bash", "count": 1}]
+    assert command.update["harness_cursor"] == 5
+
+    assert emitted == [
+        "timeline_snapshot",
+        "chat_start",
+        "chat_delta",
+        "code_start",
+        "code_delta",
+        "timeline_snapshot",
+        "exec_start",
+        "exec_output",
+        "chat_start",
+        "chat_delta",
+        "llm_done",
+    ]
+
+
+async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages() -> None:
+    import json
+
+    engine = FakeEngine(
+        reply="Second message",
+        events=(
+            TextDelta(turn_id="t1", text="First "),
+            TextDelta(turn_id="t1", text="message"),
+            AssistantText(turn_id="t1", text="First message"),
+            TextDelta(turn_id="t1", text="Second "),
+            TextDelta(turn_id="t1", text="message"),
+            AssistantText(turn_id="t1", text="Second message"),
+        ),
+    )
+    emitted: list[tuple[str, str | None]] = []
+
+    def record_emit(raw: str) -> None:
+        payload = json.loads(raw)
+        emitted.append((str(payload["role"]), payload.get("item_id")))
+
+    publisher = MagicMock()
+    publisher.emit.side_effect = record_emit
+    rt = runtime(engine, publisher=publisher)
+    state = AgentState(
+        messages=[SystemMessage(content="handoff"), inbound("two steps", 7)],
+        harness_cursor=0,
+    )
+
+    command = await harness_turn_node(state, rt, config(6985))
+
+    assert command.update is not None
+    committed = command.update["messages"]
+    assert [(type(m), m.content) for m in committed] == [
+        (AIMessage, "First message"),
+        (AIMessage, "Second message"),
+    ]
+    assert command.update["harness_cursor"] == 4
+    assert emitted == [
+        ("timeline_snapshot", None),
+        ("chat_start", "2.0"),
+        ("chat_delta", "2.0"),
+        ("chat_start", "3.0"),
+        ("chat_delta", "3.0"),
+        ("llm_done", None),
+    ]
+
+
+def test_format_tool_use_renders_patch_diffs_and_paths() -> None:
+    rendered = format_tool_use(
+        "patch",
+        {
+            "paths": ["demo.py"],
+            "changes": [
+                {
+                    "path": "demo.py",
+                    "kind": "add",
+                    "diff": "@@ -0,0 +1,2 @@\n+print('hi')\n",
+                }
+            ],
+        },
+    )
+    assert rendered == "# add: demo.py\n@@ -0,0 +1,2 @@\n+print('hi')"
+    assert format_tool_use("patch", {"paths": ["a.py", "b.py"]}) == "a.py\nb.py"
+
+
+async def test_multi_step_turn_logs_each_step_usage_and_calls(
+    loguru_records: LogRecords,
+) -> None:
+    engine = FakeEngine()
+    ctx = runtime(engine).context
+    turn = HarnessTurn(
+        turn_id="t1",
+        text="done",
+        usage=Usage(input_tokens=300, output_tokens=30),
+        cost_usd=None,
+        subtype="completed",
+        is_error=False,
+        interrupted=False,
+        num_turns=2,
+        steps=(
+            Usage(input_tokens=100, output_tokens=10),
+            Usage(input_tokens=200, output_tokens=20),
+        ),
+    )
+    log_turn_usage(ctx, 6984, "claude-fable-5-1[1m]", turn)
+    rows = loguru_records.events("llm_usage")
+    assert len(rows) == 2
+    assert [row["extra"]["in_total"] for row in rows] == [100, 200]
+    assert [row["extra"]["calls"] for row in rows] == [1, 1]
+    assert [row["extra"]["model"] for row in rows] == [
+        "claude-fable-5-1",
+        "claude-fable-5-1",
+    ]
+    assert all("unpriced" not in row["extra"] for row in rows)
+
+
+async def test_harness_turn_projects_reasoning_and_step_timing() -> None:
+    import json
+
+    engine = FakeEngine(
+        events=(
+            ReasoningDelta(turn_id="t1", text="Planning "),
+            ReasoningDelta(turn_id="t1", text="tool call"),
+            ReasoningText(turn_id="t1", text="Planning tool call"),
+            ToolUse(
+                turn_id="t1",
+                tool_use_id="call-1",
+                name="Bash",
+                tool_input={"command": "echo ok"},
+            ),
+            ToolResult(
+                turn_id="t1",
+                tool_use_id="call-1",
+                is_error=False,
+                content="ok\n",
+            ),
+            ReasoningText(turn_id="t1", text="Synthesizing reply"),
+            AssistantText(turn_id="t1", text="Final answer"),
+        ),
+    )
+    emitted: list[tuple[str, str | None]] = []
+
+    def record_emit(raw: str) -> None:
+        payload = json.loads(raw)
+        emitted.append((str(payload["role"]), payload.get("item_id")))
+
+    publisher = MagicMock()
+    publisher.emit.side_effect = record_emit
+    rt = runtime(engine, publisher=publisher)
+    state = AgentState(
+        messages=[SystemMessage(content="handoff"), inbound("run it", 9)],
+        harness_cursor=0,
+    )
+
+    command = await harness_turn_node(state, rt, config(6985))
+    assert command.update is not None
+    committed = command.update["messages"]
+    assert len(committed) == 3
+    first_ai = committed[0]
+    assert isinstance(first_ai, AIMessage)
+    assert first_ai.content == [{"type": "thinking", "thinking": "Planning tool call", "index": 0}]
+    assert "meiva_reasoning_ms_by_block" in first_ai.additional_kwargs
+    final_ai = committed[2]
+    assert isinstance(final_ai, AIMessage)
+    assert final_ai.content == [
+        {"type": "thinking", "thinking": "Synthesizing reply", "index": 0},
+        {"type": "text", "text": "Final answer", "index": 1},
+    ]
+    assert ("reasoning_start", "2.0") in emitted
+    assert ("reasoning_delta", "2.0") in emitted
+    assert ("code_start", "2.1") in emitted
+    assert ("reasoning_start", "4.0") in emitted
+    assert ("chat_start", "4.1") in emitted

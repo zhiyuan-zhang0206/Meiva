@@ -11,9 +11,11 @@ tags: []
 
 The Meiva harness system prompt carried in every native LLM call, built **once per context window** — `init_context` renders it when it lays the standing head down (an agent's first wake, and the turn after each compaction), never per turn. Constructed by `build_system_prompt()` in registration order: base guidance → SDK overview → behavior conventions → capability index.
 
-External harnesses use their own provider prompts. `init_context` does not build
-this prompt, its plugin sections, capability index or standing notes for them.
-The bridge handoff remains their identity and workspace context.
+External harnesses use their own provider CLI system prompts. `init_context` does
+not build the native `execute_code` prompt, its plugin sections, capability index
+or standing notes for them; instead, it lays down `SystemMessage(handoff.render())`
+at `messages[0]` (`harness_cursor = 0`) so the handoff document sent to the
+external harness is recorded at `0.0` in the conversation timeline.
 
 ## Core Mechanism
 

@@ -59,7 +59,7 @@ class FakeEngine:
         self.model = "claude-sonnet-5-5"
         self.submitted: list[str] = []
 
-    async def run_turn(self, text: str, *, key: str) -> HarnessTurn:
+    async def run_turn(self, text: str, *, key: str, on_event: Any = None) -> HarnessTurn:
         self.submitted.append(text)
         return HarnessTurn(
             turn_id="t1",
@@ -171,7 +171,9 @@ async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() 
 
     assert "init_context" in seen
     assert "harness_turn" in seen, "the reset resumes into the harness node"
-    assert engine.submitted == ["the compacted summary"]
+    assert len(engine.submitted) == 1
+    assert "# Role & Operating Context — Agent #6984" in engine.submitted[0]
+    assert engine.submitted[0].endswith("\n\nthe compacted summary")
     assert not NATIVE_NODES.intersection(seen), f"native turn nodes ran: {seen}"
 
 

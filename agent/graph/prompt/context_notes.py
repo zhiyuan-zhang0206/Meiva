@@ -281,3 +281,47 @@ FRAMEWORK_NOTES: tuple[ContextNote, ...] = (
     ContextNote(build=agent_id_note, on_fork=True, rank=RANK_AGENT_ID),
     ContextNote(build=preloaded_skills_note, on_fork=True, rank=RANK_PRELOADED_SKILLS),
 )
+
+HARNESS_NOTE_BUILDERS: frozenset[str] = frozenset(
+    {
+        "timezone_note",
+        "preloaded_skills_note",
+        "memory_index_note",
+        "per_agent_memory_note",
+        "inherited_memory_note",
+    }
+)
+
+
+def harness_context_notes(extensions: ExtensionRegistry, ctx: MeivaContext) -> list[str]:
+    if ctx.ops_pool is None or ctx.identity is None:
+        return []
+    entries = [
+        note
+        for note in _ordered(extensions, fork_only=False)
+        if note.build.__name__ in HARNESS_NOTE_BUILDERS
+    ]
+    rendered: list[str] = []
+    for msg in _rendered(entries, ctx):
+        text = str(msg.content).strip()
+        if not text:
+            continue
+        text = text.replace(
+            "meiva.help(meiva.skills.<path>) or meiva.files.read.",
+            "meiva.help(meiva.skills.<path>) or your native file-reading tool.",
+        )
+        rendered.append(text)
+    aid = ctx.identity.agent_id
+    if aid is not None and ctx.require_agent().read("agent", "workspace_in_system_prompt"):
+        try:
+            document = read_document(workspace_dir(aid))
+        except (OSError, ValueError) as exc:
+            rendered.append(
+                f"The shared context file could not be read: {exc}. Repair it in your workspace."
+            )
+        else:
+            if document.content:
+                rendered.append(
+                    "Current shared context displayed beside your messages:\n" + document.content
+                )
+    return rendered

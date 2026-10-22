@@ -598,7 +598,7 @@ async def test_compacted_takeover_context_restores_explanation_before_summary(
 
 
 @pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
-async def test_external_harness_establishes_no_native_prompt_or_notes(
+async def test_external_harness_cold_start_defers_head_until_first_batch(
     harness: Harness,
     aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
@@ -626,12 +626,18 @@ async def test_external_harness_establishes_no_native_prompt_or_notes(
         _config(42),
     )
 
-    assert command.update == {"messages": [], "harness_cursor": 0, "context_reset": ContextReset()}
+    assert command.update is not None
+    msgs = cast(list[AnyMessage], command.update["messages"])
+    assert len(msgs) == 1
+    assert isinstance(msgs[0], SystemMessage)
+    assert "# Role & Operating Context — Agent #42" in str(msgs[0].content)
+    assert command.update["harness_cursor"] == 0
+    assert command.update["context_reset"] == ContextReset()
     assert command.goto == "claim"
 
 
 @pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
-async def test_external_context_reset_preserves_the_tail_for_submission(
+async def test_external_context_reset_preserves_the_tail_behind_handoff(
     harness: Harness,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -644,11 +650,14 @@ async def test_external_context_reset_preserves_the_tail_for_submission(
         _config(42),
     )
 
-    assert command.update == {
-        "messages": tail,
-        "harness_cursor": 0,
-        "context_reset": ContextReset(),
-    }
+    assert command.update is not None
+    msgs = cast(list[AnyMessage], command.update["messages"])
+    assert len(msgs) == 2
+    assert isinstance(msgs[0], SystemMessage)
+    assert "# Role & Operating Context — Agent #42" in str(msgs[0].content)
+    assert msgs[1:] == tail
+    assert command.update["harness_cursor"] == 0
+    assert command.update["context_reset"] == ContextReset()
     assert command.goto == "harness_turn"
 
 

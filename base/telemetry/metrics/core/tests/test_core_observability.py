@@ -12,7 +12,7 @@ from base.telemetry.metrics.plugin_metrics import (
 )
 
 EXPECTED = {
-    "meiva_obs_llm_cost_usd": ("timeseries", ["grafana"], "llm_usage", "telemetry", 1),
+    "meiva_obs_llm_cost_usd": ("timeseries", ["grafana"], "llm_usage", "telemetry", 4),
     "meiva_obs_agent_llm_cost_usd": ("timeseries", ["inspector"], "llm_usage", "telemetry", 1),
     "meiva_obs_llm_error_rate": (
         "timeseries",

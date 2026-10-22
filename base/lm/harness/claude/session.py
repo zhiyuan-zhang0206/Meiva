@@ -22,6 +22,7 @@ from base.lm.harness.events import (
     SessionClosed,
     SessionFaulted,
     SessionStarted,
+    ToolUse,
     TurnCompleted,
     Usage,
     is_droppable,
@@ -209,6 +210,7 @@ class ClaudeSession:
         self._tasks_entered = False
         self._totals = SessionTotals()
         self._session_id: str | None = None
+        self._model: str | None = None
         self._cli_pid: int | None = None
         self._baseline: dict[int, str] = {}
         self._closed = False
@@ -216,6 +218,7 @@ class ClaudeSession:
         self._resumed_existing = False
         self._record: SessionRecord | None = None
         self._handoff_ticket: TurnTicket | None = None
+        self._turn_steps_count = 0
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         if self._client is not None:
@@ -389,15 +392,19 @@ class ClaudeSession:
 
     def _build_options(self, resume: str | None) -> Any:
         # meiva:note
-        # `cli_path` rides only when we resolved one: Python's own Claude Code SDK takes
-        # it, while a test double that models the older option set would reject it.
+        # `cli_path` and `thinking` ride only when resolved/supported: Python's own
+        # Claude Code SDK takes them, while a test double that models the older
+        # option set would reject them.
         # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-        resolved = {} if self._cli_path is None else {"cli_path": self._cli_path}
+        resolved: dict[str, Any] = {} if self._cli_path is None else {"cli_path": self._cli_path}
+        opt_fields = getattr(self._sdk.ClaudeAgentOptions, "__dataclass_fields__", {})
+        if "thinking" in opt_fields:
+            resolved["thinking"] = {"type": "adaptive", "display": "summarized"}
         return self._sdk.ClaudeAgentOptions(
             **resolved,
             model=self.config.model,
             cwd=str(self.config.cwd),
-            tools=list(self.config.tools),
+            tools=None if self.config.tools is None else list(self.config.tools),
             permission_mode=self.config.permission_mode,
             max_turns=self.config.max_turns,
             setting_sources=[],
@@ -440,7 +447,7 @@ class ClaudeSession:
             agent_id=self.agent_id,
             session_id=self._session_id,
             cwd=str(self.config.cwd),
-            model=self.config.model,
+            model=self._model or self.config.model,
             created_at=previous.created_at if previous is not None else now,
             updated_at=now,
             resumes=(previous.resumes if previous is not None else 0)
@@ -470,6 +477,7 @@ class ClaudeSession:
     async def _begin(self, ticket: TurnTicket) -> None:
         client = self._require_client()
         ticket.started_at = time.monotonic()
+        self._turn_steps_count = 0
         self._baseline = snapshot(self._probe, self._cli_pid)
         self._start_deadline(ticket)
         try:
@@ -515,6 +523,7 @@ class ClaudeSession:
             for event in map_message(message, turn_id=None):
                 if isinstance(event, SessionStarted):
                     self._session_id = event.session_id or self._session_id
+                    self._model = event.model or self._model
                     self._emit(event)
                     self._bind()
                     continue
@@ -523,7 +532,12 @@ class ClaudeSession:
         ticket = self._active
         if ticket is None:
             return
-        for event in map_message(message, turn_id=ticket.turn_id):
+        mapped = map_message(message, turn_id=ticket.turn_id)
+        if name == "AssistantMessage" and any(
+            isinstance(event, (AssistantText, ToolUse)) for event in mapped
+        ):
+            self._turn_steps_count += 1
+        for event in mapped:
             if isinstance(event, AssistantText):
                 ticket.parts.append(event.text)
             self._emit(event)
@@ -554,6 +568,7 @@ class ClaudeSession:
         self._totals = self._totals.with_turn(fields.usage, fields.cost_usd)
         if fields.session_id:
             self._session_id = fields.session_id
+        num_turns = max(fields.num_turns, self._turn_steps_count, 1)
         self._emit(
             TurnCompleted(
                 turn_id=ticket.turn_id,
@@ -563,7 +578,7 @@ class ClaudeSession:
                 is_error=fields.is_error,
                 interrupted=ticket.interrupt_requested,
                 stop_reason=fields.stop_reason,
-                num_turns=fields.num_turns,
+                num_turns=num_turns,
                 duration_ms=fields.duration_ms,
                 usage=fields.usage,
                 cost_usd=fields.cost_usd,

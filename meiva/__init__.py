@@ -253,8 +253,10 @@ def __getattr__(name: str) -> Any:
         ensure_identity()
         from .boot import maybe_load_plugins_for_missing
 
-        if maybe_load_plugins_for_missing(name):
-            return getattr(_sys.modules[__name__], name)
+        maybe_load_plugins_for_missing(name)
+        mod = _sys.modules[__name__]
+        if name in mod.__dict__:
+            return mod.__dict__[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

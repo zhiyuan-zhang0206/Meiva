@@ -42,6 +42,8 @@
   "metricMachine": "机器",
   "metricHarness": "Harness",
   "metricModel": "模型",
+  "billingApi": "API",
+  "billingSubscription": "订阅",
   "metricStatus": "状态",
   "neverPaused": "从未暂停",
   "pending": "待定",

@@ -261,17 +261,22 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   // keeps the same clock as the expanded individual block would.
   let lastLiveKind: "reasoning" | "code" | "output" | null = null;
   let lastLiveStartedAt = 0;
-  if (items.length > 0) {
-    const last = items[items.length - 1];
-    if (isLiveReasoning(last)) {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (isLiveReasoning(it)) {
       lastLiveKind = "reasoning";
-      lastLiveStartedAt = last.reasoningStartedAt ?? 0;
-    } else if (isLiveCode(last)) {
+      lastLiveStartedAt = it.reasoningStartedAt ?? 0;
+      break;
+    }
+    if (isLiveCode(it)) {
       lastLiveKind = "code";
-      lastLiveStartedAt = last.codeStartedAt ?? 0;
-    } else if (isLiveExecution(last)) {
+      lastLiveStartedAt = it.codeStartedAt ?? 0;
+      break;
+    }
+    if (isLiveExecution(it)) {
       lastLiveKind = "output";
-      lastLiveStartedAt = last.execStartedAt ?? 0;
+      lastLiveStartedAt = it.execStartedAt ?? 0;
+      break;
     }
   }
   return { total: items.length, thinking, code, output, turns: Math.max(thinking, code, output), systemPrompts, compactSummaries, memories, agentMessages, systemNotes, thinkingMs, codeMs, execMs, sdkCalls, workedMs, lastLiveKind, lastLiveStartedAt };

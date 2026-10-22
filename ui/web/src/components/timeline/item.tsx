@@ -415,7 +415,13 @@ export const ItemView = memo(function ItemView({
               item.interrupted && "border-b border-dashed border-amber-500/60 pb-1",
             )}
           >
-            <PythonCode code={streamingPayload} streaming={streaming} />
+            {item.source && item.source !== "execute_code" ? (
+              <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0 text-foreground/90">
+                {streamingPayload}
+              </pre>
+            ) : (
+              <PythonCode code={streamingPayload} streaming={streaming} />
+            )}
           </div>
           {item.interrupted ? <InterruptedNotice /> : null}
         </>

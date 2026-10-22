@@ -30,8 +30,10 @@ from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message, tail_has_recallable_inbound
 from agent.state import AgentState, MemoryState, PluginStateHandle
 from base.agents.context import MeivaContext
+from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.lm.harness.handoff import EntryPoint, HarnessContribution
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, PluginContributions
 from base.paths import memory_dir, workspace_dir
@@ -351,6 +353,17 @@ class _MemoryWriteCheckHook(Hook):
 memory_write_check_after_exec = _MemoryWriteCheckHook()
 
 
+_MEMORY_HARNESS_CONTRIBUTION = HarnessContribution(
+    harnesses=frozenset({Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY}),
+    entries=(
+        EntryPoint(
+            "meiva.memory",
+            "read and update shared cluster (`meiva.memory.PATH`) and personal memory",
+        ),
+    ),
+)
+
+
 def contribute() -> PluginContributions:
     """What this plugin declares for the agent runtime."""
     return PluginContributions(
@@ -363,4 +376,5 @@ def contribute() -> PluginContributions:
             ContextNote(per_agent_memory_note, on_fork=True, rank=RANK_PER_AGENT_MEMORY),
             ContextNote(inherited_memory_note, on_fork=True, rank=RANK_INHERITED_MEMORY),
         ),
+        harness_contributions=(_MEMORY_HARNESS_CONTRIBUTION,),
     )

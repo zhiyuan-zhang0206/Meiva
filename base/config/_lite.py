@@ -669,6 +669,8 @@ class ConfigBoot:
         exactly the fault it exists to repair (#3621 / 405 ruling). A caller that
         needs the eager chain regardless, such as the test session, calls
         `ensure_eager()` instead of relying on the flag."""
+        for key in [k for k, v in os.environ.items() if k.startswith("MEIVA_") and v == ""]:
+            os.environ.pop(key, None)
         mode = os.environ.get(BOOT_MODE_ENV)
         if mode is not None and mode != BOOT_MODE_EAGER:
             raise ValueError(

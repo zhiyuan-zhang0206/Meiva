@@ -5,6 +5,7 @@ from pathlib import Path
 
 from base.lm.harness.handoff import (
     DEFAULT_DISCIPLINE,
+    DEFAULT_ENTRIES,
     DEFAULT_OVERLAPS,
     ClusterFact,
     EntryPoint,
@@ -38,7 +39,7 @@ def build_handoff(
     workspace: Path,
     label: str | None = None,
     cluster: Iterable[ClusterFact] = (),
-    entries: Iterable[EntryPoint] = (),
+    entries: Iterable[EntryPoint] = DEFAULT_ENTRIES,
     overlaps: Sequence[str] = DEFAULT_OVERLAPS,
     discipline: Sequence[str] = DEFAULT_DISCIPLINE,
 ) -> Handoff:

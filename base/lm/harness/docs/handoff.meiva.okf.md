@@ -18,14 +18,15 @@ The handoff is a wire format, not an internal dataclass: the waking agent reads
 it as the first message of a fresh session, and its rendered size is a per-wake
 cost the host reports (`Handoff.size_bytes()`, and a `HandoffInjected` event).
 
-Section order is fixed — identity, cluster, entry points, do not use, reporting,
-task — because an agent that skims it still meets the task last. `HANDOFF_VERSION`
-is part of the document (`- handoff version: 1` in section 1) so a provider that
-caches or replays a handoff can tell which field set it holds.
+Section order is fixed — identity, cluster, entry points, boundaries, reporting,
+instructions — because an agent that skims it still meets the instructions last.
+`HANDOFF_VERSION` pins the dataclass field set across adapters.
 
 Section 3 names where to start, not an inventory: `DEFAULT_ENTRIES` holds the
 `meiva` entry — which attaches this session's identity on first use — plus the
-three namespaces a turn reaches for first (files, tasks, agents). Listing every
+cluster namespaces a turn reaches for first (tasks, agents, memory). External
+harnesses use their own native file, shell, search, and in-turn background tools,
+so `meiva.files` is not exposed in `DEFAULT_ENTRIES`. Listing every
 namespace there would become a second copy of `meiva.help()` that drifts from the
 SDK; the entry point and its pointer are enough to start.
 

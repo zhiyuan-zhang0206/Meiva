@@ -1,10 +1,28 @@
 from __future__ import annotations
 
+from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.lm.harness.handoff import EntryPoint, HarnessContribution
 from base.packages.plugins.config_registration import get_plugin_config
 from base.packages.plugins.extensions import PluginContributions
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
+
+_FLEET_HARNESS_CONTRIBUTION = HarnessContribution(
+    harnesses=frozenset({Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY}),
+    entries=(
+        EntryPoint("meiva.tasks", "the task you were given, and its siblings"),
+        EntryPoint(
+            "meiva.ui",
+            "queue user notices (`meiva.ui.notify`) when not in an active dialog",
+        ),
+    ),
+    discipline=(
+        "When coordinating Fleet work, record status in `meiva.tasks` and deliver progress to "
+        "your agreed delegator (`meiva.agents.send_message`) or queue user notices via "
+        "`meiva.ui.notify`.",
+    ),
+)
 
 
 def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
@@ -67,4 +85,5 @@ def contribute() -> PluginContributions:
     return PluginContributions(
         system_prompt_sections=(fleet_self_section, reduce_context_switch_section),
         compact_reminder_sections=(fleet_compact_reminder,),
+        harness_contributions=(_FLEET_HARNESS_CONTRIBUTION,),
     )

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+import os
+import sys
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
@@ -11,22 +13,21 @@ from base.lm.harness.antigravity import build_handoff as antigravity_handoff
 from base.lm.harness.bridge import HarnessBridge, HarnessSession, ScopedSessionRegistry
 from base.lm.harness.claude import BridgeConfig, ClaudeSession
 from base.lm.harness.codex import CodexConfig, CodexSession
-from base.lm.harness.handoff import Handoff
+from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution
 from base.lm.harness.registration import HANDLE_ENV, RegistrationStore
 from base.lm.harness.registry import SessionRegistry
 
 # meiva:note
 # The document a fresh session wakes on. It states who the agent is and where it
-# works, and asks for one short acknowledgement: the agent's actual work arrives as
-# the session's later messages, so the handoff turn must not start any. Section 3
-# lists what every attached process may reach, led by `meiva.attach()`, which
-# `import meiva` has already done here; what a particular role may reach is the
-# role's business, not the wake's.
+# works, and sits at `state.messages[0]` so the first inbound turn co-delivers the
+# handoff and the user's messages in one submission without overriding the CLI's
+# native system prompt. Section 3 lists what every attached process may reach, led
+# by `meiva.attach()`, which `import meiva` has already done here; what a particular
+# role may reach is the role's business, not the wake's.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 HANDOFF_INSTRUCTION = (
-    "You are the agent described above. Read this document once and reply with one short "
-    "acknowledgement. Your work arrives as the messages that follow this document; do not "
-    "start any on your own."
+    "You are the agent described above. Follow the rules in this document for every turn, "
+    "and act on the messages that follow it."
 )
 
 
@@ -41,7 +42,11 @@ HANDOFF_INSTRUCTION = (
 # it is rebuilt — the CLI and everything it runs resolve through this (#5491).
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 def session_environ(environ: Mapping[str, str] | None) -> dict[str, str]:
-    return with_harness_path(child_env("runner") if environ is None else environ)
+    base = dict(child_env("runner") if environ is None else environ)
+    venv_bin = str(Path(sys.executable).parent)
+    existing = base.get("PATH")
+    base["PATH"] = f"{venv_bin}{os.pathsep}{existing}" if existing else venv_bin
+    return with_harness_path(base)
 
 
 def open_session(
@@ -83,20 +88,39 @@ def open_session(
 # a harness agent that does not know that writes commands that look right and do not
 # survive. Every other adapter takes the shared document unchanged.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-def _handoff_for(harness: Harness, *, agent_id: int, machine: str, workspace: Path) -> Handoff:
+def handoff_for(
+    harness: Harness,
+    *,
+    agent_id: int,
+    machine: str,
+    workspace: Path,
+    instruction: str = HANDOFF_INSTRUCTION,
+    label: str | None = None,
+    cluster: Iterable[ClusterFact] = (),
+    contributions: Iterable[HarnessContribution] = (),
+) -> Handoff:
     if harness is Harness.ANTIGRAVITY:
-        return antigravity_handoff(
+        base = antigravity_handoff(
             agent_id=agent_id,
-            instruction=HANDOFF_INSTRUCTION,
+            instruction=instruction,
             machine=machine,
             workspace=workspace,
+            label=label,
+            cluster=cluster,
         )
-    return Handoff(
-        agent_id=agent_id,
-        instruction=HANDOFF_INSTRUCTION,
-        machine=machine,
-        workspace=workspace,
-    )
+    else:
+        base = Handoff(
+            agent_id=agent_id,
+            instruction=instruction,
+            machine=machine,
+            workspace=workspace,
+            label=label,
+            cluster=tuple(cluster),
+        )
+    return base.with_contributions(contributions, harness=harness)
+
+
+_handoff_for = handoff_for
 
 
 # meiva:note
@@ -116,11 +140,18 @@ def bridge_for(
     registration_ttl_seconds: float,
     environ: Mapping[str, str] | None = None,
     skip_permissions: bool = True,
+    contributions: Iterable[HarnessContribution] = (),
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
     scoped = ScopedSessionRegistry(inner=registry, harness=harness)
-    handoff = _handoff_for(harness, agent_id=agent_id, machine=machine, workspace=workspace)
+    handoff = _handoff_for(
+        harness,
+        agent_id=agent_id,
+        machine=machine,
+        workspace=workspace,
+        contributions=contributions,
+    )
 
     def factory(handle: str) -> HarnessSession:
         return open_session(

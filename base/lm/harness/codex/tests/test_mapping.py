@@ -85,6 +85,39 @@ def test_file_change_maps_to_a_patch_tool() -> None:
     assert events[0].tool_input == {"paths": ["a.py", "b.py"]}
 
 
+def test_file_change_preserves_kind_and_diff_when_present() -> None:
+    events = item_event(
+        {
+            "item": {
+                "type": "fileChange",
+                "id": "change-2",
+                "status": "inProgress",
+                "changes": [
+                    {
+                        "path": "demo.py",
+                        "kind": {"type": "add"},
+                        "diff": "@@ -0,0 +1,2 @@\n+print('hi')\n",
+                    }
+                ],
+            }
+        },
+        phase="started",
+        turn_id="turn-1",
+    )
+    assert isinstance(events[0], ToolUse)
+    assert events[0].name == "patch"
+    assert events[0].tool_input == {
+        "paths": ["demo.py"],
+        "changes": [
+            {
+                "path": "demo.py",
+                "kind": "add",
+                "diff": "@@ -0,0 +1,2 @@\n+print('hi')\n",
+            }
+        ],
+    }
+
+
 def test_unknown_item_maps_to_nothing() -> None:
     assert (
         item_event({"item": {"type": "reasoning", "id": "r-1"}}, phase="completed", turn_id="t")

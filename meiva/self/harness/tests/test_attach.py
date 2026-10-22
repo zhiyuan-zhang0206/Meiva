@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from meiva.self.harness.attachment import (
+    PROCESS_PROBE,
     ProcessProbe,
     refuse_unless_attachable,
     require_live_registration,
@@ -170,3 +171,7 @@ def test_a_handle_alone_resolves_without_naming_the_agent(tmp_path: Any) -> None
     saved = row(handle_sha256=handle_digest("hx_mine"))
     store.save(saved)
     assert resolve_registration("hx_mine", store=store) == saved
+
+
+def test_default_process_probe_ambient_does_not_recurse_when_unbound() -> None:
+    assert PROCESS_PROBE.ambient() is None
