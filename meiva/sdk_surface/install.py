@@ -43,7 +43,6 @@ import atexit
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -226,11 +225,11 @@ def _apply(
 class _Build:
     """The mutable ledger `install` fills while it applies plugins; frozen into the Installation."""
 
-    namespaces: dict[str, str] = field(default_factory=dict)
-    layers: dict[str, list[WrapLayer]] = field(default_factory=dict)
-    providers: list[SkillProvider] = field(default_factory=list)
-    expansions: list[str] = field(default_factory=list)
-    undo: list[Callable[[], None]] = field(default_factory=list)
+    namespaces: dict[str, str] = field(default_factory=dict[str, str])
+    layers: dict[str, list[WrapLayer]] = field(default_factory=dict[str, list[WrapLayer]])
+    providers: list[SkillProvider] = field(default_factory=list[SkillProvider])
+    expansions: list[str] = field(default_factory=list[str])
+    undo: list[Callable[[], None]] = field(default_factory=list[Callable[[], None]])
     configs: dict[str, BaseModel] = field(default_factory=dict[str, BaseModel])
 
 
@@ -258,7 +257,7 @@ def install(
     authority: ConfigAuthority | None = None,
     sampling: SamplingPolicyOwner | None = None,
     clock_factory: Callable[[], Clock] | None = None,
-    producer: Callable[[], Any] | None = None,
+    producer: Callable[[], object] | None = None,
 ) -> ExtensionRegistry:
     """Install `registry`'s SDK surface into `meiva`; return the registry of the plugins admitted.
 

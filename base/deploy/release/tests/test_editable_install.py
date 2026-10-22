@@ -320,20 +320,15 @@ def test_uv_native_editable_records_are_legal_and_exec_guard_accepts_them(tmp_pa
     assert child.returncode == 0, child.stderr
 
 
-def test_current_interpreter_source_root_reads_a_posix_venv_layout(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_current_interpreter_source_root_reads_a_posix_venv_layout(tmp_path: Path) -> None:
     """The exec guard anchors itself to the interpreter's checkout, not cwd."""
     source_root = tmp_path / "checkout"
     interpreter = source_root / ".venv" / "bin" / "python"
-    monkeypatch.setattr(editable_install.sys, "executable", str(interpreter))
 
-    assert editable_install.current_interpreter_source_root() == source_root
+    assert editable_install.current_interpreter_source_root(interpreter) == source_root
 
 
-def test_current_interpreter_source_root_keeps_symlinked_venv_identity(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_current_interpreter_source_root_keeps_symlinked_venv_identity(tmp_path: Path) -> None:
     """Resolving the base interpreter must not discard its enclosing virtualenv."""
     source_root = tmp_path / "checkout"
     base_python = tmp_path / "base" / "python"
@@ -342,6 +337,5 @@ def test_current_interpreter_source_root_keeps_symlinked_venv_identity(
     interpreter = source_root / ".venv" / "bin" / "python"
     interpreter.parent.mkdir(parents=True)
     interpreter.symlink_to(base_python)
-    monkeypatch.setattr(editable_install.sys, "executable", str(interpreter))
 
-    assert editable_install.current_interpreter_source_root() == source_root
+    assert editable_install.current_interpreter_source_root(interpreter) == source_root

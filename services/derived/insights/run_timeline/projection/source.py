@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from psycopg import Connection
 from psycopg.rows import dict_row
@@ -24,7 +23,7 @@ class Source:
         return self.previous is not None and self.previous.session + 1 == self.boundaries
 
 
-def capture_source(conn: Connection[Any], agent_id: int) -> Source:
+def capture_source(conn: Connection, agent_id: int) -> Source:
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute(
             """
@@ -49,7 +48,7 @@ def capture_source(conn: Connection[Any], agent_id: int) -> Source:
     return Source(row["head"], row["boundary"], row["count"], previous)
 
 
-def next_boundary(conn: Connection[Any], agent_id: int, previous: Segment | None) -> str | None:
+def next_boundary(conn: Connection, agent_id: int, previous: Segment | None) -> str | None:
     through = previous.checkpoint_id if previous else ""
     if previous is not None:
         row = conn.execute(

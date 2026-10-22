@@ -113,7 +113,14 @@ def _notices(
     ]
 
 
-def read(db: Database, agents: list[int], start: datetime, end: datetime) -> list[RunTimelineLink]:
+def read(
+    db: Database,
+    agents: list[int],
+    start: datetime,
+    end: datetime,
+    *,
+    page_size: int = PAGE_SIZE,
+) -> list[RunTimelineLink]:
     """The window's events between agents, with the user, with an end in `agents`, oldest first."""
     links: list[RunTimelineLink] = []
     offset = 0
@@ -125,7 +132,7 @@ def read(db: Database, agents: list[int], start: datetime, end: datetime) -> lis
                 event_names=_AUDIT_KINDS,
                 from_=start,
                 to=end,
-                limit=PAGE_SIZE,
+                limit=page_size,
                 offset=offset,
                 direction="forward",
             )
@@ -139,7 +146,7 @@ def read(db: Database, agents: list[int], start: datetime, end: datetime) -> lis
             if not has_more:
                 links.extend(_notices(conn, agents, start, end))
                 return sorted(links, key=lambda link: link.ts)
-            offset += PAGE_SIZE
+            offset += page_size
 
 
 @router.get("/api/insights/run-timeline/links")

@@ -100,7 +100,7 @@ def _materialize_namespace(name: str, ns: SimpleNamespace) -> ModuleType:
 
 
 def install_namespace(
-    plugin: str, name: str, module: Any, taken: Mapping[str, str]
+    plugin: str, name: str, module: object, taken: Mapping[str, str]
 ) -> Callable[[], None]:
     """Add `meiva.<name>` for the agent to call (`meiva.<name>.foo()`); returns the undo.
 
@@ -205,7 +205,7 @@ def check_expansion(path: str) -> None:
         )
 
 
-def install_member(plugin: str, namespace: str, name: str, fn: Any) -> Callable[[], None]:
+def install_member(plugin: str, namespace: str, name: str, fn: object) -> Callable[[], None]:
     """Attach a callable as a member of an existing meiva namespace; the agent invokes it via
     `meiva.{namespace}.{name}(...)`. Returns the undo.
 

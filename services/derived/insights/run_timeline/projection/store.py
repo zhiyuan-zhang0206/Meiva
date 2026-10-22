@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from psycopg import Connection, sql
 from psycopg.rows import dict_row
@@ -15,7 +14,7 @@ _SEGMENT_COLUMNS = """session, checkpoint_id, message_start, message_end, local_
     read_before, read_after, start_ts, end_ts, totals"""
 
 
-def last_segment(conn: Connection[Any], agent_id: int) -> Segment | None:
+def last_segment(conn: Connection, agent_id: int) -> Segment | None:
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute(
             sql.SQL(
@@ -26,7 +25,7 @@ def last_segment(conn: Connection[Any], agent_id: int) -> Segment | None:
     return Segment.model_validate(row) if row else None
 
 
-def publish(conn: Connection[Any], agent_id: int, projection: Projection) -> None:
+def publish(conn: Connection, agent_id: int, projection: Projection) -> None:
     segment = projection.segment
     data = segment.model_dump()
     data["totals"] = Jsonb(data["totals"])
@@ -76,7 +75,7 @@ def publish(conn: Connection[Any], agent_id: int, projection: Projection) -> Non
 
 
 def window_blocks(
-    conn: Connection[Any],
+    conn: Connection,
     agent_id: int,
     sessions: int,
     start: datetime,
@@ -104,7 +103,7 @@ def window_blocks(
 
 
 def segments_for_span(
-    conn: Connection[Any],
+    conn: Connection,
     agent_id: int,
     sessions: int,
     start: int,

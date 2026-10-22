@@ -45,8 +45,9 @@ class _Loop:
 
 
 class _Process:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_memory: bool = False) -> None:
         self.cpu_calls = 0
+        self.fail_memory = fail_memory
 
     def cpu_percent(self, interval: float | None = None) -> float:
         assert interval is None
@@ -54,6 +55,8 @@ class _Process:
         return 0.0 if self.cpu_calls == 1 else 37.5
 
     def memory_info(self) -> SimpleNamespace:
+        if self.fail_memory:
+            raise OSError("gone")
         return SimpleNamespace(rss=268_435_456)
 
     def num_fds(self) -> int:
@@ -101,11 +104,10 @@ def test_runtime_monitor_callback_emits_process_and_loop_metrics(
 
 
 def test_runtime_monitor_reschedules_after_sampling_failure(
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     loop = _Loop()
-    process = _Process()
+    process = _Process(fail_memory=True)
     monitor = runtime_metrics.GatewayRuntimeMonitor(
         loop=loop,  # type: ignore[arg-type]
         process=cast(psutil.Process, process),
@@ -113,7 +115,6 @@ def test_runtime_monitor_reschedules_after_sampling_failure(
         emit_interval_s=1.0,
         slow_tick_threshold_ms=100.0,
     )
-    monkeypatch.setattr(process, "memory_info", lambda: (_ for _ in ()).throw(OSError("gone")))
 
     monitor.start()
     _scheduled_at, callback, args, _handle = loop.scheduled.pop()
@@ -126,9 +127,10 @@ def test_runtime_monitor_reschedules_after_sampling_failure(
 
 
 def test_sse_metrics_initialize_idle_modes_at_zero(
-    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
+    emitted_events: EmittedEvents,
 ) -> None:
-    monkeypatch.setattr(runtime_metrics, "sse_active_connections", {"filtered": 9})
+    runtime_metrics.sse_opened("filtered")
+    emitted_events.clear()
 
     runtime_metrics.initialize_sse_metrics()
 
@@ -137,3 +139,8 @@ def test_sse_metrics_initialize_idle_modes_at_zero(
         {"mode": "throttled", "active_connections": 0},
         {"mode": "merged", "active_connections": 0},
     ]
+    assert runtime_metrics.sse_active_connections == {
+        "filtered": 0,
+        "throttled": 0,
+        "merged": 0,
+    }

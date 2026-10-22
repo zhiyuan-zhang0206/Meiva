@@ -1,4 +1,4 @@
-exports = ["history.py", "projection", "router.py", "schemas.py", "tests"]
+exports = ["projection", "router.py", "schemas.py", "tests"]
 
 [uses]
 "context.py" = ["history.py", "projection", "schemas.py"]
@@ -10,4 +10,33 @@ exports = ["history.py", "projection", "router.py", "schemas.py", "tests"]
 "tokens.py" = ["history.py", "schemas.py"]
 
 [purity]
+"." = "strict-to-be"
 "__init__.py" = "strict"
+
+[debt.deep-attr-chain]
+"messages.py#request.app.state.config.run_timeline_message_text_max" = 1
+
+[debt.impure-call]
+"context.py#import fastapi" = 1
+"links.py#import fastapi" = 1
+"links.py#import psycopg" = 1
+"messages.py#import fastapi" = 1
+"router.py#datetime.now" = 1
+"router.py#import fastapi" = 1
+
+[debt.impure-edge]
+"context.py#base/agents/history/context_breakdown.py" = 1
+"context.py#base/agents/history/context_response.py" = 1
+"history.py#base/agents/history/checkpoint.py" = 1
+"history.py#base/agents/history/hierarchy/units.py" = 1
+"history.py#base/agents/history/message_tokens.py" = 1
+"links.py#base/db/__init__.py" = 1
+"links.py#base/events/reads/audit_rows.py" = 2
+"messages.py#base/agents/history/timeline.py" = 1
+"schemas.py#base/agents/history/context_response.py" = 1
+"tokens.py#base/agents/history/hierarchy/units.py" = 1
+"tokens.py#base/agents/history/message_tokens.py" = 1
+
+[debt.wide-params]
+"messages.py#def get_run_timeline_messages" = 1
+"router.py#def get_run_timeline" = 1

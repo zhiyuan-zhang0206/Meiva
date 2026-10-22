@@ -96,11 +96,18 @@ def receiver(
 
 
 def read(
-    *agents: int, kinds: tuple[str, ...] | None = None, database_gate: ProcessDbGate
+    *agents: int,
+    kinds: tuple[str, ...] | None = None,
+    database_gate: ProcessDbGate,
+    page_size: int = links.PAGE_SIZE,
 ) -> list[links.RunTimelineLink]:
     now = datetime.now(UTC)
     found = links.read(
-        Database.from_settings(gate=database_gate), list(agents), now - timedelta(hours=48), now
+        Database.from_settings(gate=database_gate),
+        list(agents),
+        now - timedelta(hours=48),
+        now,
+        page_size=page_size,
     )
     return [link for link in found if kinds is None or link.kind in kinds]
 
@@ -224,15 +231,15 @@ def test_an_unknown_source_prefix_fails_instead_of_being_skipped(
 def test_a_window_longer_than_a_page_is_read_completely(
     redis_url: str,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     receiver: int,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(links, "PAGE_SIZE", 2)
     for hours in (5, 4, 3, 2, 1):
         message(db_conn, receiver=receiver, sender=405, hours_ago=hours)
-    assert len(read(receiver, kinds=("send_message",), database_gate=database_gate)) == 5
+    assert (
+        len(read(receiver, kinds=("send_message",), database_gate=database_gate, page_size=2)) == 5
+    )
 
 
 def _content(*, database_gate: ProcessDbGate, **params: int):

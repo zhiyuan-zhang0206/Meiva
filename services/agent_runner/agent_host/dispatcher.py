@@ -155,10 +155,12 @@ class TurnScheduler:
         *,
         activity_clock: Callable[[int], Awaitable[datetime | None]] | None = None,
         config_fingerprint: Callable[[int], str | None] | None = None,
+        cancel_unwind_timeout_s: float = CANCEL_UNWIND_TIMEOUT_S,
     ) -> None:
         self._run_turn = run_turn
         self._activity_clock = activity_clock
         self._config_fingerprint = config_fingerprint
+        self._cancel_unwind_timeout_s = cancel_unwind_timeout_s
         self._tasks: dict[int, asyncio.Task[None]] = {}
         self._errors: list[BaseException] = []
         self._reaped_successors: dict[int, asyncio.Task[None]] = {}
@@ -347,7 +349,7 @@ class TurnScheduler:
         lets the host report it and keep shutting down.
         """
         started = time.monotonic()
-        _, pending = await asyncio.wait(tasks.values(), timeout=CANCEL_UNWIND_TIMEOUT_S)
+        _, pending = await asyncio.wait(tasks.values(), timeout=self._cancel_unwind_timeout_s)
         # Retrieving the outcome of the tasks that DID finish keeps asyncio from
         # logging "exception was never retrieved" for a turn that raised on its
         # way out — noise that would sit next to the real report below.

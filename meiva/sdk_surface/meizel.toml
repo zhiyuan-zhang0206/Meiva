@@ -20,7 +20,9 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py
 
 [purity]
 "." = "strict-to-be"
+"__init__.py" = "strict"
 "const.py" = "strict"
+"validation.py" = "strict"
 
 [debt.impure-call]
 "attachment_transport.py#Path.is_file" = 1
@@ -78,34 +80,12 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py
 "install.py#class _Build" = 1
 
 [debt.untyped-export]
-"__init__.py#def meiva_module" = 1
-"extensions.py#def load_extensions" = 1
-"help.py#def doc_variants" = 1
-"help.py#def format_documented_const_stub" = 1
-"help.py#def format_signature" = 1
-"help.py#def help" = 1
-"help.py#def is_meiva_target" = 1
-"help.py#def render" = 1
-"install.py#def install" = 1
-"installation.py#def slot" = 1
-"metering.py#def install" = 2
-"metering.py#def instrument_targets" = 1
-"metering.py#def make_mcp_recorder" = 3
-"metering.py#def make_recorder" = 3
-"metering.py#def uninstall" = 1
-"plugins.py#def install_member" = 1
-"plugins.py#def install_namespace" = 1
 "process_context.py#def get_state" = 1
 "process_context.py#def get_state_update" = 1
 "process_context.py#def set_state" = 1
 "process_context.py#def set_state_update" = 1
 "settings.py#def agent_setting" = 1
 "settings.py#def attached_agent_view" = 1
-"validation.py#def coerce_str" = 1
-"validation.py#def coerce_typed" = 1
-"wraps.py#def apply_wrap" = 1
-"wraps.py#def stack" = 1
-"wraps.py#def wrappers" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1

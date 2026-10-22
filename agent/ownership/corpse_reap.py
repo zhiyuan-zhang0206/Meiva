@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import NamedTuple
 
 from psycopg_pool import AsyncConnectionPool
@@ -44,6 +45,7 @@ async def reap_crash_corpses(
     machine: str,
     *,
     bus: EventBus,
+    publish_updated: Callable[[EventBus, int], Awaitable[None]] = publish_agent_updated,
 ) -> list[ReapedCorpse]:
     async with async_write_transaction(pool) as conn:
         rows = await (
@@ -80,15 +82,24 @@ async def reap_crash_corpses(
             event="corpse_reaper_terminated",
             n=len(reaped),
         )
-    await _publish_reaped_corpses(bus, [corpse.agent_id for corpse in reaped])
+    await _publish_reaped_corpses(
+        bus,
+        [corpse.agent_id for corpse in reaped],
+        publish_updated=publish_updated,
+    )
     return reaped
 
 
-async def _publish_reaped_corpses(bus: EventBus, reaped: list[int]) -> None:
+async def _publish_reaped_corpses(
+    bus: EventBus,
+    reaped: list[int],
+    *,
+    publish_updated: Callable[[EventBus, int], Awaitable[None]] = publish_agent_updated,
+) -> None:
     """Best-effort refresh of mounted frontends and browser page release; the durable flip already committed."""
     for agent_id in reaped:
         try:
-            await publish_agent_updated(bus, agent_id)
+            await publish_updated(bus, agent_id)
         except Exception:
             logger.exception(
                 "corpse reap lifecycle hint publish failed",

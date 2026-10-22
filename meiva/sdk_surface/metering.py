@@ -105,11 +105,11 @@ def _caller(
 
 
 def make_recorder(
-    original: Callable[..., Any],
+    original: Callable[..., object],
     fq: str,
     sampling: SamplingPolicyOwner,
-    producer: Callable[[], Any] | None = None,
-) -> Callable[..., Any]:
+    producer: Callable[[], object] | None = None,
+) -> Callable[..., object]:
     """Transparent proxy around ``original`` that meters the call as ``fq`` (the call /
     tally / emit logic lives in ``base.agents.sdk.telemetry.run_metered``)."""
 
@@ -165,10 +165,10 @@ _MCP_CALL_FUNNEL = "call_raw"
 
 
 def make_mcp_recorder(
-    original: Callable[..., Any],
+    original: Callable[..., object],
     sampling: SamplingPolicyOwner,
-    producer: Callable[[], Any] | None = None,
-) -> Callable[..., Any]:
+    producer: Callable[[], object] | None = None,
+) -> Callable[..., object]:
     """Recorder for the MCP call funnel — derives the fq from the runtime args."""
 
     @functools.wraps(original)
@@ -192,7 +192,7 @@ def make_mcp_recorder(
     return _recorder(recorder, sampling)
 
 
-def instrument_targets() -> list[tuple[Any, str, str]]:
+def instrument_targets() -> list[tuple[object, str, str]]:
     """Walk the ``meiva`` namespace tree → ``(parent, attr, fq)`` for every public callable.
 
     ``fq`` is the dotted path under ``meiva`` (``files.read``, ``shell.sessions.new``,
@@ -200,7 +200,7 @@ def instrument_targets() -> list[tuple[Any, str, str]]:
     (modules / SimpleNamespace); targets routines; skips classes, constants, and
     dynamic namespaces served by ``__getattr__``.
     """
-    targets: list[tuple[Any, str, str]] = []
+    targets: list[tuple[object, str, str]] = []
     seen: set[int] = set()
 
     def walk(container: Any, prefix: str) -> None:
@@ -231,8 +231,8 @@ def instrument_targets() -> list[tuple[Any, str, str]]:
 
 
 def install(
-    sampling: SamplingPolicyOwner, *, producer: Callable[[], Any] | None = None
-) -> tuple[tuple[Any, str], ...]:
+    sampling: SamplingPolicyOwner, *, producer: Callable[[], object] | None = None
+) -> tuple[tuple[object, str], ...]:
     """Wrap every public ``meiva.*`` callable with the recording proxy. Idempotent.
 
     Called by ``meiva.sdk_surface.install`` after plugins load, so plugin namespaces /
@@ -250,7 +250,7 @@ def install(
     for parent, attr, _fq in targets:
         _check_sampling(getattr(parent, attr, None), sampling)
     _check_sampling(funnel, sampling)
-    wrapped: list[tuple[Any, str]] = []
+    wrapped: list[tuple[object, str]] = []
     for parent, attr, fq in targets:
         current = getattr(parent, attr, None)
         if current is None or is_recorder(current):
@@ -264,7 +264,7 @@ def install(
     return tuple(wrapped)
 
 
-def uninstall(ledger: tuple[tuple[Any, str], ...]) -> None:
+def uninstall(ledger: tuple[tuple[object, str], ...]) -> None:
     """Restore every metered target in `ledger` to the callable the recorder wraps — test
     teardown, so a test that installs the recorders does not leak them into the
     shared ``meiva`` singleton the rest of the suite imports.

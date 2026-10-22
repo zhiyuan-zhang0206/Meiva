@@ -2,7 +2,3 @@ exports = ["test_projection.py"]
 
 [uses]
 "test_history_cache.py" = ["test_projection.py"]
-
-[debt.first-party-patch]
-"test_run_timeline_context.py#monkeypatch.setattr services.derived.insights.run_timeline.context.context_breakdown_response" = 1
-"test_run_timeline_links.py#monkeypatch.setattr services.derived.insights.run_timeline.links.PAGE_SIZE" = 1

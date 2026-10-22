@@ -4,7 +4,3 @@ exports = ["helpers.py"]
 "test_cancel_turn_route.py" = ["helpers.py"]
 "test_scan_and_slots.py" = ["helpers.py", "scan_setup.py"]
 "test_subscription_recovery.py" = ["helpers.py", "scan_setup.py"]
-
-[debt.first-party-patch]
-"test_scan_and_slots.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S" = 1
-"test_task_retention.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S" = 1

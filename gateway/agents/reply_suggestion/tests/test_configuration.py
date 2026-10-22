@@ -9,7 +9,6 @@ from pydantic import ValidationError
 from base.config.domains.lm import LmSettings
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
-from gateway.agents.reply_suggestion import configuration
 from gateway.agents.reply_suggestion.configuration import reply_suggestion_service
 from gateway.agents.reply_suggestion.service import validate_models
 from gateway.agents.reply_suggestion.tests.support import Settings
@@ -85,7 +84,7 @@ def test_a_disabled_feature_does_not_check_its_models(model_catalog: ModelCatalo
 
 
 def test_the_draft_model_is_built_with_reasoning_off(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
+    model_catalog: ModelCatalog,
 ) -> None:
     built: list[tuple[str, dict[str, Any]]] = []
 
@@ -93,7 +92,6 @@ def test_the_draft_model_is_built_with_reasoning_off(
         built.append((model, kwargs))
         return object()
 
-    monkeypatch.setattr(configuration, "build_chat_model", fake_build)
     lm = LmSettings()
     config = SimpleNamespace(view=SimpleNamespace(lm=lm))
 
@@ -102,6 +100,7 @@ def test_the_draft_model_is_built_with_reasoning_off(
         db=object(),  # pyright: ignore[reportArgumentType]
         catalog_reader=lambda: model_catalog,
         rendering=object(),  # pyright: ignore[reportArgumentType]
+        model_builder=fake_build,
     )
     service._draft_model("deepseek-flash", model_catalog)
 

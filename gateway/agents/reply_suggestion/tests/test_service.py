@@ -16,7 +16,6 @@ from base.lm.catalog.decide.types import (
     YesNo,
     estimate_tokens,
 )
-from gateway.agents.reply_suggestion import service as service_module
 from gateway.agents.reply_suggestion.schemas import MAX_SUGGESTION_CHARS, DraftReplies
 from gateway.agents.reply_suggestion.service import (
     CACHE_ENTRIES,
@@ -40,14 +39,8 @@ def harness(model_catalog: ModelCatalog) -> Harness:
 
 
 @pytest.fixture
-def usage_rows(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-
-    def record(message: AIMessage, model: str, **kwargs: Any) -> None:
-        rows.append({"message": message, "model": model, **kwargs})
-
-    monkeypatch.setattr(service_module, "log_usage_from_message", record)
-    return rows
+def usage_rows(harness: Harness) -> list[dict[str, Any]]:
+    return harness.usage_rows
 
 
 async def test_a_running_agent_gets_no_suggestion_and_no_model_is_called(harness: Harness) -> None:

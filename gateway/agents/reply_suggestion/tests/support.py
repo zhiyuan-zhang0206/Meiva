@@ -124,6 +124,7 @@ class Harness:
         self.status = AgentStatus.IDLING
         self.messages: list[BaseMessage] = conversation()
         self.loads: list[int] = []
+        self.usage_rows: list[dict[str, Any]] = []
         self.service = ReplySuggestionService(
             policy=self.settings.policy(),
             catalog_reader=self._read_catalog,
@@ -132,7 +133,11 @@ class Harness:
             agent_status=lambda _agent_id: self.status,
             decide=self.decide,
             draft_model=self.chat.factory,
+            log_usage=self._record_usage,
         )
+
+    def _record_usage(self, message: AIMessage, model: str, **kwargs: Any) -> None:
+        self.usage_rows.append({"message": message, "model": model, **kwargs})
 
     def _read_catalog(self) -> ModelCatalog:
         self.catalog_reads += 1

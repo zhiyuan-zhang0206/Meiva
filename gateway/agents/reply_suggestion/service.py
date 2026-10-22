@@ -61,6 +61,7 @@ LoadMessages = Callable[[int], Sequence[BaseMessage]]
 AgentStatusReader = Callable[[int], AgentStatus]
 DecideCall = Callable[..., Awaitable[Mapping[str, Decision]]]
 DraftModelFactory = Callable[[str, ModelCatalog], Any]
+UsageLogger = Callable[..., object]
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,7 @@ class ReplySuggestionService:
         agent_status: AgentStatusReader,
         decide: DecideCall,
         draft_model: DraftModelFactory,
+        log_usage: UsageLogger = log_usage_from_message,
     ) -> None:
         self._policy = policy
         self._catalog_reader = catalog_reader
@@ -113,6 +115,7 @@ class ReplySuggestionService:
         self._agent_status = agent_status
         self._decide = decide
         self._draft_model = draft_model
+        self._log_usage = log_usage
         self._cache: OrderedDict[tuple[int, str], ReplySuggestionResponse] = OrderedDict()
 
     async def suggest(self, agent_id: int) -> ReplySuggestionResponse:
@@ -217,7 +220,7 @@ class ReplySuggestionService:
                 agent_id=agent_id,
             )
             return _none("generation_failed")
-        log_usage_from_message(
+        self._log_usage(
             response["raw"],
             model=model_id,
             usage_kind=DRAFT_USAGE_KIND,
