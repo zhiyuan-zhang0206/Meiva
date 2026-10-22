@@ -97,8 +97,9 @@ def get_state() -> Any:
     return value
 
 
-def set_state(value: Any) -> None:
-    """Bind the exec turn's working state; end the turn with `unbind_exec_turn`."""
+# meiva:note
+# Bind the exec turn's working state; end the turn with `unbind_exec_turn`.
+def set_state(value: object) -> None:
     if value is None:
         raise TypeError(
             "meiva.state cannot be None; end a turn with process_context.unbind_exec_turn()"
@@ -114,7 +115,7 @@ def get_state_update() -> Any:
     return slots.get(_UPDATE_KEY)
 
 
-def set_state_update(value: Any) -> None:
+def set_state_update(value: object) -> None:
     _slots()[_UPDATE_KEY] = value
 
 

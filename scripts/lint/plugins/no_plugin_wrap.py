@@ -58,8 +58,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TypeGuard
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-sys.path.insert(0, str(_REPO_ROOT))
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+sys.path.insert(0, str(REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
 
@@ -172,15 +172,15 @@ def _iter_plugin_files(targets: list[Path]) -> list[Path]:
     return files
 
 
-def _under_plugins(path: Path) -> bool:
+def _under_plugins(path: Path, repo_root: Path = REPO_ROOT) -> bool:
     try:
-        rel = path.resolve().relative_to(_REPO_ROOT).as_posix()
+        rel = path.resolve().relative_to(repo_root).as_posix()
     except ValueError:
         return False
     return rel == SCAN_DIR or rel.startswith(f"{SCAN_DIR}/")
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, repo_root: Path = REPO_ROOT) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     # argv non-empty = explicit paths (any dir); keep only plugin paths (the
@@ -192,19 +192,19 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-        targets = [p for p in (Path(a).resolve() for a in argv) if _under_plugins(p)]
+        targets = [p for p in (Path(a).resolve() for a in argv) if _under_plugins(p, repo_root)]
     else:
-        targets = lint_common.scan_roots(_REPO_ROOT, (SCAN_DIR,))
+        targets = lint_common.scan_roots(repo_root, (SCAN_DIR,))
 
-    scope = lint_common.changed_scope(only, _REPO_ROOT)
+    scope = lint_common.changed_scope(only, repo_root)
 
     total = 0
-    for path in sorted(lint_common.restrict(_iter_plugin_files(targets), scope, _REPO_ROOT)):
+    for path in sorted(lint_common.restrict(_iter_plugin_files(targets), scope, repo_root)):
         try:
-            rel = path.relative_to(_REPO_ROOT).as_posix()
+            rel = path.relative_to(repo_root).as_posix()
         except ValueError:
             rel = path.as_posix()
-        if lint_common.is_repo_test_file(path, _REPO_ROOT):
+        if lint_common.is_repo_test_file(path, repo_root):
             continue
         for lineno, message in _scan_file(path):
             total += 1

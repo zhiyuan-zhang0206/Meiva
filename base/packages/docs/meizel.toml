@@ -18,10 +18,5 @@ exports = ["frontmatter.py", "notes.py", "okf_graph.py", "pages_copy.py"]
 [debt.impure-edge]
 "notes.py#base/log/__init__.py" = 1
 
-[debt.untyped-export]
-"okf_graph.py#def build_graph_data" = 1
-"okf_graph.py#def parse_frontmatter" = 1
-"okf_graph.py#def render_html" = 1
-
 [debt.wide-public-surface]
 "okf_graph.py#public-surface" = 1

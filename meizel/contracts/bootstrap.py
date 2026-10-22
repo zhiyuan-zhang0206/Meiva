@@ -127,7 +127,7 @@ def _directory_report(edges: Edges, children: int) -> dict[str, Any]:
     }
 
 
-def build_report(analysis: Analysis) -> dict[str, Any]:
+def _build_report(analysis: Analysis) -> dict[str, Any]:
     universe = analysis.universe
     grouped = _edges_by_directory(analysis.projections)
     _, blocked = _exports(analysis.projections)
@@ -194,7 +194,7 @@ def bootstrap(root: Path, out: Path, jobs: int | None = None) -> str:
             encoding="utf-8",
         )
         written += 1
-    report = build_report(analysis)
+    report = _build_report(analysis)
     out.mkdir(parents=True, exist_ok=True)
     (out / "report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"

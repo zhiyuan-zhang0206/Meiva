@@ -133,32 +133,32 @@ def get_config_metadata(*, authority: ConfigAuthority) -> list[ConfigFieldMeta]:
     return result
 
 
+# meiva:note
+# field name -> current value for every field explicitly set in this unit's
+# `.env` that a PUT /api/config would accept.
+#
+# This is the editable override set the config panel deltas against. A field is
+# included only if it is `writable`; a host-scope field additionally requires
+# `remote_writable` UNLESS `local` (a self-target edit), since `writable` already
+# means "a human may edit it on its own host" and `remote_writable` only gates
+# editing a *remote* host's field. That keeps read-only fields (`db_url`) out and,
+# for a remote target, the connection / identity values the first `meiva start` wrote — so
+# the whole set round-trips back through a PUT without rejection.
+#
+# Core only unless the caller supplies the plugin-owned `plugin_metadata` and the
+# `plugin_values` present in their images (`config_admin.panel_overrides` does).
 def env_override_values(
     *,
     authority: ConfigAuthority,
     local: bool = False,
     plugin_metadata: Sequence[ConfigFieldMeta] = (),
-    plugin_values: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """field name -> current value for every field explicitly set in this unit's
-    `.env` that a PUT /api/config would accept.
-
-    This is the editable override set the config panel deltas against. A field is
-    included only if it is `writable`; a host-scope field additionally requires
-    `remote_writable` UNLESS `local` (a self-target edit), since `writable` already
-    means "a human may edit it on its own host" and `remote_writable` only gates
-    editing a *remote* host's field. That keeps read-only fields (`db_url`) out and,
-    for a remote target, the connection / identity values the first `meiva start` wrote — so
-    the whole set round-trips back through a PUT without rejection.
-
-    Core only unless the caller supplies the plugin-owned `plugin_metadata` and the
-    `plugin_values` present in their images (`config_admin.panel_overrides` does).
-    """
+    plugin_values: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     extra_values = dict(plugin_values or {})
     aliases = authority.read_env_aliases()
     set_fields = {name for name in fields() if field_alias(name) in aliases} | extra_values.keys()
     values = {**authority.current_field_values(), **extra_values}
-    out: dict[str, Any] = {}
+    out: dict[str, object] = {}
     for meta in [*get_config_metadata(authority=authority), *plugin_metadata]:
         if meta.name not in set_fields or not meta.writable:
             continue

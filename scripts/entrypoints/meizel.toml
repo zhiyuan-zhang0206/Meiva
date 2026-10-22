@@ -1,2 +1,13 @@
+purity = "strict-to-be"
+
 [uses]
 "tests" = ["agent.py"]
+
+[debt.impure-call]
+"agent.py#uuid.uuid4" = 1
+
+[debt.impure-edge]
+"agent.py#base/cluster/machine/__init__.py" = 1
+"agent.py#base/cluster/machine/ambient.py" = 1
+"agent.py#base/host/net/http_dial.py" = 1
+"gateway.py#gateway/app.py" = 1

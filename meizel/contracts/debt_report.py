@@ -87,7 +87,7 @@ def _judged_directories(universe: Universe) -> set[str]:
     return judged
 
 
-def report(universe: Universe) -> dict[str, Any]:
+def _report(universe: Universe) -> dict[str, Any]:
     baselines = read_baselines(universe)
     tops: dict[str, dict[str, Any]] = {}
     for directory, table in baselines.items():
@@ -134,7 +134,7 @@ def _text(data: dict[str, Any]) -> str:
 
 
 def summarize(root: Path, *, as_json: bool) -> str:
-    data = report(load_universe(root))
+    data = _report(load_universe(root))
     return json.dumps(data, indent=2, sort_keys=True) if as_json else _text(data)
 
 

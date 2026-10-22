@@ -8,6 +8,7 @@ from base.db import Database, create_agent
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
 from services.entrypoints.im_bridge.ingress.types import (
     IngressIdentityConflictError,
+    IngressReceipt,
     IngressRoute,
     IngressRouteKind,
     IngressStatus,
@@ -215,22 +216,19 @@ def test_account_replacement_fences_the_previous_owner_and_keeps_its_cursor(
 def test_post_insert_failure_rolls_back_provider_receipt_chat_and_central_audit(
     db_conn: psycopg.Connection,
     database: Database,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from services.entrypoints.im_bridge.ingress import store as store_owner
-
     agent = create_agent(db_conn)
     with database.pool(min_size=1, max_size=2) as pool:
         store = WeixinIngressStore(pool)
         binding = store.initialize("https://provider.example", "account")
         binding = store.checkpoint(binding, "", "", provider_empty=True)
 
-        def fail_after_real_insert(_row: tuple[object, ...]) -> None:
+        def fail_after_real_insert(_row: tuple[object, ...]) -> IngressReceipt:
             raise RuntimeError("receipt result failed after native insert")
 
-        monkeypatch.setattr(store_owner, "receipt_from_row", fail_after_real_insert)
+        failing_store = WeixinIngressStore(pool, receipt_builder=fail_after_real_insert)
         with pytest.raises(RuntimeError, match="after native insert"):
-            store.retain(
+            failing_store.retain(
                 binding,
                 source(),
                 {"text": "original"},
@@ -249,7 +247,7 @@ def test_post_insert_failure_rolls_back_provider_receipt_chat_and_central_audit(
 
 
 def test_failed_empty_checkpoint_rolls_back_cursor_and_activation_together(
-    database: Database, monkeypatch: pytest.MonkeyPatch
+    database: Database,
 ) -> None:
     from collections.abc import Generator
     from contextlib import contextmanager
@@ -276,10 +274,11 @@ def test_failed_empty_checkpoint_rolls_back_cursor_and_activation_together(
                 ).fetchone() == ("active", "new-empty-opaque")
                 raise RuntimeError("injected checkpoint commit interruption")
 
-        monkeypatch.setattr(store_owner, "write_transaction", fail_before_commit)
+        failing_store = WeixinIngressStore(pool, tx_factory=fail_before_commit)
         with pytest.raises(RuntimeError, match="checkpoint commit interruption"):
-            store.checkpoint(draining, "opaque-start", "new-empty-opaque", provider_empty=True)
-        monkeypatch.setattr(store_owner, "write_transaction", original_transaction)
+            failing_store.checkpoint(
+                draining, "opaque-start", "new-empty-opaque", provider_empty=True
+            )
         restored = store.refresh_binding(draining)
         assert restored.cursor == "opaque-start" and restored.state.value == "draining"
         committed = store.checkpoint(

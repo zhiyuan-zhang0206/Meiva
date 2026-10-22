@@ -8,7 +8,7 @@ surfaces as ``DecisionRequestError`` after exactly one request.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import cast
 
 from base.lm.catalog.decide.types import (
     DecisionBuildContext,
@@ -19,10 +19,11 @@ from base.lm.catalog.decide.types import (
 _ERROR_BODY_CHARS = 300
 
 
+# meiva:note
+# POST ``payload`` as JSON with a bearer key; return the decoded JSON object.
 async def post_json(
     ctx: DecisionBuildContext, *, url: str, api_key: str, payload: Mapping[str, object]
-) -> dict[str, Any]:
-    """POST ``payload`` as JSON with a bearer key; return the decoded JSON object."""
+) -> dict[str, object]:
     import httpx  # deferred: the provider contract loads on the exec-child boot path
 
     transport = cast("httpx.AsyncBaseTransport | None", ctx.transport)
@@ -46,4 +47,4 @@ async def post_json(
         raise DecisionResponseError(f"{ctx.model}: response from {url} is not JSON") from exc
     if not isinstance(body, dict):
         raise DecisionResponseError(f"{ctx.model}: response from {url} is not a JSON object")
-    return cast(dict[str, Any], body)
+    return cast(dict[str, object], body)
