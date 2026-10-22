@@ -25,6 +25,49 @@ class AgentRuntimeSettings(EnvSettings):
         )
     )
 
+    agent_host_memory_max_mb: int = Field(
+        default=0,
+        alias="MEIVA_AGENT_HOST_MEMORY_MAX_MB",
+        description=(
+            "Aggregate memory cap in MiB for the agent-host unit's whole process tree on"
+            " Linux: 0 disables it. The host is started inside a transient systemd scope"
+            " whose memory.max is this value, so a runaway worker inside it cannot starve"
+            " the machine's shared applications. Size it as RAM minus (gateway + desktop +"
+            " headroom) -- 18432 on a 31 GiB node -- and keep it above any per-exec cap,"
+            " because a child scope counts against its parent (2026-10-22: an 8.29 GiB"
+            " export killed chrome and typeless on the central node, #5543)."
+        ),
+        ge=0,
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    agent_host_memory_swap_max_mb: int = Field(
+        default=0,
+        alias="MEIVA_AGENT_HOST_MEMORY_SWAP_MAX_MB",
+        description=(
+            "Swap allowance in MiB for the same scope: 0 keeps the cap hard, so exceeding"
+            " it frees memory instead of pushing the machine into swap. Only a MemoryMax"
+            " without this lets an over-cap tree page forever, which protects nothing and"
+            " still fills the disk."
+        ),
+        ge=0,
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     exec_oom_score_adj: int = Field(
         default=800,
         alias="MEIVA_EXEC_OOM_SCORE_ADJ",

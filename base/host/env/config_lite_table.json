@@ -157,6 +157,8 @@
   "field_domains": {
     "agent_communication_style": "agent",
     "agent_host_health_port": "services",
+    "agent_host_memory_max_mb": "agent",
+    "agent_host_memory_swap_max_mb": "agent",
     "agent_reply_reminder_cadence": "agent",
     "alerts_default_limit": "display",
     "anthropic_api_key": "lm",
@@ -571,6 +573,8 @@
   "field_aliases": {
     "agent_communication_style": "MEIVA_AGENT_COMMUNICATION_STYLE",
     "agent_host_health_port": "MEIVA_AGENT_HOST_HEALTH_PORT",
+    "agent_host_memory_max_mb": "MEIVA_AGENT_HOST_MEMORY_MAX_MB",
+    "agent_host_memory_swap_max_mb": "MEIVA_AGENT_HOST_MEMORY_SWAP_MAX_MB",
     "agent_reply_reminder_cadence": "MEIVA_AGENT_REPLY_REMINDER_CADENCE",
     "alerts_default_limit": "MEIVA_ALERTS_DEFAULT_LIMIT",
     "anthropic_api_key": "ANTHROPIC_API_KEY",
@@ -985,6 +989,8 @@
   "field_scopes": {
     "agent_communication_style": "cluster-default",
     "agent_host_health_port": "host",
+    "agent_host_memory_max_mb": "host",
+    "agent_host_memory_swap_max_mb": "host",
     "agent_reply_reminder_cadence": "cluster-default",
     "alerts_default_limit": "cluster-pinned",
     "anthropic_api_key": "cluster-pinned",
@@ -1399,6 +1405,8 @@
   "field_capabilities": {
     "agent_communication_style": "agent-runner",
     "agent_host_health_port": "agent-runner",
+    "agent_host_memory_max_mb": "agent-runner",
+    "agent_host_memory_swap_max_mb": "agent-runner",
     "agent_reply_reminder_cadence": "agent-runner",
     "alerts_default_limit": "common",
     "anthropic_api_key": "agent-runner",

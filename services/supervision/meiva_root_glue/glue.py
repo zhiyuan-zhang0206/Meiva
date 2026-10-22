@@ -8,7 +8,11 @@ boundaries; diagnostics never repair them from inside the service subtree.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import logging
+import subprocess
+import sys
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
@@ -42,6 +46,95 @@ from services.supervision.meiva_root_glue.diagnostics import (
 )
 from services.supervision.roster import build_services
 
+_log = logging.getLogger(__name__)
+
+
+# meiva:note
+# An aggregate memory budget for one unit's whole process tree, in MiB; the swap cap
+# belongs to it because a budget without one is not a budget.
+@dataclass(frozen=True, slots=True)
+class UnitMemoryCap:
+    max_mb: int
+    swap_max_mb: int = 0
+
+
+# meiva:note
+# How long the assembly waits for one `systemd-run --user --scope` round trip before
+# deciding the host cannot carry a scoped unit. It is a presence check, not a
+# measurement: a machine that answers slowly is still a machine that answers.
+_SCOPE_PROBE_TIMEOUT_S = 10.0
+
+
+# meiva:note
+# The agent-host budget is opt-in per machine and only meaningful where cgroups exist.
+# The probe runs once, at assembly, because the alternative failure is worse than having
+# no cap: a unit wrapped in a launcher the host cannot run never starts at all, so a
+# configuration mistake would take the whole agent plane down instead of bounding it.
+# Inputs are parameters, not ambient reads, so the decision is testable without patching.
+def agent_host_memory_caps(
+    *,
+    max_mb: int,
+    swap_max_mb: int,
+    platform: str,
+    scope_available: Callable[[], bool],
+) -> dict[str, UnitMemoryCap]:
+    if max_mb <= 0:
+        return {}
+    if platform != "linux":
+        _log.info(
+            "agent-host memory cap configured (%d MiB) but this platform has no cgroups; "
+            "the unit runs unbounded",
+            max_mb,
+        )
+        return {}
+    if not scope_available():
+        _log.warning(
+            "agent-host memory cap configured (%d MiB) but systemd cannot create a user "
+            "scope here; the unit runs unbounded rather than failing to start",
+            max_mb,
+        )
+        return {}
+    return {"agent-host": UnitMemoryCap(max_mb=max_mb, swap_max_mb=swap_max_mb)}
+
+
+# meiva:note
+# The launch rewrite the root supervisor applies: only the unit carrying a budget is
+# wrapped, and everything else keeps the manifest's argv byte for byte. Two limits go
+# together -- a MemoryMax without a swap cap lets an over-budget tree page forever,
+# which protects nothing and still fills the disk.
+def memory_scoped_argv(
+    unit_id: str, argv: Sequence[str], *, caps: Mapping[str, UnitMemoryCap]
+) -> list[str]:
+    cap = caps.get(unit_id)
+    if cap is None:
+        return list(argv)
+    return [
+        "systemd-run",
+        "--user",
+        "--scope",
+        "--collect",
+        "-p",
+        f"MemoryMax={cap.max_mb}M",
+        "-p",
+        f"MemorySwapMax={cap.swap_max_mb}M",
+        "--",
+        *argv,
+    ]
+
+
+def _systemd_user_scope_available() -> bool:
+    try:
+        done = subprocess.run(
+            ["systemd-run", "--user", "--scope", "--collect", "true"],
+            capture_output=True,
+            timeout=_SCOPE_PROBE_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
 STATIC_PROBES: Mapping[str, str] = MappingProxyType({})
 """Spec-less unit id -> `"module:attribute"` probe reference.
 
@@ -62,6 +155,19 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     if Path.cwd().resolve() != Path(identity.cwd):
         raise RuntimeError("root cwd differs from its loaded runtime")
     context.supervisor.bind_runtime(identity, home=home)
+    # meiva:note
+    # The one place the memory budget is decided: config, platform and scope support are
+    # read here and handed on as an opaque launch rewrite, so the supervisor stays free
+    # of platform names and ambient config.
+    caps = agent_host_memory_caps(
+        max_mb=settings.agent.agent_host_memory_max_mb,
+        swap_max_mb=settings.agent.agent_host_memory_swap_max_mb,
+        platform=sys.platform,
+        scope_available=_systemd_user_scope_available,
+    )
+    context.supervisor.set_argv_transform(
+        (lambda unit_id, argv: memory_scoped_argv(unit_id, argv, caps=caps)) if caps else None
+    )
     image = LoadedCommit.capture(Path(identity.code_root))
     config = ConfigBoot()
     config.boot()
