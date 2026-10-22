@@ -31,13 +31,13 @@ frontend = ["ui"]
 
 [debt.private-module]
 "conftest.py -> tests/_asyncio_stall_probe.py" = 1
+"gateway/tests/agents/test_external_agent_source.py -> agent/graph/claim/_chat_inbound.py" = 1
 "meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_coding_session_resume.py -> meiva/shell/coding_tools/_claude_checks.py" = 4
 "meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_coding_session_resume.py -> meiva/shell/coding_tools/_common.py" = 3
 "services/agent_runner/agent_host/tests/dispatch/test_exec_memory_guard.py -> agent/graph/exec/_child_boundary.py" = 1
 "services/agent_runner/agent_host/tests/dispatch/test_exec_memory_guard.py -> agent/graph/exec/_result.py" = 1
 "services/agent_runner/agent_host/tests/dispatch/test_exec_memory_guard.py -> agent/graph/exec/_subprocess.py" = 1
 "tests/e2e/lifecycle/test_force_expire_impersonation.py -> base/agents/impersonation/_store.py" = 1
-"gateway/tests/agents/test_external_agent_source.py -> agent/graph/claim/_chat_inbound.py" = 1
 
 [debt.private-name]
 "agent/extensions/tests/test_lazy_plugin_load.py -> meiva/__init__.py#_some_private" = 1

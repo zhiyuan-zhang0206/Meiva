@@ -1,14 +1,11 @@
 """Attach an external controller to an active Meiva takeover session."""
 
-from __future__ import annotations
-
-from meiva.impersonation.attachment import Attachment
-from meiva.impersonation.attachment import attach as open_attachment
+from typing import Any
 
 __all_for_meiva__ = []
 
 
-def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
+def attach(session_id: int | str, *, agent_id: int | None = None) -> Any:
     """Borrow an active, unexpired agent identity in this local Python process.
 
     Use the session's integer id together with its owning agent id, or the
@@ -18,4 +15,6 @@ def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
     loads the agent's saved configuration and plugin state; attaching never
     renews the lease.
     """
+    from meiva.impersonation.attachment import attach as open_attachment
+
     return open_attachment(session_id, agent_id=agent_id)
