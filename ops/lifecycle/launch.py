@@ -46,11 +46,8 @@ async def launch_agent_op(
         model=settings.lm.llm_model,
         config=resolve_agent_config_pins(body.config, body.birth_config),
     )
-    has_pending = await asyncio.to_thread(
-        validate_launch_row, db_pool, body, local_machine=local_machine
-    )
-    if has_pending:
-        publish_inbound_wake(db, bus, body.agent_id, "0")
+    await asyncio.to_thread(validate_launch_row, db_pool, body, local_machine=local_machine)
+    publish_inbound_wake(db, bus, body.agent_id, "0")
     return SpawnedAgent(id=body.agent_id)
 
 
@@ -60,14 +57,12 @@ def validate_launch_row(
     *,
     local_machine: str,
     launchable: Collection[Harness] = LAUNCHABLE_HARNESSES,
-) -> bool:
+) -> None:
     """A stale attempt cannot wake an identity now placed somewhere else."""
     with db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT machine, last_launch_attempt_id, status, harness, "
-            "EXISTS(SELECT 1 FROM inbound_messages WHERE agent_id=%s AND status='pending') "
-            "FROM agents_meta WHERE id=%s",
-            (body.agent_id, body.agent_id),
+            "SELECT machine, last_launch_attempt_id, status, harness FROM agents_meta WHERE id=%s",
+            (body.agent_id,),
         )
         row = cur.fetchone()
     if row is None or row[:3] != (local_machine, body.launch_attempt_id, "idling"):
@@ -84,7 +79,6 @@ def validate_launch_row(
             f"launcher yet; only {sorted(item.value for item in launchable)} can "
             f"start a session today"
         )
-    return bool(row[4]) if len(row) > 4 else True
 
 
 def spawn_prechecks_blocking(

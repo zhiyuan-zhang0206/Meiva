@@ -10,7 +10,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.observation.evidence import AgentObservation, observation
 from base.agents.observation.snapshot import OpenNotice
-from base.api_contracts.agent_contract import AgentStatus, LivenessState
+from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
 from base.config import settings
 from gateway.inspect.schemas import HeartbeatInfo, HeartbeatLastPause
 from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
@@ -65,7 +65,7 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
         pending_row = cur.fetchone()
         assert pending_row is not None  # noqa: S101 — EXISTS always returns one row
         overlay: dict[str, Any] = dict(row[0]) if row[0] is not None else {}
-        if row[10] != "meiva" and isinstance(row[11], str) and row[11]:
+        if len(row) > 11 and row[10] != Harness.MEIVA and isinstance(row[11], str) and row[11]:
             overlay["llm_model"] = row[11]
         return InspectDbRows(
             machine=row[1],

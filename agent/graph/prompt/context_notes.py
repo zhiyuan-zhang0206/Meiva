@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
 from base.agents.to_user import read_document
+from base.api_contracts.agent_contract import Harness
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from base.packages.skills.tree import identifier, target
@@ -85,6 +86,8 @@ def _format_timeout_display(timeout_s: float) -> str:
 
 def exec_timeout_note(ctx: MeivaContext) -> HumanMessage | None:
 
+    if ctx.harness is not Harness.MEIVA:
+        return None
     if _established_agent_id(ctx, "exec-timeout") is None:
         return None
     timeout_s = ctx.require_agent().read("sandbox", "exec_timeout_seconds")
@@ -221,7 +224,13 @@ def preloaded_skills_note(ctx: MeivaContext) -> HumanMessage | None:
     if rendered is None:
         return None
     sections, _injected = rendered
-    content = _PRELOADED_SKILLS_FRAMING + "\n\n" + "\n\n---\n\n".join(sections)
+    framing = _PRELOADED_SKILLS_FRAMING
+    if ctx.harness is not Harness.MEIVA:
+        framing = framing.replace(
+            "meiva.help(meiva.skills.<path>) or meiva.files.read.",
+            "meiva.help(meiva.skills.<path>) or your native file-reading tool.",
+        )
+    content = framing + "\n\n" + "\n\n---\n\n".join(sections)
     return system_note_message(
         content=content, tag=NoteTag.PRELOADED_SKILLS, created_at=datetime.now(UTC)
     )
@@ -281,47 +290,3 @@ FRAMEWORK_NOTES: tuple[ContextNote, ...] = (
     ContextNote(build=agent_id_note, on_fork=True, rank=RANK_AGENT_ID),
     ContextNote(build=preloaded_skills_note, on_fork=True, rank=RANK_PRELOADED_SKILLS),
 )
-
-HARNESS_NOTE_BUILDERS: frozenset[str] = frozenset(
-    {
-        "timezone_note",
-        "preloaded_skills_note",
-        "memory_index_note",
-        "per_agent_memory_note",
-        "inherited_memory_note",
-    }
-)
-
-
-def harness_context_notes(extensions: ExtensionRegistry, ctx: MeivaContext) -> list[str]:
-    if ctx.ops_pool is None or ctx.identity is None:
-        return []
-    entries = [
-        note
-        for note in _ordered(extensions, fork_only=False)
-        if note.build.__name__ in HARNESS_NOTE_BUILDERS
-    ]
-    rendered: list[str] = []
-    for msg in _rendered(entries, ctx):
-        text = str(msg.content).strip()
-        if not text:
-            continue
-        text = text.replace(
-            "meiva.help(meiva.skills.<path>) or meiva.files.read.",
-            "meiva.help(meiva.skills.<path>) or your native file-reading tool.",
-        )
-        rendered.append(text)
-    aid = ctx.identity.agent_id
-    if aid is not None and ctx.require_agent().read("agent", "workspace_in_system_prompt"):
-        try:
-            document = read_document(workspace_dir(aid))
-        except (OSError, ValueError) as exc:
-            rendered.append(
-                f"The shared context file could not be read: {exc}. Repair it in your workspace."
-            )
-        else:
-            if document.content:
-                rendered.append(
-                    "Current shared context displayed beside your messages:\n" + document.content
-                )
-    return rendered

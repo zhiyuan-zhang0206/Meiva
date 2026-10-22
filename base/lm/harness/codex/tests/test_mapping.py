@@ -119,6 +119,7 @@ def test_file_change_preserves_kind_and_diff_when_present() -> None:
 
 
 def test_unknown_item_maps_to_nothing() -> None:
+    assert item_event({"item": {"type": "plan", "id": "p-1"}}, phase="completed", turn_id="t") == []
     assert (
         item_event({"item": {"type": "reasoning", "id": "r-1"}}, phase="completed", turn_id="t")
         == []

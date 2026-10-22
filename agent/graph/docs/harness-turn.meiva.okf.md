@@ -41,14 +41,16 @@ The harness owns the transcript of a resumed session; the graph owns
 `state.messages`, the display mirror. `state.harness_cursor` is how much of the
 window is covered by committed harness turns.
 
-- An empty external-harness window lays down `[SystemMessage(content=handoff.render()), *reset.tail]`
+- An empty external-harness window lays down `[SystemMessage(content=handoff.render()), *notes, *reset.tail]`
   with `harness_cursor = 0` (`model-visible ⟺ logged`). It contains no native
-  `execute_code` prompt or notes; `messages[0]` is the rendered **handoff document**
-  shown at `0.0` as the System Prompt card. The bridge never overrides the
-  provider's system prompt flag.
+  `execute_code` prompt or `exec_timeout` note; `messages[0]` is the rendered **handoff document**
+  shown at `0.0` as the System Prompt card, followed by the standing context notes
+  (`timezone`, `memory`, `agent_id`, `agent_memory`, `inherited_memory`, `preloaded_skills`,
+  and plugin notes). The bridge never overrides the provider's system prompt flag.
 - On the first turn, `pending_messages(state)` co-delivers the handoff
-  `SystemMessage` and the first user message (or reset tail) in one submission.
-- `harness_turn` runs inside `node_lifecycle(HARNESS_TURN, ...)` to emit the
+  `SystemMessage`, the standing context notes, and the first user message (or reset tail) in one submission.
+- `harness_turn` runs `harness_pre_turn_hooks` (passive memory recall, inter-agent reply
+  SDK reminder, skill recall, and newly installed skills) and `node_lifecycle(HARNESS_TURN, ...)` to emit the
   entry `TimelineSnapshot` for newly claimed inbounds, and `HarnessTurnProjector`
   projects `BridgeEvent`s (`TextDelta`, `AssistantText`, `ToolUse`, `ToolResult`)
   into live SSE events and committed `state.messages` (`AIMessage` with

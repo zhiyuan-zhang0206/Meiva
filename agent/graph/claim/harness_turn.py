@@ -14,6 +14,7 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.graph.claim.turn_stamp import persist_last_active
+from agent.graph.hooks.framework import harness_pre_turn_hooks
 from agent.graph.interrupt import (
     ModelInterruptedError,
     interrupt_halt,
@@ -128,21 +129,16 @@ def turn_key(messages: Sequence[BaseMessage]) -> str:
 
 
 def _first_str(mapping: Mapping[str, Any], *keys: str) -> str | None:
-    for key in keys:
-        val = mapping.get(key)
-        if isinstance(val, str) and val:
-            return val
-    return None
+    return next(
+        (val for k in keys if isinstance(val := mapping.get(k), str) and val),
+        None,
+    )
 
 
 def _format_write_tool_use(tool_input: Mapping[str, Any]) -> str:
     path = _first_str(tool_input, "file_path", "Path", "TargetFile")
-    content = (
-        tool_input.get("content") or tool_input.get("Content") or tool_input.get("CodeContent")
-    )
-    if path and isinstance(content, str):
-        return f"# {path}\n{content.rstrip()}"
-    return ""
+    content = _first_str(tool_input, "content", "Content", "CodeContent")
+    return f"# {path}\n{content.rstrip()}" if path and content is not None else ""
 
 
 def _format_edit_tool_use(tool_input: Mapping[str, Any]) -> str:
@@ -159,10 +155,12 @@ def _format_edit_tool_use(tool_input: Mapping[str, Any]) -> str:
 
 
 def format_tool_use(name: str, tool_input: Mapping[str, Any]) -> str:
-    if name in {"Bash", "command", "run_command"}:
-        cmd = _first_str(tool_input, "command", "CommandLine")
-        if cmd and cmd.strip():
-            return cmd
+    if (
+        name in {"Bash", "command", "run_command"}
+        and (cmd := _first_str(tool_input, "command", "CommandLine"))
+        and cmd.strip()
+    ):
+        return cmd
     if name == "patch" and (rendered := _format_patch_tool_use(tool_input)):
         return rendered
     if name in {"Write", "write_file", "write_to_file"} and (
@@ -173,41 +171,32 @@ def format_tool_use(name: str, tool_input: Mapping[str, Any]) -> str:
         rendered := _format_edit_tool_use(tool_input)
     ):
         return rendered
-    if tool_input:
-        return json.dumps(dict(tool_input), ensure_ascii=False, indent=2)
-    return name
+    return json.dumps(dict(tool_input), ensure_ascii=False, indent=2) if tool_input else name
 
 
 def _format_patch_change(raw_entry: Any) -> str | None:
     if not isinstance(raw_entry, Mapping):
         return None
     entry = cast("Mapping[str, Any]", raw_entry)
-    path = _first_str(entry, "path")
-    if not path:
+    if not (path := _first_str(entry, "path")):
         return None
     kind = _first_str(entry, "kind")
     header = f"# {kind}: {path}" if kind else f"# {path}"
     diff = entry.get("diff")
-    if isinstance(diff, str) and diff.strip():
-        return f"{header}\n{diff.rstrip()}"
-    return header
+    return f"{header}\n{diff.rstrip()}" if isinstance(diff, str) and diff.strip() else header
 
 
 def _format_patch_tool_use(tool_input: Mapping[str, Any]) -> str:
     changes = tool_input.get("changes")
     if isinstance(changes, list) and changes:
         blocks = [
-            rendered
-            for raw_entry in cast("list[Any]", changes)
-            if (rendered := _format_patch_change(raw_entry)) is not None
+            r for raw in cast("list[Any]", changes) if (r := _format_patch_change(raw)) is not None
         ]
         if blocks:
             return "\n\n".join(blocks)
     paths = tool_input.get("paths")
-    if isinstance(paths, list) and paths:
-        str_paths = [p for p in cast("list[Any]", paths) if isinstance(p, str)]
-        if len(str_paths) == len(cast("list[Any]", paths)):
-            return "\n".join(str_paths)
+    if isinstance(paths, list) and paths and all(isinstance(p, str) for p in paths):
+        return "\n".join(cast("list[str]", paths))
     return ""
 
 
@@ -439,29 +428,16 @@ class HarnessTurnProjector:
                 sdk_calls=[SdkCall(method=event.name, count=1)],
             ).model_dump()
         )
-        self._publisher.emit(
-            TimelineSnapshot(
-                agent_id=self._agent_id,
-                items=snapshot_items,
-                msg_count=self._msg_idx + 1,
-            ).model_dump_json()
+        snap = TimelineSnapshot(
+            agent_id=self._agent_id, items=snapshot_items, msg_count=self._msg_idx + 1
         )
+        self._publisher.emit(snap.model_dump_json())
         self._publisher.emit(
             ExecStart(agent_id=self._agent_id, item_id=exec_item_id).model_dump_json()
         )
+        call = ToolCall(name=event.name, args={"code": code_text}, id=tool_id, type="tool_call")
         self._messages.append(
-            AIMessage(
-                content=content,
-                tool_calls=[
-                    ToolCall(
-                        name=event.name,
-                        args={"code": code_text},
-                        id=tool_id,
-                        type="tool_call",
-                    )
-                ],
-                additional_kwargs=kwargs,
-            )
+            AIMessage(content=content, tool_calls=[call], additional_kwargs=kwargs)
         )
         slot_idx = len(self._messages)
         self._messages.append(
@@ -520,13 +496,30 @@ class HarnessTurnProjector:
         if final_text or reasoning_text:
             now = self._clock_factory().now()
             content, kwargs, _, _ = self._build_ai_content_and_kwargs(final_text, now)
-            self._messages.append(
-                AIMessage(
-                    content=content,
-                    additional_kwargs=kwargs,
-                )
-            )
+            self._messages.append(AIMessage(content=content, additional_kwargs=kwargs))
         return list(self._messages)
+
+
+async def _run_pre_turn_hooks(
+    state: _state.AgentState,
+    runtime: Runtime[MeivaContext],
+    config: RunnableConfig,
+) -> tuple[list[BaseMessage], dict[str, Any]]:
+    ctx = runtime.context
+    if ctx.ops_pool is None:
+        return [], {}
+    pre_messages: list[BaseMessage] = []
+    hook_updates: dict[str, Any] = {}
+    for _plugin, hook in harness_pre_turn_hooks(ctx.plugin_registry()):
+        result = await hook(state, runtime, config)
+        if not result:
+            continue
+        for key, value in result.items():
+            if key == "messages":
+                pre_messages.extend(cast("Sequence[BaseMessage]", value))
+            elif key != "goto":
+                hook_updates[key] = value
+    return pre_messages, hook_updates
 
 
 # meiva:note
@@ -547,9 +540,11 @@ async def harness_turn_node(
     event_publisher = ctx.event_publisher
     assert event_publisher is not None, "harness_turn requires ctx.event_publisher"  # noqa: S101
     agent_id = agent_id_from_config(config)
+    pre_messages, hook_updates = await _run_pre_turn_hooks(state, runtime, config)
+    effective_messages = [*state.messages, *pre_messages] if pre_messages else state.messages
     async with node_lifecycle(
         HARNESS_TURN,
-        messages=state.messages,
+        messages=effective_messages,
         event_publisher=event_publisher,
         agent_id=agent_id,
         turn_progress=ctx.turn_progress,
@@ -560,7 +555,14 @@ async def harness_turn_node(
         ),
         limit_reader=lambda: ctx.require_agent().read("display", "timeline_default_limit"),
     ):
-        return await _run_harness_turn(state, ctx, agent_id, event_publisher)
+        return await _run_harness_turn(
+            state,
+            ctx,
+            agent_id,
+            event_publisher,
+            pre_messages=pre_messages,
+            hook_updates=hook_updates,
+        )
 
 
 async def _run_harness_turn(
@@ -568,20 +570,33 @@ async def _run_harness_turn(
     ctx: MeivaContext,
     agent_id: int,
     event_publisher: AgentEventPublisher,
+    *,
+    pre_messages: Sequence[BaseMessage] = (),
+    hook_updates: Mapping[str, Any] | None = None,
 ) -> Command[HarnessGoto]:
     bridge = ctx.require_harness_bridge()
     ctx.turn_progress.mark(agent_id)
-    pending = pending_messages(state)
+    effective_messages = [*state.messages, *pre_messages] if pre_messages else state.messages
+    cursor = min(max(state.harness_cursor, 0), len(effective_messages))
+    pending = [
+        message
+        for message in effective_messages[cursor:]
+        if not isinstance(message, (AIMessage, ToolMessage))
+    ]
     text = render_messages(pending)
+    extra_updates = dict(hook_updates) if hook_updates else {}
     if not text:
+        if pre_messages:
+            extra_updates["messages"] = list(pre_messages)
         return Command[HarnessGoto](
-            update={"halted": True, "harness_cursor": len(state.messages)}, goto=CLAIM
+            update={**extra_updates, "halted": True, "harness_cursor": len(effective_messages)},
+            goto=CLAIM,
         )
 
     projector = HarnessTurnProjector(
         event_publisher=event_publisher,
         agent_id=agent_id,
-        base_idx=len(state.messages),
+        base_idx=len(effective_messages),
         turn_progress=ctx.turn_progress,
         clock_factory=ctx.require_clock,
     )
@@ -602,7 +617,10 @@ async def _run_harness_turn(
     except ModelInterruptedError as interrupted:
         _announce_cancel(ctx, agent_id)
         await interrupt_engine(agent_id, bridge)
-        return Command[HarnessGoto](update=interrupt_halt(interrupted.reason), goto=CLAIM)
+        halt: dict[str, object] = dict(interrupt_halt(interrupted.reason))
+        if pre_messages:
+            halt["messages"] = [*pre_messages, *cast("list[BaseMessage]", halt.get("messages", []))]
+        return Command[HarnessGoto](update={**extra_updates, **halt}, goto=CLAIM)
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
         raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
 
@@ -621,8 +639,9 @@ async def _run_harness_turn(
     await persist_last_active(ctx, agent_id, turns[-1].text)
     return Command[HarnessGoto](
         update={
-            "messages": committed,
-            "harness_cursor": len(state.messages) + len(committed),
+            **extra_updates,
+            "messages": [*pre_messages, *committed],
+            "harness_cursor": len(effective_messages) + len(committed),
             "halted": True,
         },
         goto=CLAIM,
