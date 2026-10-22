@@ -173,8 +173,12 @@ def _preflight(
     if reasons or more:
         return [*reasons, *more], resolved, serving, set[str]()
     # meiva:note
-    # The helper gate reads NEW, so every host must hold it first: this fetch is the first
-    # effect the window allows, and it happens only after every refusal above has passed.
+    # The helper gate reads NEW, so every host must hold it first. This fetch is a
+    # non-destructive effect the window deliberately accepts before the gate: the gate's own
+    # question is about that commit, and the cheap refusals above have already passed.
+    if args.dry_run:
+        s.say("helper gate: not judged in --dry-run (the target commit is not fetched)")
+        return [], resolved, serving, set[str]()
     everyone = [args.gateway, *args.runner]
     for alias in everyone:
         s.run(alias, f'{HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
@@ -182,7 +186,7 @@ def _preflight(
     rebuild = bool(getattr(args, "rebuild_extras", False))
     table = baselines(REPO)
     return (
-        refusals(probes, table, rebuild=rebuild, dry_run=args.dry_run),
+        refusals(probes, table, rebuild=rebuild),
         resolved,
         serving,
         rebuilding_hosts(probes, rebuild=rebuild),
@@ -385,6 +389,8 @@ def down(s: Session, args: argparse.Namespace) -> None:
             if alias in rebuilding:
                 s.say(f"{alias}: retiring extras so its next start can rebuild the helper")
                 flags = f"{REBUILD_STOP} --mode {args.mode} --timeout {args.stop_timeout}"
+                if alias == args.gateway:
+                    flags = f"{flags} {args.infra}"
             s.run(alias, f"{HOME}; {MEIVA} stop --yes {flags}")
             if not s.dry_run and not stop_completed(_host_up_and_journal(s, alias)[1]):
                 raise FailedError(

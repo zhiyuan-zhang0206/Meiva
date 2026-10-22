@@ -86,3 +86,63 @@ def test_rebuild_extras_excludes_keeping_extras(env: tuple[Cluster, Callable[...
         run("down", "--rebuild-extras")
     assert refused.value.code == 2
     assert cluster.effects == []
+
+
+def test_the_gate_runs_before_its_own_command_is_installed(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    # meiva:note
+    # The first wave to carry this gate runs against a checkout that does not have the command
+    # yet: the probe must come out of the target commit's objects, never out of the installed
+    # checkout, or that wave could never deploy the gate that judges it.
+    cluster, run = env
+    assert run("down") == 0
+    probes = [command for _alias, command in cluster.commands if "helper-signing.py" in command]
+    assert probes
+    for command in probes:
+        assert 'git -C "$S" archive' in command and 'PYTHONPATH="$tmp"' in command
+        assert '"$S/scripts/host_ops/tcc/helper-signing.py"' not in command
+    assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
+
+
+@pytest.mark.parametrize(
+    "dropped", ["helper", "valid", "loaded", "stale", "cert_root", "expected_hash"]
+)
+def test_a_host_that_answers_short_refuses_the_window(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str], dropped: str
+) -> None:
+    # meiva:note
+    # A probe that could not run leaves a missing or `-` value. Reading that as "nothing to do"
+    # is how a window walks past the one host it should have stopped for, so it refuses and
+    # names the host and the field it owes.
+    cluster, run = env
+    cluster.hosts["mac"]["drop_fact"] = dropped
+    assert run("down") == 2
+    assert [kind for kind, _ in cluster.effects if kind == "stop"] == []
+    out = capsys.readouterr().out
+    assert "could not read the helper facts" in out
+    assert "mac owes" in out and dropped in out
+
+
+def test_a_probe_that_could_not_run_refuses_the_window(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.hosts["lin"]["facts_rc"] = 1
+    assert run("down") == 2
+    assert [kind for kind, _ in cluster.effects if kind == "stop"] == []
+    assert "facts exit status" in capsys.readouterr().out
+
+
+def test_a_rebuilt_gateway_keeps_its_data_plane_choice(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    # meiva:note
+    # A rebuilding host gets the retirement leg, but that leg must not drop the gateway's own
+    # `--keep-infra/--stop-infra`: the data plane is not the helper's business.
+    cluster, run = env
+    cluster.hosts["gw"]["recorded_hash"] = "b" * 64
+    cluster.hosts["gw"]["loaded"] = "yes"
+    assert run("down", "--stop-extras", "--rebuild-extras") == 0
+    gateway = [c for alias, c in cluster.commands if alias == "gw" and '" stop' in c]
+    assert gateway and "--keep-infra" in gateway[0]
