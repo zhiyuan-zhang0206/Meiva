@@ -93,7 +93,18 @@ def database() -> DatabaseHandle:
     return process_context.current_context().clients.database()
 
 
-def bus() -> "EventBus":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+class _EventBus(Protocol):
+    def publish_best_effort_sync(
+        self,
+        payload: str,
+        *,
+        channel: str | None = None,
+        decode_responses: bool = True,
+        context: str = "",
+    ) -> int | None: ...
+
+
+def bus() -> _EventBus:
     """The live event bus, as this process's settings name it."""
     from base.events.live.bus import EventBus
 
