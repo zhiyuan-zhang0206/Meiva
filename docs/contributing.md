@@ -30,10 +30,14 @@ default home and can target a running deployment.
 
 ## Change and verify
 
-Implement a focused change with its related tests and current documentation. A
-notable change also carries its changelog entry as one file under `.changes/`
-(see [changelog fragments](conventions/changelog.md)); `CHANGELOG.md` is folded
-from those files at release, never appended to in a PR.
+Implement a focused change with its related tests and current documentation.
+**The change record is the history itself.** The merge queue squashes a PR into
+one commit on `main`, so its title is the entry a reader meets in `git log`, in
+the release notes page generated from a commit range (`gh compare`), and in the
+commit `git blame` lands on. That title is therefore the change record a user
+sees: write it for whoever reads it months later — what changed, and for whom —
+and let the diff and the PR description carry the detail. There is no changelog
+file to append to and no per-entry file to add.
 Keep shared facts in their owning module; use existing third-party capabilities
 rather than creating a second framework or registry. Resolve generated-file
 conflicts by regenerating from the source, not editing derived output.
@@ -105,7 +109,9 @@ design choice, discuss it with the user before changing that choice.
 ## Submit the PR
 
 Push the branch and open a PR against `main`. Explain the problem, resulting
-behavior, validation and known gaps. Use a file tree or control-flow explanation
+behavior, validation and known gaps. Its title becomes the squash commit's
+subject, so it is also the change note later readers and the release notes see;
+write it as one. Use a file tree or control-flow explanation
 when it helps readers understand a larger change; no fixed template is required.
 Address relevant CI failures and review feedback. Distinguish successful execution
 from missing, skipped or incomplete verification. Maintainers choose how to merge.

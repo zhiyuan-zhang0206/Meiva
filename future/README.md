@@ -76,7 +76,7 @@ lives with the current agent documentation; these rows track its remaining work.
 > An earlier pass (2026-07-25, Task #455) deleted di-refactor, compact-summary-guard,
 > test-env-followups, agent-label-improvements, update-failure-recovery,
 > vps-attack-surface, agent-events-stats-index, and supervision-queue, and dropped
-> the release-history dir (release history lives in the annotated git tags + `CHANGELOG.md`).
+> the release-history dir (release history lives in the annotated git tags).
 >
 > **Cleaned up 2026-09-23 (sweeper pass).** Deleted as superseded with nothing left to track: `db-write-batching` (its subject was replaced by the event-system W1 and its conclusions carried over). Status rows refreshed: `extension-ownership`, `core-package-update-channel` (P1 landed), `checkpoint-storage-rebuild` (write switch landed), `frontend-plugin-contributions`.
 >

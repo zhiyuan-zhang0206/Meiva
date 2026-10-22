@@ -65,7 +65,8 @@ What "blessed" adds (implementation slice, not new machinery):
    is FastAPI-native) and say in the docs that this is the third-party frontend
    contract.
 2. **A stability statement**, in `docs/conventions/`: additive changes are free;
-   removing or renaming a path/field gets a CHANGELOG note. No versioned API,
+   removing or renaming a path/field is called out in the PR title that does it.
+   No versioned API,
    no deprecation windows — single-digit consumers, source-visible spec, the
    codegen diff makes every contract change reviewable in the PR that makes it.
 3. **Scope**: the contract is `/api/*` (including the SSE streams — they are
