@@ -53,7 +53,10 @@ not excuse it. A name counts as bound when the module defines or imports it at i
 level (also under `if`, `try`, `for`, `with` or a walrus, or declared `global` in a
 function), is a builtin, is a submodule of the package, or is `__path__` of a package;
 a module with a module-level `__getattr__`, a star import or a `globals()` call serves
-names at run time and is not checked. An object reached through a module (a class, an
+names at run time and is not checked. When a patch targets a name that the module only
+imported from elsewhere rather than defining itself (`from a import f` patched as `b.f`),
+the diagnostic flags `(imported binding)` and instructs the caller to inject the dependency
+or patch the defining module. An object reached through a module (a class, an
 instance) is not checked, only counted.
 
 ## Recording

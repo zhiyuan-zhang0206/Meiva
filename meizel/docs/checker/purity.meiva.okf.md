@@ -1,0 +1,88 @@
+---
+type: doc
+title: "meizel/ — Purity and Bounded Container Budgets"
+description: "The three-level purity contract (none, strict-to-be, strict), the 15 deterministic purity and bounded-container rules, test purity inheritance, and policy configuration."
+tags:
+  - locality
+  - tool
+---
+
+# meizel/ — Purity and Bounded Container Budgets
+
+## Why mechanical purity and container budgets
+
+An agentic coding workflow optimizes for the shortest path to green tests. Without hard
+structural boundaries, that pressure produces module-level patching (`monkeypatch`), wide
+hub modules, pass-through wrappers, and bloated parameter lists. Ratios and heuristic scores
+are gamed by splitting functions into private helpers within the same file; only bounded
+container budgets and deterministic AST/graph rules force genuine decomposition into pure
+value transformations and thin imperative shells.
+
+## Three purity modes
+
+A manifest declares purity either for the whole directory (`purity = "strict"`) or per direct
+child under `[purity]`, with `"."` as the directory default:
+
+```toml
+[purity]
+"." = "strict-to-be"
+"model.py" = "strict"
+"scopes.py" = "strict"
+```
+
+Every Python file resolves to its nearest enclosing declaration (`none` by default):
+
+- **`none`**: only locality and patch-recording rules apply.
+- **`strict-to-be`**: all 15 purity and container-budget rules are evaluated. Existing
+  violations may be recorded in `[debt.<code>]` via `python -m meizel debt record` and can
+  only shrink (`debt-paid` fires when a recorded violation is fixed, and also when a
+  `strict-to-be` file or directory reaches zero remaining purity violations so it must be
+  promoted to `strict`).
+- **`strict`**: all 15 purity and container-budget rules are hard errors and cannot be
+  recorded as debt.
+
+Test files (`tests/**`, `test_*.py`, `*_test.py`, `conftest.py`) do not inherit a parent
+directory's module-level `strict` or `strict-to-be` mode for production-code rules, unless
+explicitly targeted. Instead, a test file whose first-party targets are all `strict` or
+`strict-to-be` is judged by the test-purity rules (`impure-test-fixture` and
+`nested-patch-target`) at the strictest shared mode (`strict-to-be` if any target is
+`strict-to-be`, otherwise `strict`).
+
+## The 15 rules
+
+| Code | Scope | What it catches |
+|---|---|---|
+| `impure-edge` | `strict`, `strict-to-be` module | Importing or reading an attribute from a first-party module whose effective purity is `none` |
+| `impure-call` | `strict`, `strict-to-be` module | `async def`, `global`, `nonlocal`, importing an effectful module (`subprocess`, `socket`, `httpx`, `requests`, `urllib`, `shutil`, `tempfile`, `ctypes`, `multiprocessing`, `signal`, plus policy `impure-imports`), or calling an ambient clock, randomness, environment, I/O or filesystem method (`time.time`, `time.monotonic`, `time.sleep`, `datetime.now`, `datetime.utcnow`, `os.environ`, `os.getenv`, `random.*`, ` secrets.*`, `uuid.uuid4`, `open`, `print`, `input`, `Path.read_text/write_text/open/exists/is_file/is_dir/mkdir/unlink/...`, plus policy `impure-calls`) |
+| `unfrozen-value` | `strict`, `strict-to-be` module | A class that is not an Enum, Exception, Protocol, TypedDict, NamedTuple, frozen `BaseModel`, or `@dataclass(frozen=True)`, or a module-level mutable literal/comprehension/call assigned to a binding |
+| `untyped-export` | `strict`, `strict-to-be` module | A public function (or exported symbol) missing parameter or return type annotations, or annotated with `Any` or bare `dict` |
+| `pass-through-function` | `strict`, `strict-to-be` module | A public undecorated function whose body only forwards its exact parameters to another function or module attribute call |
+| `nested-attr-write` | `strict`, `strict-to-be` module | Mutating state through a chained attribute (`a.b.c = x` or `self.a.b = x`, depth $\ge 2$) |
+| `domain-subset-leak` | `strict`, `strict-to-be` module | Branching on the same multi-member Enum subset (`x in {E.A, E.B}` or `case E.A \| E.B:`) across 2 or more non-test modules instead of a predicate on the Enum |
+| `stale-export` | `strict`, `strict-to-be` export | An entry in `exports` of a subpackage `meizel.toml` that no external fact edge traverses |
+| `wide-exports` | `strict`, `strict-to-be` manifest | A subpackage `meizel.toml` exporting more than `max-exports` children (default 4) |
+| `wide-fanout` | `strict`, `strict-to-be` child | A `[uses]` entry depending on more than `max-uses` sibling targets (default 8) |
+| `wide-public-surface` | `strict`, `strict-to-be` module | A module defining more than `max-public-symbols` public behavioral symbols (default 6; frozen value classes, Enums, Protocols, TypedDicts, NamedTuples and Exceptions do not count against the behavioral budget) |
+| `wide-params` | `strict`, `strict-to-be` module | A function or method taking more than `max-params` parameters excluding `self`/`cls` (default 6) |
+| `deep-attr-chain` | `strict`, `strict-to-be` module | An expression chaining more than `max-attr-hops` non-module attribute accesses (`a.b.c.d`, default 3) |
+| `impure-test-fixture` | test of `strict` / `strict-to-be` | Requesting `monkeypatch`, `mocker`, or heavy I/O fixtures configured in policy `impure-fixtures` when all first-party targets under test are `strict` or `strict-to-be` |
+| `nested-patch-target` | test of `strict` / `strict-to-be` | Patching through a multi-hop attribute chain (`monkeypatch.setattr(a.b, "c", ...)` or dotted string with $\ge 2$ attribute hops) |
+
+## Policy configuration
+
+Repository-specific additions and container budget thresholds live under `[purity]` in
+[[meizel/docs/checker/policy.meiva.okf.md|meizel.policy.toml]]:
+
+```toml
+[purity]
+impure-imports = ["psycopg", "psycopg_pool", "redis", "fastapi", "uvicorn", "aiohttp", "websockets", "starlette", "sqlalchemy", "alembic", " celery", "kombu"]
+impure-calls = ["loguru.logger.debug", "loguru.logger.info", "loguru.logger.warning", "loguru.logger.error", "loguru.logger.exception", "loguru.logger.critical", "logging.debug", "logging.info", "logging.warning", "logging.error", "logging.exception", "logging.critical"]
+impure-fixtures = ["db_session", "postgres_container", "redis_container"]
+max-uses = 8
+max-exports = 4
+max-public-symbols = 6
+max-params = 6
+max-attr-hops = 3
+```
+
+Parent: [[meizel/docs/checker/checker.meiva.okf.md|the checker]].

@@ -1,7 +1,34 @@
 exports = ["bindings.py", "fixtures.py", "mounts.py", "no_script_sibling_imports.py", "path_imports.py", "purity.py", "scan.py", "type_checking.py"]
 
+[purity]
+"." = "strict-to-be"
+"path_imports.py" = "strict"
+"purity_structure.py" = "strict"
+"python_commands.py" = "strict"
+"restricted.py" = "strict"
+"type_checking.py" = "strict"
+
 [uses]
 "purity.py" = ["purity_structure.py"]
 "python_commands.py" = ["restricted.py"]
 "scan.py" = ["bindings.py", "fixtures.py", "purity.py", "python_commands.py", "restricted.py"]
 "tests" = ["no_script_sibling_imports.py", "path_imports.py"]
+
+[debt.impure-call]
+"bindings.py#Path.read_bytes" = 1
+"bindings.py#Path.stat" = 1
+"mounts.py#Path.read_text" = 1
+"no_script_sibling_imports.py#Path.exists" = 1
+"no_script_sibling_imports.py#Path.is_dir" = 1
+"no_script_sibling_imports.py#Path.is_file" = 5
+"no_script_sibling_imports.py#Path.read_text" = 1
+"purity.py#Path.is_file" = 1
+"purity.py#Path.read_text" = 1
+"scan.py#Path.read_bytes" = 1
+
+[debt.wide-exports]
+"meizel.toml#exports" = 1
+
+[debt.wide-public-surface]
+"fixtures.py#public-surface" = 1
+"purity.py#public-surface" = 1

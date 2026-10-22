@@ -1,4 +1,16 @@
 exports = ["ambient_state", "machine_role.py", "no_os_environ.py", "turn_scoped_config.py"]
 
+[purity]
+"." = "strict-to-be"
+"machine_role.py" = "strict"
+
 [uses]
 "tests" = ["no_os_environ.py", "turn_scoped_config.py"]
+
+[debt.impure-call]
+"no_os_environ.py#Path.exists" = 1
+"no_os_environ.py#Path.is_dir" = 2
+"no_os_environ.py#Path.is_file" = 1
+"no_os_environ.py#Path.read_text" = 1
+"turn_scoped_config.py#Path.exists" = 1
+"turn_scoped_config.py#Path.read_text" = 1

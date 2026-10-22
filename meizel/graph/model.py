@@ -73,6 +73,10 @@ class Code(StrEnum):
     NESTED_PATCH_TARGET = "nested-patch-target"
     DOMAIN_SUBSET_LEAK = "domain-subset-leak"
     WIDE_FANOUT = "wide-fanout"
+    WIDE_EXPORTS = "wide-exports"
+    WIDE_PUBLIC_SURFACE = "wide-public-surface"
+    WIDE_PARAMS = "wide-params"
+    DEEP_ATTR_CHAIN = "deep-attr-chain"
 
 
 @dataclass(frozen=True, slots=True)

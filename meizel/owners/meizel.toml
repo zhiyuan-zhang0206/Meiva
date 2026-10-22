@@ -1,7 +1,15 @@
+purity = "strict-to-be"
 exports = ["clock_lattice.py", "decisions.py"]
 
 [uses]
 "tests" = ["clock_lattice.py", "decisions.py"]
+
+[debt.impure-call]
+"clock_lattice.py#Path.exists" = 1
+"clock_lattice.py#Path.is_dir" = 1
+"clock_lattice.py#Path.is_file" = 3
+"clock_lattice.py#Path.read_text" = 3
+"decisions.py#Path.is_file" = 1
 
 [debt.private-name]
 "tests/test_lint_clock_lattice.py -> clock_lattice.py#_REPO_ROOT" = 5

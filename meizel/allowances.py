@@ -58,6 +58,10 @@ RULES: dict[str, dict[str, str]] = {
         "impure-calls": NAMES,
         "impure-fixtures": NAMES,
         "max-uses": NAMES,
+        "max-exports": NAMES,
+        "max-public-symbols": NAMES,
+        "max-params": NAMES,
+        "max-attr-hops": NAMES,
     },
 }
 PER_NAME = frozenset({"single-owner"})
@@ -130,7 +134,7 @@ def _rule(rule: str, table: object, policy: Policy, problems: list[str]) -> None
         elif shape == NAMES:
             if (
                 rule == "purity"
-                and section == "max-uses"
+                and section.startswith("max-")
                 and isinstance(value, int)
                 and not isinstance(value, bool)
                 and value >= 1

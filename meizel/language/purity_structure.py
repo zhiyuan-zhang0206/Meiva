@@ -5,10 +5,11 @@ import ast
 from meizel.graph.model import Code, EnumSubsetUse, PurityItem
 
 __all__ = [
-    "finalize_subsets",
     "record_attr_write",
     "record_enum_subsets",
+    "record_module_structure",
     "record_nested_patch",
+    "record_params",
     "record_pass_through",
 ]
 
@@ -21,6 +22,32 @@ _NESTED_ATTR_WRITE_HINT = (
 )
 _NESTED_PATCH_HINT = (
     "inject the collaborator directly instead of patching through an attribute chain"
+)
+_WIDE_PUBLIC_SURFACE_HINT = (
+    "split the module into smaller cohesive modules or mark internal helpers private with `_`"
+)
+_WIDE_PARAMS_HINT = "group cohesive parameters into a `@dataclass(frozen=True)` value object"
+_DEEP_ATTR_CHAIN_HINT = (
+    "ask the immediate collaborator for the value via a method or pass only the needed slice"
+)
+_DATA_BASES = frozenset(
+    {
+        "Enum",
+        "StrEnum",
+        "IntEnum",
+        "Flag",
+        "IntFlag",
+        "Protocol",
+        "TypedDict",
+        "NamedTuple",
+        "BaseModel",
+        "Exception",
+        "RuntimeError",
+        "ValueError",
+        "KeyError",
+        "LookupError",
+        "TypeError",
+    }
 )
 
 
@@ -55,15 +82,12 @@ def _forwarded_args(call: ast.Call) -> list[str] | None:
     return out
 
 
-def _body_without_docstring(body: list[ast.stmt]) -> list[ast.stmt]:
-    if (
-        body
-        and isinstance(body[0], ast.Expr)
-        and isinstance(body[0].value, ast.Constant)
-        and isinstance(body[0].value.value, str)
-    ):
-        return body[1:]
-    return body
+def _body_without_docstring(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[ast.stmt]:
+    if ast.get_docstring(node, clean=False) is not None:
+        return node.body[1:]
+    return node.body
 
 
 def record_pass_through(
@@ -72,10 +96,15 @@ def record_pass_through(
 ) -> None:
     if node.name.startswith(("_", "test_")) or node.decorator_list:
         return
-    stmts = _body_without_docstring(node.body)
+    stmts = _body_without_docstring(node)
     if len(stmts) != 1 or not isinstance(stmts[0], ast.Return):
         return
     if not isinstance(stmts[0].value, ast.Call):
+        return
+    func = stmts[0].value.func
+    if not isinstance(func, ast.Name) and not (
+        isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+    ):
         return
     expected = _expected_params(node.args)
     forwarded = _forwarded_args(stmts[0].value)
@@ -186,7 +215,173 @@ def record_enum_subsets(subsets: list[EnumSubsetUse], node: ast.Compare) -> None
             subsets.append(EnumSubsetUse(node.lineno, next(iter(cls_names)), members))
 
 
-def finalize_subsets(
-    subsets: list[EnumSubsetUse], defined_classes: set[str]
-) -> list[EnumSubsetUse]:
-    return [u for u in subsets if u.cls_name not in defined_classes]
+def _decorator_tail(expr: ast.expr) -> str:
+    target = expr.func if isinstance(expr, ast.Call) else expr
+    if isinstance(target, ast.Name):
+        return target.id
+    if isinstance(target, ast.Attribute):
+        return target.attr
+    return ""
+
+
+def _is_overload(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    return any(_decorator_tail(d) == "overload" for d in node.decorator_list)
+
+
+def record_params(
+    items: list[PurityItem],
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    max_params: int,
+) -> None:
+    if _is_overload(node):
+        return
+    args = node.args
+    params = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+    if params and params[0].arg in {"self", "cls"}:
+        params = params[1:]
+    total = len(params) + (1 if args.vararg else 0) + (1 if args.kwarg else 0)
+    if total > max_params:
+        items.append(
+            PurityItem(
+                node.lineno,
+                Code.WIDE_PARAMS,
+                f"def {node.name}",
+                f"function `{node.name}` has {total} parameters (max {max_params} in strict mode)",
+                _WIDE_PARAMS_HINT,
+            )
+        )
+
+
+def _base_tail(expr: ast.expr) -> str:
+    target = expr.value if isinstance(expr, ast.Subscript) else expr
+    if isinstance(target, ast.Name):
+        return target.id
+    if isinstance(target, ast.Attribute):
+        return target.attr
+    return ""
+
+
+def _is_frozen_dataclass(node: ast.ClassDef) -> bool:
+    for deco in node.decorator_list:
+        if (
+            isinstance(deco, ast.Call)
+            and _decorator_tail(deco) == "dataclass"
+            and any(
+                k.arg == "frozen" and isinstance(k.value, ast.Constant) and k.value.value is True
+                for k in deco.keywords
+            )
+        ):
+            return True
+    return False
+
+
+def _is_exempt_class(node: ast.ClassDef) -> bool:
+    if _is_frozen_dataclass(node) or node.name.endswith(("Error", "Exception")):
+        return True
+    for base in node.bases:
+        tail = _base_tail(base)
+        if tail in _DATA_BASES or tail.endswith(("Error", "Exception")):
+            return True
+    return False
+
+
+def _count_public_behavioral(tree: ast.Module) -> int:
+    count = 0
+    for stmt in tree.body:
+        if (
+            isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
+            and not stmt.name.startswith("_")
+            and not _is_overload(stmt)
+        ) or (
+            isinstance(stmt, ast.ClassDef)
+            and not stmt.name.startswith("_")
+            and not _is_exempt_class(stmt)
+        ):
+            count += 1
+    return count
+
+
+def _attr_parts(node: ast.Attribute) -> tuple[str, list[str]] | None:
+    attrs: list[str] = []
+    curr: ast.expr = node
+    while isinstance(curr, ast.Attribute):
+        attrs.append(curr.attr)
+        curr = curr.value
+    if not isinstance(curr, ast.Name):
+        return None
+    attrs.reverse()
+    return curr.id, attrs
+
+
+def _imported_module_prefixes(tree: ast.Module) -> set[str]:
+    prefixes: set[str] = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            for alias in n.names:
+                if alias.asname is None and "." in alias.name:
+                    parts = alias.name.split(".")
+                    for k in range(2, len(parts) + 1):
+                        prefixes.add(".".join(parts[:k]))
+    return prefixes
+
+
+def _strip_module_hops(root_name: str, attrs: list[str], prefixes: set[str]) -> list[str]:
+    parts = [root_name, *attrs]
+    for k in range(len(parts), 1, -1):
+        if ".".join(parts[:k]) in prefixes:
+            return parts[k:]
+    return attrs
+
+
+def _record_deep_attr_chains(
+    items: list[PurityItem],
+    tree: ast.Module,
+    max_attr_hops: int,
+) -> None:
+    prefixes = _imported_module_prefixes(tree)
+    parent_values = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    call_funcs = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    for n in ast.walk(tree):
+        if (
+            not isinstance(n, ast.Attribute)
+            or not isinstance(n.ctx, ast.Load)
+            or id(n) in parent_values
+        ):
+            continue
+        chain = _attr_parts(n)
+        if chain is None:
+            continue
+        root_name, attrs = chain
+        eff = attrs[:-1] if id(n) in call_funcs else attrs
+        eff = _strip_module_hops(root_name, eff, prefixes)
+        if len(eff) > max_attr_hops:
+            full = ".".join([root_name, *attrs])
+            items.append(
+                PurityItem(
+                    n.lineno,
+                    Code.DEEP_ATTR_CHAIN,
+                    full,
+                    f"attribute chain `{full}` has {len(eff)} hops (max {max_attr_hops} in strict mode)",
+                    _DEEP_ATTR_CHAIN_HINT,
+                )
+            )
+
+
+def record_module_structure(
+    items: list[PurityItem],
+    tree: ast.Module,
+    max_public_symbols: int,
+    max_attr_hops: int,
+) -> None:
+    public_count = _count_public_behavioral(tree)
+    if public_count > max_public_symbols:
+        items.append(
+            PurityItem(
+                1,
+                Code.WIDE_PUBLIC_SURFACE,
+                "public-surface",
+                f"module defines {public_count} public behavioral symbols (max {max_public_symbols} in strict mode)",
+                _WIDE_PUBLIC_SURFACE_HINT,
+            )
+        )
+    _record_deep_attr_chains(items, tree, max_attr_hops)

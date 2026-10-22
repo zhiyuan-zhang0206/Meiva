@@ -9,10 +9,11 @@ from pathlib import Path
 from meizel import allowances
 from meizel.graph.model import Code, EnumSubsetUse, PurityItem
 from meizel.language.purity_structure import (
-    finalize_subsets,
     record_attr_write,
     record_enum_subsets,
+    record_module_structure,
     record_nested_patch,
+    record_params,
     record_pass_through,
 )
 
@@ -32,6 +33,7 @@ __all__ = [
     "record_function",
     "record_import",
     "record_import_from",
+    "record_module",
     "record_nested_patch",
 ]
 
@@ -136,10 +138,13 @@ _UNFROZEN_HINT = "use `@dataclass(frozen=True)` so value objects in strict modul
 _UNTYPED_HINT = "annotate public parameters and return types with concrete types or typed dataclasses instead of `Any` or bare `dict`"
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class PurityState:
     impure_imports: frozenset[str]
     impure_calls: frozenset[str]
+    max_public_symbols: int = 6
+    max_params: int = 6
+    max_attr_hops: int = 3
     items: list[PurityItem] = field(default_factory=list[PurityItem])
     env_lines: set[int] = field(default_factory=set[int])
     path_vars: set[str] = field(default_factory=set[str])
@@ -147,20 +152,41 @@ class PurityState:
     defined_classes: set[str] = field(default_factory=set[str])
 
 
+def finalize_subsets(
+    subsets: list[EnumSubsetUse], defined_classes: set[str]
+) -> list[EnumSubsetUse]:
+    return [u for u in subsets if u.cls_name not in defined_classes]
+
+
+def _policy_int(policy: allowances.Policy, section: str, default: int) -> int:
+    vals = policy.names("purity", section)
+    return int(vals[0]) if vals and vals[0].isdigit() else default
+
+
 @cache
-def _rules_for_root(root: Path) -> tuple[frozenset[str], frozenset[str]]:
+def _rules_for_root(root: Path) -> tuple[frozenset[str], frozenset[str], int, int, int]:
     path = root / allowances.POLICY
     if not path.is_file():
-        return DEFAULT_IMPURE_IMPORTS, DEFAULT_IMPURE_CALLS
+        return DEFAULT_IMPURE_IMPORTS, DEFAULT_IMPURE_CALLS, 6, 6, 3
     policy, _ = allowances.parse(path.read_text(encoding="utf-8"))
     imports = DEFAULT_IMPURE_IMPORTS | frozenset(policy.names("purity", "impure-imports"))
     calls = DEFAULT_IMPURE_CALLS | frozenset(policy.names("purity", "impure-calls"))
-    return imports, calls
+    return (
+        imports,
+        calls,
+        _policy_int(policy, "max-public-symbols", 6),
+        _policy_int(policy, "max-params", 6),
+        _policy_int(policy, "max-attr-hops", 3),
+    )
 
 
 def make_state(root: Path) -> PurityState:
-    imports, calls = _rules_for_root(root)
-    return PurityState(imports, calls)
+    imports, calls, max_pub, max_params, max_hops = _rules_for_root(root)
+    return PurityState(imports, calls, max_pub, max_params, max_hops)
+
+
+def record_module(state: PurityState, tree: ast.Module) -> None:
+    record_module_structure(state.items, tree, state.max_public_symbols, state.max_attr_hops)
 
 
 def record_import(state: PurityState, node: ast.Import) -> None:
@@ -250,6 +276,7 @@ def record_function(
                 _ASYNC_HINT,
             )
         )
+    record_params(state.items, node, state.max_params)
     if not top_level or node.name.startswith("_"):
         return
     record_pass_through(state.items, node)

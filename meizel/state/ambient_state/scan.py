@@ -392,7 +392,7 @@ def class_hits(cls: ast.ClassDef, qualname: str) -> list[Hit]:
 # ── the scoped walk: global rebinds, foreign rebinds, mutations, background work ──
 
 
-@dataclass
+@dataclass(frozen=True)
 class _Frame:
     name: str
     is_function: bool

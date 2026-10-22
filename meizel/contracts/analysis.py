@@ -35,7 +35,7 @@ _PARALLEL_FROM = 200
 _WORKER: dict[str, Universe] = {}
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class Analysis:
     """Everything one run found.
 
@@ -243,7 +243,7 @@ def _stale_edges(
     ]
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class StaleDeclarations:
     """Declared edges, loads and externals that nothing needs; only a whole run knows them."""
 

@@ -27,7 +27,7 @@ Sites = dict[str, list[int]]
 _POLICY = allowances.load(Path(__file__).resolve().parents[2])
 
 
-@dataclass
+@dataclass(frozen=True)
 class _DialBindings:
     """Local names bound to psycopg / psycopg_pool entry points in one module."""
 

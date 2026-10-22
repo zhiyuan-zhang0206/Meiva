@@ -507,3 +507,7 @@ impure-fixtures = [
     "redis_url",
 ]
 max-uses = ["8"]
+max-exports = ["4"]
+max-public-symbols = ["6"]
+max-params = ["6"]
+max-attr-hops = ["3"]
