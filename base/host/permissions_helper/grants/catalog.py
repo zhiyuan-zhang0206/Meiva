@@ -160,7 +160,40 @@ APP_MANAGEMENT_ITEM = PermissionItem(
     services=("kTCCServiceSystemPolicyAppBundles",),
 )
 
-DESKTOP_ITEMS: tuple[PermissionItem, ...] = (SCREEN_ITEM, ACCESSIBILITY_ITEM, APP_MANAGEMENT_ITEM)
+# meiva:note
+# No request path exists for this row, and the obstacle is the platform: macOS exposes no
+# `TCCAccessRequest` for `kTCCServiceLocalNetwork`, so the system writes the row the first
+# time the helper itself sends local-network traffic -- which on this cluster is every
+# tailnet (100.64/10) connection. A LIVE_EVENT row is reported, never read:
+# `probe.grant_for` answers UNKNOWN for it, which does not block the gate, and no helper
+# capability can report it before that first packet (#5541).
+# meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
+LOCAL_NETWORK_ITEM = PermissionItem(
+    id="local-network",
+    group="desktop",
+    title="Local network",
+    why=(
+        "Reach the other machines: every cluster call targets a tailnet 100.64/10 address,"
+        " which macOS counts as the local network, and with this grant off it refuses those"
+        " connections without showing a dialog of its own."
+    ),
+    mode=RequestMode.LIVE_EVENT,
+    pane="Privacy_LocalNetwork",
+    verify=(
+        "Privacy & Security > Local Network lists Meiva with the switch on. macOS shows the"
+        " prompt the first time the helper itself sends local-network traffic; no API asks"
+        " for it, so a fresh install may read this row as not readable yet. If cross-machine"
+        " calls fail while every other row is green, check this one first."
+    ),
+    services=("kTCCServiceLocalNetwork",),
+)
+
+DESKTOP_ITEMS: tuple[PermissionItem, ...] = (
+    SCREEN_ITEM,
+    ACCESSIBILITY_ITEM,
+    APP_MANAGEMENT_ITEM,
+    LOCAL_NETWORK_ITEM,
+)
 
 REPORT_ONLY_ITEMS: tuple[PermissionItem, ...] = (
     PermissionItem(
