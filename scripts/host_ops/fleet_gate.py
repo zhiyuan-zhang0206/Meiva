@@ -95,14 +95,38 @@ def probe_host(s: Runner, alias: str) -> tuple[dict[str, str], bool]:
 
 
 # meiva:note
-# The helper facts of the commit the wave switches to, read on that host by the module that
-# owns what a helper's identity and build are. This side only compares strings it was handed.
+# The helper facts of the commit the wave switches to, read by that commit's own module: the
+# script and the package it imports are extracted from NEW's objects, because the installed
+# checkout is the OLD commit and on a first wave does not carry this command at all.
 def probe_helper(s: Runner, alias: str, new: str) -> dict[str, str]:
     script = (
-        f'{_HOME}; "$S/.venv/bin/python" "$S/scripts/host_ops/tcc/helper-signing.py" '
-        f"facts --rev {shlex.quote(new)} 2>/dev/null | sed 's/^/h_/'"
+        f"{_HOME}\n"
+        "tmp=$(mktemp -d)\n"
+        f'git -C "$S" archive {shlex.quote(new)} | tar -x -C "$tmp"\n'
+        'out=$(cd "$tmp" && PYTHONPATH="$tmp" "$S/.venv/bin/python" '
+        '"$tmp/scripts/host_ops/tcc/helper-signing.py" facts 2>&1); rc=$?\n'
+        'echo "h_rc=$rc"\n'
+        "printf '%s\\n' \"$out\" | sed 's/^/h_/'\n"
+        'rm -rf "$tmp"'
     )
     return facts_of(s.run(alias, script, effect=False))
+
+
+# meiva:note
+# The facts every host must answer for the gate to judge it. A missing, empty or `-` value is
+# how a probe that could not run reads, so it refuses instead of passing for "nothing to do".
+REQUIRED_FACTS = ("helper", "valid", "loaded", "stale", "cert_root", "expected_hash")
+
+
+def unreadable_facts(facts: dict[str, str]) -> list[str]:
+    bad = [name for name in REQUIRED_FACTS if facts.get(f"h_{name}", "") in ("", "-")]
+    if facts.get("h_rc", "") != "0":
+        bad.insert(0, "facts exit status")
+    return bad
+
+
+def needs_rebuild(facts: dict[str, str]) -> bool:
+    return facts.get("h_stale") != "no" or facts.get("h_valid") != "yes"
 
 
 # meiva:note
@@ -134,19 +158,14 @@ def _baseline_refusals(probes: dict[str, dict[str, str]], table: dict[str, str])
 def _stale_refusals(
     probes: dict[str, dict[str, str]], table: dict[str, str], *, rebuild: bool
 ) -> list[str]:
-    blocked = [
-        alias
-        for alias, facts in probes.items()
-        if facts.get("h_helper") == "present"
-        and facts.get("h_stale") != "no"
-        and facts.get("h_loaded") == "yes"
-    ]
+    blocked = _blocked(probes)
     if not blocked or rebuild:
         return []
     rows = "\n  ".join(
         f"{alias} recorded_hash={facts.get('h_recorded_hash')} "
         f"expected_hash={facts.get('h_expected_hash')} loaded={facts.get('h_loaded')} "
-        f"stale={facts.get('h_stale')} cert_root={facts.get('h_cert_root')} "
+        f"stale={facts.get('h_stale')} valid={facts.get('h_valid')} "
+        f"cert_root={facts.get('h_cert_root')} "
         f"vs baseline={table.get(alias, 'MISSING')}"
         for alias, facts in probes.items()
     )
@@ -160,25 +179,19 @@ def _stale_refusals(
 
 
 # meiva:note
-# Every reason the helper state refuses this window: an unreadable hash, a certificate the fleet
-# does not record for that host, a host with no baseline, or a loaded helper the target commit
-# would rebuild. A dry run has not fetched the target commit yet and says so instead of refusing.
+# Every reason the helper state refuses this window: a host that could not answer (naming the
+# fields it owes), a certificate the fleet does not record for that host, a host with no
+# baseline, or a loaded helper the target commit would rebuild or re-sign.
 def refusals(
-    probes: dict[str, dict[str, str]],
-    table: dict[str, str],
-    *,
-    rebuild: bool,
-    dry_run: bool,
+    probes: dict[str, dict[str, str]], table: dict[str, str], *, rebuild: bool
 ) -> list[str]:
-    unreadable = [
-        alias for alias, facts in probes.items() if facts.get("h_expected_hash", "-") == "-"
-    ]
+    short = {alias: unreadable_facts(facts) for alias, facts in probes.items()}
+    short = {alias: names for alias, names in short.items() if names}
     reasons: list[str] = []
-    if unreadable and not dry_run:
-        reasons.append(
-            "could not read the helper hash of the target commit on: " + ", ".join(unreadable)
-        )
-    readable = {a: p for a, p in probes.items() if a not in unreadable}
+    if short:
+        detail = "; ".join(f"{alias} owes {', '.join(names)}" for alias, names in short.items())
+        reasons.append(f"could not read the helper facts of the target commit on: {detail}")
+    readable = {a: p for a, p in probes.items() if a not in short}
     return [
         *reasons,
         *_baseline_refusals(readable, table),
@@ -189,8 +202,14 @@ def refusals(
 def rebuilding_hosts(probes: dict[str, dict[str, str]], *, rebuild: bool) -> set[str]:
     if not rebuild:
         return set()
-    return {
+    return {alias for alias, facts in probes.items() if needs_rebuild(facts)}
+
+
+def _blocked(probes: dict[str, dict[str, str]]) -> list[str]:
+    return [
         alias
         for alias, facts in probes.items()
-        if facts.get("h_stale") != "no" and facts.get("h_loaded") == "yes"
-    }
+        if facts.get("h_helper") == "present"
+        and facts.get("h_loaded") == "yes"
+        and needs_rebuild(facts)
+    ]

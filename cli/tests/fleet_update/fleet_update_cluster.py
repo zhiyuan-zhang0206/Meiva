@@ -191,7 +191,7 @@ class Cluster:
             if journal is not None:
                 emit(json.dumps(journal))
             return 0
-        if "helper-signing.py" in command and "facts --rev" in command:
+        if "helper-signing.py" in command and " facts" in command:
             emit(self._helper_facts(alias, host))
             return 0
         if "converge-incomplete.json" in command:
@@ -222,7 +222,7 @@ class Cluster:
     # the owner module would report it, so no assertion needs a real machine.
     def _helper_facts(self, alias: str, host: dict[str, Any]) -> str:
         helper = host.get("helper", "present")
-        lines = [f"h_helper={helper}"]
+        lines = [f"h_rc={host.get('facts_rc', 0)}", f"h_helper={helper}"]
         if helper != "present":
             return "\n".join(lines)
         facts = {
@@ -237,7 +237,10 @@ class Cluster:
         lines.append(
             "h_stale=no" if facts["recorded_hash"] == facts["expected_hash"] else "h_stale=yes"
         )
-        return "\n".join(lines)
+        dropped = host.get("drop_fact")
+        return "\n".join(
+            line for line in lines if dropped is None or not line.startswith(f"h_{dropped}=")
+        )
 
     def _incomplete(self, alias: str, emit: Callable[[str], None]) -> int:
         recorded = self.incomplete.get(alias)
