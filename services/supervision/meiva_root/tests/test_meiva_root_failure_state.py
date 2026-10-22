@@ -418,7 +418,9 @@ async def test_a_unit_that_answers_inside_the_window_cancels_the_restart(
     # The opening line names the window it granted; the closing one names the wait that
     # actually happened, which is why they are not the same number.
     assert held[0]["waited_s"] == 1.0
-    assert 0.0 < held[1]["waited_s"] < 1.0
+    waited = held[1]["waited_s"]
+    assert isinstance(waited, float)
+    assert 0.0 < waited < 1.0
     await monitor.run_round()
     assert supervisor.restart_calls == []
     assert len(recorder.events(LEASE_EVENT)) == 2
