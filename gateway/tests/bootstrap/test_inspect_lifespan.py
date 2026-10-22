@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from base.host.system.hostport import Host
 from gateway import app as gateway_app
 from gateway.http.config import gateway_config_from_boot
-from tests.fixtures.gateway_config import gateway_test_process
+from gateway.tests.auth.gateway_config import gateway_test_process
 
 
 async def test_lifespan_waits_for_cancelled_request_sql_before_pool_close(

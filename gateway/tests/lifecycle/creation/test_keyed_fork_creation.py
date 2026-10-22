@@ -10,11 +10,11 @@ from psycopg.types.json import Jsonb
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
+from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, PATH
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from gateway.tests.lifecycle.creation.test_sdk_strong_creation import httpx_response_of, sdk
 from meiva.gateway_client import use_client
-from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 
 def _checkpoint(conn: psycopg.Connection, agent_id: int, checkpoint_id: str) -> None:

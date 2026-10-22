@@ -109,7 +109,7 @@ def test_a_label_the_agent_sets_while_borrowed_lands_in_its_lease_log(
     lease: dict[str, Any],
     machine_identity: MachineIdentity,
 ) -> None:
-    from tests.fixtures.gateway_config import gateway_test_client
+    from gateway.tests.auth.gateway_config import gateway_test_client
 
     with gateway_test_client(machine=machine_identity) as client:
         by_agent = client.patch(

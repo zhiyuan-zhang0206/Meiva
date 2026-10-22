@@ -1,7 +1,7 @@
-"""Fresh-interpreter env/config import probes; never imported by a production entry.
-
-Run as ``python [-I] _env_import_child.py <scenario>`` with the environment prepared by the test.
-"""
+# meiva:note
+# Fresh-interpreter env/config import probes; never imported by a production entry.
+#
+# Run as ``python [-I] _env_import_child.py <scenario>`` with the environment prepared by the test.
 
 from __future__ import annotations
 
@@ -15,11 +15,12 @@ def forwarded_timezone() -> None:
 
 
 def registry_imports_first() -> None:
-    import base.host.env.registry  # pyright: ignore[reportUnusedImport]
+    import base.host.env.registry
 
-    # isort: split
-    import base.config  # noqa: F401  # pyright: ignore[reportUnusedImport]
+    _ = base.host.env.registry
+    import base.config
 
+    _ = base.config
     sys.stdout.write("ok\n")
 
 

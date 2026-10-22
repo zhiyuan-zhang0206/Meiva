@@ -12,9 +12,9 @@ from base.telemetry import EventPipeline
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_materialization_is_not_a_converge_step() -> None:

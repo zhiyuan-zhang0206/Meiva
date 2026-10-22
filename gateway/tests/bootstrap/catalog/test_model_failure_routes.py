@@ -9,7 +9,7 @@ from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
 from base.paths import plugins_dir
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 
 
 @pytest.fixture

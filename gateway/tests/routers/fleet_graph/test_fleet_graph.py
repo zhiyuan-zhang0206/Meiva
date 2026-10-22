@@ -24,9 +24,9 @@ from psycopg import errors as pg_errors
 
 from base.events.live.tests.fakes import patch_sync_redis
 from base.events.reads import audit_rows
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.fleet_graph.staleness_support import use_heartbeat_age
 from services.upkeep.events_maintenance import rollup
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _seed_agent(

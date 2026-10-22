@@ -17,6 +17,7 @@ __all__ = [
     "Inputs",
     "Source",
     "Unresolved",
+    "file_ascents",
     "import_facts",
     "inputs",
     "is_launcher",
@@ -465,3 +466,51 @@ class _ImportFacts(ast.NodeVisitor):
                     )
                 )
         self.generic_visit(node)
+
+
+# meiva:note
+# Extract the trailing identifier from a Name or Attribute expression.
+def _last_name(node: ast.expr) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    return node.attr if isinstance(node, ast.Attribute) else ""
+
+
+def _plus(base: int | None, extra: int) -> int | None:
+    return None if base is None else base + extra
+
+
+def _ascents_of_call(node: ast.Call, is_path: Callable[[ast.expr], bool] | None) -> int | None:
+    name = _last_name(node.func)
+    if (is_path(node.func) if is_path else name == "Path") and len(node.args) == 1:
+        arg = node.args[0]
+        return 0 if isinstance(arg, ast.Name) and arg.id == "__file__" else None
+    if name in ("resolve", "absolute") and not node.args and isinstance(node.func, ast.Attribute):
+        return file_ascents(node.func.value, is_path)
+    return None
+
+
+def _ascents_of_parents(
+    node: ast.Subscript, is_path: Callable[[ast.expr], bool] | None
+) -> int | None:
+    parents, index = node.value, node.slice
+    if (
+        isinstance(parents, ast.Attribute)
+        and parents.attr == "parents"
+        and isinstance(index, ast.Constant)
+        and isinstance(index.value, int)
+    ):
+        return _plus(file_ascents(parents.value, is_path), index.value + 1)
+    return None
+
+
+# meiva:note
+# Count how many directories above the file `Path(__file__)...` climbs, or None.
+def file_ascents(node: ast.AST, is_path: Callable[[ast.expr], bool] | None = None) -> int | None:
+    if isinstance(node, ast.Call):
+        return _ascents_of_call(node, is_path)
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        return _plus(file_ascents(node.value, is_path), 1)
+    if isinstance(node, ast.Subscript):
+        return _ascents_of_parents(node, is_path)
+    return None

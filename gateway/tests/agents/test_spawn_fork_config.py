@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import psycopg
 
-from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 
 
 def _checkpoint(conn: psycopg.Connection, agent_id: int) -> str:

@@ -21,7 +21,7 @@ from base.config import field_names, settings
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import DEFAULT_TUNING, ModelSpec, ModelTuning, tuning_field_names
 from base.packages.tests.model_catalog import AddModels
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 TUNED_MODEL = "test-tuned-model"
 

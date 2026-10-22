@@ -4,7 +4,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any
 
 from base.api_contracts import contracts
-from tests.fixtures.gateway_config import gateway_test_app
+from gateway.tests.auth.gateway_config import gateway_test_app
 
 
 def _iter_effective_routes(routes: Iterable[Any]) -> Iterator[Any]:

@@ -25,7 +25,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.agents import forward as forward_module
 from gateway.agents import lifecycle as lifecycle_module
-from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 
 
 @pytest.fixture

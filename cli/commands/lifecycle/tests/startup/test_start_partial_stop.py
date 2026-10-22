@@ -15,11 +15,11 @@ from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as stop
 from cli.commands.lifecycle import service_stop
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def _port_always_free(_port: int) -> bool:

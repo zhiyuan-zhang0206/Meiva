@@ -13,11 +13,7 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
-from cli.commands.extensions import external_skills as bridge
-from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
-from cli.database.tests.command_inputs import command_config_machine as command_config_machine
-from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.factories.external_skills import (
+from cli.commands.converge.tests.external_skills import (
     SKILL,
     client_home,
     read_ledger,
@@ -25,8 +21,12 @@ from tests.factories.external_skills import (
     skill_source,
     target_path,
 )
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
+from cli.commands.extensions import external_skills as bridge
+from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
+from cli.database.tests.command_inputs import command_config_machine as command_config_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 @pytest.fixture(autouse=True)

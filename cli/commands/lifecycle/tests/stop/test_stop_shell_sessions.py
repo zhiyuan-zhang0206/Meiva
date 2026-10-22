@@ -58,12 +58,12 @@ from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_service
 from cli.commands.lifecycle.tests.stop.stop_support import written as written
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 # meiva:note
 # The idle test's own prompt, set by its home's `.bash_profile`.

@@ -9,8 +9,8 @@ from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from gateway.agents import creation as agent_creation
+from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 @pytest.fixture

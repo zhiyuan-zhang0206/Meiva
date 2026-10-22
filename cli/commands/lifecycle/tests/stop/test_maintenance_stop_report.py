@@ -34,9 +34,9 @@ from cli.commands.lifecycle.tests.stop.stop_support import (
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
 from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop.stop_support import written as written
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 pytestmark = [
     pytest.mark.usefixtures("written"),

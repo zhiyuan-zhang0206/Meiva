@@ -1,4 +1,4 @@
-"tests.path_scoped.cli_tests" = [
+"cli.database.tests.cli_tests" = [
     "test_python_install.py",
     "test_redis_binary_selection.py",
     "test_start_identity.py",

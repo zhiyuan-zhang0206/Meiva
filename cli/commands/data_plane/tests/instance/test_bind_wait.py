@@ -18,10 +18,10 @@ from cli.commands.data_plane.tests.instance.bind_support import (
     config_boot_environment as config_boot_environment,
 )
 from cli.commands.data_plane.tests.instance.bind_support import native_ownership as native_ownership
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_macos_redis_binaries_use_versioned_formula(

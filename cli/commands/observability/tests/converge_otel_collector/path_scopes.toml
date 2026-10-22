@@ -1,1 +1,1 @@
-"tests.path_scoped.cli_tests" = ["."]
+"cli.database.tests.cli_tests" = ["."]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import subprocess
 import sys
+from pathlib import Path
 
 __all__ = ["relay_argv", "spawn_codex_relay"]
 
@@ -24,9 +25,7 @@ def relay_argv(
     antigravity_endpoint_file: str | None = None,
 ) -> list[str]:
     argv = [
-        sys.executable,
-        "-m",
-        "cli",
+        str(Path(sys.executable).with_name("meiva")),
         "impersonate",
         "relay",
         str(agent_id),

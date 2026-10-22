@@ -23,8 +23,8 @@ from gateway.cluster import status as status_router
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import StatusCache
+from gateway.tests.auth.gateway_config import gateway_test_client
 from ops.cluster import rpc as cluster_rpc
-from tests.fixtures.gateway_config import gateway_test_client
 
 _OPS_URL = "http://runner-a:18121"
 

@@ -20,7 +20,7 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT
 from typing import Any, cast
 
-from scripts.host_ops.fleet_gate import (
+from .fleet_gate import (
     REBUILD_STOP,
     baselines,
     failed_stop,
@@ -31,15 +31,15 @@ from scripts.host_ops.fleet_gate import (
     refusals,
     stop_completed,
 )
-from scripts.host_ops.fleet_verify import POLL_S as POLL_S
-from scripts.host_ops.fleet_verify import (
+from .fleet_verify import POLL_S as POLL_S
+from .fleet_verify import (
     FailedError,
     HostFailure,
     outcome,
     verify,
 )
 
-REPO = REPO_CODE = Path(__file__).resolve().parents[1]
+REPO = REPO_CODE = Path(__file__).resolve().parents[2]
 HOME = 'H="$HOME/.meiva"; S="$H/source"; cd "$S" || exit 1'
 MEIVA = 'MEIVA_HOME="$H" "$S/.venv/bin/meiva"'
 _PYTHON = f'{HOME}; MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
@@ -77,7 +77,9 @@ _SECRETS = (
 )
 
 
-VERIFY_SCRIPTS = Path(__file__).parent / "commands" / "management"
+VERIFY_SCRIPTS = Path(__file__).resolve().parents[1] / "commands" / "management"
+CHECK_ROWS_SCRIPT = Path(__file__).with_name("schedules_verify_check_rows.py")
+ALERT_SILENCE_SCRIPT = Path(__file__).resolve().parents[1] / "fleet_alert_silence.py"
 
 
 def program_text(path: Path) -> str:
@@ -202,7 +204,7 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
             home=HOME,
             new=new,
             read_rows=shlex.quote(program_text(VERIFY_SCRIPTS / "schedules_verify_read_rows.py")),
-            check_rows=shlex.quote(program_text(VERIFY_SCRIPTS / "schedules_verify_check_rows.py")),
+            check_rows=shlex.quote(program_text(CHECK_ROWS_SCRIPT)),
         ),
         effect=False,
     )
@@ -233,7 +235,7 @@ def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "")
     out = s.run(
         args.gateway,
         f"{_PYTHON} - {verb}{tail}",
-        stdin=program_text(Path(__file__).with_name("fleet_alert_silence.py")),
+        stdin=program_text(ALERT_SILENCE_SCRIPT),
     )
     for line in out.splitlines():
         if line.startswith(("SILENCE failed", "SILENCE skipped")):

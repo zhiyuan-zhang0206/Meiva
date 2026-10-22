@@ -46,8 +46,8 @@ def sdk_via_inprocess_gateway(
 
     The assembled Gateway reads both data stores, so the fixture declares
     `gateway_data_plane`."""
+    from gateway.tests.auth.gateway_config import gateway_test_client
     from meiva.gateway_client import use_client
-    from tests.fixtures.gateway_config import gateway_test_client
 
     with (
         gateway_test_client(base_url="http://test-gateway", machine=machine_identity) as tc,

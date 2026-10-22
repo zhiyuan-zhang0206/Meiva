@@ -19,7 +19,7 @@ from base.host.net.auth import bearer_header
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
 from gateway.tests.agents.gateway_auth import without_credentials
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture, not a real secret
 

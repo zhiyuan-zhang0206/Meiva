@@ -17,8 +17,8 @@ from base.config import settings
 from gateway.agents import creation as agent_creation
 from gateway.agents.task_assignment import router as task_assignments
 from gateway.http.model_catalog import CatalogLoadFailure
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 PATH = "/api/keyed/v1/task-assignments"
 HEADERS = {"Idempotency-Key": "compound", "Idempotency-Scope": "principal-v1"}

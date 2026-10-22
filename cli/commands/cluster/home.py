@@ -76,9 +76,7 @@ def stop_command(*, roles: list[str], mode: str, timeout: float) -> list[str]:
     # directories of a genuinely stopped instance, never a live one. `--yes`
     # because the child has no terminal to confirm on (destroy confirmed already).
     return [
-        sys.executable,
-        "-m",
-        "cli.main",
+        str(_repo_root() / ".venv" / "bin" / "meiva"),
         "stop",
         "--yes",
         "--close-shell-sessions",

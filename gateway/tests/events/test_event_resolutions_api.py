@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from base.telemetry.tests.capture.event_capture import EmittedEvents, capturing_events
 from gateway.tests.agents.gateway_auth import without_credentials
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 @pytest.fixture

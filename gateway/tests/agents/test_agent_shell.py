@@ -3,8 +3,8 @@ from __future__ import annotations
 import psycopg
 import pytest
 
+from gateway.tests.auth.gateway_config import gateway_test_client
 from ops.cluster import rpc as cluster_rpc
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _insert_agent(db: psycopg.Connection, *, machine: str = "unknown") -> int:

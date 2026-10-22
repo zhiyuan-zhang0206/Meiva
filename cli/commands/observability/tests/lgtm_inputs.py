@@ -11,9 +11,9 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
 from base.native_process.os_platform import Platform
 from base.packages import dashboard_supply
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 __all__ = ["darwin_host", "default_provisioning", "empty_native_versions", "verifying_host"]
 

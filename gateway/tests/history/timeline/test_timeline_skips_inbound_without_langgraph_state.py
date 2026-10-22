@@ -14,9 +14,9 @@ from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.agents.history.timeline import window_before
+from gateway.tests.auth.gateway_config import GatewayTestClient
 from gateway.tests.history.test_timeline import _items
 from gateway.tests.history.test_timeline import test_client as test_client
-from tests.fixtures.gateway_config import GatewayTestClient
 
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps

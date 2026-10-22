@@ -5,16 +5,33 @@ from __future__ import annotations
 import subprocess
 import tomllib
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
 from typing import cast
+
+import pytest
 
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.cli import main
 from meizel.contracts.policy import POLICY, render_policy
 from meizel.graph.model import Diagnostic
+from meizel.owners import decisions
+from meizel.state.ambient_state.tests.conftest import (
+    synthetic_ambient_allowlists as synthetic_ambient_allowlists,
+)
 
 type RepoFactory = Callable[[Mapping[str, str]], Path]
+
+
+@pytest.fixture(autouse=True)
+def synthetic_decision_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the real repository's single-owner exemptions out of synthetic roots."""
+    monkeypatch.setattr(
+        decisions,
+        "DECISIONS",
+        {name: replace(decision, allowed={}) for name, decision in decisions.DECISIONS.items()},
+    )
 
 
 def listed_allowances(files: Mapping[str, str]) -> str:

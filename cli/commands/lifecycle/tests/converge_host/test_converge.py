@@ -34,10 +34,10 @@ from cli.commands.lifecycle.tests.converge_host.context_inputs import (
     pgbouncer_context as _pgbouncer_ctx,
 )
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.desktop import permissions_helper
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_ensure_meiva_on_path_links_bare_meiva_to_this_checkouts_cli(

@@ -17,7 +17,7 @@ from base.paths import meiva_home
 from gateway import app as gateway_app
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.config import gateway_config_from_boot
-from tests.fixtures.gateway_config import gateway_test_process
+from gateway.tests.auth.gateway_config import gateway_test_process
 
 
 @pytest.fixture

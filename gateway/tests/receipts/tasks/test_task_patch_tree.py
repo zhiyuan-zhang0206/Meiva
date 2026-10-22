@@ -4,13 +4,13 @@ import psycopg
 import pytest
 
 from base.api_contracts.idempotency import keyed_headers
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_tasks_router import (
     make_agent,
     make_root_task,
     make_task,
     task_status,
 )
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 class TestParentClose:

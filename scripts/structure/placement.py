@@ -20,20 +20,20 @@ import collections
 import functools
 import re
 from collections.abc import Sequence
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 
 from meizel.roles import packages
-from scripts.structure import placement_evidence, service_units
+from scripts.structure import service_units
 from scripts.structure.imports import cache, executed, facts
-from scripts.structure.placement_evidence import (
-    IncompleteReferenceEvidenceError,
-    Ref,
-    ReferenceEvidence,
-)
 
 __all__ = [
     "CODE_TOPS",
+    "IncompleteReferenceEvidenceError",
     "ModuleIndex",
+    "Ref",
+    "ReferenceEvidence",
+    "RepoRoots",
     "collect_reference_evidence",
     "collect_references",
     "common_dir",
@@ -210,13 +210,89 @@ def _div_operands(node: ast.AST) -> list[str | None]:
     return [None]
 
 
+def _bindings(
+    tree: ast.AST,
+) -> tuple[dict[str, list[ast.expr]], collections.Counter[str], set[str]]:
+    bound: dict[str, list[ast.expr]] = collections.defaultdict(list)
+    stores: collections.Counter[str] = collections.Counter()
+    opaque: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bound[target.id].append(node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
+            bound[node.target.id].append(node.value)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            stores[node.id] += 1
+        elif isinstance(node, ast.arg):
+            opaque.add(node.arg)
+        elif isinstance(node, ast.alias):
+            opaque.add((node.asname or node.name).split(".")[0])
+    return bound, stores, opaque
+
+
+# meiva:note
+# Expressions within a single file that evaluate to the repository root.
+class RepoRoots:
+    def __init__(self, tree: ast.AST, rel_path: str) -> None:
+        self._depth = len(PurePosixPath(rel_path).parts) if rel_path else 0
+        self._names: set[str] = set()
+        bound, stores, opaque = _bindings(tree)
+        grew = True
+        while grew:
+            grew = False
+            for name, values in bound.items():
+                plain = stores[name] == len(values) and name not in opaque
+                if plain and name not in self._names and all(self.is_root(v) for v in values):
+                    self._names.add(name)
+                    grew = True
+
+    def is_root(self, node: ast.AST) -> bool:
+        if isinstance(node, ast.Name):
+            return node.id in self._names
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = (
+                func.id
+                if isinstance(func, ast.Name)
+                else (func.attr if isinstance(func, ast.Attribute) else "")
+            )
+            if name == "repo_root":
+                return not node.args
+        return self._depth > 0 and executed.file_ascents(node) == self._depth
+
+
+@dataclass
+class Ref:
+    line: int
+    kind: str
+    module: str
+    unit: str
+    via: str = ""
+    names: tuple[str, ...] = ()
+
+
+@dataclass
+class ReferenceEvidence:
+    refs: list[Ref]
+    unresolved: list[executed.Unresolved]
+
+
+class IncompleteReferenceEvidenceError(ValueError):
+    def __init__(self, evidence: ReferenceEvidence) -> None:
+        self.evidence = evidence
+        details = "; ".join(f"{u.path}:{u.line}: {u.reason}" for u in evidence.unresolved)
+        super().__init__(details)
+
+
 class _Collector(ast.NodeVisitor):
     def __init__(self, index: ModuleIndex, tree: ast.AST, rel_path: str) -> None:
         self.index = index
         self.refs: list[Ref] = []
         self._handled: set[int] = set()
         self._div_seen: set[int] = set()
-        self._roots = placement_evidence.RepoRoots(tree, rel_path)
+        self._roots = RepoRoots(tree, rel_path)
         self._rel_path = rel_path
 
     def _add(

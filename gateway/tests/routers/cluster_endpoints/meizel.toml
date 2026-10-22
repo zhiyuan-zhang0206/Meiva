@@ -1,4 +1,12 @@
+exports = ["cluster_support.py"]
+
+[uses]
+"test_admin_events.py" = ["cluster_support.py"]
+"test_admin_machine_delete.py" = ["cluster_support.py"]
+
 [debt.first-party-patch]
+"cluster_support.py#monkeypatch.setattr base.cluster.session_name" = 1
+"cluster_support.py#monkeypatch.setattr gateway.events.telemetry_rows.query_events" = 1
 "test_admin_events.py#monkeypatch.setattr base.config.settings.display.cluster_events_default_limit" = 1
 "test_admin_machine_delete.py#monkeypatch.setattr gateway.agents.forward.enqueue_lifecycle" = 1
 "test_admin_machine_delete.py#monkeypatch.setattr gateway.cluster.router.gather_cluster_status" = 2

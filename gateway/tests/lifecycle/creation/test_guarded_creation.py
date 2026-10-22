@@ -15,12 +15,12 @@ from base.config import settings
 from gateway.agents import creation as agent_creation
 from gateway.agents.creation import scoped_creation_key
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
-from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import (
+from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_test_client,
 )
-from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
+from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
+from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
 PATH = "/api/keyed/v1/agents"
 SECRET = "guarded-test-secret"  # noqa: S105 -- isolated auth fixture

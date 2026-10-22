@@ -7,14 +7,14 @@ import pathlib
 import pytest
 
 from base.host.proc import run_bounded
-from scripts.lint import code_structure as lcs
-from scripts.structure import baseline_shards
-from tests.path_scoped.structure_tests import (
+from meizel.tests.synthetic import (
     synthetic_ambient_allowlists as synthetic_ambient_allowlists,
 )
-from tests.path_scoped.structure_tests import (
+from meizel.tests.synthetic import (
     synthetic_decision_allowlists as synthetic_decision_allowlists,
 )
+from scripts.lint import code_structure as lcs
+from scripts.structure import baseline_shards
 
 _SKILL = "meiva_builtins/skills/demo/reference/run.py"
 

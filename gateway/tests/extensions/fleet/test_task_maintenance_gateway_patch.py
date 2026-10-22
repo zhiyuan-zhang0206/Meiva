@@ -11,7 +11,7 @@ import psycopg
 
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 _TASK_TITLE = count(1)
 

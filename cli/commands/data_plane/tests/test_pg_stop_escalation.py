@@ -29,9 +29,9 @@ from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
-from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 HUNG_SECONDS = "3617"  # a marker only this test's archive command carries
 

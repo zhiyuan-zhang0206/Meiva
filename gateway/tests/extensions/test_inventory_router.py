@@ -16,9 +16,9 @@ from base.db.code_version_gate import ProcessDbGate
 from gateway.cluster import snapshots
 from gateway.cluster.snapshots import Snapshot
 from gateway.extensions import inventory as inventory_router
+from gateway.tests.auth.gateway_config import gateway_test_client
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import FieldWriteResult, InventoryReadResult, InventoryWriteOpResult
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _read(

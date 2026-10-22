@@ -9,8 +9,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from scripts.structure import placement_evidence
-
 from . import (
     ModuleSourceLookup,
     bindings,
@@ -535,7 +533,7 @@ class _Collector(ast.NodeVisitor):
         return renamed.as_posix()
 
     def _file_path(self, node: ast.AST) -> str | None:
-        ascents = placement_evidence.file_ascents(
+        ascents = executed.file_ascents(
             node, lambda expr: self.scope.origin(expr) == "pathlib.Path"
         )
         if (

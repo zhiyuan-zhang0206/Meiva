@@ -52,9 +52,9 @@ from cli.database import (
     operator_event_pipeline,
 )
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")

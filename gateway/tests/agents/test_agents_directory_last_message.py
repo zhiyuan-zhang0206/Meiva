@@ -7,7 +7,7 @@ import pytest
 
 from base.api_contracts.agent_contract import Harness
 from gateway.app import openapi_schema
-from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 
 _DIRECTORY_CARD_KEYS = frozenset(
     {

@@ -15,8 +15,8 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from gateway.agents import creation, launch_retry
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 
 
 @pytest.fixture

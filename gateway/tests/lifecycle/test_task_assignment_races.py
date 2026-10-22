@@ -9,10 +9,10 @@ from base.agents.tasks import creation
 from base.db import Database
 from gateway.agents import creation as agent_creation
 from gateway.agents.task_assignment import router as assignments
+from gateway.tests.auth.gateway_config import GatewayTestClient
 from gateway.tests.lifecycle.test_task_assignments import HEADERS, PATH
 from gateway.tests.lifecycle.test_task_assignments import body as body
 from gateway.tests.lifecycle.test_task_assignments import client as client
-from tests.fixtures.gateway_config import GatewayTestClient
 
 
 def _counts(conn: psycopg.Connection) -> tuple[int, ...]:

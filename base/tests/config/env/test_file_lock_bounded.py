@@ -1,12 +1,12 @@
-"""`base.native_process.os_platform.file_lock`'s bounded mode, and `.env`'s use of it.
-
-The property under test is *cross-process*, so the tests spawn real interpreters.
-An in-process test of a file lock proves almost nothing: `fcntl.flock` is advisory
-per open-file-description, so two takes inside one
-process can pass or fail for reasons that say nothing about two processes — which
-is the case the lock exists for (a CLI converge, the gateway's config PUT and the
-ops daemon all rewriting one `.env`).
-"""
+# meiva:note
+# `base.native_process.os_platform.file_lock`'s bounded mode, and `.env`'s use of it.
+#
+# The property under test is *cross-process*, so the tests spawn real interpreters.
+# An in-process test of a file lock proves almost nothing: `fcntl.flock` is advisory
+# per open-file-description, so two takes inside one
+# process can pass or fail for reasons that say nothing about two processes — which
+# is the case the lock exists for (a CLI converge, the gateway's config PUT and the
+# ops daemon all rewriting one `.env`).
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -25,7 +26,8 @@ _HOLDER = Path(__file__).with_name("_file_lock_holder.py")
 
 
 def _spawn_holder(target: Path, ready: Path, hold_s: float) -> subprocess.Popen[bytes]:
-    """A separate interpreter that takes the lock, signals, and holds it."""
+    # meiva:note
+    # A separate interpreter that takes the lock, signals, and holds it.
     return subprocess.Popen(  # noqa: S603
         [sys.executable, str(_HOLDER), str(_REPO), str(target), str(ready), str(hold_s)],
         stdin=subprocess.DEVNULL,
@@ -43,8 +45,9 @@ def _await_ready(ready: Path, proc: subprocess.Popen[bytes]) -> None:
 
 
 def test_a_second_process_waits_for_the_first(tmp_path: Path) -> None:
-    """The guarantee itself: while another process holds it, this one does not get
-    in — and once that process exits, it does."""
+    # meiva:note
+    # The guarantee itself: while another process holds it, this one does not get
+    # in — and once that process exits, it does.
     target = tmp_path / ".env"
     ready = tmp_path / "ready"
     holder = _spawn_holder(target, ready, hold_s=3.0)
@@ -61,10 +64,11 @@ def test_a_second_process_waits_for_the_first(tmp_path: Path) -> None:
 
 
 def test_the_wait_is_bounded_and_raises(tmp_path: Path) -> None:
-    """Expiry raises rather than falling through to an unsynchronized write. A
-    blocking wait with no bound is how one wedged holder becomes a wedged cluster;
-    writing anyway would be the failure the lock exists to prevent, minus the
-    error."""
+    # meiva:note
+    # Expiry raises rather than falling through to an unsynchronized write. A
+    # blocking wait with no bound is how one wedged holder becomes a wedged cluster;
+    # writing anyway would be the failure the lock exists to prevent, minus the
+    # error.
     target = tmp_path / ".env"
     ready = tmp_path / "ready"
     holder = _spawn_holder(target, ready, hold_s=30.0)
@@ -79,9 +83,10 @@ def test_the_wait_is_bounded_and_raises(tmp_path: Path) -> None:
 
 
 def test_the_lock_is_released_when_a_holder_dies(tmp_path: Path) -> None:
-    """No stale-lock handling, because the OS drops the lock when the process goes
-    — including on a crash. A lock FILE left behind is not a held lock, and code
-    that tried to clean it up would be deciding on evidence it does not have."""
+    # meiva:note
+    # No stale-lock handling, because the OS drops the lock when the process goes
+    # — including on a crash. A lock FILE left behind is not a held lock, and code
+    # that tried to clean it up would be deciding on evidence it does not have.
     target = tmp_path / ".env"
     ready = tmp_path / "ready"
     holder = _spawn_holder(target, ready, hold_s=30.0)
@@ -90,15 +95,18 @@ def test_the_lock_is_released_when_a_holder_dies(tmp_path: Path) -> None:
     holder.wait(timeout=10)
 
     with file_lock(target, timeout_s=10):
-        pass  # the dead holder's lock did not outlive it
+        # meiva:note
+        # the dead holder's lock did not outlive it
+        pass
 
 
 def test_env_locking_never_touches_the_env_file_itself(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Every door must lock a SIBLING. `file_lock`'s POSIX branch opens its path with
-    "w", which truncates — pointed at the real `.env` it would empty a cluster's
-    secrets outright, which is the accident this guard exists for."""
+    # meiva:note
+    # Every door must lock a SIBLING. `file_lock`'s POSIX branch opens its path with
+    # "w", which truncates — pointed at the real `.env` it would empty a cluster's
+    # secrets outright, which is the accident this guard exists for.
     import base.config.runtime_config as rc
     from base.host.env import dotenv_file
     from base.host.env.dotenv_file import upsert_env
@@ -117,27 +125,30 @@ def test_env_locking_never_touches_the_env_file_itself(
 
 
 def test_the_env_wait_is_bounded_in_seconds() -> None:
-    """The bound is the whole difference from the unbounded default the registry
-    still uses; an edit that made it hours would restore the failure mode without
-    touching any call site."""
+    # meiva:note
+    # The bound is the whole difference from the unbounded default the registry
+    # still uses; an edit that made it hours would restore the failure mode without
+    # touching any call site.
     assert 1.0 <= ENV_LOCK_TIMEOUT_S <= 120.0
 
 
 def test_the_unbounded_default_is_unchanged(tmp_path: Path) -> None:
-    """No timeout means the historical blocking behaviour, which the cluster
-    registry and `crontab_lock` still rely on — the bound is opt-in, so adding it
-    could not have changed them."""
+    # meiva:note
+    # No timeout means the historical blocking behaviour, which the cluster
+    # registry and `crontab_lock` still rely on — the bound is opt-in, so adding it
+    # could not have changed them.
     lock = tmp_path / "reg.lock"
     with file_lock(lock):
         pass
     assert lock.exists()
 
 
-def _recorded_lock(monkeypatch: pytest.MonkeyPatch, module: object, taken: list[Path]):  # type: ignore[no-untyped-def]
-    """Wrap `module.file_lock` so a test can see which path it took."""
-    real = module.file_lock  # type: ignore[attr-defined]
+# meiva:note
+# Wrap `module.file_lock` so a test can see which path it took.
+def _recorded_lock(monkeypatch: pytest.MonkeyPatch, module: Any, taken: list[Path]) -> None:
+    real = module.file_lock
 
-    def _record(target: Path, *, timeout_s: float | None = None):  # type: ignore[no-untyped-def]
+    def _record(target: Path, *, timeout_s: float | None = None) -> Any:
         taken.append(target)
         return real(target, timeout_s=timeout_s)
 
@@ -147,14 +158,14 @@ def _recorded_lock(monkeypatch: pytest.MonkeyPatch, module: object, taken: list[
 def test_every_env_write_door_takes_the_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """All THREE doors, not just the one this started with.
-
-    The first version of this change locked `write_fields` alone and claimed the
-    CLI-converge / gateway-PUT / ops-daemon race was closed. It was not: converge
-    writes `.env` through `upsert_env` on **every `meiva start`**, and `remove_env`
-    is another rewrite. First start uses the same upsert_env writer. A lock on
-    one door orders nothing.
-    """
+    # meiva:note
+    # All THREE doors, not just the one this started with.
+    #
+    # The first version of this change locked `write_fields` alone and claimed the
+    # CLI-converge / gateway-PUT / ops-daemon race was closed. It was not: converge
+    # writes `.env` through `upsert_env` on **every `meiva start`**, and `remove_env`
+    # is another rewrite. First start uses the same upsert_env writer. A lock on
+    # one door orders nothing.
     import base.config.runtime_config as rc
     import base.host.env.dotenv_file as dotenv_file_mod
     from base.host.env import dotenv_file
@@ -177,10 +188,11 @@ def test_every_env_write_door_takes_the_lock(
 
 
 def test_the_write_doors_are_leaves(tmp_path: Path) -> None:
-    """None of the doors may call another. `fcntl` locks are per open file
-    description, so a nested take blocks on itself and only ever ends as a
-    `LockTimeoutError` after the full bound — a self-deadlock wearing a timeout.
-    Asserted on the sources so the invariant survives a future edit."""
+    # meiva:note
+    # None of the doors may call another. `fcntl` locks are per open file
+    # description, so a nested take blocks on itself and only ever ends as a
+    # `LockTimeoutError` after the full bound — a self-deadlock wearing a timeout.
+    # Asserted on the sources so the invariant survives a future edit.
     import inspect
 
     import base.config.runtime_config as rc

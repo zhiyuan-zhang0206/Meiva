@@ -1,16 +1,16 @@
-"""CLI launcher context (#4334): the entry pop records, the gates read it.
-
-Split out of test_dotenv_boot.py to stay under the structure-lint's per-file
-line budget.
-
-cli.main's entry pops MEIVA_PROCESS_PROFILE (settings-full by design) and
-records the popped value as MEIVA_LAUNCHER_PROFILE; the authority pass reads
-the live-or-recorded context (`launcher_context`). With only the live
-marker consulted, both launcher-projection exemptions were unreachable on
-every CLI path: `meiva cluster health-probe` run from an agent child on a pure
-agent-runner dropped the launcher's runner URLs and fell back to the
-sentinel (env-class red).
-"""
+# meiva:note
+# CLI launcher context (#4334): the entry pop records, the gates read it.
+#
+# Split out of test_dotenv_boot.py to stay under the structure-lint's per-file
+# line budget.
+#
+# cli.main's entry pops MEIVA_PROCESS_PROFILE (settings-full by design) and
+# records the popped value as MEIVA_LAUNCHER_PROFILE; the authority pass reads
+# the live-or-recorded context (`launcher_context`). With only the live
+# marker consulted, both launcher-projection exemptions were unreachable on
+# every CLI path: `meiva cluster health-probe` run from an agent child on a pure
+# agent-runner dropped the launcher's runner URLs and fell back to the
+# sentinel (env-class red).
 
 from __future__ import annotations
 
@@ -22,11 +22,13 @@ import pytest
 
 from base.host.env import dotenv_boot
 from base.host.env.tests.env_files import use_env_files
-from base.host.env.tests.test_dotenv_boot import (
-    point_env_at_without_db_url,
-    restore_authority_env,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
-)
 from base.paths.home import resolve_meiva_home
+from base.tests.config.env.test_dotenv_boot import (
+    point_env_at_without_db_url,
+    restore_authority_env,
+)
+
+_ = restore_authority_env
 
 _NO_DATA_PLANE_IDENTITY_LINES = (
     f"MEIVA_CLUSTER_SECRET={os.environ['MEIVA_CLUSTER_SECRET']}",
@@ -45,8 +47,9 @@ def _restore_environ() -> Iterator[None]:
 
 
 def _point_env_at_without_data_plane_urls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """An env file that declares neither data-plane URL — the pure agent-runner
-    shape for MEIVA_DB_URL and MEIVA_REDIS_URL together (#4334)."""
+    # meiva:note
+    # An env file that declares neither data-plane URL — the pure agent-runner
+    # shape for MEIVA_DB_URL and MEIVA_REDIS_URL together (#4334).
     env_file = tmp_path / "no-data-plane.env"
     env_file.write_text(
         "MEIVA_AGENT_HOST_HEALTH_PORT=18035\n" + "\n".join(_NO_DATA_PLANE_IDENTITY_LINES) + "\n"
@@ -57,9 +60,10 @@ def _point_env_at_without_data_plane_urls(monkeypatch: pytest.MonkeyPatch, tmp_p
 def test_recorded_launcher_profile_drops_undeclared_owner_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The recorded context keeps the live one's runner-shape gate: an
-    inherited OWNER url on an undeclared unit still drops — recording the
-    profile must not widen the exemption."""
+    # meiva:note
+    # The recorded context keeps the live one's runner-shape gate: an
+    # inherited OWNER url on an undeclared unit still drops — recording the
+    # profile must not widen the exemption.
     monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
     monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
     point_env_at_without_db_url(monkeypatch, tmp_path)
@@ -75,8 +79,9 @@ def test_recorded_launcher_profile_drops_undeclared_owner_url(
 def test_recorded_launcher_profile_drops_malformed_db_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The parse gate holds for the recorded context too: `urlsplit` itself
-    rejects the value (invalid IPv6), so it drops instead of raising."""
+    # meiva:note
+    # The parse gate holds for the recorded context too: `urlsplit` itself
+    # rejects the value (invalid IPv6), so it drops instead of raising.
     monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
     monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
     point_env_at_without_db_url(monkeypatch, tmp_path)
@@ -91,9 +96,10 @@ def test_recorded_launcher_profile_drops_malformed_db_url(
 def test_recorded_launcher_profile_drops_unparseable_redis_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str
 ) -> None:
-    """The redis exemption's parse gate: a `urlsplit` failure (invalid IPv6)
-    and a parse with no host both drop — never raise, never keep a value that
-    cannot dial."""
+    # meiva:note
+    # The redis exemption's parse gate: a `urlsplit` failure (invalid IPv6)
+    # and a parse with no host both drop — never raise, never keep a value that
+    # cannot dial.
     monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
     monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
     _point_env_at_without_data_plane_urls(monkeypatch, tmp_path)

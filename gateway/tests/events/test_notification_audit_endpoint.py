@@ -8,8 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.events.notifications.store import SETTINGS_KEY
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
-from tests.fixtures.gateway_config import gateway_test_client
 
 _CLUSTER_AUTH = "notification-audit-test-value"
 _PATH = "/api/notifications/audit"

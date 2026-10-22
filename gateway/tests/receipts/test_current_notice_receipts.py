@@ -12,8 +12,8 @@ from base.api_contracts.idempotency import keyed_headers
 from base.config import settings
 from gateway.agents.notice_operations import current as current_notice_receipts
 from gateway.agents.notice_operations import router as guarded_notices
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
-from tests.fixtures.gateway_config import gateway_test_client
 
 SECRET = "guarded-notice-test-secret"  # noqa: S105 -- isolated credential
 HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}

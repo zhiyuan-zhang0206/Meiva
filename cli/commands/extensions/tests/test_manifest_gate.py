@@ -32,7 +32,7 @@ class RecordingGateway:
 # Every test here installs a package, which records `local:<machine>` provenance
 # in the cluster registry — that needs a machine identity, which a bare
 # `unit_home` deliberately lacks. See the fixture's docstring.
-pytestmark = pytest.mark.usefixtures("_installed_machine_identity")
+pytestmark = pytest.mark.usefixtures("installed_machine_identity")
 
 GOOD_MANIFEST = {
     "apiVersion": 2,

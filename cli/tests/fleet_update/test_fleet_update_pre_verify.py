@@ -1,12 +1,12 @@
-"""The generated pre-update schedule check runs on hosts whose OLD checkout is not this one.
-
-`fleet_update` is run from the operator's (NEW) checkout, but the script it generates executes the
-read step under each host's OLD source checkout and the check under a worktree of NEW. The
-2026-10 `6a2e57f` -> `3fd41ecbc6` dry run showed both steps leaning on NEW-only API: the read step
-imported `cli.database` (absent in OLD) and the check called `cmd_schedules_verify` with a
-signature OLD's interpreter never saw. These tests run the real script text against stand-ins for
-both sides.
-"""
+# meiva:note
+# The generated pre-update schedule check runs on hosts whose OLD checkout is not this one.
+#
+# `fleet_update` is run from the operator's (NEW) checkout, but the script it generates executes the
+# read step under each host's OLD source checkout and the check under a worktree of NEW. The
+# 2026-10 `6a2e57f` -> `3fd41ecbc6` dry run showed both steps leaning on NEW-only API: the read step
+# imported `cli.database` (absent in OLD) and the check called `cmd_schedules_verify` with a
+# signature OLD's interpreter never saw. These tests run the real script text against stand-ins for
+# both sides.
 
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ def _packages(*dirs: str) -> dict[str, str]:
     return {f"{d}/__init__.py": "" for d in dirs}
 
 
+# meiva:note
 # OLD as of `6a2e57f`: no `cli.database`, a read with no parameters.
 _OLD_CHECKOUT = {
     **_packages("cli", "cli/commands", "cli/commands/management"),
@@ -46,6 +47,7 @@ _OLD_CHECKOUT = {
         f"def _read_schedule_rows():\n    return {_OLD_ROWS!r}\n"
     ),
 }
+# meiva:note
 # OLD as of 39d4614: the factory takes only local_host and no opener exists.
 _FACTORY_CHECKOUT = {
     **_packages("cli", "cli/commands", "cli/commands/management", "cli/database"),
@@ -63,6 +65,7 @@ _FACTORY_CHECKOUT = {
         "    @classmethod\n    def create(cls):\n        return cls()\n"
     ),
 }
+# meiva:note
 # The intermediate factory also requires its concrete database opener.
 _OPENER_CHECKOUT = {
     **_FACTORY_CHECKOUT,
@@ -75,12 +78,18 @@ _OPENER_CHECKOUT = {
 
 
 def _read_rows(checkout: Path, out: Path) -> subprocess.CompletedProcess[str]:
-    """Execute the read step's source under the OLD checkout's import path."""
+    # meiva:note
+    # Execute the read step's source under the OLD checkout's import path.
     env = {"PATH": os.environ["PATH"], "PYTHONPATH": str(checkout), "PYTHONDONTWRITEBYTECODE": "1"}
     return subprocess.run(
         [
             sys.executable,
-            str(Path(__file__).resolve().parents[1] / "schedules_verify_read_rows.py"),
+            str(
+                Path(__file__).resolve().parents[2]
+                / "commands"
+                / "management"
+                / "schedules_verify_read_rows.py"
+            ),
             str(out),
         ],
         cwd=checkout,
@@ -210,11 +219,7 @@ def _render(new: str = "deadbeef") -> str:
         read_rows=shlex.quote(
             fleet_update.program_text(fleet_update.VERIFY_SCRIPTS / "schedules_verify_read_rows.py")
         ),
-        check_rows=shlex.quote(
-            fleet_update.program_text(
-                fleet_update.VERIFY_SCRIPTS / "schedules_verify_check_rows.py"
-            )
-        ),
+        check_rows=shlex.quote(fleet_update.program_text(fleet_update.CHECK_ROWS_SCRIPT)),
     )
 
 
@@ -224,11 +229,11 @@ def test_the_check_goes_through_the_cli_entry_with_a_throwaway_home() -> None:
     assert 'MEIVA_HOME="$T"' in check and "MEIVA_CONFIG_FETCH=skip" in check
     assert "mktemp -d" in script and 'rm -rf "$T"' in script
     assert "cmd_schedules_verify" not in script
-    assert '(umask 077; MEIVA_HOME="$H"' in script  # the rows file holds every stored script
+    # meiva:note
+    # the rows file holds every stored script
+    assert '(umask 077; MEIVA_HOME="$H"' in script
     assert 'rm -f "$R"' in script and 'worktree remove --force "$W"' in script
-    check_py = fleet_update.program_text(
-        fleet_update.VERIFY_SCRIPTS / "schedules_verify_check_rows.py"
-    )
+    check_py = fleet_update.program_text(fleet_update.CHECK_ROWS_SCRIPT)
     assert '"cli.main"' in check_py and '"schedules"' in check_py and '"verify"' in check_py
     assert '"--rows-file"' in check_py and '"--no-notify"' in check_py
 
@@ -256,7 +261,11 @@ def test_the_real_cli_checks_a_rows_file_offline_under_a_throwaway_home(tmp_path
     proc = subprocess.run(
         [
             sys.executable,
-            str(Path(__file__).resolve().parents[1] / "schedules_verify_check_rows.py"),
+            str(
+                Path(__file__).resolve().parents[2]
+                / "fleet_update"
+                / "schedules_verify_check_rows.py"
+            ),
             str(rows),
         ],
         cwd=repo_root(),
@@ -271,6 +280,7 @@ def test_the_real_cli_checks_a_rows_file_offline_under_a_throwaway_home(tmp_path
     assert "RED id=7 name=drifted missing=zz_missing_mod" in proc.stdout
 
 
+# meiva:note
 # NEW's CLI stand-in: prints what the check was given and exits with the verdict in the rows file.
 _NEW_MAIN = """\
 import json, os, sys
@@ -434,7 +444,12 @@ def test_the_read_step_reads_the_rows_through_a_gateway_from_the_hosts_own_confi
         proc = subprocess.run(
             [
                 sys.executable,
-                str(Path(__file__).resolve().parents[1] / "schedules_verify_read_rows.py"),
+                str(
+                    Path(__file__).resolve().parents[2]
+                    / "commands"
+                    / "management"
+                    / "schedules_verify_read_rows.py"
+                ),
                 str(out),
             ],
             cwd=repo_root(),

@@ -34,7 +34,7 @@ def loaded() -> None:
     def observe() -> None:
         from base.telemetry import tracing
 
-        assert tracing._state["closed"]
+        assert tracing.state["closed"]
         assert len(owners) == 1
         assert owners[0].finished.is_set()  # type: ignore[attr-defined]
         assert not owners[0]._thread.is_alive()  # type: ignore[attr-defined]
@@ -50,10 +50,10 @@ def loaded() -> None:
         entered.set()
         stop_requested.wait()
 
-    tracing._arm_tracing = arm  # type: ignore[assignment]
+    tracing.arm_tracing = arm  # type: ignore[assignment]
     tracing.start_arm_thread("http://local-test-collector", machine_identity(), Path(".meiva"))
     assert entered.wait(5)
-    owners.append(tracing._state["arm_owner"])
+    owners.append(tracing.state["arm_owner"])
 
 
 if __name__ == "__main__":

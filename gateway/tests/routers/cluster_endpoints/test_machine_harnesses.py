@@ -12,8 +12,8 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.db import Database
 from gateway.cluster.harness_probe import availability_rows, launchable, probe_harnesses
+from gateway.tests.auth.gateway_config import gateway_test_client
 from ops.rpc_schemas import HarnessProbeResult, HarnessProbeRow, OpKind
-from tests.fixtures.gateway_config import gateway_test_client
 
 REMOTE = "remote-host"
 

@@ -38,7 +38,7 @@ from base.agents.history.context_breakdown import (
 from base.agents.history.message_tokens import MessageTokens
 from base.agents.messages.token_estimate import estimate_message_tokens
 from base.db import create_agent
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def _assert_conserved(node: SectionNode) -> None:

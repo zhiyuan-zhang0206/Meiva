@@ -6,8 +6,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_memory_search import memory_config
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _init_repo(root: Path) -> str:

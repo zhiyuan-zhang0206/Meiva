@@ -1,27 +1,16 @@
-exports = ["__main__.py", "commands", "database", "parsers", "start_identity.py", "tests"]
+exports = ["__main__.py", "commands", "database", "fleet_update", "parsers", "start_identity.py", "tests"]
 
 [uses]
 "__main__.py" = ["main.py"]
-"commands" = ["database", "fleet_update.py", "python_install.py", "start_identity.py", "start_runtime.py"]
+"commands" = ["database", "python_install.py", "start_identity.py", "start_runtime.py"]
 "conftest.py" = ["commands"]
+"fleet_update" = ["main.py"]
 "init_intent.py" = ["commands", "start_identity.py", "start_intent.py"]
 "main.py" = ["database", "parsers", "preflight.py", "start_identity.py", "startup_support.py"]
 "parsers" = ["commands", "database", "init_intent.py", "start_intent.py"]
 "python_install.py" = ["_python_index.py"]
 "start_intent.py" = ["commands", "start_identity.py", "start_runtime.py", "startup_support.py"]
-"tests" = ["_python_index.py", "commands", "database", "fleet_alert_silence.py", "fleet_update.py", "init_intent.py", "main.py", "parsers", "preflight.py", "python_install.py", "start_identity.py", "start_intent.py", "start_runtime.py", "startup_support.py"]
+"tests" = ["_python_index.py", "commands", "database", "fleet_alert_silence.py", "fleet_update", "init_intent.py", "main.py", "parsers", "preflight.py", "python_install.py", "start_identity.py", "start_intent.py", "start_runtime.py", "startup_support.py"]
 
 [debt.private-module]
 "tests/test_plugin_scaffold.py -> commands/extensions/_plugin_scaffold.py" = 1
-
-[debt.private-name]
-"commands/lifecycle/tests/test_commands_status.py -> database/tests/command_fakes.py#_sess" = 1
-"init_intent.py -> start_intent.py#_home" = 1
-"tests/bootstrap/_init_identity.py -> start_intent.py#_home" = 1
-"tests/bootstrap/test_checkout_guard.py -> start_intent.py#_home" = 1
-"tests/bootstrap/test_start_boot_attempts.py -> start_intent.py#_home" = 1
-"tests/bootstrap/test_start_boot_attempts.py -> start_intent.py#_run_boot_attempt" = 3
-
-[debt.undeclared-edge]
-"commands/cluster/home.py -> main.py" = 1
-"commands/management/schedules_verify_check_rows.py -> main.py" = 1

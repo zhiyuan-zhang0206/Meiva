@@ -62,8 +62,8 @@ from cli.commands.cluster.tests.health_probe_inputs import (
     signals as signals,
 )
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def test_schema_health_db_flake_is_healthy(

@@ -13,7 +13,7 @@ from base.daemon.schedules.completion_notices import (
 )
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 UPLOAD_HEADERS = {"Idempotency-Key": "silent-upload", "Idempotency-Scope": "principal-v1"}
 

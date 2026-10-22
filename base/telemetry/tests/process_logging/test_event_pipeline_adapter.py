@@ -51,17 +51,17 @@ def _mirror_last(event_name: str, agent: int) -> dict[str, Any]:
 
 
 def test_production_loguru_sink_routes_through_the_emitter() -> None:
-    """`_event_sink` must enqueue into the emitter (which batches), not write
-    straight to the DB per record — the regression that deleted batching before.
-    """
+    # meiva:note
+    # `event_sink` must enqueue into the emitter (which batches), not write
+    # straight to the DB per record — the regression that deleted batching before.
 
     import inspect
 
-    src = inspect.getsource(slog._event_sink)
+    src = inspect.getsource(slog.event_sink)
     assert "emit(" in src
     wiring = inspect.getsource(slog.add_event_sink)
     assert "init_telemetry(" in wiring
-    assert "_event_sink" in wiring  # the adapter is the loguru handler
+    assert "event_sink" in wiring  # the adapter is the loguru handler
 
 
 def _rec(extra: dict[str, Any]) -> Any:
@@ -183,9 +183,9 @@ def test_loguru_adapter_sets_source_from_extra(
     'system')."""
     from loguru import logger as _g
 
-    from base.telemetry.process_logging import _event_sink
+    from base.telemetry.process_logging import event_sink
 
-    sink_id = _g.add(_event_sink, level="INFO", enqueue=False, catch=False)
+    sink_id = _g.add(event_sink, level="INFO", enqueue=False, catch=False)
     try:
         _g.configure(extra={"agent_id": str(_AGENT)})
         _g.info("a line from the user path", event="label_change", source="user")

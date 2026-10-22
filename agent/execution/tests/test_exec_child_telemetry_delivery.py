@@ -13,7 +13,7 @@ from typing import Any, cast
 
 import pytest
 
-from agent.graph.exec.protocol import (
+from agent.execution.protocol import (
     make_request_path,
     make_result_path,
     read_result,
@@ -227,7 +227,7 @@ def test_unfinished_ordinary_delivery_preserves_success_and_attempts_otlp_tail(
     from unittest.mock import MagicMock
 
     from agent.execution import child
-    from agent.graph.exec.protocol import ResultPayload, write_result
+    from agent.execution.protocol import ResultPayload, write_result
     from base import telemetry
     from base.agents.context.clients import ClientSet
     from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
@@ -268,7 +268,7 @@ def test_unknown_ordinary_delivery_keeps_crash_primary(
     from unittest.mock import MagicMock
 
     from agent.execution import child
-    from agent.graph.exec.protocol import ResultPayload, write_result
+    from agent.execution.protocol import ResultPayload, write_result
     from base import telemetry
 
     result_path = str(tmp_path / "result.json")
@@ -289,7 +289,7 @@ def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path)
 
     import meiva
     from agent.execution import child
-    from agent.graph.exec.protocol import ResultPayload, read_result, write_result
+    from agent.execution.protocol import ResultPayload, read_result, write_result
     from base.agents.context import MeivaContext
     from base.agents.context.clients import ClientSet
     from base.telemetry import Event, EventPipeline

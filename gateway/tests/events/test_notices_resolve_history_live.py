@@ -9,8 +9,8 @@ from base.agents.observation.snapshot import select_one
 from base.api_contracts.idempotency import keyed_headers
 from base.config import settings
 from base.lm.catalog import ModelCatalog
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.test_notices_endpoint import insert_notice, pending_rows, seed_agent
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.mark.parametrize("reply", [None, "Acknowledged"])

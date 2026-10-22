@@ -31,7 +31,7 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from gateway.tests.agents.gateway_auth import without_credentials
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 _ENVELOPE_INPUTS = EnvelopeReadInputs(Clock.from_settings, lambda: False)
 _SECRET = "external-agent-source-secret"  # noqa: S105 -- isolated test credential

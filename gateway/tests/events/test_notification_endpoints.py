@@ -8,7 +8,7 @@ import psycopg
 from base.api_contracts.idempotency import keyed_headers
 from base.events.live.bus import EventBus
 from gateway.extensions.notification_categories import categories_from_manifests
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def _agent(conn: psycopg.Connection) -> int:

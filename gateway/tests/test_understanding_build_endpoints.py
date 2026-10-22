@@ -29,7 +29,7 @@ from base.lm.catalog import ModelCatalog
 from gateway.agents.history import understanding as module
 from gateway.agents.history.configuration import understanding_policy
 from gateway.agents.history.read_inputs import UnderstandingReadPolicy
-from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 
 _T0 = datetime(2026, 10, 5, tzinfo=UTC)
 _MODEL = "deepseek-v4-flash"

@@ -3,9 +3,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.extensions import packages
+from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
-from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 
 def test_original_package_prompt_survives_template_change(

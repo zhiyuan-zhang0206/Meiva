@@ -6,8 +6,8 @@ import pytest
 
 import gateway.agents.notices as agents_notices
 from base.api_contracts.idempotency import keyed_headers
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) -> None:

@@ -19,9 +19,9 @@ from gateway.events.sse import (
     sse_frame,
     throttled_event_stream,
 )
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.test_sse import FakeRequest
 from gateway.tests.events.test_sse import redis_client as redis_client
-from tests.fixtures.gateway_config import gateway_test_client
 
 
 async def _collect_throttled_frames(

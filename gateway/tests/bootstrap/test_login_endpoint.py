@@ -25,7 +25,7 @@ from base.cluster.rate_limit import LoginRateLimitConfig
 from gateway.app import lifespan
 from gateway.http.auth.router import router
 from gateway.http.config import gateway_config_from_boot
-from tests.fixtures.gateway_config import gateway_test_client, gateway_test_process
+from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_process
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 

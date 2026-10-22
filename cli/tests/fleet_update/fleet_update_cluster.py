@@ -184,9 +184,7 @@ class Cluster:
             emit(self._roster_json())
             return 0
         if stdin in (
-            fleet_update.program_text(
-                Path(fleet_update.__file__).with_name("fleet_alert_silence.py")
-            ),
+            fleet_update.program_text(fleet_update.ALERT_SILENCE_SCRIPT),
             fleet_update.program_text(fleet_update.VERIFY_SCRIPTS / "fleet_leases.py"),
         ):
             return self._shipped(alias, command, stdin, emit)
@@ -263,9 +261,7 @@ class Cluster:
     def _shipped(
         self, alias: str, command: str, stdin: str | None, emit: Callable[[str], None]
     ) -> int:
-        if stdin == fleet_update.program_text(
-            Path(fleet_update.__file__).with_name("fleet_alert_silence.py")
-        ):
+        if stdin == fleet_update.program_text(fleet_update.ALERT_SILENCE_SCRIPT):
             return self._silence(alias, command, emit)
         self.lease_reads.append(len(self.effects))
         assert alias == "gw", "the lease table is read on the gateway host"

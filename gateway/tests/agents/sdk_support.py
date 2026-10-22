@@ -70,9 +70,9 @@ def sdk_via_gateway(
     from base.config import settings as _settings
     from gateway.agents import creation as _agents_creation
     from gateway.agents import forward as _agents_forward_router
+    from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_process
     from ops.lifecycle import launch_agent_op, lifecycle_op
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from tests.fixtures.gateway_config import gateway_test_app, gateway_test_process
 
     for _attr in (
         "anthropic_api_key",

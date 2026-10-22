@@ -64,8 +64,8 @@ def test_child_installs_signal_handlers_before_reading_request(
     model_installation: Installation,
 ) -> None:
     from agent.execution import child as exec_child
-    from agent.graph.exec import protocol
-    from agent.graph.exec.protocol import RequestPayload, ResultPayload
+    from agent.execution import protocol
+    from agent.execution.protocol import RequestPayload, ResultPayload
 
     old_sigint = signal.getsignal(signal.SIGINT)
     old_sigterm = signal.getsignal(signal.SIGTERM)

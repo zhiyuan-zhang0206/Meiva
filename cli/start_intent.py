@@ -31,12 +31,12 @@ def checkout() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _home() -> Path:
-    """The home this start acts on: `$MEIVA_HOME`, else `~/.meiva`.
-
-    A home that carries its own `<home>/source` checkout starts only from that
-    checkout (`base.paths.home.home_checkout_error`).
-    """
+def resolve_home() -> Path:
+    # meiva:note
+    # The home this start acts on: `$MEIVA_HOME`, else `~/.meiva`.
+    #
+    # A home that carries its own `<home>/source` checkout starts only from that
+    # checkout (`base.paths.home.home_checkout_error`).
     error = home_checkout_error(checkout())
     if error is not None:
         raise ValueError(error)
@@ -97,19 +97,19 @@ def run_start(
     if not args.boot:
         return start(boot=False)
     try:
-        home = _home()
+        home = resolve_home()
     except ValueError as exc:
         print(f"meiva start: {exc}", file=sys.stderr)
         return 1
-    return _run_boot_attempt(home, lambda: start(boot=True))
+    return run_boot_attempt(home, lambda: start(boot=True))
 
 
-def _run_boot_attempt(home: Path, start: Callable[[], int]) -> int:
-    """One boot-job start: a failed attempt asks to be retried until the budget is spent.
-
-    The count never refuses a start (see `base.host.system.boot_policy`); it only
-    decides what a *failed* attempt tells its scheduler.
-    """
+def run_boot_attempt(home: Path, start: Callable[[], int]) -> int:
+    # meiva:note
+    # One boot-job start: a failed attempt asks to be retried until the budget is spent.
+    #
+    # The count never refuses a start (see `base.host.system.boot_policy`); it only
+    # decides what a *failed* attempt tells its scheduler.
     from base.host.system import boot_policy
 
     attempt = boot_policy.begin_attempt(home)
@@ -148,7 +148,7 @@ def start_once(
     try:
         if runtime is None:
             runtime = StartRuntime.development(checkout())
-        home = _home()
+        home = resolve_home()
         runtime.validate()
         # Refuse before anything is created: a start never makes a home, so the
         # lock below can rely on the directory existing.

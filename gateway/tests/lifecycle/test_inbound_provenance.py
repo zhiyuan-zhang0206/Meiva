@@ -16,7 +16,7 @@ from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.agents.inbound_provenance import request_inbound_provenance
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 _SECRET = "inbound-provenance-secret"  # noqa: S105 -- isolated test credential
 

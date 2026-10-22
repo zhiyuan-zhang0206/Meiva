@@ -11,7 +11,7 @@ from base.deploy.git.memory_repo import init_local_repo, run_git
 from base.deploy.git.tests.memory_checkouts import commit_note
 from base.deploy.git.tests.memory_checkouts import memory_checkout as memory_checkout
 from gateway.http.config import gateway_config_from_boot
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def test_refresh_updates_the_checkout_read_by_the_app(

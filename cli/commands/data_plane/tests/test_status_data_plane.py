@@ -26,7 +26,7 @@ from base.cluster.dataplane import pooler as base_pooler
 from base.db.tests.fakes import patch_database
 from base.host.db_authority import delivery
 from cli.commands.data_plane.config import DataPlaneConfig
-from tests.path_scoped.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_database as operator_database
 
 _ADMIN = "pooler-admin-fixture"
 
