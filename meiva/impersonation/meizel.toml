@@ -30,3 +30,6 @@ exports = ["attachment.py"]
 "attachment.py#base/native_process/ownership.py" = 1
 "attachment.py#base/packages/plugins/config_view.py" = 1
 "attachment.py#meiva/boot.py" = 1
+
+[debt.untyped-export]
+"__init__.py#def attach" = 1
