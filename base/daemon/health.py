@@ -73,7 +73,9 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlsplit
 
+from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
 from base.daemon import health_schema
 from base.daemon.http_transport import RouteHandler as RouteHandler
 from base.daemon.http_transport import start_daemon_http
@@ -487,8 +489,47 @@ def probe_daemon(
         return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
 
 
+# meiva:note
+# A stranger answering this unit's port can only be called "not this unit's daemon", so
+# three automatic restarts recount one anonymous blocker and nobody can act on it (#5525:
+# four of five such outages were exactly this). The verdict itself stays what it was: the
+# answer says this home's daemon is not the one listening, never that this root owns a live
+# generation (#5476). One lookup on this branch only -- never on an ordinary down verdict --
+# names the listeners; `strict_listeners_on` owns that fact (it falls back to lsof where
+# macOS denies psutil's global scan), and an unavailable lookup degrades the detail rather
+# than the verdict.
+def _listening_holders(url: str) -> str:
+    port = urlsplit(url).port
+    if port is None:
+        return "unknown"
+    try:
+        pids = strict_listeners_on(port)
+    except (ListenerDiscoveryError, OSError):
+        return "unknown"
+    if not pids:
+        return "unknown"
+    return ", ".join(f"pid {pid} {_process_label(pid)}" for pid in pids)
+
+
+# meiva:note
+# A process this user cannot read still gets its pid named; psutil refuses the name and path.
+def _process_label(pid: int) -> str:
+    import psutil
+
+    try:
+        process = psutil.Process(pid)
+        return f"{process.name()} ({process.exe()})"
+    except psutil.Error:
+        return "(not readable by this user)"
+
+
 def probe_daemon_identity(
-    name: str, url: str, *, pidfile: Path, timeout_s: float = PROBE_TIMEOUT_S
+    name: str,
+    url: str,
+    *,
+    pidfile: Path,
+    timeout_s: float = PROBE_TIMEOUT_S,
+    listener_lookup: Callable[[str], str] = _listening_holders,
 ) -> DaemonProbe:
     """Probe a daemon's ``/healthz`` AND verify the answering process is ours.
 
@@ -558,7 +599,8 @@ def probe_daemon_identity(
     recorded = recorded_pid(pidfile)
     if recorded is None:
         return DaemonProbe.down(
-            f"{url} answers but no pidfile at {pidfile} — not this unit's daemon"
+            f"{url} answers but no pidfile at {pidfile} — not this unit's daemon; "
+            f"listening: {listener_lookup(url)}"
         )
     if got_pid != recorded:
         return DaemonProbe.down(
