@@ -1,4 +1,18 @@
-exports = ["allowlist.py", "tests"]
+exports = ["tests"]
+
+[purity]
+"." = "strict-to-be"
+"allowlist.py" = "strict"
+"busrule.py" = "strict"
+"dbhandle.py" = "strict"
+"endpointrule.py" = "strict"
+"owner_method.py" = "strict"
+"rootrule.py" = "strict"
+"scan.py" = "strict"
+"sliced.py" = "strict"
+"task_owner.py" = "strict"
+"task_owner_span.py" = "strict"
+"thread_owner.py" = "strict"
 
 [uses]
 "__init__.py" = ["allowlist.py", "bundle.py", "busrule.py", "dbhandle.py", "endpointrule.py", "roots.py", "scan.py", "sliced.py"]
@@ -17,5 +31,21 @@ exports = ["allowlist.py", "tests"]
 "tests" = ["__init__.py", "allowlist.py", "bundle.py", "busrule.py", "dbhandle.py", "handle_ratchet.py", "owner_method.py", "roots.py"]
 "thread_owner.py" = ["module.py", "owner_method.py"]
 
+[debt.impure-call]
+"__init__.py#Path.is_file" = 4
+"__init__.py#Path.read_text" = 1
+"bundle.py#Path.is_file" = 1
+"bundle.py#Path.read_text" = 1
+"handle_ratchet.py#Path.read_text" = 1
+"module.py#Path.is_dir" = 1
+"module.py#Path.is_file" = 1
+"module.py#Path.read_text" = 1
+"module.py#Path.stat" = 1
+"roots.py#Path.read_text" = 1
+
 [debt.private-name]
 "tests/test_handle_ratchet.py -> handle_ratchet.py#_REPO_ROOT" = 2
+
+[debt.wide-public-surface]
+"__init__.py#public-surface" = 1
+"module.py#public-surface" = 1

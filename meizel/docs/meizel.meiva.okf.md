@@ -36,7 +36,8 @@ three or more, so a new package is declared in one place or the check says where
 - `graph/`, `language/` and `contracts/` are the checker, documented in
   [[meizel/docs/checker/checker.meiva.okf.md|the checker node]]: `graph/` holds the model,
   the universe of tracked files, graph algorithms, name scopes and import
-  access; `language/` the restricted Python forms, pytest fixture requests and
+  access; `language/` the restricted Python forms, pytest fixture requests, mechanical
+  purity and container-budget checks (`purity.py`, `purity_structure.py`) and
   the file scanner that composes them with import access; `contracts/` the
   `meizel.toml` manifests, the rule, analysis, recorded debt, the policy file and the commands
   (`python -m meizel`). The layers form a DAG: `contracts` -> `language` -> `graph`.

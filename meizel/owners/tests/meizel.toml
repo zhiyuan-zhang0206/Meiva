@@ -4,3 +4,7 @@
 "test_lint_clock_lattice.py#monkeypatch.setattr meizel.owners.clock_lattice.INDEPENDENT_CLOCKS" = 4
 "test_lint_clock_lattice.py#monkeypatch.setattr meizel.owners.clock_lattice.REGISTERED_CLOCKS" = 1
 "test_lint_clock_lattice.py#monkeypatch.setattr meizel.owners.clock_lattice._REPO_ROOT" = 1
+
+[debt.impure-test-fixture]
+"test_decisions.py#fixture monkeypatch" = 5
+"test_lint_clock_lattice.py#fixture monkeypatch" = 6

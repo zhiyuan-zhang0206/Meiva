@@ -12,6 +12,7 @@ __all__ = [
     "add_uses",
     "entry_end",
     "items",
+    "set_purity",
     "unquote",
 ]
 
@@ -138,3 +139,22 @@ def add_exports(text: str, names: set[str]) -> str:
             return "\n".join(lines) + "\n"
     row = _line("", None, sorted(names))
     return "\n".join([row, "", *lines] if lines else [row]) + "\n"
+
+
+def set_purity(text: str, default: str | None, children: dict[str, str]) -> str:
+    lines = text.splitlines()
+    top = next((i for i, x in enumerate(lines) if HEADER.match(x)), len(lines))
+    for index in range(top - 1, -1, -1):
+        if re.match(r"^\s*purity\s*=", lines[index]):
+            del lines[index]
+    bounds = _section_bounds(lines, "purity")
+    if bounds is not None:
+        del lines[bounds[0] - 1 : bounds[1]]
+    block = ["[purity]"]
+    if default is not None:
+        block.append(f'"." = {json.dumps(default)}')
+    for child, level in sorted(children.items()):
+        block.append(f"{json.dumps(child)} = {json.dumps(level)}")
+    if len(block) == 1:
+        return ("\n".join(lines).rstrip() + "\n") if lines else ""
+    return _append_table(lines, block)

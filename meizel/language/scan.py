@@ -117,7 +117,7 @@ _LEAVES = frozenset(
 )
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class FileScan:
     path: str
     facts: list[Fact] = field(default_factory=list[Fact])
@@ -160,6 +160,7 @@ class Scanner(PythonCommands):
 
     def run(self) -> FileScan:
         self.children(self.tree)
+        purity.record_module(self.purity_state, self.tree)
         return FileScan(
             self.path,
             facts=list(dict.fromkeys(self.facts)),

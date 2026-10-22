@@ -1,5 +1,21 @@
 exports = ["graphs.py", "imports.py", "model.py", "scopes.py", "universe.py"]
 
+[purity]
+"." = "strict-to-be"
+"imports.py" = "strict"
+"model.py" = "strict"
+"scopes.py" = "strict"
+
 [uses]
 "imports.py" = ["model.py", "scopes.py", "universe.py"]
 "universe.py" = ["model.py"]
+
+[debt.impure-call]
+"universe.py#Path.is_file" = 1
+"universe.py#import subprocess" = 1
+
+[debt.wide-exports]
+"meizel.toml#exports" = 1
+
+[debt.wide-public-surface]
+"graphs.py#public-surface" = 1

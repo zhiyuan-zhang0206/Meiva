@@ -29,13 +29,15 @@ from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.debt import total
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
-from meizel.contracts.debt_report import Baselines, read_baselines
+from meizel.contracts.debt_report import Baselines, changed_under, read_baselines
 from meizel.contracts.declare import declare
+from meizel.contracts.manifest import load_manifests, manifest_path
+from meizel.contracts.manifest_text import set_purity
 from meizel.contracts.sync import prune
 from meizel.graph.model import Code, MeizelError
 from meizel.graph.universe import load_universe
 
-__all__ = ["RuleDiff", "rule_diff"]
+__all__ = ["RuleDiff", "purity_changed", "rule_diff"]
 
 # A manifest or policy this checker cannot read says nothing about the base: counting it as no debt
 # would let any rule change that breaks the format pass as clean.
@@ -178,8 +180,52 @@ def regenerated(base_root: Path, ref: str, jobs: int | None) -> Baselines:
     return read_baselines(load_universe(base_root))
 
 
+def purity_changed(root: Path, ref: str) -> bool:
+    changed = set(changed_under(root, ref, [":(glob)**/meizel.toml", "meizel.toml"]))
+    if not changed:
+        return False
+    manifests, _ = load_manifests(load_universe(root))
+    return any(
+        (m.purity_default is not None or bool(m.purity)) and manifest_path(d) in changed
+        for d, m in manifests.items()
+    )
+
+
+def _sync_purity_scope(root: Path, ref: str, base_root: Path) -> None:
+    for rel in changed_under(root, ref, [":(glob)meizel/**", "meizel.policy.toml"]):
+        src = root / rel
+        dst = base_root / rel
+        if src.is_file():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+        elif dst.is_file():
+            dst.unlink()
+    _stage(base_root)
+    tree_manifests, _ = load_manifests(load_universe(root))
+    base_universe = load_universe(base_root)
+    known = base_universe.files | base_universe.dirs
+    for directory, manifest in sorted(tree_manifests.items()):
+        if manifest.purity_default is None and not manifest.purity:
+            continue
+        if directory and directory not in base_universe.dirs:
+            continue
+        children = {
+            k: v
+            for k, v in manifest.purity.items()
+            if (f"{directory}/{k}" if directory else k) in known
+        }
+        target = base_root / manifest_path(directory)
+        old_text = target.read_text(encoding="utf-8") if target.is_file() else ""
+        new_text = set_purity(old_text, manifest.purity_default, children)
+        if new_text != old_text:
+            target.write_text(new_text, encoding="utf-8")
+    _stage(base_root)
+
+
 def rule_diff(root: Path, ref: str, base: Counter[str], jobs: int | None = None) -> RuleDiff:
     """Compare the tree at `root` with `ref`, given the per-code debt the base records (`base`)."""
     with _checkout(root, ref) as checkout:
+        _refuse_unreadable(analyze(checkout, jobs=jobs), ref)
+        _sync_purity_scope(root, ref, checkout)
         found = regenerated(checkout, ref, jobs)
     return RuleDiff(base, found, read_baselines(load_universe(root)), ref)

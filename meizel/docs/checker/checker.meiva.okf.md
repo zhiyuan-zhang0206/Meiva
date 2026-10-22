@@ -34,10 +34,10 @@ python -m meizel roles list <role>... | check | write
 
 ## Commands
 
-- `check` is the gate. The whole graph is analysed; `paths` narrow what is
-  reported. Each diagnostic gives `file:line`, the fact edge, the directory `L`
-  that judges it, and either the manifest line to add or the public door to use.
-  `check --changed files...` judges only those files.
+- `check` is the gate over the whole graph; `paths` narrow what is reported.
+  Each diagnostic gives `file:line`, the fact edge, the judging directory `L`,
+  and the manifest line to add or public door to use. `check --changed files...`
+  judges only those files.
 - `debt` manages recorded violations, a per-directory baseline that may only
   shrink: [[meizel/docs/checker/debt.meiva.okf.md|recorded debt]].
 - `explain` prints a node's place in its parent's local graph and the fact
@@ -45,11 +45,9 @@ python -m meizel roles list <role>... | check | write
 - `sync --prune` drops stale declarations; `sync --declare` writes the legal new
   dependencies of the changed files: [[meizel/docs/checker/sync.meiva.okf.md|keeping manifests current]].
 - `bootstrap --out DIR` writes one `meizel.toml` per directory under `DIR` from
-  the current fact edges (keeping every non-edge table), plus
-  `DIR/report.json`: edge counts, transitive-reduction sizes, strongly connected
-  components with a shortest cycle and a witness fact per edge, cycles that need
-  test files, exports blocked by underscore children, and violation counts by
-  code. The repository is untouched.
+  current fact edges (preserving non-edge tables), plus `DIR/report.json` with
+  edge counts, strongly connected components, witness facts, and violation counts
+  by code without modifying the repository.
 
 ## Fact edges
 
@@ -128,17 +126,17 @@ Plugin and schedule-script discovery is `[external]`, never `[loads]`.
 
 ## Manifest
 
-`meizel.toml` keys are `exports` (list), `[uses]` (endpoints may name deeper paths:
-[[meizel/docs/checker/narrowing.meiva.okf.md|narrowed endpoints]]), `[loads]` and `[external]`
-(only for sites listed in [[meizel/docs/checker/policy.meiva.okf.md|the policy file]]) and
-`[debt.<code>]`. Names are direct children: files with extension, directories by name.
-`meizel.toml` is not a child and does not count toward the directory budget. A directory
-without a manifest has no local edges and exports its door.
+`meizel.toml` keys are `purity` / `[purity]` ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),
+`exports` (list), `[uses]` ([[meizel/docs/checker/narrowing.meiva.okf.md|narrowed endpoints]]), `[loads]` and `[external]`
+(sites in [[meizel/docs/checker/policy.meiva.okf.md|the policy file]]) and
+`[debt.<code>]`. Names are direct children; `meizel.toml` does not count toward the
+directory budget. A directory without a manifest has no local edges and exports its door.
 
 ## When it fails
 
 Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`, `private-name`,
 `cycle-edge`, `restricted-python`, the patch codes and `missing-patch-target` ([[meizel/docs/checker/patching.meiva.okf.md|patching]]),
+the 15 purity and bounded-container codes ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),
 `unresolved-import`, `unlisted-allowance`,
 `stale-load`, `stale-external`, `policy-syntax`, `debt-paid`, and the manifest codes
 (`manifest-` + syntax, unknown-key, unknown-child, duplicate, self-edge, cycle, export-private,

@@ -46,7 +46,7 @@ table or section name is `policy-syntax`, not an exemption that silently allows 
 | `turn-scoped-config` | per-agent settings reads | `files`, `plugin-mechanism-files`; `scan-dirs`, `extra-files`, `rule-inputs` (lists) |
 | `path-imports` | runtime `sys.path` mutation | `scope`, `skills-scope` (lists) |
 | `python-commands` | bare Python subprocess invocations | `argv-wrappers` (list) |
-| `purity` | mechanical purity rules (`strict` / `strict-to-be`) | `impure-imports`, `impure-calls`, `impure-fixtures`, `max-uses` (lists) |
+| `purity` | mechanical purity rules (`strict` / `strict-to-be`) | `impure-imports`, `impure-calls`, `impure-fixtures`, `max-uses`, `max-exports`, `max-public-symbols`, `max-params`, `max-attr-hops` (lists) |
 | `type-checking` | `if TYPE_CHECKING:` | `files` |
 
 An entry that names a file or a site still goes stale when the file is gone or the site is no

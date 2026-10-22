@@ -24,7 +24,7 @@ class FixtureRequest:
     skip_self: bool = False
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class FixtureState:
     """Fixture facts of one file, gathered while it is scanned."""
 
@@ -141,7 +141,7 @@ def plugin_names(value: ast.expr) -> list[str] | None:
     return None
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class FixtureIndex:
     """What each scanned file defines, for resolving a request to its definer."""
 

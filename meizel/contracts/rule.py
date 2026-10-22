@@ -251,28 +251,30 @@ def _module_purity_diagnostics(
     return found
 
 
-def _test_purity_mode(scan: FileScan, mode: str, manifests: dict[str, Manifest]) -> str:
+def _test_purity_mode(scan: FileScan, manifests: dict[str, Manifest]) -> str:
+    own_mode = effective_purity(scan.path, manifests, include_tests=True)
     targets = {
         f.dst
         for f in scan.facts
         if f.kind in {FactKind.IMPORT, FactKind.ATTRIBUTE, FactKind.PATCH} and f.dst != scan.path
     }
     if not targets:
-        return effective_purity(scan.path, manifests, include_tests=True)
+        return own_mode
     target_modes = {effective_purity(dst, manifests) for dst in targets}
     if "none" in target_modes:
         return "none"
-    return "strict-to-be" if mode == "strict-to-be" or "strict-to-be" in target_modes else "strict"
+    return (
+        "strict-to-be" if own_mode == "strict-to-be" or "strict-to-be" in target_modes else "strict"
+    )
 
 
 def _test_purity_diagnostics(
     scan: FileScan,
     owner: str,
-    mode: str,
     manifests: dict[str, Manifest],
     impure_fixtures: frozenset[str],
 ) -> list[Diagnostic]:
-    test_mode = _test_purity_mode(scan, mode, manifests)
+    test_mode = _test_purity_mode(scan, manifests)
     if test_mode == "none":
         return []
     found = [
@@ -315,15 +317,37 @@ def _file_purity_diagnostics(
     if mode in {"strict", "strict-to-be"}:
         found.extend(_module_purity_diagnostics(scan, owner, mode, manifests))
     if is_test_file(scan.path):
-        found.extend(_test_purity_diagnostics(scan, owner, mode, manifests, impure_fixtures))
+        found.extend(_test_purity_diagnostics(scan, owner, manifests, impure_fixtures))
     return found
 
 
+def _policy_limit(policy: Policy, section: str, default: int) -> int:
+    raw = policy.names("purity", section)
+    return int(raw[0]) if raw and raw[0].isdigit() else default
+
+
 def _wide_fanout_diagnostics(manifests: dict[str, Manifest], policy: Policy) -> list[Diagnostic]:
-    raw_max = policy.names("purity", "max-uses")
-    max_uses = int(raw_max[0]) if raw_max and raw_max[0].isdigit() else 8
+    max_uses = _policy_limit(policy, "max-uses", 8)
+    max_exports = _policy_limit(policy, "max-exports", 4)
     found: list[Diagnostic] = []
     for directory, manifest in sorted(manifests.items()):
+        if (
+            "/" in directory
+            and manifest.purity_default in {"strict", "strict-to-be"}
+            and len(manifest.exports) > max_exports
+        ):
+            found.append(
+                Diagnostic(
+                    manifest.path,
+                    manifest.line_of("exports"),
+                    Code.WIDE_EXPORTS,
+                    f"exports: {_where(directory)} exports {len(manifest.exports)} children (max {max_exports} in {manifest.purity_default} mode)",
+                    (
+                        "keep the package door narrow by re-exporting through `__init__.py` or splitting subpackages",
+                    ),
+                    _purity_debt(directory, manifest.path, "exports", manifest.purity_default),
+                )
+            )
         for child, targets in sorted(manifest.uses.items()):
             child_path = f"{directory}/{child}" if directory else child
             mode = effective_purity(child_path, manifests)

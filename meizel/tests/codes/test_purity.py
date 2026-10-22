@@ -377,3 +377,87 @@ def test_wide_fanout_flags_excess_sibling_uses_in_strict_and_records_in_strict_t
     assert found.debt is not None
     assert found.debt.key == "hub.py#uses"
     assert "depends on 3 sibling targets (max 2" in found.message
+
+
+def test_wide_exports_flags_excess_subpackage_doors(make_repo: RepoFactory) -> None:
+    root = make_repo(
+        {
+            "pkg/__init__.py": "",
+            "pkg/sub/__init__.py": "",
+            "pkg/sub/a.py": "X = 1\n",
+            "pkg/sub/b.py": "X = 2\n",
+            "pkg/sub/c.py": "X = 3\n",
+            "pkg/sub/meizel.toml": 'purity = "strict-to-be"\nexports = ["a.py", "b.py", "c.py"]\n',
+            "meizel.policy.toml": '[purity]\nmax-exports = ["2"]\n',
+        }
+    )
+    [found] = diagnostics(root, "wide-exports")
+    assert found.debt is not None
+    assert (found.debt.owner, found.debt.key) == ("pkg/sub", "meizel.toml#exports")
+
+
+def test_wide_public_surface_counts_behavioral_symbols_not_frozen_data_classes(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {
+            "pkg/__init__.py": "",
+            "pkg/a.py": (
+                "from dataclasses import dataclass\n"
+                "from enum import StrEnum\n\n"
+                "@dataclass(frozen=True)\nclass Value:\n    x: int\n\n"
+                "class Mode(StrEnum):\n    A = 'a'\n\n"
+                "class DomainError(Exception):\n    pass\n\n"
+                "def f1(v: Value) -> int:\n    return v.x + 1\n\n"
+                "def f2(v: Value) -> int:\n    return v.x + 2\n\n"
+                "def f3(v: Value) -> int:\n    return v.x + 3\n"
+            ),
+            "pkg/meizel.toml": 'purity = "strict-to-be"\n',
+            "meizel.policy.toml": '[purity]\nmax-public-symbols = ["2"]\n',
+        }
+    )
+    [found] = diagnostics(root, "wide-public-surface")
+    assert found.debt is not None
+    assert found.debt.key == "a.py#public-surface"
+    assert "3 public behavioral symbols (max 2" in found.message
+
+
+def test_wide_params_excludes_self_and_flags_excess_parameters(make_repo: RepoFactory) -> None:
+    root = make_repo(
+        {
+            "pkg/__init__.py": "",
+            "pkg/a.py": (
+                "from dataclasses import dataclass\n\n"
+                "@dataclass(frozen=True)\nclass Svc:\n"
+                "    def ok(self, a: int, b: int, c: int) -> int:\n"
+                "        return a + b + c\n\n"
+                "    def too_many(self, a: int, b: int, c: int, d: int) -> int:\n"
+                "        return a + b + c + d\n"
+            ),
+            "pkg/meizel.toml": 'purity = "strict-to-be"\n',
+            "meizel.policy.toml": '[purity]\nmax-params = ["3"]\n',
+        }
+    )
+    [found] = diagnostics(root, "wide-params")
+    assert found.debt is not None
+    assert found.debt.key == "a.py#def too_many"
+
+
+def test_deep_attr_chain_flags_train_wrecks_and_ignores_module_or_method_chains(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {
+            "pkg/__init__.py": "",
+            "pkg/a.py": (
+                "def read(ctx: object, text: str) -> str:\n"
+                "    _ = text.strip().lower().replace('a', 'b')\n"
+                "    _ = ctx.a.b.c\n"
+                "    return str(ctx.a.b.c.d)\n"
+            ),
+            "pkg/meizel.toml": 'purity = "strict-to-be"\n',
+        }
+    )
+    [found] = diagnostics(root, "deep-attr-chain")
+    assert found.debt is not None
+    assert found.debt.key == "a.py#ctx.a.b.c.d"

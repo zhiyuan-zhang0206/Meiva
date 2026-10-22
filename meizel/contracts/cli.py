@@ -21,7 +21,7 @@ from meizel.contracts.debt_report import (
     summarize,
     totals_at,
 )
-from meizel.contracts.debt_rules import rule_diff
+from meizel.contracts.debt_rules import purity_changed, rule_diff
 from meizel.contracts.debt_sites import format_sites, sites
 from meizel.contracts.declare import declare
 from meizel.contracts.explain import explain
@@ -232,9 +232,9 @@ def add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser
 
 
 def _run_diff(root: Path, ref: str, on_growth: str, args: argparse.Namespace) -> int:
-    rules_changed = bool(args.waive_if_changed) and bool(
-        changed_under(root, ref, args.waive_if_changed)
-    )
+    rules_changed = (
+        bool(args.waive_if_changed) and bool(changed_under(root, ref, args.waive_if_changed))
+    ) or purity_changed(root, ref)
     if rules_changed:
         result = rule_diff(root, ref, totals_at(root, ref), args.jobs)
         print("\n".join(result.lines()))
