@@ -156,11 +156,13 @@ class TurnScheduler:
         activity_clock: Callable[[int], Awaitable[datetime | None]] | None = None,
         config_fingerprint: Callable[[int], str | None] | None = None,
         cancel_unwind_timeout_s: float = CANCEL_UNWIND_TIMEOUT_S,
+        clock_read_timeout_s: float = CLOCK_READ_TIMEOUT_S,
     ) -> None:
         self._run_turn = run_turn
         self._activity_clock = activity_clock
         self._config_fingerprint = config_fingerprint
         self._cancel_unwind_timeout_s = cancel_unwind_timeout_s
+        self._clock_read_timeout_s = clock_read_timeout_s
         self._tasks: dict[int, asyncio.Task[None]] = {}
         self._errors: list[BaseException] = []
         self._reaped_successors: dict[int, asyncio.Task[None]] = {}
@@ -416,7 +418,7 @@ class TurnScheduler:
 
         try:
             pairs = await asyncio.wait_for(
-                asyncio.gather(*(_one(a) for a in agent_ids)), CLOCK_READ_TIMEOUT_S
+                asyncio.gather(*(_one(a) for a in agent_ids)), self._clock_read_timeout_s
             )
         except (TimeoutError, Exception):
             logger.warning(

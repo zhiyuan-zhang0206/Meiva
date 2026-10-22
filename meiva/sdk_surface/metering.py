@@ -37,7 +37,7 @@ import functools
 import inspect
 from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.agents.sdk.capture import SdkCaptureOwner
@@ -104,12 +104,12 @@ def _caller(
     )
 
 
-def make_recorder(
-    original: Callable[..., object],
+def make_recorder[F: Callable[..., object]](
+    original: F,
     fq: str,
     sampling: SamplingPolicyOwner,
     producer: Callable[[], object] | None = None,
-) -> Callable[..., object]:
+) -> F:
     """Transparent proxy around ``original`` that meters the call as ``fq`` (the call /
     tally / emit logic lives in ``base.agents.sdk.telemetry.run_metered``)."""
 
@@ -151,9 +151,9 @@ def make_recorder(
                 machine_reader=machine_reader,
             )
 
-        return _recorder(async_recorder, sampling)
+        return cast("F", _recorder(async_recorder, sampling))
 
-    return _recorder(recorder, sampling)
+    return cast("F", _recorder(recorder, sampling))
 
 
 # meiva.mcps exposes its tools dynamically (the servers come from configuration), so the namespace
@@ -164,11 +164,11 @@ def make_recorder(
 _MCP_CALL_FUNNEL = "call_raw"
 
 
-def make_mcp_recorder(
-    original: Callable[..., object],
+def make_mcp_recorder[F: Callable[..., object]](
+    original: F,
     sampling: SamplingPolicyOwner,
     producer: Callable[[], object] | None = None,
-) -> Callable[..., object]:
+) -> F:
     """Recorder for the MCP call funnel — derives the fq from the runtime args."""
 
     @functools.wraps(original)
@@ -189,7 +189,7 @@ def make_mcp_recorder(
             machine_reader=machine_reader,
         )
 
-    return _recorder(recorder, sampling)
+    return cast("F", _recorder(recorder, sampling))
 
 
 def instrument_targets() -> list[tuple[object, str, str]]:
