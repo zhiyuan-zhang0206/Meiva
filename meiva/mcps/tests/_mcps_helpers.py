@@ -71,7 +71,7 @@ def fake_config(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     Patches builtin_mcp_paths to list so tests that expect empty-or-known
     configs are not surprised by the repo's mcps/chrome/.mcp.json built-in.
     """
-    import meiva.mcps.config as _cfg
+    import base.packages.mcp_config as _cfg
 
     monkeypatch.setattr(_cfg, "builtin_mcp_paths", list)
     return unit_home / "mcp.json"

@@ -1,12 +1,3 @@
-"""Checkpoint-compatible plugin delta codec for external SDK attachments.
-
-The agent layer owns it; `meiva.impersonation.attach` reaches this module by name.
-
-The existing serializer preserves reducer inputs exactly, including partial
-mappings, sets, nested models and message objects. The JSON envelope fits the
-lease's ordered delta journal; only the native graph writes checkpoints.
-"""
-
 from __future__ import annotations
 
 import base64
@@ -20,13 +11,14 @@ from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
 from pydantic.fields import FieldInfo
 
-from agent import state as agent_state
-from agent.state import plugin_state_schema
+from base.agents.context.external_attachment import state_schema as agent_state
+from base.agents.context.external_attachment.state_schema import plugin_state_schema
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.db import Database
 from base.packages.plugins.loading import registry as extensions_registry
 
 
+# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
 def serializer() -> JsonPlusSerializer:
     return JsonPlusSerializer(
         allowed_msgpack_modules=agent_state.checkpoint_msgpack_allowlist(
@@ -48,16 +40,19 @@ def _validate_messages_delta(delta: dict[str, Any]) -> None:
             )
 
 
+# meiva:note
+# Serializes a reducer input validated against `state_cls` without coercing it to a
+# field value, preserving partial mappings, sets, nested models and message objects.
+# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
 def encode_plugin_delta(delta: dict[str, Any], state_cls: type[Any]) -> dict[str, str]:
-    """Serialize a reducer input validated against `state_cls`, without coercing it to a field value."""
     checked = agent_state.validate_plugin_state_keys(delta, state_cls)
     _validate_messages_delta(checked)
     encoding, payload = serializer().dumps_typed(checked)
     return {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")}
 
 
+# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
 def decode_plugin_delta(encoded: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
-    """Decode the checkpoint codec envelope, rejecting channels `state_cls` does not have."""
     payload = serializer().loads_typed(
         (encoded["encoding"], base64.b64decode(encoded["data"], validate=True))
     )
@@ -68,8 +63,8 @@ def decode_plugin_delta(encoded: dict[str, Any], state_cls: type[Any]) -> dict[s
     return checked
 
 
+# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
 def apply_plugin_delta(state: Any, delta: dict[str, Any]) -> None:
-    """Replay one journal entry through the registered field reducers."""
     agent_state.validate_plugin_state_keys(delta, cast("type[Any]", type(state)))
     _validate_messages_delta(delta)
     for name, value in delta.items():
@@ -78,12 +73,14 @@ def apply_plugin_delta(state: Any, delta: dict[str, Any]) -> None:
         setattr(state, name, reducer(getattr(state, name), value))
 
 
+# meiva:note
+# Reads native state and pinned config using the loaded plugin state classes as the
+# checkpoint decode allowlist, reconstructing delta-written messages without writing
+# or updating a checkpoint.
+# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
 def load_snapshot(
     agent_id: int, *, database: Database
 ) -> tuple[Any, dict[str, Any] | None, dict[str, Any] | None]:
-    """Read native state and pinned config; never create or update a checkpoint."""
-    # What the plugins this attachment loaded declare; the checkpoint decode's allowlist is the state
-    # classes of the faces it loaded (`loaded_state_classes`).
     registry = extensions_registry.build_registry(validate_state=plugin_state_schema)
     state_cls = agent_state.build_agent_state(registry)
     with database.connect(autocommit=True) as conn:
@@ -97,8 +94,6 @@ def load_snapshot(
         saver = PostgresSaver(conn=typed_conn, serde=serializer())
         snapshot = saver.get_tuple({"configurable": {"thread_id": str(agent_id)}})
         if snapshot is not None:
-            # Transition layer (tasks #3180/#3181): attach with reconstructed
-            # messages instead of an empty history on delta-written threads.
             reconstruct_delta_messages(saver, snapshot)
     if snapshot is None:
         raise RuntimeError("approved agent has no checkpoint to attach")

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 import meiva
 from agent import state as state_module
-from agent.extensions import plugin_state_codec
+from base.agents.context.external_attachment import plugin_state_codec
 from base.agents.impersonation import manifest
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot

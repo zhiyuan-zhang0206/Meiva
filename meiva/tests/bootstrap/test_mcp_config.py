@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-import meiva.mcps.config as cfg_mod
+import base.packages.mcp_config as cfg_mod
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 

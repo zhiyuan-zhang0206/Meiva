@@ -1,6 +1,7 @@
-exports = ["delivery", "envelope.py", "external_caller.py", "identity.py", "inbound.py", "inbound_images.py", "inbound_provenance.py", "injection_scan.py", "kwargs.py", "lifecycle_text.py", "security_finding.py", "token_estimate.py"]
+exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "identity.py", "inbound.py", "inbound_images.py", "inbound_provenance.py", "injection_scan.py", "kwargs.py", "lifecycle_text.py", "security_finding.py", "token_estimate.py"]
 
 [uses]
+"guard.py" = ["identity.py"]
 "identity.py" = ["kwargs.py"]
 "injection_scan.py" = ["security_finding.py"]
 "tests" = ["envelope.py", "external_caller.py", "injection_scan.py", "kwargs.py", "security_finding.py", "token_estimate.py"]
