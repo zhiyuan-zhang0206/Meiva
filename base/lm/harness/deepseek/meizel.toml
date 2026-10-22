@@ -1,4 +1,4 @@
-exports = ["config.py", "mapping.py", "session.py", "types.py", "usage.py"]
+exports = ["mapping.py", "session.py", "types.py", "usage.py"]
 
 [uses]
 "__init__.py" = ["config.py", "mapping.py", "session.py", "types.py", "usage.py"]
@@ -8,3 +8,6 @@ exports = ["config.py", "mapping.py", "session.py", "types.py", "usage.py"]
 "types.py" = []
 "usage.py" = []
 "tests" = ["__init__.py", "mapping.py", "usage.py"]
+
+[purity]
+"config.py" = "strict"

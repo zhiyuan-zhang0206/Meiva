@@ -1,1 +1,4 @@
 exports = ["mcp.py", "packages.py", "plugins.py"]
+
+[purity]
+"__init__.py" = "strict"

@@ -7,5 +7,8 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 "tests" = ["direct_url.py", "pg_foreground.py", "pg_runtime.py", "pg_stall_watchdog.py", "pg_throwaway_base.py", "pg_tools.py", "pooler.py", "redis_bridge.py", "runtime_binaries.py", "walg_binary.py"]
 "walg_binary.py" = ["runtime_binaries.py"]
 
+[purity]
+"__init__.py" = "strict"
+
 [debt.private-name]
 "tests/test_vendored_binaries.py -> runtime_binaries.py#_PGVECTOR_SQL" = 5

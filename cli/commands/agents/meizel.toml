@@ -9,3 +9,6 @@ exports = ["computer.py", "control.py", "impersonation.py", "impersonation_adapt
 
 [external]
 "impersonation.py" = "runs the Python the operator pipes in or names as a file"
+
+[purity]
+"__init__.py" = "strict"

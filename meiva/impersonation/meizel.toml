@@ -2,3 +2,37 @@ exports = ["attachment.py"]
 
 [uses]
 "__init__.py" = ["attachment.py"]
+
+[purity]
+"." = "strict-to-be"
+
+[debt.impure-call]
+"attachment.py#uuid.uuid4" = 1
+
+[debt.impure-edge]
+"attachment.py#base/agents/context/__init__.py" = 1
+"attachment.py#base/agents/context/clients.py" = 1
+"attachment.py#base/agents/context/external_attachment/__init__.py" = 1
+"attachment.py#base/agents/impersonation/__init__.py" = 3
+"attachment.py#base/agents/impersonation/manifest.py" = 4
+"attachment.py#base/agents/impersonation/sessions.py" = 1
+"attachment.py#base/clock/configuration.py" = 1
+"attachment.py#base/cluster/dataplane/direct_url.py" = 1
+"attachment.py#base/cluster/machine/__init__.py" = 1
+"attachment.py#base/cluster/machine/boot.py" = 1
+"attachment.py#base/config/__init__.py" = 1
+"attachment.py#base/config/agent_pins.py" = 1
+"attachment.py#base/db/__init__.py" = 1
+"attachment.py#base/db/code_version_gate.py" = 1
+"attachment.py#base/db/config.py" = 1
+"attachment.py#base/host/env/agent_slices.py" = 1
+"attachment.py#base/native_process/code_version.py" = 1
+"attachment.py#base/native_process/ownership.py" = 1
+"attachment.py#base/packages/plugins/config_view.py" = 1
+"attachment.py#meiva/boot.py" = 1
+"attachment.py#meiva/sdk_surface/installation.py" = 1
+"attachment.py#meiva/sdk_surface/process_context.py" = 14
+"attachment.py#meiva/sdk_surface/settings.py" = 1
+
+[debt.untyped-export]
+"__init__.py#def attach" = 1

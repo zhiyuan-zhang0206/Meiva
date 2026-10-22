@@ -2,3 +2,7 @@ exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "st
 
 [uses]
 "tests" = ["collector_artifact.py", "editable_install.py"]
+
+[purity]
+"__init__.py" = "strict"
+"start_inputs.py" = "strict"

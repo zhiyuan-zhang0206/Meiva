@@ -3,3 +3,6 @@ exports = ["auth", "config.py", "disconnect.py", "middleware", "model_catalog.py
 [uses]
 "auth" = ["config.py", "middleware"]
 "config.py" = ["middleware"]
+
+[purity]
+"__init__.py" = "strict"

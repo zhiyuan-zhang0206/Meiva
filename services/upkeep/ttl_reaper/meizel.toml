@@ -6,3 +6,6 @@ exports = ["daemon.py", "shells.py"]
 "shells.py" = ["owner_notice.py"]
 "sweep.py" = ["cadence.py", "owner_notice.py"]
 "tests" = ["cadence.py", "daemon.py", "remote.py", "shells.py", "sweep.py"]
+
+[purity]
+"__init__.py" = "strict"

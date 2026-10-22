@@ -3,3 +3,16 @@ exports = ["http.py", "types.py"]
 [uses]
 "http.py" = ["types.py"]
 "tests" = ["types.py"]
+
+[purity]
+"." = "strict-to-be"
+"__init__.py" = "strict"
+
+[debt.impure-call]
+"http.py#async def post_json" = 1
+"http.py#import httpx" = 1
+"types.py#async def decide" = 1
+"types.py#async def handle_async_request" = 1
+
+[debt.untyped-export]
+"http.py#def post_json" = 1

@@ -7,3 +7,9 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "root_control" = ["ownership.py"]
 "tests" = ["__init__.py", "child_env.py", "code_version.py", "evidence.py", "loaded_commit.py", "os_platform.py", "ownership.py", "pidfd.py", "process_control.py", "runtime_incarnation.py", "turn_identity.py"]
 "turn_identity.py" = ["stop_timing.py"]
+
+[purity]
+"evidence.py" = "strict"
+"reparent.py" = "strict"
+"runtime_incarnation.py" = "strict"
+"stop_timing.py" = "strict"

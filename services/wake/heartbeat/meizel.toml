@@ -4,6 +4,9 @@ exports = ["daemon.py", "station_probe.py"]
 "daemon.py" = ["__init__.py", "completion_digest.py", "liveness.py"]
 "tests" = ["__init__.py", "completion_digest.py", "daemon.py", "liveness.py", "station_probe.py"]
 
+[purity]
+"__init__.py" = "strict"
+
 [debt.private-name]
 "tests/test_heartbeat_checkin_retry.py -> daemon.py#_sweep_backoff_resets" = 1
 "tests/test_heartbeat_daemon_part2.py -> daemon.py#_sweep_backoff_resets" = 1

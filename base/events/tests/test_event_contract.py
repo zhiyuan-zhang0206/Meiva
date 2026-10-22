@@ -43,13 +43,9 @@ def test_tier_for_applies_priority_rules_and_unknown_fallback() -> None:
     assert tier_for("unregistered", "telemetry", "info") == "observation"
 
 
-def test_tier_for_fails_fast_when_a_registered_event_lacks_a_tier(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delitem(TIER_BY_EVENT, "llm_usage")
-
+def test_tier_for_fails_fast_when_a_registered_event_lacks_a_tier() -> None:
     with pytest.raises(KeyError):
-        tier_for("llm_usage", "telemetry", "info")
+        tier_for("llm_usage", "telemetry", "info", tiers={})
 
 
 def test_dual_category_status_change() -> None:

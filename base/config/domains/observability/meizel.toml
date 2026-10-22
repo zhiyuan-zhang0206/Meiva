@@ -1,1 +1,2 @@
+purity = "strict"
 exports = ["alerts.py", "settings.py"]

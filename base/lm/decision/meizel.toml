@@ -2,3 +2,6 @@ exports = ["call.py", "tests"]
 
 [uses]
 "tests" = ["call.py"]
+
+[purity]
+"__init__.py" = "strict"

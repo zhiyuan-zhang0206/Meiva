@@ -14,3 +14,7 @@ exports = ["composer_commands.py", "dashboard_supply.py", "docs", "extensions", 
 [external]
 "dashboard_supply.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "plugin_providers.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
+
+[purity]
+"__init__.py" = "strict"
+"text_budget.py" = "strict"

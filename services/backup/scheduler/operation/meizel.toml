@@ -5,3 +5,7 @@ exports = ["staging.py", "worker_process.py"]
 
 [loads]
 "worker_bootstrap.py" = ["services/backup/scheduler"]
+
+[purity]
+"__init__.py" = "strict"
+"worker_bootstrap.py" = "strict"

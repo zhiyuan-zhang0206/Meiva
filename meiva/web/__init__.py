@@ -15,7 +15,7 @@ from meiva.web.errors import SearchError as SearchError
 from meiva.web.errors import WebError as WebError
 
 
-@dataclass
+@dataclass(frozen=True)
 class SearchResult:
     title: str
     url: str

@@ -1,1 +1,24 @@
 exports = ["commands.py", "errors.py", "fleet_graph.py", "frontend_telemetry.py", "memory.py", "models.py", "pages.py", "shell.py", "stats.py", "tasks.py", "uploads.py", "user_settings.py", "host_permissions.py"]
+
+[purity]
+"." = "strict-to-be"
+"__init__.py" = "strict"
+"commands.py" = "strict"
+"errors.py" = "strict"
+"fleet_graph.py" = "strict"
+"frontend_telemetry.py" = "strict"
+"host_permissions.py" = "strict"
+"memory.py" = "strict"
+"pages.py" = "strict"
+"shell.py" = "strict"
+"stats.py" = "strict"
+"tasks.py" = "strict"
+"uploads.py" = "strict"
+"user_settings.py" = "strict"
+
+[debt.impure-edge]
+"models.py#base/agents/model/birth_config.py" = 1
+"models.py#base/lm/registry.py" = 1
+
+[debt.wide-exports]
+"meizel.toml#exports" = 1

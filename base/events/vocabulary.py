@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Literal
 
 Category = Literal["audit", "telemetry", "log"]
 EventTier = Literal["business", "anomaly", "observation", "noise"]
@@ -68,7 +68,7 @@ class EventSpec:
     category: Category
     tier: EventTier
     extra_categories: frozenset[Category] = frozenset()
-    payload: Any | None = None
+    payload: type[object] | None = None
     destination: Literal["events", "file"] = "events"
     family: str | None = None
     doc: str = ""
@@ -80,7 +80,7 @@ def audit_event(
     name: str,
     doc: str,
     *,
-    payload: Any | None = None,
+    payload: type[object] | None = None,
     tier: EventTier = "business",
     site: str = "",
 ) -> EventSpec:
@@ -98,7 +98,7 @@ def telemetry_audit_event(
     name: str,
     doc: str,
     *,
-    payload: Any | None = None,
+    payload: type[object] | None = None,
     site: str = "",
 ) -> EventSpec:
     """A name that genuinely carries both categories (status_change: the
@@ -118,7 +118,7 @@ def telemetry_event(
     name: str,
     doc: str,
     *,
-    payload: Any | None = None,
+    payload: type[object] | None = None,
     family: str | None = None,
     destination: Literal["events", "file"] = "events",
     tier: EventTier = "observation",

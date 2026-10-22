@@ -11,3 +11,6 @@ exports = ["birth", "context", "history", "impersonation", "inbox", "incarnation
 "tasks" = ["inbox", "messages"]
 "tests" = ["birth", "context", "history", "impersonation", "inbox", "messages", "model", "observation", "to_user", "upload_delivery"]
 "upload_delivery" = ["inbox", "messages"]
+
+[purity]
+"__init__.py" = "strict"

@@ -12,3 +12,9 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 "screen.py" = ["errors.py", "targets.py"]
 "targets.py" = ["errors.py"]
 "tests" = ["ax_act.py", "ax_gap.py", "ax_ids.py", "ax_tools.py", "config.py", "errors.py", "mcp_daemon.py", "mcp_wrapper.py", "ocr", "ocr_text.py", "protocol.py", "screen.py", "session.py", "targets.py", "task_sessions.py"]
+
+[purity]
+"__init__.py" = "strict"
+"config.py" = "strict"
+"errors.py" = "strict"
+"protocol.py" = "strict"

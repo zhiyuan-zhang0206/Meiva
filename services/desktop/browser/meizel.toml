@@ -13,3 +13,8 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "session_restore.py" = ["session.py", "tab_groups"]
 "tab_groups" = ["session.py"]
 "tests" = ["daemon.py", "gateway_session.py", "macos_readiness.py", "mcp_daemon.py", "mcp_upstream.py", "orphan.py", "page_lifecycle.py", "probe.py", "profile.py", "session.py", "session_restore.py", "tab_groups"]
+
+[purity]
+"__init__.py" = "strict"
+"protocol.py" = "strict"
+"shutdown_budget.py" = "strict"

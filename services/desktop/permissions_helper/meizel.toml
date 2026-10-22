@@ -5,3 +5,6 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 "lifecycle.py" = ["build_state.py", "hardened_runtime.py", "launchd_job.py", "signing_identity.py"]
 "signing_identity.py" = ["hardened_runtime.py"]
 "tests" = ["__init__.py", "launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.py"]
+
+[purity]
+"hardened_runtime.py" = "strict"

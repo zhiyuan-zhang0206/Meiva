@@ -2,3 +2,6 @@ exports = ["document.py"]
 
 [uses]
 "tests" = ["document.py"]
+
+[purity]
+"__init__.py" = "strict"

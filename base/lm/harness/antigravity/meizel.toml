@@ -1,4 +1,4 @@
-exports = ["config.py", "handoff_rules.py", "mapping.py", "session.py", "tests", "transport.py"]
+exports = ["handoff_rules.py", "mapping.py", "session.py", "tests", "transport.py"]
 
 [uses]
 "__init__.py" = ["config.py", "handoff_rules.py", "mapping.py", "session.py", "transport.py"]
@@ -7,3 +7,6 @@ exports = ["config.py", "handoff_rules.py", "mapping.py", "session.py", "tests",
 "session.py" = ["config.py", "mapping.py", "transport.py"]
 "transport.py" = ["config.py"]
 "tests" = ["config.py", "handoff_rules.py", "mapping.py", "session.py", "transport.py"]
+
+[purity]
+"config.py" = "strict"

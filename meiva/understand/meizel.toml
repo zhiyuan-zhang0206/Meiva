@@ -4,3 +4,6 @@ exports = ["answer.py", "plans.py", "wiring.py"]
 "__init__.py" = ["answer.py", "errors.py", "plans.py", "wiring.py"]
 "answer.py" = ["errors.py", "plans.py"]
 "wiring.py" = ["answer.py"]
+
+[purity]
+"errors.py" = "strict"

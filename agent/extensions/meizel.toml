@@ -1,1 +1,4 @@
 exports = ["catalog.py"]
+
+[purity]
+"__init__.py" = "strict"

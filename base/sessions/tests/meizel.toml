@@ -17,7 +17,6 @@ exports = ["poll_until.py", "refuse_helper.py", "scripted_helper.py"]
 "test_coding_session_owner.py#monkeypatch.setattr base.sessions.coding_session_owner.is_macos" = 2
 "test_coding_session_owner.py#monkeypatch.setattr base.sessions.coding_session_owner.private_socket_dir" = 3
 "test_env_forwarding.py#monkeypatch.setattr base.host.runtime_interpreter.runtime_venv" = 1
-"test_log_prefix.py#monkeypatch.setattr base.sessions.log_prefix.datetime" = 1
 "test_posix_backend.py#monkeypatch.setattr base.sessions.posixproc.new_session" = 2
 "test_posixproc.py#monkeypatch.setattr base.sessions.posixproc.os.killpg" = 1
 "test_posixproc.py#monkeypatch.setattr base.sessions.posixproc.psutil.Process" = 2

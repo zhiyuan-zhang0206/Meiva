@@ -61,7 +61,7 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
         return retain_usage_details(msg, event), block_start_event
 
 
-def retain_usage_details(msg: AIMessageChunk | None, event: Any) -> AIMessageChunk | None:
+def retain_usage_details(msg: AIMessageChunk | None, event: object) -> AIMessageChunk | None:
     # meiva:note
     # The chunk the SDK's conversion built is the input here, so a caller (and a
     # test) supplies it directly; this puts back the two details that conversion
@@ -75,7 +75,8 @@ def retain_usage_details(msg: AIMessageChunk | None, event: Any) -> AIMessageChu
     # Emit once: LangChain concatenates repeated string metadata while
     # combining chunks. The start event carries the actual service speed.
     if kind == "message_start":
-        speed = getattr(event.message.usage, "speed", None)
+        message = getattr(event, "message", None)
+        speed = getattr(getattr(message, "usage", None), "speed", None)
         if speed is not None:
             msg.response_metadata["speed"] = speed
     # meiva:note
@@ -83,7 +84,7 @@ def retain_usage_details(msg: AIMessageChunk | None, event: Any) -> AIMessageChu
     # output_tokens_details.thinking_tokens — which the upstream
     # _create_usage_metadata drops. Supplement the chunk's usage_metadata.
     elif kind == "message_delta" and msg.usage_metadata is not None:
-        output_details = getattr(event.usage, "output_tokens_details", None)
+        output_details = getattr(getattr(event, "usage", None), "output_tokens_details", None)
         if output_details is not None:
             thinking_tokens: int = getattr(output_details, "thinking_tokens", 0) or 0
             if thinking_tokens > 0:

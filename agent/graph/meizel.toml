@@ -1,4 +1,9 @@
-exports = ["agent_traceback.py", "claim", "exec", "hooks", "interrupt.py", "llm", "llm_errors.py", "node_log.py", "prompt", "recall", "tests", "tool_calls.py"]
+exports = ["claim", "exec", "hooks", "interrupt.py", "llm", "llm_errors.py", "node_log.py", "prompt", "recall", "tests", "tool_calls.py"]
+
+[purity]
+"_shared.py" = "strict"
+"agent_traceback.py" = "strict"
+"tool_calls.py" = "strict"
 
 [uses]
 "__init__.py" = ["_build.py", "claim", "exec", "llm", "llm_errors.py"]

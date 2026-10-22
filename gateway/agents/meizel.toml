@@ -13,3 +13,6 @@ exports = ["creation.py", "eval_guard.py", "forward.py", "history", "inbound_pro
 "task_assignment" = ["creation.py"]
 "tests" = ["lifecycle.py", "state.py"]
 "to_user" = ["eval_guard.py"]
+
+[purity]
+"__init__.py" = "strict"

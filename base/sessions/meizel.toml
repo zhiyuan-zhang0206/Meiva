@@ -9,3 +9,11 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "protocol.py" = ["record.py"]
 "pty" = ["posixproc.py", "record.py"]
 "tests" = ["backend.py", "coding_session_owner.py", "coding_session_owner_record.py", "env_forwarding.py", "helperproc.py", "hosting.py", "log_prefix.py", "posixproc.py", "protocol.py", "pty", "record.py"]
+
+[purity]
+"__init__.py" = "strict"
+"log_prefix.py" = "strict-to-be"
+"provenance.py" = "strict"
+
+[debt.impure-call]
+"log_prefix.py#datetime.now" = 1

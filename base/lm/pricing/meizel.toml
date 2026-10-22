@@ -1,1 +1,21 @@
 exports = ["cache_writes.py"]
+
+[purity]
+"__init__.py" = "strict-to-be"
+"cache_writes.py" = "strict"
+
+[debt.impure-call]
+"__init__.py#Path.read_text" = 1
+"__init__.py#datetime.now" = 1
+
+[debt.untyped-export]
+"__init__.py#def parse_catalog" = 1
+"__init__.py#def plugin_model_price" = 1
+
+[debt.wide-params]
+"__init__.py#def cost_usd" = 1
+"__init__.py#def plugin_model_price" = 1
+"__init__.py#def quote" = 1
+
+[debt.wide-public-surface]
+"__init__.py#public-surface" = 1

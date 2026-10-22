@@ -3,3 +3,7 @@ exports = ["client.py", "instance_lock.py", "ipc.py"]
 [uses]
 "client.py" = ["ipc.py"]
 "tests" = ["client.py", "instance_lock.py", "ipc.py"]
+
+[purity]
+"__init__.py" = "strict"
+"ipc.py" = "strict"

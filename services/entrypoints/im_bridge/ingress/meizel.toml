@@ -6,3 +6,7 @@ exports = ["identity.py", "runtime.py", "store.py", "types.py"]
 "runtime.py" = ["commands.py", "identity.py", "store.py", "types.py"]
 "store.py" = ["types.py"]
 "tests" = ["store.py", "types.py"]
+
+[purity]
+"__init__.py" = "strict"
+"types.py" = "strict"

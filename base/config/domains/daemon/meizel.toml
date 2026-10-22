@@ -1,3 +1,4 @@
+purity = "strict"
 exports = ["settings.py"]
 
 [uses]

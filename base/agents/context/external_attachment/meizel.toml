@@ -1,4 +1,4 @@
-exports = ["core.py", "identity.py", "nodes.py", "plugin_state_codec.py", "state_channels.py", "state_schema.py"]
+exports = ["core.py", "nodes.py", "plugin_state_codec.py", "state_channels.py", "state_schema.py"]
 
 [uses]
 "__init__.py" = ["core.py", "identity.py"]
@@ -7,3 +7,8 @@ exports = ["core.py", "identity.py", "nodes.py", "plugin_state_codec.py", "state
 "plugin_state_codec.py" = ["state_schema.py"]
 "state_channels.py" = ["nodes.py"]
 "state_schema.py" = ["state_channels.py"]
+
+[purity]
+"identity.py" = "strict"
+"nodes.py" = "strict"
+"state_channels.py" = "strict"

@@ -1,1 +1,4 @@
 exports = ["router.py", "worker.py"]
+
+[purity]
+"__init__.py" = "strict"

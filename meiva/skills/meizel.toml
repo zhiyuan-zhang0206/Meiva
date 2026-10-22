@@ -2,3 +2,21 @@ exports = ["skill_index.py", "skill_proxies.py"]
 
 [uses]
 "__init__.py" = ["skill_index.py", "skill_proxies.py"]
+
+[purity]
+"." = "strict-to-be"
+
+[debt.impure-call]
+"__init__.py#Path.read_text" = 1
+
+[debt.impure-edge]
+"__init__.py#base/packages/extensions/install_registry.py" = 1
+"__init__.py#base/packages/skills/tree.py" = 1
+"__init__.py#base/paths/__init__.py" = 1
+"__init__.py#base/telemetry/audit_events.py" = 1
+"__init__.py#meiva/sdk_surface/agent_identity.py" = 1
+"__init__.py#meiva/sdk_surface/process_context.py" = 4
+"__init__.py#meiva/sdk_surface/settings.py" = 1
+"__init__.py#meiva/sdk_surface/skill_sources.py" = 2
+"skill_index.py#base/packages/skills/tree_builder.py" = 1
+"skill_proxies.py#base/packages/skills/tree.py" = 1

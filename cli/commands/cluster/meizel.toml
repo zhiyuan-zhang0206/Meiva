@@ -4,3 +4,6 @@ exports = ["control.py", "cron.py", "health.py", "home.py", "tests", "unit_join.
 "control.py" = ["unit_join.py"]
 "health.py" = ["_provider_guard.py"]
 "tests" = ["_provider_guard.py", "control.py", "cron.py", "health.py", "home.py"]
+
+[purity]
+"__init__.py" = "strict"

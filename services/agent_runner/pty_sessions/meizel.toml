@@ -4,3 +4,7 @@ exports = ["daemon.py", "ledger.py", "shutdown_budget.py"]
 "daemon.py" = ["ledger.py", "service.py", "shutdown_budget.py"]
 "service.py" = ["ledger.py", "session.py"]
 "tests" = ["daemon.py", "ledger.py", "service.py", "session.py"]
+
+[purity]
+"__init__.py" = "strict"
+"shutdown_budget.py" = "strict"

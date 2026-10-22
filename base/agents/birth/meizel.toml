@@ -3,3 +3,6 @@ exports = ["creation_identity.py", "harness.py", "spawn.py", "transaction.py"]
 [uses]
 "spawn.py" = ["transaction.py"]
 "transaction.py" = ["creation_identity.py", "harness.py"]
+
+[purity]
+"__init__.py" = "strict"

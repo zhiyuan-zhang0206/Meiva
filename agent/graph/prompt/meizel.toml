@@ -3,3 +3,6 @@ exports = ["capabilities.py", "compaction.py", "context_notes.py", "conversation
 [uses]
 "context_notes.py" = ["capabilities.py"]
 "system_prompt.py" = ["_base_prompt.py", "_codeact.py", "capabilities.py", "conversation.py"]
+
+[purity]
+"__init__.py" = "strict"

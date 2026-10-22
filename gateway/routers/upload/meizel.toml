@@ -2,3 +2,6 @@ exports = ["batches.py", "router.py"]
 
 [uses]
 "router.py" = ["batches.py"]
+
+[purity]
+"__init__.py" = "strict"

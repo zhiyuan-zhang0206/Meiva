@@ -10,3 +10,9 @@ exports = ["metrics.py"]
 "_deterministic_fixes.py" = "the syntax repairer's oracle: compiles agent-authored code"
 "_llm_repair.py" = "the syntax repairer's oracle: compiles agent-authored code"
 "agent_runtime.py" = "the syntax repairer's oracle: compiles agent-authored code"
+
+[purity]
+"__init__.py" = "strict"
+"_escapes.py" = "strict"
+"_punct.py" = "strict"
+"plugin.py" = "strict"
