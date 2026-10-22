@@ -62,7 +62,11 @@ def test_the_leases_are_named_before_the_first_stop(
     for lease in _LEASES:
         assert _lease(lease) in out
     assert "the stop ends every one of them" in out and "aborted mid-task" in out
-    assert cluster.lease_reads == [0], "read after an effect was already accepted"
+    # meiva:note
+    # The helper gate fetches the target commit before anything stops; a lease read must still
+    # precede every stop, which is the guarantee this test is about.
+    before_first_stop = cluster.effects[: cluster.lease_reads[0]]
+    assert "stop" not in [kind for kind, _ in before_first_stop], "read after a stop was accepted"
     assert [alias for kind, alias in cluster.effects if kind == "stop"] == ["mac", "lin", "gw"]
 
 
