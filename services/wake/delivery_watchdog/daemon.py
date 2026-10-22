@@ -93,7 +93,7 @@ def select_stale_pending(
             "WHERE m.status = 'pending' AND m.kind = 'chat' "
             "  AND am.status IN ('idling', 'terminated') "
             "  AND m.created_at < now() - make_interval(secs => %s) "
-            f"  AND NOT (am.status = 'terminated' AND {SYSTEM_NOTICE_SOURCE}) "
+            f"  AND NOT {SYSTEM_NOTICE_SOURCE} "
             "ORDER BY m.created_at ASC",
             (threshold_s,),
         )
