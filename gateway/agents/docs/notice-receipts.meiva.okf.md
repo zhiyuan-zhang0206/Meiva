@@ -80,6 +80,12 @@ when none is open; each call sends one fresh key and the `principal-v1` scope.
 A 409 means the observed row is no longer current. An ambiguous outcome is
 retried under the same key and replays the original acceptance.
 
+Dismiss is idempotent on the observed row: when that row is already closed, the
+call answers 200 with the closed row and records its own acceptance instead of
+409, because the caller's desired state is already true. It publishes no second
+resolution — the call that actually closed the row owns that event. An edit of a
+closed row stays 409: it cannot be applied.
+
 ## Structured question resolutions
 
 Question rows carry immutable question JSON; priority and blocking remain editable.

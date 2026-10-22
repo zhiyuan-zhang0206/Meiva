@@ -72,7 +72,16 @@ def test_original_snapshot_survives_a_later_close_and_deletion(
             headers=keyed_headers(str(uuid4())),
         )
         assert closed.status_code == 201, closed.text
-    assert _send(client, agent, notice, dismiss, key="fresh").status_code == 409
+    fresh = _send(client, agent, notice, dismiss, key="fresh")
+    if dismiss:
+        # meiva:note
+        # Dismiss is idempotent: the observed row is already closed, so a fresh key
+        # answers 200 with that closed row instead of a 409 (user ruling 2026-10-22).
+        # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+        assert fresh.status_code == 200, fresh.text
+        assert fresh.json()["resolved_at"] is not None
+    else:
+        assert fresh.status_code == 409
     replay = _send(client, agent, notice, dismiss)
     assert replay.json() == first.json()
     assert db_conn.execute(
@@ -309,6 +318,30 @@ def test_receipt_survives_expiration_and_changed_body_conflicts(
     db_conn.commit()
     assert _send(client, agent, notice, False, title="accepted").json() == first.json()
     assert _send(client, agent, notice, False, title="different").status_code == 409
+
+
+def test_dismissing_a_closed_notice_is_idempotent(
+    client: TestClient, db_conn: psycopg.Connection
+) -> None:
+    # meiva:note
+    # The second dismiss reaches a state the caller asked for, so it succeeds and
+    # records its own acceptance; the resolution event is published once, by the
+    # call that actually closed the row.
+    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
+    first = _send(client, agent, notice, True)
+    assert first.status_code == 200
+    second = _send(client, agent, notice, True, key="second")
+    assert second.status_code == 200, second.text
+    assert second.json()["resolved_at"] == first.json()["resolved_at"]
+    assert db_conn.execute(
+        "SELECT count(*) FROM notice_operation_receipts WHERE path=%s", (_path(agent, True),)
+    ).fetchone() == (2,)
+    # meiva:note
+    # An edit of the same closed row is still refused: it cannot be applied.
+    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    assert _send(client, agent, notice, False, title="later").status_code == 409
 
 
 def test_fyi_cannot_become_blocking(client: TestClient, db_conn: psycopg.Connection) -> None:

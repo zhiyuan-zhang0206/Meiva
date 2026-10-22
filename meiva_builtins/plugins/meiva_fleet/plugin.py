@@ -298,7 +298,8 @@ def edit_notice(
 
 def dismiss_notice() -> None:
     """Withdraw the open notice. One notice is open per agent and this call
-    observes it, so no id is needed; with none open it does nothing."""
+    observes it, so no id is needed; with none open it does nothing, and a notice
+    already closed stays closed — dismissing it is not an error."""
     aid = meiva.sdk_surface.agent_identity.require_agent_id()
     observed = _observe_open_notice_id(aid)
     if observed is None:
