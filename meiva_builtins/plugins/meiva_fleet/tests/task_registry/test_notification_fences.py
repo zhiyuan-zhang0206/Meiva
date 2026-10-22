@@ -1,75 +1,42 @@
 from uuid import uuid4
 
 import psycopg
-import pytest
 from psycopg.types.json import Jsonb
 
-from base.agents.messages.inbound import InboundKind
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config.service_read import ConfigAuthority
-from base.db import Database
+from base.agents.tasks.delivery import lock_task_note_owner
 from base.db import pool as db_pool
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
-from base.lm.catalog import ModelCatalog
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
 )
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import seed_agent
-from ops.agents import wake
-from ops.agents.resurrection_retry import ResurrectTriggerStaleError
-from services.agent_runner.agent_host.tests.lifecycle.resurrection.resurrection_support import (
-    status,
-    terminated,
-)
 from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
 
 
 def test_reassigned_task_refuses_delayed_home_wake(
+    redis_url: str,
     db_conn: psycopg.Connection,
     root_task_id: int,
-    database: Database,
-    event_bus: EventBus,
-    *,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
 ) -> None:
     actor = seed_agent(db_conn)
     pin_agent(actor)
-    owner = terminated(
-        db_conn,
-        config_authority=config_authority,
-        model_catalog=model_catalog,
-        database_gate=database_gate,
-        machine_identity=machine_identity,
-    )
+    owner = seed_agent(db_conn, status="terminated")
     next_owner = seed_agent(db_conn)
     task = task_registry.create(
         "fenced", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
     )
-    note_pool = db_pool(gate=database_gate)
-    assert note_pool is not None
     selected = db_conn.execute(
         "SELECT agent_id,id FROM inbound_messages WHERE agent_id=%s AND status='pending'", (owner,)
     ).fetchall()
     assert len(selected) == 1
+    with db_conn.cursor() as cur:
+        assert lock_task_note_owner(cur, owner, selected[0][1]) is True
     db_conn.execute("UPDATE agent_tasks SET owner=%s WHERE id=%s", (next_owner, task.id))
     db_conn.commit()
-    with pytest.raises(ResurrectTriggerStaleError, match="no longer current"):
-        wake.resurrect_agent(
-            database,
-            event_bus,
-            owner,
-            resurrected_by="system",
-            trigger_inbound_id=selected[0][1],
-            trigger_inbound_kind=InboundKind.SYSTEM_NOTE,
-        )
-    assert status(db_conn, owner) == "terminated"
+    with db_conn.cursor() as cur:
+        assert lock_task_note_owner(cur, owner, selected[0][1]) is False
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect'", (owner,)
     ).fetchone() == (0,)

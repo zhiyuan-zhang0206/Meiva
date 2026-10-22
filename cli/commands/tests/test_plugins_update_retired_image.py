@@ -37,20 +37,29 @@ def test_plugins_update_reconciles_retired_only_image(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The recovery CLI upgrades the old image without loading the plugin runtime."""
+    from pydantic import BaseModel
+
     from cli.commands.extensions.plugins import cmd_plugins_update
-    from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
+
+    class SampleConfig(BaseModel):
+        execution_mode: str = "image"
 
     plugin_dir = _make_plugin_dir("meiva_fleet", tmp_path)
     (plugin_dir / "plugin.py").write_text('raise RuntimeError("runtime must not load")\n')
     (plugin_dir / "default_config.py").write_text(
-        "from meiva_builtins.plugins.meiva_fleet.default_config import contribute\n"
+        "from pydantic import BaseModel\n"
+        "from base.packages.plugins.extensions import PluginContributions\n\n"
+        "class SampleConfig(BaseModel):\n"
+        "    execution_mode: str = 'image'\n\n"
+        "def contribute() -> PluginContributions:\n"
+        "    return PluginContributions(config=SampleConfig)\n"
     )
     image = disk_image_path("meiva_fleet")
     image.parent.mkdir(parents=True)
     image.write_text('{"agent_standing_directives": []}\n')
 
     assert cmd_plugins_update() == 0
-    assert json.loads(image.read_text()) == FleetConfig().model_dump()
+    assert json.loads(image.read_text()) == SampleConfig().model_dump()
     saved = image.read_bytes()
     capsys.readouterr()
     assert cmd_plugins_update() == 0

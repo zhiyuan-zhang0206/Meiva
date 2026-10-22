@@ -29,10 +29,88 @@ import contextlib
 import json
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from base.host.env.dotenv_boot import EnvBootResult
+from base.paths.home import resolve_meiva_home
+
+LAUNCHER_PROFILE_ENV_KEY = "MEIVA_LAUNCHER_PROFILE"
+_GENERATION_ENV = "MEIVA_DB_GENERATION"
+# meiva:note
+# Environment key name for the unit API token, not a literal credential.
+_API_TOKEN_ENV = "MEIVA_API_TOKEN"  # noqa: S105
+
+
+# meiva:note
+# Authority facts from one environment delivery, retained by its boot owner.
+#
+# A refusal is reported only when that owner's credential-free DB URL is
+# dialed. Later environment deliveries cannot change this result.
+@dataclass(frozen=True, slots=True)
+class EnvBootResult:
+    db_authority_refusal: str | None = None
+
+
+# meiva:note
+# The launcher's process profile for this process tree, live or recorded.
+#
+# A launcher-spawned daemon or agent carries the live `MEIVA_PROCESS_PROFILE`
+# marker. A CLI entry point pops that marker before dispatch (the CLI is
+# settings-full by design) after recording the value as
+# `LAUNCHER_PROFILE_ENV_KEY` (cli/main.py `_normalize_process_profile`), so a
+# boot pass reached through a CLI still knows the launcher context (#4334).
+# None when the tree has no launcher context at all — a plain shell or test
+# process — and the projection exemptions stay off.
+def launcher_context() -> str | None:
+    return os.environ.get("MEIVA_PROCESS_PROFILE") or os.environ.get(LAUNCHER_PROFILE_ENV_KEY)
+
+
+# meiva:note
+# Whether os.environ carries exactly this runner home's installed unit
+# login (`base.host.db_authority.unit`) with its generation marker.
+def is_delivered_unit_login() -> bool:
+    generation = os.environ.get(_GENERATION_ENV)
+    home = resolve_meiva_home().expanduser().resolve()
+    if not generation or not (home / "db-authority" / "unit.json").exists():
+        return False
+    from base.host.db_authority.unit import is_delivered_login
+
+    return is_delivered_login(home, os.environ.get("MEIVA_DB_URL"), generation)
+
+
+# meiva:note
+# Deliver the runner's login and API token before its bootstrap fetch.
+#
+# A launcher delivery of this home's installed capability is kept. An
+# admitted operator consumes the installed capability. A refused process
+# keeps the credential-free endpoint and returns its first-dial reason.
+def deliver_unit_authority() -> EnvBootResult:
+    if is_delivered_unit_login():
+        return EnvBootResult()
+    home = resolve_meiva_home().expanduser().resolve()
+    context = launcher_context()
+    if context is not None:
+        return EnvBootResult(
+            db_authority_refusal=(
+                f"this {context}-profile agent-runner process was launched without its unit's "
+                "database login; only the root launcher delivers it"
+            )
+        )
+    from base.host.db_authority.model import AuthorityRefusedError
+    from base.host.db_authority.unit import consume_unit
+
+    try:
+        capability = consume_unit(home)
+    except (AuthorityRefusedError, ValueError, OSError) as exc:
+        return EnvBootResult(
+            db_authority_refusal=f"no database authority for this agent-runner process: {exc}"
+        )
+    os.environ["MEIVA_DB_URL"] = capability.dsn
+    os.environ[_GENERATION_ENV] = str(capability.generation.number)
+    os.environ[_API_TOKEN_ENV] = capability.api.token
+    return EnvBootResult()
+
 
 # An agent boots by fetching this. The timeout must cover a slow-but-healthy
 # fetch under load (the whole boot -- fetch + import + claim -- has to finish
@@ -393,8 +471,6 @@ def apply_bootstrap_values(base_url: str, values: dict[str, str]) -> None:
     # one reachability fact this process already proved.
     if not os.environ.get("MEIVA_GATEWAY_HEALTH_URL"):
         os.environ["MEIVA_GATEWAY_HEALTH_URL"] = f"{base_url.rstrip('/')}/api/health"
-    from base.host.env.dotenv_boot import is_delivered_unit_login
-
     delivered = is_delivered_unit_login()
     for key, value in values.items():
         if key == "MEIVA_DB_URL" and delivered:
@@ -508,8 +584,6 @@ def inject_config_from_gateway() -> EnvBootResult:
     (`base.host.env.dotenv_boot.deliver_unit_authority`). That delivery runs first:
     it also supplies the machine API token the fetch authenticates with.
     """
-    from base.host.env.dotenv_boot import deliver_unit_authority
-
     base_url = _gateway_base_url()
     result = deliver_unit_authority()
     values = resolve_bootstrap_values()

@@ -46,6 +46,7 @@ class _FieldInfoLike(Protocol):
     """
 
     alias: str | None
+    annotation: Any
     serialization_alias: str | None
     json_schema_extra: dict[str, Any] | Callable[[dict[str, Any]], None] | None
 

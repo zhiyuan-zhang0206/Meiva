@@ -3,35 +3,13 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
+from base.agents.lifecycle import (
+    release_browser_pages,
+    release_default_chrome_pages,
+)
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
-from base.paths import meiva_home
-from meiva.mcps import release_agent_chrome_pages
-
-
-async def _release_default_chrome_pages(agent_id: int) -> bool:
-    return await release_agent_chrome_pages(agent_id, meiva_home())
-
-
-async def release_browser_pages(
-    agent_id: int,
-    *,
-    page_releaser: Callable[[int], Awaitable[object]] = _release_default_chrome_pages,
-) -> None:
-    """Best-effort close of this agent's browser-mcp pages after termination commits."""
-    try:
-        released = await page_releaser(agent_id)
-        if not released:
-            logger.debug(
-                "agent {agent_id} browser-page release skipped (no service / failed)",
-                agent_id=agent_id,
-            )
-    except Exception:
-        logger.opt(exception=True).warning(
-            "agent {agent_id} browser-page release failed (non-fatal)",
-            agent_id=agent_id,
-        )
 
 
 async def finish_termination(
@@ -40,7 +18,7 @@ async def finish_termination(
     cutoff: int | None,
     killer: Callable[[int, int], None] | None,
     *,
-    page_releaser: Callable[[int], Awaitable[object]] = _release_default_chrome_pages,
+    page_releaser: Callable[[int], Awaitable[object]] = release_default_chrome_pages,
 ) -> None:
     """Attempt every post-commit effect and preserve the first failure, including cancellation."""
     primary_error: BaseException | None = None

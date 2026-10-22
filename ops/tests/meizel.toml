@@ -25,7 +25,6 @@ exports = ["pool_support.py"]
 "test_env_audit.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
 "test_env_audit.py#monkeypatch.setattr ops.env_audit.load_alias_metadata" = 5
 "test_env_audit.py#monkeypatch.setattr ops.env_audit.psutil.Process" = 1
-"test_hosted_lifecycle_agent.py#monkeypatch.setattr ops.cluster_status.kill_agent_shells" = 1
 "test_inventory_ops.py#monkeypatch.setattr base.packages.mcp_config.display_available" = 1
 "test_inventory_ops.py#monkeypatch.setattr base.packages.mcp_config.load_mcp_config" = 1
 "test_operations_config.py#monkeypatch.setattr base.host.config_validators.read_time_capability" = 2

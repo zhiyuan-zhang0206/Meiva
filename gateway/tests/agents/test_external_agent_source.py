@@ -1,40 +1,35 @@
-"""Sending as the user versus as a declared external agent, from the CLI to the agent's context.
-
-`user` reaches the agent as an ordinary user message. `external_agent:<subject>[:<instance>]`
-reaches it as a message from that external agent: the agent reads who sent it, and the
-timeline row carries the source so the UI can show the sender. Both pass the same gateway
-credential check; neither declaration grants anything.
-"""
+# meiva:note
+# Sending as the user versus as a declared external agent, from the CLI to the agent's context.
+#
+# `user` reaches the agent as an ordinary user message. `external_agent:<subject>[:<instance>]`
+# reaches it as a message from that external agent: the agent reads who sent it, and the
+# timeline row carries the source so the UI can show the sender. Both pass the same gateway
+# credential check; neither declaration grants anything.
 
 from __future__ import annotations
 
 import contextlib
 from collections.abc import Generator
-from typing import Any
-from unittest.mock import Mock
 from uuid import uuid4
 
-import httpx2
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
-import base.cluster.machine as cluster_machine
 from agent.db import claim_inbound_batch
 from agent.graph.claim._chat_inbound import build_chat_inbound
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
-from base.agents.messages.envelope import EnvelopeReadInputs
+from base.agents.messages.envelope import EnvelopeReadInputs, validate_source
+from base.api_contracts.idempotency import keyed_headers
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
-from base.host.net import http_dial
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
-from cli.commands.agents.control import cmd_agents_send
 from gateway.tests.agents.gateway_auth import without_credentials
 from tests.fixtures.gateway_config import gateway_test_client
 
@@ -43,10 +38,11 @@ _SECRET = "external-agent-source-secret"  # noqa: S105 -- isolated test credenti
 _EXTERNAL = "external_agent:claude_code:run-7"
 
 
+# meiva:note
+# A real hosted admission: the target is a live agent whose claim path reads the inbound.
 async def _admit(
     db: psycopg.Connection, pool: AsyncConnectionPool, database: Database
 ) -> RuntimeIncarnation:
-    """A real hosted admission: the target is a live agent whose claim path reads the inbound."""
     agent_id = create_agent(db)
     db.execute(
         "INSERT INTO agents_meta (id, status, machine) VALUES (%s, 'idling', 'host-test') "
@@ -64,25 +60,25 @@ async def _admit(
     return incarnation
 
 
+# meiva:note
+# Post a message through a real gateway app with the cluster credential on.
 @contextlib.contextmanager
 def authenticated_gateway(
     monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity
 ) -> Generator[TestClient]:
-    """The CLI's `send` posts through a real gateway app with the cluster credential on."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _SECRET)
-    monkeypatch.setattr(cluster_machine, "gateway_api_base", Mock(return_value="http://testserver"))
-    monkeypatch.setattr(
-        cluster_machine,
-        "gateway_auth_headers",
-        Mock(return_value={"Authorization": f"Bearer {_SECRET}"}),
-    )
     with gateway_test_client(machine=machine) as client:
-
-        def post(url: str, **kwargs: Any) -> httpx2.Response:
-            return client.post(url, **kwargs)
-
-        monkeypatch.setattr(http_dial, "post", post)
         yield client
+
+
+def _send_message(client: TestClient, agent_id: int, content: str, source: str) -> None:
+    validate_source(source)
+    resp = client.post(
+        f"/api/agents/{agent_id}/messages",
+        headers={"Authorization": f"Bearer {_SECRET}", **keyed_headers(str(uuid4()))},
+        json={"content": content, "source": source},
+    )
+    assert resp.status_code == 201, resp.text
 
 
 async def _claimed_text(
@@ -111,12 +107,11 @@ async def test_cli_send_as_user_reaches_the_agent_as_a_plain_user_message(
     machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(db_conn, aops_pool, database)
-    with authenticated_gateway(monkeypatch, machine=machine_identity):
-        assert cmd_agents_send(incarnation.agent_id, "run the checks", "user") == 0
+    with authenticated_gateway(monkeypatch, machine=machine_identity) as client:
+        _send_message(client, incarnation.agent_id, "run the checks", "user")
     source, content, payload = await _claimed_text(aops_pool, incarnation)
     assert source == "user"
     assert payload is None
-    # The user envelope has no sender label: the message reads exactly as typed.
     assert content == "run the checks"
 
 
@@ -129,8 +124,8 @@ async def test_cli_send_as_external_agent_reaches_the_agent_as_that_agent(
     machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(db_conn, aops_pool, database)
-    with authenticated_gateway(monkeypatch, machine=machine_identity):
-        assert cmd_agents_send(incarnation.agent_id, "I finished the refactor", _EXTERNAL) == 0
+    with authenticated_gateway(monkeypatch, machine=machine_identity) as client:
+        _send_message(client, incarnation.agent_id, "I finished the refactor", _EXTERNAL)
     source, content, payload = await _claimed_text(aops_pool, incarnation)
     assert source == _EXTERNAL
     assert payload == {
@@ -156,13 +151,15 @@ async def test_a_system_sourced_chat_reaches_the_agent_as_a_system_note(
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
     incarnation = await _admit(db_conn, aops_pool, database)
     notice = "Uploaded files on m:\n- a.png: /tmp/a.png"
-    with authenticated_gateway(monkeypatch, machine=machine_identity):
-        assert cmd_agents_send(incarnation.agent_id, notice, "system:upload") == 0
+    with authenticated_gateway(monkeypatch, machine=machine_identity) as client:
+        _send_message(client, incarnation.agent_id, notice, "system:upload")
     source, content, _ = await _claimed_text(aops_pool, incarnation)
     assert source == "system:upload"
     assert content == f"<system_note>\n{notice}\n</system_note>"
 
 
+# meiva:note
+# The UI shows the sender from the inbound's `source`, so the row must carry it.
 async def test_external_agent_message_is_listed_with_its_source_for_the_timeline(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -171,10 +168,9 @@ async def test_external_agent_message_is_listed_with_its_source_for_the_timeline
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The UI shows the sender from the inbound's `source`, so the row must carry it."""
     incarnation = await _admit(db_conn, aops_pool, database)
-    with authenticated_gateway(monkeypatch, machine=machine_identity):
-        assert cmd_agents_send(incarnation.agent_id, "hello", _EXTERNAL) == 0
+    with authenticated_gateway(monkeypatch, machine=machine_identity) as client:
+        _send_message(client, incarnation.agent_id, "hello", _EXTERNAL)
     row = db_conn.execute(
         "SELECT source, kind, source_verified_by, source_transport FROM inbound_messages "
         "WHERE agent_id = %s",
@@ -218,6 +214,8 @@ def test_gateway_rejects_a_malformed_declaration_before_any_insert(
     ).fetchone() == (0,)
 
 
+# meiva:note
+# Declaring an identity is not a credential: the gateway check still applies.
 async def test_an_unauthenticated_external_agent_declaration_is_refused(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -226,7 +224,6 @@ async def test_an_unauthenticated_external_agent_declaration_is_refused(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Declaring an identity is not a credential: the gateway check still applies."""
     incarnation = await _admit(db_conn, aops_pool, database)
     with authenticated_gateway(monkeypatch, machine=machine_identity) as client:
         response = without_credentials(client).post(
