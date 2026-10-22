@@ -128,7 +128,9 @@ runs:
         # lock used to surface here as one more failed install and was reported as an
         # incomplete cache.
         install_with_dpkg_lock_free() {
-          bash "$GITHUB_WORKSPACE/scripts/provision/wait_apt_lock.sh" 120
+          # Advisory: a lock that will not clear must still fall through to the cached .deb
+          # path, and the wait's own ::warning:: already named the holder.
+          bash "$GITHUB_WORKSPACE/scripts/provision/wait_apt_lock.sh" 120 || true
           sudo timeout 300 apt-get install -y "${archives[@]}" "${net[@]}" "${pkgs[@]}"
         }
 
@@ -145,7 +147,7 @@ runs:
             exit 1
           fi
           echo "::warning::apt-get install failed; installing ${#debs[@]} cached .deb(s) directly with dpkg"
-          bash "$GITHUB_WORKSPACE/scripts/provision/wait_apt_lock.sh" 120
+          bash "$GITHUB_WORKSPACE/scripts/provision/wait_apt_lock.sh" 120 || true
           if ! sudo dpkg -i "${debs[@]}"; then
             echo "::error::dpkg could not install the ${#debs[@]} cached .deb(s); its own error is above. This is an install failure — it does not prove the closure is incomplete" >&2
             exit 1

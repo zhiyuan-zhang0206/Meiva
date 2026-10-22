@@ -146,3 +146,25 @@ def test_every_install_step_waits_for_the_lock_first() -> None:
         if unguarded or not has_wait:
             offenders[action.parent.name] = unguarded or ["no wait at all"]
     assert offenders == {}
+
+
+# meiva:note
+# The wait is advisory by contract: a lock that will not clear is a warning, never a step
+# failure, because the cached .deb path can still install what the mirror could not deliver.
+# Pinning it here keeps a future edit from turning the diagnosis back into a hard stop on a
+# job that used to pass (2026-10-22: e2e shards failed on exactly that).
+# meiva:link scripts/provision/docs/apt-lock.meiva.okf.md
+def test_the_lock_wait_never_fails_a_step_by_itself() -> None:
+    wrapper = _REPO_ROOT / "scripts/provision/wait_apt_lock.sh"
+    text = wrapper.read_text(encoding="utf-8")
+    assert "::error::" not in text, "the advisory wait must not annotate a job error"
+    assert "::warning::" in text
+
+    fatal: list[str] = []
+    for action in _ACTIONS:
+        for line in action.read_text(encoding="utf-8").splitlines():
+            if "wait_apt_lock.sh" not in line:
+                continue
+            if "|| exit" in line or line.rstrip().endswith("&& exit 1"):
+                fatal.append(line.strip())
+    assert fatal == [], f"these waits abort the step instead of falling through: {fatal}"
