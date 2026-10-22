@@ -36,6 +36,7 @@ def test_required_set_is_the_product_desktop_surface() -> None:
         "screen-recording",
         "accessibility",
         "app-management",
+        "local-network",
         "desktop-folder",
         "documents-folder",
         "downloads-folder",
@@ -62,6 +63,21 @@ def test_app_management_sends_the_person_to_its_pane_instead_of_asking() -> None
     assert "no longer fails" in item.verify
     assert "by hand" in item.verify
     assert not item.ping_key
+
+
+# meiva:note
+# Local network is the row macOS writes on the first real packet, not on a request: the
+# helper has no capability that could report it, and the catalog must still list it so a
+# missing grant is a named row instead of an unexplained cross-machine failure (#5541).
+def test_local_network_is_listed_and_reported_but_never_read() -> None:
+    item = catalog.ITEMS_BY_ID["local-network"]
+    assert item.mode is RequestMode.LIVE_EVENT
+    assert item.required
+    assert item.group == "desktop"
+    assert item.services == ("kTCCServiceLocalNetwork",)
+    assert item.pane == "Privacy_LocalNetwork"
+    assert not item.ping_key
+    assert "Local Network" in item.verify
 
 
 def test_report_only_rows_are_never_prompted() -> None:
