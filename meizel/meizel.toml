@@ -25,8 +25,5 @@ exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_c
 "lint_common.py#import subprocess" = 1
 "roles.py#Path.read_text" = 1
 
-[debt.unfrozen-value]
-"allowances.py#class Policy" = 1
-
 [debt.wide-public-surface]
 "lint_common.py#public-surface" = 1

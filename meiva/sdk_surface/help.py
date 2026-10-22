@@ -26,7 +26,6 @@ from .discovery import (
     agent_visible_names,
     children,
     is_container,
-    is_element,
     is_namespace,
     is_skill_object,
 )
@@ -238,7 +237,7 @@ def _target_body(target: Any, fqn: str, render: _Render = _DEFAULT_RENDER) -> st
         # the path + full body), regardless of depth.
         include_doc = (_heading_depth(fqn) == 1) or is_skill_object(target)
         return _format_module_stub(target, include_own_doc=include_doc, render=render)
-    if is_element(target):
+    if inspect.isroutine(target):
         # The FQN tail is the `def name` identifier — if target is a
         # plugin-wrapped function, its `__name__` may still be the wrapper's
         # internal symbol (e.g. `_wrapped_read`); directly splitting the FQN
@@ -273,7 +272,7 @@ def _resolve_fqn(target: Any) -> str:
         return "meiva"
     if is_container(target):
         return _container_fqn(target)
-    if is_element(target):
+    if inspect.isroutine(target):
         return _element_fqn(target)
     if is_documented_const(target):
         return _resolve_const_name(target)

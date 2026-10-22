@@ -67,7 +67,7 @@ RULES: dict[str, dict[str, str]] = {
 PER_NAME = frozenset({"single-owner"})
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class Policy:
     external: dict[str, str] = field(default_factory=dict[str, str])
     loads: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
@@ -122,7 +122,13 @@ def _names(value: object, where: str, problems: list[str]) -> tuple[str, ...]:
     return tuple(cast("list[str]", items))
 
 
-def _rule(rule: str, table: object, policy: Policy, problems: list[str]) -> None:
+def _rule(
+    rule: str,
+    table: object,
+    listed: dict[tuple[str, str], dict[str, str]],
+    named: dict[tuple[str, str], tuple[str, ...]],
+    problems: list[str],
+) -> None:
     if not isinstance(table, dict):
         problems.append(f"[{rule}] must be a table")
         return
@@ -130,7 +136,7 @@ def _rule(rule: str, table: object, policy: Policy, problems: list[str]) -> None
         shape = RULES[rule].get(section, REASONS) if rule in PER_NAME else RULES[rule].get(section)
         where = f"[{rule}] {section}" if shape == NAMES else f"[{rule}.{section}]"
         if shape == REASONS:
-            policy.listed[(rule, section)] = _reasons(value, where, problems)
+            listed[(rule, section)] = _reasons(value, where, problems)
         elif shape == NAMES:
             if (
                 rule == "purity"
@@ -139,49 +145,64 @@ def _rule(rule: str, table: object, policy: Policy, problems: list[str]) -> None
                 and not isinstance(value, bool)
                 and value >= 1
             ):
-                policy.named[(rule, section)] = (str(value),)
+                named[(rule, section)] = (str(value),)
             else:
-                policy.named[(rule, section)] = _names(value, where, problems)
+                named[(rule, section)] = _names(value, where, problems)
         else:
             known = ", ".join(sorted(RULES[rule]))
             problems.append(f"[{rule}] has no section {section!r}; the sections are {known}")
 
 
-def _checker(document: dict[str, object], policy: Policy, problems: list[str]) -> None:
+def _checker(
+    document: dict[str, object], problems: list[str]
+) -> tuple[dict[str, str], dict[str, tuple[str, ...]], tuple[str, ...]]:
     external = document.get("external", {})
     loads = document.get("loads", {})
     defaults = document.get("default-arguments", {})
     if not (isinstance(external, dict) and isinstance(loads, dict) and isinstance(defaults, dict)):
         problems.append("every table must be a table")
-        return
-    policy.external = _reasons(cast("dict[str, object]", external), "[external]", problems)
+        return {}, {}, ()
+    parsed_external = _reasons(cast("dict[str, object]", external), "[external]", problems)
+    parsed_loads: dict[str, tuple[str, ...]] = {}
     for path, targets in cast("dict[str, object]", loads).items():
         if isinstance(targets, list) and all(
             isinstance(t, str) for t in cast("list[object]", targets)
         ):
-            policy.loads[path] = tuple(cast("list[str]", targets))
+            parsed_loads[path] = tuple(cast("list[str]", targets))
         else:
             problems.append(f"[loads] {path!r} must be a list of directories")
-    policy.default_arguments = tuple(cast("dict[str, object]", defaults))
+    return parsed_external, parsed_loads, tuple(cast("dict[str, object]", defaults))
 
 
 def parse(text: str) -> tuple[Policy, list[str]]:
     """The policy in `text` and every defect of its shape; valid entries are kept."""
-    policy = Policy(lines=text.splitlines())
+    lines = text.splitlines()
     try:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
-        return policy, [f"invalid TOML: {error}"]
+        return Policy(lines=lines), [f"invalid TOML: {error}"]
     problems: list[str] = []
     for name in document:
         if name not in CHECKER_TABLES and name not in RULES:
             tables = ", ".join((*CHECKER_TABLES, *RULES))
             problems.append(f"unknown table {name!r}; the tables are {tables}")
-    _checker(document, policy, problems)
+    external, loads, default_arguments = _checker(document, problems)
+    listed: dict[tuple[str, str], dict[str, str]] = {}
+    named: dict[tuple[str, str], tuple[str, ...]] = {}
     for rule in RULES:
         if rule in document:
-            _rule(rule, document[rule], policy, problems)
-    return policy, problems
+            _rule(rule, document[rule], listed, named, problems)
+    return (
+        Policy(
+            external=external,
+            loads=loads,
+            default_arguments=default_arguments,
+            listed=listed,
+            named=named,
+            lines=lines,
+        ),
+        problems,
+    )
 
 
 @cache

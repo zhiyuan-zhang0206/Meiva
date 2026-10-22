@@ -72,7 +72,7 @@ def test_cli_rejects_write_modes_and_new_exemptions(
 
 
 def test_scan_rejects_sites_even_when_an_old_baseline_file_permits_them(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = tmp_path / "base/example/handles.py"
     source.parent.mkdir(parents=True)
@@ -84,13 +84,11 @@ def test_scan_rejects_sites_even_when_an_old_baseline_file_permits_them(
     old_baseline = tmp_path / "meizel/state/ambient_state/handle_ratchet_baseline.json"
     old_baseline.parent.mkdir(parents=True)
     old_baseline.write_text('{"base/example": {"shim": 100, "self-built": 100, "bus-built": 100}}')
-    monkeypatch.setattr(ratchet, "_REPO_ROOT", tmp_path)
 
     def tracked_files(_root: Path) -> list[str]:
         return ["base/example/handles.py"]
 
-    monkeypatch.setattr(ratchet.lint_common, "tracked_files", tracked_files)
-    assert ratchet.main([]) == 1
+    assert ratchet.main([], repo_root=tmp_path, tracked_files_fn=tracked_files) == 1
     errors = capsys.readouterr().err
     assert "base/example/handles.py:3" in errors
     assert "base/example/handles.py:4" in errors
@@ -98,14 +96,9 @@ def test_scan_rejects_sites_even_when_an_old_baseline_file_permits_them(
     assert old_baseline.read_text().startswith('{"base/example"')
 
 
-def test_cli_passes_empty_scan_without_a_baseline_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(ratchet, "_REPO_ROOT", tmp_path)
-
+def test_cli_passes_empty_scan_without_a_baseline_file(tmp_path: Path) -> None:
     def tracked_files(_root: Path) -> list[str]:
         return []
 
-    monkeypatch.setattr(ratchet.lint_common, "tracked_files", tracked_files)
-    assert ratchet.main([]) == 0
+    assert ratchet.main([], repo_root=tmp_path, tracked_files_fn=tracked_files) == 0
     assert list(tmp_path.iterdir()) == []

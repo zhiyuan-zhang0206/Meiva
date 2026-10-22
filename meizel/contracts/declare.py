@@ -25,7 +25,7 @@ from meizel.graph.universe import is_private_module
 __all__ = ["changed_files", "declare"]
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class Plan:
     uses: dict[str, dict[str, set[str]]] = field(default_factory=dict[str, dict[str, set[str]]])
     exports: dict[str, set[str]] = field(default_factory=dict[str, set[str]])

@@ -227,7 +227,9 @@ class Attachment(ExternalAttachment):
         return process_context.get_state_update()
 
     def _clear_state_update(self) -> None:
-        process_context.get_state_update().clear()
+        update = process_context.get_state_update()
+        if isinstance(update, dict):
+            update.clear()
 
     def _bind_borrowed_context(self) -> None:
         borrowed = ExternalLease(

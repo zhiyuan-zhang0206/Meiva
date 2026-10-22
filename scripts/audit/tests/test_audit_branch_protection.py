@@ -144,51 +144,57 @@ def test_drift_report_detects_an_inactive_workflow() -> None:
     ) == ["workflow ci.yml is not active (state=disabled_manually)"]
 
 
-def test_cli_reports_ok_and_exits_zero(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(audit, "run_gh", _fake_gh(_protection(), _workflows()))
-
-    assert audit.main(["--repo", "owner/repo", "--json"]) == 0
+def test_cli_reports_ok_and_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
+    assert (
+        audit.main(
+            ["--repo", "owner/repo", "--json"],
+            run_gh_fn=_fake_gh(_protection(), _workflows()),
+        )
+        == 0
+    )
     assert capsys.readouterr().out.rstrip().endswith("AUDIT_RESULT=ok")
 
 
-def test_cli_reports_drift_and_exits_one(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_cli_reports_drift_and_exits_one(capsys: pytest.CaptureFixture[str]) -> None:
     protection = _protection(sorted(_EXPECTED_CHECKS - {"e2e (Playwright happy path)"}))
-    monkeypatch.setattr(audit, "run_gh", _fake_gh(protection, _workflows()))
 
-    assert audit.main(["--repo", "owner/repo", "--json"]) == 1
+    assert (
+        audit.main(
+            ["--repo", "owner/repo", "--json"],
+            run_gh_fn=_fake_gh(protection, _workflows()),
+        )
+        == 1
+    )
     assert capsys.readouterr().out.rstrip().endswith("AUDIT_RESULT=drift")
 
 
 def test_cli_reports_declaration_mismatch_as_drift_without_calling_github(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     trunk_file = tmp_path / "trunk.yaml"
     trunk_file.write_text(_TRUNK_BAD_FIXTURE)
-    monkeypatch.setattr(audit, "TRUNK_FILE", trunk_file)
 
     def unexpected_gh(_args: list[str]) -> NoReturn:
         raise AssertionError("declaration drift must not depend on the GitHub API")
 
-    monkeypatch.setattr(audit, "run_gh", unexpected_gh)
-
-    assert audit.main(["--repo", "owner/repo", "--json"]) == 1
+    assert (
+        audit.main(
+            ["--repo", "owner/repo", "--json"],
+            trunk_file=trunk_file,
+            run_gh_fn=unexpected_gh,
+        )
+        == 1
+    )
     assert capsys.readouterr().out.rstrip().endswith("AUDIT_RESULT=drift")
 
 
 def test_cli_reports_verification_errors_and_exits_two(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
 
     def missing_gh(_args: list[str]) -> NoReturn:
         raise FileNotFoundError("gh")
 
-    monkeypatch.setattr(audit, "run_gh", missing_gh)
-
-    assert audit.main(["--repo", "owner/repo", "--json"]) == 2
+    assert audit.main(["--repo", "owner/repo", "--json"], run_gh_fn=missing_gh) == 2
     assert capsys.readouterr().out.rstrip().endswith("AUDIT_RESULT=error")

@@ -70,9 +70,12 @@ class DownloadLimits:
     progress_interval_s: float
 
 
-@dataclass
 class DownloadProgress:
-    received: int = 0
+    def __init__(self, received: int = 0) -> None:
+        self.received = received
+
+    def add(self, count: int) -> None:
+        self.received += count
 
 
 # meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
@@ -119,7 +122,7 @@ def stream_download(
             if not chunk:
                 break
             fh.write(chunk)
-            progress.received += len(chunk)
+            progress.add(len(chunk))
             elapsed = _elapsed()
             if elapsed - last_beat >= limits.progress_interval_s:
                 pct = f" ({progress.received * 100 // total}%)" if total else ""

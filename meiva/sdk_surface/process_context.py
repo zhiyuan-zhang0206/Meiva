@@ -89,8 +89,9 @@ def outside_process(name: str) -> ContextOutsideProcessError:
     )
 
 
-def get_state() -> Any:
-    """The exec turn's working state, or `PluginStateOutsideTurnError` outside a turn."""
+# meiva:note
+# The exec turn's working state, or `PluginStateOutsideTurnError` outside a turn.
+def get_state() -> object:
     value = _slots().get(_STATE_KEY)
     if value is None:
         raise outside_exec_turn("state")
@@ -107,8 +108,9 @@ def set_state(value: object) -> None:
     _slots()[_STATE_KEY] = value
 
 
-def get_state_update() -> Any:
-    """Whatever the exec code left in the delta slot (the exec child validates it at exit)."""
+# meiva:note
+# Whatever the exec code left in the delta slot (the exec child validates it at exit).
+def get_state_update() -> object:
     slots = _slots()
     if slots.get(_STATE_KEY) is None:
         raise outside_exec_turn("state_update")

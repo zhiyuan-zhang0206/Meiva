@@ -9,7 +9,7 @@ process resource; the default database factory refuses it before a connection ca
 """
 
 from collections.abc import Mapping
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast, overload
 
 from base.agents.context.clients import DatabaseHandle
 from base.clock import Clock
@@ -117,9 +117,26 @@ def attached_agent_view() -> tuple[Mapping[str, object], _PluginConfigReader] | 
     )
 
 
-def agent_setting(name: str) -> Any:
-    """One per-agent setting of this process's agent: the attached agent's pin, else the
-    settings (which carry the exec child's overlay)."""
+@overload
+def agent_setting(name: Literal["llm_model"]) -> str: ...
+
+
+@overload
+def agent_setting(name: Literal["security_scan_enabled"]) -> bool: ...
+
+
+@overload
+def agent_setting(name: Literal["heartbeat_pause_max_seconds"]) -> float: ...
+
+
+@overload
+def agent_setting(name: str) -> object: ...
+
+
+# meiva:note
+# One per-agent setting of this process's agent: the attached agent's pin, else the
+# settings (which carry the exec child's overlay).
+def agent_setting(name: str) -> object:
     from base.host.env.agent_slices import agent_setting
 
     attached = attached_agent_view()

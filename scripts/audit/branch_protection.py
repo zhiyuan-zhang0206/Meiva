@@ -15,7 +15,7 @@ import argparse
 import json
 import re
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import cast
 from urllib.parse import quote
@@ -198,19 +198,25 @@ def _json_mapping(text: str, location: str) -> dict[str, object]:
     return _mapping(payload, location)
 
 
-def _audit(repo: str, branch: str) -> list[str]:
+def _audit(
+    repo: str,
+    branch: str,
+    *,
+    trunk_file: Path = TRUNK_FILE,
+    run_gh_fn: Callable[[list[str]], str] = run_gh,
+) -> list[str]:
     if _GITHUB_REPO.fullmatch(repo) is None:
         raise ValueError("--repo must have the form owner/repo")
     if not branch:
         raise ValueError("--branch must not be empty")
 
-    trunk_text = TRUNK_FILE.read_text()
+    trunk_text = trunk_file.read_text()
     declaration_findings = trunk_gate_findings(trunk_text)
     if declaration_findings:
         return declaration_findings
     expected = expected_checks()
     protection = _json_mapping(
-        run_gh(
+        run_gh_fn(
             [
                 "api",
                 "--method",
@@ -221,7 +227,7 @@ def _audit(repo: str, branch: str) -> list[str]:
         "branch protection response",
     )
     workflows = _json_mapping(
-        run_gh(
+        run_gh_fn(
             [
                 "api",
                 "--method",
@@ -253,7 +259,12 @@ def _error_detail(error: BaseException) -> str:
     return str(error)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    trunk_file: Path = TRUNK_FILE,
+    run_gh_fn: Callable[[list[str]], str] = run_gh,
+) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", help="GitHub repository as owner/repo")
     parser.add_argument("--branch", default="main")
@@ -262,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         repo = args.repo if args.repo is not None else derive_repo()
-        findings = _audit(repo, args.branch)
+        findings = _audit(repo, args.branch, trunk_file=trunk_file, run_gh_fn=run_gh_fn)
     except (
         FileNotFoundError,
         OSError,

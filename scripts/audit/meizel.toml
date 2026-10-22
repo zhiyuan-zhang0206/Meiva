@@ -1,4 +1,5 @@
 exports = ["branch_protection.py", "module_moves.py"]
+purity = "strict-to-be"
 
 [uses]
 "tests" = ["branch_protection.py", "impact_census.py", "module_moves.py", "schema_drift.py", "sdk_usage.py", "where_used.py", "where_used_scan.py"]
@@ -6,3 +7,26 @@ exports = ["branch_protection.py", "module_moves.py"]
 
 [external]
 "module_moves.py" = "imports the old and new module names the operator passes on the command line"
+
+[debt.impure-call]
+"branch_protection.py#Path.read_text" = 1
+"branch_protection.py#import subprocess" = 1
+"branch_protection.py#import urllib" = 1
+"module_moves.py#Path.read_bytes" = 1
+"module_moves.py#import subprocess" = 1
+"schema_drift.py#Path.exists" = 1
+"schema_drift.py#Path.read_text" = 2
+"schema_drift.py#Path.write_text" = 1
+"schema_drift.py#import psycopg" = 1
+"where_used_scan.py#Path.is_file" = 1
+"where_used_scan.py#Path.read_bytes" = 1
+"where_used_scan.py#import subprocess" = 1
+
+[debt.impure-edge]
+"impact_census.py#scripts/ci/test_impact.py" = 1
+"impact_census.py#scripts/ci/test_selector.py" = 1
+"schema_drift.py#base/config/__init__.py" = 1
+
+[debt.wide-public-surface]
+"schema_drift.py#public-surface" = 1
+"where_used_scan.py#public-surface" = 1

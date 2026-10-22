@@ -14,8 +14,6 @@ exports = ["conftest.py"]
 "test_ambient_endpoints.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.ENDPOINT_PACKAGES" = 2
 "test_ambient_sliced.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.SLICED_PACKAGES" = 2
 "test_ambient_state.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.ALLOWED" = 1
-"test_handle_ratchet.py#monkeypatch.setattr meizel.state.ambient_state.handle_ratchet._REPO_ROOT" = 2
-"test_handle_ratchet.py#monkeypatch.setattr meizel.state.ambient_state.handle_ratchet.lint_common.tracked_files" = 2
 
 [debt.impure-test-fixture]
 "conftest.py#fixture monkeypatch" = 1
@@ -25,7 +23,3 @@ exports = ["conftest.py"]
 "test_ambient_endpoints.py#fixture monkeypatch" = 2
 "test_ambient_sliced.py#fixture monkeypatch" = 2
 "test_ambient_state.py#fixture monkeypatch" = 1
-"test_handle_ratchet.py#fixture monkeypatch" = 2
-
-[debt.nested-patch-target]
-"test_handle_ratchet.py#ratchet.lint_common.tracked_files" = 2

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -32,10 +33,15 @@ def kind_of(name: str) -> str:
     return SELF_BUILT if name.endswith(".from_settings") else SHIM
 
 
-def scan(repo_root: Path) -> Sites:
-    """`(package, kind) -> ["path:line", ...]` for every ungoverned production module."""
+# meiva:note
+# `(package, kind) -> ["path:line", ...]` for every ungoverned production module.
+def scan(
+    repo_root: Path,
+    *,
+    tracked_files_fn: Callable[[Path], list[str]] = lint_common.tracked_files,
+) -> Sites:
     found: Sites = {}
-    for rel in lint_common.tracked_files(repo_root):
+    for rel in tracked_files_fn(repo_root):
         if not rel.endswith(".py") or not ambient_state.in_scope(rel):
             continue
         tree = ast.parse((repo_root / rel).read_text(encoding="utf-8"), filename=rel)
@@ -66,11 +72,16 @@ def errors(sites: Sites) -> list[str]:
     ]
 
 
-def main(argv: list[str]) -> int:
+def main(
+    argv: list[str],
+    *,
+    repo_root: Path = _REPO_ROOT,
+    tracked_files_fn: Callable[[Path], list[str]] = lint_common.tracked_files,
+) -> int:
     if argv:
         print("error: library handle lint accepts no arguments", file=sys.stderr)
         return 1
-    problems = errors(scan(_REPO_ROOT))
+    problems = errors(scan(repo_root, tracked_files_fn=tracked_files_fn))
     for problem in problems:
         print(problem, file=sys.stderr)
     return 1 if problems else 0
