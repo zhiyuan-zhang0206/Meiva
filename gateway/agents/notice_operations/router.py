@@ -79,7 +79,7 @@ async def dismiss_current(
         mutate, request.app.state.db_pool, request.url.path, key, agent_id, body
     )
     record = acceptance.record
-    if not acceptance.replayed:
+    if not acceptance.replayed and not acceptance.already_closed:
         if record.require_response:
             await asyncio.to_thread(publish_response_required_hint, request.app.state.bus, agent_id)
         await lifecycle.publish_notice_resolved(
