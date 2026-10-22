@@ -106,10 +106,14 @@ def fail(phase: str, detail: str) -> NoReturn:
 
 
 def _run(
-    cmd: list[str], *, check: bool = True, timeout: float = 120.0
+    cmd: list[str],
+    *,
+    check: bool = True,
+    timeout: float = 120.0,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(  # noqa: S603 - fixed argv lists built in this file, no untrusted input
-        cmd, capture_output=True, text=True, timeout=timeout, check=False
+        cmd, capture_output=True, text=True, timeout=timeout, check=False, env=env
     )
     if check and proc.returncode != 0:
         tail = (proc.stdout + proc.stderr).strip()[-800:]

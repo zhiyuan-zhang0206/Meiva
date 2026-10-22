@@ -3319,6 +3319,62 @@ func stopHeldMouseMonitor() {
     heldMonitor = nil
 }
 
+// MARK: - Single-instance guard
+
+/// Held for the process lifetime. `flock` belongs to the kernel, so it is released
+/// when this process exits for any reason; a stale file never blocks a real restart.
+private var instanceLockFD: Int32 = -1
+
+/// Claim `<socket>.lock` before touching the socket path.
+///
+/// The socket path is the one resource a second helper can destroy: `serve()` must
+/// `unlink` the stale file before `bind`, so a second launch rewrites the path while
+/// the live daemon keeps serving a now-orphaned fd -- every later connect fails with
+/// ECONNREFUSED until the machine restarts. On 2026-10-22 a stray `--check` run
+/// inherited `MEIVA_PERMISSIONS_HELPER_SOCKET`, lived 10 ms, and took the desktop
+/// surface of the whole machine down that way.
+func claimInstanceLock(socketPath: String) -> Bool {
+    let lockPath = socketPath + ".lock"
+    let fd = open(lockPath, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+    guard fd >= 0 else {
+        FileHandle.standardError.write(
+            Data("MeivaPermissionsHelper: cannot open instance lock \(lockPath)\n".utf8)
+        )
+        return false
+    }
+    guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+        close(fd)
+        return false
+    }
+    ftruncate(fd, 0)
+    let pid = "\(getpid())\n"
+    _ = pid.withCString { write(fd, $0, strlen($0)) }
+    instanceLockFD = fd
+    return true
+}
+
+/// True when something accepts connections on `path`. A leftover socket file whose
+/// owner died refuses the connect, so this never mistakes a corpse for a live daemon.
+func listenerExists(at path: String) -> Bool {
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    if fd < 0 { return false }
+    defer { close(fd) }
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+    let bytes = Array(path.utf8)
+    guard bytes.count < MemoryLayout.size(ofValue: addr.sun_path) else { return false }
+    withUnsafeMutablePointer(to: &addr.sun_path) { p in
+        p.withMemoryRebound(to: UInt8.self, capacity: bytes.count) { dst in
+            for (i, b) in bytes.enumerated() { dst[i] = b }
+        }
+    }
+    let len = socklen_t(MemoryLayout<sockaddr_un>.size)
+    let rc = withUnsafePointer(to: &addr) { ptr in
+        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, len) }
+    }
+    return rc == 0
+}
+
 // MARK: - Socket server
 
 func socketPath() -> String {
@@ -3360,6 +3416,20 @@ func serve() {
         exit(1)
     }
     reportResponsiblePID()
+    // A second instance must never reach the `unlink` below: rebinding the path
+    // orphans the live daemon's listening fd and silently breaks the desktop surface.
+    guard claimInstanceLock(socketPath: path) else {
+        FileHandle.standardError.write(
+            Data("MeivaPermissionsHelper: another instance owns \(path); refusing to start\n".utf8)
+        )
+        exit(0)  // exit 0: KeepAlive{SuccessfulExit:false} must not thrash on this
+    }
+    if listenerExists(at: path) {
+        FileHandle.standardError.write(
+            Data("MeivaPermissionsHelper: \(path) is already served; refusing to rebind\n".utf8)
+        )
+        exit(0)
+    }
     registerPermissions()
     unlink(path)
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
