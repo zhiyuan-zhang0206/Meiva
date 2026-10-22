@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import signal
 import subprocess
 import sys
@@ -60,10 +61,29 @@ def stop_browser(deadline: float) -> None:
         raise RuntimeError("this unit's browser appeared during stop")
 
 
-def stop_extras(deadline: float) -> None:
+def _retire_permissions_helper(timeout_s: float) -> None:
     from cli.commands.lifecycle._stop_extras import stop_permissions_helper
 
-    stop_permissions_helper(timeout_s=remaining(deadline))
+    stop_permissions_helper(timeout_s=timeout_s)
+
+
+def stop_extras(
+    deadline: float,
+    *,
+    retained: frozenset[str],
+    retire: Callable[[float], None] | None = None,
+) -> None:
+    # meiva:note
+    # Self-defence for the action itself: `stop_permissions_helper` is importable from anywhere,
+    # and retiring the helper needs the service root gone, which any retained unit prevents.
+    # The flag-level refusal lives in `require_extras_retirable` (called from `do_stop`), where
+    # the operator's own choices can still be named; here only the fact of retention matters.
+    if retained:
+        raise ValueError(
+            "retiring extras needs the service root stopped, but this stop retains "
+            f"{', '.join(sorted(retained))}; stop them too, or keep extras"
+        )
+    (retire or _retire_permissions_helper)(remaining(deadline))
 
 
 def report_incomplete(
@@ -140,6 +160,29 @@ def require_dedicated_choices(preserve_sessions: frozenset[str]) -> None:
             f"--keep-service {sorted(dedicated)}: choose --keep-shell-sessions/"
             "--close-shell-sessions and --keep-browser/--stop-browser instead"
         )
+
+
+def require_extras_retirable(
+    *,
+    teardown_extras: bool,
+    keep_shell_sessions: bool,
+    keep_browser: bool,
+    preserve_sessions: frozenset[str],
+) -> None:
+    # meiva:note
+    # Refuse the combination before one unit goes down: the rule and its words live in
+    # `service_selection.extras_keep_refusal`, which the fleet's parser also uses, so an operator
+    # cannot be told two different things about the same stop.
+    from base.deploy.lifecycle import service_selection
+
+    choices = argparse.Namespace(
+        extras="--stop-extras" if teardown_extras else None,
+        shell="--keep-shell-sessions" if keep_shell_sessions else None,
+        browser="--keep-browser" if keep_browser else None,
+        kept="--keep-service" if preserve_sessions else None,
+    )
+    if refusal := service_selection.extras_keep_refusal(choices):
+        raise ValueError(refusal)
 
 
 def stop_plan(
@@ -233,7 +276,7 @@ def _stop_initialization(
     if not keep_browser:
         _timed_phase(phases, "browser", lambda: stop_browser(deadline))
     if teardown_extras:
-        _timed_phase(phases, "extras", lambda: stop_extras(deadline))
+        _timed_phase(phases, "extras", lambda: stop_extras(deadline, retained=frozenset()))
     if keep_infra is False:
         _timed_phase(
             phases,
@@ -336,7 +379,14 @@ def _stop_selected(
             services_phase_action(preserved=preserved, deadline=deadline, helper=helper),
         )
     if teardown_extras:
-        _timed_phase(phases, "extras", lambda: stop_extras(deadline))
+        _timed_phase(
+            phases,
+            "extras",
+            lambda: stop_extras(
+                deadline,
+                retained=preserved | ({SERVICE_UNIT} if keep_shell_sessions else frozenset[str]()),
+            ),
+        )
     if "gateway" in roles and keep_infra is False:
         _timed_phase(
             phases,

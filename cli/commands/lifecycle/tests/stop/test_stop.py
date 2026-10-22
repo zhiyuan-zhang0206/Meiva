@@ -652,3 +652,19 @@ def test_stop_refused_inside_an_exec_domain(
                 producer=operator_pipeline,
                 command_runtime=command_runtime,
             )
+
+
+# meiva:note
+# The action itself: an admitted stop reaches the retirement; a retained one never does.
+def test_stop_extras_retires_the_helper_once_and_only_when_nothing_is_retained() -> None:
+    timeouts: list[float] = []
+
+    def retire(timeout_s: float) -> None:
+        timeouts.append(timeout_s)
+
+    deadline = time.monotonic() + 30.0
+    command.stop_extras(deadline, retained=frozenset(), retire=retire)
+    assert len(timeouts) == 1
+    with pytest.raises(ValueError):
+        command.stop_extras(deadline, retained=frozenset({"browser"}), retire=retire)
+    assert len(timeouts) == 1
