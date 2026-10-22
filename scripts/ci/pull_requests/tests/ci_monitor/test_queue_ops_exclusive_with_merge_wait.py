@@ -202,7 +202,9 @@ def test_diagnose_test_failure_uses_native_evidence(
     assert "getSubmittedPullRequest" in calls[0].full_url
 
 
-def test_diagnose_runner_network_flake(diag_gh: Any, capsys: pytest.CaptureFixture[str]) -> None:
+def test_diagnose_runner_install_reads_as_infrastructure(
+    diag_gh: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
     check = "backend (pytest + pyright)"
     host = diag_gh(
         [
@@ -220,7 +222,9 @@ def test_diagnose_runner_network_flake(diag_gh: Any, capsys: pytest.CaptureFixtu
         ci_utils.main(["1871", "--diagnose"], host=host, clock=TEST_CLOCK, open_url=FakeUrlOpener())
         == 0
     )
-    assert "runner-side network flake" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "infrastructure: apt/dpkg system-deps install" in out
+    assert "runner-side network flake" not in out
 
 
 def test_diagnose_reports_synthetic_test_pr(
