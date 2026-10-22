@@ -50,21 +50,15 @@ _log = logging.getLogger(__name__)
 
 
 def _field_alias_map() -> dict[str, str]:
-    """`Settings` field name -> its `.env` alias (the key the field reads from env).
+    from base.host.env.config_lite_table import FIELD_ALIASES
 
-    Lazy import: `base/config` builds on this module's primitives, so a
-    top-level import risks a cycle; by call time the config package is built.
-    """
-    from base.config import field_alias_map
-
-    return field_alias_map()
+    return dict(FIELD_ALIASES)
 
 
 def _field_is_list(name: str) -> bool:
-    """Whether ``name`` is declared as a list-backed Settings field."""
-    from base.config import FIELD_INFOS
+    from base.config.config_registry import field_infos
 
-    return get_origin(FIELD_INFOS[name].annotation) is list
+    return get_origin(field_infos()[name].annotation) is list
 
 
 def env_set_field_names() -> set[str]:

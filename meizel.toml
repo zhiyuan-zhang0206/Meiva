@@ -2,13 +2,13 @@
 ".agents" = ["base"]
 "agent" = ["meiva", "base"]
 "meiva" = ["base"]
-"meiva_builtins" = ["agent", "meiva", "base", "ops", "services"]
-"cli" = ["agent", "meiva", "meiva_builtins", "base", "ops", "scripts", "services", "tests"]
+"meiva_builtins" = ["agent", "meiva", "base", "services"]
+"cli" = ["agent", "meiva", "base", "ops", "scripts", "services", "tests"]
 "conftest.py" = ["tests"]
 "demos" = ["agent", "base"]
-"gateway" = ["agent", "meiva", "meiva_builtins", "base", "cli", "ops", "services", "tests"]
-"ops" = ["agent", "base", "tests"]
-"schedules" = ["meiva", "base", "scripts", "services"]
+"gateway" = ["agent", "meiva", "meiva_builtins", "base", "ops", "services", "tests"]
+"ops" = ["base", "tests"]
+"schedules" = ["meiva", "base", "scripts"]
 "scripts" = ["agent", "meiva", "base", "cli", "gateway", "meizel", "ops", "services", "tests"]
 "services" = ["meiva", "base", "ops"]
 "services/agent_runner/agent_host" = ["agent/db/__init__.py", "agent/graph/__init__.py", "agent/graph/claim/node.py", "agent/graph/claim/tests", "agent/graph/exec/_child_boundary.py", "agent/graph/exec/_result.py", "agent/graph/exec/_subprocess.py", "agent/graph/hooks/compact.py", "agent/graph/llm/node.py", "agent/graph/llm_errors.py", "agent/graph/node_log.py", "agent/graph/tests/cancel_fixture.py", "agent/graph/tests/test_llm_helpers.py", "agent/impersonation.py", "agent/impersonation_handoff.py", "agent/impersonation_process.py", "agent/llm/__init__.py", "agent/messages/__init__.py", "agent/messages/guard.py", "agent/ownership/corpse_reap.py", "agent/ownership/hosted.py", "agent/ownership/inbound.py", "agent/ownership/tests/ownership_support.py", "agent/process_boot.py", "agent/startup/__init__.py", "agent/state.py", "agent/tests/agent_tests.py", "agent/tests/claim/test_inbound_ownership.py", "agent/turn/runloop.py", "agent/turn/trace_checkpoint.py", "base/lm/harness/bridge.py"]
@@ -27,12 +27,7 @@ tests = ["tests"]
 frontend = ["ui"]
 
 [debt.cycle-edge]
-"scripts/codegen/dump_openapi.py -> gateway/app.py" = 1
 "scripts/content_lint/check_doc_references.py -> cli/parsers/__init__.py" = 1
-"scripts/entrypoints/gateway.py -> gateway/app.py" = 1
-"scripts/host_ops/tests/test_update_schedule_script.py -> gateway/schedules/router.py" = 9
-"scripts/host_ops/tests/test_update_schedule_script.py -> gateway/schedules/session_control.py" = 3
-"scripts/host_ops/update_schedule_script.py -> gateway/schedules/router.py" = 1
 "scripts/verify/tests/test_container.py -> cli/parsers/__init__.py" = 1
 "scripts/verify/tests/test_tart_run.py -> cli/parsers/__init__.py" = 1
 "tests/ci/test_backend_test_gate.py -> scripts/ci/shard_counts.py" = 3
@@ -202,13 +197,13 @@ frontend = ["ui"]
 
 [debt.private-module]
 "conftest.py -> tests/_asyncio_stall_probe.py" = 1
-"gateway/tests/agents/test_external_agent_source.py -> agent/graph/claim/_chat_inbound.py" = 1
 "meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_coding_session_resume.py -> meiva/shell/coding_tools/_claude_checks.py" = 4
 "meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_coding_session_resume.py -> meiva/shell/coding_tools/_common.py" = 3
 "services/agent_runner/agent_host/tests/dispatch/test_exec_memory_guard.py -> agent/graph/exec/_child_boundary.py" = 1
 "services/agent_runner/agent_host/tests/dispatch/test_exec_memory_guard.py -> agent/graph/exec/_result.py" = 1
 "services/agent_runner/agent_host/tests/dispatch/test_exec_memory_guard.py -> agent/graph/exec/_subprocess.py" = 1
 "tests/e2e/lifecycle/test_force_expire_impersonation.py -> base/agents/impersonation/_store.py" = 1
+"gateway/tests/agents/test_external_agent_source.py -> agent/graph/claim/_chat_inbound.py" = 1
 
 [debt.private-name]
 "agent/extensions/tests/test_lazy_plugin_load.py -> meiva/__init__.py#_some_private" = 1

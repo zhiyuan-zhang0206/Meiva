@@ -35,7 +35,7 @@ returns to a lower layer would close a cycle.
 
 ## Recorded debt
 
-Some edges against the direction exist today (`gateway` using `cli`, tests
+Some edges against the direction exist today (for example, `cli` using `scripts`, or tests
 that reach up). They are not exemptions: each fact on such an edge is a recorded `cycle-edge` debt in
 the manifest of the directory whose graph has the cycle, counted per source and target file, so a new
 import on the same edge is a new violation and the recorded ones can only shrink. `python -m meizel debt`
@@ -47,9 +47,8 @@ shows what is left. See [recorded debt](../../meizel/docs/checker/debt.meiva.okf
   use `cli`; it uses `agent` only through the narrowed hosted-runner edge; and nothing below `agent`
   uses `services.agent_runner.agent_host`. That puts `services` below `cli`, above `base` and outside the
   agent kernel. Nothing names a direction between `services` and `gateway`, `meiva` or `ops`.
-- **`ops`** is above `base` and below `gateway` and `cli`.
-- **`meiva_builtins`** (built-in plugins and skills) imports `base`, `meiva`, `agent`, `ops` and `services`,
-  and `agent` and `ops` each import back into it; those cycles are recorded debt.
+- **`ops`** is above `base` and below `services`, `gateway` and `cli`; it does not import `meiva` or `agent`.
+- **`meiva_builtins`** (built-in plugins and skills) imports `base`, `meiva`, `agent` and `services`.
 - **`scripts/`, `tests/`, `schedules/` and `demos/`** are directories of the root like any other: what
   they import is declared in the root manifest, and their own tests under a package are judged in that package.
 
