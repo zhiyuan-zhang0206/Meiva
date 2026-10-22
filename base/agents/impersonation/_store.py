@@ -64,6 +64,26 @@ def public(lease: Mapping[str, Any]) -> dict[str, Any]:
 
 
 # meiva:note
+# Which takeover, if any, a restart on `machine` would strand: the newest open lease and a
+# readable holder, never the token hash. Status is the authority and the clock only guards a
+# lagging reaper -- a released lease keeps its future `expires_at` (real rows show 4h/8h TTLs
+# ended early), so testing the clock alone reports a lease nobody holds. Read-only: the
+# caller owns the transaction and the failure semantics.
+def live_lease_on_machine(conn: psycopg.Connection, machine: str) -> tuple[str, str] | None:
+    row = conn.execute(
+        "SELECT id::text, source, executor_name FROM agent_impersonations "
+        "WHERE machine=%s AND status IN ('requested','accepted','active') "
+        "AND expires_at>clock_timestamp() "
+        "ORDER BY expires_at DESC, agent_id LIMIT 1",
+        (machine,),
+    ).fetchone()
+    if row is None:
+        return None
+    lease_id, source, executor = row
+    return lease_id, f"{source} / {executor}" if executor else source
+
+
+# meiva:note
 # The one wording for a same-machine refusal, naming the agent and both machines:
 # the operator's next question is always "which host is the agent on, and which
 # one am I on", and the bare sentence turned every mismatch into a manual hunt.

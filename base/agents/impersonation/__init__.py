@@ -31,6 +31,9 @@ from base.agents.impersonation._store import (
     ImpersonationError as ImpersonationError,
 )
 from base.agents.impersonation._store import (
+    live_lease_on_machine as live_lease_on_machine,
+)
+from base.agents.impersonation._store import (
     lock_lease as lock_lease,
 )
 from base.agents.impersonation._store import (

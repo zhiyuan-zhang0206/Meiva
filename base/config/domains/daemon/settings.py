@@ -239,6 +239,20 @@ class DaemonSettings(
         },
     )
 
+    health_restart_lease_grace_s: float = Field(
+        default=30.0,
+        ge=0,
+        alias="MEIVA_HEALTH_RESTART_LEASE_GRACE_S",
+        description="Seconds the root health monitor holds the FIRST restart of one outage when this machine carries a live impersonation lease, so a takeover session is not cut off mid-work; the probe is re-read when the window ends and a unit that answers again cancels the restart. Zero disables the courtesy, and later attempts of the same outage are never held (task #5551).",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     health_probe_agent_min: int = Field(
         default=1,
         alias="MEIVA_HEALTH_PROBE_AGENT_MIN",

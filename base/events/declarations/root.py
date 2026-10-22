@@ -21,6 +21,21 @@ class RootHealthExpected(TypedDict):
     expected_since_timestamp_seconds: float
 
 
+# meiva:note
+# A root unit's first restart of one outage was held for a live impersonation lease.
+# `outcome` is `deferred` when the window opened and `recovered` when the unit answered
+# again inside it, cancelling the restart. `attempt` counts the attempt the deferral held
+# back, `waited_s` is the window (deferred) or the elapsed wait (recovered), and `holder`
+# is the operator's readable label, never a token.
+class RootHealthRestartLeaseGrace(TypedDict):
+    unit: str
+    attempt: int
+    lease_id: str
+    holder: str
+    waited_s: float
+    outcome: str
+
+
 class RootRestartFailed(TypedDict):
     """One member's failed replacement half, recorded explicitly (task #4872).
 
@@ -598,6 +613,14 @@ EVENTS: dict[str, EventSpec] = {
         "root completed one service health and diagnostic observation round",
         payload=RootHealthTick,
         tier="noise",
+    ),
+    "root_health_restart_lease_grace": audit_event(
+        "root_health_restart_lease_grace",
+        "the root health monitor held the first restart of an outage because this machine "
+        "carries a live impersonation lease -- deferred when the window opened, recovered "
+        "when the unit answered again inside it and the restart was cancelled",
+        payload=RootHealthRestartLeaseGrace,
+        tier="anomaly",
     ),
     "postgres_stop_escalated": telemetry_event(
         "postgres_stop_escalated",

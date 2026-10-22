@@ -12,11 +12,13 @@ from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from base.agents.impersonation import live_lease_on_machine
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.db import Database
 from base.native_process.os_platform import is_macos
+from services.supervision.meiva_root.health import LeaseProbe
 from services.supervision.meiva_root_glue.diagnostics import Diagnostic
 
 
@@ -151,6 +153,18 @@ def database_recovery_probe(database: Callable[[], Database]) -> Callable[[], Da
         except Exception as exc:
             return DaemonProbe.unavailable(f"database probe failed: {type(exc).__name__}")
         return DaemonProbe.up("database answered")
+
+    return probe
+
+
+# meiva:note
+# The watchdog asks "would restarting this unit strand a live takeover?" and gets
+# `(lease_id, holder)` or None. The answer is read here, on the glue side, so the monitor
+# keeps no database client of its own: a database outage must not make the watchdog blind.
+def live_lease_probe(database: Callable[[], Database], machine: str) -> LeaseProbe:
+    def probe() -> tuple[str, str] | None:
+        with database().connect(autocommit=True) as conn:
+            return live_lease_on_machine(conn, machine)
 
     return probe
 
