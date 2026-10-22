@@ -3,3 +3,6 @@ exports = ["intermediates.py", "names.py", "offsite.py", "passphrase.py", "tests
 [uses]
 "offsite.py" = ["names.py"]
 "tests" = ["names.py", "offsite.py", "passphrase.py"]
+
+[purity]
+"names.py" = "strict"

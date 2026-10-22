@@ -25,21 +25,14 @@ def test_header_format(pid: int | None) -> None:
     assert (" pid=" in line) is (pid is not None)
 
 
-def test_header_identity_changes_with_name_pid_and_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    class Clock:
-        instant = datetime(2026, 9, 9, microsecond=123456, tzinfo=UTC)
-
-        @classmethod
-        def now(cls, tz: object) -> datetime:
-            assert tz is UTC
-            return cls.instant
-
-    monkeypatch.setattr(log_prefix, "datetime", Clock)
-    first = log_prefix.session_log_header("one", pid=1)
-    other_name = log_prefix.session_log_header("two", pid=1)
-    other_pid = log_prefix.session_log_header("one", pid=2)
-    Clock.instant = Clock.instant.replace(microsecond=123457)
-    later = log_prefix.session_log_header("one", pid=1)
+def test_header_identity_changes_with_name_pid_and_time() -> None:
+    instant = datetime(2026, 9, 9, microsecond=123456, tzinfo=UTC)
+    first = log_prefix.session_log_header("one", pid=1, now=instant)
+    other_name = log_prefix.session_log_header("two", pid=1, now=instant)
+    other_pid = log_prefix.session_log_header("one", pid=2, now=instant)
+    later = log_prefix.session_log_header(
+        "one", pid=1, now=instant.replace(microsecond=123457)
+    )
     assert len({first, other_name, other_pid, later}) == 4
     assert b".123456+00:00" in first
 

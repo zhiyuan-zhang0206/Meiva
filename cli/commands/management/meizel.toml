@@ -7,3 +7,6 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 
 [external]
 "schedule_verify_child.py" = "dry-runs the imports of a user-written schedule script and checks its syntax"
+
+[purity]
+"__init__.py" = "strict"

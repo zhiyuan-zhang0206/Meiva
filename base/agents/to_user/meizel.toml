@@ -4,3 +4,6 @@ exports = ["document.py", "models.py", "resources.py"]
 "__init__.py" = ["document.py", "models.py", "resources.py"]
 "document.py" = ["models.py", "resources.py"]
 "resources.py" = ["models.py"]
+
+[purity]
+"models.py" = "strict"

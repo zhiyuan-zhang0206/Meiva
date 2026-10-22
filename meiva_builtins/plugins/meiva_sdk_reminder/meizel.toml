@@ -2,3 +2,8 @@ exports = ["agent_runtime.py"]
 
 [uses]
 "agent_runtime.py" = ["_state.py"]
+
+[purity]
+"__init__.py" = "strict"
+"_state.py" = "strict"
+"plugin.py" = "strict"

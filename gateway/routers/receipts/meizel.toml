@@ -1,1 +1,4 @@
 exports = ["creation.py", "task.py"]
+
+[purity]
+"__init__.py" = "strict"

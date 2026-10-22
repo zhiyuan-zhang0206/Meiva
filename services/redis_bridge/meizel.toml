@@ -2,3 +2,6 @@ exports = ["relay.py"]
 
 [uses]
 "tests" = ["relay.py"]
+
+[purity]
+"__init__.py" = "strict"

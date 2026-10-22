@@ -4,3 +4,6 @@ exports = ["commands.py", "configuration", "fleet_graph.py", "fleet_tokens.py", 
 "fleet_graph.py" = ["fleet_tokens.py"]
 "pages.py" = ["page_acceptance.py"]
 "tasks.py" = ["receipts"]
+
+[purity]
+"__init__.py" = "strict"

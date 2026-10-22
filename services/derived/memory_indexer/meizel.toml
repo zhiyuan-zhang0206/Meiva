@@ -8,3 +8,6 @@ exports = ["backends", "chunking.py", "config.py", "daemon.py", "embeddings", "p
 "patrol_status.py" = ["config.py"]
 "rerank.py" = ["backends", "chunking.py"]
 "tests" = ["backends", "chunking.py", "config.py", "daemon.py", "memory_search_reconcile.py", "recall_regression.py", "rerank.py"]
+
+[purity]
+"__init__.py" = "strict"

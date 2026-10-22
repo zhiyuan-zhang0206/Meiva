@@ -5,3 +5,7 @@ exports = ["configuration.py", "conversation.py", "read_inputs.py", "timeline.py
 "conversation.py" = ["timeline.py"]
 "timeline.py" = ["read_inputs.py"]
 "understanding.py" = ["read_inputs.py"]
+
+[purity]
+"__init__.py" = "strict"
+"read_inputs.py" = "strict"

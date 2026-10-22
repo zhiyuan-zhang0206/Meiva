@@ -14,3 +14,6 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 "tests" = ["__init__.py", "audit_events.py", "delivery", "emitter.py", "event_store.py", "metrics", "observability.py", "otlp", "pipeline_build.py", "process_logging.py", "station_endpoint.py", "trace_mirror.py", "tracing.py"]
 "trace_mirror.py" = ["delivery"]
 "tracing.py" = ["delivery", "observability.py", "otlp", "trace_mirror.py"]
+
+[purity]
+"loki_index_labels.py" = "strict"

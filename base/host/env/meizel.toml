@@ -7,3 +7,7 @@ exports = ["agent_slices.py", "bootstrap.py", "config_lite_table.py", "dotenv_bo
 "health_ports.py" = ["port_table.py", "registry.py"]
 "registry.py" = ["config_lite_table.py"]
 "tests" = ["bootstrap.py", "dotenv_boot.py", "harness_binaries.py"]
+
+[purity]
+"__init__.py" = "strict"
+"port_table.py" = "strict"

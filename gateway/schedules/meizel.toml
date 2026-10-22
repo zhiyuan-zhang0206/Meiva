@@ -6,3 +6,6 @@ exports = ["receipts.py", "router.py", "session_control.py", "tests"]
 
 [external]
 "router.py" = "compiles a user-written schedule script to reject syntax errors"
+
+[purity]
+"__init__.py" = "strict"

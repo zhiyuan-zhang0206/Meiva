@@ -3,3 +3,6 @@ exports = ["coordination"]
 [uses]
 "platform" = ["tests"]
 "tests" = ["integrations", "practice"]
+
+[purity]
+"__init__.py" = "strict"

@@ -165,7 +165,7 @@ def bucket_messages(
 SECTION_SPLIT_THRESHOLD_TOKENS = 1000
 
 
-@dataclass
+@dataclass(frozen=True)
 class SectionNode:
     """One node of the recursive system-prompt breakdown: a heading — or the
     `(preamble)` / `(intro)` prose that precedes the first sub-heading — with its
@@ -180,7 +180,7 @@ class SectionNode:
     estimated: bool = True  # a section is a share of the system prompt, never measured alone
 
 
-@dataclass
+@dataclass(frozen=True)
 class _WeightNode:
     """Structural section tree in estimator weight, before token apportionment/pruning.
     `own_weight` = the node's own residual prose (its heading line plus the text up

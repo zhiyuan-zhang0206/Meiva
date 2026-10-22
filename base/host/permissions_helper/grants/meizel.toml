@@ -6,3 +6,7 @@ exports = ["catalog.py", "checklist.py", "gate.py", "probe.py", "triggers.py"]
 "probe.py" = ["catalog.py", "children"]
 "triggers.py" = ["catalog.py", "children", "probe.py"]
 "tests" = ["catalog.py", "checklist.py", "gate.py", "probe.py"]
+
+[purity]
+"__init__.py" = "strict"
+"catalog.py" = "strict"

@@ -5,6 +5,10 @@ exports = ["daemon.py", "labeler.py", "tests"]
 "labeler.py" = ["config.py"]
 "tests" = ["config.py", "daemon.py", "labeler.py"]
 
+[purity]
+"__init__.py" = "strict"
+"config.py" = "strict"
+
 [debt.private-name]
 "tests/test_labeler_config.py -> daemon.py#_hard_exit" = 2
 "tests/test_labeler_config.py -> daemon.py#_is_running" = 1

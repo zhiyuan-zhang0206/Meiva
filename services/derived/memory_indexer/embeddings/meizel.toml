@@ -4,3 +4,6 @@ exports = ["base.py", "factory.py", "gemini.py", "tests"]
 "factory.py" = ["base.py", "gemini.py"]
 "gemini.py" = ["base.py"]
 "tests" = ["base.py", "factory.py", "gemini.py"]
+
+[purity]
+"__init__.py" = "strict"

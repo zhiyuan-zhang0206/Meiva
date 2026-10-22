@@ -19,6 +19,9 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 "telemetry" = ["api_contracts", "clock", "cluster", "config", "db", "events", "host", "log", "native_process", "paths"]
 "tests" = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "db", "deploy", "events", "host", "lm", "log", "native_process", "packages", "paths", "sessions", "telemetry"]
 
+[purity]
+"__init__.py" = "strict"
+
 [debt.private-module]
 "tests/config/bootstrap/_lite_parity_child.py -> config/_full.py" = 1
 "tests/config/bootstrap/_lite_parity_child.py -> config/_lite.py" = 3

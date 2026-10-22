@@ -8,3 +8,7 @@ exports = ["grafana_render.py", "lgtm.py", "lgtm_native.py", "logs.py", "otel_co
 "otel_collector.py" = ["_otel_collector_exporters.py"]
 "tests" = ["_lgtm_provisioning.py", "grafana_render.py", "lgtm_native.py", "observatory_urls.py", "otel_collector.py", "trace.py"]
 "trace.py" = ["otel_collector.py"]
+
+[purity]
+"__init__.py" = "strict"
+"_otel_collector_exporters.py" = "strict"

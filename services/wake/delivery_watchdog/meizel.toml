@@ -3,3 +3,6 @@ exports = ["daemon.py", "dead_letter.py"]
 [uses]
 "daemon.py" = ["dead_letter.py"]
 "tests" = ["daemon.py"]
+
+[purity]
+"__init__.py" = "strict"

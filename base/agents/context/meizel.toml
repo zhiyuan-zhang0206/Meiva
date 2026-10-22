@@ -5,3 +5,6 @@ exports = ["clients.py", "external_attachment", "gateway_client", "identity.py"]
 "external_attachment" = []
 "gateway_client" = ["__init__.py", "clients.py", "identity.py"]
 "tests" = ["__init__.py", "clients.py", "identity.py"]
+
+[purity]
+"identity.py" = "strict"

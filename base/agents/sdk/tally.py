@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from threading import Lock
 
 
-@dataclass
+@dataclass(frozen=True)
 class SdkCallTally:
     """Shared by calls and threads belonging to one explicit execution context."""
 

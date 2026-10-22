@@ -4,3 +4,6 @@ exports = ["health.py", "store.py", "types.py", "worker.py"]
 "health.py" = ["store.py"]
 "store.py" = ["types.py"]
 "worker.py" = ["store.py", "types.py"]
+
+[purity]
+"__init__.py" = "strict"

@@ -15,3 +15,6 @@ exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py",
 "terminal_notices.py" = ["host_transport.py"]
 "tests" = ["__init__.py", "_store.py", "event_log.py", "event_signals.py", "history.py", "host_transport.py", "maintenance.py", "manifest.py", "relay.py", "sessions.py", "status.py", "terminal_notices.py"]
 "wake.py" = ["status.py"]
+
+[purity]
+"notes.py" = "strict"

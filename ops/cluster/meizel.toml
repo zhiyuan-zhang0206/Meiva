@@ -1,1 +1,4 @@
 exports = ["operations.py", "rpc.py"]
+
+[purity]
+"__init__.py" = "strict"

@@ -37,7 +37,7 @@ class DrainResult:
     phase: DrainPhase
 
 
-@dataclass
+@dataclass(frozen=True)
 class SyncReceipt:
     """One FIFO barrier, acknowledged only after preceding writes succeed."""
 

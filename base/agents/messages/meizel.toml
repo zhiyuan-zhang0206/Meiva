@@ -5,3 +5,14 @@ exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "identit
 "identity.py" = ["kwargs.py"]
 "injection_scan.py" = ["security_finding.py"]
 "tests" = ["envelope.py", "external_caller.py", "injection_scan.py", "kwargs.py", "security_finding.py", "token_estimate.py"]
+
+[purity]
+"__init__.py" = "strict"
+"envelope.py" = "strict"
+"inbound.py" = "strict"
+"inbound_images.py" = "strict"
+"inbound_provenance.py" = "strict"
+"injection_scan.py" = "strict"
+"kwargs.py" = "strict"
+"lifecycle_text.py" = "strict"
+"security_finding.py" = "strict"

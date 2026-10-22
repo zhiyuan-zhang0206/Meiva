@@ -1,1 +1,2 @@
+purity = "strict"
 exports = ["feishu.py", "telegram.py"]

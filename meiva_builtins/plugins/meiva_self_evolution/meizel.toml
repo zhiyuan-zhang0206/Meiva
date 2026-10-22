@@ -1,2 +1,6 @@
 [uses]
 "tests" = ["agent_runtime.py"]
+
+[purity]
+"__init__.py" = "strict"
+"plugin.py" = "strict"

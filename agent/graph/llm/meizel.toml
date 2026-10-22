@@ -5,5 +5,9 @@ exports = ["goto.py", "node.py", "tests"]
 "node.py" = ["_cancel.py", "_chunk.py", "_retry.py", "_stream.py", "goto.py"]
 "tests" = ["_cancel.py", "_chunk.py", "_retry.py", "_stream.py", "node.py"]
 
+[purity]
+"__init__.py" = "strict"
+"goto.py" = "strict"
+
 [debt.private-name]
 "tests/test_llm_turn_end.py -> node.py#_llm_node_impl" = 2

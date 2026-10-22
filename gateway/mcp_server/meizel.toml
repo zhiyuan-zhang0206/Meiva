@@ -1,1 +1,4 @@
 exports = ["endpoint.py"]
+
+[purity]
+"__init__.py" = "strict"

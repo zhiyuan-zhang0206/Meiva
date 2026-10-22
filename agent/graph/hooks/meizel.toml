@@ -5,3 +5,6 @@ exports = ["compact.py", "framework.py", "node.py", "tests"]
 "framework.py" = ["capabilities.py", "compact.py", "skill_recall.py"]
 "skill_recall.py" = ["compact.py"]
 "tests" = ["capabilities.py", "compact.py", "framework.py", "skill_recall.py"]
+
+[purity]
+"__init__.py" = "strict"

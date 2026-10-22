@@ -21,6 +21,13 @@ exports = ["daemon_shutdown.py", "daemon_shutdown_child.py", "short_tmp.py"]
 "test_resource_sample.py#monkeypatch.setattr base.host.resource_sample.subprocess.run" = 1
 "test_resource_sample.py#monkeypatch.setattr base.host.resource_sample.sys.platform" = 1
 
+[debt.impure-test-fixture]
+"test_resource_sample.py#fixture monkeypatch" = 5
+
+[debt.nested-patch-target]
+"test_resource_sample.py#module.subprocess.run" = 1
+"test_resource_sample.py#module.sys.platform" = 1
+
 [debt.restricted-python]
 "test_proc.py#python -c" = 9
 "test_proc.py#python subprocess that runs something other than a literal repository file" = 1

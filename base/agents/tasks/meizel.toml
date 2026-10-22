@@ -7,3 +7,8 @@ exports = ["creation.py", "delivery.py", "model.py", "notes.py", "owner_notifica
 "reparent.py" = ["rules.py"]
 "rules.py" = ["status.py"]
 "tests" = ["rules.py"]
+
+[purity]
+"__init__.py" = "strict"
+"priority.py" = "strict"
+"status.py" = "strict"

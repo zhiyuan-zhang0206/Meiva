@@ -8,3 +8,7 @@ exports = ["agent_events.py", "computer_traces.py", "merged.py", "metrics.py", "
 "router.py" = ["schemas.py", "telemetry_rows.py"]
 "system.py" = ["sse.py"]
 "tests" = ["sse.py", "telemetry_rows.py"]
+
+[purity]
+"__init__.py" = "strict"
+"schemas.py" = "strict"

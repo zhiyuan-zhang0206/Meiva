@@ -10,3 +10,10 @@ exports = ["checkpoint.py", "checkpoint_copy.py", "checkpoint_postgres_walks.py"
 "message_tokens.py" = ["checkpoint.py", "closing_request.py"]
 "tests" = ["checkpoint.py", "checkpoint_postgres_walks.py", "closing_request.py", "compact_boundary.py", "context_breakdown.py", "context_response.py", "delta_read_compat.py", "hierarchy", "message_tokens.py", "timeline.py", "timeline_inputs.py"]
 "timeline.py" = ["timeline_inputs.py", "timeline_item.py"]
+
+[purity]
+"__init__.py" = "strict"
+"checkpoint_serde.py" = "strict"
+"checkpoint_serializer.py" = "strict"
+"closing_request.py" = "strict"
+"timeline_inputs.py" = "strict"

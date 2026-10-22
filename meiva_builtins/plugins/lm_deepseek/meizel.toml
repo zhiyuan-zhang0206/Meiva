@@ -1,2 +1,6 @@
 [uses]
 "provider.py" = ["chat.py"]
+
+[purity]
+"chat.py" = "strict"
+"plugin.py" = "strict"

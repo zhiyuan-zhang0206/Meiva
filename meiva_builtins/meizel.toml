@@ -2,3 +2,6 @@ exports = ["plugins", "skills"]
 
 [uses]
 "tests" = ["skills"]
+
+[purity]
+"__init__.py" = "strict"
