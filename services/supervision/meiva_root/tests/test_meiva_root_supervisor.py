@@ -293,6 +293,7 @@ async def test_an_unconfigured_unit_is_launched_without_a_rewrite(tmp_path: Path
     await owner.start()
     try:
         assert seen == [(sys.executable, "-u", str(_CHILD), "sleep")]
+        assert (await row(owner))["launch_rewrite"] == "off"
     finally:
         await owner.shutdown()
 
@@ -318,6 +319,7 @@ async def test_a_configured_transform_rewrites_only_its_unit(tmp_path: Path) -> 
             ("wrapped:worker", sys.executable, "-u", str(_CHILD), "sleep"),
             (sys.executable, "-u", str(_CHILD), "sleep"),
         ]
+        assert (await row(owner))["launch_rewrite"] == "on"
     finally:
         await owner.shutdown()
 
@@ -357,6 +359,40 @@ async def test_a_refused_rewrite_falls_back_to_the_manifest_argv(tmp_path: Path)
 
 
 # meiva:note
+# The mirror of the retirement rule: a *stopped* unit also exits inside the window, and a
+# signal death reports a negative code. Reading any exit as "the wrapper is unusable" would
+# let one ordinary `stop` retire the cap for the rest of this root's life.
+async def test_a_stopped_unit_keeps_its_rewrite(tmp_path: Path) -> None:
+    seen: list[tuple[str, ...]] = []
+    plain = (sys.executable, "-u", str(_CHILD), "sleep")
+
+    async def launcher(*argv: str, **options: Any) -> Any:
+        seen.append(tuple(argv))
+        # meiva:note
+        # Run the manifest argv whatever was asked for: the wrapper name is a probe, and the
+        # point is a real child that dies of the stop signal.
+        return await asyncio.create_subprocess_exec(*plain, **options)
+
+    unit = UnitManifest("worker", plain, RestartPolicy.ALWAYS, "root", ())
+    owner = Supervisor(
+        UnitRegistry([unit]),
+        run_dir=tmp_path,
+        config=SupervisorConfig(stop_timeout_s=0.2),
+        spawn=launcher,
+    )
+    owner.set_argv_transform(lambda unit_id, argv: [f"wrapped:{unit_id}", *argv])
+    await owner.start()
+    try:
+        await owner.down("worker")
+        assert (await row(owner))["launch_rewrite"] == "on"
+        await owner.up("worker")
+        assert len(seen) == 2
+        assert seen[1][0] == "wrapped:worker"
+    finally:
+        await owner.shutdown()
+
+
+# meiva:note
 # The dangerous shape is not "the launcher refuses" but "the launcher starts, then exits
 # non-zero": that reads as an ordinary unit exit, so the restart policy would replay the
 # same wrapper forever and the unit would never come up. One early exit must retire the
@@ -386,6 +422,7 @@ async def test_an_early_non_zero_exit_retires_the_rewrite(tmp_path: Path) -> Non
             if (await row(owner))["state"] == "stopped":
                 break
             await asyncio.sleep(0.02)
+        assert (await row(owner))["launch_rewrite"] == "off(retired)"
         await owner.restart("worker")
         for _ in range(200):
             if len(seen) >= 2:

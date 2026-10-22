@@ -98,6 +98,35 @@ class CallerFacts:
         return f"{who} pid={self.pid} uid={self.uid} on {self.machine} ({self.cwd})"
 
 
+# meiva:note
+# The wire validates the caller block; this binds it to the record the root
+# persists, so the attribution outlives the requesting process and the root
+# generation that served it.
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+def caller_facts(raw: object) -> CallerFacts | None:
+    if not isinstance(raw, dict):
+        return None
+    values = cast("Mapping[str, object]", raw)
+    argv = values.get("argv")
+    env_keys = values.get("env_keys")
+    return CallerFacts(
+        pid=int(cast("int", values["pid"])),
+        ppid=int(cast("int", values["ppid"])),
+        uid=int(cast("int", values["uid"])),
+        cwd=str(values["cwd"]),
+        argv=tuple(
+            str(item) for item in cast("list[object]", argv if isinstance(argv, list) else [])
+        ),
+        agent_id=None if values.get("agent_id") is None else str(values["agent_id"]),
+        machine=str(values["machine"]),
+        operation_id=None if values.get("operation_id") is None else str(values["operation_id"]),
+        env_keys=tuple(
+            str(item)
+            for item in cast("list[object]", env_keys if isinstance(env_keys, list) else [])
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class IntentRecord:
     intent: UnitIntent
