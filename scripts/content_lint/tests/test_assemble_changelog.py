@@ -114,6 +114,28 @@ def test_fragments_order_by_the_commit_that_added_them_not_mtime(tmp_path: Path)
     assert [f.path.name for f in fold.read_fragments(root)] == ["2-second.md", "1-first.md"]
 
 
+def test_a_batch_of_fragments_folds_newest_first(tmp_path: Path) -> None:
+    # meiva:note
+    # A release folds every fragment at once. `read_fragments` returns them newest
+    # first, and each lands on top of its section, so the block they form keeps
+    # that order instead of being reversed by the insertions.
+    root = _git_repo(tmp_path)
+    stamps = ((10, "1-oldest", "oldest"), (11, "2-middle", "middle"), (12, "3-newest", "newest"))
+    for hour, name, label in stamps:
+        _fragment(root, f"{name}.md", f"type: Added\n\n- The {label} addition.\n")
+        at = f"2026-10-20T{hour}:00:00+00:00"
+        _git(root, "add", "-A", at=at)
+        _git(root, "commit", "--quiet", "-m", label, at=at)
+    folded = fold.fold_fragments(_CLEAN, fold.read_fragments(root))
+    assert (
+        "### Added\n"
+        "- The newest addition.\n\n"
+        "- The middle addition.\n\n"
+        "- The oldest addition.\n\n"
+        "- A newer addition"
+    ) in folded
+
+
 def test_an_untracked_fragment_falls_back_to_its_mtime(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _fragment(root, "1-older.md", "type: Added\n\n- Older.\n")

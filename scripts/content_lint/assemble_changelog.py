@@ -178,7 +178,11 @@ def read_fragments(root: Path) -> list[Fragment]:
 
 def fold_fragments(changelog: str, fragments: list[Fragment]) -> str:
     preamble, sections, trailer = parse_changelog(changelog)
-    for fragment in fragments:
+    # meiva:note
+    # `fragments` is newest first and each one lands on top of its section, so
+    # they are inserted back to front: a release folds the whole batch at once
+    # and the newest entry must still lead, not trail, the block it forms.
+    for fragment in reversed(fragments):
         sections.setdefault(fragment.section, []).insert(0, fragment.entry)
     return render_changelog(preamble, sections, trailer)
 

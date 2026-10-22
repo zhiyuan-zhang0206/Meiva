@@ -8,6 +8,38 @@ and the matching GitHub Releases.
 ## [Unreleased]
 
 ### Added
+- The shared browser's tabs now survive a deliberate `meiva stop`/`meiva start`:
+  stop records the open tabs (URL, title, pinned, tab-group title, order) to
+  `<home>/run/browser-session.json`, start relaunches Chrome with
+  `--restore-last-session` and re-applies the recorded pins and groups, then
+  reports `browser session: restored N/M tabs; pin/group reapplied K/J`
+  ([browser session restore](services/desktop/browser/docs/browser-session-restore.meiva.okf.md)).
+  A crash, a watchdog respawn and `--keep-browser` all leave the browser alone.
+
+- `lint-host-platform-marks` refuses a test that reads the process's own platform
+  (`sys.platform`, `Host.system()`, `Platform.current()`) or resolves through the
+  ambient PATH (`shutil.which(name)` with no `path=`) without saying so — the pattern
+  that makes a test green in CI and red on a macOS developer machine. The sites that
+  predate the rule are frozen in `scripts/lint/baseline/host_platform_marks.json`
+  (49 files, 84 reads); the baseline only shrinks
+  ([rule](scripts/lint/docs/host-platform-marks.meiva.okf.md)).
+
+- `@pytest.mark.requires_host("linux" | "darwin")` declares a test whose subject only
+  exists on one host (launchd, TCC, codesign, swiftc); `tests/fixtures/host_platform.py`
+  turns it into a skip on every other host with one consistent reason and still lists
+  the test under `--collect-only`, so a CI lane can be held to running it. Everything
+  else injects a fake `Host` (`base/host/system/tests/fake_commands.py:fake_host`) and
+  asserts the same result on every machine
+  ([platform-dependent tests](docs/conventions/testing.md#platform-dependent-tests)).
+
+- A new built-in `meiva-immersive` skill keeps a live human conversation fed while
+  heavy work runs in parallel: the human turns it on ("immersive on"), the agent
+  announces the silence cap (default 60s), the inline/delegate split and how the
+  session ends, keeps a durable ledger in its workspace, and reverts to the default
+  batched reporting on exit. It never enters on its own — an agent may offer a live
+  pass once, because where the human's attention goes is the human's decision —
+  ([immersive skill](meiva_builtins/skills/coordination/meiva-immersive/docs/meiva-immersive.meiva.okf.md)).
+
 - `meiva stop --maintenance-for 45m --reason "..."` declares how long a host is expected to be
   down: the stop records `machines.maintenance_until` / `maintenance_reason` on the host, and the
   next start clears them. An ordinary stop clears whatever a previous one declared, a
@@ -122,6 +154,74 @@ and the matching GitHub Releases.
 - `install.sh --mirror cn`: route PyPI / npm / Homebrew through China mirrors.
 
 ### Changed
+- A numbered reply to a notice question can choose no option: `0` on the first
+  line answers with a comment alone, the same answer the Web form sends, so a
+  text-only client is no longer narrower than the console
+  ([owner doc](meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md)).
+
+- An expired notice now reaches its agent as a message that names the notice's
+  local id, its title and when it lapsed, says nothing is pending and that the
+  single open notice is free again — instead of a "Re: ..." that read like a user
+  reply. The row is queued for a terminated owner too, with no wake and no
+  resurrection, while the user's side stays silent: expiry posts no notification
+  and the question only leaves the queue
+  ([notify](meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md)).
+
+- A system notification queued for a terminated owner is no longer counted as a
+  stalled delivery. Such a row is written to be read on a later life and is never
+  woken, so staying pending is its resting state rather than a lost wake; a peer
+  or user chat for the same owner still alerts as before
+  ([reaper](services/docs/gateway_side/ttl_reaper.meiva.okf.md)).
+
+- A notice question can be answered with a comment alone: no option chosen is a
+  complete answer for both single- and multi-select questions, and a single
+  choice is cleared by choosing it again
+  ([owner doc](meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md)).
+
+- `meiva.ui.notify` now fails while the agent already holds an open notice, naming
+  that notice's id and the two ways out — dismiss it or edit it in place — instead of
+  silently replacing it. A second post used to supersede the first, which over 30 days
+  of production erased 51.7% of the 259 notices that needed an answer before the user
+  saw them ([notify contract](meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md)).
+
+- The conversation title names the agent and stops there: `Agent #<id> · <label>`, with no
+  harness suffix. Which harness runs an agent and which model it was born on now read in
+  the Inspector's Liveness section, beside birth, heartbeat, machine and status, and the
+  configuration overlay no longer repeats `llm_model` as if it were an override
+  (user 2026-10-21).
+
+- A phone's drawer button now carries the unresolved-alert count, the same bubble the
+  desktop rail shows on its restore button while collapsed. Closing the drawer hides
+  the sidebar's icon row just as collapsing the rail does, so on a phone the count that
+  leads that row had nowhere to appear (user 2026-10-21).
+
+- The Fleet graphs settle in a quarter of the time they did: the shared force
+  default `alphaDecay` moves from d3's 0.0228 to 0.08, so the 40-node agent
+  graph's entrance runs 82 ticks (about 1.4 s at 60 fps) instead of 295 (4.9 s),
+  with average node travel down from 108 px to 79 px and no overlapping nodes at
+  rest. The landing the user likes stays; the amount it moves does not (user
+  2026-10-21). Only the default moves, so a browser that already stored
+  `display.*_force_params` keeps its own value and the slider range stays
+  0.001-0.2
+  ([fleet view](ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md)).
+
+- The unresolved-alert bell now leads the sidebar's icon row, ahead of Fleet, and the
+  collapsed rail's restore button carries the same count. With the sidebar closed the
+  icon row is gone, so an unreviewed alert was invisible for as long as the reader kept
+  the rail shut; collapsing still shows no agent list, status dots or other badges
+  ([agent sidebar](ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md),
+  [home shell chrome](ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md)).
+
+- The changelog is folded instead of merged: a notable change writes one file per
+  entry under `.changes/`, and `scripts/content_lint/assemble_changelog.py --write`
+  folds them into `CHANGELOG.md` at release, newest first by the commit that added
+  the fragment. Every merge appended to the same `## [Unreleased]` section — 104
+  of the last 150 merges touched the file — so independent PRs collided on it and
+  the 2026-10-20 UI batch had to land one change at a time; the fold is also the
+  first thing that can prove an entry survived a merge, and it collapses the
+  section headings hand merges duplicated (16 over 110 entries)
+  ([changelog fragments](docs/conventions/changelog.md)).
+
 - The spawn form stacks below the md breakpoint (user 2026-10-21, phone): at a 390px
   viewport the four-column table gave the model column 4px of usable width, so machine,
   harness, model and effort became four 44px rows that state the current pick, open one list
@@ -488,6 +588,16 @@ and the matching GitHub Releases.
   slugs) out of code, CI, and tests.
 
 ### Removed
+- `meiva.ui.notify` no longer returns a `.superseded` list on its `Notice`, and the
+  `notice_resolved` event no longer carries `superseded_by`: with one open notice per
+  agent nothing supersedes anything
+  ([notice receipts](gateway/agents/docs/notice-receipts.meiva.okf.md)).
+
+- The spawn form's external-harness footnote is gone: "These options configure Meiva
+  history budgets and compaction. <harness> uses its own adapter or CLI model settings"
+  restated neither what the columns configure nor what changes with the harness, while
+  the columns already read "Meiva history model" and "Summary effort" (user 2026-10-21).
+
 - The memory graph is gone: its sidebar entry, the `/memory/graph` page that drew
   ~3000 notes as a force-directed graph, and `GET /api/memory/graph` with its cache,
   schemas and tests. It had never been used for a decision and could not be reviewed at
@@ -622,6 +732,38 @@ and the matching GitHub Releases.
   the Loki query path above; see `deploy/lgtm/README.md`.
 
 ### Fixed
+- A page whose shell could not be admitted while `pty-sessions` was still starting is
+  now deferred to the next reconcile pass instead of being closed: the failed attempt
+  releases the `session_name` it had reserved (compare-and-set, so a concurrent
+  reconcile's newer name survives), and the page server asks the backend
+  (`SessionBackend.service_available()`) whether the service is there at all before
+  treating a creation failure as this page's fault. A restart no longer costs every
+  open page its session and its registration (task #5458).
+
+- `meiva start` records a `lifecycle_request` row (`up`, naming the services it is
+  about to launch) on a cold start, before the manifest is published and the root is
+  spawned. A whole-cluster stop leaves no live root, so the per-unit `up` rows never
+  existed for the start that followed; `audit_events` could name who stopped a host
+  and not who brought it back. A start that dies during bring-up now names its caller
+  too (task #5535).
+
+- On a phone, a message's time and Copy no longer sit under every block: touching
+  the message reveals the band for a few seconds and it hides again, and the Copy
+  glyph now matches the height of the time beside it
+  ([card chrome](ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md)).
+
+- `cli/commands/lifecycle/tests/test_start_host_dependencies.py` refused-tool test now
+  runs the gate over an injected Linux `Host` instead of the platform of the machine
+  running it, so it asserts `✗ crontab` and its repair everywhere; a second case proves
+  the macOS table (`✗ launchctl`, no `crontab`) from the same Linux-run assertion. It
+  was red on macOS, where `Host.system()` selected the launchctl rows
+  ([the note it generalises](cli/commands/lifecycle/tests/test_start_host_dependencies.py)).
+
+- The conversation bar keeps the agent's name while Inspector mode is on. The mode had
+  renamed the bar to "Inspector", which hid the agent the reader was still in from the
+  only place that names it; the mode stays visible in its pressed toggle and in the
+  right column itself (user 2026-10-21).
+
 - A timeline block's timestamp and Copy moved out of the card box into the 12px gap below it
   (user 2026-10-21): the row owns that gap as its own bottom padding with a compensating
   negative margin, so block-to-block spacing is unchanged while the chrome stops overlapping
