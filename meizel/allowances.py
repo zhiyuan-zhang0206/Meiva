@@ -1,33 +1,3 @@
-"""`meizel.policy.toml`: the one file that lists every allowance, and how it is read.
-
-An allowance is a place where a rule lets something through that it would otherwise reject: a
-file that loads or runs code at run time, a module allowed to hide state, a clock constant that is
-not part of the lattice. Allowances live here and nowhere else, so a reviewer sees every widening
-in one diff and no rule carries a list of exceptions in its code. The file sits at the repository
-root; the checker's own tables come first, then one table per lint rule:
-
-```toml
-[external]
-"app/runner.py" = "executes the schedule script the user wrote"
-
-[loads]
-"app/loader.py" = ["meiva_builtins"]
-
-[default-arguments]
-
-[type-checking.files]
-"app/lazy.py" = "keeps a heavy import off the boot path"
-
-[ambient-state]
-pure-callees = ["re.compile"]
-```
-
-A rule's table holds sections of two shapes: a table of `name = "reason"` (every entry says why)
-and a list of names (a vocabulary of callees). `RULES` is the closed list of both. This module is
-the only reader of the file: the checker validates it through `parse`, and the lints read their
-sections through `load`, so a typo in a section name fails instead of allowing nothing.
-"""
-
 from __future__ import annotations
 
 import tomllib
@@ -52,15 +22,37 @@ RULES: dict[str, dict[str, str]] = {
         "wiring-callees": NAMES,
         "pure-callees": NAMES,
         "pure-chain-callees": NAMES,
+        "skill-script-patterns": NAMES,
+        "config-modules": NAMES,
+        "config-readers": NAMES,
+        "db-modules": NAMES,
+        "db-primitives": NAMES,
+        "db-handles": NAMES,
+        "bus-handles": NAMES,
+        "endpoint-handles": NAMES,
         "sink-facades": REASONS,
         "pure-repo-callees": REASONS,
         "sites": REASONS,
     },
     "clock-lattice": {"family-modules": NAMES, "independent-clocks": REASONS},
-    "no-os-environ": {"provider-key-vars": REASONS, "live-read-vars": REASONS, "files": REASONS},
-    "turn-scoped-config": {"files": REASONS, "plugin-mechanism-files": REASONS},
+    "no-os-environ": {
+        "test-only-dirs": NAMES,
+        "rule-inputs": NAMES,
+        "provider-key-vars": REASONS,
+        "live-read-vars": REASONS,
+        "files": REASONS,
+    },
+    "path-imports": {"scope": NAMES, "skills-scope": NAMES},
+    "python-commands": {"argv-wrappers": NAMES},
+    "turn-scoped-config": {
+        "scan-dirs": NAMES,
+        "extra-files": NAMES,
+        "rule-inputs": NAMES,
+        "files": REASONS,
+        "plugin-mechanism-files": REASONS,
+    },
     "type-checking": {"files": REASONS},
-    "single-owner": {},
+    "single-owner": {"postgres-dial-owners": NAMES},
 }
 PER_NAME = frozenset({"single-owner"})
 
@@ -90,7 +82,11 @@ class Policy:
 
     @staticmethod
     def _known(rule: str, section: str, shape: str) -> None:
-        wanted = REASONS if rule in PER_NAME else RULES.get(rule, {}).get(section)
+        wanted = (
+            RULES[rule].get(section, REASONS)
+            if rule in PER_NAME
+            else RULES.get(rule, {}).get(section)
+        )
         if wanted != shape:
             raise KeyError(f"{POLICY} has no {shape} section [{rule}] {section}")
 
@@ -121,7 +117,7 @@ def _rule(rule: str, table: object, policy: Policy, problems: list[str]) -> None
         problems.append(f"[{rule}] must be a table")
         return
     for section, value in cast("dict[str, object]", table).items():
-        shape = REASONS if rule in PER_NAME else RULES[rule].get(section)
+        shape = RULES[rule].get(section, REASONS) if rule in PER_NAME else RULES[rule].get(section)
         where = f"[{rule}] {section}" if shape == NAMES else f"[{rule}.{section}]"
         if shape == REASONS:
             policy.listed[(rule, section)] = _reasons(value, where, problems)

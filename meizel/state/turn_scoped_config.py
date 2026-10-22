@@ -1,64 +1,3 @@
-"""Forbid reading per-agent config through a process-global in turn-scoped code.
-
-Run: `.venv/bin/python scripts/lint/turn_scoped_config.py [path ...]` (that launcher binds
-the config registry and calls `main` here; defaults
-to the turn-scoped packages; an explicit path that does not exist is an error
-(stderr + exit 1) rather than a silent no-op). Also runs automatically via
-pre-commit.
-
-## Why
-
-In the hosted runner model (future/infra/lifecycle/agent-runner-as-server.md, work item
-b) many agents' turns share one process, so a `per_agent=True` field read
-through the process-global `settings` singleton returns the CLUSTER default —
-silently ignoring the agent's `config_overlay` / `birth_config`. The correct
-read path for turn-scoped code is the agent's slices
-(`base/host/env/agent_slices.py`, on `runtime.context.agent`):
-
-    runtime.context.require_agent().brain.llm_model   # pin, else the live default
-
-The exec child and the SDK run one agent per process, so their settings carry
-that agent's overlay (boot applied it onto the singleton); the SDK reads a
-per-agent setting through `meiva.sdk_surface.settings.agent_setting`.
-
-## Rules
-
-**Framework fields.** Scan the turn-scoped packages (code that runs inside an agent's turn):
-`agent/`, `meiva/`, `meiva_builtins/`, `base/lm/`, plus the turn-adjacent
-`base` modules listed in _EXTRA_FILES. Any `settings.<domain>.<field>`
-attribute read where `<field>` is a `per_agent=True` field in the config
-registry is an error — the site must read the agent's slices (or `agent_setting`).
-The same goes for `get_field("<field>")` and for `resolve_setting("<field>", ...)` without
-`overrides=`: the model layering takes its explicit layer from the agent's `overrides` slice,
-and without it the layer is the cluster's value.
-
-The per-agent field set is read from the live config registry
-(`base.config.per_agent_field_names`), so declaring a new per-agent field
-auto-extends the ban with no manual list to maintain.
-
-**Plugin config.** Same problem one layer over: `_PLUGIN_CONFIGS`
-(`base/packages/plugins/config_registration.py`) is a process-global `plugin -> instance`
-map that boot rebuilds from the agent's overlay, so subscripting it in turn
-code returns whichever agent booted the process. Reads go through
-`get_plugin_config(plugin, slices)` (host side) or
-`process_plugin_config` (this process's own instance; `meiva.sdk_surface.settings.plugins`). Membership tests
-(`name in _PLUGIN_CONFIGS`) are untouched — they ask whether a plugin is
-registered, which is not per-agent.
-
-Comment lines are skipped (docstrings inside the scan are matched — a
-docstring showing the wrong pattern teaches the wrong pattern). Gateway / ops
-code is NOT scanned: those processes legitimately read per-agent fields as
-cluster defaults (spawn-time birth_config resolution, config panels).
-
-## Exemptions
-
-_ALLOWED_FILES only — a file may be exempt when it IS the mechanism (the view
-itself, the boot-time overlay apply that writes the singleton). No inline
-escape hatch.
-
-Error format `file:line: <line content>` + non-zero exit.
-"""
-
 from __future__ import annotations
 
 import re
@@ -71,21 +10,10 @@ from meizel import allowances, lint_common
 __all__ = ["main"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-
-_SCAN_DIRS = (
-    "agent",
-    "meiva",
-    "meiva_builtins",
-    "base/lm",
-)
-
-# Turn-adjacent `base` modules that execute inside agent turns.
-_EXTRA_FILES = ("base/packages/plugins/activation.py",)
-
-# Both lists are in meizel.policy.toml under [turn-scoped-config], each entry with its reason.
 _POLICY = allowances.load(_REPO_ROOT)
 
-# Files that resolve a field's live default off the singleton by design.
+_SCAN_DIRS = _POLICY.names("turn-scoped-config", "scan-dirs")
+_EXTRA_FILES = _POLICY.names("turn-scoped-config", "extra-files")
 _ALLOWED_FILES = frozenset(_POLICY.reasons("turn-scoped-config", "files"))
 
 # The files that ARE the plugin-config mechanism: the registry owns the process-global map, the
@@ -111,7 +39,7 @@ def _iter_files(paths: list[str]) -> list[Path]:
 
 
 # The config registry decides which fields are per-agent for every file.
-_RULE_INPUTS = ("base/config/", "base/host/env/")
+_RULE_INPUTS = _POLICY.names("turn-scoped-config", "rule-inputs")
 
 
 def _layered_reads(text: str, rel: str, per_agent: set[str]) -> list[str]:
@@ -191,9 +119,8 @@ def main(argv: list[str], *, per_agent_field_names: Callable[[], Iterable[str]])
     )
     _report(
         "per-agent config read through the bare settings singleton in turn-scoped code — read "
-        "it from the agent's slices (base/host/env/agent_slices.py) or "
-        "`meiva.sdk_surface.settings.agent_setting`; in hosted mode the singleton holds the CLUSTER default, "
-        "not this agent's overlay:",
+        "it from the agent's slices or `agent_setting`; in hosted mode the singleton holds "
+        "the CLUSTER default, not this agent's overlay:",
         errors,
     )
     return 1 if (errors or plugin_errors or layered_errors) else 0

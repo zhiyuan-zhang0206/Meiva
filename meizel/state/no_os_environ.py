@@ -1,58 +1,3 @@
-"""Forbid bare os.environ / os.getenv — runtime config must go through base.config.Settings.
-
-Run: `.venv/bin/python scripts/lint/no_os_environ.py [path ...]` (that launcher binds the
-config registry and calls `main` here; defaults to scanning the whole repo;
-an explicit path that does not exist is an error (stderr + exit 1) rather than a
-silent no-op). Also run automatically via pre-commit hook before commit.
-
-## Why
-
-`base.config.settings` (the `Settings` aggregate in `base/config/`) is the single
-source of truth for runtime config. Scattered `os.environ.get("MEIVA_X")` causes:
-- defaults drift from Settings
-- types (bool/int/float) are unvalidated; ValueError surfaces only at use, not at startup
-- the frontend Control page does not see newly-added vars
-- review cannot trace "where does this variable come from"
-
-## Two rules
-
-### Rule 1: Non-test code
-
-Scan all non-test .py files under `agent/`, `base/`,
-`gateway/`, `services/`, `meiva/`, `scripts/` (test_*.py / *_test.py /
-any `tests/` directory excluded). Any reference to `os.environ` or `os.getenv` is an error,
-unless the file is in _ALLOWED_FILES (Settings itself + .env loader +
-bootstrap that cannot depend on Settings).
-
-Adding a new _ALLOWED_FILES entry requires demonstrating "cannot go through
-Settings" — bootstrap ordering constraints; provider-key reads are centralized
-behind ``provider_api.require_key``, and other SDK-internal raw env is owned by
-Settings fields. No inline exemption mechanism — avoids scattered hard-to-audit
-`# noqa`-style escape hatches.
-
-### Rule 2: Test code
-
-Scan all `monkeypatch.setenv("X", ...)` / `monkeypatch.delenv("X")` /
-`os.environ["X"] = ...` calls in `tests/`, `test_*.py`, `*_test.py`; if
-X is in Settings's **model_fields alias set**, error — the `Settings`
-singleton is built once and its fields hold the environment as it stood then
-(the pytest conftest builds it eagerly at import, `MEIVA_CONFIG_BOOT=eager`; a
-production process builds it at the first config read beyond the boot-lite
-surface, see `base/config/__init__.py`), so later setenv/delenv cannot reach
-`settings.x`, and the test silently no-ops.
-Must switch to `monkeypatch.setattr(settings, "<field_name>", value)` —
-except provider API-key env vars declared in `_PROVIDER_KEY_ENV_VARS` and the
-live-read knobs in `_LIVE_READ_ENV_VARS` (see below): those are read from the
-environment live by design, so setenv is the real seam.
-
-The alias set is dynamically read from `the config field registry` — adding a
-new field to Settings auto-syncs the ban list; no manual maintenance.
-Historical bugs: PR #327 hit this pattern twice (test_loop_main's
-MEIVA_MCP_SOCKET, base/daemon/tests/test_health.py's MEIVA_SCHEDULER_HEALTH_PORT).
-
-Error format `file:line: <line content>` + non-zero exit.
-"""
-
 from __future__ import annotations
 
 import re
@@ -67,10 +12,13 @@ __all__ = ["main"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Everything below is listed in meizel.policy.toml under [no-os-environ], each entry with its reason.
+_POLICY = allowances.load(_REPO_ROOT)
+
 # Framework dirs Rule 1 does not scan. A test file under them (a package's own
 # `<pkg>/**/tests/`) is still read for Rule 2, so the default scan visits their
 # test files only.
-_TEST_ONLY_DIRS = ("meiva_builtins", "cli", "ops")
+_TEST_ONLY_DIRS = _POLICY.names("no-os-environ", "test-only-dirs")
 
 # Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
 _SCAN_DIRS = (
@@ -78,14 +26,6 @@ _SCAN_DIRS = (
     *packages("tooling"),
 )
 
-# Everything below is listed in meizel.policy.toml under [no-os-environ], each entry with its reason.
-_POLICY = allowances.load(_REPO_ROOT)
-
-# Provider API-key env vars are read from os.environ at build time
-# (base/lm/provider_api.require_key) once the provider is a plugin — the Settings field is retired
-# from that provider's key path (task #2505). In tests, monkeypatch.setenv on these is a REAL seam
-# (require_key reads env live), not a Settings-singleton no-op. Each key must match a
-# ProviderBinding.key_env.
 _PROVIDER_KEY_ENV_VARS = frozenset(_POLICY.reasons("no-os-environ", "provider-key-vars"))
 
 # Vars read from the live environment BY DESIGN (not via the Settings singleton, which holds the
@@ -116,9 +56,6 @@ _TEST_SETENV_PATTERN = re.compile(
     r"\bmonkeypatch\.(?:setenv|delenv)\s*\(\s*['\"]([A-Z_][A-Z0-9_]*)['\"]"
 )
 
-# Triple-quoted docstring literals like `monkeypatch.setenv("MEIVA_X"...)`
-# (e.g. a fixture's docstring describing the call) are not violations —
-# track triple-quote state line-by-line and skip inside docstring ranges.
 _TRIPLE_QUOTE_PATTERN = re.compile(r'"""|\'\'\'')
 
 
@@ -202,7 +139,7 @@ def _rel_label(path: Path, root: Path) -> str:
 
 
 # The config registry decides which env names Rule 2 treats as Settings-managed, for every test.
-_RULE_INPUTS = ("base/config/", "base/host/env/")
+_RULE_INPUTS = _POLICY.names("no-os-environ", "rule-inputs")
 
 
 def _in_default_scope(path: Path, root: Path) -> bool:
@@ -258,7 +195,7 @@ def main(
                 )
             else:
                 print(
-                    f"{rel}:{lineno}: bare os.environ/getenv usage -> route through base.config.settings"
+                    f"{rel}:{lineno}: bare os.environ/getenv usage -> route through the Settings aggregate"
                 )
             print(f"    {content}")
 

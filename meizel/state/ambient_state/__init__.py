@@ -1,56 +1,6 @@
-"""Ambient state: module-level state that code reads to decide, and background work no one owns.
-
-Rule 9 in scripts/lint/code_structure.py. Inject what is read to decide; a
-write-only facade may stay global. For anything a module holds at import — an
-instance, a container, a `global` slot, a `ContextVar`, an import-time call or
-read — ask whether anything reads it to decide what to do. If so it belongs to a
-component built in a composition root and handed in, not to the module. A logger,
-meter or tracer is written through and read by nothing, so it may stay a global.
-
-`scan.py` finds the sites (its docstring lists every rule and the known
-gaps), `allowlist.py` holds the closed lists with a reason per entry, and
-the frozen sites live in the `ambient_state` section of the
-scripts/structure/baseline/ shards as `path::rule:name -> site count`. The rule ids:
-
-- state: `ambient-instance`, `ambient-container`, `contextvar`, `global-rebind`,
-  `foreign-rebind`, `class-level-container`, `hidden-singleton`, `hidden-cache`;
-- import-time effects: `import-time-call`, `import-time-read`, `host-fact`;
-- configuration reads: `settings-read` — a module of a slice-governed package
-  (`allowlist.SLICED_PACKAGES`, see `sliced.py`) other than its composition root imports the
-  process-global `settings`;
-- database and bundle wiring: `ambient-db` (a package in `allowlist.DB_HANDLE_PACKAGES` dials
-  from the live settings instead of taking a `Database`, see `dbhandle.py`) and `bundle-leak` (a
-  `@root_bundle` class named outside its defining module, see `bundle.py`);
-- `ambient-clock`: a package in `allowlist.CLOCK_PACKAGES` builds the cluster clock
-  (`Clock.from_settings()`) outside the roots named for it;
-- `ambient-bus`: a package in `allowlist.BUS_PACKAGES` builds the event bus
-  (`EventBus.from_settings()`) outside the roots named for it;
-- `ambient-endpoint`: a package in `allowlist.ENDPOINT_PACKAGES` builds the endpoint table
-  (`ServiceEndpoints.from_settings()`) outside the roots named for it;
-- free-floating background work: `asyncio-task`, `thread` (keyed by the enclosing
-  function). Background work must be durable or re-derivable from durable state and
-  run as its own service loop; use a per-iteration `async with asyncio.TaskGroup()`
-  for bounded parallelism. Explicit Tasks require real per-instance registry,
-  completion/error and finite teardown wiring (task_owner.py); Threads require
-  visible admission, handle, stop and completion/error wiring (thread_owner.py).
-  Both require consumer lifecycle proof.
-
-Scope: the governed packages plus `schedules/`. Tests, `__main__.py`, an
-`if __name__ == "__main__":` block and skill scripts (`meiva_builtins/skills/**`,
-`meiva_builtins/plugins/*/**/skills/**`, which run as programs, not importable
-modules) are outside it. There is no inline exemption.
-
-Like Rules 4-6 the frozen counts must match reality in both directions, and
-against the base revision the section is shrink-only: a new key, or a raised
-count, is refused; a fixed site must be removed from the baseline. A rename or a
-split cannot carry a frozen site. Introducing this lint does not permit a new
-baseline entry; comparisons always use the base revision's entries.
-"""
-
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 
 from meizel import allowances, lint_common
@@ -59,7 +9,6 @@ from meizel.state.ambient_state import allowlist as allow
 from meizel.state.ambient_state import (
     bundle,
     busrule,
-    clockrule,
     dbhandle,
     endpointrule,
     scan,
@@ -72,8 +21,6 @@ SECTION = "ambient_state"
 LINT = "meizel/state/ambient_state/__init__.py"
 SCOPE = packages("application", "templates")
 Sites = dict[str, list[int]]
-
-_SKILL_SCRIPTS = re.compile(r"^meiva_builtins/(skills/|plugins/[^/]+/(.*/)?skills/)")
 
 _STATE_FIX = (
     "inject what is read to decide: build it in a composition root and hand it to the "
@@ -91,9 +38,8 @@ _FIXES: dict[str, str] = {
     scan.INSTANCE: f"module-level instance — {_STATE_FIX}",
     scan.CONTAINER: f"module-level mutable container — {_STATE_FIX}",
     scan.CONTEXTVAR: (
-        "LangGraph Runtime[MeivaContext] already carries graph-run dependencies — "
-        "do not duplicate them with a ContextVar; outside the graph, pass "
-        "the caller's context explicitly instead of adding an ambient carrier"
+        "pass the caller's runtime context explicitly as an argument instead of "
+        "carrying dependencies through an ambient ContextVar"
     ),
     scan.GLOBAL_REBIND: f"a function rebinds a module global — {_STATE_FIX}",
     scan.FOREIGN: "rebinds an attribute of another module — give the owner a setter or inject the value",
@@ -101,8 +47,7 @@ _FIXES: dict[str, str] = {
     scan.SINGLETON: f"a zero-argument cache is a hidden singleton — {_STATE_FIX}; a memoized pure derivation is listed under [ambient-state.sites] with a reason",
     scan.CACHE: "a memoized function is state unless it is pure — a pure derivation is listed under [ambient-state.sites] in meizel.policy.toml with a reason",
     scan.CALL: "a call that runs at import (a registry fill or side effect) — register from a composition root, not at import",
-    dbhandle.AMBIENT_DB: f"an ambient database dial in a package that holds a Database handle — {dbhandle.FIX}",
-    clockrule.AMBIENT_CLOCK: f"the cluster clock built outside a root — {clockrule.FIX}",
+    dbhandle.AMBIENT_DB: f"an ambient database dial in a package that holds a database handle — {dbhandle.FIX}",
     busrule.AMBIENT_BUS: f"the event bus built outside a root — {busrule.FIX}",
     endpointrule.AMBIENT_ENDPOINT: f"the endpoint table built outside a root — {endpointrule.FIX}",
     bundle.BUNDLE_LEAK: f"a root bundle named outside its composition root — {bundle.FIX}",
@@ -120,7 +65,7 @@ def in_scope(rel: str) -> bool:
         rel.split("/", 1)[0] in SCOPE
         and not lint_common.is_test_path(rel)
         and not rel.endswith("__main__.py")
-        and _SKILL_SCRIPTS.match(rel) is None
+        and not any(rx.match(rel) for rx in allow.SKILL_SCRIPT_PATTERNS)
     )
 
 
@@ -145,7 +90,6 @@ def _hits(tree: ast.Module, rel: str, repo_root: Path) -> list[scan.Hit]:
         *dbhandle.hits(tree, rel),
         *endpointrule.hits(tree, rel),
         *busrule.hits(tree, rel),
-        *clockrule.hits(tree, rel),
         *bundle.hits(tree, repo_root),
     ]
 
@@ -221,7 +165,6 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
         ("DB_HANDLE_PACKAGES", allow.DB_HANDLE_PACKAGES),
         ("ENDPOINT_PACKAGES", allow.ENDPOINT_PACKAGES),
         ("BUS_PACKAGES", allow.BUS_PACKAGES),
-        ("CLOCK_PACKAGES", allow.CLOCK_PACKAGES),
     ):
         errors += _missing_roots(repo_root, table, registry)
     for callee in sorted(allow.PURE_REPO_CALLEES):

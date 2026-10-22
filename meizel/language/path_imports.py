@@ -1,50 +1,16 @@
-"""Path imports: code under meiva_builtins/ reaches other code through packages, never a file path.
-
-A skill or plugin script that edits `sys.path`, calls `site.addsitedir`, or loads
-a module from a file (`importlib.util.spec_from_file_location`,
-`importlib.machinery.SourceFileLoader`, `runpy.run_path`) turns its directory into
-an unreviewed code package that sidesteps the package doors, budgets and locality
-rules. Shared code belongs in a governed package the script imports normally, and
-the script stays a thin entry point. Files under a `tests/` directory are exempt.
-Rule 6 in scripts/lint/code_structure.py rejects every measured site directly;
-there is no baseline allowance.
-
-**One narrow exception** (2026-09-29 narrowing): a script under
-`meiva_builtins/skills/<group>/<skill>/` may run a one-line `sys.path.insert(0, ...)` /
-`sys.path.append(...)` guard whose argument is derived from `__file__` and whose
-resolved directory stays inside that same `<skill>/` tree — the pattern
-`lint_no_script_sibling_imports.py` already documents
-(`sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))`, or the
-`pathlib` equivalent `str(Path(__file__).resolve().parent)`), optionally with a
-`/ "subdir"` (or `os.path.join(..., "subdir")`) tail to reach a sibling
-sub-skill's own `scripts/` directory. `measure()` recognizes this shape and does
-not count it as a site at all — it is not debt to freeze, it is the endorsed way
-for a skill's scripts to import their own siblings. Three things still always
-count as a site, with no exception:
-
-- a `sys.path` mutation whose target resolves outside the script's own
-  top-level skill directory (a cross-skill reach, or anything under
-  `meiva_builtins/plugins/` or another non-skill tree);
-- any of the four file-loader calls (`importlib.util.spec_from_file_location`,
-  `importlib.machinery.SourceFileLoader`, `runpy.run_path`, `site.addsitedir`),
-  even with a `__file__`-derived, in-skill argument — a loader is a package-door
-  bypass regardless of where it points;
-- any other `sys.path` mutation form (`extend`/`remove`/`pop`/`clear`, a slice
-  assignment, a plain assignment) — only a literal `.insert(0, ...)` or
-  `.append(...)` guard is recognized.
-"""
-
 from __future__ import annotations
 
 import ast
+from pathlib import Path
 
-from meizel import lint_common
+from meizel import allowances, lint_common
 
+_POLICY = allowances.load(Path(__file__).resolve().parents[2])
 SECTION = "path_imports"
-_SCOPE = ("meiva_builtins/",)
-_SKILLS_SCOPE = "meiva_builtins/skills/"
+_SCOPE = _POLICY.names("path-imports", "scope")
+_SKILLS_SCOPE = _POLICY.names("path-imports", "skills-scope")
 FIX = (
-    "move the shared code into a governed package (meiva/, base/, or the plugin's own "
+    "move the shared code into a governed package (or the plugin's own "
     "package) and import it normally; keep the script a thin entry point"
 )
 _PATH_MUTATORS = frozenset({"insert", "append", "extend", "remove", "pop", "clear"})
@@ -249,16 +215,12 @@ def _guard_target(rel_path: str, expr: ast.expr) -> list[str] | None:
 
 
 def _is_within_own_skill(rel_path: str, target_parts: list[str]) -> bool:
-    """True when `target_parts` stays inside the top-level skill directory that
-    `rel_path` (an `meiva_builtins/skills/<group>/<skill>/...` file) itself lives under —
-    `meiva_builtins/skills/<group>/<skill>/` is the boundary, not the narrower
-    directory a nested sub-skill happens to sit in."""
-    if not rel_path.startswith(_SKILLS_SCOPE):
+    if not any(rel_path.startswith(prefix) for prefix in _SKILLS_SCOPE):
         return False
     file_parts = rel_path.split("/")
     if len(file_parts) < 4:
         return False
-    skill_root = file_parts[:4]  # ["meiva_builtins", "skills", "<group>", "<skill>"]
+    skill_root = file_parts[:4]
     return target_parts[: len(skill_root)] == skill_root
 
 
@@ -286,14 +248,9 @@ def _is_allowed_skill_guard(rel_path: str, call: ast.Call) -> bool:
 
 
 def measure(tree: ast.Module, rel_path: str) -> Sites:
-    """Path-import sites in one module under `meiva_builtins/`, keyed `path::target`.
-
-    A test file (under any `tests/` directory) is exempt: a test loads the script
-    it proves by path on purpose. Skips a call that `_is_allowed_skill_guard`
-    recognizes as the endorsed within-skill `__file__` guard — that shape is not
-    a site at all, so it never becomes a violation (see the module
-    docstring)."""
-    if not rel_path.startswith(_SCOPE) or lint_common.is_test_path(rel_path):
+    if not any(rel_path.startswith(prefix) for prefix in _SCOPE) or lint_common.is_test_path(
+        rel_path
+    ):
         return {}
     bindings = _Bindings(tree)
     sites: Sites = {}

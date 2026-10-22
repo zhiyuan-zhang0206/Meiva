@@ -1,69 +1,3 @@
-"""Forbid lattice-vocabulary timing constants outside the clock-lattice modules.
-
-Run: `.venv/bin/python -m meizel.owners.clock_lattice [path ...]` (defaults to
-scanning the non-test source dirs; an explicit path that does not exist is an
-error (stderr + exit 1) rather than a bare traceback). Also run automatically
-via pre-commit hook.
-
-## Why
-
-The clock lattice (`base/deploy/timing.py`) is the single authority for every timing
-constant that must hold an ORDER relative to its neighbours — boot stall < launch
-confirm < boot budget < reap grace, NO_PROGRESS < schedule stall, the lease TTLs, the
-controller scan cadence, the wedged derivation. The orderings are load-bearing:
-the 2026-07-30 spawn incident happened because a launch-confirm window was raised
-without its neighbouring reap grace, and the relation existed only in prose.
-
-A bare `_SOME_REAP_GRACE_S = 100` in a new module is that incident's seedling —
-the name carries lattice vocabulary, so it reads as part of the lattice, but
-nothing knows its neighbours. This lint is the code-level guard: lattice
-vocabulary may only appear where the lattice can see it.
-
-## The rule
-
-A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`,
-`REAP`, `BUDGET`, `WEDGED`, `NO_PROGRESS`, `LAUNCH_CONFIRM`, `LEASE_TTL`,
-`LEASE_RENEW`, `SCAN_INTERVAL`, `REAP_INTERVAL`) must be one of:
-
-1. **Defined in a lattice family module** — `base/deploy/timing.py`,
-   `base/deploy/progress_timeout.py`, `base/native_process/stop_timing.py`,
-   `base/deploy/schedule_timing.py`. These are the lattice's homes; registering
-   a new clock there and in `CLOCKS` is the correct way to add one.
-2. **An alias of a registered clock** — the assignment's value is a bare
-   reference to a clock registered in `base.deploy.timing.CLOCKS`
-   (e.g. `_ROLLOUT_STALL_TIMEOUT_S: float = NO_PROGRESS_TIMEOUT_S`). The value is
-   still defined once; the alias is just a local name.
-3. **Explicitly exempt** in `INDEPENDENT_CLOCKS` below — the constant is either
-   not a clock at all (a flag name, a SQL key, a collection) or a genuinely
-   independent clock with no lattice neighbour, each with a stated reason.
-
-The allowlists must stay current: a full scan (no path arguments, as pre-commit
-and CI run it) also fails when a `FAMILY_MODULES` file or an
-`INDEPENDENT_CLOCKS` file is gone, or an exempted constant is no longer defined
-at module level in its file — an exemption for a deleted symbol would silently
-pre-approve whatever next takes that name.
-
-## Values bound to a clock name
-
-The same vocabulary also governs the value a name is *bound* to, wherever the binding is written:
-a module constant (above), the default of a dataclass field, a keyword argument at a call, or an
-ordinary assignment (`name = 5.0`, `self.name = 5.0`). A name that carries lattice vocabulary as whole
-snake_case words (`stall`, `grace`, `reap`, `budget`, `wedged`, `no_progress`, `launch_confirm`,
-`lease_ttl`, `lease_renew`, `scan_interval`, `reap_interval`) and is bound to a number literal (or an
-expression of literals only) is a definition of a clock, so it may appear only in a family
-module or under an `INDEPENDENT_CLOCKS` entry (`path::name`). Anything else defines nothing and is not
-checked: a bare reference to another name or attribute (an alias, or a config field that carries the
-value somebody else gave it), a field without a default, a default of `None`. Moving the
-literal to the call site (`HealthConfig(startup_grace_s=30)`) is a definition at that site.
-
-Scope: non-test code only (tests monkeypatch clocks smaller on purpose).
-Settings fields are class-body definitions in `base/config/` and are the
-operator-overridable configuration authority, not module constants — they are not
-scanned, and `base/deploy/timing.py` registers them by reference.
-
-Error format `file:line: <reason>` + non-zero exit.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -110,26 +44,25 @@ FAMILY_MODULES = _POLICY.names("clock-lattice", "family-modules")
 _CONST_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 
 
-# Registered clock names, for the alias rule (rule 2): the assignment's value must
-# be a bare reference to one of these. Read from `base/deploy/timing.py` once, at
-# import, with a pure AST parse (no import of the app's settings stack), so the
-# lint runs anywhere the source tree is present — the same zero-dependency shape
-# as every other scripts/ lint.
 def _parse_registered_clocks() -> frozenset[str]:
-    tree = ast.parse((_REPO_ROOT / "base" / "deploy" / "timing.py").read_text(encoding="utf-8"))
     names: set[str] = set()
-    for node in tree.body:
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+    for rel in FAMILY_MODULES:
+        path = _REPO_ROOT / rel
+        if not path.is_file():
             continue
-        target = node.targets[0] if isinstance(node, ast.Assign) else node.target
-        if (
-            isinstance(target, ast.Name)
-            and target.id == "CLOCKS"
-            and isinstance(node.value, ast.Dict)
-        ):
-            for key in node.value.keys:
-                if isinstance(key, ast.Constant) and isinstance(key.value, str):
-                    names.add(key.value)
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+            if (
+                isinstance(target, ast.Name)
+                and target.id == "CLOCKS"
+                and isinstance(node.value, ast.Dict)
+            ):
+                for key in node.value.keys:
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        names.add(key.value)
     return frozenset(names)
 
 
@@ -254,9 +187,10 @@ def scan_file(path: Path, *, independent: Mapping[tuple[str, str], str] | None =
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         for target in targets:
             if isinstance(target, ast.Name) and _is_unregistered_clock(rel, target.id, node.value):
+                registry = FAMILY_MODULES[0] if FAMILY_MODULES else "a lattice family module"
                 errors.append(
                     f"{path}:{node.lineno}: {target.id} — lattice-vocabulary clock outside "
-                    "the lattice family modules; define it in base/deploy/timing.py (and "
+                    f"the lattice family modules; define it in {registry} (and "
                     "register it in CLOCKS) or make it an alias of a registered clock"
                 )
     return errors

@@ -188,6 +188,38 @@ pure-chain-callees = [
     "hashlib.sha1",
     "hashlib.sha256",
 ]
+skill-script-patterns = [
+    "^meiva_builtins/(skills/|plugins/[^/]+/(.*/)?skills/)",
+]
+config-modules = [
+    "base.config",
+]
+config-readers = [
+    "settings",
+    "get_field",
+    "set_field",
+    "ensure_eager",
+]
+db-modules = [
+    "base.db",
+    "base.db.connections",
+]
+db-primitives = [
+    "connect",
+    "pool",
+    "async_pool",
+]
+db-handles = [
+    "base.db:Database",
+    "base.db.handle:Database",
+]
+bus-handles = [
+    "base.events.live:EventBus",
+    "base.events.live.bus:EventBus",
+]
+endpoint-handles = [
+    "base.daemon.endpoints:ServiceEndpoints",
+]
 
 # Files that ARE a sink facade: the module-level state in them is the facade's own write-only
 # machinery. The exemption covers state only; a thread or task a facade starts is still reported.
@@ -259,6 +291,11 @@ family-modules = [
 "services/desktop/computer/mcp_daemon.py::_WATCHDOG_MIN_STALL_S" = "not a clock: a sanity floor on the operator-configured loop-stall window (settings.daemon.computer_use_loop_stall_s) — it only keeps a below-floor misconfiguration from restart-looping a healthy daemon, no lattice neighbour"
 
 # single-owner (meizel/owners/decisions): modules that bypass a decision's one owner, per decision.
+[single-owner]
+postgres-dial-owners = [
+    "base/db/connections.py",
+]
+
 [single-owner.postgres-dial]
 "base/cluster/dataplane/pg_admin.py" = "the OS-user administrator's peer-socket authority (roles, grants, schema DDL, owner sessions) behind its own postmaster custody check; the FC-10 cutover scripts dial through it, so its transport stays as rehearsed until the cutover lands"
 "base/cluster/dataplane/pg_foreground.py" = "readiness probe of the foreground throwaway postmaster base/cluster/dataplane/pg_tools.py started, under the same home-free constraint"
@@ -269,6 +306,17 @@ family-modules = [
 
 # no-os-environ (meizel/state/no_os_environ): environment variables that tests may set live, and
 # the files that read the environment because they cannot go through Settings.
+[no-os-environ]
+test-only-dirs = [
+    "meiva_builtins",
+    "cli",
+    "ops",
+]
+rule-inputs = [
+    "base/config/",
+    "base/host/env/",
+]
+
 [no-os-environ.provider-key-vars]
 "ANTHROPIC_API_KEY" = "read live by meiva_builtins/plugins/lm_anthropic"
 "DASHSCOPE_API_KEY" = "read live by meiva_builtins/plugins/lm_alibaba"
@@ -341,6 +389,21 @@ family-modules = [
 
 # turn-scoped-config (meizel/state/turn_scoped_config): files that read per-agent fields off the
 # singleton by design, and the two files that are the plugin-config mechanism.
+[turn-scoped-config]
+scan-dirs = [
+    "agent",
+    "meiva",
+    "meiva_builtins",
+    "base/lm",
+]
+extra-files = [
+    "base/packages/plugins/activation.py",
+]
+rule-inputs = [
+    "base/config/",
+    "base/host/env/",
+]
+
 [turn-scoped-config.files]
 "base/host/env/agent_slices.py" = "The slices resolve a field's live default off the singleton by design."
 
@@ -375,3 +438,16 @@ family-modules = [
 "base/lm/content.py" = "LangChain message-stack trim on the same registration path: message types appear in annotations only, or (pricing) import at the call site of a runtime isinstance (task #3633)."
 "base/lm/factory.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
 "base/lm/pricing/__init__.py" = "LangChain message-stack trim on the same registration path: message types appear in annotations only, or (pricing) import at the call site of a runtime isinstance (task #3633)."
+
+[path-imports]
+scope = [
+    "meiva_builtins/",
+]
+skills-scope = [
+    "meiva_builtins/skills/",
+]
+
+[python-commands]
+argv-wrappers = [
+    "base.host.proc.run_bounded",
+]

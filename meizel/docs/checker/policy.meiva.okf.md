@@ -39,11 +39,13 @@ table or section name is `policy-syntax`, not an exemption that silently allows 
 
 | Table | Rule | Sections |
 |---|---|---|
-| `ambient-state` | module-level state (`meizel/state/ambient_state`) | `sink-callees`, `sink-callee-suffixes`, `wiring-callees`, `pure-callees`, `pure-chain-callees` (lists); `sink-facades`, `pure-repo-callees`, `sites` |
+| `ambient-state` | module-level state (`meizel/state/ambient_state`) | `sink-callees`, `sink-callee-suffixes`, `wiring-callees`, `pure-callees`, `pure-chain-callees`, `skill-script-patterns`, `config-modules`, `config-readers`, `db-modules`, `db-primitives`, `db-handles`, `bus-handles`, `endpoint-handles` (lists); `sink-facades`, `pure-repo-callees`, `sites`, `db-packages`, `db-handle-packages`, `bus-packages`, `endpoint-packages`, `config-packages`, `bundle-packages`, `sliced-packages`, `task-owner-packages`, `thread-owner-packages` |
 | `clock-lattice` | lattice-vocabulary constants | `family-modules` (list); `independent-clocks` (`path::NAME`) |
-| `single-owner.<decision>` | one owner per decision | one table of module paths per decision, e.g. `postgres-dial` |
-| `no-os-environ` | raw `os.environ` | `provider-key-vars`, `live-read-vars`, `files` |
-| `turn-scoped-config` | per-agent settings reads | `files`, `plugin-mechanism-files` |
+| `single-owner.<decision>` | one owner per decision | one table of module paths per decision, e.g. `postgres-dial`, plus `<decision>-owners` lists |
+| `no-os-environ` | raw `os.environ` | `provider-key-vars`, `live-read-vars`, `files`; `test-only-dirs`, `rule-inputs` (lists) |
+| `turn-scoped-config` | per-agent settings reads | `files`, `plugin-mechanism-files`; `scan-dirs`, `extra-files`, `rule-inputs` (lists) |
+| `path-imports` | runtime `sys.path` mutation | `scope`, `skills-scope` (lists) |
+| `python-commands` | bare Python subprocess invocations | `argv-wrappers` (list) |
 | `type-checking` | `if TYPE_CHECKING:` | `files` |
 
 An entry that names a file or a site still goes stale when the file is gone or the site is no
