@@ -13,11 +13,13 @@
 # one. Closing the attachment never touches the registration row: the bridge owns
 # that document, and a provider sandbox would refuse the write anyway.
 #
-# A lifecycle self-call (compact, restart, terminate) is refused by the SDK's
-# own `assert_self_action`, which requires the caller to own the agent's turn loop
-# and an attachment never does; everything else that a caller might forbid —
-# spawning agents, scheduling, spending on `understand` — is a review convention,
-# not a runtime rule.
+# A native-loop self-call (compact, restart) is refused by the SDK's own
+# `assert_self_action`, which requires the caller to own the agent's turn loop;
+# `meiva.self.pause_heartbeat` and `meiva.self.terminate` operate on the attached
+# identity so a harness agent can pause its heartbeat or end its own process when
+# its role is complete. Everything else that a caller might forbid — spawning
+# agents, scheduling, spending on `understand` — is a review convention, not a
+# runtime rule.
 # meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
 
 from __future__ import annotations

@@ -69,9 +69,13 @@ in `FileSessionRegistry`.
 - `bridge_for` builds the handoff and `ScopedSessionRegistry` (which binds every
   load/save to `SessionRecord.harness`). The handoff is co-delivered once on the
   first turn of a fresh session.
-- `run_turn` starts the session, submits turn text under the newest inbound row id,
-  and streams `BridgeEvent`s via `on_event`. Completed keys within the same session
-  replay the ticket outcome without emitting a second completion event.
+- `run_turn` starts the session, submits turn text under the newest inbound row id
+  (or `window-{cursor + len(pending)}` when the batch carries only notes such as a
+  heartbeat check-in), and streams `BridgeEvent`s via `on_event`. Completed keys within
+  the same session replay the ticket outcome without emitting a second completion event.
+- When a turn is interrupted by a system/terminate signal (`InterruptReason.SYSTEM`), any tool
+  calls and reasoning already projected during the turn are committed to `state.messages`
+  and covered by `harness_cursor` before `claim` settles the termination inbound.
 - A session that faults or closes mid-turn retires itself and raises a fatal stream
   abort; the next inbound opens a fresh resumed session from the registry.
 - Retirement is asynchronous (`HarnessSessions.retire`), and the next turn awaits

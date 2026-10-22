@@ -33,7 +33,10 @@ directly: the uniform surface is this adapter, not a shared wire protocol.
    six-section document; a fresh thread submits it as its first turn. A resumed
    thread is not re-injected.
 3. **Map notifications back and persist the identity pair.** `events()` is the
-   single outbound stream, and the registry writes `agent_id ↔ thread_id`.
+   single outbound stream, and the registry writes `agent_id ↔ thread_id`. When
+   `turn/start` returns the authoritative Codex `turn.id`, `CodexSession` binds
+   the active ticket to that id and discards any stale notification state from an
+   earlier turn replayed during `thread/resume`.
 
 ## Modules
 

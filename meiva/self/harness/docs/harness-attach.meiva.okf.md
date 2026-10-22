@@ -128,10 +128,10 @@ the agent's durable state and two writers would race.
 
 **There is no capability gate.** A stored declaration is a record, not a check
 (user ruling, 2026-10-19), so an attached harness agent has the same rights as a
-native one. Lifecycle self-calls — `compact`, `restart`, `terminate` — belong to
-the bridge by convention, and the SDK refuses them on its own ground:
-`assert_self_action` requires the caller to own the agent's turn loop, which an
-external process never does.
+native one. Native-loop self-calls (`compact`, `restart`) are refused by
+`assert_self_action`, while `meiva.self.pause_heartbeat` and `meiva.self.terminate`
+operate on the attached identity so the agent can pause its heartbeat or end its
+process when its role is complete.
 
 ## Why not MCP, and why not a sidecar
 

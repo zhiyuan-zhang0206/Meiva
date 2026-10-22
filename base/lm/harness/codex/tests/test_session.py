@@ -161,3 +161,35 @@ async def test_thread_id_is_written_to_the_registry(tmp_path: Path) -> None:
         assert record.cwd == str(tmp_path)
     finally:
         await harness.stop()
+
+
+async def test_stale_resumed_turn_notification_is_replaced_by_authoritative_turn_id(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path)
+    try:
+        ticket = harness.session.submit("heartbeat check-in")
+        harness.server.usage(
+            input_tokens=999,
+            output_tokens=99,
+            cached_input_tokens=500,
+            turn_id="stale-resumed-turn",
+        )
+        await harness.turn_started()
+        harness.server.delta("All ", turn_id="codex-turn-1")
+        harness.server.delta("clear.", turn_id="codex-turn-1")
+        harness.server.message("All clear.", turn_id="codex-turn-1")
+        harness.server.usage(
+            input_tokens=120,
+            output_tokens=15,
+            cached_input_tokens=80,
+            turn_id="codex-turn-1",
+        )
+        harness.server.complete(turn_id="codex-turn-1")
+        outcome = await asyncio.wait_for(ticket.outcome(), 2)
+        assert outcome.text == "All clear."
+        assert outcome.usage.input_tokens == 120
+        assert outcome.usage.output_tokens == 15
+        assert outcome.usage.cache_read_input_tokens == 80
+    finally:
+        await harness.stop()

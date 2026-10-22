@@ -190,6 +190,8 @@ def test_the_key_is_the_newest_inbound_row() -> None:
 
 def test_a_notes_only_window_uses_its_length() -> None:
     assert turn_key([HumanMessage(content="note")]) == "window-1"
+    assert turn_key([HumanMessage(content="note")], cursor=5) == "window-6"
+    assert turn_key([HumanMessage(content="second note")], cursor=7) == "window-8"
 
 
 async def test_a_turn_submits_the_pending_messages_and_commits_the_reply() -> None:
@@ -651,3 +653,51 @@ async def test_harness_turn_projects_reasoning_and_step_timing() -> None:
     assert ("code_start", "2.1") in emitted
     assert ("reasoning_start", "4.0") in emitted
     assert ("chat_start", "4.1") in emitted
+
+
+async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> None:
+    from agent.graph.interrupt import ModelInterruptedError
+    from base.agents.messages.inbound import InterruptReason
+
+    class SelfTerminatingEngine(FakeEngine):
+        async def run_turn(
+            self,
+            text: str,
+            *,
+            key: str,
+            on_event: Callable[[BridgeEvent], None] | None = None,
+        ) -> HarnessTurn:
+            self.submitted.append((text, key))
+            assert on_event is not None
+            on_event(ReasoningText(turn_id="t1", text="Role complete, terminating."))
+            on_event(
+                ToolUse(
+                    turn_id="t1",
+                    tool_use_id="call-term",
+                    name="Bash",
+                    tool_input={"command": "python3 -c 'import meiva; meiva.self.terminate()'"},
+                )
+            )
+            raise ModelInterruptedError(InterruptReason.SYSTEM)
+
+    engine = SelfTerminatingEngine()
+    state = AgentState(
+        messages=[
+            SystemMessage(content="handoff"),
+            inbound("initial task", 1),
+            AIMessage(content="done"),
+            HumanMessage(content="[Heartbeat]: check in"),
+        ],
+        harness_cursor=3,
+    )
+
+    command = await harness_turn_node(state, runtime(engine), config(6986))
+    assert engine.submitted == [("[Heartbeat]: check in", "window-4")]
+    assert command.update is not None
+    committed = command.update["messages"]
+    assert len(committed) == 2
+    assert isinstance(committed[0], AIMessage)
+    assert committed[0].tool_calls[0]["name"] == "Bash"
+    assert isinstance(committed[1], ToolMessage)
+    assert command.update["harness_cursor"] == 6
+    assert command.update["halted"] is True

@@ -28,6 +28,7 @@ from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.messages.inbound import InterruptReason
 from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.telemetry import SdkCall
@@ -103,29 +104,32 @@ def render_message(message: BaseMessage) -> str:
     content = message_content(message)
     if isinstance(content, str):
         return content
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, str):
-            parts.append(block)
-        elif block.get("type") == "text" and isinstance(block.get("text"), str):
-            parts.append(block["text"])
-        else:
-            parts.append(f"[{block.get('type', 'attachment')}]")
-    return "\n".join(parts)
+    return "\n".join(
+        block
+        if isinstance(block, str)
+        else (
+            block["text"]
+            if block.get("type") == "text" and isinstance(block.get("text"), str)
+            else f"[{block.get('type', 'attachment')}]"
+        )
+        for block in content
+    )
 
 
 # meiva:note
 # The adapter's idempotency key: the newest inbound row in the batch, which is unique
 # per claim and stable when the same window is submitted twice (a crashed turn, a
 # retry within the session). A window that carries only notes has no row to name, so
-# its length stands in; retrying it reuses the same key for the same window.
+# the cursor plus its length stands in; retrying the same window at the same cursor
+# reuses the key, while a later note-only turn (such as a second heartbeat) gets a
+# distinct key instead of replaying the first.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-def turn_key(messages: Sequence[BaseMessage]) -> str:
+def turn_key(messages: Sequence[BaseMessage], *, cursor: int = 0) -> str:
     for message in reversed(messages):
         inbound_id = read_meiva_kwargs(message).get("meiva_inbound_id")
         if isinstance(inbound_id, int):
             return f"inbound-{inbound_id}"
-    return f"window-{len(messages)}"
+    return f"window-{cursor + len(messages)}"
 
 
 def _first_str(mapping: Mapping[str, Any], *keys: str) -> str | None:
@@ -144,11 +148,7 @@ def _format_write_tool_use(tool_input: Mapping[str, Any]) -> str:
 def _format_edit_tool_use(tool_input: Mapping[str, Any]) -> str:
     path = _first_str(tool_input, "file_path", "Path", "TargetFile")
     old = _first_str(tool_input, "old_string", "Target", "TargetContent")
-    new = (
-        tool_input.get("new_string")
-        or tool_input.get("Replacement")
-        or tool_input.get("ReplacementContent")
-    )
+    new = _first_str(tool_input, "new_string", "Replacement", "ReplacementContent")
     if path and old is not None and isinstance(new, str):
         return f"# {path}\n--- old\n{old.rstrip()}\n+++ new\n{new.rstrip()}"
     return ""
@@ -175,13 +175,12 @@ def format_tool_use(name: str, tool_input: Mapping[str, Any]) -> str:
 
 
 def _format_patch_change(raw_entry: Any) -> str | None:
-    if not isinstance(raw_entry, Mapping):
+    if not isinstance(raw_entry, Mapping) or not (
+        path := _first_str(cast("Mapping[str, Any]", raw_entry), "path")
+    ):
         return None
     entry = cast("Mapping[str, Any]", raw_entry)
-    if not (path := _first_str(entry, "path")):
-        return None
-    kind = _first_str(entry, "kind")
-    header = f"# {kind}: {path}" if kind else f"# {path}"
+    header = f"# {kind}: {path}" if (kind := _first_str(entry, "kind")) else f"# {path}"
     diff = entry.get("diff")
     return f"{header}\n{diff.rstrip()}" if isinstance(diff, str) and diff.strip() else header
 
@@ -245,48 +244,37 @@ class HarnessTurnProjector:
 
     def on_event(self, event: BridgeEvent) -> None:
         self._turn_progress.mark(self._agent_id)
-        if isinstance(event, BridgeReasoningDelta):
-            self._on_reasoning_delta(event)
-        elif isinstance(event, ReasoningText):
-            self._on_reasoning_text(event)
-        elif isinstance(event, TextDelta):
-            self._on_text_delta(event)
-        elif isinstance(event, AssistantText):
-            self._on_assistant_text(event)
+        if isinstance(event, (BridgeReasoningDelta, ReasoningText)):
+            self._on_reasoning_event(event)
+        elif isinstance(event, (TextDelta, AssistantText)):
+            self._on_text_event(event)
         elif isinstance(event, ToolUse):
             self._on_tool_use(event)
         elif isinstance(event, ToolResult):
             self._on_tool_result(event)
 
-    def _on_reasoning_delta(self, event: BridgeReasoningDelta) -> None:
+    def _on_reasoning_event(self, event: BridgeReasoningDelta | ReasoningText) -> None:
         if self._text_completed and self._text_buf:
             self._flush_completed_text()
-        self._streamed_reasoning = True
-        self._append_reasoning(event.text)
-
-    def _on_reasoning_text(self, event: ReasoningText) -> None:
-        if self._text_completed and self._text_buf:
-            self._flush_completed_text()
+        if isinstance(event, BridgeReasoningDelta):
+            self._streamed_reasoning = True
+            self._append_reasoning(event.text)
+            return
         if not self._streamed_reasoning:
             self._append_reasoning(event.text)
         self._streamed_reasoning = False
         self._reasoning_ended_at = self._clock_factory().now()
 
-    def _on_text_delta(self, event: TextDelta) -> None:
+    def _on_text_event(self, event: TextDelta | AssistantText) -> None:
         if self._text_completed and self._text_buf:
             self._flush_completed_text()
         if self._reasoning_started and self._reasoning_ended_at is None:
             self._reasoning_ended_at = self._clock_factory().now()
         self._any_text_event = True
-        self._streamed_text = True
-        self._append_text(event.text)
-
-    def _on_assistant_text(self, event: AssistantText) -> None:
-        if self._text_completed and self._text_buf:
-            self._flush_completed_text()
-        if self._reasoning_started and self._reasoning_ended_at is None:
-            self._reasoning_ended_at = self._clock_factory().now()
-        self._any_text_event = True
+        if isinstance(event, TextDelta):
+            self._streamed_text = True
+            self._append_text(event.text)
+            return
         if not self._streamed_text:
             self._append_text(event.text)
         self._streamed_text = False
@@ -332,17 +320,15 @@ class HarnessTurnProjector:
         code_ms: int | None = None
         if include_code_ms_at is not None:
             c_start = self._reasoning_ended_at or self._step_started_at
-            computed_code_ms = max(int((now - c_start).total_seconds() * 1000), 0)
-            if computed_code_ms > 0:
-                code_ms = computed_code_ms
+            if (computed := max(int((now - c_start).total_seconds() * 1000), 0)) > 0:
+                code_ms = computed
                 kwargs["meiva_code_ms_by_block"] = {str(include_code_ms_at): code_ms}
         return content, kwargs, reasoning_ms, code_ms
 
     def _flush_completed_text(self) -> None:
         now = self._clock_factory().now()
         step_text = "".join(self._text_buf).strip()
-        reasoning_text = "".join(self._reasoning_buf).strip()
-        if step_text or reasoning_text:
+        if step_text or "".join(self._reasoning_buf).strip():
             content, kwargs, _, _ = self._build_ai_content_and_kwargs(step_text, now)
             self._messages.append(AIMessage(content=content, additional_kwargs=kwargs))
             self._msg_idx += 1
@@ -364,8 +350,7 @@ class HarnessTurnProjector:
     def _append_text(self, text: str) -> None:
         if not text:
             return
-        chat_block_idx = 1 if self._reasoning_started else 0
-        item_id = f"{self._msg_idx}.{chat_block_idx}"
+        item_id = f"{self._msg_idx}.{1 if self._reasoning_started else 0}"
         if not self._chat_started:
             self._reasoning_coalescer.flush()
             self._publisher.emit(
@@ -408,10 +393,9 @@ class HarnessTurnProjector:
                 ).model_dump()
             )
         if step_text:
-            chat_idx = 1 if reasoning_text else 0
             snapshot_items.append(
                 TimelineItem(
-                    item_id=f"{self._msg_idx}.{chat_idx}",
+                    item_id=f"{self._msg_idx}.{1 if reasoning_text else 0}",
                     kind="agent_chat",
                     payload=step_text,
                     created_at=now.isoformat(),
@@ -428,10 +412,11 @@ class HarnessTurnProjector:
                 sdk_calls=[SdkCall(method=event.name, count=1)],
             ).model_dump()
         )
-        snap = TimelineSnapshot(
-            agent_id=self._agent_id, items=snapshot_items, msg_count=self._msg_idx + 1
+        self._publisher.emit(
+            TimelineSnapshot(
+                agent_id=self._agent_id, items=snapshot_items, msg_count=self._msg_idx + 1
+            ).model_dump_json()
         )
-        self._publisher.emit(snap.model_dump_json())
         self._publisher.emit(
             ExecStart(agent_id=self._agent_id, item_id=exec_item_id).model_dump_json()
         )
@@ -457,15 +442,13 @@ class HarnessTurnProjector:
         self._reset_step_buffers(now)
 
     def _on_tool_result(self, event: ToolResult) -> None:
-        slot = self._tool_slots.get(event.tool_use_id)
-        if slot is None:
+        if (slot := self._tool_slots.get(event.tool_use_id)) is None:
             return
         slot_idx, exec_item_id, started_at = slot
         now = self._clock_factory().now()
         self._step_started_at = now
         exec_ms = max(int((now - started_at).total_seconds() * 1000), 0)
         prev = self._messages[slot_idx]
-        sdk_calls = read_meiva_kwargs(prev).get("sdk_calls")
         tool_id = prev.tool_call_id if isinstance(prev, ToolMessage) else event.tool_use_id
         self._publisher.emit(
             ExecOutput(
@@ -480,8 +463,32 @@ class HarnessTurnProjector:
             created_at=now,
             started_at=started_at,
             exec_ms=exec_ms,
-            sdk_calls=sdk_calls,
+            sdk_calls=read_meiva_kwargs(prev).get("sdk_calls"),
         )
+
+    def settle_interrupt(
+        self,
+        reason: InterruptReason,
+        *,
+        effective_len: int,
+        pre_messages: Sequence[BaseMessage],
+    ) -> dict[str, object]:
+        halt: dict[str, object] = dict(interrupt_halt(reason))
+        partial: list[BaseMessage] = []
+        if reason is InterruptReason.SYSTEM and self._messages:
+            self._reasoning_coalescer.flush()
+            self._coalescer.flush()
+            self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
+            partial = list(self._messages)
+        if pre_messages or partial:
+            halt["messages"] = [
+                *pre_messages,
+                *partial,
+                *cast("list[BaseMessage]", halt.get("messages", [])),
+            ]
+        if partial:
+            halt["harness_cursor"] = effective_len + len(partial)
+        return halt
 
     def finish(self, turns: Sequence[HarnessTurn]) -> list[BaseMessage]:
         self._reasoning_coalescer.flush()
@@ -610,16 +617,23 @@ async def _run_harness_turn(
                 _ticking(
                     ctx.turn_progress.mark,
                     agent_id,
-                    bridge.run_turn(text, key=turn_key(pending), on_event=projector.on_event),
+                    bridge.run_turn(
+                        text,
+                        key=turn_key(pending, cursor=cursor),
+                        on_event=projector.on_event,
+                    ),
                 ),
                 cancel_event,
             )
     except ModelInterruptedError as interrupted:
-        _announce_cancel(ctx, agent_id)
+        halt = projector.settle_interrupt(
+            interrupted.reason,
+            effective_len=len(effective_messages),
+            pre_messages=pre_messages,
+        )
+        if "harness_cursor" not in halt:
+            _announce_cancel(ctx, agent_id)
         await interrupt_engine(agent_id, bridge)
-        halt: dict[str, object] = dict(interrupt_halt(interrupted.reason))
-        if pre_messages:
-            halt["messages"] = [*pre_messages, *cast("list[BaseMessage]", halt.get("messages", []))]
         return Command[HarnessGoto](update={**extra_updates, **halt}, goto=CLAIM)
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
         raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
@@ -727,16 +741,10 @@ async def interrupt_engine(agent_id: int, bridge: TurnEngine) -> None:
 # as a provider that said nothing.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 def _resolve_pricing_model(raw_model: str, catalog: Any) -> str:
-    if raw_model in catalog.prices:
-        return raw_model
     candidate = raw_model.removesuffix("[1m]")
-    if candidate in catalog.prices:
-        return candidate
-    for suffix in ("-high", "-medium", "-low", "-minimal"):
-        if candidate.endswith(suffix):
-            stripped = candidate.removesuffix(suffix)
-            if stripped in catalog.prices:
-                return stripped
+    for suffix in ("", "-high", "-medium", "-low", "-minimal"):
+        if candidate.endswith(suffix) and (s := candidate.removesuffix(suffix)) in catalog.prices:
+            return raw_model if not suffix and raw_model in catalog.prices else s
     return raw_model
 
 
