@@ -65,7 +65,12 @@ Per-panel provenance:
 from __future__ import annotations
 
 from base.events.contract import DELIVERY_STALLED_KEYS, GATEWAY_LATENCY_KEYS, LLM_USAGE_KEYS
-from base.telemetry.metrics.logql import CATEGORY_OR_LOG, event_count
+from base.telemetry.metrics.logql import (
+    CATEGORY_OR_LOG,
+    HARNESS_ORDER,
+    event_count,
+    harness_source_filter,
+)
 from base.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep
 
 # ── LogQL fragments (Task #1280) ──────────────────────────────────────────────
@@ -74,6 +79,27 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep
 _LLM_ATTR = {k: f"attributes_{k}" for k in LLM_USAGE_KEYS}
 _DELIVERY_ATTR = {k: f"attributes_{k}" for k in DELIVERY_STALLED_KEYS}
 _GATEWAY_ATTR = {k: f"attributes_{k}" for k in GATEWAY_LATENCY_KEYS}
+
+
+def _harness_tokens(attr_key: str, window: str, harness: str) -> str:
+    filt = harness_source_filter(_LLM_ATTR["source"], harness)
+    return (
+        f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+        f"category={{category}} | {filt} | "
+        f"unwrap {_LLM_ATTR[attr_key]} [{window}]))"
+    )
+
+
+def _harness_cache_hit(window: str, harness: str) -> str:
+    filt = harness_source_filter(_LLM_ATTR["source"], harness)
+    return (
+        f'100 * sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+        f'category={{category}} | {filt} | {_LLM_ATTR["cache_read"]} != "" | '
+        f"unwrap {_LLM_ATTR['cache_read']} [{window}]))"
+        f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+        f'category={{category}} | {filt} | {_LLM_ATTR["cache_read"]} != "" | '
+        f"unwrap {_LLM_ATTR['in_total']} [{window}]))"
+    )
 
 
 # ── stat panels (8-wide, three per row) ───────────────────────────────
@@ -269,15 +295,16 @@ def core_metrics() -> list[MetricSpec]:
             unit="short",
             panel="stat",
             query=(
-                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
-                f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
-                f' + sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
-                f"unwrap {_LLM_ATTR['out_total']} [$__range]))"
+                f"{_harness_tokens('in_total', '$__range', HARNESS_ORDER[0])}"
+                f" + {_harness_tokens('out_total', '$__range', HARNESS_ORDER[0])}"
             ),
+            targets=[
+                f"{_harness_tokens('in_total', '$__range', h)}"
+                f" + {_harness_tokens('out_total', '$__range', h)}"
+                for h in HARNESS_ORDER[1:]
+            ],
             query_type="logql",
-            target_names=["tokens"],
+            target_names=list(HARNESS_ORDER),
             width=8,
             height=4,
             panel_id=8,
@@ -297,18 +324,15 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="short",
             panel="stat",
-            query=(
-                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
-                f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
-            ),
+            query=_harness_tokens("in_total", "$__range", HARNESS_ORDER[0]),
+            targets=[_harness_tokens("in_total", "$__range", h) for h in HARNESS_ORDER[1:]],
             query_type="logql",
             width=8,
             height=4,
             panel_id=44,
             section="core",
             order=8,
-            target_names=["input"],
+            target_names=list(HARNESS_ORDER),
         )
     )
 
@@ -321,18 +345,15 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="short",
             panel="stat",
-            query=(
-                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
-                f"unwrap {_LLM_ATTR['out_total']} [$__range]))"
-            ),
+            query=_harness_tokens("out_total", "$__range", HARNESS_ORDER[0]),
+            targets=[_harness_tokens("out_total", "$__range", h) for h in HARNESS_ORDER[1:]],
             query_type="logql",
             width=8,
             height=4,
             panel_id=45,
             section="core",
             order=9,
-            target_names=["output"],
+            target_names=list(HARNESS_ORDER),
         )
     )
 
@@ -345,23 +366,20 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="percent",
             panel="stat",
-            query=(
-                f'100 * sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f'category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
-                f"unwrap {_LLM_ATTR['cache_read']} [$__range]))"
-                f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f'category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
-                f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
-            ),
+            query=_harness_cache_hit("$__range", HARNESS_ORDER[0]),
+            targets=[_harness_cache_hit("$__range", h) for h in HARNESS_ORDER[1:]],
             query_type="logql",
             field_defaults={"decimals": 2, "noValue": "N/A"},
-            description="Cache-read / input tokens over calls reporting cache usage; unmetered calls are excluded from both sums.",
+            description=(
+                "Cache-read / input tokens per harness (meiva, claude_code, codex, antigravity) "
+                "over calls reporting cache usage; unmetered calls are excluded from both sums."
+            ),
             width=8,
             height=4,
             panel_id=46,
             section="core",
             order=10,
-            target_names=["cache hit %"],
+            target_names=list(HARNESS_ORDER),
         )
     )
 
@@ -466,23 +484,23 @@ def core_metrics() -> list[MetricSpec]:
             name="core_token_output_reasoning",
             title="Token usage — Output + Reasoning",
             time_basis="per_minute",
-            description="Tokens per minute (5-minute buckets / 5): output and reasoning tokens.",
+            description=(
+                "Tokens per minute (5-minute buckets / 5): output tokens separated by harness "
+                "(meiva, claude_code, codex, antigravity) plus reasoning tokens."
+            ),
             event_name="llm_usage",
             category="telemetry",
             unit="short",
             panel="timeseries",
-            query=(
-                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
-                f"unwrap {_LLM_ATTR['out_total']} [5m]))"
-            ),
+            query=_harness_tokens("out_total", "5m", HARNESS_ORDER[0]),
             targets=[
+                *(_harness_tokens("out_total", "5m", h) for h in HARNESS_ORDER[1:]),
                 f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
                 f"category={{category}} | "
-                f"unwrap {_LLM_ATTR['reasoning']} [5m]))"
+                f"unwrap {_LLM_ATTR['reasoning']} [5m]))",
             ],
             query_type="logql",
-            target_names=["out", "reasoning"],
+            target_names=[*(f"{h} out" for h in HARNESS_ORDER), "reasoning"],
             custom={
                 "fillOpacity": 25,
                 "stacking": {"mode": "normal", "group": "A"},
@@ -499,39 +517,19 @@ def core_metrics() -> list[MetricSpec]:
         MetricSpec(
             name="core_cache_hit",
             title="Cache hit (token-weighted / max agent / min agent)",
+            description=(
+                "Token-weighted cache-read / input tokens (5m window) separated by harness "
+                "(meiva, claude_code, codex, antigravity) so low-cache harnesses do not dilute "
+                "native cache hit rate."
+            ),
             event_name="llm_usage",
             category="telemetry",
             unit="percent",
             panel="timeseries",
-            query=(
-                f'100 * sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f'category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
-                f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
-                f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f'category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
-                f"unwrap {_LLM_ATTR['in_total']} [5m]))"
-            ),
-            targets=[
-                # max agent: per-agent ratio, then the max across agents per bucket
-                (
-                    f'100 * max(sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                    f'| json | category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
-                    f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
-                    f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                    f'| json | category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
-                    f"unwrap {_LLM_ATTR['in_total']} [5m])))"
-                ),
-                (
-                    f'100 * min(sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                    f'| json | category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
-                    f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
-                    f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                    f'| json | category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
-                    f"unwrap {_LLM_ATTR['in_total']} [5m])))"
-                ),
-            ],
+            query=_harness_cache_hit("5m", HARNESS_ORDER[0]),
+            targets=[_harness_cache_hit("5m", h) for h in HARNESS_ORDER[1:]],
             query_type="logql",
-            target_names=["overall", "max agent", "min agent"],
+            target_names=list(HARNESS_ORDER),
             custom={"axisLabel": "cache hit %"},
             thresholds=[ThresholdStep(color="red", value=80.0)],
             panel_id=12,
@@ -657,18 +655,18 @@ def core_metrics() -> list[MetricSpec]:
             name="core_token_input",
             title="Token usage — Input",
             time_basis="per_minute",
-            description="Tokens per minute (5-minute buckets / 5): input tokens.",
+            description=(
+                "Tokens per minute (5-minute buckets / 5): input tokens separated by harness "
+                "(meiva, claude_code, codex, antigravity)."
+            ),
             event_name="llm_usage",
             category="telemetry",
             unit="short",
             panel="timeseries",
-            query=(
-                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
-                f"unwrap {_LLM_ATTR['in_total']} [5m]))"
-            ),
+            query=_harness_tokens("in_total", "5m", HARNESS_ORDER[0]),
+            targets=[_harness_tokens("in_total", "5m", h) for h in HARNESS_ORDER[1:]],
             query_type="logql",
-            target_names=["in"],
+            target_names=list(HARNESS_ORDER),
             custom={
                 "fillOpacity": 25,
                 "stacking": {"mode": "normal", "group": "A"},

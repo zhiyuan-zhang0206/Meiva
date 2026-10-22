@@ -13,6 +13,8 @@ from base.lm.harness.events import (
     BridgeEvent,
     HandoffInjected,
     RateLimitObserved,
+    ReasoningDelta,
+    ReasoningText,
     SessionBound,
     SessionClosed,
     SessionFaulted,
@@ -24,7 +26,7 @@ from base.lm.harness.events import (
     Usage,
     is_droppable,
 )
-from base.lm.harness.handoff import ClusterFact, EntryPoint, Handoff
+from base.lm.harness.handoff import ClusterFact, EntryPoint, Handoff, HarnessContribution
 from base.lm.harness.registration import (
     HANDLE_ENV,
     HarnessRegistration,
@@ -44,12 +46,15 @@ __all__ = [
     "HandoffInjected",
     "HarnessBridge",
     "HarnessClosedError",
+    "HarnessContribution",
     "HarnessRegistration",
     "HarnessSession",
     "HarnessSetupError",
     "HarnessTurn",
     "HarnessTurnFaultedError",
     "RateLimitObserved",
+    "ReasoningDelta",
+    "ReasoningText",
     "RegistrationStore",
     "ScopedSessionRegistry",
     "SessionBound",

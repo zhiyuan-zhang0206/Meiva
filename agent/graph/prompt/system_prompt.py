@@ -25,7 +25,11 @@ from .capabilities import (
     disabled_by_sdk_config,
     is_capability_surface_member,
 )
-from .conversation import COMMUNICATION_STYLE_SECTIONS, user_reply_section
+from .conversation import (
+    COMMUNICATION_STYLE_SECTIONS,
+    harness_user_reply_section,
+    user_reply_section,
+)
 
 
 def _resolved(setting: str, slices: AgentSlices, catalog: ModelCatalog) -> Any:
@@ -600,3 +604,85 @@ def build_system_prompt(
             parts.append(f"Knowledge cutoff: {cutoff}")
 
     return "\n\n".join(parts).rstrip("\n") + "\n"
+
+
+HARNESS_FRAMEWORK_SECTIONS: tuple[Callable[..., str], ...] = (
+    keep_it_simple_section,
+    harness_user_reply_section,
+    communication_style_section,
+    user_tone_section,
+    _output_conciseness_section,
+    ui_delivery_section,
+    _outcome_reporting_section,
+    _action_caution_section,
+    align_before_action_section,
+    delegation_check_section,
+    cross_machine_delegation_section,
+    _file_driven_work_section,
+    _long_running_operation_section,
+    temporal_awareness_section,
+    invest_in_the_future_section,
+)
+
+HARNESS_PLUGIN_SECTION_NAMES: frozenset[str] = frozenset(
+    {
+        "fleet_self_section",
+        "reduce_context_switch_section",
+        "memory_discipline_section",
+        "engineering_workflow_section",
+    }
+)
+
+
+def build_harness_system_prompt(
+    extensions: ExtensionRegistry,
+    slices: AgentSlices,
+    *,
+    agent_id: int | None,
+    catalog: ModelCatalog,
+) -> str:
+    from functools import partial
+
+    parts: list[str] = []
+
+    def workspace_section(agent: AgentSlices) -> str:
+        return agent_workspace_pointer(agent, agent_id=agent_id)
+
+    framework_sections: tuple[Callable[..., str], ...] = (
+        *HARNESS_FRAMEWORK_SECTIONS,
+        workspace_section,
+        capabilities_section,
+    )
+    catalog_sections = (
+        keep_it_simple_section,
+        communication_style_section,
+        user_tone_section,
+        _output_conciseness_section,
+        ui_delivery_section,
+        _outcome_reporting_section,
+        _action_caution_section,
+        align_before_action_section,
+        delegation_check_section,
+        cross_machine_delegation_section,
+        _file_driven_work_section,
+        temporal_awareness_section,
+        invest_in_the_future_section,
+    )
+    for section_fn in framework_sections:
+        bound_section: Callable[[AgentSlices], str] = (
+            partial(section_fn, catalog=catalog)
+            if section_fn in catalog_sections
+            else partial(section_fn)
+        )
+        contribution = bound_section(slices)
+        if contribution:
+            parts.append(contribution)
+
+    for _plugin, section_fn in extensions.system_prompt_sections():
+        if section_fn.__name__ not in HARNESS_PLUGIN_SECTION_NAMES:
+            continue
+        contribution = section_fn(slices, catalog=catalog)
+        if contribution:
+            parts.append(contribution)
+
+    return "\n\n".join(parts).strip()

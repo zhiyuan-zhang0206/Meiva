@@ -1869,6 +1869,21 @@ describe("live clock freezing and settleTurn", () => {
     expect(useTimelineStore.getState().turnActive).toBe(false);
   });
 
+  it("keeps an earlier concurrent execStartedAt live when a second tool starts and finishes", () => {
+    const store = useTimelineStore.getState();
+    store.switchThread(42, [], false);
+    store.processSseEvent({ role: "exec_start", agent_id: 42, item_id: "7.0" });
+    const anchor = useTimelineStore.getState().items[0].execStartedAt;
+    expect(anchor).toEqual(expect.any(Number));
+    store.processSseEvent({ role: "code_start", agent_id: 42, item_id: "8.0" });
+    store.processSseEvent({ role: "exec_start", agent_id: 42, item_id: "9.0" });
+    store.processSseEvent({ role: "exec_output", agent_id: 42, item_id: "9.0", content: "fast" });
+    const state = useTimelineStore.getState();
+    const firstExec = state.items.find((it) => it.item_id === "7.0");
+    expect(firstExec?.execStartedAt).toBe(anchor);
+    expect(state.turnActive).toBe(true);
+  });
+
   it("settleTurn freezes live clocks, drops empty exec placeholders, and clears turnActive", () => {
     const store = useTimelineStore.getState();
     store.switchThread(42, [], false);

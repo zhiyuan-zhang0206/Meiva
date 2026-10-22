@@ -8,7 +8,11 @@ from base.events.contract import (
     SYNTAX_FIX_KEYS,
     TURN_END_KEYS,
 )
-from base.telemetry.metrics.logql import event_count
+from base.telemetry.metrics.logql import (
+    HARNESS_ORDER,
+    event_count,
+    harness_source_filter,
+)
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
 _LLM_ATTR = {k: f"attributes_{k}" for k in LLM_USAGE_KEYS}
@@ -17,6 +21,15 @@ _HALT_ATTR = {k: f"attributes_{k}" for k in HALT_KEYS}
 _FIX_ATTR = {k: f"attributes_{k}" for k in SYNTAX_FIX_KEYS}
 _FRONTEND_ATTR = {k: f"attributes_{k}" for k in FRONTEND_INTERACTION_KEYS}
 _SDK_ATTR = {k: f"attributes_{k}" for k in SDK_CALL_KEYS}
+
+
+def _obs_harness_cost(window: str, harness: str) -> str:
+    filt = harness_source_filter(_LLM_ATTR["source"], harness)
+    return (
+        f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+        f"category={{category}} | {filt} | "
+        f"unwrap {_LLM_ATTR['cost_usd']} [{window}]))"
+    )
 
 
 def core_metrics() -> list[MetricSpec]:
@@ -36,8 +49,9 @@ def core_metrics() -> list[MetricSpec]:
                 "LLM call cost per minute — unwrap of the cost_usd field every "
                 "llm_usage payload carries (task #2626; the producer computes it "
                 "from one versioned-catalog quote in base/lm/pricing/__init__.py, unpriced "
-                "models carry no cost_usd and are skipped); 30-minute buckets "
-                "normalized to per-minute USD (bucket sum / 30). "
+                "models carry no cost_usd and are skipped), separated into actual "
+                "API spend (meiva) and virtual subscription cost per external harness; "
+                "30-minute buckets normalized to per-minute USD (bucket sum / 30). "
                 "event_name='llm_usage', category='telemetry'."
             ),
             event_name="llm_usage",
@@ -45,12 +59,12 @@ def core_metrics() -> list[MetricSpec]:
             unit="currencyUSD",
             panel="timeseries",
             query_type="logql",
-            query=(
-                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
-                f"unwrap {_LLM_ATTR['cost_usd']} [30m]))"
-            ),
-            target_names=["cost usd"],
+            query=_obs_harness_cost("30m", HARNESS_ORDER[0]),
+            targets=[_obs_harness_cost("30m", h) for h in HARNESS_ORDER[1:]],
+            target_names=[
+                "meiva (actual API)",
+                *(f"{h} (virtual)" for h in HARNESS_ORDER[1:]),
+            ],
             output=["grafana"],
             panel_id=40,
             section="LLM",

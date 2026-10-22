@@ -151,27 +151,36 @@ def handoff(agent_id: int = 6984) -> Handoff:
     )
 
 
-async def test_a_turn_returns_its_own_reply_and_the_opening_turn_as_a_prelude() -> None:
-    session = FakeSession(opening="acknowledged")
-    bridge = make_bridge(session, handoff=handoff())
+async def test_a_first_turn_co_delivers_the_handoff_in_a_single_submission() -> None:
+    session = FakeSession()
+    doc = handoff()
+    bridge = make_bridge(session, handoff=doc)
+    events: list[BridgeEvent] = []
 
-    turn = await bridge.run_turn("hello", key="inbound-7")
+    turn = await bridge.run_turn("hello", key="inbound-7", on_event=events.append)
 
-    assert turn.text == "reply-t2", "the handoff turn's text is not this turn's reply"
-    assert turn.usage.input_tokens == 10, "a turn reports its own usage"
-    assert [opening.text for opening in turn.prelude] == ["acknowledged"]
-    assert turn.prelude[0].usage.input_tokens == 100, "the opening turn keeps its own row"
-    assert [submitted[1] for submitted in session.submitted] == ["handoff", "inbound-7"]
+    assert turn.text == "reply-t1"
+    assert turn.usage.input_tokens == 10
+    assert turn.prelude == ()
+    assert session.submitted == [(f"{doc.render().strip()}\n\nhello", "inbound-7", "t1")]
+    assert [type(event) for event in events] == [AssistantText]
     assert bridge.model == "claude-sonnet-5-5"
 
 
-async def test_a_later_turn_has_no_prelude() -> None:
-    bridge = make_bridge(FakeSession(opening="acknowledged"), handoff=handoff())
+async def test_a_turn_whose_text_already_starts_with_the_handoff_is_not_prefixed_twice() -> None:
+    session = FakeSession()
+    doc = handoff()
+    bridge = make_bridge(session, handoff=doc)
+    co_delivered = f"{doc.render().strip()}\n\nhello"
 
-    await bridge.run_turn("one", key="inbound-1")
+    await bridge.run_turn(co_delivered, key="inbound-1")
     turn = await bridge.run_turn("two", key="inbound-2")
 
-    assert turn.prelude == (), "the opening turn is reported once, on the turn that waited for it"
+    assert turn.prelude == ()
+    assert session.submitted == [
+        (co_delivered, "inbound-1", "t1"),
+        ("two", "inbound-2", "t2"),
+    ]
 
 
 async def test_a_faulted_turn_retires_its_session_and_the_next_one_starts_fresh() -> None:
@@ -194,19 +203,22 @@ async def test_a_faulted_turn_retires_its_session_and_the_next_one_starts_fresh(
 
     assert turn.text == "reply-t1", "the rebuilt session runs its own first turn"
     assert fresh.started == 1
-    assert fresh.handoff is None, "a resume carries the transcript, so no second handoff"
+    assert fresh.submitted == [("again", "inbound-2", "t1")]
 
 
 async def test_the_handoff_is_injected_once_and_the_session_started_once() -> None:
-    session = FakeSession(opening="acknowledged")
-    bridge = make_bridge(session, handoff=handoff())
+    session = FakeSession()
+    doc = handoff()
+    bridge = make_bridge(session, handoff=doc)
 
     await bridge.run_turn("one", key="inbound-1")
     await bridge.run_turn("two", key="inbound-2")
 
     assert session.started == 1
-    assert len(session.submitted) == 3, "handoff + two turns"
-    assert session.handoff is not None
+    assert session.submitted == [
+        (f"{doc.render().strip()}\n\none", "inbound-1", "t1"),
+        ("two", "inbound-2", "t2"),
+    ]
 
 
 async def test_a_faulted_session_fails_the_turn() -> None:

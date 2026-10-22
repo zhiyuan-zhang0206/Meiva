@@ -134,6 +134,7 @@ def log_usage_fields(
     usage_kind: str,
     source: str | None = None,
     for_agent_id: int | None = None,
+    calls: int = 1,
     catalog: ModelCatalog,
 ) -> tuple[int, float]:
     # meiva:note
@@ -150,6 +151,7 @@ def log_usage_fields(
         usage_kind=usage_kind,
         source=source,
         for_agent_id=for_agent_id,
+        calls=calls,
         catalog=catalog,
     )
 
@@ -217,6 +219,7 @@ def _log_usage(
     cache_write_1h: int = 0,
     attribution: str | None = None,
     record_out: dict[str, Any] | None = None,
+    calls: int = 1,
     catalog: ModelCatalog,
 ) -> tuple[int, float]:
     # meiva:note
@@ -279,7 +282,7 @@ def _log_usage(
         "[llm usage] in={in_total}" + cache_text + "  "
         "out={out_total} reason={reasoning}{reason_pct}",
         event="llm_usage",
-        calls=1,
+        calls=calls,
         reason_pct=reason_pct,
         **({"requested_model": requested_model} if requested_model is not None else {}),
         latency_ms=latency_ms,

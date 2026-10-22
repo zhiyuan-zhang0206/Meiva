@@ -439,10 +439,54 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range]))",
-     "legendFormat": "llm cost",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | unwrap attributes_cost_usd [$__range]))",
+     "legendFormat": "actual (API)",
      "queryType": "instant",
      "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=~\"claude_code|codex|antigravity\" | unwrap attributes_cost_usd [$__range]))",
+     "legendFormat": "virtual (sub total)",
+     "queryType": "instant",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | unwrap attributes_cost_usd [$__range]))",
+     "legendFormat": "claude_code (virtual)",
+     "queryType": "instant",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | unwrap attributes_cost_usd [$__range]))",
+     "legendFormat": "codex (virtual)",
+     "queryType": "instant",
+     "refId": "D"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | unwrap attributes_cost_usd [$__range]))",
+     "legendFormat": "antigravity (virtual)",
+     "queryType": "instant",
+     "refId": "E"
     }
    ],
    "title": "LLM cost (window)",
@@ -499,10 +543,43 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [$__range])) + sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_out_total [$__range]))",
-     "legendFormat": "tokens",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | unwrap attributes_in_total [$__range])) + sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | unwrap attributes_out_total [$__range]))",
+     "legendFormat": "meiva",
      "queryType": "instant",
      "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | unwrap attributes_in_total [$__range])) + sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | unwrap attributes_out_total [$__range]))",
+     "legendFormat": "claude_code",
+     "queryType": "instant",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | unwrap attributes_in_total [$__range])) + sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | unwrap attributes_out_total [$__range]))",
+     "legendFormat": "codex",
+     "queryType": "instant",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | unwrap attributes_in_total [$__range])) + sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | unwrap attributes_out_total [$__range]))",
+     "legendFormat": "antigravity",
+     "queryType": "instant",
+     "refId": "D"
     }
    ],
    "title": "Tokens (window)",
@@ -559,10 +636,43 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [$__range]))",
-     "legendFormat": "input",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | unwrap attributes_in_total [$__range]))",
+     "legendFormat": "meiva",
      "queryType": "instant",
      "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | unwrap attributes_in_total [$__range]))",
+     "legendFormat": "claude_code",
+     "queryType": "instant",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | unwrap attributes_in_total [$__range]))",
+     "legendFormat": "codex",
+     "queryType": "instant",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | unwrap attributes_in_total [$__range]))",
+     "legendFormat": "antigravity",
+     "queryType": "instant",
+     "refId": "D"
     }
    ],
    "title": "LLM input tokens (window)",
@@ -619,10 +729,43 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_out_total [$__range]))",
-     "legendFormat": "output",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | unwrap attributes_out_total [$__range]))",
+     "legendFormat": "meiva",
      "queryType": "instant",
      "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | unwrap attributes_out_total [$__range]))",
+     "legendFormat": "claude_code",
+     "queryType": "instant",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | unwrap attributes_out_total [$__range]))",
+     "legendFormat": "codex",
+     "queryType": "instant",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | unwrap attributes_out_total [$__range]))",
+     "legendFormat": "antigravity",
+     "queryType": "instant",
+     "refId": "D"
     }
    ],
    "title": "LLM output tokens (window)",
@@ -633,7 +776,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Cache-read / input tokens over calls reporting cache usage; unmetered calls are excluded from both sums.",
+   "description": "Cache-read / input tokens per harness (meiva, claude_code, codex, antigravity) over calls reporting cache usage; unmetered calls are excluded from both sums.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -682,10 +825,43 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [$__range])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [$__range]))",
-     "legendFormat": "cache hit %",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [$__range])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | attributes_cache_read != \"\" | unwrap attributes_in_total [$__range]))",
+     "legendFormat": "meiva",
      "queryType": "instant",
      "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [$__range])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | attributes_cache_read != \"\" | unwrap attributes_in_total [$__range]))",
+     "legendFormat": "claude_code",
+     "queryType": "instant",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [$__range])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | attributes_cache_read != \"\" | unwrap attributes_in_total [$__range]))",
+     "legendFormat": "codex",
+     "queryType": "instant",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [$__range])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | attributes_cache_read != \"\" | unwrap attributes_in_total [$__range]))",
+     "legendFormat": "antigravity",
+     "queryType": "instant",
+     "refId": "D"
     }
    ],
    "title": "Cache hit (window)",
@@ -1036,7 +1212,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Tokens per minute (5-minute buckets / 5): input tokens.",
+   "description": "Tokens per minute (5-minute buckets / 5): input tokens separated by harness (meiva, claude_code, codex, antigravity).",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -1092,10 +1268,43 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [5m])) / 5",
-     "legendFormat": "in",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | unwrap attributes_in_total [5m])) / 5",
+     "legendFormat": "meiva",
      "queryType": "range",
      "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | unwrap attributes_in_total [5m])) / 5",
+     "legendFormat": "claude_code",
+     "queryType": "range",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | unwrap attributes_in_total [5m])) / 5",
+     "legendFormat": "codex",
+     "queryType": "range",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | unwrap attributes_in_total [5m])) / 5",
+     "legendFormat": "antigravity",
+     "queryType": "range",
+     "refId": "D"
     }
    ],
    "title": "Token usage \u2014 Input (per minute)",
@@ -1106,7 +1315,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Tokens per minute (5-minute buckets / 5): output and reasoning tokens.",
+   "description": "Tokens per minute (5-minute buckets / 5): output tokens separated by harness (meiva, claude_code, codex, antigravity) plus reasoning tokens.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -1162,10 +1371,43 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_out_total [5m])) / 5",
-     "legendFormat": "out",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | unwrap attributes_out_total [5m])) / 5",
+     "legendFormat": "meiva out",
      "queryType": "range",
      "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | unwrap attributes_out_total [5m])) / 5",
+     "legendFormat": "claude_code out",
+     "queryType": "range",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | unwrap attributes_out_total [5m])) / 5",
+     "legendFormat": "codex out",
+     "queryType": "range",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | unwrap attributes_out_total [5m])) / 5",
+     "legendFormat": "antigravity out",
+     "queryType": "range",
+     "refId": "D"
     },
     {
      "datasource": {
@@ -1176,7 +1418,7 @@
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_reasoning [5m])) / 5",
      "legendFormat": "reasoning",
      "queryType": "range",
-     "refId": "B"
+     "refId": "E"
     }
    ],
    "title": "Token usage \u2014 Output + Reasoning (per minute)",
@@ -1187,6 +1429,7 @@
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Token-weighted cache-read / input tokens (5m window) separated by harness (meiva, claude_code, codex, antigravity) so low-cache harnesses do not dilute native cache hit rate.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -1247,8 +1490,8 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m]))",
-     "legendFormat": "overall",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m]))",
+     "legendFormat": "meiva",
      "queryType": "range",
      "refId": "A"
     },
@@ -1258,8 +1501,8 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m])))",
-     "legendFormat": "max agent",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m]))",
+     "legendFormat": "claude_code",
      "queryType": "range",
      "refId": "B"
     },
@@ -1269,10 +1512,21 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m])))",
-     "legendFormat": "min agent",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m]))",
+     "legendFormat": "codex",
      "queryType": "range",
      "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m]))",
+     "legendFormat": "antigravity",
+     "queryType": "range",
+     "refId": "D"
     }
    ],
    "title": "Cache hit (token-weighted / max agent / min agent)",
@@ -1905,7 +2159,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "LLM call cost per minute \u2014 unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in base/lm/pricing/__init__.py, unpriced models carry no cost_usd and are skipped); 30-minute buckets normalized to per-minute USD (bucket sum / 30). event_name='llm_usage', category='telemetry'.",
+   "description": "LLM call cost per minute \u2014 unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in base/lm/pricing/__init__.py, unpriced models carry no cost_usd and are skipped), separated into actual API spend (meiva) and virtual subscription cost per external harness; 30-minute buckets normalized to per-minute USD (bucket sum / 30). event_name='llm_usage', category='telemetry'.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -1961,10 +2215,43 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [30m])) / 30",
-     "legendFormat": "cost usd",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | unwrap attributes_cost_usd [30m])) / 30",
+     "legendFormat": "meiva (actual API)",
      "queryType": "range",
      "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | unwrap attributes_cost_usd [30m])) / 30",
+     "legendFormat": "claude_code (virtual)",
+     "queryType": "range",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | unwrap attributes_cost_usd [30m])) / 30",
+     "legendFormat": "codex (virtual)",
+     "queryType": "range",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | unwrap attributes_cost_usd [30m])) / 30",
+     "legendFormat": "antigravity (virtual)",
+     "queryType": "range",
+     "refId": "D"
     }
    ],
    "title": "LLM cost (per minute)",
@@ -5486,7 +5773,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Projected full-day LLM spend from usage-time cost snapshots over the dashboard time window. Formula: window spend \u00d7 86,400 / elapsed seconds in the panel range.",
+   "description": "Projected full-day LLM spend from usage-time cost snapshots over the dashboard time window, separated into actual API spend (meiva) and virtual subscription cost (claude_code, codex, antigravity). Formula: window spend \u00d7 86,400 / elapsed seconds in the panel range.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -5534,10 +5821,54 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range]))) * 86400 / $__range_s",
-     "legendFormat": "today est.",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | unwrap attributes_cost_usd [$__range]))) * 86400 / $__range_s",
+     "legendFormat": "actual (API)",
      "queryType": "instant",
      "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=~\"claude_code|codex|antigravity\" | unwrap attributes_cost_usd [$__range]))) * 86400 / $__range_s",
+     "legendFormat": "virtual (sub total)",
+     "queryType": "instant",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | unwrap attributes_cost_usd [$__range]))) * 86400 / $__range_s",
+     "legendFormat": "claude_code (virtual)",
+     "queryType": "instant",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | unwrap attributes_cost_usd [$__range]))) * 86400 / $__range_s",
+     "legendFormat": "codex (virtual)",
+     "queryType": "instant",
+     "refId": "D"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | unwrap attributes_cost_usd [$__range]))) * 86400 / $__range_s",
+     "legendFormat": "antigravity (virtual)",
+     "queryType": "instant",
+     "refId": "E"
     }
    ],
    "title": "LLM cost estimate \u2014 day pace",
@@ -5548,7 +5879,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Projected 30-day LLM spend from usage-time cost snapshots over the dashboard time window. Formula: window spend \u00d7 2,592,000 / elapsed seconds in the panel range.",
+   "description": "Projected 30-day LLM spend from usage-time cost snapshots over the dashboard time window, separated into actual API spend (meiva) and virtual subscription cost (claude_code, codex, antigravity). Formula: window spend \u00d7 2,592,000 / elapsed seconds in the panel range.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -5596,10 +5927,54 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range]))) * 2592000 / $__range_s",
-     "legendFormat": "month est.",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | unwrap attributes_cost_usd [$__range]))) * 2592000 / $__range_s",
+     "legendFormat": "actual (API)",
      "queryType": "instant",
      "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=~\"claude_code|codex|antigravity\" | unwrap attributes_cost_usd [$__range]))) * 2592000 / $__range_s",
+     "legendFormat": "virtual (sub total)",
+     "queryType": "instant",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | unwrap attributes_cost_usd [$__range]))) * 2592000 / $__range_s",
+     "legendFormat": "claude_code (virtual)",
+     "queryType": "instant",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | unwrap attributes_cost_usd [$__range]))) * 2592000 / $__range_s",
+     "legendFormat": "codex (virtual)",
+     "queryType": "instant",
+     "refId": "D"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | unwrap attributes_cost_usd [$__range]))) * 2592000 / $__range_s",
+     "legendFormat": "antigravity (virtual)",
+     "queryType": "instant",
+     "refId": "E"
     }
    ],
    "title": "LLM cost estimate \u2014 30-day pace",
@@ -5610,7 +5985,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Usage-time LLM cost snapshots grouped into $__interval buckets, normalized to a per-minute USD rate (bucket sum / interval seconds * 60).",
+   "description": "Usage-time LLM cost snapshots grouped into $__interval buckets, normalized to a per-minute USD rate (bucket sum / interval seconds * 60), separated into actual API cost (meiva) and virtual subscription cost per external harness.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -5666,10 +6041,43 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__interval])) / ($__interval_ms / 60000)",
-     "legendFormat": "cost usd",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source!~\"claude_code|codex|antigravity\" | unwrap attributes_cost_usd [$__interval])) / ($__interval_ms / 60000)",
+     "legendFormat": "meiva (actual API)",
      "queryType": "range",
      "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"claude_code\" | unwrap attributes_cost_usd [$__interval])) / ($__interval_ms / 60000)",
+     "legendFormat": "claude_code (virtual)",
+     "queryType": "range",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"codex\" | unwrap attributes_cost_usd [$__interval])) / ($__interval_ms / 60000)",
+     "legendFormat": "codex (virtual)",
+     "queryType": "range",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_source=\"antigravity\" | unwrap attributes_cost_usd [$__interval])) / ($__interval_ms / 60000)",
+     "legendFormat": "antigravity (virtual)",
+     "queryType": "range",
+     "refId": "D"
     }
    ],
    "title": "LLM cost / minute",

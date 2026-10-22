@@ -117,12 +117,13 @@ def _usage(base: _MetricIdentity, attributes: Mapping[str, Any]) -> MetricObserv
     model = attributes.get("model")
     if model is not None and not isinstance(model, str):
         raise ValueError("observed usage model must be text")
+    calls = max(1, _count(attributes.get("calls", 1)))
     return MetricObservation(
         **base,
         kind="usage",
         model=model,
-        usage_calls=1,
-        unpriced_calls=int(unpriced),
+        usage_calls=calls,
+        unpriced_calls=calls if unpriced else 0,
         tokens_in=_count(attributes.get("in_total", 0)),
         tokens_out=_count(attributes.get("out_total", 0)),
         tokens_cached=_count(attributes["cache_read"])

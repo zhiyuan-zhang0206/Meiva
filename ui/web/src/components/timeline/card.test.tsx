@@ -542,6 +542,22 @@ describe("CardHeader", () => {
     expect(container.textContent).not.toContain("shell.run");
   });
 
+  it("agent_code with external tool source renders tool name and line count without 'of code'", () => {
+    const cItem = item("agent_code", {
+      source: "Bash",
+      payload: "git status\ngit diff",
+      sdk_calls: [{ method: "Bash", count: 1 }],
+    });
+    const cfg = messageCardConfig(cItem)!;
+    expect(cfg.icon?.displayName).toBe("Terminal");
+    const { container } = renderWithQuery(
+      <CardHeader item={cItem} config={cfg} expanded={false} onToggle={noop} />,
+    );
+    expect(container.textContent).toContain("Bash · 2 lines");
+    expect(container.textContent).not.toContain("of code");
+    expect(container.textContent).not.toContain("× 1");
+  });
+
   it("code_output with exec_ms shows duration", () => {
     const oItem = item("code_output", {
       payload: "line1\nline2",

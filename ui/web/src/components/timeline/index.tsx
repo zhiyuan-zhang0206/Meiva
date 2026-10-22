@@ -11,7 +11,6 @@ import {
   createStickyController,
   isAtBottom,
 } from "@/lib/layout/sticky";
-import type { Harness } from "@/lib/harness/harness";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { readScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
@@ -40,7 +39,6 @@ import { TimelineRow, cardConfigFor } from "./row";
 
 interface Props {
   items: BackendTimelineItem[];
-  harness: Harness | null;
   compactBuffer?: CompactTransitionBuffer | null;
   threadKey?: string;
   scrollMemoryKey?: string;
@@ -61,7 +59,6 @@ interface Props {
 
 export const TimelineView = memo(function TimelineView({
   items: canonicalItems,
-  harness,
   compactBuffer = null,
   threadKey,
   scrollMemoryKey,
@@ -77,25 +74,19 @@ export const TimelineView = memo(function TimelineView({
 }: Props) {
   const t = useTranslations("timeline");
   const { activationRows, turnRows, measureRows } = useTimelineWindowLimits();
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
-  const visibleItems = useMemo(
-    () => harness === "meiva" ? canonicalItems : canonicalItems.filter((item) => item.kind !== "system_prompt"),
-    [canonicalItems, harness],
+  const bufferedItems = useMemo(
+    () => compactBuffer?.rows.map((row) => row.item) ?? [],
+    [compactBuffer],
   );
-  const bufferedRows = useMemo(
-    () => compactBuffer?.rows.filter((row) => harness === "meiva" || row.item.kind !== "system_prompt") ?? [],
-    [compactBuffer, harness],
-  );
-  const bufferedItems = useMemo(() => bufferedRows.map((row) => row.item), [bufferedRows]);
   const currentItems = useMemo(
     () => compactBuffer
-      ? visibleItems.filter((item) => (parseItemIdParts(item.item_id)?.rank ?? 0) === 0)
-      : visibleItems,
-    [visibleItems, compactBuffer],
+      ? canonicalItems.filter((item) => (parseItemIdParts(item.item_id)?.rank ?? 0) === 0)
+      : canonicalItems,
+    [canonicalItems, compactBuffer],
   );
   const items = useMemo(
-    () => compactBuffer ? [...bufferedItems, ...currentItems] : visibleItems,
-    [compactBuffer, bufferedItems, currentItems, visibleItems],
+    () => compactBuffer ? [...bufferedItems, ...currentItems] : canonicalItems,
+    [compactBuffer, bufferedItems, currentItems, canonicalItems],
   );
 
   const endRef = useRef<HTMLDivElement>(null);
@@ -707,11 +698,11 @@ export const TimelineView = memo(function TimelineView({
 
   const groups = useMemo(() => {
     if (!compactBuffer) {
-      return groupTimelineSegments(visibleItems).map((entry) => ({ ...entry, source: "canonical" as const }));
+      return groupTimelineSegments(canonicalItems).map((entry) => ({ ...entry, source: "canonical" as const }));
     }
     const buffered = groupTimelineSegments(
       bufferedItems,
-      (_item, index) => bufferedRows[index].rank,
+      (_item, index) => compactBuffer.rows[index].rank,
     ).map((entry) => ({ ...entry, source: "buffer" as const }));
     const current = groupTimelineSegments(currentItems)
       .map((entry) => ({
@@ -720,7 +711,7 @@ export const TimelineView = memo(function TimelineView({
         source: "canonical" as const,
       }));
     return [...buffered, ...current];
-  }, [visibleItems, compactBuffer, bufferedItems, bufferedRows, currentItems]);
+  }, [canonicalItems, compactBuffer, bufferedItems, currentItems]);
 
   const groupEntries = useMemo(() => groups.map((entry) => {
     const group = entry.group;

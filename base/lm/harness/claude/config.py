@@ -18,7 +18,7 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 class BridgeConfig:
     cwd: Path
     model: str = DEFAULT_MODEL
-    tools: tuple[str, ...] = ("Read", "Grep", "Glob", "Edit", "Write", "Bash")
+    tools: tuple[str, ...] | None = None
     permission_mode: str = "bypassPermissions"
     max_turns: int | None = 24
     auth: AuthConfig = field(default_factory=AuthConfig)

@@ -12,8 +12,14 @@ from typing import Any, NamedTuple
 
 import psycopg
 
+from base.api_contracts.agent_contract import HARNESS_BILLING, HarnessBilling
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
 from base.telemetry.metrics.event_sql import numeric
+
+SUBSCRIPTION_SOURCES = tuple(
+    sorted(h.value for h, b in HARNESS_BILLING.items() if b is HarnessBilling.SUBSCRIPTION)
+)
+_SUBSCRIPTION_SOURCES_SQL = ", ".join(repr(s) for s in SUBSCRIPTION_SOURCES)
 
 
 class WindowTotals(NamedTuple):
@@ -38,13 +44,16 @@ def window_totals(
     successful `turn_end` rows, with or without a duration.
     """
     usage = "event_name = 'llm_usage' AND category = 'telemetry'"
+    api_usage = (
+        f"{usage} AND COALESCE({LLM_USAGE_KEYS['source']}, '') NOT IN ({_SUBSCRIPTION_SOURCES_SQL})"
+    )
     turn = f"event_name = 'turn_end' AND {TURN_END_KEYS['ok']} = 'true'"
     query = f"""
         SELECT
           COALESCE(sum({numeric(LLM_USAGE_KEYS["in_total"])}) FILTER (WHERE {usage}), 0),
           COALESCE(sum({numeric(LLM_USAGE_KEYS["out_total"])}) FILTER (WHERE {usage}), 0),
           COALESCE(sum({numeric(LLM_USAGE_KEYS["cache_read"])}) FILTER (WHERE {usage}), 0),
-          COALESCE(sum({numeric(LLM_USAGE_KEYS["cost_usd"])}) FILTER (WHERE {usage}), 0),
+          COALESCE(sum({numeric(LLM_USAGE_KEYS["cost_usd"])}) FILTER (WHERE {api_usage}), 0),
           COALESCE(sum({numeric(TURN_END_KEYS["duration_seconds"])}) FILTER (WHERE {turn}), 0),
           count(*) FILTER (WHERE {turn}),
           COALESCE(sum({numeric(LLM_USAGE_KEYS["in_total"])}) FILTER (

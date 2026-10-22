@@ -315,10 +315,8 @@ export function applySystemEvent(
       // "writing code for Xs" clock from earlier blocks, so their chips show
       // the frozen duration rather than clocks that keep ticking through
       // later phases.
-      return freezeExecClocks(
-        freezeReasoningClocks(
-          clearCodeClocks(createStartItem(items, ev.item_id, "agent_chat")),
-        ),
+      return freezeReasoningClocks(
+        clearCodeClocks(createStartItem(items, ev.item_id, "agent_chat")),
       );
     case "chat_delta":
       return appendDeltaById(items, ev.item_id, "agent_chat", ev.content);
@@ -331,7 +329,7 @@ export function applySystemEvent(
       // and stamp codeElapsedMs=0 (the bug that kept "Writing code for Xs"
       // from ever appearing during streaming).
       return createStartItem(
-        freezeExecClocks(freezeReasoningClocks(clearCodeClocks(items))),
+        freezeReasoningClocks(clearCodeClocks(items)),
         ev.item_id,
         "agent_code",
       );
@@ -344,7 +342,7 @@ export function applySystemEvent(
       // live clock is started by createStartItem (added after the freeze, so
       // it keeps its fresh anchor).
       return createStartItem(
-        freezeExecClocks(freezeReasoningClocks(clearCodeClocks(items))),
+        freezeReasoningClocks(clearCodeClocks(items)),
         ev.item_id,
         "agent_reasoning",
       );
@@ -357,7 +355,7 @@ export function applySystemEvent(
       // ExecOutputChunk / ExecOutput events. Clear any codeStartedAt
       // clocks (code writing → execution).
       return upsertItemById(
-        freezeExecClocks(freezeReasoningClocks(clearCodeClocks(items))),
+        freezeReasoningClocks(clearCodeClocks(items)),
         {
           item_id: ev.item_id,
           kind: "code_output",
@@ -560,7 +558,7 @@ export function mergeSnapshotWithStreaming(
     if (streamingIds.has(it.item_id)) return true;
     const parsed = parseItemId(it.item_id);
     if (parsed === null) return true;
-    return parsed[0] === msg_count;
+    return it.kind === "code_output" ? parsed[0] <= msg_count : parsed[0] === msg_count;
   });
   // Sort by item_id's msg_idx.block_idx — ephemeral markers go through the
   // parseItemId null path and land at the end, preserving event ordering.
@@ -663,9 +661,6 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent): ThreadTimeli
     ev.role === "code_start" ||
     ev.role === "reasoning_start" ||
     ev.role === "exec_start";
-  // cancelled is handled above (it flips both flags off); intentionally absent here.
-  const turnEnd = ev.role === "llm_done" || ev.role === "exec_output" || ev.role === "error";
-
   // streaming flag
   const codeStart = ev.role === "code_start";
   const codeEnd =
@@ -694,17 +689,19 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent): ThreadTimeli
   // instead of ticking on dead items. The guard keeps array identity stable when
   // there is no live clock to act on.
   const applied = applySystemEvent(t.items, ev);
-  const hasLiveClock =
-    turnEnd &&
-    applied.some(
-      (it) =>
-        (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
-        it.codeStartedAt != null ||
-        (it.execStartedAt != null && it.exec_ms == null),
-    );
-  const items = hasLiveClock
-    ? freezeExecClocks(clearCodeClocks(freezeReasoningClocks(applied)))
-    : applied;
+  const anyLiveClock = applied.some(
+    (it) =>
+      (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
+      (it.codeStartedAt != null && it.code_elapsed_ms == null) ||
+      (it.execStartedAt != null && it.exec_ms == null),
+  );
+  // cancelled is handled above (it flips both flags off); intentionally absent here.
+  const hardTurnEnd = ev.role === "llm_done" || ev.role === "error";
+  const turnEnd = hardTurnEnd || (ev.role === "exec_output" && !anyLiveClock);
+  const items =
+    hardTurnEnd && anyLiveClock
+      ? freezeExecClocks(clearCodeClocks(freezeReasoningClocks(applied)))
+      : applied;
 
   return {
     ...t,

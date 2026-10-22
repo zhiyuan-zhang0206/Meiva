@@ -36,7 +36,7 @@ async def test_options_carry_the_boundary_invariants(tmp_path: Path) -> None:
         assert options.setting_sources == []
         assert options.strict_mcp_config is True
         assert options.include_partial_messages is True
-        assert "Bash" in list(options.tools or [])
+        assert options.tools is None
         assert options.env.get("ANTHROPIC_API_KEY") == ""
         assert options.permission_mode == "bypassPermissions"
     finally:

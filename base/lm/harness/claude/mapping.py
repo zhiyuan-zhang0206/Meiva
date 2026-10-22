@@ -7,6 +7,8 @@ from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
     RateLimitObserved,
+    ReasoningDelta,
+    ReasoningText,
     SessionStarted,
     TextDelta,
     ToolResult,
@@ -82,7 +84,13 @@ def _stream(message: Any, turn_id: str | None) -> list[BridgeEvent]:
     if event.get("type") != "content_block_delta":
         return []
     delta = _as_dict(event.get("delta"))
-    if delta.get("type") != "text_delta":
+    delta_type = delta.get("type")
+    if delta_type == "thinking_delta":
+        thinking = delta.get("thinking")
+        if not isinstance(thinking, str) or not thinking:
+            return []
+        return [ReasoningDelta(turn_id=turn_id, text=thinking)]
+    if delta_type != "text_delta":
         return []
     text = delta.get("text")
     if not isinstance(text, str) or not text:
@@ -96,7 +104,11 @@ def _assistant(message: Any, turn_id: str | None) -> list[BridgeEvent]:
     events: list[BridgeEvent] = []
     for block in _as_list(getattr(message, "content", None)):
         kind = type(block).__name__
-        if kind == "TextBlock":
+        if kind == "ThinkingBlock":
+            thinking = _text(getattr(block, "thinking", None))
+            if thinking:
+                events.append(ReasoningText(turn_id=turn_id, text=thinking))
+        elif kind == "TextBlock":
             text = _text(getattr(block, "text", None))
             if text:
                 events.append(AssistantText(turn_id=turn_id, text=text))

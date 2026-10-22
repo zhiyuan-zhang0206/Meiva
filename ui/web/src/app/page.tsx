@@ -371,7 +371,6 @@ function HomeContent({
           <TimelineView
             key={activeId ?? "unselected"}
             items={items}
-            harness={activeAgent?.harness ?? null}
             compactBuffer={compactBuffer}
             threadKey={activeId != null ? String(activeId) : undefined}
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}

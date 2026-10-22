@@ -13,13 +13,16 @@ import {
   ChevronDown,
   ChevronRight,
   Code2,
+  FilePen,
   FileText,
   Info,
   Paperclip,
+  Search,
   Settings,
   Sparkles,
   Terminal,
   User,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -102,6 +105,67 @@ function agentChatTitle(item: BackendTimelineItem): {
   };
 }
 
+export function toolCallIcon(source: string | null | undefined): LucideIcon {
+  if (!source || source === "execute_code") return Code2;
+  switch (source) {
+    case "command":
+    case "Bash":
+    case "run_command":
+      return Terminal;
+    case "patch":
+    case "Edit":
+    case "Write":
+    case "MultiEdit":
+    case "write_file":
+    case "edit_file":
+      return FilePen;
+    case "Read":
+    case "read_file":
+      return FileText;
+    case "Grep":
+    case "Glob":
+    case "web_search":
+    case "search_web":
+      return Search;
+    case "Task":
+    case "Agent":
+    case "invoke_subagent":
+      return Bot;
+    default:
+      return Wrench;
+  }
+}
+
+function renderToolIcon(source: string | null | undefined, className: string): ReactNode {
+  switch (source) {
+    case "command":
+    case "Bash":
+    case "run_command":
+      return <Terminal className={className} />;
+    case "patch":
+    case "Edit":
+    case "Write":
+    case "MultiEdit":
+    case "write_file":
+    case "edit_file":
+      return <FilePen className={className} />;
+    case "Read":
+    case "read_file":
+      return <FileText className={className} />;
+    case "Grep":
+    case "Glob":
+    case "web_search":
+    case "search_web":
+      return <Search className={className} />;
+    case "Task":
+    case "Agent":
+    case "invoke_subagent":
+      return <Bot className={className} />;
+    default:
+      return <Wrench className={className} />;
+  }
+}
+
 // Pure per-item visual config. null → this item is an ephemeral system marker
 // that renders bare (no card). Kept pure (no toggle state) so the timeline can
 // memoize it over the items array alone.
@@ -133,7 +197,7 @@ export function messageCardConfig(
     case "agent_code":
       return {
         rich: "code",
-        icon: Code2,
+        icon: toolCallIcon(item.source),
         title: null,
         // Deeper border than agent_chat — the tool call is the load-bearing action.
         border: colors.agent_code.border,
@@ -590,7 +654,8 @@ function CodeSummary({
   payload: string;
   now: number;
 }) {
-  const { calls, lines } = summarizeCode(payload, item.sdk_calls);
+  const isExternalTool = Boolean(item.source && item.source !== "execute_code");
+  const { calls, lines } = summarizeCode(payload, isExternalTool ? null : item.sdk_calls);
 
   // Two states, mirroring ThinkingSummary / OutputSummary:
   // - LIVE (codeStartedAt set, still streaming): "Writing code for Xs".
@@ -611,6 +676,19 @@ function CodeSummary({
     timing = `Writing code for ${formatDuration(now - item.codeStartedAt)}`;
   } else if (codeElapsed != null) {
     timing = `Wrote code for ${formatDuration(codeElapsed)}`;
+  }
+
+  if (isExternalTool) {
+    return (
+      <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
+        {renderToolIcon(item.source, cn("size-3.5 shrink-0", liveCode && "text-sky-500"))}
+        <span className="truncate tabular-nums">
+          {timing ? <>{timing}<span className="opacity-60">{" · "}</span></> : null}
+          <span className="text-foreground/80">{item.source}</span>
+          <span className="opacity-60">{` · ${lines} ${lines === 1 ? "line" : "lines"}`}</span>
+        </span>
+      </span>
+    );
   }
 
   return (

@@ -8,7 +8,7 @@ import hashlib
 import json
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -26,6 +26,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.factory import validate_model_config
 from base.lm.harness.bridge import HarnessBridge
 from base.lm.harness.engine import TurnEngine
+from base.lm.harness.handoff import HarnessContribution
 from base.lm.harness.registration import RegistrationStore
 from base.lm.harness.registry import SessionRegistry
 from base.lm.harness.wiring import bridge_for
@@ -376,6 +377,7 @@ async def build_runtime(
     registrations: RegistrationStore | None = None,
     registration_ttl_seconds: float,
     machine: str,
+    contributions: Iterable[HarnessContribution] = (),
 ) -> AgentRuntime:
     """Build the retained model after the host repaired its original admission."""
     llm, _binding = await boot_agent_scope(
@@ -397,6 +399,7 @@ async def build_runtime(
             registration_ttl_seconds=registration_ttl_seconds,
             machine=machine,
             skip_permissions=slices.harness_cli.harness_skip_permissions,
+            contributions=contributions,
         ),
     )
 
@@ -410,6 +413,7 @@ def harness_bridge_for(
     registration_ttl_seconds: float,
     machine: str,
     skip_permissions: bool = True,
+    contributions: Iterable[HarnessContribution] = (),
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
@@ -426,6 +430,7 @@ def harness_bridge_for(
         registrations=registrations,
         registration_ttl_seconds=registration_ttl_seconds,
         skip_permissions=skip_permissions,
+        contributions=contributions,
     )
 
 

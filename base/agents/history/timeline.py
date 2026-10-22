@@ -474,6 +474,26 @@ def _content_block_item(
     return _chat_item(msg_idx, block_idx, t, created_at), block_idx, reasoning_attached
 
 
+def _tool_call_code_and_source(
+    tc: ToolCall, sdk_calls: list[SdkCall] | None
+) -> tuple[str, str | None]:
+    args = tc.get("args")
+    code = (
+        raw_code if isinstance(args, dict) and isinstance(raw_code := args.get("code"), str) else ""
+    )
+    tc_name = tc.get("name")
+    tool_source = (
+        tc_name if isinstance(tc_name, str) and tc_name and tc_name != "execute_code" else None
+    )
+    if tool_source is None and sdk_calls:
+        first_method = sdk_calls[0].method
+        if first_method and not first_method.startswith("meiva."):
+            tool_source = first_method
+    if tool_source is not None:
+        code = code.removeprefix(f"# {tool_source}\n")
+    return code, tool_source
+
+
 # meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 def _tool_call_items(
     msg: AIMessage,
@@ -486,12 +506,8 @@ def _tool_call_items(
     out: list[TimelineItem] = []
     tool_calls: list[ToolCall] = getattr(msg, "tool_calls", None) or []
     for ordinal, tc in enumerate(tool_calls):
-        args = tc.get("args")
-        code = ""
-        if isinstance(args, dict):
-            c = args.get("code")
-            if isinstance(c, str):
-                code = c
+        sdk_calls = sdk_by_id.get(tc.get("id") or "")
+        code, tool_source = _tool_call_code_and_source(tc, sdk_calls)
         code_block_idx = len(content_indices) + ordinal
         block_code_elapsed_ms = (
             code_ms_by_block.get(str(code_block_idx)) if code_ms_by_block is not None else None
@@ -500,11 +516,11 @@ def _tool_call_items(
             TimelineItem(
                 item_id=f"{msg_idx}.{code_block_idx}",
                 kind="agent_code",
-                source=None,
+                source=tool_source,
                 payload=code,
                 created_at=created_at,
                 inbound_id=None,
-                sdk_calls=sdk_by_id.get(tc.get("id") or ""),
+                sdk_calls=sdk_calls,
                 code_elapsed_ms=block_code_elapsed_ms,
             )
         )

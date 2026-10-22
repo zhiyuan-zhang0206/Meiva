@@ -218,6 +218,8 @@ def load_meiva_env() -> EnvBootResult:
     alias is normalized before a lower-priority layer can supply the other alias.
     Additional index settings remain separate and are never merged here.
     """
+    for key in [k for k, v in os.environ.items() if k.startswith("MEIVA_") and v == ""]:
+        os.environ.pop(key, None)
     home = resolve_meiva_home()
     os.environ.setdefault("MEIVA_HOME", str(home))
     _load_dotenv_layer(home / ".env")

@@ -5,11 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.harness import ClusterFact, EntryPoint, Handoff
+from base.api_contracts.agent_contract import Harness
+from base.lm.harness import ClusterFact, EntryPoint, Handoff, HarnessContribution
 from base.lm.harness.handoff import HANDOFF_VERSION
 
 DEFAULT_CLUSTER = (ClusterFact("macmini", "primary host"),)
-DEFAULT_ENTRIES = (EntryPoint("meiva.files", "read and write files"),)
+DEFAULT_ENTRIES = (EntryPoint("meiva.tasks", "read and update tasks"),)
 
 
 def handoff(
@@ -35,20 +36,23 @@ def test_render_carries_the_six_sections_in_order(tmp_path: Path) -> None:
     text = handoff(tmp_path).render()
     headings = [line for line in text.splitlines() if line.startswith("## ")]
     assert headings == [
-        "## 1. Identity",
-        "## 2. Cluster",
-        "## 3. Entry points",
-        "## 4. Do not use",
-        "## 5. Reporting",
-        "## 6. Task",
+        "## Meiva & Your Cluster Identity",
+        "## Cluster Machines",
+        "## Using the Meiva Python SDK",
+        "## Tool & Environment Boundaries",
+        "## Collaboration & Reporting",
+        "## Standing Instructions",
     ]
 
 
 def test_render_mentions_identity_and_task(tmp_path: Path) -> None:
     text = handoff(tmp_path).render()
-    assert "Meiva agent #6984 (claude-sdk-bridge)" in text
+    assert "# Role & Operating Context — Agent #6984 (claude-sdk-bridge)" in text
+    assert "Handoff" not in text
     assert f"- workspace: {tmp_path}" in text
     assert "- machine: macmini" in text
+    assert "python3 -c '" in text
+    assert "import meiva" in text
     assert text.rstrip().endswith("Read hello.txt and reply with the third word.")
 
 
@@ -67,10 +71,48 @@ def test_non_positive_agent_id_is_refused(tmp_path: Path) -> None:
         handoff(tmp_path, agent_id=0)
 
 
-def test_defaults_cover_the_overlap_and_reporting_rules(tmp_path: Path) -> None:
-    text = handoff(tmp_path).render()
-    assert "background-task or monitor machinery" in text
-    assert "One reply per turn" in text
+def test_defaults_cover_the_boundary_and_reporting_rules(tmp_path: Path) -> None:
+    text = Handoff(
+        agent_id=6984,
+        instruction="Read hello.txt",
+        machine="macmini",
+        workspace=tmp_path,
+    ).render()
+    assert "meiva.files" not in text
+    assert "meiva.tasks" not in text
+    assert "meiva.watcher" not in text
+    assert "meiva.agents" in text
+    assert "Use your native tools for files" in text
+    assert "State what you did and the evidence for it" in text
+
+
+def test_with_contributions_filters_by_harness_and_deduplicates(tmp_path: Path) -> None:
+    base = Handoff(
+        agent_id=6984,
+        instruction="Read hello.txt",
+        machine="macmini",
+        workspace=tmp_path,
+    )
+    contributions = (
+        HarnessContribution(
+            harnesses=frozenset({Harness.CODEX, Harness.CLAUDE_CODE}),
+            entries=(
+                EntryPoint("meiva.tasks", "the task you were given, and its siblings"),
+                EntryPoint("meiva.agents", "duplicate should be ignored"),
+            ),
+            discipline=("Report progress to your agreed delegator.",),
+        ),
+        HarnessContribution(
+            harnesses=frozenset({Harness.ANTIGRAVITY}),
+            entries=(EntryPoint("meiva.agy_only", "antigravity only"),),
+        ),
+    )
+    merged = base.with_contributions(contributions, harness=Harness.CODEX)
+    text = merged.render()
+    assert "meiva.tasks" in text
+    assert "duplicate should be ignored" not in text
+    assert "meiva.agy_only" not in text
+    assert "Report progress to your agreed delegator." in text
 
 
 def test_empty_cluster_and_entries_render_placeholders(tmp_path: Path) -> None:
@@ -108,8 +150,3 @@ def test_field_set_is_pinned_to_the_handoff_version() -> None:
         "Handoff fields changed: bump HANDOFF_VERSION and update "
         "PINNED_HANDOFF_FIELDS in the same commit"
     )
-
-
-def test_render_states_the_handoff_version(tmp_path: Path) -> None:
-    text = handoff(tmp_path).render()
-    assert f"- handoff version: {HANDOFF_VERSION}" in text

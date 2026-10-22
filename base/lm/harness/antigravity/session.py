@@ -16,6 +16,7 @@ from base.lm.harness.antigravity.mapping import (
     map_init,
     map_step_update,
     parse_result,
+    parse_usage,
 )
 from base.lm.harness.antigravity.transport import (
     AgyTransport,
@@ -160,6 +161,7 @@ class AgySession:
         self._tasks_entered = False
         self._totals = SessionTotals()
         self._session_id: str | None = None
+        self._model: str | None = None
         self._baseline: dict[int, str] = {}
         self._closed = False
         self._dropped_deltas = 0
@@ -167,6 +169,7 @@ class AgySession:
         self._record: SessionRecord | None = None
         self._handoff_ticket: TurnTicket | None = None
         self._step_text: dict[int, list[str]] = {}
+        self._turn_steps: list[Usage] = []
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         if self._transport is not None:
@@ -398,7 +401,7 @@ class AgySession:
             agent_id=self.agent_id,
             session_id=self._session_id,
             cwd=str(self.config.cwd),
-            model=self.config.model,
+            model=self._model or self.config.model,
             created_at=previous.created_at if previous is not None else now,
             updated_at=now,
             resumes=(previous.resumes if previous is not None else 0)
@@ -428,6 +431,7 @@ class AgySession:
     async def _begin(self, ticket: TurnTicket) -> None:
         ticket.started_at = time.monotonic()
         self._step_text = {}
+        self._turn_steps = []
         try:
             transport = await self._ensure_transport()
             self._baseline = snapshot(self._probe, transport.pid)
@@ -507,6 +511,7 @@ class AgySession:
         if name == "init":
             event = map_init(payload)
             self._session_id = event.session_id or self._session_id
+            self._model = event.model or self._model
             self._emit(event)
             self._bind()
             return
@@ -522,6 +527,10 @@ class AgySession:
             for event in map_step_update(update, turn_id=ticket.turn_id):
                 self._emit(event)
             if update.get("state") == "DONE":
+                if update.get("step_type") == "agent_response" and isinstance(
+                    update.get("usage"), dict
+                ):
+                    self._turn_steps.append(parse_usage(update.get("usage")))
                 done = assistant_text(
                     update, turn_id=ticket.turn_id, text=self._take_step_text(update)
                 )
@@ -563,6 +572,8 @@ class AgySession:
         self._totals = self._totals.with_turn(fields.usage, None)
         if fields.session_id:
             self._session_id = fields.session_id
+        steps = tuple(self._turn_steps)
+        num_turns = max(len(steps), fields.num_turns, 1)
         self._emit(
             TurnCompleted(
                 turn_id=ticket.turn_id,
@@ -572,12 +583,13 @@ class AgySession:
                 is_error=fields.is_error,
                 interrupted=ticket.interrupt_requested or fields.interrupted,
                 stop_reason=fields.status,
-                num_turns=fields.num_turns,
+                num_turns=num_turns,
                 duration_ms=fields.duration_ms,
                 usage=fields.usage,
                 cost_usd=None,
                 cumulative_cost_usd=self._totals.cost_usd,
                 permission_denials=fields.denied_actions,
+                steps=steps,
             )
         )
         self._complete(ticket, outcome)

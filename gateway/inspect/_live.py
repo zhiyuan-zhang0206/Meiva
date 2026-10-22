@@ -45,7 +45,11 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
             "       CASE WHEN heartbeat_paused_until > now() THEN heartbeat_paused_until END, "
             "       liveness_state, last_probe_at, "
             "       (SELECT mp.last_probe_at FROM machine_probe mp "
-            "        WHERE mp.machine_name = agents_meta.machine) "
+            "        WHERE mp.machine_name = agents_meta.machine), "
+            "       harness, "
+            "       (SELECT amo.model FROM agent_metric_observations amo "
+            "        WHERE amo.agent_id = agents_meta.id AND amo.model IS NOT NULL "
+            "        ORDER BY amo.occurred_at DESC LIMIT 1) "
             "FROM agents_meta WHERE id = %s",
             (agent_id,),
         )
@@ -60,6 +64,9 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
         )
         pending_row = cur.fetchone()
         assert pending_row is not None  # noqa: S101 — EXISTS always returns one row
+        overlay: dict[str, Any] = dict(row[0]) if row[0] is not None else {}
+        if row[10] != "meiva" and isinstance(row[11], str) and row[11]:
+            overlay["llm_model"] = row[11]
         return InspectDbRows(
             machine=row[1],
             status=row[2],
@@ -68,7 +75,7 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
             spawned_at=row[5],
             paused_until=row[6],
             pending_inbound=bool(pending_row[0]),
-            config_overlay=row[0] if row[0] is not None else {},
+            config_overlay=overlay,
             liveness_state=LivenessState(row[7]),
             last_probe_at=row[8],
             observation=observation(row[9]),

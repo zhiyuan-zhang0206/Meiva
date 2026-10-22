@@ -216,6 +216,7 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     key: "cost-activity",
     node: (
       <CostActivitySection
+        agentId={agentId}
         inspect={windowedData}
         failed={windowedQuery.error != null}
         pending={windowedQuery.isPending}
@@ -362,8 +363,7 @@ function InspectReadError({ message, retryLabel, pending, onRetry }: {
   );
 }
 
-function ContextSection({ agentId }: { agentId: number }) {
-  const t = useTranslations("inspector");
+function useAgentHarness(agentId: number) {
   const { data: roster } = useAgentRoster();
   const selected = useQuery<AgentRow>({
     queryKey: [...AGENT_DETAIL_QUERY_KEY, agentId],
@@ -373,7 +373,12 @@ function ContextSection({ agentId }: { agentId: number }) {
     gcTime: 0,
     retry: false,
   });
-  const harness = (roster?.agents.find((agent) => agent.agent_id === agentId) ?? selected.data)?.harness;
+  return (roster?.agents.find((agent) => agent.agent_id === agentId) ?? selected.data)?.harness;
+}
+
+function ContextSection({ agentId }: { agentId: number }) {
+  const t = useTranslations("inspector");
+  const harness = useAgentHarness(agentId);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const contextTokens = useTimelineStore((s) => s.tokenUsage);
   const maxContextTokens = useTimelineStore((s) => s.maxContextTokens);
@@ -597,6 +602,7 @@ function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
 }
 
 function CostActivitySection({
+  agentId,
   inspect,
   failed,
   pending,
@@ -605,6 +611,7 @@ function CostActivitySection({
   fetching,
   onRefresh,
 }: {
+  agentId: number;
   inspect: AgentInspectStatistics | undefined;
   failed: boolean;
   pending: boolean;
@@ -614,6 +621,8 @@ function CostActivitySection({
   onRefresh: () => void;
 }) {
   const t = useTranslations("inspector");
+  const harness = useAgentHarness(agentId);
+  const isExternalHarness = harness != null && harness !== "meiva";
   const cost = inspect?.cost;
   const activity = inspect?.activity ?? null;
   const tps = inspect?.tps;
@@ -621,10 +630,13 @@ function CostActivitySection({
   const idleSeconds = activity
     ? Math.max(0, activity.alive_seconds - activity.active_seconds)
     : 0;
+  const billingSub =
+    harness != null ? (isExternalHarness ? t("billingSubscription") : t("billingApi")) : undefined;
   const unpricedSub =
     cost && cost.unpriced_calls > 0
       ? t("unpriced", { count: String(cost.unpriced_calls) })
       : undefined;
+  const costSub = [billingSub, unpricedSub].filter(Boolean).join(" · ") || undefined;
   return (
     <Section
       icon={<Activity className="size-3" />}
@@ -670,7 +682,7 @@ function CostActivitySection({
               <Metric
                 label={t("metricCost")}
                 value={`$${cost.cost_usd.toFixed(4)}`}
-                sub={unpricedSub}
+                sub={costSub}
               />
               <Metric label={t("metricLlmCalls")} value={String(cost.llm_calls)} />
               <Metric
@@ -684,22 +696,26 @@ function CostActivitySection({
             </div>
           ) : null}
           <div className="grid grid-cols-2 gap-1">
-            <Metric
-              label={t("metricTps")}
-              value={tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—"}
-            />
-            <Metric
-              label={t("metricLlmOutput")}
-              value={
-                hasLife && activity.llm_seconds != null
-                  ? formatInterval(Math.round(activity.llm_seconds))
-                  : "—"
-              }
-            />
-            <Metric
-              label={t("metricCodeExecution")}
-              value={hasLife ? formatInterval(Math.round(activity.exec_seconds)) : "—"}
-            />
+            {!isExternalHarness ? (
+              <>
+                <Metric
+                  label={t("metricTps")}
+                  value={tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—"}
+                />
+                <Metric
+                  label={t("metricLlmOutput")}
+                  value={
+                    hasLife && activity.llm_seconds != null
+                      ? formatInterval(Math.round(activity.llm_seconds))
+                      : "—"
+                  }
+                />
+                <Metric
+                  label={t("metricCodeExecution")}
+                  value={hasLife ? formatInterval(Math.round(activity.exec_seconds)) : "—"}
+                />
+              </>
+            ) : null}
             <Metric
               label={t("metricIdle")}
               value={hasLife ? formatInterval(Math.round(idleSeconds)) : "—"}
