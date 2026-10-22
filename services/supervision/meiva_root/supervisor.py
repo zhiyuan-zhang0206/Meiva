@@ -9,10 +9,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from time import monotonic, time
-from typing import Protocol, cast
+from typing import Any, Protocol
 
 import psutil
 
@@ -38,6 +38,7 @@ from services.supervision.meiva_root.intent_store import (
     RestartFailure,
     RestartStage,
     UnitIntent,
+    caller_facts,
     merge_record_for_boot,
 )
 from services.supervision.meiva_root.left_behind import LeftBehindMixin
@@ -51,6 +52,10 @@ from services.supervision.meiva_root.unit_ledger import GenerationRecord
 from services.supervision.meiva_root.unit_records import Generation, UnitRuntime
 
 _log = logging.getLogger(__name__)
+
+# meiva:note
+# A refused wrapper is refused in milliseconds; losing the cap beats a restart loop.
+REWRITE_STARTUP_WINDOW_S = 10.0
 
 
 class HealthSource(Protocol):
@@ -69,36 +74,8 @@ class MetricsSource(Protocol):
         ...
 
 
-# meiva:note
-# The wire validates the caller block; this binds it to the record the root
-# persists, so the attribution outlives the requesting process and the root
-# generation that served it.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
-def _caller_facts(raw: object) -> CallerFacts | None:
-    if not isinstance(raw, dict):
-        return None
-    values = cast("Mapping[str, object]", raw)
-    argv = values.get("argv")
-    env_keys = values.get("env_keys")
-    return CallerFacts(
-        pid=int(cast("int", values["pid"])),
-        ppid=int(cast("int", values["ppid"])),
-        uid=int(cast("int", values["uid"])),
-        cwd=str(values["cwd"]),
-        argv=tuple(
-            str(item) for item in cast("list[object]", argv if isinstance(argv, list) else [])
-        ),
-        agent_id=None if values.get("agent_id") is None else str(values["agent_id"]),
-        machine=str(values["machine"]),
-        operation_id=None if values.get("operation_id") is None else str(values["operation_id"]),
-        env_keys=tuple(
-            str(item)
-            for item in cast("list[object]", env_keys if isinstance(env_keys, list) else [])
-        ),
-    )
-
-
 type ChildSpawn = Callable[..., Awaitable[asyncio.subprocess.Process]]
+type ArgvTransform = Callable[[str, Sequence[str]], Sequence[str]]
 
 
 class Supervisor(LeftBehindMixin, StoppingMixin):
@@ -125,6 +102,17 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         self._run_dir = run_dir
         self._log_dir = run_dir / "logs"
         self._config = config if config is not None else SupervisorConfig()
+        # meiva:note
+        # Opaque launch rewriting from the assembly; None launches the manifest as written.
+        self._argv_transform: ArgvTransform | None = None
+
+        # meiva:note
+        # A rewrite that starts and then dies is not a launch failure the supervisor can
+        # see: the wrapper exits, this looks like an ordinary unit exit, and the restart
+        # policy would replay the same rewrite forever -- a unit that never comes up.
+        # One early non-zero exit therefore retires the rewrite for this process's whole
+        # life, and the unit runs unbounded from then on, loudly.
+        self._rewrite_retired = False
         self._units: dict[str, UnitRuntime] = {
             manifest.id: UnitRuntime(manifest=manifest) for manifest in registry.units
         }
@@ -371,6 +359,9 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
                 "restart_count": runtime.restart_count,
                 "last_exit": runtime.last_exit,
                 "last_error": runtime.last_error,
+                "launch_rewrite": _rewrite_state(
+                    self._argv_transform, retired=self._rewrite_retired
+                ),
             }
             units.append(entry)
         own_identity = OwnedProcess.capture(psutil.Process())
@@ -482,7 +473,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
                 return error_response(
                     ErrorCode.INVALID_REQUEST, f"verb {verb.value!r} requires a name"
                 )
-            caller = _caller_facts(request.get("caller"))
+            caller = caller_facts(request.get("caller"))
             if verb is Verb.UP:
                 return ok_response(await self.up(name, caller=caller))
             if verb in {Verb.DOWN, Verb.FORCE_DOWN}:
@@ -612,6 +603,11 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             return
         self._clear_restart_failure(runtime)
 
+    # meiva:note
+    # The assembly owns the decision; no platform name or ambient config enters this file.
+    def set_argv_transform(self, transform: ArgvTransform | None) -> None:
+        self._argv_transform = transform
+
     async def _spawn(self, runtime: UnitRuntime) -> None:
         """Fork+exec one fresh generation of `runtime`.
 
@@ -633,8 +629,16 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         try:
             env = inherited_process_env() | dict(manifest.env)
             launcher = self.spawn or asyncio.create_subprocess_exec
-            proc = await launcher(
-                *manifest.exec,
+            plain = list(manifest.exec)
+            argv = (
+                self._argv_transform(manifest.id, plain)
+                if self._argv_transform is not None and not self._rewrite_retired
+                else plain
+            )
+            proc = await self._launch(
+                launcher,
+                argv,
+                plain,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=log_fd,
                 stderr=asyncio.subprocess.STDOUT,
@@ -654,6 +658,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             started_at=monotonic(),
             seq=runtime.spawn_seq,
             identity=identity,
+            rewritten=argv != plain,
         )
         runtime.generation = generation
         runtime.state = UnitState.RUNNING
@@ -684,9 +689,42 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             " ".join(manifest.exec),
         )
 
+    async def _launch(
+        self, launcher: ChildSpawn, argv: Sequence[str], plain: Sequence[str], **options: Any
+    ) -> asyncio.subprocess.Process:
+        if list(argv) == list(plain):
+            return await launcher(*plain, **options)
+        try:
+            return await launcher(*argv, **options)
+        except OSError as exc:
+            _log.warning(
+                "the rewritten launch never started (%s); memory cap not applied, "
+                "the unit runs unbounded",
+                exc,
+            )
+            return await launcher(*plain, **options)
+
     async def _watch(self, runtime: UnitRuntime, generation: Generation) -> None:
         """Reap one direct child and make an unexpected exit eligible for replacement."""
         returncode = await generation.proc.wait()
+        # meiva:note
+        # Positive exit inside the window retires the rewrite; negative codes are signal
+        # deaths, so a plain `stop` never costs the cap. A real crash is indistinguishable
+        # here -- we choose to lose the cap rather than risk a restart loop.
+        if (
+            generation.rewritten
+            and not self._rewrite_retired
+            and returncode > 0
+            and monotonic() - generation.started_at <= REWRITE_STARTUP_WINDOW_S
+        ):
+            self._rewrite_retired = True
+            _log.warning(
+                "unit %s: the rewritten launch exited %s within %.0fs; memory cap not "
+                "applied, the unit runs unbounded for the rest of this root's life",
+                runtime.manifest.id,
+                returncode,
+                REWRITE_STARTUP_WINDOW_S,
+            )
         if runtime.generation is generation:
             runtime.last_exit = _describe_exit(returncode)
             runtime.state = UnitState.STOPPED
@@ -726,6 +764,13 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         if runtime.last_error is not None:
             result["error"] = runtime.last_error
         return result
+
+
+# meiva:note
+# The status row carries the rewrite's state: "why is this machine unbounded" is answerable
+# without grepping a log.
+def _rewrite_state(transform: ArgvTransform | None, *, retired: bool) -> str:
+    return "off" if transform is None else "off(retired)" if retired else "on"
 
 
 def _describe_exit(returncode: int) -> str:

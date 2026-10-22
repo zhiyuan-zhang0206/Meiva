@@ -331,3 +331,72 @@ async def test_reference_station_and_writer_share_one_entry_gate(
     assert len(machines) == 1
     assert readers == [machines[0].host, machines[0].host]
     await rounds.stop()
+
+
+# meiva:note
+# The agent-host memory budget is opt-in and platform-gated. A cap that does nothing is
+# worse than no cap: it lets an operator believe the plane is bounded. These tests pin
+# the three ways it declines (zero, non-Linux, no usable systemd) and the one way it
+# applies, through explicit parameters rather than patched module state.
+def test_agent_host_cap_is_off_by_default() -> None:
+    assert (
+        glue.agent_host_memory_caps(
+            max_mb=0,
+            swap_max_mb=0,
+            platform="linux",
+            scope_available=lambda _max_mb, _swap_mb: True,
+        )
+        == {}
+    )
+
+
+def test_agent_host_cap_declines_where_cgroups_do_not_exist() -> None:
+    assert (
+        glue.agent_host_memory_caps(
+            max_mb=18432,
+            swap_max_mb=0,
+            platform="darwin",
+            scope_available=lambda _max_mb, _swap_mb: True,
+        )
+        == {}
+    )
+
+
+def test_agent_host_cap_declines_when_systemd_cannot_scope() -> None:
+    assert (
+        glue.agent_host_memory_caps(
+            max_mb=18432,
+            swap_max_mb=0,
+            platform="linux",
+            scope_available=lambda _max_mb, _swap_mb: False,
+        )
+        == {}
+    )
+
+
+def test_agent_host_cap_applies_when_every_precondition_holds() -> None:
+    caps = glue.agent_host_memory_caps(
+        max_mb=18432,
+        swap_max_mb=0,
+        platform="linux",
+        scope_available=lambda _max_mb, _swap_mb: True,
+    )
+    assert caps == {"agent-host": glue.UnitMemoryCap(max_mb=18432, swap_max_mb=0)}
+
+
+def test_the_launch_rewrite_wraps_only_the_capped_unit() -> None:
+    caps = {"agent-host": glue.UnitMemoryCap(max_mb=18432, swap_max_mb=0)}
+    argv = ["python", "-m", "services.agent_runner.agent_host"]
+    assert glue.memory_scoped_argv("agent-host", argv, caps=caps) == [
+        "systemd-run",
+        "--user",
+        "--scope",
+        "--collect",
+        "-p",
+        "MemoryMax=18432M",
+        "-p",
+        "MemorySwapMax=0M",
+        "--",
+        *argv,
+    ]
+    assert glue.memory_scoped_argv("gateway", argv, caps=caps) == argv
