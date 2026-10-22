@@ -15,11 +15,11 @@ from pydantic import BaseModel, Field
 
 import base.agents.impersonation as agents_impersonation
 from agent import impersonation, impersonation_handoff, impersonation_process
-from agent.extensions import plugin_state_codec
 from agent.graph.exec.protocol import read_request, write_request
 from agent.hooks.tests.fakes import placeholder_runtime
 from agent.state import BaseAgentState
 from base.agents.context import MeivaContext
+from base.agents.context.external_attachment import plugin_state_codec
 from base.agents.impersonation import relay
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision

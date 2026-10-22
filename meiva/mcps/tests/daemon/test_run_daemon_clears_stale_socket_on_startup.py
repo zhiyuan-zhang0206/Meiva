@@ -324,7 +324,7 @@ async def test_connect_server_enforces_requires_before_connecting(
 ) -> None:
     """A server whose `requires` is unmet raises BEFORE any stdio launch."""
     write_config(fake_home, {"chrome": {"command": "npx", "requires": {"display": True}}})
-    import meiva.mcps.config as _cfg
+    import base.packages.mcp_config as _cfg
 
     # display_available is imported into mcp_config from base.host.system.probes;
     # patch the bound name (where assert_requirements calls it).

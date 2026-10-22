@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-import meiva.mcps.config as cfg_mod
+import base.packages.mcp_config as cfg_mod
 from base.packages.plugins.mcp_enabled import (
     McpEnabledConfig,
     McpEnabledConfigError,

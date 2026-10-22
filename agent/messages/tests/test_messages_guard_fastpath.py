@@ -11,12 +11,12 @@ from langchain_core.messages import (
 )
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
-from agent.messages import guard
 from agent.messages.guard import (
     MessagesMutationError,
     guarded_add_messages,
     guarded_delta_reducer,
 )
+from base.agents.messages import guard
 
 StateBuilder = Callable[[], tuple[list[Any], list[Any]]]
 
