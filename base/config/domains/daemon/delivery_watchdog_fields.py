@@ -34,9 +34,9 @@ class DeliveryWatchdogFields:
     )
 
     delivery_watchdog_threshold_seconds: float = Field(
-        default=30.0,
+        default=120.0,
         alias="MEIVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS",
-        description="Delivery watchdog stall alert threshold (seconds): a chat inbound still pending longer than this whose owner is in a waiting/terminal state (idling/terminated) is reported as a stalled delivery.",
+        description="Delivery watchdog stall alert threshold (seconds): a chat inbound still pending longer than this whose owner is in a waiting/terminal state (idling/terminated) is reported as a stalled delivery. Baseline 2026-10-22: p50 delivery is 3-5s and 29% of chats exceed 30s, so the old 30s line sat inside normal wake latency; 120s still leaves the 600s-24h tail (the one worth acting on) untouched.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,

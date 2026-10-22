@@ -186,6 +186,35 @@ groups:
               type: reduce
               expression: A
               reducer: mean
+          - refId: E
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: E
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                max by (agent_id) (max_over_time({service_name="unknown_service",
+                event_name="delivery_stalled"} | json | cluster=".meiva" | category="telemetry"
+                | unwrap attributes_age_s [3m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 180
+              to: 0
+          - refId: F
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: F
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: E
+              reducer: max
           - refId: D
             datasourceUid: __expr__
             queryType: ""
@@ -2859,16 +2888,17 @@ groups:
           metric: delivery_stalled
           team: meiva-ops
         annotations:
-          summary: "Chat delivery to agent {{ $labels.agent_id }} is stalled ({{ $values.C }} stalled inbound(s) in 3m)"
+          summary: "Chat delivery to agent {{ $labels.agent_id }} is stalled ({{ $values.C }} stalled inbound(s) in 3m, oldest {{ $values.F }}s)"
           description: >-
             The delivery watchdog emits one delivery_stalled event per chat inbound that stayed pending past
-            MEIVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS (30s) while its owner is idling or terminated (lost
-            pub/sub wake or a claim loop that is not running). A system notification queued for a
-            terminated owner is excluded: it waits for a later life and is never woken, so it is not a
-            lost wake. Wake re-dispatch and the dead-letter sweeps
-            keep running; this rule is only the notification. Deploy windows are silenced upstream by the
-            fleet-update silence, so a resume's claim tail does not page. The rule is per agent (stream
-            label agent_id); meiva-ops-delivery-stalled-backlog stays as the fleet-wide volume rule.
+            MEIVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS (120s) while its owner is idling or terminated (lost
+            pub/sub wake or a claim loop that is not running). System notifications are excluded for every
+            owner: measured 2026-10-22, 229 of 229 notices that sat 1-24h were enqueued inside a runtime
+            restart window - the host was gone, so nothing could claim them - and notices were 85% of the
+            whole long tail. This rule changed in SCOPE, not sensitivity: the 600s+ tail caused by a real
+            lost wake is still reported per agent, and meiva-ops-delivery-stalled-backlog stays as the
+            fleet-wide volume rule. Deploy windows are silenced upstream by the fleet-update silence, so a
+            resume's claim tail does not page.
         data:
           - refId: A
             datasourceUid: loki

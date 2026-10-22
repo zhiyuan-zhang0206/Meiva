@@ -343,7 +343,7 @@ class TestSelectStalePending:
         )
         assert [row[0] for row in select_stale_pending(pool, _THRESHOLD_S)] == [iid]
 
-    def test_idling_owner_system_notification_is_still_a_stall(
+    def test_idling_owner_system_notification_is_not_a_stall(
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
@@ -355,8 +355,11 @@ class TestSelectStalePending:
         machine_identity: MachineIdentity,
     ) -> None:
         # meiva:note
-        # An idling owner is woken for a system notification, so one still pending
-        # means the wake or the claim loop is broken.
+        # A system notice is not evidence of a lost wake. Measured 2026-10-22 over 3
+        # days: of the 229 notices-to-idling-owners pending 1-24h, every one was
+        # enqueued during a runtime restart window (the host was gone, so nothing
+        # could claim it) and 85% of the whole long tail were notices. Alerts they
+        # produced were restart bookkeeping, not a delivery defect.
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
@@ -364,14 +367,14 @@ class TestSelectStalePending:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        iid = _insert_old_inbound(
+        _insert_old_inbound(
             db_conn,
             aid,
             age_s=_THRESHOLD_S + 5,
             database_gate=database_gate,
             source="system:notice-expire",
         )
-        assert [row[0] for row in select_stale_pending(pool, _THRESHOLD_S)] == [iid]
+        assert select_stale_pending(pool, _THRESHOLD_S) == []
 
     def test_running_owner_queues_are_not_stalls(
         self,
