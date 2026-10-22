@@ -23,12 +23,13 @@ instructions — because an agent that skims it still meets the instructions las
 `HANDOFF_VERSION` pins the dataclass field set across adapters.
 
 Section 3 names where to start, not an inventory: `DEFAULT_ENTRIES` holds the
-`meiva` entry — which attaches this session's identity on first use — plus the
-cluster namespaces a turn reaches for first (tasks, agents, memory). External
-harnesses use their own native file, shell, search, and in-turn background tools,
-so `meiva.files` is not exposed in `DEFAULT_ENTRIES`. Listing every
-namespace there would become a second copy of `meiva.help()` that drifts from the
-SDK; the entry point and its pointer are enough to start.
+`meiva` entry — which attaches this session's identity on first use — plus
+`meiva.agents` and `meiva.self` (`pause_heartbeat`, `terminate`), while plugins
+contribute their own cluster namespaces (`meiva.tasks`, `meiva.memory`,
+`meiva.schedules`). External harnesses use their own native file, shell, search,
+and in-turn background tools, so `meiva.files` is not exposed in `DEFAULT_ENTRIES`.
+Listing every namespace there would become a second copy of `meiva.help()` that
+drifts from the SDK; the entry point and its pointer are enough to start.
 
 Changing the field set or the section order means bumping the version.
 `tests/test_handoff.py` pins both: the field tuple is compared against

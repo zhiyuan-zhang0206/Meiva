@@ -196,14 +196,25 @@ def terminate() -> NoReturn:
     background work that should no longer wake you before calling this."""
     from meiva.sdk_surface import agent_identity
 
-    agent_identity.assert_self_action("terminate")
+    ctx = process_context.ambient_context()
+    is_attached = (
+        ctx is not None
+        and ctx.identity is not None
+        and ctx.identity.owns_loop
+        and ctx.identity.lease is not None
+    )
+    if not is_attached:
+        agent_identity.assert_self_action("terminate")
+    target_id = agent_identity.require_agent_id() if is_attached else agent_identity.agent_id()
     with process_context.current_context().sql.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
             "VALUES (%s, '', 'terminate', 'self')",
-            (agent_identity.agent_id(),),
+            (target_id,),
         )
     _publish_self_inbound_wake()
+    if is_attached:
+        raise SystemExit(0)
     raise AgentTermination
 
 

@@ -375,9 +375,7 @@ class CodexSession:
             poll_seconds=CANCEL_POLL_SECONDS,
         )
         remaining = (
-            ()
-            if gone
-            else describe(observed, [child for child in spawned if self._probe.is_alive(child)])
+            () if gone else describe(observed, [c for c in spawned if self._probe.is_alive(c)])
         )
         return CancelReport(
             turn_id=ticket.turn_id if ticket is not None else None,
@@ -458,17 +456,16 @@ class CodexSession:
     def _resume_from_registry(self) -> str | None:
         if self._registry is None or self.agent_id is None:
             return None
-        record = self._registry.load(self.agent_id)
-        if record is None:
-            return None
-        self._record = record
-        return record.session_id
+        self._record = self._registry.load(self.agent_id)
+        return self._record.session_id if self._record is not None else None
 
     def _inject_handoff(self, handoff: Handoff | None) -> None:
         if handoff is None or self._resumed_existing:
             return
-        key = f"handoff:{self.agent_id}" if self.agent_id is not None else None
-        ticket = self.submit(handoff.render(), key=key)
+        ticket = self.submit(
+            handoff.render(),
+            key=f"handoff:{self.agent_id}" if self.agent_id is not None else None,
+        )
         self._handoff_ticket = ticket
         self._emit(
             HandoffInjected(
@@ -490,8 +487,7 @@ class CodexSession:
             model=self._model or self.config.model or "",
             created_at=previous.created_at if previous is not None else now,
             updated_at=now,
-            resumes=(previous.resumes if previous is not None else 0)
-            + (1 if self._resumed_existing else 0),
+            resumes=(previous.resumes if previous is not None else 0) + int(self._resumed_existing),
         )
         self._registry.save(self._record)
         self._emit(
@@ -502,9 +498,8 @@ class CodexSession:
 
     def _touch(self) -> None:
         if self._registry is not None and self._record is not None:
-            self._record = replace(
-                self._record, updated_at=datetime.now(UTC).isoformat(timespec="seconds")
-            )
+            now = datetime.now(UTC).isoformat(timespec="seconds")
+            self._record = replace(self._record, updated_at=now)
             self._registry.save(self._record)
 
     async def _begin(self, ticket: TurnTicket) -> None:
@@ -519,10 +514,22 @@ class CodexSession:
         except Exception as exc:
             self._fail_turn(ticket, exc)
             return
-        if (codex_turn_id := as_text(as_object(result.get("turn")).get("id"))) and (
-            ticket.turn_id not in self._turn_ids.values()
-        ):
-            self._turn_ids.setdefault(codex_turn_id, ticket.turn_id)
+        if codex_turn_id := as_text(as_object(result.get("turn")).get("id")):
+            self._bind_codex_turn(ticket, codex_turn_id)
+
+    def _bind_codex_turn(self, ticket: TurnTicket, codex_turn_id: str) -> None:
+        if stale := [
+            cid
+            for cid, tid in self._turn_ids.items()
+            if tid == ticket.turn_id and cid != codex_turn_id
+        ]:
+            for cid in stale:
+                self._turn_ids.pop(cid, None)
+            self._turn_usage.pop(ticket.turn_id, None)
+            self._turn_steps.pop(ticket.turn_id, None)
+            self._final_parts.pop(ticket.turn_id, None)
+            ticket.parts.clear()
+        self._turn_ids[codex_turn_id] = ticket.turn_id
 
     def _start_deadline(self, ticket: TurnTicket) -> None:
         async def expire() -> None:
@@ -603,9 +610,14 @@ class CodexSession:
     def _handle_turn_completed(self, params: JsonObject) -> None:
         turn = as_object(params.get("turn"))
         codex_turn_id = as_text(turn.get("id")) or ""
-        turn_id = self._turn_ids.pop(codex_turn_id, None)
         ticket = self._active
-        if ticket is None or (turn_id is not None and ticket.turn_id != turn_id):
+        bound_codex_id = self._codex_turn_for(ticket.turn_id) if ticket is not None else ""
+        turn_id = self._turn_ids.pop(codex_turn_id, None)
+        if (
+            ticket is None
+            or (turn_id is not None and ticket.turn_id != turn_id)
+            or (turn_id is None and codex_turn_id and bound_codex_id)
+        ):
             self._emit(
                 SessionFaulted(
                     turn_id=turn_id,
@@ -728,24 +740,17 @@ class CodexSession:
         self._fail_pending(SessionClosedError(f"session failed: {exc}"))
 
     def _fail_pending(self, exc: BaseException) -> None:
-        queued = list(self._pending)
-        self._pending.clear()
-        for ticket in queued:
+        for ticket in (*self._pending, *([self._active] if self._active is not None else [])):
             ticket._fail(exc)
-        active = self._active
-        if active is not None:
-            active._fail(exc)
-            self._active = None
+        self._pending.clear()
+        self._active = None
 
     def _recall(self, key: str) -> TurnTicket | None:
-        active = self._active
-        if active is not None and active.key == key:
-            return active
-        for ticket in self._pending:
-            if ticket.key == key:
-                return ticket
-        completed = self._completed.get(key)
-        if completed is None:
+        if self._active is not None and self._active.key == key:
+            return self._active
+        if queued := next((t for t in self._pending if t.key == key), None):
+            return queued
+        if (completed := self._completed.get(key)) is None:
             return None
         future: asyncio.Future[TurnOutcome] = asyncio.get_running_loop().create_future()
         future.set_result(completed)
