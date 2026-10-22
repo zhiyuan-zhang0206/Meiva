@@ -1,4 +1,4 @@
-exports = ["background.py", "coding_tools", "handle.py", "sessions.py", "tests"]
+exports = ["background.py", "coding_tools", "sessions.py", "tests"]
 
 [uses]
 "__init__.py" = ["background.py", "handle.py", "sessions.py"]
@@ -6,3 +6,6 @@ exports = ["background.py", "coding_tools", "handle.py", "sessions.py", "tests"]
 "sessions.py" = ["handle.py"]
 "coding_tools" = ["sessions.py", "tests"]
 "tests" = ["sessions.py"]
+
+[purity]
+"handle.py" = "strict"

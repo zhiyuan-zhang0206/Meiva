@@ -5,3 +5,7 @@ exports = ["index.py", "names.py", "project_roots.py", "scan.py", "tree.py", "tr
 "tests" = ["index.py", "names.py", "project_roots.py", "scan.py"]
 "tree.py" = ["names.py"]
 "tree_builder.py" = ["index.py", "names.py", "tree.py"]
+
+[purity]
+"__init__.py" = "strict"
+"names.py" = "strict"

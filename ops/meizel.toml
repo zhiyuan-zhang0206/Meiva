@@ -10,3 +10,6 @@ exports = ["agents", "alerts.py", "cluster", "cluster_status", "env_audit.py", "
 "pages.py" = ["rpc_schemas"]
 "pty_close_notices.py" = ["cluster_status", "rpc_schemas"]
 "tests" = ["cluster", "cluster_status", "env_audit.py", "host_config.py", "inventory.py", "pages.py", "pty_close_notices.py", "rpc_schemas"]
+
+[purity]
+"__init__.py" = "strict"

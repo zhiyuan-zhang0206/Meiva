@@ -1,5 +1,10 @@
 exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains", "profiles.py", "runtime_config.py", "service_read.py", "tests"]
 
+[purity]
+"base.py" = "strict-to-be"
+"profiles.py" = "strict"
+"wiring.py" = "strict"
+
 [uses]
 "__init__.py" = ["_full.py", "_lite.py", "admin", "config_registry.py", "profiles.py", "service_read.py"]
 "_full.py" = ["admin", "agent_pins.py", "config_registry.py", "domains", "profiles.py", "service_read.py"]
@@ -11,3 +16,6 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 "runtime_config.py" = ["config_registry.py"]
 "service_read.py" = ["config_registry.py", "domains", "runtime_config.py"]
 "tests" = ["__init__.py", "_full.py", "_lite.py", "admin", "base.py", "config_registry.py", "runtime_config.py", "service_read.py"]
+
+[debt.impure-edge]
+"base.py#base/paths/home.py" = 1

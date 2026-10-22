@@ -2,3 +2,6 @@ exports = ["builtin_schedules.py", "completion_notices.py", "inputs.py", "watche
 
 [uses]
 "tests" = ["builtin_schedules.py", "completion_notices.py"]
+
+[purity]
+"__init__.py" = "strict"

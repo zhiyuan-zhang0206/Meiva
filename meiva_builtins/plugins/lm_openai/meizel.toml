@@ -1,2 +1,5 @@
 [uses]
 "provider.py" = ["decision.py"]
+
+[purity]
+"plugin.py" = "strict"

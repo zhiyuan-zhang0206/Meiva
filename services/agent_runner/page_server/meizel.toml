@@ -4,3 +4,7 @@ exports = ["daemon.py", "resources.py"]
 "daemon.py" = ["config.py", "dead_pages.py", "degradation.py", "resources.py", "server.py"]
 "dead_pages.py" = ["config.py"]
 "tests" = ["config.py", "daemon.py", "dead_pages.py", "resources.py", "server.py"]
+
+[purity]
+"__init__.py" = "strict"
+"config.py" = "strict"

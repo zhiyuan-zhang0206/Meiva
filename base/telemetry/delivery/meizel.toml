@@ -4,3 +4,7 @@ exports = ["loss.py", "mirror.py", "pipeline.py", "receipts.py", "reporting.py",
 "loss.py" = ["mirror.py", "receipts.py", "state.py"]
 "mirror.py" = ["receipts.py", "reporting.py", "serialization.py", "state.py"]
 "pipeline.py" = ["loss.py", "receipts.py", "reporting.py"]
+
+[purity]
+"__init__.py" = "strict"
+"receipts.py" = "strict"

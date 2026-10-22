@@ -11,3 +11,6 @@ exports = ["autostart.py", "backend.py", "boot_policy.py", "boot_unit.py", "cron
 "probes.py" = ["hostport.py"]
 "tests" = ["autostart.py", "backend.py", "boot_policy.py", "boot_unit.py", "cron.py", "hostport.py", "logs_job.py", "macos_firewall.py", "packages_job.py", "pr_flow_job.py", "probes.py", "walg_job.py"]
 "walg_job.py" = ["__init__.py", "cron.py", "hostport.py"]
+
+[purity]
+"__init__.py" = "strict"

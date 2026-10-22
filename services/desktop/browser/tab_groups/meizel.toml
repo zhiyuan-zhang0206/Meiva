@@ -2,3 +2,6 @@ exports = ["grouping.py"]
 
 [uses]
 "tests" = ["grouping.py"]
+
+[purity]
+"__init__.py" = "strict"

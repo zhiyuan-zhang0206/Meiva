@@ -1,1 +1,4 @@
 exports = ["breaker.py"]
+
+[purity]
+"__init__.py" = "strict"

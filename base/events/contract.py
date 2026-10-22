@@ -19,6 +19,7 @@ and the ops grid constants.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import get_type_hints
 
 from base.events.loader import load_events
@@ -38,7 +39,13 @@ EVENTS: dict[str, EventSpec] = load_events()
 TIER_BY_EVENT: dict[str, EventTier] = {name: spec.tier for name, spec in EVENTS.items()}
 
 
-def tier_for(event_name: str, category: str, level: str) -> EventTier:
+def tier_for(
+    event_name: str,
+    category: str,
+    level: str,
+    *,
+    tiers: Mapping[str, EventTier] = TIER_BY_EVENT,
+) -> EventTier:
     """Human-facing tier for one persisted event row.
 
     A registered name always reads through ``TIER_BY_EVENT`` first, so a
@@ -47,7 +54,7 @@ def tier_for(event_name: str, category: str, level: str) -> EventTier:
     severity and category deliberately take priority over that default tier:
     warning-or-higher is an anomaly, and an audit row is a business fact.
     """
-    declared = TIER_BY_EVENT[event_name] if event_name in EVENTS else None
+    declared = tiers[event_name] if event_name in EVENTS else None
     if level.lower() in {"warning", "error", "critical"}:
         return "anomaly"
     if category == "audit":

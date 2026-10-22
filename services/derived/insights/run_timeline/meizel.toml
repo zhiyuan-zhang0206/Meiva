@@ -8,3 +8,6 @@ exports = ["history.py", "projection", "router.py", "schemas.py", "tests"]
 "router.py" = ["context.py", "links.py", "messages.py", "projection", "schemas.py"]
 "tests" = ["context.py", "history.py", "links.py", "messages.py", "projection", "router.py", "tokens.py"]
 "tokens.py" = ["history.py", "schemas.py"]
+
+[purity]
+"__init__.py" = "strict"

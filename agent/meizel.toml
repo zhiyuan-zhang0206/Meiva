@@ -14,6 +14,11 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "tests" = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py", "impersonation_handoff.py", "impersonation_process.py", "llm", "messages", "nodes.py", "ownership", "process_boot.py", "startup", "state.py"]
 "turn" = ["db", "graph", "impersonation_handoff.py", "startup", "state.py", "state_channels.py"]
 
+[purity]
+"__init__.py" = "strict"
+"nodes.py" = "strict"
+"state_channels.py" = "strict"
+
 [debt.private-module]
 "tests/test_exec_subprocess.py -> graph/exec/_result.py" = 1
 "tests/test_exec_subprocess.py -> graph/exec/_stream.py" = 1

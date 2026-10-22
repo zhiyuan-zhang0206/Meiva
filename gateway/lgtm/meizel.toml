@@ -2,3 +2,6 @@ exports = ["backend_failure.py", "telemetry_staleness.py"]
 
 [uses]
 "tests" = ["telemetry_staleness.py"]
+
+[purity]
+"__init__.py" = "strict"

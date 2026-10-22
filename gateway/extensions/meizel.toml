@@ -6,3 +6,8 @@ exports = ["inventory.py", "notification_categories.py", "packages.py", "plugin_
 "skills.py" = ["schemas.py"]
 "tests" = ["inventory_matrix.py", "schemas.py", "skills.py"]
 "ui_contributions.py" = ["schemas.py"]
+
+[purity]
+"__init__.py" = "strict"
+"inventory_matrix.py" = "strict"
+"schemas.py" = "strict"

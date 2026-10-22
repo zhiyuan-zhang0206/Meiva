@@ -4,3 +4,6 @@ exports = ["chat_delivery.py", "compact.py", "insert.py", "rows.py"]
 "compact.py" = ["control_delivery.py", "insert.py"]
 "control_delivery.py" = ["insert.py"]
 "tests" = ["chat_delivery.py", "compact.py", "insert.py"]
+
+[purity]
+"__init__.py" = "strict"

@@ -7,3 +7,6 @@ exports = ["deps.py", "plans.py", "runner.py", "wiring.py"]
 "reader.py" = ["deepseek.py", "deps.py", "errors.py", "policy.py"]
 "runner.py" = ["brave.py", "deepseek.py", "deps.py", "plans.py", "reader.py"]
 "wiring.py" = ["deepseek.py", "deps.py", "errors.py"]
+
+[purity]
+"errors.py" = "strict"

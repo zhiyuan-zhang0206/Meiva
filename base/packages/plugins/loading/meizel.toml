@@ -6,3 +6,6 @@ exports = ["discovery.py", "faces.py", "plugin_loader.py", "registry.py"]
 
 [external]
 "plugin_loader.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
+
+[purity]
+"__init__.py" = "strict"

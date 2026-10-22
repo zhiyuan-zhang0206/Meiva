@@ -3,3 +3,7 @@
 "plugin.py" = ["written.py"]
 "tests" = ["_state.py", "agent_runtime.py", "plugin.py", "written.py"]
 "written.py" = ["agent_runtime.py"]
+
+[purity]
+"__init__.py" = "strict"
+"_state.py" = "strict"

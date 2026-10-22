@@ -12,5 +12,9 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "parsers", "st
 "start_intent.py" = ["commands", "start_identity.py", "start_runtime.py", "startup_support.py"]
 "tests" = ["_python_index.py", "commands", "database", "fleet_alert_silence.py", "fleet_update", "init_intent.py", "main.py", "parsers", "preflight.py", "python_install.py", "start_identity.py", "start_intent.py", "start_runtime.py", "startup_support.py"]
 
+[purity]
+"__init__.py" = "strict"
+"startup_support.py" = "strict"
+
 [debt.private-module]
 "tests/test_plugin_scaffold.py -> commands/extensions/_plugin_scaffold.py" = 1

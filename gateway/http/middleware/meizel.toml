@@ -3,3 +3,7 @@ exports = ["cors.py", "error_envelope.py", "error_handlers.py", "latency.py", "r
 [uses]
 "error_handlers.py" = ["error_envelope.py"]
 "tests" = ["error_handlers.py", "runtime_metrics.py"]
+
+[purity]
+"__init__.py" = "strict"
+"stopping.py" = "strict"

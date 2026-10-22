@@ -2,3 +2,6 @@ exports = ["audit_rows.py"]
 
 [uses]
 "tests" = ["audit_rows.py"]
+
+[purity]
+"__init__.py" = "strict"

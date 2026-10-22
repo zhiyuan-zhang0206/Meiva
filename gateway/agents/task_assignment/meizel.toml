@@ -3,3 +3,6 @@ exports = ["router.py"]
 [uses]
 "receipts.py" = ["schemas.py"]
 "router.py" = ["receipts.py", "schemas.py"]
+
+[purity]
+"__init__.py" = "strict"

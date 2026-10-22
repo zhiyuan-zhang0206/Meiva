@@ -1,1 +1,14 @@
 exports = ["data_plane.py", "walg.py"]
+
+[purity]
+"." = "strict-to-be"
+"__init__.py" = "strict"
+"walg.py" = "strict"
+
+[debt.impure-call]
+"data_plane.py#import urllib" = 2
+"data_plane.py#os.environ" = 2
+
+[debt.impure-edge]
+"data_plane.py#base/host/env/dotenv_boot.py" = 1
+"data_plane.py#base/host/net/url_secret.py" = 1

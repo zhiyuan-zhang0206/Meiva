@@ -3,3 +3,18 @@ exports = ["compaction.py", "completion_policy.py", "eval.py", "runtime.py", "se
 [uses]
 "runtime.py" = ["completion_policy.py"]
 "settings.py" = ["compaction.py", "eval.py", "memory.py", "prompt.py", "runtime.py", "skill_recall.py"]
+
+[purity]
+"." = "strict-to-be"
+"__init__.py" = "strict"
+"compaction.py" = "strict"
+"completion_policy.py" = "strict"
+"eval.py" = "strict"
+"memory.py" = "strict"
+"prompt.py" = "strict"
+"runtime.py" = "strict"
+"settings.py" = "strict"
+"skill_recall.py" = "strict"
+
+[debt.wide-exports]
+"meizel.toml#exports" = 1

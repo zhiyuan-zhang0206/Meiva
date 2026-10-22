@@ -1,6 +1,11 @@
-exports = ["client.py", "client_stateful.py", "grants", "wire.py"]
+exports = ["client.py", "grants", "wire.py"]
 
 [uses]
 "client.py" = ["client_stateful.py", "wire.py"]
 "client_stateful.py" = ["wire.py"]
 "grants" = ["client.py", "wire.py"]
+
+[purity]
+"__init__.py" = "strict"
+"client_stateful.py" = "strict"
+"wire.py" = "strict"

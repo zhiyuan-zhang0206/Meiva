@@ -2,3 +2,14 @@ exports = ["agent", "channels", "daemon", "display.py", "gateway.py", "general.p
 
 [uses]
 "tests" = ["display.py", "sandbox.py", "to_user.py"]
+
+[purity]
+"__init__.py" = "strict"
+"display.py" = "strict"
+"gateway.py" = "strict"
+"general.py" = "strict"
+"lm.py" = "strict"
+"packages.py" = "strict"
+"sandbox.py" = "strict"
+"to_user.py" = "strict"
+"web.py" = "strict"

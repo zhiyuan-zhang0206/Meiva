@@ -1,5 +1,17 @@
 exports = ["configuration.py", "tests"]
 
+[purity]
+"__init__.py" = "strict-to-be"
+
 [uses]
 "configuration.py" = ["__init__.py"]
 "tests" = ["__init__.py", "configuration.py"]
+
+[debt.impure-call]
+"__init__.py#async def asleep" = 3
+"__init__.py#datetime.now" = 1
+"__init__.py#time.monotonic" = 1
+"__init__.py#time.sleep" = 1
+
+[debt.impure-edge]
+"__init__.py#base/config/__init__.py" = 1

@@ -3,3 +3,8 @@ exports = ["call_policy.py", "capture.py", "tally.py", "telemetry.py"]
 [uses]
 "telemetry.py" = ["call_policy.py", "capture.py", "tally.py"]
 "tests" = ["call_policy.py", "tally.py", "telemetry.py"]
+
+[purity]
+"__init__.py" = "strict"
+"capture.py" = "strict"
+"tally.py" = "strict"

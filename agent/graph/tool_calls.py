@@ -13,7 +13,7 @@ from typing import Any, cast
 from langchain_core.messages import AIMessage, ToolCall
 
 
-def code_from_args(args: Any, *, source: str) -> str:
+def code_from_args(args: object, *, source: str) -> str:
     """The `code` argument of a tool call, strictly. Raises if `args` is not a
     dict or `code` is present but not a string; returns "" only when `code` is
     absent. The single strict extractor the exec path and the llm-node

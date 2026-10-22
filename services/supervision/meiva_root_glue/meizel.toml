@@ -5,3 +5,6 @@ exports = ["diagnostic_probes.py", "manifests.py"]
 "drill.py" = ["glue.py"]
 "glue.py" = ["diagnostic_probes.py", "diagnostics.py"]
 "tests" = ["diagnostic_probes.py", "diagnostics.py", "drill.py", "glue.py", "manifests.py"]
+
+[purity]
+"__init__.py" = "strict"

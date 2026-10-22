@@ -5,6 +5,9 @@ exports = ["boot.py", "daemon.py", "dispatch_sync.py", "tests"]
 "tests" = ["boot.py", "daemon.py", "health.py", "in_flight.py", "to_user_resource.py", "to_user_watch.py"]
 "to_user_resource.py" = ["in_flight.py"]
 
+[purity]
+"__init__.py" = "strict"
+
 [debt.private-name]
 "tests/child_daemon_exit.py -> daemon.py#_hard_exit" = 2
 "tests/daemon/test_an_unrelated_op_still_dispatches_while_a.py -> daemon.py#_dispatch" = 9

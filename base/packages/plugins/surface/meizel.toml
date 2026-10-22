@@ -2,3 +2,9 @@ exports = ["inspector.py", "notification_contributions.py", "stats.py", "ui_cont
 
 [uses]
 "tests" = ["stats.py"]
+
+[purity]
+"__init__.py" = "strict"
+"inspector.py" = "strict"
+"notification_contributions.py" = "strict"
+"ui_contributions.py" = "strict"

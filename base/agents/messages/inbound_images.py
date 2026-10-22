@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -37,7 +38,7 @@ def image_mime_for(name: str) -> str | None:
     return IMAGE_MIME.get(Path(name).suffix.lower())
 
 
-def inbound_image_urls(agent_id: int, payload: dict[str, Any] | None) -> list[str] | None:
+def inbound_image_urls(agent_id: int, payload: Mapping[str, object] | None) -> list[str] | None:
     """Image reference urls of a stored multimodal inbound, or None.
 
     The stored `content_blocks` mirror the POST body; a block counts as a

@@ -15,3 +15,7 @@ exports = ["build.py", "chunk_consumer.py", "chunk_plan.py", "chunks.py", "group
 "sessions.py" = ["chunk_plan.py", "chunks.py", "units.py"]
 "store.py" = ["usage.py"]
 "tests" = ["build.py", "chunk_consumer.py", "chunk_generate.py", "chunks.py", "generate.py", "group.py", "group_consumer.py", "group_store.py", "leaf_groups.py", "rebuild.py", "serve.py", "sessions.py", "store.py", "units.py", "usage.py"]
+
+[purity]
+"__init__.py" = "strict"
+"usage.py" = "strict"

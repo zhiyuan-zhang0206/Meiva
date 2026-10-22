@@ -2,3 +2,7 @@ exports = ["home_lifecycle_locks.py", "launch_failures.py", "pause_markers.py", 
 
 [uses]
 "tests" = ["home_lifecycle_locks.py", "launch_failures.py", "pause_markers.py", "service_selection.py", "start_serving.py", "status_journal.py"]
+
+[purity]
+"__init__.py" = "strict"
+"service_selection.py" = "strict"
