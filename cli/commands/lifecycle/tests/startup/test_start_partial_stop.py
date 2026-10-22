@@ -108,7 +108,7 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
     def _fake_stop_browser(_deadline: float) -> None:
         steps.append("browser")
 
-    def _fake_stop_extras(_deadline: float) -> None:
+    def _fake_stop_extras(_deadline: float, *, retained: frozenset[str]) -> None:
         steps.append("extras")
 
     def _fake_stop_data_plane(

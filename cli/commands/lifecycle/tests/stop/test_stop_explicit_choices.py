@@ -395,9 +395,13 @@ def test_force_stop_tears_down_extras_exactly_when_asked_and_spends_the_budget(
     command_runtime: CommandRuntime,
 ) -> None:
     command_runtime.machine.set(role="gateway")
-    extras: list[float] = []
+    extras: list[frozenset[str]] = []
     root_stops = record_root_stops(monkeypatch)
-    monkeypatch.setattr(command, "stop_extras", extras.append)
+
+    def record_extras(_deadline: float, *, retained: frozenset[str]) -> None:
+        extras.append(retained)
+
+    monkeypatch.setattr(command, "stop_extras", record_extras)
     assert (
         _force_stop(
             command_runtime=command_runtime,
