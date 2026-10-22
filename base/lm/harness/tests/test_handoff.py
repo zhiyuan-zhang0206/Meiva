@@ -82,6 +82,9 @@ def test_defaults_cover_the_boundary_and_reporting_rules(tmp_path: Path) -> None
     assert "meiva.tasks" not in text
     assert "meiva.watcher" not in text
     assert "meiva.agents" in text
+    assert "meiva.self" in text
+    assert "pause_heartbeat" in text
+    assert "terminate" in text
     assert "Use your native tools for files" in text
     assert "State what you did and the evidence for it" in text
 

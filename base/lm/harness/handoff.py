@@ -49,6 +49,11 @@ DEFAULT_ENTRIES: tuple[EntryPoint, ...] = (
         "you on first use — start at meiva.help()",
     ),
     EntryPoint("meiva.agents", "spawn or message another agent, or read the one that briefed you"),
+    EntryPoint(
+        "meiva.self",
+        "pause your heartbeat while waiting (`pause_heartbeat`), or end your process when your "
+        "role is complete (`terminate`)",
+    ),
 )
 
 

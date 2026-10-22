@@ -608,11 +608,16 @@ def build_system_prompt(
 
 HARNESS_NATIVE_OVERLAP_NAMESPACES: frozenset[str] = frozenset({"cwd", "files", "shell", "web"})
 
+HARNESS_DEFAULT_SDK_EXPANSIONS: tuple[str, ...] = ("self",)
+
 HARNESS_EXCLUDED_PLUGIN_SECTIONS: frozenset[str] = frozenset({"coding_tools_section"})
 
 
 def harness_sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    configured = tuple(slices.read("agent", "sdk_expand_in_system_prompt"))
+    configured = (
+        *HARNESS_DEFAULT_SDK_EXPANSIONS,
+        *slices.read("agent", "sdk_expand_in_system_prompt"),
+    )
     wanted = [
         path
         for path in effective_sdk_expand(

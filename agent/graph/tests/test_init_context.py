@@ -638,18 +638,32 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
 
     assert command.update is not None
     msgs = cast(list[AnyMessage], command.update["messages"])
-    assert len(msgs) >= 3
-    assert isinstance(msgs[0], SystemMessage)
-    assert f"# Role & Operating Context — Agent #{tid}" in str(msgs[0].content)
-    assert "# Custom Plugin Section" in str(msgs[0].content)
+    assert len(msgs) >= 3 and isinstance(msgs[0], SystemMessage)
+    head_text = str(msgs[0].content)
+    assert all(
+        s in head_text
+        for s in (
+            f"# Role & Operating Context — Agent #{tid}",
+            "meiva.self",
+            "pause_heartbeat",
+            "# Custom Plugin Section",
+        )
+    )
     note_texts = "\n".join(str(m.content) for m in msgs[1:])
-    assert "Conversation timezone:" in note_texts
-    assert f"Your Agent ID is {tid}" in note_texts
-    assert "Custom plugin standing note." in note_texts
-    assert isinstance(command.update["capabilities"], CapabilitiesState)
-    assert command.update["harness_cursor"] == 0
-    assert command.update["context_reset"] == ContextReset()
-    assert command.goto == "claim"
+    assert all(
+        s in note_texts
+        for s in (
+            "Conversation timezone:",
+            f"Your Agent ID is {tid}",
+            "Custom plugin standing note.",
+        )
+    )
+    assert (
+        isinstance(command.update["capabilities"], CapabilitiesState)
+        and command.update["harness_cursor"] == 0
+        and command.update["context_reset"] == ContextReset()
+        and command.goto == "claim"
+    )
 
 
 @pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
