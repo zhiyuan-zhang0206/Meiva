@@ -388,8 +388,17 @@ class TestWakeHealth:
         """
         agent_id = 6986
         listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
+        # meiva:note
+        # The stalled consume is the path under test, so it announces itself: the
+        # assertion can then tell "consume abandoned" from an open that outspent
+        # the budget without recording a degradation. The 1.0s budget covers only
+        # the consume, and with the 2.0s abandon grace the wait still returns
+        # inside the 5s timing assertion.
+        # meiva:link base/events/live/redis_listener.py
+        consuming = asyncio.Event()
 
         async def _hung_consume(pubsub: object, timeout: float) -> None:
+            consuming.set()
             await asyncio.sleep(3600)
 
         try:
@@ -397,10 +406,14 @@ class TestWakeHealth:
             with monkeypatch.context() as patch:
                 patch.setattr(listener, "_consume_one", _hung_consume)
                 started = time.monotonic()
-                await listener.wait_one(timeout=0.3)
+                waiter = asyncio.create_task(listener.wait_one(timeout=1.0))
+                await asyncio.wait_for(consuming.wait(), timeout=10.0)
+                await asyncio.wait_for(waiter, timeout=10.0)
                 assert time.monotonic() - started < 5.0
 
-            assert listener.wake_state is WakeState.DEGRADED
+            assert listener.wake_state is WakeState.DEGRADED, (
+                f"wake_state={listener.wake_state} reason={listener.wake_degrade_reason}"
+            )
             assert listener.wake_degrade_reason == WakeFailure.CONSUME_ABANDON.value
             assert listener._redis is None
             assert listener._pubsub is None
