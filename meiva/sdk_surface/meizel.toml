@@ -17,3 +17,107 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py
 "skill_sources.py" = ["install.py", "installation.py"]
 "tests" = ["batch.py", "process_context.py", "validation.py"]
 "wraps.py" = ["installation.py", "metering.py", "settings.py"]
+
+[purity]
+"." = "strict-to-be"
+"const.py" = "strict"
+
+[debt.impure-call]
+"attachment_transport.py#Path.is_file" = 1
+"attachment_transport.py#Path.stat" = 1
+"batch.py#async def _bounded" = 1
+"batch.py#async def run_batch" = 1
+"injection_check.py#async def _chunk_probability" = 1
+"injection_check.py#async def page_probability" = 1
+"injection_check.py#async def run" = 1
+"metering.py#async def async_recorder" = 1
+"sdk_disable.py#os.environ" = 1
+"wraps.py#async def async_chained" = 1
+
+[debt.impure-edge]
+"agent_identity.py#base/agents/context/__init__.py" = 1
+"agent_identity.py#base/agents/messages/external_caller.py" = 1
+"attachment_transport.py#base/lm/catalog/__init__.py" = 1
+"attachment_transport.py#base/lm/registry.py" = 4
+"extensions.py#base/config/service_read.py" = 1
+"extensions.py#base/lm/catalog/__init__.py" = 1
+"extensions.py#base/packages/plugins/load_report.py" = 2
+"extensions.py#base/packages/plugins/loading/faces.py" = 1
+"injection_check.py#base/lm/catalog/__init__.py" = 1
+"injection_check.py#base/lm/decision/call.py" = 1
+"injection_check.py#base/log/__init__.py" = 1
+"install.py#base/agents/sdk/call_policy.py" = 1
+"install.py#base/config/service_read.py" = 1
+"install.py#base/lm/catalog/__init__.py" = 1
+"install.py#base/packages/plugins/extensions.py" = 1
+"install.py#base/packages/plugins/flags.py" = 4
+"install.py#base/packages/plugins/load_report.py" = 3
+"installation.py#base/agents/sdk/call_policy.py" = 1
+"installation.py#base/config/service_read.py" = 1
+"installation.py#base/lm/catalog/__init__.py" = 1
+"installation.py#base/packages/plugins/extensions.py" = 1
+"metering.py#base/agents/messages/external_caller.py" = 1
+"metering.py#base/agents/sdk/call_policy.py" = 1
+"metering.py#base/agents/sdk/telemetry.py" = 4
+"process_context.py#base/agents/context/__init__.py" = 1
+"process_context.py#base/native_process/loaded_commit.py" = 1
+"settings.py#base/agents/context/clients.py" = 1
+"settings.py#base/cluster/machine/__init__.py" = 1
+"settings.py#base/config/__init__.py" = 1
+"settings.py#base/config/service_read.py" = 1
+"settings.py#base/events/live/bus.py" = 1
+"settings.py#base/host/env/agent_slices.py" = 2
+"settings.py#base/lm/catalog/__init__.py" = 1
+"wraps.py#base/log/__init__.py" = 1
+"wraps.py#base/packages/plugins/activation.py" = 2
+
+[debt.pass-through-function]
+"discovery.py#is_element" = 1
+
+[debt.unfrozen-value]
+"install.py#class _Build" = 1
+
+[debt.untyped-export]
+"__init__.py#def meiva_module" = 1
+"extensions.py#def load_extensions" = 1
+"help.py#def doc_variants" = 1
+"help.py#def format_documented_const_stub" = 1
+"help.py#def format_signature" = 1
+"help.py#def help" = 1
+"help.py#def is_meiva_target" = 1
+"help.py#def render" = 1
+"install.py#def install" = 1
+"installation.py#def slot" = 1
+"metering.py#def install" = 2
+"metering.py#def instrument_targets" = 1
+"metering.py#def make_mcp_recorder" = 3
+"metering.py#def make_recorder" = 3
+"metering.py#def uninstall" = 1
+"plugins.py#def install_member" = 1
+"plugins.py#def install_namespace" = 1
+"process_context.py#def get_state" = 1
+"process_context.py#def get_state_update" = 1
+"process_context.py#def set_state" = 1
+"process_context.py#def set_state_update" = 1
+"settings.py#def agent_setting" = 1
+"settings.py#def attached_agent_view" = 1
+"validation.py#def coerce_str" = 1
+"validation.py#def coerce_typed" = 1
+"wraps.py#def apply_wrap" = 1
+"wraps.py#def stack" = 1
+"wraps.py#def wrappers" = 1
+
+[debt.wide-exports]
+"meizel.toml#exports" = 1
+
+[debt.wide-params]
+"extensions.py#def load_extensions" = 1
+"install.py#def install" = 1
+
+[debt.wide-public-surface]
+"agent_identity.py#public-surface" = 1
+"discovery.py#public-surface" = 1
+"help.py#public-surface" = 1
+"install.py#public-surface" = 1
+"process_context.py#public-surface" = 1
+"settings.py#public-surface" = 1

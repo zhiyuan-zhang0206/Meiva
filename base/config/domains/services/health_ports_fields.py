@@ -9,9 +9,8 @@ the `.env` contract stay exactly as they were.
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import Field
+from pydantic.config import JsonValue
 
 from base.host.env.port_table import FIXED_PORTS
 
@@ -28,13 +27,15 @@ from base.host.env.port_table import FIXED_PORTS
 # its name (`base.daemon.health.healthz_url`, `base.paths.pid_path`), not configured.
 
 
-def health_port_field(name: str, *, capability: str | None = None, writable: bool = False) -> Any:
+def health_port_field(
+    name: str, *, capability: str | None = None, writable: bool = False
+) -> int | None:
     """The `<name>_health_port` field of a standard `/healthz` daemon.
 
     `name` is the daemon's health name (a key of the fixed port table); the
     alias is `MEIVA_<NAME>_HEALTH_PORT` and the described default is the table's.
     """
-    extra: dict[str, Any] = {} if capability is None else {"capability": capability}
+    extra: dict[str, JsonValue] = {} if capability is None else {"capability": capability}
     extra |= {
         "restart_required": "",
         "writable": writable,

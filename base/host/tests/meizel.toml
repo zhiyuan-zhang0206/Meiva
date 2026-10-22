@@ -17,16 +17,6 @@ exports = ["daemon_shutdown.py", "daemon_shutdown_child.py", "short_tmp.py"]
 "test_proc.py#monkeypatch.setattr base.native_process.ownership.pidfd.open_process" = 1
 "test_proc.py#monkeypatch.setattr base.native_process.ownership.pidfd.send_signal" = 1
 "test_proc.py#monkeypatch.setattr base.native_process.ownership.sys" = 1
-"test_resource_sample.py#monkeypatch.setattr base.host.resource_sample.battery_sample" = 1
-"test_resource_sample.py#monkeypatch.setattr base.host.resource_sample.subprocess.run" = 1
-"test_resource_sample.py#monkeypatch.setattr base.host.resource_sample.sys.platform" = 1
-
-[debt.impure-test-fixture]
-"test_resource_sample.py#fixture monkeypatch" = 5
-
-[debt.nested-patch-target]
-"test_resource_sample.py#module.subprocess.run" = 1
-"test_resource_sample.py#module.sys.platform" = 1
 
 [debt.restricted-python]
 "test_proc.py#python -c" = 9
@@ -36,5 +26,3 @@ exports = ["daemon_shutdown.py", "daemon_shutdown_child.py", "short_tmp.py"]
 "test_proc.py#monkeypatch.setattr psutil.Process" = 2
 "test_proc.py#monkeypatch.setattr psutil.Process.children" = 1
 "test_proc.py#monkeypatch.setattr psutil.Process.create_time" = 2
-"test_resource_sample.py#monkeypatch.setattr psutil.cpu_percent" = 1
-"test_resource_sample.py#monkeypatch.setattr psutil.virtual_memory" = 1

@@ -6,5 +6,22 @@ exports = ["frontmatter.py", "notes.py", "okf_graph.py", "pages_copy.py"]
 "tests" = ["frontmatter.py", "notes.py"]
 
 [purity]
+"." = "strict-to-be"
 "__init__.py" = "strict"
+"frontmatter.py" = "strict"
 "pages_copy.py" = "strict"
+
+[debt.impure-call]
+"notes.py#Path.read_text" = 1
+"okf_graph.py#Path.open" = 1
+
+[debt.impure-edge]
+"notes.py#base/log/__init__.py" = 1
+
+[debt.untyped-export]
+"okf_graph.py#def build_graph_data" = 1
+"okf_graph.py#def parse_frontmatter" = 1
+"okf_graph.py#def render_html" = 1
+
+[debt.wide-public-surface]
+"okf_graph.py#public-surface" = 1

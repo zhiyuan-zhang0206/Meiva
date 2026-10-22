@@ -109,17 +109,15 @@ def _tps(
     name: str,
     title: str,
     description: str,
-    attr_key: str,
-    attr_label: str,
-    tps_label: str,
-    *,
-    panel_id: int,
-    order: int,
-    legend_label: str | None = None,
+    attrs: tuple[str, str],
+    labels: str | tuple[str, str],
+    placement: tuple[int, int],
 ) -> MetricSpec:
+    attr_key, attr_label = attrs
+    tps_label, legend = (labels, labels) if isinstance(labels, str) else labels
+    panel_id, order = placement
     tok = _LLM_ATTR[attr_key]
     timing = _LLM_ATTR[attr_label]
-    legend = legend_label or tps_label
     avg = (
         f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
         f'category={{category}} | {timing}!="" | '
@@ -554,11 +552,9 @@ def core_metrics() -> list[MetricSpec]:
             "latency is the llm_usage wall-clock (latency_ms). avg = token-weighted "
             "over all calls; max/min = the fastest/slowest agent per bucket "
             "(agent_id IS NOT NULL, only buckets with valid calls count).",
-            "in_total",
-            "latency_ms",
+            ("in_total", "latency_ms"),
             "in tokens/s",
-            panel_id=13,
-            order=1,
+            (13, 1),
         )
     )
 
@@ -574,11 +570,9 @@ def core_metrics() -> list[MetricSpec]:
             "llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; "
             "max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, "
             "only buckets with valid calls count).",
-            "out_total",
-            "latency_ms",
+            ("out_total", "latency_ms"),
             "out tokens/s",
-            panel_id=14,
-            order=2,
+            (14, 2),
         )
     )
 
@@ -595,12 +589,9 @@ def core_metrics() -> list[MetricSpec]:
             "decode_ms=NULL do not count. avg = token-weighted over all calls; "
             "max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, "
             "only buckets with valid calls count).",
-            "out_total",
-            "decode_ms",
-            "out tokens/s",
-            panel_id=15,
-            order=3,
-            legend_label="gen out tokens/s",
+            ("out_total", "decode_ms"),
+            ("out tokens/s", "gen out tokens/s"),
+            (15, 3),
         )
     )
 

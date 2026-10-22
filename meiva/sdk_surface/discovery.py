@@ -12,18 +12,18 @@ import ast as _ast
 import inspect
 from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
-from typing import Any, ForwardRef
+from typing import Any, ForwardRef, cast
 
 from .const import is_documented_const
 
 # ── Kind predicates ────────────────────────────────────────────────────────
 
 
-def is_container(obj: Any) -> bool:
+def is_container(obj: object) -> bool:
     return inspect.ismodule(obj) or inspect.isclass(obj) or isinstance(obj, SimpleNamespace)
 
 
-def is_element(obj: Any) -> bool:
+def is_element(obj: object) -> bool:
     return inspect.isroutine(obj)
 
 
@@ -40,12 +40,12 @@ class Constant:
     doc: str
 
 
-def is_skill_object(obj: Any) -> bool:
+def is_skill_object(obj: object) -> bool:
     """True if `obj` is a skill proxy or namespace (has `_meiva_skill_kind`)."""
     return hasattr(obj, "_meiva_skill_kind")
 
 
-def is_namespace(obj: Any) -> bool:
+def is_namespace(obj: object) -> bool:
     """True when `obj` is a module or a SimpleNamespace plugin namespace."""
     return obj is not None and (inspect.ismodule(obj) or isinstance(obj, SimpleNamespace))
 
@@ -54,8 +54,8 @@ def is_namespace(obj: Any) -> bool:
 
 
 def children(
-    container: Any, *, hidden_members: frozenset[str] = frozenset()
-) -> list[tuple[str, Any]]:
+    container: object, *, hidden_members: frozenset[str] = frozenset()
+) -> list[tuple[str, object]]:
     """Children of a container. `hidden_members` (dotted `meiva` paths, e.g.
     ``meiva.self.attach``) drops those members from a module/namespace render — a
     render parameter, passed down by `help()`; classes and plain namespaces are
@@ -85,14 +85,14 @@ def _child_group_rank(child: Any) -> int:
     return 3
 
 
-def _sorted_children(children: list[tuple[str, Any]]) -> list[tuple[str, Any]]:
+def _sorted_children(children: list[tuple[str, object]]) -> list[tuple[str, object]]:
     """Deterministic module-stub layout: grouped by kind (`_child_group_rank`),
     alphabetical within each group — instead of whatever order `__all_for_meiva__`
     or `vars()` happens to carry."""
     return sorted(children, key=lambda nc: (_child_group_rank(nc[1]), nc[0]))
 
 
-def _static_agent_surface(container: Any) -> list[str] | None:
+def _static_agent_surface(container: object) -> list[str] | None:
     """The explicitly-declared agent surface (`__all_for_meiva__`) as a name list,
     or None when the container declares none (`agent_visible_names` raises then).
 
@@ -110,14 +110,15 @@ def _static_agent_surface(container: Any) -> list[str] | None:
         surface = getattr(container, "__all_for_meiva__", None)
     if not isinstance(surface, list):
         return None
-    return [n for n in surface if isinstance(n, str) and not n.startswith("_")]
+    items = cast(list[object], surface)
+    return [n for n in items if isinstance(n, str) and not n.startswith("_")]
 
 
 class UndeclaredSurfaceError(TypeError):
     """A container reached the agent surface without declaring `__all_for_meiva__`."""
 
 
-def agent_visible_names(container: Any) -> list[str]:
+def agent_visible_names(container: object) -> list[str]:
     """Agent-visible member names of an `meiva` namespace container - the single
     source of truth for `help()` rendering, SDK-expand discovery, doc linting,
     and metering instrumentation.
@@ -143,8 +144,8 @@ def agent_visible_names(container: Any) -> list[str]:
 
 
 def module_children(
-    mod: Any, *, hidden_members: frozenset[str] = frozenset()
-) -> list[tuple[str, Any]]:
+    mod: ModuleType, *, hidden_members: frozenset[str] = frozenset()
+) -> list[tuple[str, object]]:
     """The children named by `mod`'s `__all_for_meiva__` (via `agent_visible_names`, which raises
     when there is none). PEP 224 attribute docstrings are discovered alongside via AST; any
     non-callable/non-class/non-module attr is wrapped as `Constant` so the renderer can show
@@ -166,17 +167,17 @@ def module_children(
     ]
 
 
-def _is_routine_or_class(attr: Any) -> bool:
+def _is_routine_or_class(attr: object) -> bool:
     """True when `attr` is a function or a class."""
     return inspect.isfunction(attr) or inspect.isclass(attr)
 
 
 def resolve_child(
-    mod: Any,
+    mod: object,
     name: str,
     annotations: dict[str, str],
     docs: dict[str, str],
-) -> Any:
+) -> object:
     """Build a child entry for `name` from `mod`'s `__all_for_meiva__`.
 
     Functions / classes / modules and `meiva.const()`-wrapped values pass
@@ -270,12 +271,12 @@ def _string_literal_value(node: _ast.stmt) -> str | None:
     return None
 
 
-def _class_children(cls: type) -> list[tuple[str, Any]]:
+def _class_children(cls: type) -> list[tuple[str, object]]:
     """Public surface of a class, in source-reading order: declared fields
     first (e.g. dataclass attributes — annotation order is `__init__` order),
     then methods / nested classes. Fields wrap as `Constant` so the renderer
     emits `name: type`; inherited-from-object members don't count."""
-    result: list[tuple[str, Any]] = [
+    result: list[tuple[str, object]] = [
         _annotation_field(name, ann)
         for name, ann in inspect.get_annotations(cls).items()
         if not name.startswith("_")

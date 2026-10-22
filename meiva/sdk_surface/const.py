@@ -6,18 +6,18 @@ const assignments (e.g. `meiva.self.AGENT_ID = meiva.const(...)`) keep working
 during submodule load.
 """
 
-from typing import Any
+from typing import Any, cast
 
 _DOCUMENTED_MARKER = "__meiva_documented_const__"
 """Class attribute set on every type `const()` mints; `is_documented_const` reads it."""
 
 
-def is_documented_const(obj: Any) -> bool:
+def is_documented_const(obj: object) -> bool:
     """True if `obj`'s type is one minted by `const()`."""
     return vars(type(obj)).get(_DOCUMENTED_MARKER) is True
 
 
-def const(value: Any, doc: str) -> Any:
+def const[T](value: T, doc: str) -> T:
     """Wrap a constant value with a docstring so `help(value)` shows the doc.
 
     Returns a `type(value)` subclass instance carrying `__doc__` set to `doc`.
@@ -48,7 +48,7 @@ def const(value: Any, doc: str) -> Any:
     Raises:
         TypeError: `type(value)` is not subclassable.
     """
-    base = type(value)
+    base: Any = type(value)
     cls = type(
         f"Documented{base.__name__}",
         (base,),
@@ -60,4 +60,4 @@ def const(value: Any, doc: str) -> Any:
     )
     instance = cls(value)
     instance.__doc__ = doc
-    return instance
+    return cast(T, instance)

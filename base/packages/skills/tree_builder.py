@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 from base.log import logger
 from base.packages.skills.index import SkillFile, SkillIndex
 from base.packages.skills.names import SkillIdentity, match_key
-from base.packages.skills.tree import NS, Leaf, Skill, claim, descend, flatten
+from base.packages.skills.tree import NS, Leaf, Skill, Tree, claim, descend, flatten
 
 __all__ = ["SkillIndexBuilder", "scan_tree", "skills_in"]
 
@@ -20,7 +19,7 @@ __all__ = ["SkillIndexBuilder", "scan_tree", "skills_in"]
 # meiva:link meiva/skills/docs/skills.meiva.okf.md
 class SkillIndexBuilder:
     def __init__(self, base_ns: tuple[str, ...] = ()) -> None:
-        self.tree: dict[str, Any] = {}
+        self.tree: Tree = {}
         self._base_ns = base_ns
         self._claimed: dict[tuple[str, ...], str] = {}
         self._seen_hashes: set[str] = set()
@@ -109,9 +108,7 @@ class SkillIndexBuilder:
 
 
 # meiva:link meiva/skills/docs/skills.meiva.okf.md
-def scan_tree(
-    skills_root: Path, gate: set[str] | None, provider_roots: Sequence[Path]
-) -> dict[str, Any]:
+def scan_tree(skills_root: Path, gate: set[str] | None, provider_roots: Sequence[Path]) -> Tree:
     builder = SkillIndexBuilder()
     builder.mount(skills_root, gate)
     for root in provider_roots:

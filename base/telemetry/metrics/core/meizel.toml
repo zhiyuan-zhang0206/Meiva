@@ -16,10 +16,8 @@ exports = ["catalog.py"]
 "frontend.py" = "strict"
 "host.py" = "strict"
 "observability.py" = "strict"
+"panels.py" = "strict"
 "pr_flow.py" = "strict"
 
 [debt.wide-fanout]
 "catalog.py#uses" = 1
-
-[debt.wide-params]
-"panels.py#def _tps" = 1

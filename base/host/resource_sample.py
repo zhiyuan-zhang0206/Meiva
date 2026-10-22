@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from typing import Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict
@@ -101,16 +102,20 @@ def parse_battery(out: str) -> _BatteryFields:
     return fields
 
 
-def battery_sample() -> _BatteryFields:
+def battery_sample(
+    *,
+    platform: str | None = None,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> _BatteryFields:
     """One best-effort battery reading; {} off macOS / on failure / no battery.
 
     Swallows failures by design: the sample degrades to None fields, it does
     not fail the probe (unlike the psutil reads, which propagate).
     """
-    if sys.platform != "darwin":
+    if (platform if platform is not None else sys.platform) != "darwin":
         return {}
     try:
-        out = subprocess.run(
+        out = run(
             ["/usr/bin/pmset", "-g", "batt"],
             check=False,
             capture_output=True,
@@ -122,7 +127,11 @@ def battery_sample() -> _BatteryFields:
     return parse_battery(out)
 
 
-def resource_sample() -> ResourceSample:
+def resource_sample(
+    *,
+    cpu_percent: Callable[[float], float] | None = None,
+    battery_fn: Callable[[], _BatteryFields] = battery_sample,
+) -> ResourceSample:
     """Read this machine's CPU / memory / primary-disk usage — and, on a macOS
     battery host, its battery state — right now.
 
@@ -132,6 +141,7 @@ def resource_sample() -> ResourceSample:
     """
     import psutil
 
+    read_cpu = psutil.cpu_percent if cpu_percent is None else cpu_percent
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage(primary_disk_path())
 
@@ -152,12 +162,12 @@ def resource_sample() -> ResourceSample:
 
     return ResourceSample(
         ts=time.time(),
-        cpu_pct=psutil.cpu_percent(interval=CPU_INTERVAL_S),
+        cpu_pct=read_cpu(CPU_INTERVAL_S),
         mem_used_gb=round(mem_used / (1024**3), 2),
         mem_total_gb=round(mem.total / (1024**3), 2),
         mem_pct=mem.percent,
         disk_used_gb=round(disk.used / (1024**3), 2),
         disk_total_gb=round(disk_total / (1024**3), 2),
         disk_pct=disk.percent,
-        **battery_sample(),
+        **battery_fn(),
     )

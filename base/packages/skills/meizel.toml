@@ -7,5 +7,27 @@ exports = ["index.py", "names.py", "project_roots.py", "scan.py", "tree.py", "tr
 "tree_builder.py" = ["index.py", "names.py", "tree.py"]
 
 [purity]
+"." = "strict-to-be"
 "__init__.py" = "strict"
 "names.py" = "strict"
+"tree.py" = "strict"
+
+[debt.impure-call]
+"index.py#Path.is_dir" = 4
+"index.py#Path.is_file" = 2
+"index.py#Path.read_text" = 2
+"index.py#Path.stat" = 2
+"project_roots.py#Path.exists" = 1
+"project_roots.py#Path.is_dir" = 2
+"project_roots.py#Path.is_file" = 1
+"scan.py#Path.is_file" = 1
+"scan.py#Path.read_bytes" = 1
+"scan.py#Path.stat" = 1
+"scan.py#import urllib" = 1
+"tree_builder.py#Path.is_dir" = 1
+
+[debt.impure-edge]
+"tree_builder.py#base/log/__init__.py" = 1
+
+[debt.wide-exports]
+"meizel.toml#exports" = 1

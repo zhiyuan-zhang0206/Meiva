@@ -23,17 +23,15 @@ class TestResourceSample:
         assert s.disk_used_gb <= s.disk_total_gb
         assert s.mem_total_gb > 0
 
-    def test_cpu_is_measured_not_inherited(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_cpu_is_measured_not_inherited(self) -> None:
         intervals: list[float | None] = []
-        real = psutil.cpu_percent
 
         def spy(interval: float | None = None) -> float:
             intervals.append(interval)
-            return real(interval=interval)
+            return psutil.cpu_percent(interval=interval)
 
-        monkeypatch.setattr(psutil, "cpu_percent", spy)
-        first = resource_sample()
-        second = resource_sample()
+        first = resource_sample(cpu_percent=spy)
+        second = resource_sample(cpu_percent=spy)
         assert intervals == [CPU_INTERVAL_S, CPU_INTERVAL_S]
         assert second.ts >= first.ts
 
@@ -42,12 +40,12 @@ class TestResourceSample:
         with pytest.raises(Exception, match="frozen"):
             s.cpu_pct = 1.0
 
-    def test_propagates_psutil_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            psutil, "virtual_memory", lambda: (_ for _ in ()).throw(RuntimeError("no psutil"))
-        )
+    def test_propagates_psutil_failure(self) -> None:
+        def _fail(_interval: float) -> float:
+            raise RuntimeError("no psutil")
+
         with pytest.raises(RuntimeError, match="no psutil"):
-            resource_sample()
+            resource_sample(cpu_percent=_fail)
 
 
 class TestBatterySample:
@@ -103,28 +101,19 @@ class TestBatterySample:
     def test_desktop_reports_nothing(self) -> None:
         assert parse_battery(self.PMSET_DESKTOP) == {}
 
-    def test_off_macos_reports_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import base.host.resource_sample as module
+    def test_off_macos_reports_nothing(self) -> None:
+        assert battery_sample(platform="linux") == {}
 
-        monkeypatch.setattr(module.sys, "platform", "linux")
-        assert battery_sample() == {}
-
-    def test_read_failure_degrades_to_no_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_read_failure_degrades_to_no_fields(self) -> None:
         import subprocess
 
-        import base.host.resource_sample as module
-
-        def _raise_timeout(*_a: object, **_k: object) -> object:
+        def _raise_timeout(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
             raise subprocess.TimeoutExpired("pmset", 2)
 
-        monkeypatch.setattr(module.subprocess, "run", _raise_timeout)
-        assert battery_sample() == {}
+        assert battery_sample(platform="darwin", run=_raise_timeout) == {}
 
-    def test_sample_carries_battery_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import base.host.resource_sample as module
-
-        monkeypatch.setattr(module, "battery_sample", lambda: parse_battery(self.PMSET_CHARGING))
-        s = resource_sample()
+    def test_sample_carries_battery_fields(self) -> None:
+        s = resource_sample(battery_fn=lambda: parse_battery(self.PMSET_CHARGING))
         assert s.battery_percent == 80
         assert s.battery_power == "ac"
         assert s.battery_charging is True

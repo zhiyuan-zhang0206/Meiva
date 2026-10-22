@@ -8,6 +8,7 @@ composer commands (`base.packages.composer_commands`) and the agent's prompt rea
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TypedDict
 
 from base.packages.skills.names import display_name, match_key
@@ -81,15 +82,13 @@ def target(skill: Skill) -> str:
 # to hang `.skill` / `.doc` off.
 
 
+@dataclass(frozen=True, slots=True)
 class Leaf:
     """A pure skill leaf in the namespace tree — a folder with a SKILL.md and no
     skill-bearing children. Wraps a `Skill` so it's not confused with a
     namespace `dict`."""
 
-    __slots__ = ("skill",)
-
-    def __init__(self, skill: Skill) -> None:
-        self.skill = skill
+    skill: Skill
 
 
 class NS(dict[str, "Node"]):
