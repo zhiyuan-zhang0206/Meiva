@@ -174,6 +174,20 @@ def _ensure_token(pool: ConnectionPool, row: PageRow) -> str:
     return str(persisted[0])
 
 
+# meiva:note
+# Undo THIS pass's reservation, and only that one: `session_name = <ours>` is the
+# compare half. A concurrent reconcile (or the operator's own re-serve) may have
+# written a newer name between the claim and this failure, and clearing that row
+# would delete a session somebody else is about to create.
+def _release_claim(pool: ConnectionPool, row: PageRow, page_session: str, token: str) -> None:
+    with write_transaction(pool) as conn:
+        conn.execute(
+            "UPDATE agent_pages SET session_name = NULL WHERE id = %s AND session_name = %s "
+            "AND server_token = %s AND closed_at IS NULL AND expired_at IS NULL",
+            (row.id, page_session, token),
+        )
+
+
 def _create_page_session(
     pool: ConnectionPool, backend: SessionBackend, row: PageRow, token: str
 ) -> str:
@@ -199,6 +213,7 @@ def _create_page_session(
         Path(row.serve_dir),
         env=env,
     ):
+        _release_claim(pool, row, page_session, token)
         raise RuntimeError(f"failed to create page session {page_session!r}")
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -427,6 +442,19 @@ def _ensure_handle(
         try:
             page_session = _create_page_session(pool, backend, row, token)
         except RuntimeError:
+            # meiva:note
+            # A restart answers "no pty-sessions service is listening" for as long as it
+            # takes the service to come up, and that is not this page's failure: the
+            # claim is already rolled back, so the row is left open for the next pass
+            # (task #5458). Closing it there is what made every page lose its session on
+            # a restart; a service that IS there and still refused keeps today's verdict.
+            if not backend.service_available():
+                _log.warning(
+                    "[page-server] session service not accepting for %s; admission deferred "
+                    "to the next pass",
+                    key,
+                )
+                return None
             _log.exception("[page-server] initial creation failed for %s; no retry", key)
             close_failed_page(pool, row, bus)
             return None

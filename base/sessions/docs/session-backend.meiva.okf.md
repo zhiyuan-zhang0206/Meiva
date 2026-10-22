@@ -19,6 +19,15 @@ tags: [base, process, supervision]
   shells, so agent exits and agent-host restarts do not end them; stopping the
   owning service does.
 
+`SessionBackend.service_available()` answers the one question a caller asks after a
+failed `new_session`: can this backend admit a session right now? It defaults to
+True (a backend that launches the process itself has nothing to check).
+`PtySessionBackend` answers it with the service's generation probe, because the
+service reports an *absent* service as "no sessions" on `list`/`has` — a caller that
+read those would call a missing service healthy. The page server uses the answer to
+tell "the service is not there yet" (defer the page to the next reconcile pass) from
+"this request cannot succeed" (close the page).
+
 Native sessions use `base/sessions/record.py:SessionRecord` under the home's
 `run/sessions/` and logs under `logs/`. No PTY is allocated. Native backends
 raise `NotImplementedError` for terminal operations. The protocol's default
