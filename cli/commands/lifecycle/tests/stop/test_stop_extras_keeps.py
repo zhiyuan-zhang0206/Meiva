@@ -71,12 +71,11 @@ def test_a_compatible_stop_is_admitted(
 def test_the_stop_kernel_refuses_before_it_touches_a_single_dependency(
     force: bool, require_confirmation: bool
 ) -> None:
-    """Both stop paths meet in `do_stop`; the guard must run before either one starts work.
-
-    Nothing here is patched: the dependencies are fakes passed in, so any call they
-    receive is work that ran before the refusal (a studio database read, a telemetry
-    pipeline, a machine identity lookup). All of them must stay untouched.
-    """
+    # meiva:note
+    # Both stop paths meet in `do_stop`; the guard must run before either one starts work.
+    # Nothing here is patched: the dependencies are fakes passed in, so any call they
+    # receive is work that ran before the refusal (a studio database read, a telemetry
+    # pipeline, a machine identity lookup). All of them must stay untouched.
     database_factory: Any = MagicMock()
     producer: Any = MagicMock()
     machine: Any = MagicMock()
@@ -97,6 +96,7 @@ def test_the_stop_kernel_refuses_before_it_touches_a_single_dependency(
             machine=machine,
             helper=None,
         )
+    # meiva:note
     # `require_confirmation=True` proves the refusal precedes the interactive prompt: a prompt
     # first would consume stdin and never reach this assertion.
     assert database_factory.mock_calls == []
@@ -106,18 +106,18 @@ def test_the_stop_kernel_refuses_before_it_touches_a_single_dependency(
 
 @pytest.mark.parametrize("retained", [frozenset({"browser"}), frozenset({"meiva-pty-sessions"})])
 def test_retiring_extras_itself_refuses_while_a_unit_is_retained(retained: frozenset[str]) -> None:
-    """The action, not only the command, refuses: `stop_permissions_helper` stays unbypassable."""
+    # meiva:note
+    # The action, not only the command, refuses: `stop_permissions_helper` stays unbypassable.
     with pytest.raises(ValueError) as refusal:
         command.stop_extras(30.0, retained=retained)
     assert "retains" in str(refusal.value)
 
 
 def test_every_call_site_passes_the_retained_keyword() -> None:
-    """A call site that forgot `retained` stopped every unit and then raised TypeError.
-
-    It ran after the tree was down, outside the failure reporting that turns a stop into a
-    readable message (review 2026-10-22), so the signature is pinned here for every caller.
-    """
+    # meiva:note
+    # A call site that forgot `retained` stopped every unit and then raised TypeError.
+    # It ran after the tree was down, outside the failure reporting that turns a stop into a
+    # readable message (review 2026-10-22), so the signature is pinned here for every caller.
     calls = 0
     for path in sorted((Path(__file__).resolve().parents[2]).glob("*.py")):
         tree = ast.parse(path.read_text())
