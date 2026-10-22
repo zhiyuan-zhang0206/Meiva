@@ -109,7 +109,7 @@ def _iter_files(targets: list[Path]) -> list[Path]:
     return files
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     if argv:
@@ -119,16 +119,16 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         targets = [Path(a).resolve() for a in argv]
     else:
-        targets = lint_common.scan_roots(_REPO_ROOT, SCAN_DIRS)
+        targets = lint_common.scan_roots(repo_root, SCAN_DIRS)
 
-    scope = lint_common.changed_scope(only, _REPO_ROOT)
+    scope = lint_common.changed_scope(only, repo_root)
 
     total = 0
-    for path in sorted(lint_common.restrict(_iter_files(targets), scope, _REPO_ROOT)):
-        if lint_common.is_repo_test_file(path, _REPO_ROOT):
+    for path in sorted(lint_common.restrict(_iter_files(targets), scope, repo_root)):
+        if lint_common.is_repo_test_file(path, repo_root):
             continue
         try:
-            rel = path.relative_to(_REPO_ROOT).as_posix()
+            rel = path.relative_to(repo_root).as_posix()
         except ValueError:
             rel = path.as_posix()
         for lineno, message in _scan_file(path, rel):

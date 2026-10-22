@@ -15,8 +15,5 @@ exports = ["candidate.py", "editing.py", "metadata.py"]
 "metadata.py#base/config/config_registry.py" = 1
 "metadata.py#base/config/service_read.py" = 1
 
-[debt.untyped-export]
-"metadata.py#def env_override_values" = 2
-
 [debt.wide-params]
 "metadata.py#def __init__" = 1

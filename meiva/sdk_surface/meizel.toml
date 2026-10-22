@@ -82,10 +82,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py
 [debt.untyped-export]
 "process_context.py#def get_state" = 1
 "process_context.py#def get_state_update" = 1
-"process_context.py#def set_state" = 1
-"process_context.py#def set_state_update" = 1
 "settings.py#def agent_setting" = 1
-"settings.py#def attached_agent_view" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1

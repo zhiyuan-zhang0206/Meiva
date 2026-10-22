@@ -9,7 +9,7 @@ process resource; the default database factory refuses it before a connection ca
 """
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Protocol, cast
 
 from base.agents.context.clients import DatabaseHandle
 from base.clock import Clock
@@ -100,13 +100,21 @@ def bus() -> "EventBus":  # noqa: F821  # pyright: ignore[reportUndefinedVariabl
     return EventBus.from_settings()
 
 
-def attached_agent_view() -> tuple[Mapping[str, Any], Any] | None:
-    """The pins and plugin-config view of the agent this process attached to
-    (`meiva.impersonation.attach`: one attachment per process), if any: the lease its context carries."""
+class _PluginConfigReader(Protocol):
+    def config_for(self, name: str) -> object: ...
 
+
+# meiva:note
+# The pins and plugin-config view of the agent this process attached to
+# (`meiva.impersonation.attach`: one attachment per process), if any: the lease its context carries.
+def attached_agent_view() -> tuple[Mapping[str, object], _PluginConfigReader] | None:
     context = process_context.ambient_context()
     lease = None if context is None or context.identity is None else context.identity.lease
-    return None if lease is None else lease.config()
+    return (
+        None
+        if lease is None
+        else cast("tuple[Mapping[str, object], _PluginConfigReader] | None", lease.config())
+    )
 
 
 def agent_setting(name: str) -> Any:

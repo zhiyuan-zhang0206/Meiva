@@ -20,31 +20,50 @@ from __future__ import annotations
 
 import sys
 import uuid
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Protocol, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
-from base.cluster.machine import gateway_api_base, gateway_auth_headers
+from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.cluster.machine.ambient import gateway_access_from_settings
 from base.host.net.http_dial import post as dial_post
 
 
-def main() -> None:
+class _PostResponse(Protocol):
+    def raise_for_status(self) -> object: ...
+
+    def json(self) -> Mapping[str, object]: ...
+
+
+class _PostFn(Protocol):
+    def __call__(
+        self, url: str, *, json: dict[str, str], headers: dict[str, str]
+    ) -> _PostResponse: ...
+
+
+def main(
+    *,
+    api_base_fn: Callable[[str], str] = gateway_api_base,
+    auth_headers_fn: Callable[[GatewayAccess], dict[str, str]] = gateway_auth_headers,
+    post_fn: _PostFn = dial_post,
+) -> None:
     access = gateway_access_from_settings()  # ambient: O
-    base = gateway_api_base(
+    base = api_base_fn(
         access.gateway_url
     )  # role-blind: the configured gateway_url (localhost on a dev cluster)
     # The keyed spawn route is authenticated: present the machine API token (or the
     # cluster secret) as a Bearer token; without it the gateway rejects this spawn with 401.
     headers = {
-        **gateway_auth_headers(access),
+        **auth_headers_fn(access),
         "Idempotency-Key": uuid.uuid4().hex,
         SCOPE_HEADER: PRINCIPAL_SCOPE,
     }
-    resp = dial_post(f"{base}/api/keyed/v1/agents", json={"spawner": "user"}, headers=headers)
+    resp = post_fn(f"{base}/api/keyed/v1/agents", json={"spawner": "user"}, headers=headers)
     resp.raise_for_status()
-    agent_id = int(resp.json()["id"])
+    agent_id = int(cast("int | str", resp.json()["id"]))
     print(f"agent_id={agent_id}")
 
 

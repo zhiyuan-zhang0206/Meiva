@@ -19,9 +19,9 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 from base.packages.docs.notes import normalize_tags
@@ -56,11 +56,19 @@ def find_files(bundle_dir: str | Path) -> list[str]:
     return sorted(out)
 
 
-def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """Adapter over `base.packages.docs.frontmatter.parse_frontmatter_typed` — absent/bad
-    frontmatter returns `({}, text)`; valid YAML keeps its value types and the
-    body's leading newline is stripped.
-    """
+class OkfGraphData(TypedDict):
+    name: str
+    nodes: list[dict[str, object]]
+    treeEdges: list[dict[str, object]]
+    crossEdges: list[dict[str, object]]
+    tags: list[str]
+
+
+# meiva:note
+# Adapter over `base.packages.docs.frontmatter.parse_frontmatter_typed` — absent/bad
+# frontmatter returns `({}, text)`; valid YAML keeps its value types and the
+# body's leading newline is stripped.
+def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
     parsed = parse_frontmatter_typed(text)
     if parsed is not None:
         fm, body = parsed
@@ -214,21 +222,21 @@ def _cross_edges(
     return [pair_info[k] for k in pair_order]
 
 
+# meiva:note
+# Parse every `.meiva.okf.md` file under `bundle_dir` into D3 graph data:
+# nodes, tree edges (from the filesystem hierarchy), cross edges (from
+# resolved `[[wikilinks]]`, deduplicated + weighted), and the set of all tags.
+#
+# `raw_links_out`, if given, is extended with every `(source, raw_target,
+# resolved_or_None)` wikilink tuple seen — used by the CLI to report
+# unresolved links; callers that only want the graph (e.g. the gateway
+# route) can leave it `None`.
 def build_graph_data(
     bundle_dir: str | Path,
     name: str = "OKF",
     *,
     raw_links_out: list[tuple[str, str, str | None]] | None = None,
-) -> dict[str, Any]:
-    """Parse every `.meiva.okf.md` file under `bundle_dir` into D3 graph data:
-    nodes, tree edges (from the filesystem hierarchy), cross edges (from
-    resolved `[[wikilinks]]`, deduplicated + weighted), and the set of all tags.
-
-    `raw_links_out`, if given, is extended with every `(source, raw_target,
-    resolved_or_None)` wikilink tuple seen — used by the CLI to report
-    unresolved links; callers that only want the graph (e.g. the gateway
-    route) can leave it `None`.
-    """
+) -> OkfGraphData:
     bundle_dir = str(bundle_dir)
     paths = find_files(bundle_dir)
     path_set = set(paths)
@@ -263,12 +271,12 @@ def build_graph_data(
             raw_links.append((path, target_raw, resolved))
 
     # Build tree edges
-    tree_edges: list[dict[str, Any]] = []
+    tree_edges: list[dict[str, object]] = []
     for path, n in nodes.items():
         if n["parent"] is not None:
             tree_edges.append({"source": n["parent"], "target": path})
 
-    cross_edges = _cross_edges(nodes, raw_links)
+    cross_edges: list[dict[str, object]] = list(_cross_edges(nodes, raw_links))
 
     # Collect all unique tags
     all_tags: list[str] = sorted({tag for n in nodes.values() for tag in n["tags"]})
@@ -285,9 +293,10 @@ def build_graph_data(
     }
 
 
-def render_html(data: dict[str, Any], template_text: str) -> str:
-    """Inject graph `data` into the D3 template, returning a self-contained
-    HTML page (no external data fetch — see `DATA_PLACEHOLDER`)."""
+# meiva:note
+# Inject graph `data` into the D3 template, returning a self-contained
+# HTML page (no external data fetch — see `DATA_PLACEHOLDER`).
+def render_html(data: OkfGraphData | Mapping[str, object], template_text: str) -> str:
     if DATA_PLACEHOLDER not in template_text:
         raise ValueError("Template missing data placeholder")
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")

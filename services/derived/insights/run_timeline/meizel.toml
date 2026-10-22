@@ -13,9 +13,6 @@ exports = ["projection", "router.py", "schemas.py", "tests"]
 "." = "strict-to-be"
 "__init__.py" = "strict"
 
-[debt.deep-attr-chain]
-"messages.py#request.app.state.config.run_timeline_message_text_max" = 1
-
 [debt.impure-call]
 "context.py#import fastapi" = 1
 "links.py#import fastapi" = 1

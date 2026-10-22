@@ -76,19 +76,16 @@ def test_async_lint_helper_names_are_not_kept_alive_by_a_test(
     assert lint.stale_repo_helpers() == []
 
 
-def test_plugin_wrap_lint_exempts_a_plugins_own_tests(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_plugin_wrap_lint_exempts_a_plugins_own_tests(tmp_path: Path) -> None:
     from scripts.lint.plugins import no_plugin_wrap as lint
 
-    monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     body = "import meiva\n\nmeiva.files.read = lambda: None\n"
     stub = _write(tmp_path, "meiva_builtins/plugins/p/tests/test_plugin.py", body)
-    assert lint.main([]) == 0
-    assert lint.main([str(stub)]) == 0
+    assert lint.main([], repo_root=tmp_path) == 0
+    assert lint.main([str(stub)], repo_root=tmp_path) == 0
 
     _write(tmp_path, "meiva_builtins/plugins/p/plugin.py", body)
-    assert lint.main([]) == 1
+    assert lint.main([], repo_root=tmp_path) == 1
 
 
 def test_meiva_root_scope_lint_exempts_the_supervisors_own_tests(

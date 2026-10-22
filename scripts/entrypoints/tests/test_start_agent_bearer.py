@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import cast
 
-import pytest
-
 from base.cluster.machine.tests.gateway_stubs import (
     gateway_api_base_stub,
     gateway_auth_headers_stub,
@@ -18,28 +16,26 @@ from base.cluster.machine.tests.gateway_stubs import (
 from scripts.entrypoints import agent as mod
 
 
-def test_start_agent_posts_with_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_agent_posts_with_bearer() -> None:
     captured: dict[str, object] = {}
 
     class _Resp:
         def raise_for_status(self) -> None: ...
 
         @staticmethod
-        def json() -> dict[str, int]:
+        def json() -> dict[str, object]:
             return {"id": 7}
 
-    def _fake_post(url: str, *, json: dict, headers: dict) -> _Resp:
+    def _fake_post(url: str, *, json: dict[str, str], headers: dict[str, str]) -> _Resp:
         captured["url"] = url
         captured["headers"] = headers
         return _Resp()
 
-    monkeypatch.setattr(mod, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
-    monkeypatch.setattr(
-        mod, "gateway_auth_headers", gateway_auth_headers_stub({"Authorization": "Bearer sekret"})
+    mod.main(
+        api_base_fn=gateway_api_base_stub("http://gw:8000"),
+        auth_headers_fn=gateway_auth_headers_stub({"Authorization": "Bearer sekret"}),
+        post_fn=_fake_post,
     )
-    monkeypatch.setattr(mod, "dial_post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
-
-    mod.main()
 
     assert captured["url"] == "http://gw:8000/api/keyed/v1/agents"
     # The Bearer header is what a multi-host gateway requires (PR#100 pattern).

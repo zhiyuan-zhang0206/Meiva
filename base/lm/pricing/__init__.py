@@ -302,18 +302,23 @@ def load_archive() -> dict[str, ModelPrice]:
     return parse_catalog(raw)
 
 
-def parse_catalog(raw: dict[str, Any]) -> dict[str, ModelPrice]:
-    schema_version = raw["schema_version"]
-    if schema_version not in (1, 2) or raw["currency"] != "USD" or raw["unit_tokens"] != 1_000_000:
+def parse_catalog(raw: Mapping[str, object]) -> dict[str, ModelPrice]:
+    raw_any = cast("Mapping[str, Any]", raw)
+    schema_version = raw_any["schema_version"]
+    if (
+        schema_version not in (1, 2)
+        or raw_any["currency"] != "USD"
+        or raw_any["unit_tokens"] != 1_000_000
+    ):
         raise RuntimeError("unsupported pricing catalog schema, currency, or token unit")
-    if not isinstance(raw["catalog_version"], str) or not raw["catalog_version"]:
+    if not isinstance(raw_any["catalog_version"], str) or not raw_any["catalog_version"]:
         raise RuntimeError("pricing catalog version must be a non-empty string")
-    raw_models = raw.get("models")
+    raw_models = raw_any.get("models")
     if not isinstance(raw_models, dict) or not raw_models:
         raise RuntimeError("pricing catalog models must be a non-empty mapping")
     return {
         model: _parse_model_price(model, entry_raw, schema_version)
-        for model, entry_raw in cast(dict[str, dict[str, Any]], raw["models"]).items()
+        for model, entry_raw in cast(dict[str, dict[str, Any]], raw_any["models"]).items()
     }
 
 
@@ -419,6 +424,11 @@ def plugin_price_provenance(model: str, *, prices: PriceBook) -> tuple[str, str]
     return prices.provenance(model)
 
 
+# meiva:note
+# Validate and parse a plugin provider's per-model price declaration.
+#
+# Full and flat-compatible plugin declarations both become ``ModelPrice``
+# values and use the archive parser and runtime selector.
 def plugin_model_price(
     model: str,
     *,
@@ -428,16 +438,11 @@ def plugin_model_price(
     source_url: str,
     source_checked_at: str,
     vendor: str | None = None,
-    periods: tuple[Any, ...] = (),
+    periods: Sequence[object] = (),
     cache_write_5m: float | None = None,
     cache_write_1h: float | None = None,
     plugin: str = "<unknown>",
 ) -> ModelPrice:
-    """Validate and parse a plugin provider's per-model price declaration.
-
-    Full and flat-compatible plugin declarations both become ``ModelPrice``
-    values and use the archive parser and runtime selector.
-    """
     if not source_url.startswith("https://"):
         raise ValueError(
             f"provider plugin {plugin!r}: source_url must be HTTPS, got {source_url!r}"
@@ -465,6 +470,7 @@ def plugin_model_price(
             raise ValueError(
                 f"provider plugin {plugin!r}: {model!r} price {name} must be finite and non-negative"
             )
+    periods_any = cast("Sequence[Any]", periods)
     raw_periods: list[dict[str, Any]] = (
         [
             {
@@ -499,9 +505,9 @@ def plugin_model_price(
                     for tier in period.tiers
                 ],
             }
-            for period in periods
+            for period in periods_any
         ]
-        if periods
+        if periods_any
         else [
             {
                 "effective_from": None,

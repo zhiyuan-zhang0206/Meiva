@@ -80,10 +80,6 @@ exports = ["analysis.py", "cli.py", "debt.py", "enumerations.py", "generated.py"
 "declare.py#class Plan" = 1
 "manifest.py#class Manifest" = 1
 
-[debt.untyped-export]
-"bootstrap.py#def build_report" = 1
-"debt_report.py#def report" = 1
-
 [debt.wide-exports]
 "meizel.toml#exports" = 1
 
@@ -93,5 +89,4 @@ exports = ["analysis.py", "cli.py", "debt.py", "enumerations.py", "generated.py"
 [debt.wide-public-surface]
 "cli.py#public-surface" = 1
 "debt.py#public-surface" = 1
-"debt_report.py#public-surface" = 1
 "rule.py#public-surface" = 1

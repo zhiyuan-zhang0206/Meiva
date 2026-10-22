@@ -14,6 +14,7 @@ too: the same narrowing, one level up.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 if TYPE_CHECKING:
@@ -47,13 +48,13 @@ class ContentBlock(TypedDict, total=False):
     partial_json: str
 
 
-def content_blocks(content: list[Any]) -> list[str | ContentBlock]:
-    """Re-label the list arm of an AIMessage(Chunk).content as `str | ContentBlock`
-    so a `for b in content_blocks(content): if isinstance(b, dict): b.get(...)`
-    walk reads typed fields. Identity at runtime — langchain already hands us the
-    str / dict blocks; this only attaches the `ContentBlock` shape to the dicts.
-    """
-    return content
+# meiva:note
+# Re-label the list arm of an AIMessage(Chunk).content as `str | ContentBlock`
+# so a `for b in content_blocks(content): if isinstance(b, dict): b.get(...)`
+# walk reads typed fields. Identity at runtime — langchain already hands us the
+# str / dict blocks; this only attaches the `ContentBlock` shape to the dicts.
+def content_blocks(content: Sequence[object]) -> list[str | ContentBlock]:
+    return cast("list[str | ContentBlock]", content)
 
 
 # ── Typed accessors for the loosely-typed LangChain message members ──
