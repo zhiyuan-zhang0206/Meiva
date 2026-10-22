@@ -207,6 +207,7 @@ class _Machine:
 class _Runtime:
     def __init__(self, roles: frozenset[str] | None) -> None:
         self.machine = _Machine(roles)
+        self.helper = None
 
 
 @pytest.mark.parametrize(
@@ -242,3 +243,98 @@ def test_the_restart_handler_refuses_before_any_command_runs(
         "--keep-extras | --restart-extras",
     ):
         assert form in err
+
+
+def _refusing_args(argv: list[str]) -> argparse.Namespace:
+    # meiva:note
+    # A dependency factory that fails loudly: a refusal that reached the database
+    # would fail this test with the factory's own error instead of a clean status.
+    args = _parsed(argv)
+    args.runtime = _Runtime(RUNNER)
+
+    def _untouched() -> None:
+        raise AssertionError("a refusal must not open the database")
+
+    args.database_factory = _untouched
+    args.producer = _untouched
+    return args
+
+
+def test_a_contradictory_stop_answers_the_operator_in_one_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # meiva:note
+    # The guard refuses before any unit stops; the operator reads one line naming the
+    # conflict and both ways out, never a traceback that looks like the command crashed.
+    args = _refusing_args(
+        [
+            "stop",
+            "--keep-shell-sessions",
+            "--stop-browser",
+            "--stop-extras",
+            "--keep-no-services",
+            "--mode",
+            "smooth",
+            "--timeout",
+            "60",
+            "--yes",
+        ]
+    )
+    assert host_parsers.h_stop(args) == 1
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert err.startswith("meiva stop: ")
+    assert "--keep-shell-sessions" in err
+    assert "--keep-extras" in err
+
+
+def test_a_dedicated_service_kept_by_the_wrong_choice_answers_in_one_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # meiva:note
+    # The same layer answers the other operator-input refusal under the stop kernel:
+    # keeping shell sessions or the browser through `--keep-service` is not a crash.
+    args = _refusing_args(
+        [
+            "stop",
+            "--close-shell-sessions",
+            "--stop-browser",
+            "--keep-extras",
+            "--mode",
+            "smooth",
+            "--timeout",
+            "60",
+            "--yes",
+            "--keep-service",
+            "browser",
+        ]
+    )
+    assert host_parsers.h_stop(args) == 1
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert err.startswith("meiva stop: --keep-service ['browser']: choose ")
+
+
+def test_a_caller_contract_error_still_surfaces_as_a_traceback() -> None:
+    # meiva:note
+    # Only the operator's own contradictions become one line: a missing caller-owned
+    # child list is a programming error, so it keeps raising instead of being dressed
+    # as an operator message.
+    args = _parsed(
+        [
+            "restart",
+            "--all-services",
+            "--close-shell-sessions",
+            "--keep-browser",
+            "--keep-extras",
+            "--mode",
+            "smooth",
+            "--timeout",
+            "60",
+            "--start-timeout",
+            "120",
+        ]
+    )
+    args.runtime = _Runtime(GATEWAY)
+    with pytest.raises(ValueError, match="caller-owned child retention"):
+        host_parsers.h_restart(args)
