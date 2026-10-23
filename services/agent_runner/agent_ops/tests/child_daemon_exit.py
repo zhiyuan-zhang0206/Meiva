@@ -18,8 +18,8 @@ def _crash() -> None:
 
     daemon.main(
         argv=[],
-        init_process=_silent,
-        install_shutdown=_silent,
+        init_gateway_process=_silent,
+        install_graceful_shutdown=_silent,
         serve_daemon=_boom,
     )
 

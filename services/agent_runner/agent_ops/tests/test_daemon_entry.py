@@ -144,8 +144,8 @@ def test_entry_shares_image_gate_factory_and_closes_writer(  # noqa: PLR0915 -- 
                 config_factory=lambda: process_config,
                 database_cls=build_database,
                 pipeline_builder=build_pipeline,
-                init_process=init,
-                install_shutdown=install_shutdown,
+                init_gateway_process=init,
+                install_graceful_shutdown=install_shutdown,
                 runner_factory=lambda: runner,
                 serve_daemon=run,
             )
@@ -183,7 +183,7 @@ def test_entry_keeps_startup_failure_when_writer_close_also_fails(tmp_path: Path
             capture_image=lambda: LoadedCommit(source_root=tmp_path, sha=None),
             config_factory=snapshot_process_config,
             client_set_cls=_FailingClientSet,
-            init_process=init,
+            init_gateway_process=init,
         )
     assert raised.value is primary
     assert closed == [2]

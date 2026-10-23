@@ -141,7 +141,7 @@ async def test_server_failure_releases_owned_resources(
             ops_acceptance=lambda: frozenset({"test-digest"}),
             ops_bind_host=bind_host,
             register_boot=register_boot,
-            start_health=start_health,
+            start_health_server=start_health,
             stop_health=stop_health,
         )
 

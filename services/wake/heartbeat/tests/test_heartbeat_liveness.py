@@ -9,13 +9,11 @@ from psycopg_pool import ConnectionPool
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from services.wake.heartbeat import liveness
 from services.wake.heartbeat.liveness import (
     OFFLINE_AFTER_FAILURES,
     merge_liveness,
@@ -194,14 +192,12 @@ class TestLivenessPass:
         redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 12.0)
         register_machine(db_conn)
         aid = _make_agent(
             db_conn,
@@ -226,6 +222,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=RecordingProbe({MACHINE: True}),
+                timeout_s=12.0,
             )
         )
         assert seen["timeout_s"] == 12.0
@@ -407,7 +404,6 @@ class TestLivenessPass:
         redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
@@ -428,18 +424,13 @@ class TestLivenessPass:
         def capture_announcement(_bus: object, agent_id: int) -> None:
             announced.append(agent_id)
 
-        monkeypatch.setattr(
-            liveness,
-            "publish_agent_updated_sync",
-            capture_announcement,
-        )
-
         asyncio.run(
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({MACHINE: True}),
+                publish_fn=capture_announcement,
             )
         )
         assert announced == []
@@ -451,6 +442,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({MACHINE: True}),
+                publish_fn=capture_announcement,
             )
         )
         assert announced == []
@@ -462,6 +454,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=fail,
+                publish_fn=capture_announcement,
             )
         )
         asyncio.run(
@@ -470,6 +463,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=fail,
+                publish_fn=capture_announcement,
             )
         )
         assert announced == [aid]
@@ -481,6 +475,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=fail,
+                publish_fn=capture_announcement,
             )
         )
         assert announced == []
@@ -492,6 +487,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({MACHINE: True}),
+                publish_fn=capture_announcement,
             )
         )
         assert announced == [aid]

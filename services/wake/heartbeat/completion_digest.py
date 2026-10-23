@@ -15,7 +15,9 @@ errors propagate through this caller to the heartbeat service's
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from psycopg_pool import ConnectionPool
 
@@ -68,6 +70,7 @@ async def flush_once(
     *,
     now: datetime | None = None,
     machine: MachineIdentity,
+    deliver_fn: Callable[..., Awaitable[Any]] = deliver_chat_inbound,
 ) -> int:
     """Deliver each completed hour, then mark its persisted event rows.
 
@@ -78,16 +81,20 @@ async def flush_once(
     digests = await asyncio.to_thread(_pending, pool, moment)
     delivered = 0
     for digest in digests:
-        delivery = await deliver_chat_inbound(
+
+        def _prepare(_conn: Any, digest: CompletionDigest = digest) -> str:
+            return format_digest(
+                agent_id=digest.agent_id,
+                window_start=digest.window_start,
+                notices=digest.notices,
+            )
+
+        delivery = await deliver_fn(
             pool,
             db,
             bus,
             digest.agent_id,
-            prepare=lambda _conn, digest=digest: format_digest(
-                agent_id=digest.agent_id,
-                window_start=digest.window_start,
-                notices=digest.notices,
-            ),
+            prepare=_prepare,
             source=_SOURCE,
             client_message_id=_digest_key(digest),
             local_machine=machine.name(),
@@ -107,11 +114,12 @@ async def completion_digest_loop(
     progress: LoopProgress,
     *,
     machine: MachineIdentity,
+    flush_fn: Callable[..., Awaitable[int]] = flush_once,
 ) -> None:
     """The completion-digest flush as a resident sequential loop: one pass at
     start, then every `FLUSH_INTERVAL_S`."""
 
     async def one_round() -> None:
-        await flush_once(pool, db, bus, machine=machine)
+        await flush_fn(pool, db, bus, machine=machine)
 
     await round_loop.run_rounds("completion-digest", progress, FLUSH_INTERVAL_S, one_round)

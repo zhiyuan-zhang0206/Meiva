@@ -209,7 +209,7 @@ def test_paused_and_non_runner_machines_are_not_probed(
 
 
 def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    *, database_gate: ProcessDbGate
 ) -> None:
     events: list[str] = []
 
@@ -220,9 +220,6 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
         events.append("sleep")
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(heartbeat_daemon, "run_liveness_pass", fake_pass)
-    monkeypatch.setattr(heartbeat_daemon, "sleep_with_liveness", fake_sleep)
-
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             heartbeat_daemon.liveness_loop(
@@ -230,6 +227,8 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
                 cast(ConnectionPool, object()),
                 EventBus.from_settings(),
                 LoopProgress("liveness", 60.0),
+                pass_fn=fake_pass,
+                sleep_fn=fake_sleep,
             )
         )
 
@@ -237,7 +236,7 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
 
 
 def test_a_failing_pass_waits_out_the_interval_before_retrying(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    *, database_gate: ProcessDbGate
 ) -> None:
     events: list[str] = []
 
@@ -250,9 +249,6 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying(
         if events.count("sleep") == 2:
             raise asyncio.CancelledError
 
-    monkeypatch.setattr(heartbeat_daemon, "run_liveness_pass", failing_pass)
-    monkeypatch.setattr(heartbeat_daemon, "sleep_with_liveness", sleep)
-
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             heartbeat_daemon.liveness_loop(
@@ -260,6 +256,8 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying(
                 cast(ConnectionPool, object()),
                 EventBus.from_settings(),
                 LoopProgress("liveness", 60.0),
+                pass_fn=failing_pass,
+                sleep_fn=sleep,
             )
         )
 

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import sys
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -12,16 +11,24 @@ import pytest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config.tests.configuration import snapshot_process_config
-from base.daemon import shutdown
-from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.native_process import code_version
+from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.telemetry import pipeline_build, process_logging
-from base.telemetry.delivery import reporting
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
 from services.entrypoints.gate import daemon
+from services.entrypoints.gate.daemon import MainDeps
+
+
+class _FakeCodeVersion(CodeVersion):
+    def __init__(self, loaded: LoadedCommit, *, count_mock: Mock) -> None:
+        super().__init__(loaded)
+        self._count_mock = count_mock
+
+    def get(self) -> int:
+        if self._version is None:
+            self._version = int(self._count_mock(self.loaded.source_root, self.loaded.sha))
+        return self._version
 
 
 @dataclass
@@ -35,20 +42,30 @@ class _Entry:
     pipeline: Mock = field(default_factory=Mock)
     capture: Mock = field(default_factory=Mock)
     failures: dict[str, BaseException] = field(default_factory=dict[str, BaseException])
+    argv: list[str] = field(default_factory=lambda: ["--port", "32001"])
+    deps: MainDeps = field(default_factory=MainDeps)
 
     def step(self, name: str) -> None:
         self.calls.append(name)
         if failure := self.failures.get(name):
             raise failure
 
+    def run_main(
+        self,
+        *,
+        argv: Sequence[str] | None = None,
+        deps: MainDeps | None = None,
+    ) -> None:
+        daemon.main(
+            self.argv if argv is None else argv,
+            deps=self.deps if deps is None else deps,
+        )
+
 
 @pytest.fixture
-def entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Entry:
+def entry(tmp_path: Path) -> _Entry:
     setup = _Entry(LoadedCommit(tmp_path, "captured-image"))
     setup.capture.return_value = setup.image
-    monkeypatch.setattr(LoadedCommit, "capture", setup.capture)
-    monkeypatch.setattr(daemon, "ConfigBoot", snapshot_process_config)
-    monkeypatch.setattr(sys, "argv", ["gate", "--port", "32001"])
 
     def build_pipeline(*, database: Callable[[], Any], machine: MachineIdentity, home: Path) -> Any:
         setup.database = database
@@ -82,29 +99,38 @@ def entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Entry:
         assert name == "gate"
 
     setup.pipeline.stop.side_effect = stop
-    monkeypatch.setattr(pipeline_build, "build_pipeline", build_pipeline)
-    monkeypatch.setattr(process_logging, "init_gateway_process", logging)
-    monkeypatch.setattr(shutdown, "install_graceful_shutdown", install_shutdown)
-    monkeypatch.setattr(daemon, "Gate", gate)
-    monkeypatch.setattr(daemon, "ThreadingHTTPServer", server)
+    setup.deps = MainDeps(
+        capture_image=setup.capture,
+        config_boot_cls=snapshot_process_config,
+        build_pipeline=build_pipeline,
+        init_gateway_process=logging,
+        install_graceful_shutdown=install_shutdown,
+        gate_cls=gate,
+        http_server_cls=server,
+    )
     return setup
 
 
-def test_entry_keeps_one_image_gate_factory_and_producer(
-    entry: _Entry, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_entry_keeps_one_image_gate_factory_and_producer(entry: _Entry) -> None:
     version = Mock(return_value=17)
-    monkeypatch.setattr(code_version, "first_parent_count", version)
     opened: list[ProcessDbGate] = []
 
-    def database(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> object:
+    def database(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Any:
         assert entry.machine is not None
         assert direct_url.local_host == entry.machine.host
         opened.append(gate)
         return object()
 
-    monkeypatch.setattr(Database, "from_settings", database)
-    daemon.main()
+    def code_version(loaded: LoadedCommit) -> CodeVersion:
+        return _FakeCodeVersion(loaded, count_mock=version)
+
+    entry.run_main(
+        deps=replace(
+            entry.deps,
+            code_version_cls=code_version,
+            database_from_settings=database,
+        )
+    )
     entry.capture.assert_called_once_with()
     assert opened == []
     assert entry.database is not None
@@ -138,7 +164,7 @@ def test_startup_and_serve_failures_stop_the_writer_without_replacing_error(
     primary = RuntimeError(stage)
     entry.failures[stage] = primary
     with pytest.raises(RuntimeError) as caught:
-        daemon.main()
+        entry.run_main()
     assert caught.value is primary
     entry.pipeline.stop.assert_called_once_with(timeout=2)
     assert entry.calls[-1] == "pipeline-stop"
@@ -155,7 +181,7 @@ def test_http_and_pipeline_cleanup_faults_remain_notes_on_serve_failure(entry: _
         }
     )
     with pytest.raises(SystemExit) as caught:
-        daemon.main()
+        entry.run_main()
     assert caught.value is primary
     assert any("close failed" in note for note in primary.__notes__)
     assert any("writer failed" in note for note in primary.__notes__)
@@ -167,34 +193,29 @@ def test_cleanup_fault_without_primary_is_raised(entry: _Entry, stage: str) -> N
     failure = RuntimeError(stage)
     entry.failures[stage] = failure
     with pytest.raises(RuntimeError) as caught:
-        daemon.main()
+        entry.run_main()
     assert caught.value is failure
     entry.pipeline.stop.assert_called_once_with(timeout=2)
 
 
 def test_interrupt_closes_http_before_stopping_writer(entry: _Entry) -> None:
     entry.failures["serve"] = KeyboardInterrupt()
-    daemon.main()
+    entry.run_main()
     assert entry.calls[-2:] == ["http-close", "pipeline-stop"]
 
 
-def test_unfinished_stop_is_reported_without_reentering_pipeline(
-    entry: _Entry, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_unfinished_stop_is_reported_without_reentering_pipeline(entry: _Entry) -> None:
     drain = DrainResult(DrainStatus.UNFINISHED, DrainPhase.STOP)
     entry.pipeline.stop.side_effect = None
     entry.pipeline.stop.return_value = drain
     report = Mock()
-    monkeypatch.setattr(reporting, "report_no_pipeline", report)
-    daemon.main()
+    entry.run_main(deps=replace(entry.deps, report_no_pipeline=report))
     entry.pipeline.stop.assert_called_once_with(timeout=2)
     assert "unfinished" in report.call_args.args[0]
     assert report.call_args.kwargs["drain"] is drain
 
 
-def test_real_owned_pipeline_is_joined_on_http_exit(
-    entry: _Entry, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_real_owned_pipeline_is_joined_on_http_exit(entry: _Entry) -> None:
     pipeline = EventPipeline(writer=lambda _events: None)
 
     def build_pipeline(
@@ -203,9 +224,8 @@ def test_real_owned_pipeline_is_joined_on_http_exit(
         del database
         return pipeline
 
-    monkeypatch.setattr(pipeline_build, "build_pipeline", build_pipeline)
     try:
-        daemon.main()
+        entry.run_main(deps=replace(entry.deps, build_pipeline=build_pipeline))
         assert entry.logging.call_args.kwargs["producer"]() is pipeline
         assert pipeline.stopped
     finally:
@@ -213,9 +233,9 @@ def test_real_owned_pipeline_is_joined_on_http_exit(
 
 
 def test_invalid_arguments_do_not_capture_or_construct_resources(entry: _Entry) -> None:
-    sys.argv.append("--unknown-option")
+    entry.argv.append("--unknown-option")
     with pytest.raises(SystemExit) as caught:
-        daemon.main()
+        entry.run_main()
     assert caught.value.code == 2
     entry.capture.assert_not_called()
     assert entry.calls == []
