@@ -1,6 +1,5 @@
 [debt.first-party-patch]
 "test_agent_wake_hosted.py#monkeypatch.setattr ops.agents.wake.publish_inbound_wake" = 1
 "test_schema_mismatch.py#monkeypatch.setattr gateway.cluster.roster_probe.dispatch_status_probe" = 1
-"test_schema_mismatch.py#monkeypatch.setattr ops.cluster_status.schema_mismatch.applied_migration_names" = 3
+"test_schema_mismatch.py#monkeypatch.setattr ops.cluster_status.schema_mismatch.applied_migration_names" = 2
 "test_schema_mismatch.py#monkeypatch.setattr ops.cluster_status.schema_mismatch.detect" = 1
-"test_schema_mismatch.py#monkeypatch.setattr ops.cluster_status.schema_mismatch.required_migration_set" = 2
