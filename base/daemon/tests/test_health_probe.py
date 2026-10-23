@@ -198,6 +198,48 @@ async def test_probe_rejects_200_from_a_process_that_is_not_ours(tmp_path: Path)
         await health.stop_health_server(server)
 
 
+# meiva:note
+# #5525's family A: a process that is not this unit's daemon answers the port, the probe can
+# only say "not this unit's daemon", and three restarts recount the same anonymous blocker.
+# The detail must name the listener, and an unavailable lookup must stay a verdict rather
+# than become a probe failure.
+@pytest.mark.asyncio
+async def test_a_missing_pidfile_names_the_process_listening_on_the_port(tmp_path: Path) -> None:
+    port = find_free_port()
+    pidfile = tmp_path / "agent_host.pid"
+    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
+    try:
+        probe = await _probe("agent_host", port, pidfile)
+        assert probe.verdict is health.ProbeVerdict.DOWN
+        assert "answers but no pidfile" in probe.detail
+        assert f"listening: pid {os.getpid()}" in probe.detail
+    finally:
+        await health.stop_health_server(server)
+
+
+@pytest.mark.asyncio
+async def test_an_unavailable_listener_lookup_leaves_the_detail_usable(tmp_path: Path) -> None:
+    port = find_free_port()
+    pidfile = tmp_path / "agent_host.pid"
+    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
+
+    def no_discovery(_url: str) -> str:
+        return "unknown"
+
+    try:
+        probe = await asyncio.to_thread(
+            health.probe_daemon_identity,
+            "agent_host",
+            probe_url(port),
+            pidfile=pidfile,
+            listener_lookup=no_discovery,
+        )
+        assert probe.verdict is health.ProbeVerdict.DOWN
+        assert "not this unit's daemon; listening: unknown" in probe.detail
+    finally:
+        await health.stop_health_server(server)
+
+
 @pytest.mark.asyncio
 async def test_probe_rejects_daemon_from_another_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
