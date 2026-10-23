@@ -578,7 +578,7 @@ repos:
         name: lint NoteTag / system_marker bidirectional sync
         entry: .venv/bin/python scripts/lint/note_tags.py
         language: system
-        files: ^(base/agents/messages/kwargs\.py|ui/web/src/components/timeline/markers\.tsx)$
+        files: ^(base/agents/messages/kwargs\.py|ui/web/src/components/timeline/model/marker-classify\.ts)$
         pass_filenames: false
 
       # Migration layout: timestamp-id filename format, unique names, merged
