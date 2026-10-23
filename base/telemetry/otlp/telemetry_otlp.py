@@ -69,7 +69,7 @@ from base.telemetry.delivery.reporting import (
     report_no_pipeline,
     report_sink_failure,
 )
-from base.telemetry.emitter import emit
+from base.telemetry.emitter import emit, pipeline_bound
 from base.telemetry.metrics import ci_runs_metrics
 from base.telemetry.observability import (
     cluster_label,
@@ -337,6 +337,11 @@ class OtlpBackend:
         self._producers_idle.set()
         self._active_producers = 0
         self._start_error: BaseException | None = None
+        # meiva:note
+        # Set when the owner starts closing. A bring-up failure after this point is only
+        # reportable if the process bound an event pipeline to carry the report (#5578).
+        # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+        self._closing = False
         # Child deferral (task #3816 M4b) — policy in base.telemetry.otlp.telemetry_otlp_defer;
         # the lambdas look the backend methods up per call so test seams stay live.
         self._deferral = ChildDeferral(
@@ -430,8 +435,18 @@ class OtlpBackend:
             )
         return worker.sync(timeout)
 
+    # meiva:note
+    # The pipeline calls this before its own drain: that drain is where a never-started
+    # exporter gets brought up for the first time at interpreter exit, an attempt the SDK
+    # can no longer honour. Marking it keeps that failure out of a log nobody can act on.
+    # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+    def begin_close(self) -> None:
+        self._closing = True
+
     def shutdown(self, timeout: float = 2.0) -> DrainResult:
         """Close admission and observe this exporter within one local deadline."""
+        self.begin_close()
+        self.begin_close()
         # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("OTLP timeout must be finite and non-negative")
@@ -607,6 +622,15 @@ class OtlpBackend:
             meter = worker.metrics.get_meter("meiva.telemetry")
             self._logs, self._metric_provider, self._meter = worker.logs, worker.metrics, meter
         except Exception as exc:
+            # meiva:note
+            # A process that binds no event pipeline has no sink for this diagnosis — the
+            # attempt could not deliver anything either. That is the watcher child's shape:
+            # it builds the boot pipeline, binds none, and at exit the SDK's executors are
+            # already shut down, so the bring-up fails and used to print a warning plus
+            # traceback for work that finished (#5578).
+            # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+            if self._closing and not pipeline_bound():
+                return False
             self._init_failed_at = time.monotonic()
             self._report(
                 f"OTLP backend init failed — OTLP side disabled; retrying in {COLLECTOR_RETRY_INTERVAL_S}s: {exc!r}"

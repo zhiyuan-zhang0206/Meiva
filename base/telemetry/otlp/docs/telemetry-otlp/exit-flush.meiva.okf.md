@@ -64,9 +64,16 @@ through this ordered seam.
 - `base/host/exit_codes.py:hard_exit` skips every atexit handler
   including this drain (`os._exit`); the queued batch is deliberately not
   flushed — hard-exit semantics win (accepted, task #4320).
-- A deferred hold can begin its existing exporter attempt at shutdown without
-  waiting on SDK construction in the caller, subject to the same startup-frozen
-  enabled gate as live completion. Disabled holds keep their unexported records
+- A deferred hold's shutdown attempt is reported only to a process that can
+  receive the report. The owner marks itself closing before its own drain; a
+  bring-up that fails after that point is logged only when an event pipeline is
+  bound. At interpreter exit the SDK's executors are already shut down, so a
+  watcher's never-started exporter fails there — with no bound pipeline the report
+  has no reader, and a warning plus traceback for work that finished is exactly
+  the noise that task #5578 removed. The attempt itself still runs: a process that
+  did bind a pipeline keeps its deferred bring-up and its diagnostics. A worker
+  already live is kept and stopped under the same deadline, subject to the same
+  startup-frozen enabled gate as live completion. Disabled holds keep their unexported records
   and report unfinished; they do not construct SDK resources. Empty holds construct nothing;
   interpreter finalization still refuses first construction. The existing age
   timer is canceled and observed finitely. An in-flight completion remains
