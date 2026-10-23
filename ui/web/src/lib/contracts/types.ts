@@ -66,6 +66,13 @@ export {
   type FamilyClasses,
   type NotificationCategoriesResponse,
   type NotificationCategoryItem,
+  type TaskFields,
+  type TaskGraphRow,
+  type TaskListResponse,
+  type TaskPriority,
+  type TaskRow,
+  type TaskStatus,
+  type TaskSummaryRow,
   type TimeMode,
   type ToUserDocument,
   type UserSettingListResponse,
@@ -490,59 +497,3 @@ export type FleetGraph = Omit<WireFleetGraph, "nodes" | "edges"> & {
   readonly nodes: readonly FleetGraphNode[];
   readonly edges: readonly FleetGraphEdge[];
 };
-// --- Tasks (GET /api/tasks) ---
-//
-// The task registry — persistent, process-decoupled work items that outlive
-// the agent doing them. Backs the Task Graph (a free D3-force view).
-
-// The task lifecycle status set — the backend's base/agents/tasks/status.py enum,
-// surfaced through the generated wire schema (a pytest locks db/schema.sql and
-// openapi.json to it; 'ongoing' was removed by user ruling 2026-09-15). The
-// system root is not a status: it is pinned in_progress and immutable.
-export type TaskStatus = Schemas["TaskStatus"];
-
-// The task's stakes axis (P0 highest .. P3 lowest) — the same four rungs as a
-// notice priority, so it reuses the PRIORITY_* style maps in lib/notices.ts.
-export type TaskPriority = "P0" | "P1" | "P2" | "P3";
-
-export interface TaskSummaryRow {
-  readonly id: number;
-  readonly parent_id: number | null;
-  readonly title: string;
-  readonly status: TaskStatus;
-  readonly priority: TaskPriority;
-  readonly owner: number | null;
-  readonly owner_label?: string | null;
-  readonly created_by: string;
-  readonly created_at: string;
-  readonly updated_at: string;
-  // Reminder fields — the gateway always emits them (Pydantic defaults), so
-  // they match the generated schema's optionality exactly (mirrored here so
-  // the hover detail card can show them).
-  readonly remind_interval_seconds?: number | null;
-  readonly last_reminded_at?: string | null;
-  readonly reminder_count: number;
-  // Out-of-window structural ancestor delivered by a windowed GET /api/tasks
-  // (the task graph renders it dimmed so the tree never dangles).
-  readonly ghost?: boolean;
-}
-
-export interface TaskRow extends TaskSummaryRow {
-  readonly description: string;
-  readonly results: string | null;
-}
-
-// meiva:note
-// What the Fleet task graph reads: the summary columns plus the description the
-// board renders. `results` is left out - it is 85% of the full list's bytes and
-// only the hover card shows it, which reads the one row it displays.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-export interface TaskGraphRow extends TaskSummaryRow {
-  readonly description: string;
-}
-
-export type TaskFields = "full" | "summary" | "graph";
-
-export interface TaskListResponse<T extends TaskSummaryRow = TaskSummaryRow> {
-  readonly tasks: readonly T[];
-}

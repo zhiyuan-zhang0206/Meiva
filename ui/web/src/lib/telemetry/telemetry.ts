@@ -163,10 +163,20 @@ function flush(): void {
   });
 }
 
+const testListeners: {
+  onTrack?: (element: TelemetryElement, opts?: TrackOptions) => void;
+  onSetPage?: (page: string) => void;
+  onFlush?: () => void;
+} = {};
+
 /** Flush buffered telemetry immediately. Lifecycle instrumentation calls this
  * after enqueueing final page metrics so delivery never depends on listener
  * registration order. */
 export function flushTelemetry(): void {
+  if (testListeners.onFlush) {
+    testListeners.onFlush();
+    return;
+  }
   flush();
 }
 
@@ -183,6 +193,10 @@ function ensureTimer(): void {
 /** Track one interaction. No-op under SSR and while disabled; rate-limits in
  *  place and dedupes unless `dedupe: false`. Never throws. */
 export function track(element: TelemetryElement, opts: TrackOptions = {}): void {
+  if (testListeners.onTrack) {
+    testListeners.onTrack(element, opts);
+    return;
+  }
   if (!enabled) return;
   const page = opts.page ?? currentPage;
   const key = opts.key;
@@ -206,6 +220,9 @@ export function track(element: TelemetryElement, opts: TrackOptions = {}): void 
 /** Set the current page (normalized route) — called by TelemetryPageView
  *  on every route change; subsequent track() calls inherit it. */
 export function setTelemetryPage(page: string): void {
+  if (testListeners.onSetPage) {
+    testListeners.onSetPage(page);
+  }
   currentPage = page;
 }
 
@@ -227,7 +244,7 @@ export function normalizePage(pathname: string): string {
 // ── test surface (not part of the public contract) ──
 
 /** Reset module state — tests only. */
-export function __telemetryResetForTest(): void {
+function __telemetryResetForTest(): void {
   enabled = typeof window !== "undefined";
   sessionId = "";
   currentPage = "unknown";
@@ -239,27 +256,47 @@ export function __telemetryResetForTest(): void {
     flushTimer = null;
   }
   warnedOnce = false;
+  delete testListeners.onTrack;
+  delete testListeners.onSetPage;
+  delete testListeners.onFlush;
 }
 
 /** Force a flush now — tests only. Returns the number of events sent. */
-export function __telemetryFlushForTest(): number {
+function __telemetryFlushForTest(): number {
   const n = buffer.length;
   flush();
   return n;
 }
 
 /** Pending buffer size — tests only. */
-export function __telemetryBufferSize(): number {
+function __telemetryBufferSize(): number {
   return buffer.length;
 }
 
 /** Per-tab session id (minted lazily) — tests only. */
-export function __telemetrySessionId(): string {
+function __telemetrySessionId(): string {
   if (sessionId === "") sessionId = newSessionId();
   return sessionId;
 }
 
 /** Force-disable (SSR-safety probe) — tests only. */
-export function __telemetrySetEnabledForTest(value: boolean): void {
+function __telemetrySetEnabledForTest(value: boolean): void {
   enabled = value;
 }
+
+export const telemetryTestControl = Object.freeze({
+  reset: __telemetryResetForTest,
+  flush: __telemetryFlushForTest,
+  bufferSize: __telemetryBufferSize,
+  sessionId: __telemetrySessionId,
+  setEnabled: __telemetrySetEnabledForTest,
+  intercept(handlers: {
+    onTrack?: (element: TelemetryElement, opts?: TrackOptions) => void;
+    onSetPage?: (page: string) => void;
+    onFlush?: () => void;
+  }): void {
+    testListeners.onTrack = handlers.onTrack;
+    testListeners.onSetPage = handlers.onSetPage;
+    testListeners.onFlush = handlers.onFlush;
+  },
+});

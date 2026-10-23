@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  __telemetryFlushForTest,
-  __telemetryResetForTest,
+  telemetryTestControl,
   track,
 } from "./telemetry";
-import { __webVitalsResetForTest, initWebVitals } from "./web-vitals";
+import { initWebVitals, webVitalsResetForTest } from "./web-vitals";
 
 interface MockObserver {
   callback: PerformanceObserverCallback;
@@ -67,13 +66,13 @@ beforeEach(() => {
     value: "visible",
   });
   installPerformanceObserver();
-  __telemetryResetForTest();
-  __webVitalsResetForTest();
+  telemetryTestControl.reset();
+  webVitalsResetForTest();
 });
 
 afterEach(() => {
-  __webVitalsResetForTest();
-  __telemetryResetForTest();
+  webVitalsResetForTest();
+  telemetryTestControl.reset();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -107,6 +106,6 @@ describe("Web Vitals telemetry lifecycle", () => {
       expect.objectContaining({ element: "web-vitals", key: "lcp", value: "1235" }),
       expect.objectContaining({ element: "web-vitals", key: "cls", value: "0" }),
     ]));
-    expect(__telemetryFlushForTest()).toBe(0);
+    expect(telemetryTestControl.flush()).toBe(0);
   });
 });

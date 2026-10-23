@@ -1,6 +1,7 @@
 exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-throttled-streaming.ts", "use-timeline-colors.ts", "use-timeline.ts"]
 
 [uses]
+"tests" = ["timeline-store.ts", "timeline.ts", "use-timeline.ts"]
 "timeline-colors.test.ts" = ["timeline-colors.ts"]
 "timeline-scenarios.test.ts" = ["timeline.ts"]
 "timeline-store.test.ts" = ["timeline-store.ts"]
@@ -10,7 +11,7 @@ exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "time
 "use-compact-history-retention.ts" = ["timeline-store.ts"]
 "use-throttled-streaming.test.ts" = ["use-throttled-streaming.ts"]
 "use-timeline-colors.ts" = ["timeline-colors.ts"]
-"use-timeline.test.ts" = ["timeline-store.ts", "timeline.ts", "use-timeline.ts"]
+"use-timeline.test.ts" = ["tests", "timeline-store.ts", "timeline.ts", "use-timeline.ts"]
 "use-timeline.ts" = ["timeline-store.ts", "use-compact-history-retention.ts"]
 
 [purity]
@@ -21,7 +22,6 @@ exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "time
 "use-timeline-colors.ts" = "strict"
 
 [debt.first-party-patch]
-"use-timeline.test.ts#vi.mock ui/web/src/lib/format/interaction-timing.ts" = 1
 "use-timeline.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "use-timeline.test.ts#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
 
@@ -43,7 +43,7 @@ exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "time
 "use-timeline.ts#useTimeline#useRef" = 1
 
 [debt.stdlib-patch]
-"use-timeline.test.ts#vi.spyOn document.visibilityState" = 2
+"use-timeline.test.ts#vi.spyOn document.visibilityState" = 1
 "use-timeline.test.ts#vi.spyOn queryClient.invalidateQueries" = 1
 
 [debt.third-party-patch]

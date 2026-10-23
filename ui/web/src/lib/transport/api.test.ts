@@ -5,9 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { keyedHeaders } from "./operation-key";
 
 import { ApiError, api, MessageDeliveryUnknownError } from "./api";
-import { track } from "../telemetry/telemetry";
+import {
+  telemetryTestControl,
+  type TelemetryElement,
+  type TrackOptions,
+} from "../telemetry/telemetry";
 
-vi.mock("../telemetry/telemetry", () => ({ track: vi.fn() }));
+const track = vi.fn<(element: TelemetryElement, opts?: TrackOptions) => void>();
 
 interface FetchCall {
   url: string;
@@ -20,7 +24,8 @@ let calls: FetchCall[];
 
 beforeEach(() => {
   calls = [];
-  vi.mocked(track).mockReset();
+  track.mockReset();
+  telemetryTestControl.intercept({ onTrack: track });
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string, init?: RequestInit) => {
@@ -38,6 +43,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  telemetryTestControl.reset();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });

@@ -3,9 +3,11 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 [uses]
 "nav-timing.test.tsx" = ["nav-timing.ts", "telemetry.ts"]
 "nav-timing.ts" = ["telemetry.ts"]
-"telemetry-page-view.test.tsx" = ["telemetry-page-view.tsx", "telemetry.ts", "web-vitals.ts"]
+"telemetry-page-view.test.tsx" = ["telemetry-page-view.tsx", "telemetry.ts"]
 "telemetry-page-view.tsx" = ["telemetry.ts", "web-vitals.ts"]
-"web-vitals.test.ts" = ["telemetry.ts"]
+"telemetry.test.ts" = ["telemetry.ts"]
+"web-vitals-integration.test.ts" = ["telemetry.ts", "web-vitals.ts"]
+"web-vitals.test.ts" = ["telemetry.ts", "web-vitals.ts"]
 "web-vitals.ts" = ["telemetry.ts"]
 
 [purity]
@@ -14,12 +16,6 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 "telemetry-page-view.tsx" = "strict-to-be"
 "telemetry.ts" = "strict-to-be"
 "web-vitals.ts" = "strict-to-be"
-
-[debt.first-party-patch]
-"nav-timing.test.tsx#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
-"telemetry-page-view.test.tsx#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
-"telemetry-page-view.test.tsx#vi.mock ui/web/src/lib/telemetry/web-vitals.ts" = 1
-"web-vitals.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
 
 [debt.impure-call]
 "nav-timing.ts#clearFallback#clearTimeout" = 1
@@ -58,17 +54,6 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 "web-vitals.ts#observe#new PerformanceObserver" = 1
 "web-vitals.ts#reportWhenHidden#document" = 1
 
-[debt.private-name]
-"telemetry.test.ts -> telemetry.ts#__telemetryBufferSize" = 1
-"telemetry.test.ts -> telemetry.ts#__telemetryFlushForTest" = 1
-"telemetry.test.ts -> telemetry.ts#__telemetryResetForTest" = 1
-"telemetry.test.ts -> telemetry.ts#__telemetrySessionId" = 1
-"telemetry.test.ts -> telemetry.ts#__telemetrySetEnabledForTest" = 1
-"web-vitals-integration.test.ts -> telemetry.ts#__telemetryFlushForTest" = 1
-"web-vitals-integration.test.ts -> telemetry.ts#__telemetryResetForTest" = 1
-"web-vitals-integration.test.ts -> web-vitals.ts#__webVitalsResetForTest" = 1
-"web-vitals.test.ts -> web-vitals.ts#__webVitalsResetForTest" = 1
-
 [debt.stdlib-patch]
 "nav-timing.test.tsx#vi.stubGlobal cancelAnimationFrame" = 1
 "nav-timing.test.tsx#vi.stubGlobal requestAnimationFrame" = 1
@@ -80,12 +65,6 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 [debt.third-party-patch]
 "nav-timing.test.tsx#vi.mock next" = 1
 "telemetry-page-view.test.tsx#vi.mock next" = 1
-
-[debt.undeclared-edge]
-"telemetry.test.ts -> telemetry.ts" = 1
-"web-vitals-integration.test.ts -> telemetry.ts" = 1
-"web-vitals-integration.test.ts -> web-vitals.ts" = 1
-"web-vitals.test.ts -> web-vitals.ts" = 1
 
 [debt.unfrozen-value]
 "nav-timing.ts#fallbackMs" = 1
@@ -115,6 +94,3 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 "web-vitals.ts#interactionToNextPaint" = 1
 "web-vitals.ts#latestLcp" = 1
 "web-vitals.ts#observers" = 1
-
-[debt.wide-public-surface]
-"telemetry.ts#__all__" = 1

@@ -1,0 +1,11 @@
+exports = ["use-timeline-context.ts", "use-timeline-pagination.ts"]
+
+purity = "strict"
+
+[uses]
+"use-timeline-compact.ts" = ["use-timeline-context.ts"]
+"use-timeline-ownership.ts" = ["use-timeline-context.ts"]
+"use-timeline-pagination.ts" = ["use-timeline-compact.ts", "use-timeline-context.ts", "use-timeline-ownership.ts", "use-timeline-sse.ts", "use-timeline-streaming.ts", "use-timeline-switch.ts"]
+"use-timeline-sse.ts" = ["use-timeline-context.ts"]
+"use-timeline-streaming.ts" = ["use-timeline-context.ts"]
+"use-timeline-switch.ts" = ["use-timeline-context.ts"]

@@ -1,22 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { track } from "../telemetry/telemetry";
 import {
-  __interactionTimingResetForTest,
+  telemetryTestControl,
+  type TelemetryElement,
+  type TrackOptions,
+} from "../telemetry/telemetry";
+import {
   clearMessageSent,
+  interactionTimingResetForTest,
   markMessageSent,
   noteTurnStart,
 } from "./interaction-timing";
 
-vi.mock("../telemetry/telemetry", () => ({ track: vi.fn() }));
+const track = vi.fn<(element: TelemetryElement, opts?: TrackOptions) => void>();
 
 beforeEach(() => {
-  __interactionTimingResetForTest();
-  vi.mocked(track).mockReset();
+  interactionTimingResetForTest();
+  track.mockReset();
+  telemetryTestControl.intercept({ onTrack: track });
 });
 
 afterEach(() => {
-  __interactionTimingResetForTest();
+  interactionTimingResetForTest();
+  telemetryTestControl.reset();
   vi.restoreAllMocks();
 });
 

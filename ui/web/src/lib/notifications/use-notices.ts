@@ -151,7 +151,6 @@ export function dropOpenNotices(queryClient: QueryClient, noticeIds: number[]): 
   });
 }
 
-/** Test-only: clear pending drop tombstones between cases. */
-export function __dropTombstonesResetForTest(): void {
+export function dropTombstonesResetForTest(): void {
   dropTombstones.clear();
 }
