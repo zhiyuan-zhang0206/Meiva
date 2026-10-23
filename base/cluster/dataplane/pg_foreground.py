@@ -14,7 +14,7 @@ POSTMASTER_SHUTDOWN_S = 10.0
 
 
 def start_foreground_postgres(
-    argv: list[str], *, log: Path, env: Mapping[str, str] | None = None
+    argv: list[str], *, log: Path, env: Mapping[str, str]
 ) -> subprocess.Popen[bytes]:
     """Return the direct child before readiness checks; no process-family receipts."""
     with log.open("ab", buffering=0) as output:

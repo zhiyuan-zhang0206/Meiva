@@ -1,11 +1,12 @@
-"""Exec-envelope transfer-cost panels — task #2174.
+# meiva:note
+# Exec-envelope transfer-cost panels — task #2174.
+#
+# Split out of ``base/telemetry/metrics/core/observability.py`` when that module hit
+# the 800-line code-structure ceiling (task #2174): the two panels unwrap the
+# ``exec_envelope`` event (agent/execution/protocol.py::_log_envelope_transfer)
+# and group by envelope/op — the transfer-cost display split out of the Exec
+# outcomes other bucket (PM ruling 2026-08-31).
 
-Split out of ``base/telemetry/metrics/core/observability.py`` when that module hit
-the 800-line code-structure ceiling (task #2174): the two panels unwrap the
-``exec_envelope`` event (agent/graph/exec/protocol.py::_log_envelope_transfer)
-and group by envelope/op — the transfer-cost display split out of the Exec
-outcomes other bucket (PM ruling 2026-08-31).
-"""
 
 from __future__ import annotations
 

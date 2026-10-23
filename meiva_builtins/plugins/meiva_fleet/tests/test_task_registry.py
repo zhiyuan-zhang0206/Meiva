@@ -16,6 +16,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db import fetch_one
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
@@ -393,20 +394,21 @@ def test_log_appends_timestamped_lines(
         assert re.match(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] ", line)
 
 
+# meiva:note
+# A task note is stamped in the clock's cluster timezone, not the writing
+# machine's local timezone. A fleet spans machines and one task's notes are
+# appended by several of them, so host-local stamps put unmarked, mutually
+# inconsistent wall clocks in one column of text.
 def test_log_stamps_in_the_cluster_timezone(
-    redis_url: str, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    """A task note is stamped in `settings.general.timezone`, not the writing
-    machine's local timezone. A fleet spans machines and one task's notes are
-    appended by several of them, so host-local stamps put unmarked, mutually
-    inconsistent wall clocks in one column of text."""
-    from base.config import settings
-
     agent_id = seed_agent(db_conn)
-    pin_agent(agent_id)
     stamps: dict[str, str] = {}
     for tz in ("Asia/Shanghai", "Pacific/Honolulu"):
-        monkeypatch.setattr(settings.general, "timezone", tz)
+        config = ClockConfig(
+            timezone=tz, authoritative_timezone=None, message_timestamp_weekday=False
+        )
+        pin_agent(agent_id, clock_factory=lambda config=config: Clock(config, timers=SYSTEM_TIMERS))
         task = task_registry.create(
             f"stamped in {tz}", "detail", parent=root_task_id, operation_key=str(uuid4())
         )
@@ -415,7 +417,8 @@ def test_log_stamps_in_the_cluster_timezone(
         assert results is not None
         stamps[tz] = results.split("]")[0]
     # Honolulu is UTC-10 year-round, Shanghai UTC+8: 18 hours apart, so two
-    # stamps taken seconds apart cannot agree unless the setting is read.
+    # meiva:note
+    # stamps taken seconds apart cannot agree unless the clock's zone is used.
     assert stamps["Asia/Shanghai"] != stamps["Pacific/Honolulu"]
 
 

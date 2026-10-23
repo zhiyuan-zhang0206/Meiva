@@ -16,7 +16,7 @@ from pathlib import Path
 
 from agent.execution.protocol import ResultPayload, read_result
 from base.deploy.release import editable_install
-from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 
 from ._result import (
     ExecChildError,

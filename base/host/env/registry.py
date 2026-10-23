@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
+from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.host.env.config_lite_table import (
     FIELD_ALIASES,
     FIELD_CAPABILITIES,
@@ -110,11 +111,6 @@ def network_proxy_configured() -> bool:
     return any(os.environ.get(key) for key in NETWORK_PROXY_KEYS)
 
 
-# The per-agent config overlay / birth stamp travel in env vars as JSON (never
-# argv — issue #974: argv is world-readable via `ps`). Not Settings fields:
-# they are process-bound carriers the exec launcher writes and child boot consumes.
-AGENT_CONFIG_OVERLAY_ENV = "MEIVA_AGENT_CONFIG_OVERLAY"
-AGENT_BIRTH_CONFIG_ENV = "MEIVA_AGENT_BIRTH_CONFIG"
 # Service birth snapshots are delivered per unit, never inherited by its parent.
 SERVICE_PLUGIN_CONFIG_ENV = "MEIVA_SERVICE_PLUGIN_CONFIG"
 # Cluster policy travels through the existing authenticated bootstrap snapshot.
