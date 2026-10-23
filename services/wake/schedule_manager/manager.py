@@ -21,20 +21,18 @@ from __future__ import annotations
 import logging
 import shlex
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.clock import Clock
+from base.clock import Clock, Timers
 from base.cluster import session_name
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 from base.paths import meiva_home
-from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.protocol import SessionBackend
 from services.wake.schedule_manager import host_restart, revisions
@@ -84,8 +82,18 @@ class ScheduleManager:
     schedule row; schedule sessions are never touched when the service stops
     (they survive it)."""
 
-    def __init__(self, db_pool: ConnectionPool[Any]) -> None:
+    def __init__(
+        self,
+        db_pool: ConnectionPool[Any],
+        *,
+        backend: SessionBackend,
+        timers: Timers,
+        repo_root: Path,
+    ) -> None:
         self._pool = db_pool
+        self._backend = backend
+        self._timers = timers
+        self._repo_root = repo_root
         # Enabled sessions whose stale same-name survivor resisted a reap. A
         # live session normally means adopt, but these need another official
         # reap before their replacement may launch. In memory: a restarted
@@ -299,13 +307,13 @@ class ScheduleManager:
 
     # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
     def _read_host_generation(self) -> str | None:
-        return get_shell_backend().host_generation()
+        return self._backend.host_generation()
 
     # meiva:note
     # While the session host does not answer, one reconcile pass takes no action: no session is declared lost, no schedule changes status, and no launch is attempted.
     # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
     def _note_host_generation_unknown(self) -> None:
-        now = time.monotonic()
+        now = self._timers.monotonic()
         if now - self._host_generation_unknown_logged < HOST_GENERATION_UNKNOWN_LOG_INTERVAL_S:
             return
         self._host_generation_unknown_logged = now
@@ -406,7 +414,7 @@ class ScheduleManager:
         from base.sessions.pty.allocation_freeze import current_generation
 
         live: set[int] = set()
-        backend = get_shell_backend()
+        backend = self._backend
         generation = current_generation()
         prefix = session_name("schedule-")  # meiva-schedule-
         names = backend.list_sessions(prefix=prefix)
@@ -473,7 +481,7 @@ class ScheduleManager:
         if wanted is None or not wanted.enabled:
             return
         name = session_name(f"schedule-{schedule_id}")
-        backend = get_shell_backend()
+        backend = self._backend
         # A gateway restart (rollout / crash) can leave the previous run's
         # session behind — the old runner process keeps serving until its PTY
         # host reaps it. The PTY backend's new_session is idempotent
@@ -518,7 +526,7 @@ class ScheduleManager:
         # session behind for the reconcile's session-existence liveness to
         # misread (the Task #1115 bug-B class).
         cmd = (
-            f"cd {shlex.quote(str(REPO_ROOT))} && "
+            f"cd {shlex.quote(str(self._repo_root))} && "
             f".venv/bin/python -m services.wake.schedule_manager.runner {schedule_id} {wanted.revision}; exit $?"
         )
         # No shell-TTL row is written here (deliberate exemption, task
@@ -529,7 +537,7 @@ class ScheduleManager:
         # deadline would make the TTL reaper kill a resident schedule every
         # day, one kill/relaunch cycle per schedule.
         try:
-            backend.new_session(name, cmd, REPO_ROOT, env=env)
+            backend.new_session(name, cmd, self._repo_root, env=env)
         except Exception as exc:
             # Admission was committed before the request. Its unknown outcome
             # consumes this revision; only an explicit restart may try again.
@@ -605,7 +613,7 @@ class ScheduleManager:
 
     def _note_blocked(self, schedule_id: int, why: str) -> None:
         """Count one failed convergence attempt; give up when the streak is old enough."""
-        now = time.monotonic()
+        now = self._timers.monotonic()
         first, latest = self._blocked.get(schedule_id, (now, now))
         if now - latest > BLOCKED_STREAK_GAP_S:
             first = now
@@ -645,7 +653,7 @@ class ScheduleManager:
         self, schedule_id: int, name: str, failure: str, *, exc: BaseException | None = None
     ) -> None:
         """Log an unresolved reap at most once per schedule per cooldown."""
-        now = time.monotonic()
+        now = self._timers.monotonic()
         prior = self._reap_failure_logs.get(schedule_id)
         if prior is not None:
             last_logged, suppressed = prior
@@ -699,11 +707,11 @@ class ScheduleManager:
             return False
         if (
             expected_generation is not None
-            and get_shell_backend().session_generation(name) != expected_generation
+            and self._backend.session_generation(name) != expected_generation
         ):
             return False
         try:
-            reaped, mode = get_shell_backend().kill_session(name)
+            reaped, mode = self._backend.kill_session(name)
         except Exception as exc:
             self._log_reap_failure(schedule_id, name, "raised", exc=exc)
             self._note_blocked(schedule_id, f"the session {name} could not be reaped")

@@ -22,6 +22,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import session_name
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.sessions.backend import get_shell_backend
@@ -160,7 +161,9 @@ def test_pty_launch_live_capture(
         "print('RUNNER_ALIVE', require_actor()); time.sleep(30)",
         "python schedule.py",
     )
-    mgr = sm.ScheduleManager(pool)
+    mgr = sm.ScheduleManager(
+        pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=REPO
+    )
     mgr.reconcile()
 
     name = session_name(f"schedule-{sid}")
@@ -200,7 +203,9 @@ def test_pty_crash_is_not_replayed_after_manager_restart(
     marker = Path(_pty_home) / "crash-effects"
     script = f"printf 'effect\\n' >> {marker}; exit 1"
     sid = _insert_schedule(db_conn, "pty-crash", script, "bash run.sh")
-    mgr = sm.ScheduleManager(pool)
+    mgr = sm.ScheduleManager(
+        pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=REPO
+    )
     mgr.reconcile()
     name = session_name(f"schedule-{sid}")
     backend = get_shell_backend()
@@ -210,7 +215,9 @@ def test_pty_crash_is_not_replayed_after_manager_restart(
     _wait_session_gone(name)
 
     for _ in range(3):
-        sm.ScheduleManager(pool).reconcile()
+        sm.ScheduleManager(
+            pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=REPO
+        ).reconcile()
         assert not backend.has_session(name)
     row = db_conn.execute(
         "SELECT status, launch_count FROM schedules WHERE id = %s", (sid,)
@@ -225,9 +232,13 @@ def test_pty_crash_is_not_replayed_after_manager_restart(
         (sid,),
     )
     db_conn.commit()
-    assert sm.ScheduleManager(pool).sync_one(sid)
+    assert sm.ScheduleManager(
+        pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=REPO
+    ).sync_one(sid)
     _wait_session_gone(name)
-    sm.ScheduleManager(pool).reconcile()
+    sm.ScheduleManager(
+        pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=REPO
+    ).reconcile()
     assert marker.read_text().splitlines() == ["effect", "effect"]
 
 
@@ -249,14 +260,15 @@ def test_real_pty_revision_is_adopted_after_lost_acknowledgement(
         f"#!/bin/sh\nprintf 'birth\\n' >> {shlex.quote(str(marker))}\nexec sleep 30\n"
     )
     runner.chmod(0o755)
-    monkeypatch.setattr(sm, "REPO_ROOT", tmp_path)
     sid = _insert_schedule(
         db_conn, "pty-revision", "import time; time.sleep(30)", "python schedule.py"
     )
     db_conn.execute("UPDATE schedules SET desired_revision = 1 WHERE id = %s", (sid,))
     db_conn.commit()
     name = session_name(f"schedule-{sid}")
-    mgr = sm.ScheduleManager(pool)
+    mgr = sm.ScheduleManager(
+        pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=tmp_path
+    )
     monkeypatch.setattr(mgr, "_mark_running", MagicMock(side_effect=RuntimeError("lost ack")))
     try:
         with pytest.raises(RuntimeError, match="lost ack"):
@@ -268,7 +280,9 @@ def test_real_pty_revision_is_adopted_after_lost_acknowledgement(
         assert db_conn.execute(
             "SELECT status, launch_count FROM schedules WHERE id = %s", (sid,)
         ).fetchone() == ("error", 1)
-        sm.ScheduleManager(pool).reconcile()
+        sm.ScheduleManager(
+            pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=tmp_path
+        ).reconcile()
         assert get_shell_backend().session_started_at(name) == before
         assert db_conn.execute(
             "SELECT status, launch_count, last_error FROM schedules WHERE id = %s", (sid,)

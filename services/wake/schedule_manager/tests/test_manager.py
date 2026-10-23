@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterator
 from pathlib import Path
@@ -9,20 +10,23 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import services.wake.schedule_manager.manager as sm
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import session_name
 from base.config import settings
 from base.deploy.lifecycle import start_serving
+from base.sessions.protocol import SessionBackend
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 
-class _FakeBackend:
+class _FakeBackend(SessionBackend):
     def __init__(self) -> None:
         self.live: list[str] = []
         self.killed: list[str] = []
         self.kill_results: list[bool] = []
         self.launch_envs: list[dict[str, object]] = []
         self.generations: dict[str, str | None] = {}
+        self.launched: list[int] = []
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         return [s for s in self.live if s.startswith(prefix)]
@@ -36,7 +40,20 @@ class _FakeBackend:
     def host_generation(self) -> str | None:
         return "host-a"
 
-    def new_session(self, name: str, cmd: str, cwd: object, *, env: dict[str, object]) -> bool:
+    def new_session(
+        self,
+        name: str,
+        cmd: str,
+        cwd: Path,
+        *,
+        env: dict[str, str],
+        login_shell: bool = True,
+        exec_cmd: bool = True,
+    ) -> bool:
+        sid = int(str(env["MEIVA_SCHEDULE_ID"]))
+        self.launched.append(sid)
+        self.launch_envs.append(dict(env))
+        self.live.append(session_name(f"schedule-{sid}"))
         return True
 
     def capture_pane(self, name: str, lines: int = 200, *, scrollback: bool = True) -> str:
@@ -48,6 +65,21 @@ class _FakeBackend:
         if reaped:
             self.live = [s for s in self.live if s != name]
         return reaped, "forced" if reaped else "survived"
+
+
+def _set_allocation_generation(unit_home: Path, generation: str) -> None:
+    (unit_home / "pty-allocation-freeze.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state": "active",
+                "generation": generation,
+                "holder": "test",
+                "reason": "test",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
+    )
 
 
 @pytest.fixture
@@ -63,29 +95,13 @@ def pool(db_url: str) -> Iterator[ConnectionPool[psycopg.Connection]]:
 
 @pytest.fixture
 def fake_session(
-    serving_root: start_serving.RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    serving_root: start_serving.RootBirth, unit_home: Path
 ) -> tuple[_FakeBackend, list[int]]:
-    from base.sessions.pty import allocation_freeze
-
+    del unit_home
     backend = _FakeBackend()
-    launched: list[int] = []
-
-    def _fake_new_session(
-        _self: object, name: str, cmd: str, cwd: object, *, env: dict[str, object]
-    ) -> bool:
-        sid = int(str(env["MEIVA_SCHEDULE_ID"]))
-        launched.append(sid)
-        backend.launch_envs.append(dict(env))
-        backend.live.append(session_name(f"schedule-{sid}"))
-        return True
-
-    monkeypatch.setattr(sm, "get_shell_backend", lambda: backend)
-    monkeypatch.setattr(_FakeBackend, "new_session", _fake_new_session)
-    monkeypatch.setattr(allocation_freeze, "current_generation", lambda: None)
-    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True
-    return backend, launched
+    return backend, backend.launched
 
 
 def _insert(conn: psycopg.Connection, name: str, *, enabled: bool = True) -> int:
@@ -132,11 +148,13 @@ def _run_row(conn: psycopg.Connection, rid: int) -> tuple[bool | None, str | Non
 def test_reconcile_does_not_sweep_orphan_null_rows(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    _backend, launched = fake_session
+    backend, launched = fake_session
     sid = _insert(db_conn, "orphan-a", enabled=False)
     rid = _insert_null_run(db_conn, sid)
 
-    sm.ScheduleManager(pool).reconcile()
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    ).reconcile()
 
     assert launched == []
     assert _run_row(db_conn, rid) == (None, None)
@@ -150,7 +168,9 @@ def test_reconcile_keeps_null_row_for_live_session(
     rid = _insert_null_run(db_conn, sid)
     backend.live.append(session_name(f"schedule-{sid}"))
 
-    sm.ScheduleManager(pool).reconcile()
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    ).reconcile()
 
     assert launched == []
     assert _run_row(db_conn, rid) == (None, None)
@@ -159,11 +179,13 @@ def test_reconcile_keeps_null_row_for_live_session(
 def test_launch_closes_null_rows_of_dead_predecessor(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    _backend, launched = fake_session
+    backend, launched = fake_session
     sid = _insert(db_conn, "orphan-c")
     rid = _insert_null_run(db_conn, sid)
 
-    sm.ScheduleManager(pool).reconcile()
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    ).reconcile()
 
     assert launched == [sid]
     assert _run_row(db_conn, rid) == (False, "interrupted")
@@ -180,7 +202,9 @@ def test_sync_stop_closes_orphan_rows_immediately(
         cur.execute("UPDATE schedules SET enabled = false WHERE id = %s", (sid,))
     db_conn.commit()
 
-    sm.ScheduleManager(pool).sync_one(sid)
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    ).sync_one(sid)
 
     assert session_name(f"schedule-{sid}") in backend.killed
     assert launched == []
@@ -189,17 +213,17 @@ def test_sync_stop_closes_orphan_rows_immediately(
 
 def test_launches_enabled_missing_session(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
-    from base.sessions.pty import allocation_freeze
-
-    _backend, launched = fake_session
-    monkeypatch.setattr(allocation_freeze, "current_generation", lambda: "current-generation")
+    backend, launched = fake_session
+    _set_allocation_generation(unit_home, "current-generation")
     sid = _insert(db_conn, "job-a")
 
-    sm.ScheduleManager(pool).reconcile()
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    ).reconcile()
 
     assert launched == [sid]
     assert _status(db_conn, sid) == "running"
@@ -210,13 +234,13 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-
-    _backend, launched = fake_session
+    backend, launched = fake_session
     start_serving.clear_serving()
     sid = _insert(db_conn, "await-serving")
-    manager = sm.ScheduleManager(pool)
+    manager = sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    )
 
     manager.reconcile()
 
@@ -232,38 +256,41 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
 
 
 def test_live_superseded_generation_is_reaped_before_schedule_reconcile(
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
-    from base.sessions.pty import allocation_freeze
-
     backend, _launched = fake_session
     name = session_name("schedule-77")
     backend.live.append(name)
     backend.generations[name] = "previous-generation"
-    monkeypatch.setattr(allocation_freeze, "current_generation", lambda: "current-generation")
+    _set_allocation_generation(unit_home, "current-generation")
 
-    assert sm.ScheduleManager(pool)._live_ids() == set()
+    assert (
+        sm.ScheduleManager(
+            pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+        )._live_ids()
+        == set()
+    )
     assert backend.killed == [name]
 
 
 def test_superseded_generation_reap_retries_before_rebuilding_enabled_schedule(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
-    from base.sessions.pty import allocation_freeze
-
     backend, launched = fake_session
     sid = _insert(db_conn, "generation-retry")
     name = session_name(f"schedule-{sid}")
     backend.live.append(name)
     backend.generations[name] = "previous-generation"
     backend.kill_results = [False, True]
-    monkeypatch.setattr(allocation_freeze, "current_generation", lambda: "current-generation")
-    manager = sm.ScheduleManager(pool)
+    _set_allocation_generation(unit_home, "current-generation")
+    manager = sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    )
 
     manager.reconcile()
     assert backend.killed == [name]
@@ -282,7 +309,9 @@ def test_launch_env_carries_cluster_timezone(
     backend, launched = fake_session
     sid = _insert(db_conn, "job-tz")
 
-    sm.ScheduleManager(pool)._launch(sid)
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    )._launch(sid)
 
     assert launched == [sid]
     env = backend.launch_envs[0]
@@ -297,7 +326,9 @@ def test_adopts_live_session_without_relaunch(
     sid = _insert(db_conn, "job-b")
     backend.live.append(session_name(f"schedule-{sid}"))
 
-    sm.ScheduleManager(pool).reconcile()
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    ).reconcile()
 
     assert launched == []
 
@@ -310,7 +341,9 @@ def test_reaps_stale_session_before_launch(
     stale = session_name(f"schedule-{sid}")
     backend.live.append(stale)
 
-    sm.ScheduleManager(pool)._launch(sid)
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    )._launch(sid)
 
     assert stale in backend.killed
     assert launched == [sid]
@@ -325,7 +358,9 @@ def test_retries_enabled_stale_session_reap_before_launch(
     stale = session_name(f"schedule-{sid}")
     backend.live.append(stale)
     backend.kill_results = [False, True]
-    manager = sm.ScheduleManager(pool)
+    manager = sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    )
 
     manager._launch(sid)
     assert backend.killed == [stale]
@@ -347,7 +382,9 @@ def test_kills_orphan_session(
     orphan = session_name(f"schedule-{sid}")
     backend.live.append(orphan)
 
-    sm.ScheduleManager(pool).reconcile()
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    ).reconcile()
 
     assert orphan in backend.killed
     assert _status(db_conn, sid) == "stopped"
@@ -362,11 +399,13 @@ def _set_status(conn: psycopg.Connection, sid: int, status: str) -> None:
 def test_completed_schedule_not_relaunched(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    _backend, launched = fake_session
+    backend, launched = fake_session
     sid = _insert(db_conn, "done-a")
     _set_status(db_conn, sid, "completed")
 
-    sm.ScheduleManager(pool).reconcile()
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    ).reconcile()
 
     assert launched == []
     assert _status(db_conn, sid) == "completed"
@@ -383,7 +422,9 @@ def test_sync_recovers_errored_schedule(
     )
     db_conn.commit()
 
-    sm.ScheduleManager(pool).sync_one(sid)
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    ).sync_one(sid)
 
     assert launched == [sid]
     assert session_name(f"schedule-{sid}") in backend.live
@@ -395,7 +436,7 @@ def test_sync_launches_enabled_and_kills_disabled(
 ) -> None:
     backend, launched = fake_session
     sid = _insert(db_conn, "sync-a", enabled=True)
-    mgr = sm.ScheduleManager(pool)
+    mgr = sm.ScheduleManager(pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT)
 
     mgr.sync_one(sid)
     assert launched == [sid]
@@ -415,7 +456,9 @@ def test_stop_reaps_then_start_rebuilds_without_reviving_after_gateway_restart(
     backend, launched = fake_session
     sid = _insert(db_conn, "stop-start")
     name = session_name(f"schedule-{sid}")
-    manager = sm.ScheduleManager(pool)
+    manager = sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    )
 
     manager.sync_one(sid)
     assert launched == [sid]
@@ -430,7 +473,9 @@ def test_stop_reaps_then_start_rebuilds_without_reviving_after_gateway_restart(
     assert name not in backend.live
     assert _status(db_conn, sid) == "stopped"
 
-    sm.ScheduleManager(pool).reconcile()
+    sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    ).reconcile()
     assert launched == [sid]
     assert name not in backend.live
 
@@ -452,7 +497,9 @@ def test_failed_reap_keeps_runtime_status_and_retries_on_reconcile(
     backend, launched = fake_session
     sid = _insert(db_conn, "retry-reap")
     name = session_name(f"schedule-{sid}")
-    manager = sm.ScheduleManager(pool)
+    manager = sm.ScheduleManager(
+        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
+    )
     manager.sync_one(sid)
     run_id = _insert_null_run(db_conn, sid)
 
@@ -478,21 +525,19 @@ def test_reap_failure_error_logs_are_rate_limited(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     backend, _launched = fake_session
     sid = _insert(db_conn, "rate-limit-reap")
     backend.kill_results = [False, False, False]
-    clock = {"t": 1000.0}
-    monkeypatch.setattr(sm.time, "monotonic", lambda: clock["t"])
-    manager = sm.ScheduleManager(pool)
+    clock = ManualTimers(start=1000.0)
+    manager = sm.ScheduleManager(pool, backend=backend, timers=clock, repo_root=sm.REPO_ROOT)
 
     with caplog.at_level(logging.ERROR, logger=sm.__name__):
         assert not manager._reap(sid)
-        clock["t"] += sm.PTY_FAILURE_LOG_INTERVAL_S - 1
+        clock.advance(sm.PTY_FAILURE_LOG_INTERVAL_S - 1)
         assert not manager._reap(sid)
-        clock["t"] += 1
+        clock.advance(1)
         assert not manager._reap(sid)
 
     errors = [
@@ -506,18 +551,18 @@ def test_reap_failure_error_logs_are_rate_limited(
 
 def test_schedule_manager_uses_shell_backend() -> None:
     from base.sessions.backend import get_backend, get_shell_backend
+    from services.wake.schedule_manager import daemon
 
-    assert sm.get_shell_backend is get_shell_backend
-    assert sm.get_shell_backend is not get_backend
+    assert daemon.get_shell_backend is get_shell_backend
+    assert daemon.get_shell_backend is not get_backend
 
 
 def test_successful_launch_clears_stale_last_error(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _backend, launched = fake_session
+    backend, launched = fake_session
     sid = _insert(db_conn, "job-recovered")
     with db_conn.cursor() as cur:
         cur.execute(
@@ -529,9 +574,8 @@ def test_successful_launch_clears_stale_last_error(
     db_conn.commit()
     _set_status(db_conn, sid, "stopped")
 
-    clock = {"t": 0.0}
-    monkeypatch.setattr(sm.time, "monotonic", lambda: clock["t"])
-    mgr = sm.ScheduleManager(pool)
+    clock = ManualTimers()
+    mgr = sm.ScheduleManager(pool, backend=backend, timers=clock, repo_root=sm.REPO_ROOT)
     mgr.reconcile()
     assert launched == [sid]
     with db_conn.cursor() as cur:
@@ -543,17 +587,11 @@ def test_successful_launch_clears_stale_last_error(
     assert last_error is None, "stale breaker text must be cleared on successful launch"
 
 
-def _clock(monkeypatch: pytest.MonkeyPatch) -> dict[str, float]:
-    clock = {"t": 1000.0}
-    monkeypatch.setattr(sm.time, "monotonic", lambda: clock["t"])
-    return clock
-
-
-def _tick(manager: sm.ScheduleManager, clock: dict[str, float], seconds: float) -> None:
-    end = clock["t"] + seconds
-    while clock["t"] < end:
+def _tick(manager: sm.ScheduleManager, clock: ManualTimers, seconds: float) -> None:
+    end = clock.monotonic() + seconds
+    while clock.monotonic() < end:
         manager.reconcile()
-        clock["t"] += 30
+        clock.advance(30)
 
 
 def _last_error(conn: psycopg.Connection, sid: int) -> str | None:
@@ -566,16 +604,15 @@ def test_a_reap_that_keeps_failing_is_given_up_once_the_window_ends(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
-    monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
 ) -> None:
     backend, launched = fake_session
-    clock = _clock(monkeypatch)
+    clock = ManualTimers(start=1000.0)
     sid = _insert(db_conn, "survivor", enabled=False)
     name = session_name(f"schedule-{sid}")
     backend.live.append(name)
     backend.kill_results = [False] * 10_000
-    manager = sm.ScheduleManager(pool)
+    manager = sm.ScheduleManager(pool, backend=backend, timers=clock, repo_root=sm.REPO_ROOT)
 
     _tick(manager, clock, sm.BLOCKED_GIVE_UP_AFTER_S - 30)
     retried = len(backend.killed)
@@ -583,7 +620,7 @@ def test_a_reap_that_keeps_failing_is_given_up_once_the_window_ends(
     assert len(emitted_events) == 0
     assert _status(db_conn, sid) == "running"
 
-    clock["t"] += 30
+    clock.advance(30)
     manager.reconcile()
     assert len(backend.killed) == retried + 1
     assert _status(db_conn, sid) == "error"
@@ -593,7 +630,7 @@ def test_a_reap_that_keeps_failing_is_given_up_once_the_window_ends(
     ]
 
     for _ in range(3):
-        clock["t"] += 30
+        clock.advance(30)
         manager.reconcile()
         assert manager.sync_one(sid) is True
     assert len(backend.killed) == retried + 1
@@ -607,14 +644,13 @@ def test_an_explicit_new_revision_lifts_the_give_up(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend, _launched = fake_session
-    clock = _clock(monkeypatch)
+    clock = ManualTimers(start=1000.0)
     sid = _insert(db_conn, "survivor-lifted", enabled=False)
     backend.live.append(session_name(f"schedule-{sid}"))
     backend.kill_results = [False] * 10_000
-    manager = sm.ScheduleManager(pool)
+    manager = sm.ScheduleManager(pool, backend=backend, timers=clock, repo_root=sm.REPO_ROOT)
     _tick(manager, clock, sm.BLOCKED_GIVE_UP_AFTER_S + 30)
     assert _status(db_conn, sid) == "error"
     attempts = len(backend.killed)
@@ -635,16 +671,16 @@ def test_a_failure_streak_is_broken_by_a_gap(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
-    monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
 ) -> None:
-    clock = _clock(monkeypatch)
+    backend, _launched = fake_session
+    clock = ManualTimers(start=1000.0)
     sid = _insert(db_conn, "gappy")
-    manager = sm.ScheduleManager(pool)
+    manager = sm.ScheduleManager(pool, backend=backend, timers=clock, repo_root=sm.REPO_ROOT)
 
     for _ in range(4):
         manager._note_blocked(sid, "x")
-        clock["t"] += sm.BLOCKED_STREAK_GAP_S + 1
+        clock.advance(sm.BLOCKED_STREAK_GAP_S + 1)
 
     assert len(emitted_events) == 0
     assert sid not in manager._abandoned
