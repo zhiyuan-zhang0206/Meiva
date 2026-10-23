@@ -9,11 +9,8 @@ import meiva
 
 
 @pytest.fixture
-def fake_config(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point meiva_home() to tmpdir; the repo's built-in .mcp.json files are not listed."""
-    import base.packages.mcp_config as _cfg
-
-    monkeypatch.setattr(_cfg, "builtin_mcp_paths", list)
+def fake_config(unit_home: Path) -> Path:
+    """Point meiva_home() to tmpdir; the machine config lives there."""
     return unit_home / "mcp.json"
 
 

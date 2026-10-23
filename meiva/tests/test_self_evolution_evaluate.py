@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast
+from typing import Any
 
+import httpx
+import psycopg
 import pytest
 
-import meiva
+from base.cluster.machine import MachineIdentity
+from base.config.tests.config_authority import config_authority as config_authority
 from base.db import Database
+from base.packages.tests.model_catalog import model_catalog as model_catalog
+from meiva.gateway_client import use_client
+from meiva.tests.fixtures.model_owner import model_installation as model_installation
+from meiva.tests.fixtures.model_owner import sdk_model_owner as sdk_model_owner
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 
 def _evaluate_module() -> ModuleType:
@@ -36,35 +45,33 @@ def _evaluate_module() -> ModuleType:
         ("claude-sonnet-5", {"eval_isolation": True, "llm_model": "claude-sonnet-5"}),
     ],
 )
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_launch_spawns_eval_isolated_agents(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    machine_identity: MachineIdentity,
     model: str | None,
     expected_overlay: dict[str, object],
 ) -> None:
     evaluate = _evaluate_module()
-    overlays: list[dict[str, object] | None] = []
+    pin_agent(7, machine=machine_identity)
+    received: list[dict[str, Any]] = []
 
-    def _spawn(**kwargs: object) -> int:
-        config_overlay = kwargs["config_overlay"]
-        assert isinstance(config_overlay, dict)
-        overlays.append(cast(dict[str, object], config_overlay))
-        return 42
+    def gateway(request: httpx.Request) -> httpx.Response:
+        received.append(json.loads(request.content))
+        return httpx.Response(201, json={"id": 42}, request=request)
 
-    monkeypatch.setattr(
-        meiva.agents,
-        "spawn",
-        _spawn,
-    )
-    monkeypatch.setattr(evaluate, "_eval_dir", lambda: tmp_path)
+    with (
+        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(gateway)) as http,
+        use_client(http),
+    ):
+        state = evaluate.launch(
+            "meiva-goal",
+            [{"agent_id": 9, "task_prompt": "Inspect the output", "tools_called": []}],
+            model=model,
+        )
+    Path(state["path"]).unlink()
 
-    state = evaluate.launch(
-        "meiva-goal",
-        [{"agent_id": 9, "task_prompt": "Inspect the output", "tools_called": []}],
-        model=model,
-    )
-
-    assert overlays == [expected_overlay]
+    assert [body["config"] for body in received] == [expected_overlay]
+    assert [body["prompt"] for body in received] == ["Inspect the output"]
     assert state["runs"][0]["eval_agent_id"] == 42
     assert state["runs"][0]["original_tools_called"] == []
 
@@ -118,9 +125,62 @@ def test_verify_replay(
     assert ok is expected
 
 
-def test_gather_excludes_invalid_replays_from_mean(
-    monkeypatch: pytest.MonkeyPatch, database: Database
+def _record(**overrides: Any) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "label": "ok",
+        "task_prompt": "Inspect the output",
+        "turns": 1,
+        "final_output": "done",
+        "tools_called": {},
+        "exec_ok": 1,
+        "exec_failed": 0,
+        "last_exec_failed": False,
+        "compactions": 0,
+        "followup_prompts": [],
+        "tokens_in": 1000,
+        "tokens_out": 500,
+        "leak_audit": [],
+        "invalidated": False,
+    }
+    record.update(overrides)
+    return record
+
+
+def _seed_statuses(db_conn: psycopg.Connection[Any], statuses: dict[int, str]) -> None:
+    for agent_id, status in statuses.items():
+        db_conn.execute(
+            "INSERT INTO agents (id) VALUES (%s) ON CONFLICT (id) DO NOTHING", (agent_id,)
+        )
+        db_conn.execute(
+            "INSERT INTO agents_meta (id, spawner, status, session_index) "
+            "VALUES (%s, 'test', %s, 0)",
+            (agent_id, status),
+        )
+    db_conn.commit()
+
+
+def test_split_progress_separates_finished_agents_from_running_ones() -> None:
+    evaluate = _evaluate_module()
+
+    progress = evaluate.split_progress(
+        [41, 42, 44, 45, 46],
+        {41: "idling", 42: "terminated", 44: "idling", 45: "running"},
+    )
+
+    assert progress == {"done": [41, 42, 44], "pending": [45, 46]}
+
+
+def test_poll_reads_the_statuses_of_the_eval_agents(
+    database: Database, db_conn: psycopg.Connection[Any]
 ) -> None:
+    evaluate = _evaluate_module()
+    _seed_statuses(db_conn, {51: "idling", 52: "running"})
+    state = {"runs": [{"eval_agent_id": 51}, {"eval_agent_id": 52}, {"eval_agent_id": 53}]}
+
+    assert evaluate.poll(state, database=database) == {"done": [51], "pending": [52, 53]}
+
+
+def test_the_report_excludes_invalid_replays_from_the_mean() -> None:
     evaluate = _evaluate_module()
     state: dict[str, Any] = {
         "skill": "meiva-goal",
@@ -133,85 +193,34 @@ def test_gather_excludes_invalid_replays_from_mean(
                 "original_tools_called": {"meiva.files.read": 1},
             },
             {"eval_agent_id": 44, "source_agent_id": 3, "original_tools_called": {}},
+            {"eval_agent_id": 45, "source_agent_id": 4, "original_tools_called": {}},
         ],
         "skipped": [],
     }
-    records: dict[int, dict[str, Any]] = {
-        41: {
-            "label": "ok",
-            "turns": 1,
-            "final_output": "done",
-            "tools_called": {},
-            "leak_audit": [],
-            "invalidated": False,
-        },
-        42: {
-            "label": "ok",
-            "turns": 1,
-            "final_output": "done",
-            "tools_called": {},
-            "leak_audit": [],
-            "invalidated": False,
-        },
-        44: {
-            "label": "ok",
-            "turns": 1,
-            "final_output": "done",
-            "tools_called": {},
-            "leak_audit": [],
-            "invalidated": False,
-        },
+    records = {
+        41: _record(),
+        42: _record(),
+        44: _record(turns=0, exec_ok=0, final_output="done"),
     }
 
-    def _poll(_state: dict[str, Any], **_kwargs: object) -> dict[str, list[int]]:
-        assert _kwargs["database"] is database
-        return {"done": [41, 42, 44], "pending": []}
+    report = evaluate.assemble_report(state, [45], records)
 
-    def _collect_one(agent_id: int, **_kwargs: object) -> dict[str, Any]:
-        assert _kwargs["database"] is database
-        return records[agent_id]
-
-    def _scores(rec: dict[str, Any]) -> dict[str, Any]:
-        if rec is records[41]:
-            return {"completion": 1.0, "efficiency": 1.0, "overall": 1.0}
-        if rec is records[44]:
-            return {
-                "completion": None,
-                "efficiency": None,
-                "overall": None,
-                "abstain": "no_telemetry",
-            }
-        return {"completion": 0.0, "efficiency": 0.0, "overall": 0.0}
-
-    def _leak_paths(_agent_id: int) -> Any:
-        return object()
-
-    monkeypatch.setattr(evaluate, "poll", _poll)
-    monkeypatch.setattr(evaluate, "collect_one", _collect_one)
-    monkeypatch.setattr(evaluate, "_leak_paths", _leak_paths)
-    monkeypatch.setattr(
-        evaluate,
-        "scores",
-        _scores,
-    )
-
-    report = evaluate.gather(state, database=database)
-
+    perfect = evaluate.scores(records[41])
     assert report["n"] == 1
-    assert report["mean"] == {"completion": 1.0, "efficiency": 1.0, "overall": 1.0}
+    assert report["mean"] == {key: perfect[key] for key in ("completion", "efficiency", "overall")}
+    assert report["pending"] == [45]
     assert [entry["valid"] for entry in report["per_task"]] == [True, False, False]
     assert [entry["eval_agent_id"] for entry in report["invalid"]] == [42, 44]
+    assert report["invalid"][0]["verification"]["reason"].startswith("replay tool profile diverges")
     assert report["invalid"][1]["verification"]["reason"] == "abstain:no_telemetry"
 
-    empty = evaluate.gather({**state, "runs": [state["runs"][2]]}, database=database)
+    empty = evaluate.assemble_report({**state, "runs": [state["runs"][2]]}, [], {44: records[44]})
     assert empty["n"] == 0
     assert empty["mean"] is None
     assert evaluate._mean([]) is None
 
 
-def test_gather_excludes_leaked_replays_from_mean(
-    monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
+def test_the_report_excludes_leaked_replays_from_the_mean() -> None:
     evaluate = _evaluate_module()
     state: dict[str, Any] = {
         "skill": "meiva-goal",
@@ -222,52 +231,31 @@ def test_gather_excludes_leaked_replays_from_mean(
         ],
         "skipped": [],
     }
-    records: dict[int, dict[str, Any]] = {
-        42: {
-            "agent_id": 42,
-            "label": "ok",
-            "turns": 1,
-            "final_output": "done",
-            "tools_called": {},
-            "leak_audit": [],
-            "invalidated": False,
-        },
-        43: {
-            "agent_id": 43,
-            "label": "ok",
-            "turns": 1,
-            "final_output": "done",
-            "tools_called": {},
-            "leak_audit": [{"surface": "results", "evidence": "read", "tool": None}],
-            "invalidated": True,
-        },
-    }
+    leak = [{"surface": "results", "evidence": "read", "tool": None}]
+    records = {42: _record(), 43: _record(leak_audit=leak, invalidated=True)}
 
-    def _poll(_state: dict[str, Any], **_kwargs: object) -> dict[str, list[int]]:
-        assert _kwargs["database"] is database
-        return {"done": [42, 43], "pending": []}
+    report = evaluate.assemble_report(state, [], records)
 
-    def _collect_one(agent_id: int, **_kwargs: object) -> dict[str, Any]:
-        assert _kwargs["database"] is database
-        return records[agent_id]
-
-    def _scores(rec: dict[str, Any]) -> dict[str, float]:
-        score = 1.0 if rec["agent_id"] == 42 else 0.0
-        return {"completion": score, "efficiency": score, "overall": score}
-
-    def _leak_paths(_agent_id: int) -> Any:
-        return object()
-
-    monkeypatch.setattr(evaluate, "poll", _poll)
-    monkeypatch.setattr(evaluate, "collect_one", _collect_one)
-    monkeypatch.setattr(evaluate, "_leak_paths", _leak_paths)
-    monkeypatch.setattr(evaluate, "scores", _scores)
-
-    report = evaluate.gather(state, database=database)
-
+    clean = evaluate.scores(records[42])
     assert report["n"] == 1
-    assert report["mean"]["overall"] == 1.0
+    assert report["mean"]["overall"] == clean["overall"]
     assert report["invalidated"] == 1
     assert report["per_task"][1]["invalidated"] is True
-    assert report["per_task"][1]["leak_audit"] == records[43]["leak_audit"]
+    assert report["per_task"][1]["leak_audit"] == leak
     assert report["invalid"][0]["verification"]["reason"] == "leak"
+
+
+def test_the_report_does_not_change_the_records_it_is_given() -> None:
+    evaluate = _evaluate_module()
+    state: dict[str, Any] = {
+        "skill": "meiva-goal",
+        "stamp": "test",
+        "runs": [{"eval_agent_id": 42, "source_agent_id": 1, "original_tools_called": {}}],
+        "skipped": [],
+    }
+    record = _record(task_prompt="")
+    before = dict(record)
+
+    evaluate.assemble_report(state, [], {42: record})
+
+    assert record == before

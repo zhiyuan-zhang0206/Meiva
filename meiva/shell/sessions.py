@@ -4,251 +4,81 @@ __all_for_meiva__ = ["capture", "kill", "list", "new", "renew", "send", "send_ke
 
 import builtins
 import contextlib
-import math
-import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import cast
 
+from base.agents.context.clients import DatabaseHandle
 from base.cluster import session_name
-from base.host.env.registry import process_environment
 from base.log import logger
 from base.paths import repo_root, workspace_dir
+from base.sessions.backend import PtySessionBackend, get_shell_backend
 from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
 from base.sessions.page_session import is_page_label
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.security import scan_content
+from meiva.shell import session_env, session_plan
 from meiva.shell.handle import SessionHandle
-
-# A session name is a lowercase slug starting with a letter: it rides inside the
-# session identifier (after the numeric id), so the charset stays conservative
-# and the leading letter keeps it visually distinct from the id it follows.
-_NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
+from meiva.shell.session_env import SessionHost
+from meiva.shell.session_plan import validate_ttl
 
 
-_MAX_TTL_SECONDS = 86_400  # 24h — user-facing sessions only; watchers exempt (see validate_ttl)
-
-
-def validate_ttl(ttl: float, *, system: bool = False) -> float:
-    """Validate a TTL. The 24h cap protects user calls only.
-
-    `system=True` marks a system-side session (a watcher spawn): its ttl is
-    the watcher's true target deadline (user ruling 2026-09-14, task #3411)
-    and is exempt from the sessions.new cap of 2026-09-01 — a 7-day standing
-    cron is a normal watcher, not a user session. A non-finite or
-    non-positive ttl is refused on every path: a session whose deadline has
-    already passed must never be created.
-    """
-    if not math.isfinite(ttl) or ttl <= 0:
-        raise ValueError("ttl must be finite and greater than zero")
-    if not system and ttl > _MAX_TTL_SECONDS:
-        raise ValueError(
-            f"ttl must be at most {_MAX_TTL_SECONDS} seconds (24 hours) — "
-            "sessions live at most one day"
-        )
-    return ttl
-
-
-def renewal_update(cur: Any, agent_id: int, session_id: int, ttl: float) -> datetime | None:
-    """The guarded deadline write; None when the row is no longer unexpired.
-
-    The guard compares against ``clock_timestamp()`` — the statement time,
-    evaluated after the row lock is acquired — never ``now()`` (transaction
-    start). A renewal whose transaction began before the deadline but whose
-    UPDATE only executes after the reaper already claimed the row must lose
-    (issue #2053): with ``now()`` the guard would still pass on a session the
-    kill was already dispatched for, and the row would show renewed while the
-    session is dead.
-    """
-    cur.execute(
-        "UPDATE agent_shell_ttls "
-        "SET expires_at = clock_timestamp() + make_interval(secs => %s), "
-        "renewals = renewals + 1, last_renewed_at = clock_timestamp() "
-        "WHERE agent_id = %s AND session_id = %s AND expires_at > clock_timestamp() "
-        "RETURNING expires_at",
-        (ttl, agent_id, session_id),
-    )
-    row = cur.fetchone()
-    return row[0] if row is not None else None
-
-
+# meiva:note
+# One agent's persistent shell sessions on a backend and a database. The module functions below are the SDK entries: each reads this process's agent identity once (`shell_sessions()`) and calls the matching method here, whose every dependency is a constructor or call argument, so a test builds one over the real pty-sessions backend and a throwaway database.
 class ShellSessions:
-    """One agent's persistent shell sessions on a backend and a database.
-
-    Built by `shell_sessions()` below from this process's settings and agent identity
-    (the same SDK root as `database()` / `bus()`); the module functions below delegate to it.
-    A test builds one over a fake backend and database.
-    """
-
-    def __init__(self, *, backend: Any, database: Any, agent_id: int) -> None:
+    def __init__(
+        self, *, backend: PtySessionBackend, database: DatabaseHandle, agent_id: int
+    ) -> None:
         self._backend = backend
         self._database = database
         self._agent_id = agent_id
 
-    def _agent_prefix(self) -> str:
-        # Generic prefix for all shell sessions of the current agent:
-        # `meiva-agent-<agent_id>-`. The agent's process, its shells, and
-        # its watchers all share this prefix; kill_all filters on it.
-        return f"{session_name(f'agent-{self._agent_id}')}-"
+    @property
+    def agent_id(self) -> int:
+        return self._agent_id
 
-    def _shell_prefix(self) -> str:
-        # Base prefix for every session this agent owns. All sessions share the
-        # `shell-<session_id>` base; a named session carries an extra `-<name>`
-        # suffix on top (watchers use the conventional name "watcher").
-        # `_shell_prefix()` therefore matches both.
-        return f"{self._agent_prefix()}shell-"
+    # meiva:note
+    # Every shell session of this agent, watchers included, is named `meiva-agent-<agent_id>-shell-<session_id>[-<name>]`; kill_all and `list` filter on this prefix.
+    def shell_prefix(self) -> str:
+        return f"{session_name(f'agent-{self._agent_id}')}-shell-"
 
-    def _next_session_index_from_db(self) -> int:
-        # Atomically increment agents_meta.session_index to fetch the next session
-        # number (shared by shells and watchers). Uses `UPDATE ... RETURNING` for
-        # concurrency safety. No fallback — raise directly if DB is unavailable or
-        # the agent isn't in agents_meta.
-        agent_id = self._agent_id
-        # base.db.connect(): this runs inside the agent's exec sandbox, so its
-        # connect cap keeps a black-holing database from hanging `meiva.shell.sessions.new()`
-        # on the OS TCP-retransmit timeout instead of raising.
-        with self._database.connect() as conn, conn.cursor() as cur:
-            cur.execute("SET TRANSACTION READ WRITE")
-            cur.execute(
-                "UPDATE agents_meta SET session_index = session_index + 1 "
-                "WHERE id = %s RETURNING session_index",
-                (agent_id,),
-            )
-            row = cur.fetchone()
-            conn.commit()
-        if row is None:
-            raise RuntimeError(
-                f"agent {agent_id} not in agents_meta table — cannot allocate session_index"
-            )
-        # session_index DEFAULT 0; first UPDATE RETURNING 1 → returns 0
-        return int(row[0]) - 1
-
-    def _list_all_sessions(self) -> builtins.list[str]:
-        # List all sessions on the shell backend (no prefix filtering). The PTY
-        # backend answers only its own sessions, which are exactly this agent's
-        # shells + watchers since the session-backend migration (services live on
-        # get_backend(), orchestration on the session backend) — the same filtering that follows needs no more.
+    def _names(self) -> builtins.list[str]:
         return self._backend.list_sessions()
 
-    def _own_sessions(self) -> builtins.list[str]:
-        # Full session names of this agent's sessions (shells + watchers).
-        prefix = self._shell_prefix()
-        return [s for s in self._list_all_sessions() if s.startswith(prefix)]
-
     def resolve(self, session_id: int) -> str:
-        # Resolve an int session id to its full session name. The id is unique
-        # within the agent, so `…-shell-<id>` matches exactly one session whether
-        # or not it carries a `-<name>` suffix. Prefix-matching `<base>-` cannot
-        # conflate ids: `…-shell-12` does not start with `…-shell-1-`. Raise if the
-        # id does not belong to this agent.
-        base = f"{self._shell_prefix()}{session_id}"
-        for name in self._own_sessions():
-            if name == base or name.startswith(f"{base}-"):
-                return name
-        raise ValueError(f"session {session_id} is not this agent's (no match for {base!r})")
+        return session_plan.match_session(self._names(), self.shell_prefix(), session_id)
 
-    def record_ttl(self, session_id: int, ttl: float) -> None:
-        """Write the session's mandatory deadline row to `agent_shell_ttls`.
-
-        The TTL reaper reads this table (the runner role holds INSERT).
-        Fail-loud: without the row the reaper can never reclaim the session, so
-        the caller must abort the creation it just made. `SET TRANSACTION READ
-        WRITE` leads the transaction — a pooled backend handed over with
-        session-level read-only poison would otherwise reject the write."""
-        try:
-            with self._database.connect() as conn, conn.cursor() as cur:
-                cur.execute("SET TRANSACTION READ WRITE")
-                cur.execute(
-                    "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
-                    "VALUES (%s, %s, now() + make_interval(secs => %s))",
-                    (self._agent_id, session_id, ttl),
-                )
-                conn.commit()
-        except Exception as exc:
-            raise RuntimeError(f"failed to track TTL for session {session_id}") from exc
-
+    # meiva:note
+    # `ttl` is required: user ruling 2026-08-27 made shell TTL mandatory (the idle-shell-reminder daemon is gone and TTL is the only reclamation mechanism). Every caller, shells and watchers alike, records its deadline in `agent_shell_ttls`; for a watcher that deadline IS the watcher's target (launch timeout, cron end, at moment plus grace; user ruling 2026-09-14, task #3411). The cap is applied here, at the write point, so every caller is bound by it. The id is allocated before the host-level PTY admission gate: during an operator freeze a refused attempt leaves a harmless gap in this monotonic per-agent sequence, which is never rolled back or reused, so an old numeric handle stays stale instead of naming a later session. A session whose deadline row cannot be written is disposed of, because the reaper could never see it.
     def create(
         self,
-        name: str | None = None,
+        name: str | None,
         *,
-        cwd: str | None = None,
+        cwd: Path,
         ttl: float,
         system: bool = False,
         env_overrides: dict[str, str] | None = None,
+        host: SessionHost,
     ) -> tuple[int, str]:
-        # Allocate the next session id and create the shell session. `name` becomes
-        # a `-<name>` suffix on the session identifier (None = unnamed). `cwd` sets
-        # the session's starting directory (None = the agent's workspace, the same
-        # base meiva.shell.run uses). Returns (id, full_name). Internal — `new()`
-        # (shell), `run_background`, and `meiva.watcher.spawn.run` (named "watcher")
-        # all use it.
-        #
-        # `ttl` is REQUIRED: user ruling 2026-08-27 made shell TTL mandatory (the
-        # idle-shell-reminder daemon is gone and TTL is the only reclamation
-        # mechanism). Every caller — shells and watchers alike — records its
-        # deadline in `agent_shell_ttls`. For a watcher that deadline IS the
-        # watcher's target (launch timeout / cron end / at moment + grace; user
-        # ruling 2026-09-14, task #3411) — one lifecycle system, not a registry
-        # lifetime beside a decorative shell TTL.
-        if name is not None and not _NAME_RE.fullmatch(name):
-            raise ValueError(
-                f"session name {name!r} invalid — use a lowercase slug like 'dev-server' "
-                "([a-z][a-z0-9-]*)"
-            )
-        if is_page_label(name):
-            # The `page-` label names meiva.ui.serve page sessions exactly
-            # (base/sessions/page_session.py), which a terminate's shell kill spares.
-            raise ValueError(
-                f"session name {name!r} invalid — 'page-' names are reserved for pages"
-            )
-        # Validate here, not at call sites, so every caller is capped at the
-        # write point (ruling 2026-09-01: sessions live at most 24h) — except
-        # system-side callers (watcher spawns), whose ttl IS the watcher's true
-        # target deadline and is exempt (ruling 2026-09-14, task #3411).
+        from meiva.shell import ttl_store
+
+        session_plan.validate_name(name, page_label=is_page_label(name))
         ttl = validate_ttl(ttl, system=system)
-        session_id = self._next_session_index_from_db()
-        full = f"{self._shell_prefix()}{session_id}" + (f"-{name}" if name is not None else "")
-        # Pass the session allowlist to the backend. On POSIX the shell's base env is
-        # the pty-sessions service's own env, overlaid with this dict;
-        # watcher-only runner credentials arrive through `env_overrides`; every session
-        # also gets the owner's identity (below), the projection's one deliberate addition.
-        #
-        # The dict rides the request body over the service's 0600 unix socket, not
-        # argv (issue #974).
-        backend = self._backend
-        if cwd is None:
-            cwd = str(workspace_dir(self._agent_id))
-        # The id is allocated before the host-level PTY admission gate. During an
-        # operator freeze a refused attempt therefore leaves a harmless gap in this
-        # monotonic per-agent sequence. Never roll it back or reuse it: an old
-        # numeric handle must remain stale instead of naming a later session.
-        session_cwd = Path(cwd)
-        activate_venv = cwd_is_inside_checkout(session_cwd, repo_root())
-        session_env = forward_env_dict(process_environment(), activate_venv=activate_venv)
-        # The session is the agent's own: the owner's id rides the environment so a script run
-        # in it builds a full MeivaContext (`meiva.boot.launched_context`,
-        # `owns_loop=False`) and `meiva.DB` / `meiva.REDIS` / the gateway-backed calls work as in
-        # the exec child (ruling 2026-10-04, docs/decisions/agents/context/2026-10-04-meiva-state-and-context.md,
-        # source 2). Per-creation, from this session's owner — not the creating process's
-        # copied value, which the allowlist drops (a frozen pane's stale id).
-        session_env["MEIVA_AGENT_ID"] = str(self._agent_id)
-        if env_overrides:
-            session_env.update(env_overrides)
-        ok = backend.new_session(
-            full,
-            "",
-            session_cwd,
-            env=session_env,
+        session_id = ttl_store.next_session_index(self._database, self._agent_id)
+        full = session_plan.session_full_name(self.shell_prefix(), session_id, name)
+        env = session_env.session_environment(
+            host,
+            activate_venv=cwd_is_inside_checkout(cwd, host.checkout),
+            agent_id=self._agent_id,
+            overrides=env_overrides,
         )
-        if not ok:
+        if not self._backend.new_session(full, "", cwd, env=env):
             raise RuntimeError(f"failed to create session {full!r}")
         try:
-            self.record_ttl(session_id, ttl)
+            ttl_store.record_ttl(self._database, self._agent_id, session_id, ttl)
         except RuntimeError:
-            # An untracked session could never be reclaimed — dispose of it
-            # rather than leaving a live session the reaper cannot see.
             try:
-                backend.kill_session(full, graceful=False)
+                self._backend.kill_session(full, graceful=False)
             except Exception:
                 logger.opt(exception=True).warning(
                     "disposing of untracked session {!r} after its TTL record failed also failed; "
@@ -258,10 +88,9 @@ class ShellSessions:
             raise
         return session_id, full
 
+    # meiva:note
+    # Text and Enter go in separate writes: a combined write races TUI programs (Claude Code, Codex) that are still processing the typed text when Enter arrives.
     def send(self, session_id: int, cmd: str, *, enter: bool = True) -> None:
-        # Text and Enter go in separate writes: a combined write races TUI
-        # programs (Claude Code, Codex) that are still processing the typed text
-        # when Enter arrives.
         target = self.resolve(session_id)
         self._backend.send(target, cmd)
         if enter:
@@ -270,10 +99,9 @@ class ShellSessions:
     def send_keys(self, session_id: int, *keys: str) -> None:
         self._backend.send_keys(self.resolve(session_id), *keys)
 
+    # meiva:note
+    # A session holds whatever ran in it, an interactive fetch or a coding agent rendering a web page, so reading one ingests exactly as `shell.run` does. The text is scanned for the same reason and comes back byte-for-byte.
     def capture(self, session_id: int, lines: int, *, scrollback: bool) -> str:
-        # A session holds whatever ran in it — an interactive fetch, a coding agent
-        # rendering a web page — so reading one ingests exactly as `shell.run` does.
-        # Scanned for the same reason; the text comes back byte-for-byte.
         name = self.resolve(session_id)
         pane = self._backend.capture_pane(name, lines, scrollback=scrollback)
         return scan_content(pane, source="shell.sessions.capture")
@@ -284,65 +112,34 @@ class ShellSessions:
             raise RuntimeError(f"failed to kill session {session_id}")
 
     def kill_all(self) -> int:
-        sessions = self._own_sessions()
-        for name in sessions:
+        names = session_plan.own_names(self._names(), self.shell_prefix())
+        for name in names:
             with contextlib.suppress(RuntimeError):
                 self._backend.kill_session(name, graceful=False)
-        return len(sessions)
+        return len(names)
 
+    # meiva:note
+    # Extends the deadline row and writes the audit trail. The write UPDATEs the deadline in one transaction guarded by `expires_at > clock_timestamp()`: an expired row is never renewable, which is what makes the pair with the reaper airtight, since a successful renewal proves the row was unexpired at its write and a renewal attempted after the deadline loses. The audit trail is one `agent_shell_ttl_renewals` row (requested ttl plus before and after deadlines) in the same transaction, the `renewals` counter and `last_renewed_at` on the main row, and a telemetry `shell_ttl_renewed` event. The before/after read and the write use separate connections on purpose: the guarded UPDATE re-checks the deadline itself, so the read needs no lock, and a concurrent second renewal can at worst stamp a slightly stale `prev_expires_at`. A session that is not this agent's, or not alive, raises ValueError like send and capture.
     def renew(self, session_id: int, ttl: float) -> datetime:
-        # Not this agent's / not alive -> ValueError, same rule as send/capture.
+        from base import telemetry
+        from meiva.shell import ttl_store
+
         self.resolve(session_id)
-        return self._record_renewal(session_id, ttl)
-
-    def list(self) -> builtins.dict[int, str | None]:
-        prefix = self._shell_prefix()
-        out: builtins.dict[int, str | None] = {}
-        for full in self._own_sessions():
-            rest = full[len(prefix) :]  # "<id>" or "<id>-<name>"
-            sid, _, name = rest.partition("-")
-            out[int(sid)] = name or None
-        return out
-
-    def _record_renewal(self, session_id: int, ttl: float) -> datetime:
-        """Extend the deadline row and write the audit trail.
-
-        The write UPDATEs the deadline in one transaction guarded by
-        ``expires_at > clock_timestamp()``: an expired row is never renewable.
-        The guard is what makes the pair with the reaper airtight — a successful
-        renewal proves the row was unexpired at its write, so no expired-row
-        select could have returned it before that write, and a renewal attempted
-        after the deadline loses (the reaper owns the session). ``SET TRANSACTION
-        READ WRITE`` leads the transaction — same pooled read-only poison
-        defense as `_record_ttl`.
-
-        Audit trail: one `agent_shell_ttl_renewals` row (requested ttl +
-        before/after deadlines) in the same transaction as the deadline write,
-        plus the `renewals` counter and `last_renewed_at` on the main row, plus
-        a telemetry `shell_ttl_renewed` event. The before/after read and the
-        write use separate connections on purpose: the guarded UPDATE re-checks
-        the deadline itself, so the read needs no lock, and a concurrent second
-        renewal from a background process can at worst stamp a slightly stale
-        `prev_expires_at` — deadlines stay monotone and this path is
-        single-agent, single-turn by construction, not worth locking for.
-        """
-        agent_id = self._agent_id
-        prev_expires = self._read_expiry_row(session_id)
+        prev_expires = ttl_store.read_expiry(self._database, self._agent_id, session_id)
         if prev_expires is None:
             raise RuntimeError(
                 f"session {session_id} has no TTL row — a pre-mandate session cannot be renewed"
             )
-        new_expires = self._apply_renewal(session_id, ttl, prev_expires)
-        from base import telemetry
-
+        new_expires = ttl_store.apply_renewal(
+            self._database, self._agent_id, session_id, ttl, prev_expires
+        )
         telemetry.emit(
             "telemetry",
             "shell_ttl_renewed",
             level="info",
-            agent_id=agent_id,
+            agent_id=self._agent_id,
             attributes={
                 "session_id": session_id,
-                # int cast stabilizes the emitted metric kind (task #4011).
                 "ttl_s": round(ttl),
                 "prev_expires_at": prev_expires.isoformat(),
                 "new_expires_at": new_expires.isoformat(),
@@ -350,64 +147,32 @@ class ShellSessions:
         )
         return new_expires
 
-    def _read_expiry_row(self, session_id: int) -> datetime | None:
-        """The session's current deadline; None when the row is absent."""
-        import psycopg
-
-        try:
-            with self._database.connect() as conn, conn.cursor() as cur:
-                cur.execute(
-                    "SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
-                    (self._agent_id, session_id),
-                )
-                row = cur.fetchone()
-        except psycopg.Error as exc:
-            raise RuntimeError(f"failed to renew session {session_id}") from exc
-        return row[0] if row is not None else None
-
-    def _apply_renewal(self, session_id: int, ttl: float, prev_expires: datetime) -> datetime:
-        """The guarded write: new deadline + audit row, one transaction.
-
-        Returns the new deadline; raises ValueError when the row expired (or
-        was reaped) between the read and this write — the owner renews before
-        the deadline or not at all (user ruling 2026-09-08).
-        """
-        import psycopg
-
-        agent_id = self._agent_id
-        new_expires: datetime | None = None
-        try:
-            with self._database.connect() as conn, conn.cursor() as cur:
-                cur.execute("SET TRANSACTION READ WRITE")
-                updated = renewal_update(cur, agent_id, session_id, ttl)
-                if updated is not None:
-                    new_expires = updated
-                    cur.execute(
-                        "INSERT INTO agent_shell_ttl_renewals "
-                        "(agent_id, session_id, requested_ttl_seconds, prev_expires_at, "
-                        "new_expires_at) VALUES (%s, %s, %s, %s, %s)",
-                        (agent_id, session_id, ttl, prev_expires, new_expires),
-                    )
-                    conn.commit()
-        except psycopg.Error as exc:
-            raise RuntimeError(f"failed to renew session {session_id}") from exc
-        if new_expires is None:
-            raise ValueError(
-                f"session {session_id} is already past its TTL — expired sessions "
-                "are reclaimed automatically; renew before the deadline"
-            )
-        return new_expires
+    def list(self) -> builtins.dict[int, str | None]:
+        return session_plan.session_table(self._names(), self.shell_prefix())
 
 
-def shell_sessions() -> ShellSessions:
-    """This agent's persistent shell sessions, on the shell backend and the cluster database.
+# meiva:note
+# The machine facts a new session starts from, read once per creation: this checkout and the environment the session forwards.
+def session_host() -> SessionHost:
+    return SessionHost(checkout=repo_root(), forwarded=forward_env_dict(activate_venv=True))
 
-    Raises RuntimeError when this process has no agent identity: shell sessions are an agent's,
-    so a standalone script that imports meiva gets an explicit refusal, never another agent's or
-    a global's sessions."""
-    from base.sessions.backend import get_shell_backend
-    from meiva.sdk_surface import agent_identity
+
+# meiva:note
+# The sessions of one agent on this process's session backend and cluster database (the same SDK root as `database()` and `bus()`). The backend is the pty-sessions service; `get_shell_backend` answers its client typed as the abstract backend, and the shell operations live on the concrete one.
+def open_sessions(agent_id: int) -> ShellSessions:
     from meiva.sdk_surface.settings import database
+
+    return ShellSessions(
+        backend=cast(PtySessionBackend, get_shell_backend()),
+        database=database(),
+        agent_id=agent_id,
+    )
+
+
+# meiva:note
+# Raises RuntimeError when this process has no agent identity: shell sessions are an agent's, so a standalone script that imports meiva gets an explicit refusal, never another agent's or a global's sessions.
+def shell_sessions() -> ShellSessions:
+    from meiva.sdk_surface import agent_identity
 
     agent_id = agent_identity.agent_id()
     if agent_id is None:
@@ -418,13 +183,11 @@ def shell_sessions() -> ShellSessions:
             "MEIVA_AGENT_ID). Running a standalone script that imports meiva "
             "does not set an agent identity."
         )
-    return ShellSessions(backend=get_shell_backend(), database=database(), agent_id=agent_id)
+    return open_sessions(agent_id)
 
 
-def shell_sessions_handle() -> ShellSessions:
-    return shell_sessions()
-
-
+# meiva:note
+# Allocate the next session id and create the shell session. Internal: `new()` (shell), `meiva.watcher.spawn.run` (named "watcher") and the background runs use it. `cwd` defaults to the agent's workspace, the same base `meiva.shell.run` uses.
 def create_session(
     name: str | None = None,
     *,
@@ -433,10 +196,10 @@ def create_session(
     system: bool = False,
     env_overrides: dict[str, str] | None = None,
 ) -> tuple[int, str]:
-    # Allocate the next session id and create the shell session. Internal — `new()`
-    # (shell), `run_background`, and `meiva.watcher.spawn.run` (named "watcher") all use it.
-    return shell_sessions_handle().create(
-        name, cwd=cwd, ttl=ttl, system=system, env_overrides=env_overrides
+    shell = shell_sessions()
+    start = Path(cwd) if cwd is not None else workspace_dir(shell.agent_id)
+    return shell.create(
+        name, cwd=start, ttl=ttl, system=system, env_overrides=env_overrides, host=session_host()
     )
 
 
@@ -452,7 +215,10 @@ def new(name: str, *, ttl: float) -> int:
             passes, with `renew(id, ttl=)`."""
     name = coerce_str(name, "name")
     ttl = coerce_typed(ttl, "ttl", (int, float))
-    session_id, _ = shell_sessions_handle().create(name, ttl=ttl)
+    shell = shell_sessions()
+    session_id, _ = shell.create(
+        name, cwd=workspace_dir(shell.agent_id), ttl=ttl, host=session_host()
+    )
     return session_id
 
 
@@ -467,7 +233,7 @@ def send(id: int | SessionHandle, cmd: str, *, enter: bool = True) -> None:
     id = _session_id(id)
     cmd = coerce_str(cmd, "cmd")
     enter = coerce_typed(enter, "enter", bool)
-    shell_sessions_handle().send(id, cmd, enter=enter)
+    shell_sessions().send(id, cmd, enter=enter)
 
 
 def send_keys(id: int | SessionHandle, *keys: str) -> None:
@@ -476,7 +242,7 @@ def send_keys(id: int | SessionHandle, *keys: str) -> None:
     `Enter`, `Space`, `PageUp`."""
     id = _session_id(id)
     keys = tuple(coerce_str(key, "key") for key in keys)
-    shell_sessions_handle().send_keys(id, *keys)
+    shell_sessions().send_keys(id, *keys)
 
 
 def capture(id: int | SessionHandle, lines: int | None = None, *, scrollback: bool = True) -> str:
@@ -495,7 +261,7 @@ def capture(id: int | SessionHandle, lines: int | None = None, *, scrollback: bo
     else:
         resolved_lines = coerce_typed(lines, "lines", int)
     scrollback = coerce_typed(scrollback, "scrollback", bool)
-    return shell_sessions_handle().capture(id, resolved_lines, scrollback=scrollback)
+    return shell_sessions().capture(id, resolved_lines, scrollback=scrollback)
 
 
 def _session_id(id: object) -> int:
@@ -512,7 +278,7 @@ def _session_id(id: object) -> int:
 
 def kill(id: int | SessionHandle) -> None:
     id = _session_id(id)
-    shell_sessions_handle().kill(id)
+    shell_sessions().kill(id)
 
 
 # Not in __all_for_meiva__, so never rendered into the SDK docs: a prefix-scoped
@@ -520,7 +286,7 @@ def kill(id: int | SessionHandle) -> None:
 # NOT reap sessions — they outlive the turn (see services/agent_runner/agent_host/host.py); the agent
 # itself kills sessions one by one via kill(id).
 def kill_all() -> int:
-    return shell_sessions_handle().kill_all()
+    return shell_sessions().kill_all()
 
 
 def renew(id: int | SessionHandle, *, ttl: float) -> datetime:
@@ -535,7 +301,7 @@ def renew(id: int | SessionHandle, *, ttl: float) -> datetime:
         The new expiry time."""
     id = _session_id(id)
     ttl = validate_ttl(coerce_typed(ttl, "ttl", (int, float)))
-    return shell_sessions_handle().renew(id, ttl)
+    return shell_sessions().renew(id, ttl)
 
 
 def list() -> dict[int, str | None]:
@@ -544,4 +310,4 @@ def list() -> dict[int, str | None]:
     Entries named `page-<name>` are live page servers for pages this agent
     opened via `meiva.ui.serve`, not leftovers; see `meiva.ui` for their lifecycle.
     """
-    return shell_sessions_handle().list()
+    return shell_sessions().list()

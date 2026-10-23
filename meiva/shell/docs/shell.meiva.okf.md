@@ -28,6 +28,7 @@ Interface for executing shell commands. Three modes: one-shot `run()`, backgroun
 - `list() → dict[int, str | None]` — List your sessions (id → name, unnamed as None).
 
 ## Key Dependencies
+- [[meiva/shell/docs/implementation.meiva.okf.md|Facade and implementation]] — the entries above read the process once and call implementations with explicit values
 - [[agent/docs/sessions.meiva.okf.md]] — the session backend is the underlying implementation of sessions
 - [[meiva/shell/coding_tools/docs/coding-tools.meiva.okf.md|meiva.shell.coding_tools]] — launchers that start Claude Code / Codex in these sessions (not agent-facing)
 

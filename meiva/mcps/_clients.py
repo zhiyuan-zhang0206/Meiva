@@ -4,30 +4,51 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
-from meiva.mcps.config import MCPConnectError
+from meiva.mcps.config import MCPConnectError, ToolInfo
 
-from . import _remote
 from ._remote import RemoteMCPClient, connect_remote
 
 
+# meiva:note
+# The context owns the daemon connection and its live timeout reader. `socket_path` is where the machine's MCP daemon listens (`base.paths.mcp_daemon_shared_socket` of the home), given by the composition root; the socket is looked for when the first request dials, since the daemon may start after the context.
 class McpClients:
-    """The context owns the daemon connection and its live timeout reader."""
-
-    def __init__(self, timeout_seconds: Callable[[], float]) -> None:
+    def __init__(self, socket_path: Path, timeout_seconds: Callable[[], float]) -> None:
+        self.socket_path = socket_path
         self.timeout_seconds = timeout_seconds
         self._lock = threading.Lock()
         self._remote: RemoteMCPClient | None = None
 
     def remote(self) -> RemoteMCPClient:
         """Require a daemon socket; never spawn an alternative tool runtime."""
-        socket_path = _remote.daemon_socket_path()
-        if not socket_path:
+        if not self.socket_path.exists():
             raise MCPConnectError("MCP daemon unavailable; start the machine's mcp-daemon service")
         with self._lock:
             if self._remote is None:
-                self._remote = connect_remote(socket_path)
+                self._remote = connect_remote(str(self.socket_path))
             return self._remote
+
+    # meiva:note
+    # The daemon calls the tools make (the `RemoteClient` shape): each dials the daemon on its first request, so a context that never calls an MCP tool holds no socket.
+    def list_tools(
+        self, server: str, *, timeout_seconds: float, agent_id: int | None
+    ) -> list[ToolInfo]:
+        return self.remote().list_tools(server, timeout_seconds=timeout_seconds, agent_id=agent_id)
+
+    def call_tool(
+        self,
+        server: str,
+        tool: str,
+        args: dict[str, Any],
+        *,
+        timeout_seconds: float,
+        agent_id: int | None,
+    ) -> dict[str, Any]:
+        return self.remote().call_tool(
+            server, tool, args, timeout_seconds=timeout_seconds, agent_id=agent_id
+        )
 
     def close(self) -> None:
         """Drop this context's daemon connection."""

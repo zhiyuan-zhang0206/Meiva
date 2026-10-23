@@ -15,7 +15,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from types import MappingProxyType, ModuleType
+from typing import Any, Protocol, cast
 
 from pydantic import BaseModel
 
@@ -24,41 +25,85 @@ from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
-from base.packages.plugin_config_contracts import PluginConfigImages
-from base.packages.plugins.extensions import ExtensionRegistry
+from base.packages.plugin_config_contracts import PluginConfigImages, UnboundPluginConfigImages
+from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 
 from . import meiva_module
 
 
+# meiva:note
+# One installed wrap layer, in registration order. `target` is the dotted `meiva` path
+# (`"files.read"`), `plugin` the plugin that declared it, `wrapper` the author's
+# `wrapper(inner, *args, **kwargs)` function: plugin-declared registry data, the
+# introspectable artifact (`wrapper.__module__` and its source say who and what).
 @dataclass(frozen=True)
 class WrapLayer:
-    """One installed wrap layer, in registration order.
-
-    - target: dotted `meiva` path, e.g. `"files.read"`.
-    - plugin: the plugin that declared it.
-    - wrapper: the author's `wrapper(inner, *args, **kwargs)` function — the
-      introspectable artifact (`wrapper.__module__` / source say who and what).
-    - chained: the closure actually installed on the namespace at this layer.
-    """
-
     target: str
     plugin: str
     wrapper: Callable[..., Any]
-    chained: Callable[..., Any]
 
 
 SkillProvider = Callable[[], list[Path]]
 
 
+# meiva:note
+# What one applied piece of an SDK installation did to the process, as data: the installer's
+# ledger of reversals. Uninstalling, or rolling back a plugin whose declaration failed halfway,
+# reads the ledger newest-first and reverses each record (`install.revert`); the records name
+# the objects they touched, so reversing one needs nothing from the code that applied it.
+@dataclass(frozen=True)
+class NamespaceAdded:
+    name: str
+    module: ModuleType
+    on_surface: bool
+
+
+@dataclass(frozen=True)
+class MemberAdded:
+    namespace: str
+    name: str
+    parent: ModuleType
+
+
+@dataclass(frozen=True)
+class WrapAdded:
+    layer: WrapLayer
+    parent: Any
+    attr: str
+    chained: Callable[..., Any]
+    original: Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class ProviderAdded:
+    provider: SkillProvider
+
+
+@dataclass(frozen=True)
+class ConfigBound:
+    plugin: str
+
+
+type Reversal = NamespaceAdded | MemberAdded | WrapAdded | ProviderAdded | ConfigBound
+
+
+# meiva:note
+# What an installation needs of the client set it meters through: the lazily built event
+# pipeline. A `base.agents.context.clients.ClientSet` satisfies it; naming only the capability
+# keeps this module free of the client stack's imports.
+class EventPipelines(Protocol):
+    def event_pipeline(self) -> Any: ...
+
+
+# meiva:note
+# What the installed registry put into the process, and how to take it back.
+#
+# Frozen: a change builds a new value and swaps the holder (`SLOT`) — see the module docstring.
+# `wrap_layers` and the provider tuple are snapshots taken when the installation was built;
+# `undo` is the ledger of reversals in application order (run newest-first, once, on the way
+# out).
 @dataclass(frozen=True)
 class Installation:
-    """What the installed registry put into the process, and how to take it back.
-
-    Frozen: a change builds a new value and swaps the holder (`SLOT`) — see the
-    module docstring. `wrap_layers` and the provider tuple are snapshots taken when
-    the installation was built; the undos still close over the builders that filled
-    them (they are only ever run once, on the way out)."""
-
     registry: ExtensionRegistry
     config_images: PluginConfigImages
     expansions: tuple[str, ...]
@@ -67,14 +112,46 @@ class Installation:
     metered: tuple[tuple[Any, str], ...]
     disabled: frozenset[str]
     faces: bool
-    undo: tuple[Callable[[], None], ...]
+    undo: tuple[Reversal, ...]
     sampling: SamplingPolicyOwner = field(default_factory=SamplingPolicyOwner)
     configs: Mapping[str, BaseModel] = field(default_factory=dict[str, BaseModel])
     catalog: ModelCatalog | None = None
     provider_keys: ProviderKeys | None = None
     authority: ConfigAuthority | None = None
-    clock_factory: Callable[[], Clock] | None = None
-    producer: Callable[[], Any] | None = None
+    clock: Clock | None = None
+    clients: EventPipelines | None = None
+
+    # meiva:note
+    # An installation that holds no plugin surface: only the root values it is given.
+    @classmethod
+    def bare(
+        cls,
+        *,
+        catalog: ModelCatalog | None = None,
+        provider_keys: ProviderKeys | None = None,
+        authority: ConfigAuthority | None = None,
+        clock: Clock | None = None,
+        clients: EventPipelines | None = None,
+        configs: Mapping[str, BaseModel] | None = None,
+        skill_providers: tuple[SkillProvider, ...] = (),
+    ) -> Installation:
+        return cls(
+            registry=EMPTY,
+            config_images=UnboundPluginConfigImages(),
+            expansions=(),
+            wrap_layers=MappingProxyType({}),
+            skill_providers=skill_providers,
+            metered=(),
+            disabled=frozenset(),
+            faces=False,
+            undo=(),
+            configs=MappingProxyType({}) if configs is None else configs,
+            catalog=catalog,
+            provider_keys=provider_keys,
+            authority=authority,
+            clock=clock,
+            clients=clients,
+        )
 
     def require_catalog(self) -> ModelCatalog:
         """Return this installation's explicit model facts or refuse a non-model installation."""

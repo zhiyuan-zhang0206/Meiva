@@ -1,30 +1,40 @@
-"""Provider doubles and media fixtures shared by understand contract tests."""
+# meiva:note
+# The harness the meiva.understand tests share: `meiva.understand` run over deps built from the
+# test's configuration authority and catalog, with the text and media models scripted behind the
+# real provider factory (the deps name the `llm_override` seam). Relative paths resolve against
+# `tmp_path`, nothing is saved unless a test gives an output site, and findings are dropped
+# unless a test gives an exec turn.
 
 from __future__ import annotations
 
 import dataclasses
-from datetime import UTC, datetime
+from datetime import UTC
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import BaseMessage
 
+from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import model_overrides
+from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
 from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
+from meiva.security import FindingDelivery
+from meiva.tests.fixtures.scripted_chat_model import OVERRIDE, Script, ScriptedModels
 from meiva.understand import answer, plans, wiring
-from meiva.understand.answer import UnderstandDeps
+from meiva.understand.answer import OutputSite, UnderstandDeps
 
 __all__ = [
-    "ProviderCapture",
+    "UnderstandHarness",
     "fake_image",
     "fake_pdf",
     "fake_video",
-    "mock_deepseek",
-    "mock_gemini",
     "run_understand",
-    "understand_deps",
+    "understand_harness",
 ]
+
+ANSWER = "fake answer"
 
 
 def run_understand(
@@ -33,43 +43,30 @@ def run_understand(
     effort: str | ReasoningEffort = ReasoningEffort.MAX,
     max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
 ) -> list[str]:
-    """`meiva.understand` with these deps: the same validation, then `answer.run`."""
     return answer.run(plans.normalize(targets, effort, max_concurrent), deps)
 
 
-class ProviderCapture:
-    """Capture factory options and expose a configurable provider invocation double.
+# meiva:note
+# `meiva.understand` over `deps`; `text` and `media` are the scripts of the two models.
+class UnderstandHarness:
+    def __init__(self, deps: UnderstandDeps, models: ScriptedModels) -> None:
+        self.deps = deps
+        self.scripted_models = models
+        self.text = models.script(deps.text_model, ANSWER)
+        self.media = models.script(deps.media_model, ANSWER)
 
-    `deps` are this process's real understand deps with the provider factory replaced by
-    `build`, no output directory (nothing is saved) and a live clock; `configure` changes any
-    of them, and `understand` runs the SDK call with them.
-    """
-
-    def __init__(self, base: UnderstandDeps) -> None:
-        self.deps = dataclasses.replace(
-            base,
-            build_chat_model=self.build,
-            output_dir=lambda: None,
-            now=lambda: datetime.now(UTC),
-        )
-        self.model: str | None = None
-        self.kwargs: dict[str, object] = {}
-        self.invoke = MagicMock(name="provider_invoke")
-        self._response = MagicMock()
-        self._response.content = "fake answer"
-        self._response.response_metadata = {}
-        self.invoke.return_value = self._response
-        self._model = MagicMock(name="chat_model", invoke=self.invoke)
-
-    def build(self, model: str, **kwargs: object) -> MagicMock:
-        """Factory replacement that records the requested model and options."""
-        self.model = model
-        self.kwargs = kwargs
-        return self._model
-
+    # meiva:note
+    # Change fields of the deps; a renamed model keeps its script under the new name.
     def configure(self, **changes: Any) -> None:
-        """Replace fields of the deps the next `understand` call receives."""
         self.deps = dataclasses.replace(self.deps, **changes)
+        self.scripted_models.bind(self.deps.text_model, self.text)
+        self.scripted_models.bind(self.deps.media_model, self.media)
+
+    def use_exec_turn(self, update: dict[str, Any]) -> None:
+        self.configure(delivery=FindingDelivery(enabled=True, in_turn=True, update=update))
+
+    def save_to(self, directory: Path) -> None:
+        self.configure(output=OutputSite(directory, UTC))
 
     def understand(
         self,
@@ -77,17 +74,17 @@ class ProviderCapture:
         effort: str | ReasoningEffort = ReasoningEffort.MAX,
         max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
     ) -> list[str]:
-        """Run `meiva.understand` for `targets` against this capture's deps."""
         return run_understand(self.deps, targets, effort, max_concurrent)
 
-    def respond_with(self, content: str | list[dict[str, str]]) -> None:
-        """Set the default provider response while retaining its metadata shape."""
-        self._response.content = content
-
-    @property
-    def content(self) -> list[Any]:
-        """Content of the single HumanMessage passed to the latest invocation."""
-        return self.invoke.call_args[0][0][0].content
+    # meiva:note
+    # The content blocks of the single HumanMessage of the script's latest request.
+    @staticmethod
+    def content_of(script: Script) -> list[Any]:
+        [message] = script.requests[-1]
+        assert isinstance(message, BaseMessage)
+        content = message.content
+        assert isinstance(content, list)
+        return content
 
 
 @pytest.fixture
@@ -111,19 +108,22 @@ def fake_pdf(tmp_path: Path) -> Path:
     return path
 
 
+# meiva:note
+# The deps of the test configuration: relative paths resolve against `tmp_path`, the answer
+# models are scripted, nothing is saved and findings are dropped.
 @pytest.fixture
-def understand_deps(sdk_model_owner: None) -> UnderstandDeps:
-    """The deps of this process's SDK installation: its configured models and the real factory."""
-    return wiring.understand_deps()
-
-
-@pytest.fixture
-def mock_deepseek(understand_deps: UnderstandDeps) -> ProviderCapture:
-    """The shared provider factory replaced for text routing tests."""
-    return ProviderCapture(understand_deps)
-
-
-@pytest.fixture
-def mock_gemini(understand_deps: UnderstandDeps) -> ProviderCapture:
-    """The shared provider factory replaced for media routing tests."""
-    return ProviderCapture(understand_deps)
+def understand_harness(
+    scripted_models: ScriptedModels,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    tmp_path: Path,
+) -> UnderstandHarness:
+    deps = wiring.understand_deps_for(
+        config_authority,
+        catalog=model_catalog,
+        overrides=model_overrides(),
+        base_dir=tmp_path,
+        output=None,
+        delivery=FindingDelivery(enabled=True, in_turn=False, update=None),
+    )
+    return UnderstandHarness(dataclasses.replace(deps, llm_override=OVERRIDE), scripted_models)

@@ -58,9 +58,7 @@ def run_schedule(
                 database=database(),
                 inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine),
                 plugins=engine.PluginInputs(
-                    config=snapshot_process_config(),
-                    clock_factory=Clock.from_settings,
-                    producer=clients.event_pipeline,
+                    config=snapshot_process_config(), machine=machine, clients=clients
                 ),
                 policy=policy,
                 home=meiva_home(),

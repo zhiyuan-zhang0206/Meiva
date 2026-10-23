@@ -1,6 +1,3 @@
-[uses]
-"test_watcher.py" = ["notice_background.py"]
-
 [debt.restricted-python]
 "test_watcher.py#python subprocess that runs something other than a literal repository file" = 1
 "test_watcher_plugin_load.py#python subprocess that runs something other than a literal repository file" = 3

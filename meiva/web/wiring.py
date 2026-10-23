@@ -2,41 +2,28 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from functools import partial
 from typing import cast
 
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
-from base.host.net.ports import SYSTEM_URL_OPENER
-from base.lm import factory
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
+from meiva.sdk_surface import agent_identity
 from meiva.sdk_surface import settings as sdk_settings
-from meiva.sdk_surface.injection_check import begin_check
-from meiva.security import finding_delivery_active, record_model_finding, scan_content
-from meiva.web.deepseek import RateLimiter
-from meiva.web.deps import (
-    BraveConfig,
-    DeepSeekFetchConfig,
-    DeepSeekSearchConfig,
-    FetchDeps,
-    FetchModel,
-    JinaConfig,
-    ReaderProvider,
-    SearchDeps,
-    SearchProvider,
-)
+from meiva.sdk_surface.injection_check import injection_check_inputs
+from meiva.security import FindingDelivery, current_delivery
+from meiva.web.configs import BraveConfig, DeepSeekFetchConfig, DeepSeekSearchConfig, JinaConfig
+from meiva.web.deps import FetchDeps, FetchModel, ReaderProvider, SearchDeps, SearchProvider
 from meiva.web.errors import FetchError
 
 __all__ = ["fetch_deps", "fetch_deps_for", "search_deps", "search_deps_for"]
 
 
 def search_deps() -> SearchDeps:
-    return search_deps_for(sdk_settings.config_authority())
+    return search_deps_for(sdk_settings.config_authority(), delivery=current_delivery())
 
 
-def search_deps_for(authority: ConfigAuthority) -> SearchDeps:
+def search_deps_for(authority: ConfigAuthority, *, delivery: FindingDelivery) -> SearchDeps:
     timeout_s = authority.service_field_value("web_search_timeout_seconds")
     return SearchDeps(
         provider=cast(SearchProvider, authority.service_field_value("web_search_provider")),
@@ -51,10 +38,9 @@ def search_deps_for(authority: ConfigAuthority) -> SearchDeps:
             endpoint=authority.service_field_value("web_deepseek_search_endpoint"),
             timeout_s=timeout_s,
             max_count=authority.service_field_value("web_deepseek_max_results"),
-            pacer=RateLimiter(authority.service_field_value("web_deepseek_qps")),
+            qps=authority.service_field_value("web_deepseek_qps"),
         ),
-        open_url=SYSTEM_URL_OPENER,
-        scan=_scan,
+        delivery=delivery,
     )
 
 
@@ -69,7 +55,14 @@ def fetch_deps() -> FetchDeps:
             "web.fetch requires this SDK installation's model configuration (ModelCatalog), "
             "but it carries none; web.search needs no model"
         ) from exc
-    return fetch_deps_for(authority, catalog=catalog, keys=keys, overrides=overrides)
+    return fetch_deps_for(
+        authority,
+        catalog=catalog,
+        keys=keys,
+        overrides=overrides,
+        delivery=current_delivery(),
+        agent_id=agent_identity.agent_id(),
+    )
 
 
 def fetch_deps_for(
@@ -78,6 +71,8 @@ def fetch_deps_for(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     overrides: ModelOverrides,
+    delivery: FindingDelivery,
+    agent_id: int | None,
 ) -> FetchDeps:
     fetch_timeout_s = authority.service_field_value("web_fetch_timeout_seconds")
     return FetchDeps(
@@ -91,7 +86,7 @@ def fetch_deps_for(
             api_key=authority.service_field_value("deepseek_api_key"),
             endpoint=authority.service_field_value("web_deepseek_fetch_endpoint"),
             timeout_s=fetch_timeout_s,
-            pacer=RateLimiter(authority.service_field_value("web_deepseek_qps")),
+            qps=authority.service_field_value("web_deepseek_qps"),
         ),
         fetch_model=FetchModel(
             model=authority.service_field_value("web_fetch_model"),
@@ -107,18 +102,8 @@ def fetch_deps_for(
             keys=keys,
             overrides=overrides,
         ),
-        open_url=SYSTEM_URL_OPENER,
-        build_chat_model=factory.build_chat_model,
-        scan=_scan,
-        begin_check=_checker(),
-    )
-
-
-def _scan(content: str, source: str) -> str:
-    return scan_content(content, source=source)
-
-
-def _checker() -> Callable[[str, str, str], Callable[[], None]]:
-    return partial(
-        begin_check, delivery_active=finding_delivery_active, record=record_model_finding
+        delivery=delivery,
+        injection=injection_check_inputs(
+            authority, catalog, keys=keys, agent_id=agent_id, delivery_active=delivery.active
+        ),
     )

@@ -38,29 +38,3 @@ def test_exec_child_with_the_identity_the_launcher_passes_reaches_the_backend(
     tmp_path: Path,
 ) -> None:
     assert _run_probe(tmp_path, agent_id=41) == "LIST={}"
-
-
-class _CapturingBackend:
-    """Records the env dict `create()` hands the session backend."""
-
-    def __init__(self) -> None:
-        self.env: dict[str, str] = {}
-
-    def new_session(self, name: str, cmd: str, cwd: Path, *, env: dict[str, str]) -> bool:
-        self.env = dict(env)
-        return True
-
-    def list_sessions(self) -> list[str]:
-        return []
-
-
-def test_created_session_carries_the_owners_identity(tmp_path: Path) -> None:
-    """Every session names its owner: a script run in it constructs the owner's complete
-    MeivaContext from the environment (ruling 2026-10-04, source 2)."""
-    from meiva.shell.sessions import ShellSessions
-    from meiva.shell.tests.support import FakeDatabase
-
-    backend = _CapturingBackend()
-    sessions = ShellSessions(backend=backend, database=FakeDatabase(), agent_id=41)
-    sessions.create(name="probe", cwd=str(tmp_path), ttl=120)
-    assert backend.env["MEIVA_AGENT_ID"] == "41"

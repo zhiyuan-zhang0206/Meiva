@@ -9,7 +9,6 @@ pty-sessions service under the tmp test home."""
 
 from __future__ import annotations
 
-import ast
 import dataclasses
 import datetime
 import os
@@ -17,7 +16,6 @@ import pathlib
 import subprocess
 import sys
 import time
-from collections.abc import Callable
 from typing import Any
 
 import psycopg
@@ -26,8 +24,8 @@ import pytest
 import meiva
 from base.sessions.pty.tests.pty_shells import wait_for
 from meiva import watcher
-from meiva.tests.namespaces.watcher.notice_background import NoticeBackground
-from meiva.watcher import plans, spawn, wiring
+from meiva.watcher import launch_plan, plans, spawn, wiring
+from meiva.watcher.spawn import SpawnDeps
 
 pytestmark = [
     # `_isolated_agent` is opt-in (mutates global meiva.self.AGENT_ID); apply it
@@ -38,10 +36,6 @@ pytestmark = [
 ]
 
 
-def _ignore_send(_session_id: int, _line: str) -> None:
-    """Accept the launch command without running it: the test reads the generated files."""
-
-
 def _is_live_watcher(wid: int, name: str = "test-watcher") -> bool:
     return meiva.shell.sessions.list().get(wid) == name
 
@@ -49,6 +43,10 @@ def _is_live_watcher(wid: int, name: str = "test-watcher") -> bool:
 def _watchers_dir() -> pathlib.Path:
     """Where the bound agent's generated watcher files go."""
     return wiring.spawn_deps().watchers_dir
+
+
+def _now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.UTC)
 
 
 def _launch(*args: Any, **kwargs: Any) -> int:
@@ -61,10 +59,6 @@ def _cron(*args: Any, **kwargs: Any) -> int:
 
 def _at(*args: Any, **kwargs: Any) -> int:
     return watcher.at(*args, **kwargs).session_id
-
-
-def _boot_text(wid: int) -> str:
-    return (_watchers_dir() / f"watcher_{wid}_boot.py").read_text()
 
 
 def test_launch_creates_watcher_session(_agent_row: int) -> None:
@@ -265,103 +259,6 @@ def test_launch_requires_timeout_and_name() -> None:
         _launch("import meiva\n", name="test")  # type: ignore[call-arg]
 
 
-def test_launch_arms_watchdog_in_boot_file(
-    _agent_row: int, launch_watcher: Callable[..., int]
-) -> None:
-    # The generated bootstrap must arm a daemon timer that hard-exits with
-    # code 124 at the deadline — that is what bounds a custom watcher's
-    # lifetime. The timeout reason is printed so it lands in the log file.
-    wid = launch_watcher("import meiva\n", 120, "test-watchdog", send=_ignore_send)
-    boot = _boot_text(wid)
-    assert "threading.Timer(120.0" in boot
-    assert "os._exit(124)" in boot
-    assert "120s limit" in boot
-
-
-def test_watchdog_message_formats_fractional_seconds(
-    _agent_row: int, launch_watcher: Callable[..., int]
-) -> None:
-    wid = launch_watcher("import meiva\n", 0.5, "test-fractional", send=_ignore_send)
-    assert "0.5s limit" in _boot_text(wid)
-
-
-def test_boot_without_watchdog_has_no_timer(tmp_path: pathlib.Path) -> None:
-    # at/cron scripts self-terminate, so their bootstrap arms no watchdog.
-    # The orphan guard (task #1726) is armed regardless — it is not a
-    # watchdog: it only hard-exits a watcher whose session chain died, and
-    # never bounds a healthy watcher's lifetime.
-    boot = spawn.build_boot(tmp_path / "x.py", None, 42)
-    assert "Timer" not in boot
-    assert "os._exit(124)" not in boot
-    assert "os._exit(125)" in boot  # the orphan guard's exit code
-
-
-def test_boot_arms_orphan_guard(tmp_path: pathlib.Path) -> None:
-    """Task #1726: every generated bootstrap must arm the orphan guard — a
-    daemon thread that compares getppid() against the boot-time parent and
-    hard-exits (code 125) on a mismatch, so a watcher child dies within
-    seconds of its pty host dying instead of firing cron/at forever as a
-    ppid=1 orphan. Armed BEFORE `import meiva`: a hung import must not keep an
-    orphan alive."""
-    boot = spawn.build_boot(tmp_path / "x.py", None, 42)
-    assert "_parent_pid = os.getppid()" in boot
-    assert "def _orphan_guard" in boot
-    assert "os.getppid() != _parent_pid" in boot
-    assert "os._exit(125)" in boot
-    guard_line = boot.index("_orphan_guard")
-    assert guard_line < boot.index("import meiva")
-    ast.parse(boot)  # must be valid Python
-
-
-def test_boot_orphan_guard_message_names_session_gone(tmp_path: pathlib.Path) -> None:
-    # The guard's stderr line lands in the watcher's log — a debugger must be
-    # able to tell an orphan-guard exit (125) from a watchdog timeout (124).
-    boot = spawn.build_boot(tmp_path / "x.py", None, 42)
-    assert "[watcher] session gone (pty session ended)" in boot
-    assert "os._exit(125)" in boot
-
-
-def test_boot_loads_plugins_before_running_script(tmp_path: pathlib.Path) -> None:
-    # A fresh child's `import meiva` is the factory module without the agent
-    # process's plugin setattrs, so the bootstrap must load plugin namespaces
-    # (meiva.tasks etc.) before it runpys the watcher script — otherwise the script
-    # AttributeErrors on any plugin namespace. Order matters: load then run.
-    boot = spawn.build_boot(tmp_path / "x.py", None, 42)
-    assert "meiva.ensure_plugins_loaded()" in boot
-    assert boot.index("meiva.ensure_plugins_loaded()") < boot.index("runpy.run_path")
-    ast.parse(boot)  # must be valid Python
-
-
-def test_boot_propagates_failures_without_catching(tmp_path: pathlib.Path) -> None:
-    # try/finally around runpy only cleans up the generated files — no except
-    # anywhere, so a crash still prints its traceback into the log and exits
-    # non-zero; the shell-level notice reports the code. Only the cleanup's
-    # own OSError is swallowed (unlink failure is harmless).
-    boot = spawn.build_boot(tmp_path / "x.py", 60.0, 42)
-    assert "try:" in boot
-    assert "finally:" in boot
-    # The runpy try has NO except — a crash propagates (R1-8: only the
-    # finally's own cleanup — deleting the generated files — is fail-soft).
-    assert "except Exception" not in boot.split("finally:")[0]
-    assert "except BaseException" not in boot
-    assert "runpy.run_path" in boot
-    ast.parse(boot)  # must be valid Python
-
-
-def test_boot_self_cleans_generated_files(tmp_path: pathlib.Path) -> None:
-    # The finally block deletes the script + the bootstrap itself — a watcher
-    # reads them exactly once at launch, so normal exits leave the watchers
-    # dir empty instead of accumulating a script graveyard.
-    script = tmp_path / "watcher_3.py"
-    boot = spawn.build_boot(script, None, 42)
-    assert "finally:" in boot
-    assert "os.unlink(_p)" in boot
-    assert "except OSError" in boot
-    assert str(script) in boot  # the script path is unlinked too
-    assert "__file__" in boot  # and the bootstrap deletes itself
-    ast.parse(boot)
-
-
 @pytest.mark.flaky  # real watcher session + time.sleep polling (5s deadline)
 def test_shell_kill_stops_watcher(_agent_row: int) -> None:
     # A watcher is an ordinary session — the generic session kill stops it.
@@ -376,77 +273,27 @@ def test_shell_kill_stops_watcher(_agent_row: int) -> None:
     assert not _is_live_watcher(wid, "test-launch")
 
 
-def test_spawn_kills_session_when_send_fails(
-    _agent_row: int, launch_watcher: Callable[..., int]
+# meiva:note
+# A session whose launch never sent must not linger as an idle login shell under the watcher's
+# name until its TTL (up to 7 days for a default cron): it is killed and the failure propagates.
+# The failure is a real one: the path of one generated file is already taken by a directory.
+@pytest.mark.parametrize("generated", ["{}.py", "{}_boot.py", "{}_launch.sh"])
+def test_spawn_kills_session_when_the_launch_fails(
+    _agent_row: int, spawn_deps: SpawnDeps, generated: str
 ) -> None:
-    """A session whose launch command never sent must not linger as an idle
-    login shell under the watcher's name until its TTL (up to 7 days for a
-    default cron) — kill it and propagate the failure."""
-    captured: dict[str, int] = {}
+    probe = meiva.shell.sessions.new("probe", ttl=300)
+    next_id = probe + 1
+    deps = dataclasses.replace(spawn_deps, live_session_ids=spawn_deps.live_session_ids | {next_id})
+    blocked = spawn_deps.watchers_dir / generated.format(f"watcher_{next_id}")
+    blocked.mkdir()
+    try:
+        with pytest.raises(IsADirectoryError):
+            spawn.run(plans.plan_launch("import meiva\n", "1h", "test-fail", None, _now()), deps)
 
-    def fail_send(session_id: int, _cmd: str) -> None:
-        captured["session_id"] = session_id
-        raise RuntimeError("session send failed")
-
-    with pytest.raises(RuntimeError, match="session send failed"):
-        launch_watcher("import meiva\n", "1h", "test-send-fail", send=fail_send)
-
-    assert captured["session_id"] not in meiva.shell.sessions.list()
-
-
-def test_at_and_cron_plan_without_watchdog() -> None:
-    # at/cron scripts self-terminate, so they plan with no watchdog (None).
-    now = datetime.datetime.now(datetime.UTC)
-    # Derived, not a literal year: `at` rejects a past `when`, so a pinned date
-    # silently becomes a failing test the moment the clock passes it. Keeps the
-    # trailing-Z ISO shape, which is the parse path this test exercises.
-    when = (now + datetime.timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    at = plans.plan_at(
-        when, "ping later", name="test-at", notify=None, now=now, announce_timezone=None
-    )
-    assert at.watchdog_secs is None
-    assert at.kind == "at"
-    assert "_wake(_MESSAGE)" in at.code
-    assert "ping later" in at.code
-    cron = plans.plan_cron(
-        "0 3 * * *",
-        "daily",
-        timezone=None,
-        end_time=None,
-        name="test-cron",
-        notify=None,
-        now=now,
-        default_timezone="UTC",
-    )
-    assert cron.watchdog_secs is None
-    assert cron.kind == "cron"
-
-
-def test_watcher_plans_forward_failure_notify() -> None:
-    now = datetime.datetime.now(datetime.UTC)
-    when = (now + datetime.timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    requests = [
-        plans.plan_launch("pass", "1h", "test-launch-notify", "always"),
-        plans.plan_at(
-            when,
-            "ping later",
-            name="test-at-notify",
-            notify="always",
-            now=now,
-            announce_timezone=None,
-        ),
-        plans.plan_cron(
-            "0 3 * * *",
-            "daily",
-            timezone=None,
-            end_time=None,
-            name="test-cron-notify",
-            notify="always",
-            now=now,
-            default_timezone="UTC",
-        ),
-    ]
-    assert [r.notify for r in requests] == ["always", "always", "always"]
+        assert next_id not in meiva.shell.sessions.list()
+    finally:
+        blocked.rmdir()
+        meiva.shell.sessions.kill(probe)
 
 
 def test_watcher_rejects_unknown_notify(_agent_row: int) -> None:
@@ -454,101 +301,41 @@ def test_watcher_rejects_unknown_notify(_agent_row: int) -> None:
         _launch("pass", timeout="1h", name="test-invalid-notify", notify="success")
 
 
-def test_launch_carries_agent_and_session_to_child(
-    _agent_row: int, launch_watcher: Callable[..., int]
+def test_launch_writes_the_generated_files_while_the_watcher_runs(
+    _agent_row: int, spawn_deps: SpawnDeps
 ) -> None:
-    # Identity crosses the process boundary inlined into the generated
-    # bootstrap (the session env allowlist does NOT forward MEIVA_AGENT_ID —
-    # Task #856/#964): the child must see its agent id as MEIVA_AGENT_ID.
-    # The watcher's session id rides as an env var on the run command so the
-    # time watchers can tag their wake-ups.
-    wid = launch_watcher("import meiva\n", "1h", "test-watcher", send=_ignore_send)
-    launch = (_watchers_dir() / f"watcher_{wid}_launch.sh").read_text()
-    assert f"MEIVA_WATCHER_SESSION_ID={wid} " in launch
-    boot = _boot_text(wid)
-    # Identity is inlined; meiva is imported for init_globals
-    assert f'os.environ["MEIVA_AGENT_ID"] = "{_agent_row}"' in boot
-    assert "process_context" not in boot
-    assert "import meiva" in boot
-    assert "runpy.run_path" in boot
-    assert "init_globals" in boot
+    code = "from __future__ import annotations\nimport time\ntime.sleep(60)\n"
 
+    handle = spawn.run(plans.plan_launch(code, "1h", "test-files", None, _now()), spawn_deps)
 
-def test_launch_writes_script_verbatim_and_runs_via_runpy(
-    _agent_row: int, launch_watcher: Callable[..., int]
-) -> None:
-    # The script file is the agent's code unchanged — nothing prepended — so a
-    # leading `from __future__` import (must be the first statement of a file)
-    # stays valid. Watchdog and runpy live in the separate generated bootstrap
-    # file; identity is inlined there (the session env allowlist does not
-    # forward MEIVA_AGENT_ID — Task #856/#964).
-    code = "from __future__ import annotations\nimport meiva\n"
-    wid = launch_watcher(code, "1h", "test-launch", send=_ignore_send)
-
-    script = _watchers_dir() / f"watcher_{wid}.py"
-    assert script.read_text() == code  # verbatim, no bootstrap prepended
-    boot = _boot_text(wid)
-    assert "runpy.run_path" in boot
-    # Identity is inlined into the bootstrap
-    assert f'os.environ["MEIVA_AGENT_ID"] = "{_agent_row}"' in boot
-    assert "process_context" not in boot
-    assert "import meiva" in boot
-    assert "init_globals" in boot
-    assert f"watcher_{wid}.py" in boot
-    launch = (_watchers_dir() / f"watcher_{wid}_launch.sh").read_text()
-    assert f"watcher_{wid}_boot.py" in launch
+    try:
+        wid = handle.session_id
+        assert (spawn_deps.watchers_dir / f"watcher_{wid}.py").read_text() == code
+        assert (
+            f"watcher_{wid}.py" in (spawn_deps.watchers_dir / f"watcher_{wid}_boot.py").read_text()
+        )
+    finally:
+        meiva.shell.sessions.kill(handle.session_id)
 
 
 # -- Completion notice (shell-level, fires on every exit path) -----------------
 
 
-def test_spawn_line_tees_and_notifies(_agent_row: int, launch_watcher: Callable[..., int]) -> None:
-    # The command line must tee the child's output to the per-agent log file
-    # and session capture, then end with the CLI completion notice + session
-    # close: the notice is sent from the shell level so a crashed or
-    # hard-killed child cannot skip it, and `; exit $_ec` closes the session
-    # even when delivery fails — a lingering shell is a live session nobody
-    # ever intended to keep (Task #1115 bug B).
-    captured: dict[str, Any] = {}
-
-    def record_send(_session_id: int, line: str) -> None:
-        captured["cmd"] = line
-
-    wid = launch_watcher("import meiva\n", "1h", "test-notice", send=record_send)
-
-    import shlex
-
-    sent = captured["cmd"]
-    assert shlex.split(sent) == [".", str(_watchers_dir() / f"watcher_{wid}_launch.sh")]
-    cmd = (_watchers_dir() / f"watcher_{wid}_launch.sh").read_text().splitlines()[1]
-    assert ".shell_logs" in cmd  # output is teed to the workspace log dir
-    assert "exec 3> >(tee" in cmd
-    assert ") >&3 2>&1" in cmd
-    assert "_ec=$?" in cmd
-    assert "agents send" in cmd
-    assert f"--source watcher:{wid}" in cmd
-    assert "finished. Full output at" in cmd
-    assert "exited with code" not in cmd
-    assert "--tail-file" in cmd
-    assert cmd.endswith("; exit $_ec")
-
-
 @pytest.mark.flaky  # real pty watcher session + time.sleep polling (15s deadline)
-def test_watcher_completion_notice_e2e(_agent_row: int, tmp_path: pathlib.Path) -> None:
+def test_watcher_completion_notice_e2e(
+    _agent_row: int, spawn_deps: SpawnDeps, fake_cli: pathlib.Path
+) -> None:
     """End-to-end through a real pty session: when the watcher child exits, the
     completion notice fires (CLI invoked with the watcher source) and the
     session closes itself. The CLI is faked with a script that records its
     argv, so no gateway is needed."""
-    argv_file = tmp_path / "argv.txt"
-    fake_cli = tmp_path / "fake-meiva"
-    fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {argv_file}\n")
-    fake_cli.chmod(0o755)
+    argv_file = fake_cli.parent / "argv.txt"
 
     # `exit 7` exits the shell subshell wrapping the python command — use a
     # python-level SystemExit instead so the exit code flows through the child.
     wid = spawn.run(
-        plans.plan_launch("raise SystemExit(7)\n", "1h", "test-e2e", None),
-        dataclasses.replace(wiring.spawn_deps(), background=NoticeBackground(cli=fake_cli)),
+        plans.plan_launch("raise SystemExit(7)\n", "1h", "test-e2e", None, _now()),
+        dataclasses.replace(spawn_deps, cli=fake_cli),
     ).session_id
 
     deadline = time.time() + 15
@@ -575,6 +362,7 @@ def test_watcher_launch_during_shell_startup_with_long_paths(
     _agent_row: int,
     tmp_path: pathlib.Path,
     unit_home: pathlib.Path,
+    spawn_deps: SpawnDeps,
 ) -> None:
     """Long notice paths must survive the shell's startup canonical input mode."""
     # Delay readline startup deterministically; a new PTY is initially canonical.
@@ -591,18 +379,14 @@ def test_watcher_launch_during_shell_startup_with_long_paths(
     fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{argv_file}'\n")
     fake_cli.chmod(0o755)
     wid = spawn.run(
-        plans.plan_launch("raise SystemExit(7)\n", "1h", "test-long-path", None),
-        dataclasses.replace(
-            wiring.spawn_deps(),
-            watchers_dir=carrier_dir,
-            background=NoticeBackground(cli=fake_cli, log_dir=long_dir),
-        ),
+        plans.plan_launch("raise SystemExit(7)\n", "1h", "test-long-path", None, _now()),
+        dataclasses.replace(spawn_deps, watchers_dir=carrier_dir, workspace=long_dir, cli=fake_cli),
     ).session_id
     assert wait_for(argv_file.exists, timeout=15), meiva.shell.sessions.capture(wid, lines=30)
     argv = argv_file.read_text().splitlines()
     assert "finished." in argv[3]
     assert f"watcher:{wid}" in argv
-    output_path = long_dir / f"{wid}_test-long-path.log"
+    output_path = long_dir / ".shell_logs" / f"{wid}_test-long-path.log"
     assert f"Full output at {output_path}." in argv[3]
     assert str(output_path) == argv[argv.index("--tail-file") + 1]
     assert wait_for(lambda: wid not in meiva.shell.sessions.list(), timeout=10)
@@ -614,28 +398,10 @@ def test_watcher_launch_during_shell_startup_with_long_paths(
 # -- Agent identity in the child (Task #964 regression) ----------------------
 
 
-def test_boot_inlines_agent_identity(tmp_path: pathlib.Path) -> None:
-    """The bootstrap must set MEIVA_AGENT_ID itself: the session env allowlist
-    (base/host/env/registry.py child_env, Task #856) deliberately does
-    not forward agent-scope knobs to session children, so a child that relied
-    on inheritance would see meiva.self.AGENT_ID=None and its wake-up
-    send_message would 422 on /api/agents/None/messages (Task #964). The
-    inline assignment must run before any SDK use — including `import meiva`
-    itself: a stale MEIVA_AGENT_ID in the session env (a server freezes
-    its first session's env) would otherwise establish the WRONG identity at
-    import time (2026-08-09: every watcher child on the shared server woke
-    agent 2959 instead of its owner)."""
-    boot = spawn.build_boot(tmp_path / "x.py", None, 42)
-    assert 'os.environ["MEIVA_AGENT_ID"] = "42"' in boot
-    env_line = boot.index('os.environ["MEIVA_AGENT_ID"]')
-    assert env_line < boot.index("import meiva")  # before the meiva import, not just before use
-    assert env_line < boot.index("meiva.ensure_plugins_loaded()")
-    assert env_line < boot.index("runpy.run_path")
-    ast.parse(boot)  # must be valid Python
-
-
 @pytest.mark.flaky  # real pty watcher session + file-polling (15s deadline)
-def test_watcher_child_sees_agent_identity(_agent_row: int, tmp_path: pathlib.Path) -> None:
+def test_watcher_child_sees_agent_identity(
+    _agent_row: int, tmp_path: pathlib.Path, spawn_deps: SpawnDeps, fake_cli: pathlib.Path
+) -> None:
     """End-to-end regression (Task #964): a real watcher child must see its
     agent id via meiva.self.AGENT_ID — the wake-up send_message depends on it.
     Before the fix the child had no MEIVA_AGENT_ID (None) and every scheduled
@@ -648,14 +414,9 @@ def test_watcher_child_sees_agent_identity(_agent_row: int, tmp_path: pathlib.Pa
         "import pathlib\n"
         f"pathlib.Path({str(out)!r}).write_text(str(meiva.self.AGENT_ID))\n"
     )
-    # Fake the completion-notice CLI so no gateway is needed.
-    fake_cli = tmp_path / "fake-meiva"
-    fake_cli.write_text("#!/bin/sh\nexit 0\n")
-    fake_cli.chmod(0o755)
-
     wid = spawn.run(
-        plans.plan_launch(code, "1h", "test-identity", None),
-        dataclasses.replace(wiring.spawn_deps(), background=NoticeBackground(cli=fake_cli)),
+        plans.plan_launch(code, "1h", "test-identity", None, _now()),
+        dataclasses.replace(spawn_deps, cli=fake_cli),
     ).session_id
 
     deadline = time.time() + 15
@@ -693,7 +454,7 @@ def test_boot_overrides_stale_env_identity(tmp_path: pathlib.Path) -> None:
         f"pathlib.Path({str(out)!r}).write_text(str(meiva.self.AGENT_ID))\n"
     )
     boot_path = tmp_path / "probe_boot.py"
-    boot_path.write_text(spawn.build_boot(script, None, 4242))
+    boot_path.write_text(launch_plan.build_boot(script, None, 4242))
 
     env = {**os.environ, "MEIVA_AGENT_ID": "9999"}  # stale/wrong identity
     res = subprocess.run(  # noqa: S603 — repo-internal generated boot file
@@ -710,7 +471,7 @@ def test_boot_overrides_stale_env_identity(tmp_path: pathlib.Path) -> None:
 
 
 def test_watcher_child_overrides_stale_session_identity(
-    _agent_row: int, tmp_path: pathlib.Path
+    _agent_row: int, tmp_path: pathlib.Path, spawn_deps: SpawnDeps, fake_cli: pathlib.Path
 ) -> None:
     """A stale MEIVA_AGENT_ID in the session env must NOT win: the bootstrap
     inlines the spawning agent's id BEFORE `import meiva`. Regression for
@@ -727,18 +488,13 @@ def test_watcher_child_overrides_stale_session_identity(
         "import pathlib\n"
         f"pathlib.Path({str(out)!r}).write_text(str(meiva.self.AGENT_ID))\n"
     )
-    fake_cli = tmp_path / "fake-meiva"
-    fake_cli.write_text("#!/bin/sh\nexit 0\n")
-    fake_cli.chmod(0o755)
-
     stale = _agent_row + 1  # a WRONG identity, as if frozen into the session env
-    base_deps = wiring.spawn_deps()
     wid = spawn.run(
-        plans.plan_launch(code, "1h", "test-stale-id", None),
+        plans.plan_launch(code, "1h", "test-stale-id", None, _now()),
         dataclasses.replace(
-            base_deps,
-            background=NoticeBackground(cli=fake_cli),
-            runner_env={**base_deps.runner_env, "MEIVA_AGENT_ID": str(stale)},
+            spawn_deps,
+            cli=fake_cli,
+            runner_env={**spawn_deps.runner_env, "MEIVA_AGENT_ID": str(stale)},
         ),
     ).session_id
 

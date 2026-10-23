@@ -5,7 +5,3 @@
 "test_lazy_child_imports.py" = ["child_lazy_imports.py"]
 "test_lazy_child_telemetry.py" = ["child_lazy_telemetry.py"]
 "test_telemetry_otlp_exit_delivery_agent.py" = ["child_external_cli.py"]
-
-[debt.first-party-patch]
-"child_external_cli.py#assignment base.agents.context.external_attachment.plugin_state_codec.load_snapshot" = 1
-"child_external_cli.py#assignment meiva.impersonation.attachment.control.require_active" = 1

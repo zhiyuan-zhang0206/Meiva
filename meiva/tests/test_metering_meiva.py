@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.agents.sdk import call_policy
-from meiva.sdk_surface import metering
+from meiva.sdk_surface import meiva_module, metering
 
 _CHILD = Path(__file__).parent / "bootstrap" / "child_sdk_probes.py"
 
@@ -23,12 +23,14 @@ def test_install_wraps_and_restores_mcp_call_funnel() -> None:
     # below reads as a failure. The shared guards (`tests/fixtures/`) uninstall an
     # installation a test left behind, so the baseline here is bare.
     before = meiva.mcps.call_funnel.call_raw
-    ledger = metering.install(call_policy.SamplingPolicyOwner())
+    sampling = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    ledger = metering.install(sampling, clients=None, surface=metering.read_surface(meiva_module()))
     try:
         assert meiva.mcps.call_funnel.call_raw is not before
         assert metering.is_recorder(meiva.mcps.call_funnel.call_raw)
     finally:
         metering.uninstall(ledger)
+        sampling.close()
     assert meiva.mcps.call_funnel.call_raw is before
 
 

@@ -23,32 +23,45 @@ from __future__ import annotations
 
 import contextlib
 import json
-import re
 import shlex
 import socket
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
+from base.agents.messages.external_caller import launch_caller_assignment
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.lm.harness.codex.auth import SECRET_ENV_NAMES
 from base.sessions import coding_session_owner
-from meiva.shell import sessions
+from meiva.shell.sessions import ShellSessions
 
-from ._common import cancel as _cancel_generation
 from ._common import (
+    LaunchSite,
+    SessionGone,
+    capability_report,
+    capture_screen,
     init_file,
     kill_session_after_failed_launch,
+    launch_site,
     new_generation,
+    print_owner,
     terminate_generation_after_failed_launch,
-    worker_bootstrap,
     write_task_file_header,
 )
+from ._common import cancel as _cancel_generation
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
-from ._common import session_uuid as session_uuid
 from ._common import status as _owner_status
+from .plans.codex_screen import (
+    dead_session_warning,
+    is_working,
+    parse_session_id,
+    ready_timeout_line,
+    ui_state,
+)
+from .plans.launch_request import LaunchRequest, checked_prompt, contract_file, worker_bootstrap
+from .plans.launch_request import session_uuid as session_uuid
+from .plans.pacing import CodexWaits, Pacing
 
 # meiva:note
 # Both codex processes this module starts — the shared app server (which does the model
@@ -61,11 +74,6 @@ _DROP_CREDENTIALS: str = "env " + " ".join(f"-u {name}" for name in SECRET_ENV_N
 
 DEFAULT_TTL_SECONDS = 4 * 3600
 _SUPERVISOR_TTL_PADDING_SECONDS = 300
-
-
-_SESSION_ID = re.compile(
-    r"Session:\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
-)
 
 
 def _config_overrides(workspace: Path) -> str:
@@ -81,84 +89,63 @@ def _config_overrides(workspace: Path) -> str:
     return f"-c {shlex.quote(trusted)} -c check_for_update_on_startup=false"
 
 
-def wait_for_ready(sid: int, timeout: float = 90.0) -> None:
-    """Wait until Codex has finished MCP startup after publishing its handle.
-
-    len(output) > 50 alone is a FALSE ready signal: the TUI renders its frame
-    during "Starting MCP servers (0/2)", and a message sent then has its Enter
-    swallowed — the text parks in the composer and the session looks alive but
-    never works (empirical 2026-08-26 #3438, 2026-09-02 #5655, 2026-09-03
-    #5779). Treat "Starting MCP" as not-ready until it disappears.
-    """
+# meiva:note
+# Wait until Codex has finished MCP startup after publishing its handle. The TUI draws a frame while MCP is still starting, and a message sent then has its Enter swallowed, so "Starting MCP" counts as not ready until it disappears. A wait that runs out says so and lets the launch send anyway.
+def wait_for_ready(shell: ShellSessions, sid: int, pacing: Pacing) -> None:
     print(f"waiting for session {sid} to be ready (MCP startup + render)...")
-    deadline = time.time() + timeout
+    deadline = time.monotonic() + pacing.timeout
     rendered = False
-    while time.time() < deadline:
-        output = sessions.capture(sid, scrollback=False)
-        if len(output) > 50:
+    while time.monotonic() < deadline:
+        match capture_screen(shell, sid):
+            case SessionGone(reason=reason):
+                raise RuntimeError(f"Codex session {sid} ended before it was ready: {reason}")
+            case str() as screen:
+                state = ui_state(screen)
+        if state != "blank":
             rendered = True
-            if "Starting MCP" in output:
-                time.sleep(2)
-                continue
-            time.sleep(2)
-            print("  -> ready (MCP startup finished)")
-            return
-        time.sleep(1)
-    print(
-        f"  -> timeout after {timeout:.0f} s "
-        f"({'rendered, still starting MCP' if rendered else 'never rendered'}), sending anyway"
-    )
+            time.sleep(pacing.settle)
+            if state == "ready":
+                print("  -> ready (MCP startup finished)")
+                return
+            continue
+        time.sleep(pacing.poll)
+    print(ready_timeout_line(pacing.timeout, rendered=rendered))
 
 
-def _dead_session_warning(action: str, exc: ValueError) -> None:
-    """Warn — never raise — when a receipt checkpoint meets a dead session.
-
-    The checkpoint's contract is loud-not-fatal: the operator sees the warning
-    and checks the session. An escaped ValueError is read as launch failure by
-    the caller, which kills the session and rolls the generation back.
-    """
-    print(
-        "  -> WARNING: submission unverified "
-        f"({action} failed: {exc}); the session may have ended. "
-        "Check the session before relying on it."
-    )
+# meiva:note
+# The visible screen, or None after saying so when the session has ended. A receipt checkpoint is loud, not fatal: the operator sees the warning and checks the session.
+def _screen_or_warn(shell: ShellSessions, sid: int, action: str) -> str | None:
+    screen = capture_screen(shell, sid)
+    if isinstance(screen, SessionGone):
+        print(dead_session_warning(action, screen.reason))
+        return None
+    return screen
 
 
-def verify_submitted(sid: int, timeout: float = 60.0) -> None:
-    """The bootstrap message must actually submit, not park in the composer.
-
-    Submission signal = capture shows "Working" (Codex's busy state line). If
-    it does not appear within ``timeout``, send one Enter (Enter submits a single-line queued message; the historical
-    "Tab submits" note is wrong — 2026-09-03 #5779 re-test) and re-check.
-    Kept loud but not fatal: a dead session's capture()/send_keys() refusal
-    warns and returns — an escaped ValueError would roll the launch back (the
-    caller kills the session and terminates the generation on exceptions).
-    """
+# meiva:note
+# The bootstrap message must actually submit, not park in the composer. The submission signal is "Working" on the screen. If it does not appear within the window, one Enter is sent (Enter submits a single-line queued message; the historical "Tab submits" note is wrong, 2026-09-03 #5779 re-test) and the screen is checked again. Kept loud but not fatal: a dead session's refusal warns and returns, because an escaped ValueError would roll the launch back (the caller kills the session and terminates the generation on exceptions).
+def verify_submitted(shell: ShellSessions, sid: int, pacing: Pacing) -> None:
     print("verifying the bootstrap message was submitted...")
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            output = sessions.capture(sid, scrollback=False)
-        except ValueError as exc:
-            _dead_session_warning("capture", exc)
+    deadline = time.monotonic() + pacing.timeout
+    while time.monotonic() < deadline:
+        output = _screen_or_warn(shell, sid, "capture")
+        if output is None:
             return
-        if "Working" in output:
+        if is_working(output):
             print("  -> submitted (Working visible)")
             return
-        time.sleep(3)
+        time.sleep(pacing.poll)
     print("  -> not submitted within window; sending Enter once")
     try:
-        sessions.send_keys(sid, "Enter")
+        shell.send_keys(sid, "Enter")
     except ValueError as exc:
-        _dead_session_warning("Enter retry", exc)
+        print(dead_session_warning("Enter retry", str(exc)))
         return
-    time.sleep(5)
-    try:
-        output = sessions.capture(sid, scrollback=False)
-    except ValueError as exc:
-        _dead_session_warning("capture", exc)
+    time.sleep(pacing.settle)
+    output = _screen_or_warn(shell, sid, "capture")
+    if output is None:
         return
-    if "Working" in output:
+    if is_working(output):
         print("  -> submitted after Enter retry")
     else:
         print(
@@ -168,25 +155,20 @@ def verify_submitted(sid: int, timeout: float = 60.0) -> None:
         )
 
 
-def read_session_id(sid: int, timeout: float = 20.0) -> str:
-    """The Codex session id, read from the ``/status`` card of the ready TUI.
-
-    It is the id ``codex resume <id>`` takes, and it is what a person sees in
-    the same card. Sent before the first message, so the composer is empty; a
-    ``/status`` that parked gets one Enter. No id means the launch cannot be
-    resumed later, so it fails.
-    """
-    sessions.send(sid, "/status")
+# meiva:note
+# The Codex session id, read from the `/status` card of the ready TUI. It is the id `codex resume <id>` takes, and what a person sees in the same card. Sent before the first message, so the composer is empty; a `/status` that parked gets one Enter. No id means the launch cannot be resumed later, so it fails.
+def read_session_id(shell: ShellSessions, sid: int, pacing: Pacing) -> str:
+    shell.send(sid, "/status")
     for attempt in range(2):
-        deadline = time.time() + timeout / 2
-        while time.time() < deadline:
-            found = _SESSION_ID.search(sessions.capture(sid, lines=80))
+        deadline = time.monotonic() + pacing.timeout / 2
+        while time.monotonic() < deadline:
+            found = parse_session_id(shell.capture(sid, 80, scrollback=True))
             if found is not None:
-                print(f"  -> codex session {found.group(1)}")
-                return found.group(1)
-            time.sleep(1)
+                print(f"  -> codex session {found}")
+                return found
+            time.sleep(pacing.poll)
         if attempt == 0:
-            sessions.send_keys(sid, "Enter")
+            shell.send_keys(sid, "Enter")
     raise RuntimeError(
         f"could not read the Codex session id from /status in session {sid}; "
         "the launch is rolled back because it could not be resumed later"
@@ -221,24 +203,24 @@ def supervisor_name(owner: coding_session_owner.CodingSessionOwner) -> str:
     return coding_session_owner.supervisor_suffix(owner.key, owner.generation)
 
 
+# meiva:note
+# Launch a quiet PTY supervisor that cannot resurrect a terminated owner. `command` is what the supervisor session runs (`supervisor_command`), built by the caller so a launch that cannot supervise fails before any session exists.
 def launch_supervisor(
-    owner: coding_session_owner.CodingSessionOwner, ttl_seconds: float, watcher: Path
+    site: LaunchSite,
+    owner: coding_session_owner.CodingSessionOwner,
+    ttl_seconds: float,
+    command: str,
 ) -> tuple[int, str]:
-    """Launch a quiet PTY supervisor that cannot resurrect a terminated owner."""
-    supervisor_ttl = min(ttl_seconds + _SUPERVISOR_TTL_PADDING_SECONDS, 86_400)
-    suffix = supervisor_name(owner)
-    session_id = sessions.new(
-        name=suffix,
-        ttl=supervisor_ttl,
-    )
-    command = supervisor_command(owner, watcher)
-    try:
-        sessions.send(session_id, command)
-    except BaseException:
-        kill_session_after_failed_launch(session_id)
-        raise
     if owner.owner_agent_id is None:
         raise RuntimeError("launching owner has no agent identity")
+    supervisor_ttl = min(ttl_seconds + _SUPERVISOR_TTL_PADDING_SECONDS, 86_400)
+    suffix = supervisor_name(owner)
+    session_id = site.open_session(suffix, supervisor_ttl)
+    try:
+        site.shell.send(session_id, command)
+    except BaseException:
+        kill_session_after_failed_launch(site.shell, session_id)
+        raise
     return session_id, coding_session_owner.full_session_name(
         owner.owner_agent_id, session_id, suffix
     )
@@ -311,30 +293,16 @@ def _app_server_log_path(owner: coding_session_owner.CodingSessionOwner) -> Path
     return owner.state_dir / "app-server.log"
 
 
-def wait_for_app_server(
-    endpoint: str, timeout: float = 20.0, *, log_path: Path | None = None
-) -> None:
-    """Block until the shared app server accepts a connection on its socket.
-
-    Socket acceptance is the readiness fact (the app server writes no startup
-    line); a launch whose endpoint never answers fails loudly instead of
-    starting a TUI that queues nothing. ``log_path``, when given, names the
-    server's own log in the timeout error so a failing launch points at the
-    evidence (review N3).
-
-    The 20s timeout and 0.5s probe cadence are fixed launch bounds: app-server
-    startup measured ~1-2s on codex 0.153.4, so 20s bounds one wait and an
-    absent or older app server fails the launch loudly instead of hanging it.
-    """
+# meiva:note
+# Block until the shared app server accepts a connection on its socket. Socket acceptance is the readiness fact (the app server writes no startup line); a launch whose endpoint never answers fails loudly instead of starting a TUI that queues nothing. `log_path`, when given, names the server's own log in the timeout error so a failing launch points at the evidence (review N3). The connect probe is bounded at the house 2 seconds for same-machine sockets, as in the PTY launcher.
+def wait_for_app_server(endpoint: str, pacing: Pacing, *, log_path: Path | None = None) -> None:
     path = endpoint.removeprefix("unix://")
     print(f"waiting for the shared codex app server at {endpoint}...")
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = time.monotonic() + pacing.timeout
+    while time.monotonic() < deadline:
         if Path(path).exists():
             with contextlib.suppress(OSError):
                 probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                # Local connect-probe bound: the house 2s for same-machine
-                # sockets, as in the PTY launcher.
                 probe.settimeout(2.0)
                 try:
                     probe.connect(path)
@@ -342,7 +310,7 @@ def wait_for_app_server(
                     probe.close()
                 print("  -> app server ready")
                 return
-        time.sleep(0.5)
+        time.sleep(pacing.poll)
     detail = f" (app-server log: {log_path})" if log_path is not None else ""
     raise RuntimeError(
         f"the shared codex app server did not become ready at {endpoint}{detail}; "
@@ -379,101 +347,44 @@ def codex_command(
     )
 
 
-def _print_owner(owner: coding_session_owner.CodingSessionOwner) -> None:
-    print(f"status={owner.status}")
-    if owner.generation is not None:
-        print(f"generation={owner.generation}")
-    if owner.owner_agent_id is not None:
-        print(f"owner_agent_id={owner.owner_agent_id}")
-    if owner.session_id is not None:
-        print(f"session_id={owner.session_id}")
-    if owner.session_name is not None:
-        print(f"session_name={owner.session_name}")
-    if owner.supervisor_session_id is not None:
-        print(f"supervisor_session_id={owner.supervisor_session_id}")
-    if owner.supervisor_session_name is not None:
-        print(f"supervisor_session_name={owner.supervisor_session_name}")
-    if owner.tasks_file is not None:
-        print(f"tasks_file={owner.tasks_file}")
-    if owner.work_file is not None:
-        print(f"work_file={owner.work_file}")
-
-
 def status(workspace: Path, *, mode: str = "auto", force: bool = False) -> int:
     """Print every generation recorded for the workspace."""
     return _owner_status(
         coding_session_owner.canonical_key(workspace, tool="codex"),
-        _print_owner,
-        mode=mode,
-        force=force,
+        capability=capability_report("codex", mode=mode, force=force),
     )
 
 
 def cancel(workspace: Path, generation: str) -> int:
     """Stop and terminalize exactly this generation."""
     return _cancel_generation(
-        coding_session_owner.canonical_key(workspace, tool="codex"),
-        generation,
-        _print_owner,
+        coding_session_owner.canonical_key(workspace, tool="codex"), generation
     )
 
 
-@dataclass(frozen=True)
-class LaunchRequest:
-    """One launch's inputs, checked: a supervised worker carries both files; a
-    prompt launch carries an initial prompt and no files."""
-
-    workspace: Path
-    tasks_file: Path | None
-    work_file: Path | None
-    ttl_seconds: float
-    caller_instance: str | None
-    prompt: str | None
-    skill_dir: Path
-    resume: str | None
-    provenance: str | None = None
-
-
-def _checked_prompt(
-    prompt: str | None, tasks_file: Path | None, work_file: Path | None
-) -> str | None:
-    """The initial prompt, or None for a supervised launch; mismatched inputs raise."""
-    if prompt is not None:
-        if not prompt.strip():
-            raise ValueError("a prompt launch needs a non-empty prompt")
-        if tasks_file is not None or work_file is not None:
-            raise ValueError("a prompt launch does not use task or work files")
-        return prompt
-    if tasks_file is None or work_file is None:
-        raise ValueError("a supervised launch needs its task and work files")
-    return None
-
-
+# meiva:note
+# Start the shared app-server and Codex TUI in the published PTY and deliver the launch message. Returns the shared app-server endpoint and the Codex session id, which `codex resume` and `meiva impersonate request --provider codex` take.
 def start_codex(
+    site: LaunchSite,
     sid: int,
-    key: coding_session_owner.CodingSessionKey,
     owner: coding_session_owner.CodingSessionOwner,
-    generation: str,
     request: LaunchRequest,
+    waits: CodexWaits,
 ) -> tuple[str, str]:
-    """Start the shared app-server and Codex TUI in the published PTY and deliver its launch message.
-
-    Returns the shared app-server endpoint and the Codex session id, which
-    ``codex resume`` and ``meiva impersonate request --provider codex`` take.
-    """
-    remote = app_server_endpoint(key, generation)
-    sessions.send(
-        sid, app_server_command(owner, request.workspace, remote, request.caller_instance)
-    )
-    wait_for_app_server(remote, log_path=_app_server_log_path(owner))
-    sessions.send(
+    if owner.generation is None:
+        raise RuntimeError("launching owner has no generation")
+    shell = site.shell
+    remote = app_server_endpoint(owner.key, owner.generation)
+    shell.send(sid, app_server_command(owner, request.workspace, remote, request.caller_instance))
+    wait_for_app_server(remote, waits.server, log_path=_app_server_log_path(owner))
+    shell.send(
         sid,
         codex_command(
             request.workspace, request.caller_instance, remote=remote, resume=request.resume
         ),
     )
-    wait_for_ready(sid)
-    codex_session = read_session_id(sid)
+    wait_for_ready(shell, sid, waits.ready)
+    codex_session = read_session_id(shell, sid, waits.status)
     if request.resume is not None and codex_session != request.resume:
         raise RuntimeError(
             f"codex reopened session {codex_session}, not the requested {request.resume}"
@@ -483,24 +394,26 @@ def start_codex(
     else:
         assert request.tasks_file is not None and request.work_file is not None  # noqa: S101
         message = worker_bootstrap(
-            request.skill_dir / "references" / "collaboration_protocol.md",
+            contract_file(request.skill_dir),
             request.workspace,
             request.tasks_file,
             request.work_file,
             resumed=request.resume is not None,
             provenance=request.provenance,
         )
-    sessions.send(sid, message)
-    verify_submitted(sid)
+    shell.send(sid, message)
+    verify_submitted(shell, sid, waits.submit)
     return remote, codex_session
 
 
-def _start_generation(
-    key: coding_session_owner.CodingSessionKey,
+# meiva:note
+# Supervise, publish and start one fresh generation; roll back on failure. A supervised launch starts its supervisor first and records it; a prompt launch (a takeover) has none. The coding session is published as active before the tool starts, so a generation that ended meanwhile (its record no longer launching) fails the launch here. Every session the launch opened (the supervisor included, even when recording it failed) is reclaimed on failure.
+def start_generation(
+    site: LaunchSite,
     owner: coding_session_owner.CodingSessionOwner,
     request: LaunchRequest,
+    waits: CodexWaits,
 ) -> tuple[coding_session_owner.CodingSessionOwner, str, str]:
-    """Supervise, publish and start one fresh generation; roll back on failure."""
     if (
         owner.generation is None
         or owner.expected_suffix is None
@@ -508,16 +421,17 @@ def _start_generation(
         or owner.owner_agent_id is None
     ):
         raise RuntimeError("new owner generation is missing launch fields")
+    key = owner.key
     generation = owner.generation
     expected_suffix = owner.expected_suffix
     owner_agent_id = owner.owner_agent_id
-    sid: int | None = None
+    opened: list[int] = []
     try:
         owner.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         if request.prompt is None:
-            watcher_id, watcher_name = launch_supervisor(
-                owner, request.ttl_seconds, request.skill_dir / "scripts" / "watch_work.py"
-            )
+            command = supervisor_command(owner, request.skill_dir / "scripts" / "watch_work.py")
+            watcher_id, watcher_name = launch_supervisor(site, owner, request.ttl_seconds, command)
+            opened.append(watcher_id)
             owner = coding_session_owner.attach_supervisor(
                 key,
                 generation,
@@ -525,7 +439,8 @@ def _start_generation(
                 session_name=watcher_name,
                 writer=AtomicWriter(SYSTEM_FS),
             )
-        sid = sessions.new(name=expected_suffix, ttl=request.ttl_seconds)
+        sid = site.open_session(expected_suffix, request.ttl_seconds)
+        opened.append(sid)
         full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)
         active = coding_session_owner.publish_active(
             key,
@@ -534,10 +449,10 @@ def _start_generation(
             session_name=full_name,
             writer=AtomicWriter(SYSTEM_FS),
         )
-        remote, codex_session = start_codex(sid, key, owner, generation, request)
+        remote, codex_session = start_codex(site, sid, owner, request, waits)
     except BaseException:
-        if sid is not None:
-            kill_session_after_failed_launch(sid)
+        for session_id in opened:
+            kill_session_after_failed_launch(site.shell, session_id)
         terminate_generation_after_failed_launch(key, generation)
         raise
     return active, remote, codex_session
@@ -564,29 +479,34 @@ def launch(
     ``codex_app_server`` and ``codex_session`` so the session can also accept
     an impersonation handover when instructed via a message.
     """
-    from base.agents.messages.external_caller import launch_caller_assignment
-
     request = LaunchRequest(
         workspace,
         tasks_file,
         work_file,
         ttl_seconds,
         caller_instance,
-        _checked_prompt(prompt, tasks_file, work_file),
+        checked_prompt(prompt, tasks_file, work_file),
         skill_dir,
         resume,
         provenance,
     )
     launch_caller_assignment("codex", caller_instance)
+    site = launch_site()
     if tasks_file is not None and work_file is not None:
         init_file(tasks_file, "")
         init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
         write_task_file_header(tasks_file, provenance or "")
-    key = coding_session_owner.canonical_key(workspace, tool="codex")
-    owner = new_generation(key, tasks_file=tasks_file, work_file=work_file, ttl_seconds=ttl_seconds)
-    active, remote, codex_session = _start_generation(key, owner, request)
+    key = coding_session_owner.canonical_key(workspace, tool="codex", cluster=site.cluster)
+    owner = new_generation(
+        key,
+        owner_agent_id=site.shell.agent_id,
+        tasks_file=tasks_file,
+        work_file=work_file,
+        ttl_seconds=ttl_seconds,
+    )
+    active, remote, codex_session = start_generation(site, owner, request, CodexWaits())
     print(f"ready. name={active.expected_suffix} workspace={workspace}")
     print(f"codex_app_server={remote}")
-    _print_owner(active)
+    print_owner(active, "codex")
     print(f"codex_session={codex_session}")
     return 0

@@ -597,7 +597,7 @@ async def run(
         if clients is None:
             clients = process_clients(database=lambda: db, config=config, machine=machine)
         installation = load_installation(
-            config, producer=clients.event_pipeline, load_extensions=_state_gated_loader()
+            config, clients=clients, load_extensions=_state_gated_loader()
         )
         checkpointer = await build_checkpointer(
             workload_pool,

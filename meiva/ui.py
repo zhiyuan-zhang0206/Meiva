@@ -12,7 +12,6 @@ import re as _re
 import socket as _socket
 import time as _time
 import urllib.request as _urlopen
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -127,12 +126,11 @@ def _port_is_bindable(host: str, port: int) -> bool:
 
 @dataclass(frozen=True)
 class PageHost:
-    """What a page call runs against: this machine's page host, the agent it acts for and how
-    it probes ports.
+    """What a page call runs against: this machine's page host and the agent it acts for.
 
     Built per call by `page_host()` from this process's settings and agent
-    identity; the module functions below delegate to it. A test builds one with the probes it
-    needs.
+    identity; the module functions below delegate to it. Its port probes are real sockets, so a
+    test serves a listener on port 0 instead of replacing them.
     """
 
     host: str
@@ -143,13 +141,11 @@ class PageHost:
     # under load — long enough to cover the slowest observed pass (~30s,
     # 2026-08-28) while still failing loudly when the daemon is genuinely down.
     ready_timeout_s: float = 60.0
-    health: Callable[[str, int], str | None] = _probe_page_health
-    bindable: Callable[[str, int], bool] = _port_is_bindable
 
     def _page_is_serving(self, port: int) -> bool:
         """Whether an HTTP server answers on (host, port) — the daemon's server
         (any token; identity is the daemon's concern, not the caller's)."""
-        return self.health(self.host, port) is not None
+        return _probe_page_health(self.host, port) is not None
 
     def _answers_as_page_server(self, port: int) -> bool:
         """Whether (host, port) answers /health like this platform's page servers.
@@ -158,7 +154,7 @@ class PageHost:
         other occupant — a dev server, a database, a foreign HTTP service —
         answers differently or not at all.
         """
-        body = self.health(self.host, port)
+        body = _probe_page_health(self.host, port)
         return body is not None and body.startswith("ok:")
 
     def _own_open_page_on_port(self, port: int) -> bool:
@@ -195,7 +191,7 @@ class PageHost:
         Raises:
             PageError: the port is occupied by a non-page-server process.
         """
-        if self.bindable(self.host, port):
+        if _port_is_bindable(self.host, port):
             return
         if self._answers_as_page_server(port):
             return
@@ -232,7 +228,6 @@ class PageHost:
         agent's current page untouched. `serve_dir` is the served directory the
         page_server daemon reads — only serve() sets it.
         """
-        _validate_name(name)
         try:
             if ttl is None:
                 row = gateway_client.register_page(
@@ -276,6 +271,51 @@ class PageHost:
             raise
         if not closed:
             raise PageClosed(f"no open page {name!r} for agent {self.agent_id}")
+
+
+# meiva:note
+# The validated arguments of one `show` / `serve` / `close` call. The entry points coerce and
+# check their arguments here, before the process is read, so a malformed call fails the same
+# way with or without an agent identity, and the validation is testable as values.
+@dataclass(frozen=True)
+class ShowRequest:
+    name: str
+    port: int
+    title: str | None
+    ttl: float | None
+
+
+@dataclass(frozen=True)
+class ServeRequest:
+    dir: str
+    name: str
+    port: int
+    title: str | None
+    ttl: float | None
+
+
+def show_request(name: str, port: int, title: str | None, ttl: float | None) -> ShowRequest:
+    name = coerce_str(name, "name")
+    port = _coerce_page_port(port)
+    title = coerce_str(title, "title", allow_none=True)
+    ttl = coerce_typed(ttl, "ttl", (int, float), allow_none=True)
+    ttl = _validate_ttl(ttl)
+    _validate_name(name)
+    return ShowRequest(name=name, port=port, title=title, ttl=ttl)
+
+
+def serve_request(
+    dir: str, name: str, port: int, title: str | None, ttl: float | None
+) -> ServeRequest:
+    dir = coerce_str(dir, "dir", allow_types=(_os.PathLike,))
+    shown = show_request(name, port, title, ttl)
+    return ServeRequest(dir=dir, name=shown.name, port=shown.port, title=shown.title, ttl=shown.ttl)
+
+
+def close_request(name: str) -> str:
+    name = coerce_str(name, "name")
+    _validate_name(name)
+    return name
 
 
 def page_host() -> PageHost:
@@ -330,11 +370,10 @@ def show(
         title: defaults to `name`.
         ttl: page lifetime; omitted = the platform default; expiry does not stop the server.
     """
-    name = coerce_str(name, "name")
-    port = _coerce_page_port(port)
-    title = coerce_str(title, "title", allow_none=True)
-    ttl = coerce_typed(ttl, "ttl", (int, float), allow_none=True)
-    return page_host().register(name, port, title, serve_dir=None, ttl=_validate_ttl(ttl))
+    request = show_request(name, port, title, ttl)
+    return page_host().register(
+        request.name, request.port, request.title, serve_dir=None, ttl=request.ttl
+    )
 
 
 def serve(
@@ -369,23 +408,22 @@ def serve(
         title: defaults to `name`.
         ttl: page lifetime in seconds; omitted = the platform default.
     """
-    dir = coerce_str(dir, "dir", allow_types=(_os.PathLike,))
-    name = coerce_str(name, "name")
-    port = _coerce_page_port(port)
-    title = coerce_str(title, "title", allow_none=True)
-    ttl = coerce_typed(ttl, "ttl", (int, float), allow_none=True)
-    ttl = _validate_ttl(ttl)
-    _validate_name(name)
-
+    request = serve_request(dir, name, port, title, ttl)
     host = page_host()
-    host.reject_foreign_port_occupant(port)
+    host.reject_foreign_port_occupant(request.port)
 
-    page = host.register(name, port, title, serve_dir=str(Path(dir).resolve()), ttl=ttl)
+    page = host.register(
+        request.name,
+        request.port,
+        request.title,
+        serve_dir=str(Path(request.dir).resolve()),
+        ttl=request.ttl,
+    )
 
     # The daemon reconciles on a ~2s poll; wait for the server it spawns.
-    if not host.wait_until_serving(port):
+    if not host.wait_until_serving(request.port):
         raise PageError(
-            f"page server for {name!r} on port {port} did not come up within "
+            f"page server for {request.name!r} on port {request.port} did not come up within "
             f"{host.ready_timeout_s:.0f}s — is the page-server daemon running? "
             "(the page row is registered; the daemon will keep retrying)"
         )
@@ -399,10 +437,7 @@ def close(name: str) -> None:
     persistent shell session, removing the `page-<name>` session-list entry.
     For a `show()` page, only the registration ends; your server keeps running.
     """
-    name = coerce_str(name, "name")
-    _validate_name(name)
-
-    page_host().close(name)
+    page_host().close(close_request(name))
 
 
 def __getattr__(name: str) -> object:

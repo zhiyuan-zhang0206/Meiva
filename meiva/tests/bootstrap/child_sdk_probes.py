@@ -68,22 +68,24 @@ def telemetry_overflow() -> None:
 
 def plain_import_sdk_events(target: str) -> None:
     import json
+    from dataclasses import replace
 
     import meiva
-    from base import telemetry
-    from base.agents.sdk import call_policy as sdk_call_policy
+    from base.agents.context.clients import ClientSet
+    from base.telemetry.tests.capture.event_capture import capturing_events
+    from meiva.sdk_surface import process_context
 
-    sdk_call_policy.policy = lambda _owner: sdk_call_policy.SamplingPolicy()  # pyright: ignore[reportAttributeAccessIssue]
-    rows: list[dict[str, object]] = []
-
-    def capture(*args: object, producer: object, machine_reader: object, **kwargs: object) -> None:
-        assert callable(producer)
-        assert callable(machine_reader)
-        assert machine_reader() == meiva.context.require_machine().name()
-        rows.append(kwargs)
-
-    telemetry.emit = capture  # pyright: ignore[reportAttributeAccessIssue]
-    assert meiva.files.read(target) == "hello"
+    with capturing_events() as events:
+        context = meiva.context
+        process_context.bind_context(
+            replace(context, clients=ClientSet(pipeline_factory=events.producer))
+        )
+        assert meiva.files.read(target) == "hello"
+        rows = [
+            {"agent_id": event.agent_id, "machine": event.machine, "attributes": event.attributes}
+            for event in events.named("sdk_call")
+        ]
+        assert rows[0]["machine"] == context.require_machine().name()
     print(json.dumps(rows))
 
 
@@ -99,10 +101,22 @@ def agent_profile_owner_url_guard() -> None:
         )
 
 
+# meiva:note
+# The data-plane URLs a watcher session may carry, or the refusal, for this environment.
+def watcher_runner_env() -> None:
+    import json
+
+    from base.host.env import dotenv_boot
+
+    try:
+        print(json.dumps({"env": dotenv_boot.watcher_runner_env()}))
+    except RuntimeError as exc:
+        print(json.dumps({"error": str(exc)}))
+
+
 def non_agent_import_unbound_context() -> None:
     import importlib
     import os
-    from types import SimpleNamespace
 
     os.environ.pop("MEIVA_AGENT_ID", None)
     import meiva
@@ -120,12 +134,12 @@ def non_agent_import_unbound_context() -> None:
     assert installation.installed() is None
     process_context.unbind_context()
     process_context.bind_host_process()
-    installed = installation.installed
-    installation.installed = lambda: SimpleNamespace(faces=True)  # pyright: ignore[reportAttributeAccessIssue]
-    meiva.ensure_plugins_loaded()
+    from meiva.sdk_surface.tests.installation_holder import held_installation
+
+    with held_installation(installation.Installation.bare()):
+        meiva.ensure_plugins_loaded()
     assert process_context.is_host_process()
     assert getattr(meiva, "context", None) is None
-    installation.installed = installed
     error = ValueError("retained explicit load failure")
     install.mark_load_failed(error)
     importlib.reload(meiva)
@@ -139,6 +153,80 @@ def non_agent_import_unbound_context() -> None:
         raise AssertionError("explicit loading hid its prior failure")
 
 
+# meiva:note
+# What the launch environment makes of the process: the context, its loop flag, the child test.
+def launched_identity() -> None:
+    import json
+
+    import meiva
+    from base.agents.context import MeivaContext
+    from base.agents.context.identity import AgentIdentity
+    from meiva.sdk_surface import agent_identity
+
+    ambient_id = agent_identity.agent_id()
+    context = getattr(meiva, "context", None)
+    identity = None if context is None else context.identity
+    turn = MeivaContext(identity=AgentIdentity(5, True))
+    outcome: dict[str, object] = {
+        "agent_id": ambient_id,
+        "owns_loop": None if identity is None else identity.owns_loop,
+        "launched_child": agent_identity.is_launched_child(),
+        "actor": agent_identity.require_actor() if ambient_id is not None else None,
+        "turn_agent_id": agent_identity.require_agent_id(turn),
+    }
+    try:
+        agent_identity.assert_self_action("restart")
+    except RuntimeError as exc:
+        outcome["self_action"] = str(exc)
+    print(json.dumps(outcome))
+
+
+# meiva:note
+# A process nobody launched as an agent: reads fail fast and no context appears.
+def unestablished_identity() -> None:
+    import json
+
+    import meiva
+    from meiva.sdk_surface import agent_identity
+
+    outcome: dict[str, object] = {"agent_id": agent_identity.agent_id()}
+    for name, call in (
+        ("require_agent_id", agent_identity.require_agent_id),
+        ("require_actor", agent_identity.require_actor),
+        ("assert_self_action", lambda: agent_identity.assert_self_action("terminate")),
+        ("context", lambda: meiva.context),
+    ):
+        try:
+            call()
+        except (RuntimeError, AttributeError) as exc:
+            outcome[name] = str(exc)
+    outcome["launched_child"] = agent_identity.is_launched_child()
+    outcome["has_context"] = getattr(meiva, "context", None) is not None
+    print(json.dumps(outcome))
+
+
+# meiva:note
+# The external tool profile precedes a local context's agent id, but not an explicit one.
+def external_profile_actor() -> None:
+    import json
+
+    from base.agents.context import MeivaContext
+    from base.agents.context.identity import AgentIdentity
+    from meiva.sdk_surface import agent_identity, process_context
+
+    process_context.bind_context(MeivaContext(identity=AgentIdentity(405, True)))
+    print(
+        json.dumps(
+            {
+                "local": agent_identity.require_actor(),
+                "explicit": agent_identity.require_actor(
+                    MeivaContext(identity=AgentIdentity(406, True))
+                ),
+            }
+        )
+    )
+
+
 SCENARIOS = {
     "config_lite": config_lite,
     "no_context_for_bare_script": no_context_for_bare_script,
@@ -146,6 +234,10 @@ SCENARIOS = {
     "plain_import_sdk_events": plain_import_sdk_events,
     "agent_profile_owner_url_guard": agent_profile_owner_url_guard,
     "non_agent_import_unbound_context": non_agent_import_unbound_context,
+    "watcher_runner_env": watcher_runner_env,
+    "launched_identity": launched_identity,
+    "unestablished_identity": unestablished_identity,
+    "external_profile_actor": external_profile_actor,
 }
 
 SCENARIOS[sys.argv[1]](*sys.argv[2:])  # pyright: ignore[reportCallIssue]

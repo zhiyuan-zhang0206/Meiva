@@ -13,7 +13,7 @@ import pytest
 
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from meiva import agents, gateway_client
+from meiva import agents
 from meiva.gateway_client import use_client
 from meiva.sdk_surface import process_context
 
@@ -91,17 +91,12 @@ class TestAgentsEntries:
         assert (request.method, request.url.path) == ("POST", "/api/agents/7/messages")
         assert json.loads(request.content) == {"content": "hi", "source": "agent:1"}
 
-    def test_send_message_blocks_pass_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            gateway_client,
-            "send_message",
-            lambda _aid, **kw: seen.update(kw) or None,  # pyright: ignore[reportUnknownArgumentType]
-        )  # pyright: ignore[reportUnknownArgumentType]
+    def test_send_message_blocks_pass_through(self, gateway_requests: list[httpx.Request]) -> None:
         blocks: list[dict[str, object]] = [{"type": "text", "text": "hi"}]
 
         agents.send_message(7, blocks)  # pyright: ignore[reportArgumentType]
-        assert seen["content"] is blocks
+        [request] = gateway_requests
+        assert json.loads(request.content) == {"content": blocks, "source": "agent:1"}
 
     def test_send_message_multi_element_type_errors(self, no_gateway_http: None) -> None:
         with pytest.raises(TypeError, match="content must be a string"):

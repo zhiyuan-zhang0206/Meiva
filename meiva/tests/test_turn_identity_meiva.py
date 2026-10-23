@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from meiva.sdk_surface import agent_identity, process_context
@@ -12,9 +11,8 @@ from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
-def _reset_process_slots(monkeypatch: pytest.MonkeyPatch) -> None:
+def _reset_process_slots() -> None:
     pin_no_identity()
-    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
 
 
 def test_turn_metadata_cannot_override_a_local_sdk_binding() -> None:
@@ -31,6 +29,7 @@ def test_turn_metadata_cannot_override_a_local_sdk_binding() -> None:
 
 def test_host_identity_requires_the_callers_explicit_context() -> None:
     context = MeivaContext(identity=AgentIdentity(33, True))
+    pin_agent(None)
     assert agent_identity.agent_id() is None
     with pytest.raises(RuntimeError, match="no established agent identity"):
         agent_identity.require_agent_id()
@@ -38,7 +37,6 @@ def test_host_identity_requires_the_callers_explicit_context() -> None:
         agent_identity.assert_self_action("terminate")
     assert agent_identity.require_agent_id(context) == 33
     assert agent_identity.require_actor(context) == "agent:33"
-    assert getattr(meiva, "context", None) is None
 
 
 def test_established_child_context_cannot_become_shared_host() -> None:
@@ -47,17 +45,6 @@ def test_established_child_context_cannot_become_shared_host() -> None:
         process_context.bind_host_process()
     assert agent_identity.require_agent_id() == 5
     assert process_context.is_host_process() is False
-
-
-def test_turn_metadata_cannot_grant_a_launched_script_loop_ownership(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("MEIVA_AGENT_ID", "5")
-    assert agent_identity.is_launched_child() is True
-    turn = MeivaContext(identity=AgentIdentity(5, True))
-    assert agent_identity.require_agent_id(turn) == 5
-    with pytest.raises(RuntimeError, match="background script"):
-        agent_identity.assert_self_action("restart")
 
 
 def test_explicit_actor_is_independent_of_turn_metadata() -> None:

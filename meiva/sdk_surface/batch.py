@@ -44,23 +44,18 @@ def validate_max_concurrent(max_concurrent: int | None, *, example: str) -> None
             )
 
 
+# meiva:note
+# Run `worker` over every item concurrently.
+#
+# Order is preserved; the first error propagates. `max_concurrent` caps how many workers are in
+# flight at once via a semaphore; None keeps concurrency unbounded — a provider 429 propagates
+# like any other upstream failure. Per-result bookkeeping (e.g. `meiva.understand`'s auto-save)
+# belongs to the caller, which runs it over `zip(items, results)` once the batch returned.
 async def run_batch[T, R](
     items: list[T],
     worker: Callable[[T], R],
     max_concurrent: int | None,
-    after: Callable[[T, R], None] | None = None,
 ) -> list[R]:
-    """Run `worker` over every item concurrently.
-
-    Order is preserved; the first error propagates. `max_concurrent` caps how
-    many workers are in flight at once via a semaphore; None keeps concurrency
-    unbounded — a provider 429 propagates like any other upstream failure.
-
-    `after` (optional) is called once per item, in input order, on the event
-    loop thread after the batch collected — for per-result bookkeeping (e.g.
-    `meiva.understand`'s auto-save) that must not race inside worker threads.
-    An `after` failure propagates like a worker failure.
-    """
     validate_max_concurrent(max_concurrent, example="<batch api>(..., max_concurrent=N)")
     if max_concurrent is None:
         tasks = [asyncio.to_thread(worker, item) for item in items]
@@ -72,8 +67,4 @@ async def run_batch[T, R](
                 return await asyncio.to_thread(worker, item)
 
         tasks = [_bounded(item) for item in items]
-    results = await asyncio.gather(*tasks)
-    if after is not None:
-        for item, result in zip(items, results, strict=True):
-            after(item, result)
-    return results
+    return await asyncio.gather(*tasks)

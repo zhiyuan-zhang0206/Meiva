@@ -27,7 +27,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
-from base.config.tests.configuration import defaults
+from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -67,7 +67,7 @@ def _runtime(
     return Runtime(
         context=MeivaContext(
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
-            clients=process_clients(),
+            clients=process_clients(config=snapshot_process_config()),
             harness=harness,
             hosted_resources=resources,
             ops_pool=ops_pool,
