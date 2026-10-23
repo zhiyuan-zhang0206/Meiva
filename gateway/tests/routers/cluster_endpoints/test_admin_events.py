@@ -1,12 +1,31 @@
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import pytest
-
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+)
+from gateway.tests.auth.gateway_config import (
+    gateway_test_client as _base_gateway_test_client,
+)
+from gateway.tests.routers.cluster_endpoints.cluster_support import (
+    active_admin_query,
+)
 from gateway.tests.routers.cluster_endpoints.cluster_support import (
     fake_admin_events as fake_admin_events,
 )
+
+
+@contextmanager
+def gateway_test_client(*, default_limit: int | None = None) -> Generator[GatewayTestClient]:
+    with _base_gateway_test_client() as client:
+        query = active_admin_query()
+        if query is not None:
+            client.app.state.cluster_events_reader = query
+        if default_limit is not None:
+            client.app.state.cluster_events_default_limit = default_limit
+        yield client
 
 
 def _row(
@@ -128,12 +147,9 @@ class TestAdminEvents:
         assert fake_admin_events["calls"][0]["limit"] == 200
 
     def test_limit_defaults_come_from_display_config(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+        self, fake_admin_events: dict[str, list[dict[str, Any]]]
     ) -> None:
-        from base.config import settings
-
-        monkeypatch.setattr(settings.display, "cluster_events_default_limit", 7)
-        with gateway_test_client() as client:
+        with gateway_test_client(default_limit=7) as client:
             client.get("/api/cluster/admin/events")
         assert fake_admin_events["calls"][0]["limit"] == 7
 

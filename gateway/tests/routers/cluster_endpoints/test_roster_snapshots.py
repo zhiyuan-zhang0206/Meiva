@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -17,7 +18,6 @@ import gateway.cluster.status as status_mod
 from base.api_contracts.status import MachineStatus
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.cluster import snapshots
@@ -29,6 +29,7 @@ from ops.cluster import rpc as cluster_rpc
 
 _ROW = tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]
 _NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
+_active_dispatch: list[Any] = []
 
 
 def _row(name: str = "runner-a", url: str | None = "http://runner-a:8113") -> _ROW:
@@ -68,7 +69,7 @@ def _snap(
 
 
 @pytest.fixture
-def no_dial(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+def no_dial() -> Generator[list[str]]:
     """Fail the test if the roster dials a runner; returns the list of dialed names."""
     dialed: list[str] = []
 
@@ -76,8 +77,11 @@ def no_dial(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         dialed.append(target_machine)
         return _status(target_machine)
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
-    return dialed
+    _active_dispatch.append(dispatch)
+    try:
+        yield dialed
+    finally:
+        _active_dispatch.clear()
 
 
 def _gather(
@@ -86,7 +90,13 @@ def _gather(
     database_gate: ProcessDbGate,
     *,
     local_machine: MachineIdentity,
+    probe_timeout_s: float | None = None,
+    dispatch_fn: Any = None,
 ) -> list[MachineStatus]:
+    del local_machine
+    resolved_dispatch = (
+        (_active_dispatch[-1] if _active_dispatch else None) if dispatch_fn is None else dispatch_fn
+    )
     return asyncio.run(
         status_mod.gather_cluster_status(
             Database.from_settings(gate=database_gate),
@@ -95,6 +105,8 @@ def _gather(
             identity_log=IdentityMismatchLog(),
             snapshots=snaps,
             image=LOADED_IMAGE,
+            probe_timeout_s=probe_timeout_s,
+            dispatch_fn=resolved_dispatch,
         )
     )
 
@@ -237,7 +249,6 @@ def test_a_fresh_read_dials_every_runner_whatever_the_snapshot_says(
 
 
 def test_the_gateway_remembers_no_failure_between_reads(
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
     *,
     machine_identity: MachineIdentity,
@@ -250,17 +261,26 @@ def test_the_gateway_remembers_no_failure_between_reads(
         calls.append(target_machine)
         raise cluster_rpc.ClusterOpUnreachable("blackhole")
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
-
-    first = _gather([_row()], None, database_gate=database_gate, local_machine=machine_identity)
-    second = _gather([_row()], None, database_gate=database_gate, local_machine=machine_identity)
+    first = _gather(
+        [_row()],
+        None,
+        database_gate=database_gate,
+        local_machine=machine_identity,
+        dispatch_fn=dispatch,
+    )
+    second = _gather(
+        [_row()],
+        None,
+        database_gate=database_gate,
+        local_machine=machine_identity,
+        dispatch_fn=dispatch,
+    )
 
     assert [m.online for m in first + second] == [False, False]
     assert calls == ["runner-a", "runner-a"]
 
 
 def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
     *,
     machine_identity: MachineIdentity,
@@ -268,13 +288,10 @@ def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
     """The dials run in parallel under one per-dial deadline, so five hosts that
     never answer cost about one budget, not five."""
     budget_s = 0.3
-    monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", budget_s)
 
     async def dispatch(**_kw: object) -> dict[str, object]:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
-
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
 
     started = time.monotonic()
     machines = _gather(
@@ -282,6 +299,8 @@ def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
         None,
         database_gate=database_gate,
         local_machine=machine_identity,
+        probe_timeout_s=budget_s,
+        dispatch_fn=dispatch,
     )
     elapsed = time.monotonic() - started
 
@@ -313,7 +332,6 @@ def _snapshot_row(conn: psycopg.Connection, name: str, *, running_sha: str) -> N
 def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -326,8 +344,8 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
         dialed.append(target_machine)
         return _status(target_machine, running_sha="from-a-dial")
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
     with gateway_test_client(machine=machine_identity) as client:
+        client.app.state.status_probe_dispatcher = dispatch
         default = client.get("/api/cluster/roster").json()
         assert dialed == []
         fresh = client.get("/api/cluster/roster?fresh=true").json()
@@ -342,7 +360,6 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
 def test_the_machines_endpoint_follows_the_same_two_modes(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -355,8 +372,8 @@ def test_the_machines_endpoint_follows_the_same_two_modes(
         dialed.append(target_machine)
         return _status(target_machine)
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
     with gateway_test_client(machine=machine_identity) as client:
+        client.app.state.status_probe_dispatcher = dispatch
         assert client.get("/api/cluster/machines").json()[0]["live"] is True
         assert dialed == []
         assert client.get("/api/cluster/machines?fresh=true").json()[0]["live"] is True

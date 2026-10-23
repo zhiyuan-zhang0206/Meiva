@@ -1,22 +1,26 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any
 
 import psycopg
 import pytest
 
-from base import cluster
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from gateway.events import telemetry_rows
+
+_active_admin_query: list[Any] = []
+
+
+def active_admin_query() -> Any:
+    return _active_admin_query[-1] if _active_admin_query else None
 
 
 @pytest.fixture
-def fake_admin_events(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[str, Any]]]:
-    """Patch telemetry_rows.query_events for the admin-events route; record the
-    kwargs and return canned rows."""
+def fake_admin_events() -> Generator[dict[str, Any]]:
+    """Configure a cluster_events_reader stub; record kwargs and return canned rows."""
 
     calls: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
@@ -25,16 +29,17 @@ def fake_admin_events(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
         calls.append(kwargs)
         return rows, False
 
-    monkeypatch.setattr(telemetry_rows, "query_events", _query)
-    return {"calls": calls, "rows": rows}
+    _active_admin_query.append(_query)
+    try:
+        yield {"calls": calls, "rows": rows, "query": _query}
+    finally:
+        _active_admin_query.clear()
 
 
 @pytest.fixture(autouse=True)
-def pinned_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin the session-name composer for gateway cluster tests."""
-    # meiva:note
-    # The test stub uses an untyped lambda over the service name.
-    monkeypatch.setattr(cluster, "session_name", lambda svc: f"meiva-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
+def pinned_session_names() -> None:
+    """Keep the shared fixture entry point for cluster endpoint test suites."""
+    return
 
 
 def seed_away_machine(

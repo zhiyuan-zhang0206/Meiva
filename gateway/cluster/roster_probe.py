@@ -19,7 +19,11 @@ _log = logging.getLogger(__name__)
 
 
 async def dispatch_status_probe(
-    name: str, ops_url: str, *, timeout_s: float | None = None
+    name: str,
+    ops_url: str,
+    *,
+    timeout_s: float | None = None,
+    dispatch_fn: Any = None,
 ) -> dict[str, Any]:
     """Retry one fast transport failure inside the existing total deadline.
 
@@ -32,9 +36,10 @@ async def dispatch_status_probe(
     """
     if timeout_s is None:
         timeout_s = settings.gateway.status_probe_timeout_seconds
+    dispatcher = cluster_rpc.dispatch_to_url if dispatch_fn is None else dispatch_fn
     try:
         async with asyncio.timeout(timeout_s):
-            return await cluster_rpc.dispatch_to_url(
+            return await dispatcher(
                 target_machine=name,
                 kind="status_probe",
                 payload={},

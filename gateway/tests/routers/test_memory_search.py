@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -23,13 +24,31 @@ from base.lm.catalog import ModelCatalog
 from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from gateway.routers.memory import MemorySearchInputs
 from gateway.tests.agents.gateway_auth import gateway_credentials
-from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_client
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    gateway_test_app,
+)
+from gateway.tests.auth.gateway_config import (
+    gateway_test_client as _base_gateway_test_client,
+)
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import ChunkHit
-from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
 _active_app: list[FastAPI] = []
+_active_client_apps: list[FastAPI] = []
+
+
+@contextmanager
+def gateway_test_client(*args: Any, **kwargs: Any) -> Generator[GatewayTestClient]:
+    with _base_gateway_test_client(*args, **kwargs) as client:
+        if _active_app:
+            client.app.state.memory_search_inputs = memory_search_app().state.memory_search_inputs
+        _active_client_apps.append(client.app)
+        try:
+            yield client
+        finally:
+            _active_client_apps.remove(client.app)
 
 
 def memory_config(root: Path, *, boot: ConfigBoot | None = None) -> GatewayConfig:
@@ -42,8 +61,8 @@ def memory_search_app() -> FastAPI:
     return _active_app[-1]
 
 
-def _memory_inputs() -> MemorySearchInputs:
-    def api_key() -> str | None:
+def _memory_inputs(*, api_key: Callable[[], str | None] | None = None) -> MemorySearchInputs:
+    def default_api_key() -> str | None:
         value = settings.lm.gemini_api_key
         return None if value is None else value.get_secret_value()
 
@@ -52,13 +71,22 @@ def _memory_inputs() -> MemorySearchInputs:
         backend=lambda: settings.services.memory_search_backend,
         uri=lambda: settings.services.memory_search_uri,
         embedding_timeout=lambda: settings.services.memory_embed_timeout_seconds,
-        api_key=api_key,
+        api_key=default_api_key if api_key is None else api_key,
         acquire_timeout=lambda: settings.services.memory_search_acquire_timeout_seconds,
         deadline=lambda: settings.services.memory_search_deadline_seconds,
         rerank_model=lambda: settings.services.memory_rerank_model,
         rerank_candidates=lambda: settings.services.memory_rerank_candidates,
         dedup_candidates=lambda: settings.services.memory_dedup_candidates,
     )
+
+
+def set_memory_inputs(**overrides: Any) -> MemorySearchInputs:
+    app = memory_search_app()
+    updated = replace(app.state.memory_search_inputs, **overrides)
+    app.state.memory_search_inputs = updated
+    for client_app in _active_client_apps:
+        client_app.state.memory_search_inputs = updated
+    return updated
 
 
 def _hit(path: Path, idx: int = 0, kind: str = "body") -> ChunkHit:
@@ -116,7 +144,7 @@ def memory_search_app_db(
         _active_app.clear()
 
 
-def patch_provider(monkeypatch: pytest.MonkeyPatch, provider: object) -> None:
+def patch_provider(provider: object) -> None:
     def construct(
         name: str,
         *,
@@ -127,7 +155,11 @@ def patch_provider(monkeypatch: pytest.MonkeyPatch, provider: object) -> None:
         del name, catalog, timeout_reader, api_key_reader
         return provider
 
-    monkeypatch.setattr(factory, "get_provider", construct)
+    set_memory_inputs(provider_builder=construct)
+
+
+def patch_backend(backend_cls: Any) -> None:
+    set_memory_inputs(backend_builder=backend_cls)
 
 
 class StubProvider:
@@ -154,9 +186,7 @@ class StubProvider:
 class TestPrimaryPath:
     """Primary node goes directly through embedder + the backend, returns relative paths."""
 
-    def test_primary_returns_relative_paths(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_primary_returns_relative_paths(self, tmp_path: Path) -> None:
         """Primary path: stub embedder + index → verify returned paths are relative to memory_root."""
         # create a few fake markdown files in tmp so relative_to doesn't raise
         (tmp_path / "notes").mkdir()
@@ -164,9 +194,7 @@ class TestPrimaryPath:
         (tmp_path / "bar.md").write_text("y")
 
         # stub embedder/backend to avoid real Gemini / backend calls
-        import services.derived.memory_indexer.backends.factory as _factory
-
-        patch_provider(monkeypatch, StubProvider)
+        patch_provider(StubProvider)
 
         class _FakeBackend:
             def __init__(self, *args: object, **kwargs: object) -> None:
@@ -178,7 +206,7 @@ class TestPrimaryPath:
                 assert timeout > 0  # the handler must hand the backend a real deadline
                 return [_hit(tmp_path / "notes" / "foo.md"), _hit(tmp_path / "bar.md")]
 
-        monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
+        patch_backend(_FakeBackend)
 
         with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.post(
@@ -199,9 +227,7 @@ class TestPrimaryPath:
         # each result carries the matched chunk and its relevance score
         assert [(item["chunk"], item["score"]) for item in results] == [("x", 0.5), ("y", 0.5)]
 
-    def test_primary_returns_descriptions_from_frontmatter(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_primary_returns_descriptions_from_frontmatter(self, tmp_path: Path) -> None:
         """When files have a YAML frontmatter description, results include it."""
         (tmp_path / "with_desc.md").write_text(
             """---
@@ -226,9 +252,7 @@ title: No Description
         )
         (tmp_path / "no_frontmatter.md").write_text("# Just a heading\n\nNo YAML.")
 
-        import services.derived.memory_indexer.backends.factory as _factory
-
-        patch_provider(monkeypatch, StubProvider)
+        patch_provider(StubProvider)
 
         class _FakeBackend:
             def __init__(self, *args: object, **kwargs: object) -> None:
@@ -244,7 +268,7 @@ title: No Description
                     _hit(tmp_path / "no_frontmatter.md"),
                 ]
 
-        monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
+        patch_backend(_FakeBackend)
 
         with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.post(
@@ -262,9 +286,7 @@ title: No Description
         assert results[2]["description"] == ""
         assert set(body) == {"results"}
 
-    def test_primary_embedder_failure_raises_indexer_unavailable(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_primary_embedder_failure_raises_indexer_unavailable(self) -> None:
         """embedder API failure → IndexerUnavailable (wire 503)."""
 
         class _BoomProvider:
@@ -275,7 +297,7 @@ title: No Description
             async def embed_query_async(_q: str) -> Any:
                 raise EmbeddingAPIError("gemini quota exhausted")
 
-        patch_provider(monkeypatch, _BoomProvider)
+        patch_provider(_BoomProvider)
 
         with gateway_test_client() as client:
             resp = client.post(
@@ -286,7 +308,7 @@ title: No Description
         assert body["reason"] == "indexer_unavailable"
         assert "embed" in body["detail"]
 
-    def test_unexpected_embed_failure_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_unexpected_embed_failure_propagates(self) -> None:
         """An unmodelled failure keeps its identity instead of becoming an outage."""
 
         failure = FileNotFoundError(2, "No such file or directory")
@@ -296,18 +318,14 @@ title: No Description
             async def embed_query_async(_q: str) -> list[float]:
                 raise failure
 
-        patch_provider(monkeypatch, BrokenProvider)
+        patch_provider(BrokenProvider)
         with gateway_test_client() as client, pytest.raises(FileNotFoundError) as caught:
             client.post("/api/memory/search", json={"query": "x", "k": 5, "purpose": "search"})
         assert caught.value is failure
 
-    def test_primary_backend_failure_raises_indexer_unavailable(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_primary_backend_failure_raises_indexer_unavailable(self) -> None:
         """backend raises (e.g. connect refused) → IndexerUnavailable (wire 503)."""
-        import services.derived.memory_indexer.backends.factory as _factory
-
-        patch_provider(monkeypatch, StubProvider)
+        patch_provider(StubProvider)
 
         class _BoomBackend:
             def __init__(self, *args: object, **kwargs: object) -> None:
@@ -318,7 +336,7 @@ title: No Description
             ) -> list[ChunkHit]:
                 raise RuntimeError("connection refused 19530")
 
-        monkeypatch.setattr(_factory, "get_backend", _BoomBackend)
+        patch_backend(_BoomBackend)
 
         with gateway_test_client() as client:
             resp = client.post(
@@ -331,12 +349,8 @@ title: No Description
 class TestRerank:
     """The second stage orders the vector candidates by the decision model's probability."""
 
-    def _backend(
-        self, monkeypatch: pytest.MonkeyPatch, hits: list[ChunkHit]
-    ) -> list[tuple[int, float]]:
-        import services.derived.memory_indexer.backends.factory as _factory
-
-        patch_provider(monkeypatch, StubProvider)
+    def _backend(self, hits: list[ChunkHit]) -> list[tuple[int, float]]:
+        patch_provider(StubProvider)
         asked: list[tuple[int, float]] = []
 
         class _FakeBackend:
@@ -349,7 +363,7 @@ class TestRerank:
                 asked.append((k, timeout))
                 return hits
 
-        monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
+        patch_backend(_FakeBackend)
         return asked
 
     def _pool(self, tmp_path: Path) -> None:
@@ -360,10 +374,10 @@ class TestRerank:
             )
 
     def test_results_follow_the_decision_probability_not_vector_order(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: Judge
+        self, tmp_path: Path, judge: Judge
     ) -> None:
         self._pool(tmp_path)
-        self._backend(monkeypatch, [_hit(tmp_path / n) for n in ("a.md", "b.md", "c.md")])
+        self._backend([_hit(tmp_path / n) for n in ("a.md", "b.md", "c.md")])
         judge.rules = {"passage a": 0.1, "passage b": 0.6, "passage c": 0.95}
 
         with gateway_test_client(config=memory_config(tmp_path)) as client:
@@ -382,11 +396,9 @@ class TestRerank:
         assert {model for model, _, _ in judge.calls} == {settings.services.memory_rerank_model}
         assert all("what about c" in state for _, state, _ in judge.calls)
 
-    def test_purpose_selects_the_relevance_question(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: Judge
-    ) -> None:
+    def test_purpose_selects_the_relevance_question(self, tmp_path: Path, judge: Judge) -> None:
         self._pool(tmp_path)
-        self._backend(monkeypatch, [_hit(tmp_path / "a.md")])
+        self._backend([_hit(tmp_path / "a.md")])
         questions: dict[str, Any] = {}
         for purpose in ("recall", "search", "dedup"):
             judge.calls.clear()
@@ -398,12 +410,10 @@ class TestRerank:
             questions[purpose] = judge.calls[0][2]
         assert len(set(questions.values())) == 3
 
-    def test_backend_is_asked_for_the_configured_candidate_count(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_backend_is_asked_for_the_configured_candidate_count(self, tmp_path: Path) -> None:
         self._pool(tmp_path)
-        asked = self._backend(monkeypatch, [])
-        monkeypatch.setattr(settings.services, "memory_rerank_candidates", 40)
+        asked = self._backend([])
+        set_memory_inputs(rerank_candidates=lambda: 40)
 
         with gateway_test_client(config=memory_config(tmp_path)) as client:
             assert client.post(
@@ -413,13 +423,10 @@ class TestRerank:
         # a `k` above the candidate count does not widen the retrieval
         assert [k for k, _timeout in asked] == [40, 40]
 
-    def test_dedup_asks_for_its_own_candidate_count(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_dedup_asks_for_its_own_candidate_count(self, tmp_path: Path) -> None:
         self._pool(tmp_path)
-        asked = self._backend(monkeypatch, [])
-        monkeypatch.setattr(settings.services, "memory_rerank_candidates", 40)
-        monkeypatch.setattr(settings.services, "memory_dedup_candidates", 7)
+        asked = self._backend([])
+        set_memory_inputs(rerank_candidates=lambda: 40, dedup_candidates=lambda: 7)
 
         with gateway_test_client(config=memory_config(tmp_path)) as client:
             for purpose, k in (("dedup", 5), ("dedup", 9), ("recall", 5), ("search", 5)):
@@ -431,12 +438,11 @@ class TestRerank:
         assert settings.services.memory_dedup_candidates == 5
 
     def test_stale_vector_hits_are_dropped_before_ranking(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: Judge
+        self, tmp_path: Path, judge: Judge
     ) -> None:
         self._pool(tmp_path)
         self._backend(
-            monkeypatch,
-            [_hit(tmp_path / "gone.md"), _hit(tmp_path / "a.md", idx=9), _hit(tmp_path / "b.md")],
+            [_hit(tmp_path / "gone.md"), _hit(tmp_path / "a.md", idx=9), _hit(tmp_path / "b.md")]
         )
         with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.post(
@@ -446,12 +452,12 @@ class TestRerank:
         assert len(judge.calls) == 1
 
     def test_decision_failure_is_a_clear_503_not_vector_order(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: Judge
+        self, tmp_path: Path, judge: Judge
     ) -> None:
         from base.api_contracts.agent_contract import IndexerUnavailable
 
         self._pool(tmp_path)
-        self._backend(monkeypatch, [_hit(tmp_path / "a.md")])
+        self._backend([_hit(tmp_path / "a.md")])
         judge.failure = IndexerUnavailable("memory rerank failed (jev): upstream 503")
 
         with gateway_test_client(config=memory_config(tmp_path)) as client:
@@ -521,7 +527,6 @@ async def never_returns(*_args: object, **_kwargs: object) -> list[ChunkHit]:
 
 
 def stub_search_backend(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     search: Any,
@@ -531,9 +536,6 @@ def stub_search_backend(
 
     Returns the fresh per-test semaphore so tests can assert on permit state.
     """
-    import services.derived.memory_indexer.backends.factory as _factory
-    from base.config import settings
-
     app = memory_search_app()
     app.state.gateway_config = replace(app.state.gateway_config, memory_root=tmp_path)
     (tmp_path / "a.md").write_text("---\ntype: Memory\n---\nx\n", encoding="utf-8")
@@ -545,7 +547,7 @@ def stub_search_backend(
     # from `app.state.memory_search_gate`, so the stub installs a fresh instance there.
     fresh = asyncio.Semaphore(permits)
     app.state.memory_search_gate = fresh
-    monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", _TEST_DEADLINE_S)
+    set_memory_inputs(deadline=lambda: _TEST_DEADLINE_S)
 
     class _StubBackend:
         def __init__(self, *args: object, **kwargs: object) -> None:
@@ -554,8 +556,8 @@ def stub_search_backend(
         async def search_topk_async(self, _v: object, _k: int, *, timeout: float) -> list[ChunkHit]:
             return await search(_v, _k, timeout=timeout)
 
-    patch_provider(monkeypatch, StubProvider)
-    monkeypatch.setattr(_factory, "get_backend", _StubBackend)
+    patch_provider(StubProvider)
+    patch_backend(_StubBackend)
     return fresh
 
 
@@ -590,7 +592,6 @@ async def test_query_usage_failure_propagates_without_network_replay(
     from types import SimpleNamespace
 
     from fastapi import Request
-    from pydantic import SecretStr
 
     from gateway.routers import memory
     from gateway.schemas import MemorySearchRequest
@@ -599,7 +600,6 @@ async def test_query_usage_failure_propagates_without_network_replay(
 
     fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     monkeypatch.setattr(httpx, "AsyncClient", fake)
-    monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("test-key"))
     failure = error_type("accounting invariant failed")
     seen: list[object] = []
 
@@ -611,7 +611,7 @@ async def test_query_usage_failure_propagates_without_network_replay(
     state = SimpleNamespace(
         catalog=model_catalog,
         memory_search_gate=asyncio.Semaphore(1),
-        memory_search_inputs=_memory_inputs(),
+        memory_search_inputs=_memory_inputs(api_key=lambda: "test-key"),
     )
 
     async def stays_connected() -> dict[str, str]:

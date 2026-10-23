@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -61,7 +61,9 @@ _log = logging.getLogger(__name__)
 _MAX_MESSAGE_CONTENT_BYTES = 1_048_576
 
 
-def _validate_image_ref(agent_id: int, url: str) -> None:
+def _validate_image_ref(
+    agent_id: int, url: str, *, path_resolver: Callable[[int, str], Any] | None = None
+) -> None:
 
     parsed = parse_upload_url(url)
     if parsed is None:
@@ -71,8 +73,9 @@ def _validate_image_ref(agent_id: int, url: str) -> None:
         raise HTTPException(422, f"image_url {url!r} references a different agent's upload")
     if image_mime_for(name) is None:
         raise HTTPException(422, f"image_url {url!r} is not a recognized image type")
+    resolver = resolve_upload_path if path_resolver is None else path_resolver
     try:
-        path = resolve_upload_path(agent_id, name)
+        path = resolver(agent_id, name)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     if not path.is_file():
@@ -106,9 +109,10 @@ def _prepare_message_content(
                 "switch it to a vision-capable model "
                 f"({', '.join(vision_capable_provider_names(catalog=catalog))})",
             )
+        path_resolver = getattr(request.app.state, "upload_path_resolver", None)
         for b in blocks:
             if isinstance(b, ImageUrlContentBlock):
-                _validate_image_ref(agent_id, b.image_url.url)
+                _validate_image_ref(agent_id, b.image_url.url, path_resolver=path_resolver)
 
     return _normalize_message_content(content)
 

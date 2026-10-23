@@ -92,6 +92,8 @@ async def _roster_statuses(
     fresh: bool,
     image: LoadedCommit,
     local_machine: MachineIdentity,
+    gather_fn: Any = None,
+    dispatch_fn: Any = None,
 ) -> list[MachineStatus]:
     """The roster of every unpaused machine: from the heartbeat liveness pass's
     snapshot, or — when `fresh` — by dialing every runner now."""
@@ -99,6 +101,15 @@ async def _roster_statuses(
     if not rows:
         return []
     found = None if fresh else await asyncio.to_thread(snapshots.read_all_blocking, pool)
+    if gather_fn is not None:
+        return await gather_fn(
+            db,
+            rows,
+            local_machine.name(),
+            identity_log=identity_log,
+            snapshots=found,
+            image=image,
+        )
     return await gather_cluster_status(
         db,
         rows,
@@ -106,6 +117,7 @@ async def _roster_statuses(
         identity_log=identity_log,
         snapshots=found,
         image=image,
+        dispatch_fn=dispatch_fn,
     )
 
 
@@ -229,6 +241,8 @@ async def get_cluster_roster(
         fresh=fresh,
         image=request.app.state.process_image,
         local_machine=request.app.state.machine,
+        gather_fn=getattr(request.app.state, "cluster_status_gatherer", None),
+        dispatch_fn=getattr(request.app.state, "status_probe_dispatcher", None),
     )
 
 
@@ -246,6 +260,16 @@ async def get_cluster_roster(
 # the default *window* is display.cluster_events_default_limit
 # (task #3696 exception inventory: KEEP).
 _EVENTS_MAX_LIMIT = 1000
+
+
+def _normalize_level_min(level: str | None) -> str | None:
+    if not level:
+        return None
+    level_upper = level.upper()
+    order = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+    if level_upper not in order:
+        raise HTTPException(status_code=400, detail=f"unknown level: {level!r}")
+    return order[order.index(level_upper) :][0].lower()
 
 
 @router.get("/api/cluster/admin/events", response_model=AgentEventsResponse)
@@ -279,7 +303,13 @@ def get_cluster_admin_events(
     `since=<oldest_ts_seen>` on the next call.
     """
     if limit is None:
-        limit = settings.display.cluster_events_default_limit
+        limit = int(
+            getattr(
+                request.app.state,
+                "cluster_events_default_limit",
+                settings.display.cluster_events_default_limit,
+            )
+        )
     if limit < 1 or limit > _EVENTS_MAX_LIMIT:
         raise HTTPException(
             status_code=400,
@@ -292,21 +322,16 @@ def get_cluster_admin_events(
             detail="pass either `agent_id` or `service_only=true`, not both",
         )
 
-    level_min = None
-    if level:
-        level_upper = level.upper()
-        order = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
-        if level_upper not in order:
-            raise HTTPException(status_code=400, detail=f"unknown level: {level!r}")
-        level_min = order[order.index(level_upper) :][0].lower()
+    level_min = _normalize_level_min(level)
 
     since_dt = _parse_since(since) if since else None
     events = [e.strip() for e in event.split(",") if e.strip()] if event else None
 
     # A lower bound is always in effect; the default is the last 24 hours.
     window_from = since_dt or datetime.now(UTC) - timedelta(hours=24)
+    events_reader = getattr(request.app.state, "cluster_events_reader", telemetry_rows.query_events)
     with request.app.state.db_pool.connection() as conn:
-        rows, _ = telemetry_rows.query_events(
+        rows, _ = events_reader(
             conn,
             agent_id=agent_id,
             service_only=service_only,
@@ -388,6 +413,8 @@ async def get_cluster_machines(
         fresh=fresh,
         image=request.app.state.process_image,
         local_machine=request.app.state.machine,
+        gather_fn=getattr(request.app.state, "cluster_status_gatherer", None),
+        dispatch_fn=getattr(request.app.state, "status_probe_dispatcher", None),
     )
     # This is the AGENT view: it lists only machines that can run agent processes
     # (carry the agent-runner capability). A gateway-only node is intentionally

@@ -99,12 +99,15 @@ async def upload_files(
             "this route saves silently; deliver a batch with POST /api/keyed/v1/agents/{id}/uploads",
         )
     batch = await read_upload_batch(files)
+    upload_dir_fn = (
+        getattr(request.app.state, "agent_upload_dir_resolver", None) or agent_upload_dir
+    )
     return await asyncio.to_thread(
         save_keyed_batch,
         request.app.state.db_pool,
         key,
         agent_id,
-        agent_upload_dir(agent_id, create=False),
+        upload_dir_fn(agent_id, create=False),
         batch,
         [file.filename or "untitled" for file in files],
         max_bytes=MAX_AGENT_UPLOAD_BYTES,
@@ -123,8 +126,9 @@ def serve_upload(agent_id: int, filename: str, request: Request) -> FileResponse
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise AgentNotFound(agent_id)
+    path_resolver = getattr(request.app.state, "upload_path_resolver", None) or resolve_upload_path
     try:
-        path = resolve_upload_path(agent_id, filename)
+        path = path_resolver(agent_id, filename)
     except ValueError as e:
         # A traversal attempt is a bad request, not a server error.
         raise HTTPException(status_code=400, detail=str(e)) from e

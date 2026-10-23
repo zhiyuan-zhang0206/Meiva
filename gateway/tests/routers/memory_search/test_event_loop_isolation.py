@@ -9,15 +9,17 @@ from pathlib import Path
 
 import pytest
 
-from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_memory_search import (
     SEARCH_PERMITS,
     asgi_client,
     assert_semaphore_locked,
+    gateway_test_client,
     memory_config,
     never_returns,
+    patch_backend,
     patch_provider,
     post_memory_search,
+    set_memory_inputs,
     stub_search_backend,
 )
 from gateway.tests.routers.test_memory_search import (
@@ -36,13 +38,9 @@ class TestEventLoopIsolation:
     examined freezes ended with a gemini-embedding POST as the last MainThread
     log line — the sync call had blocked healthz for minutes)."""
 
-    def test_slow_embed_does_not_block_healthz(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_slow_embed_does_not_block_healthz(self, tmp_path: Path) -> None:
         import threading
         import time
-
-        import services.derived.memory_indexer.backends.factory as _factory
 
         (tmp_path / "a.md").write_text("---\ntype: Memory\n---\nx\n")
 
@@ -58,7 +56,7 @@ class TestEventLoopIsolation:
                 await asyncio.sleep(1.0)
                 return [0.0] * 768
 
-        patch_provider(monkeypatch, _SlowProvider)
+        patch_provider(_SlowProvider)
 
         class _FakeBackend:
             def __init__(self, *args: object, **kwargs: object) -> None:
@@ -70,7 +68,7 @@ class TestEventLoopIsolation:
                 assert timeout > 0  # the handler must hand the backend a real deadline
                 return [ChunkHit(str(tmp_path / "a.md"), "body", 0, 0.5)]
 
-        monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
+        patch_backend(_FakeBackend)
 
         with gateway_test_client(config=memory_config(tmp_path)) as client:
             outcome: dict[str, object] = {}
@@ -112,10 +110,8 @@ class TestWedgedBackendReleasesPermits:
     handler owes regardless.
     """
 
-    async def test_wedged_backend_answers_503_instead_of_hanging(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        stub_search_backend(monkeypatch, tmp_path, search=never_returns)
+    async def test_wedged_backend_answers_503_instead_of_hanging(self, tmp_path: Path) -> None:
+        stub_search_backend(tmp_path, search=never_returns)
 
         async with asgi_client() as client:
             resp = await asyncio.wait_for(post_memory_search(client), timeout=10)
@@ -123,12 +119,10 @@ class TestWedgedBackendReleasesPermits:
         assert resp.status_code == 503
         assert resp.json()["reason"] == "indexer_unavailable"
 
-    async def test_more_wedged_requests_than_permits_all_finish(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    async def test_more_wedged_requests_than_permits_all_finish(self, tmp_path: Path) -> None:
         """The overflow request never reaches the backend — it waits in
         `acquire`, which the deadline has to cover too."""
-        stub_search_backend(monkeypatch, tmp_path, search=never_returns)
+        stub_search_backend(tmp_path, search=never_returns)
 
         async with asgi_client() as client:
             responses = await asyncio.wait_for(
@@ -138,9 +132,7 @@ class TestWedgedBackendReleasesPermits:
 
         assert [r.status_code for r in responses] == [503] * (SEARCH_PERMITS + 1)
 
-    async def test_a_wedged_embed_is_covered_too(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    async def test_a_wedged_embed_is_covered_too(self, tmp_path: Path) -> None:
         """The deadline spans both phases, not just the backend one.
 
         The backend stalled in the incident, but the embed runs under the same
@@ -153,8 +145,8 @@ class TestWedgedBackendReleasesPermits:
             fingerprint = "fake:provider:dim=768"
             embed_query_async = never_returns
 
-        stub_search_backend(monkeypatch, tmp_path, search=never_returns)
-        patch_provider(monkeypatch, _StuckProvider)
+        stub_search_backend(tmp_path, search=never_returns)
+        patch_provider(_StuckProvider)
 
         async with asgi_client() as client:
             responses = await asyncio.wait_for(
@@ -164,9 +156,7 @@ class TestWedgedBackendReleasesPermits:
 
         assert [r.status_code for r in responses] == [503] * (SEARCH_PERMITS + 1)
 
-    async def test_a_cancelled_holder_gives_its_permit_back(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    async def test_a_cancelled_holder_gives_its_permit_back(self, tmp_path: Path) -> None:
         """A client that disconnects mid-search must not cost a permit.
 
         This is the other candidate mechanism for the outage. uvicorn cancels
@@ -180,9 +170,7 @@ class TestWedgedBackendReleasesPermits:
         a suspended coroutine lives on no thread, so faulthandler cannot see
         which await it stopped at.
         """
-        import services.derived.memory_indexer.backends.factory as _factory
-
-        sem = stub_search_backend(monkeypatch, tmp_path, search=never_returns)
+        sem = stub_search_backend(tmp_path, search=never_returns)
 
         async with asgi_client() as client:
             holders = [
@@ -206,20 +194,16 @@ class TestWedgedBackendReleasesPermits:
                 ) -> list[ChunkHit]:
                     return [ChunkHit(str(tmp_path / "a.md"), "body", 0, 0.5)]
 
-            monkeypatch.setattr(_factory, "get_backend", _Healthy)
+            patch_backend(_Healthy)
             recovered = await asyncio.wait_for(post_memory_search(client), timeout=10)
 
         # A 503 here would mean the permits never came back and this request
         # sat in acquire until its own deadline.
         assert recovered.status_code == 200
 
-    async def test_permits_return_so_a_later_search_still_works(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    async def test_permits_return_so_a_later_search_still_works(self, tmp_path: Path) -> None:
         """Enough wedged requests to pin every permit, then a healthy one."""
-        import services.derived.memory_indexer.backends.factory as _factory
-
-        stub_search_backend(monkeypatch, tmp_path, search=never_returns)
+        stub_search_backend(tmp_path, search=never_returns)
 
         async with asgi_client() as client:
             await asyncio.wait_for(
@@ -236,7 +220,7 @@ class TestWedgedBackendReleasesPermits:
                 ) -> list[ChunkHit]:
                     return [ChunkHit(str(tmp_path / "a.md"), "body", 0, 0.5)]
 
-            monkeypatch.setattr(_factory, "get_backend", _Healthy)
+            patch_backend(_Healthy)
             recovered = await asyncio.wait_for(post_memory_search(client), timeout=10)
 
         assert recovered.status_code == 200
@@ -254,18 +238,13 @@ class TestAcquireFastFail:
     and the recalled agent's first LLM turn waited out the whole queue.
     """
 
-    async def test_congested_gate_fails_fast_with_503(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    async def test_congested_gate_fails_fast_with_503(self, tmp_path: Path) -> None:
         """One permit held by a wedged search; the next request 503s on the
         acquire budget, well before the search deadline."""
-        from base.config import settings
-
-        sem = stub_search_backend(monkeypatch, tmp_path, search=never_returns, permits=1)
+        sem = stub_search_backend(tmp_path, search=never_returns, permits=1)
         # A tiny acquire budget so the failure is provably the fast-fail, and a
         # deadline far above it so the deadline is NOT what answered.
-        monkeypatch.setattr(settings.services, "memory_search_acquire_timeout_seconds", 0.05)
-        monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", 5.0)
+        set_memory_inputs(acquire_timeout=lambda: 0.05, deadline=lambda: 5.0)
 
         async with asgi_client() as client:
             holder = asyncio.create_task(post_memory_search(client))
@@ -331,14 +310,12 @@ class TestSemaphoreCancelSafety:
         await asyncio.wait_for(sem.acquire(), timeout=1)
 
 
-def test_semaphore_sized_from_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_semaphore_sized_from_setting() -> None:
     """The query-embed concurrency gate reads `memory_search_max_concurrency`
     (env MEIVA_MEMORY_SEARCH_MAX_CONCURRENCY) — a knob, not a hardcoded constant."""
     import gateway.routers.memory as _gw_memory
-    from base.config import settings
 
-    monkeypatch.setattr(settings.services, "memory_search_max_concurrency", 7)
-    assert _gw_memory.build_search_gate(settings.services.memory_search_max_concurrency)._value == 7
+    assert _gw_memory.build_search_gate(7)._value == 7
 
 
 class TestMemoryNoteEndpoint:

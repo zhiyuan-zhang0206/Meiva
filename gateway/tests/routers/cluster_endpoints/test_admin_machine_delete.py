@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import psycopg
-import pytest
 from psycopg.rows import TupleRow
 
 from base.cluster.machine import MachineIdentity
@@ -83,14 +82,11 @@ class TestAgentMachineList:
         self,
         db_conn: psycopg.Connection,
         set_machine_identity: MachineIdentitySetter,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         # Seed one LOCAL agent-runner row. The local machine is probed through
         # its own ops server like any other (status_probe), so stub the op
         # dispatch; the row survives the agent-view filter (only agent-runner
         # machines run agents).
-        from ops.cluster import rpc as cluster_rpc
-
         machine: MachineIdentity = set_machine_identity(role="agent-runner", name="runner-test")
 
         async def _fake_dispatch(
@@ -114,7 +110,6 @@ class TestAgentMachineList:
                 "paused": False,
             }
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
@@ -124,6 +119,7 @@ class TestAgentMachineList:
             )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         with gateway_test_client(machine=machine) as client:
+            client.app.state.status_probe_dispatcher = _fake_dispatch
             r = client.get("/api/cluster/machines")
         assert r.status_code == 200
         body = r.json()
@@ -140,14 +136,12 @@ class TestAgentMachineList:
         self,
         db_conn: psycopg.Connection,
         set_machine_identity: MachineIdentitySetter,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         """The agent/config projection must not target a runner whose ops
         server answered but could not provide a determinate status."""
         from datetime import UTC, datetime
 
         from base.api_contracts.status import MachineStatus
-        from gateway.cluster import router as cluster_router
 
         machine: MachineIdentity = set_machine_identity(role="gateway", name="cloud-test")
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
@@ -172,8 +166,8 @@ class TestAgentMachineList:
                 )
             ]
 
-        monkeypatch.setattr(cluster_router, "gather_cluster_status", _fake_gather)  # pyright: ignore[reportUnknownArgumentType]
         with gateway_test_client(machine=machine) as client:
+            client.app.state.cluster_status_gatherer = _fake_gather
             response = client.get("/api/cluster/machines")
 
         assert response.status_code == 200
@@ -189,7 +183,6 @@ class TestAgentMachineList:
     def test_get_cluster_machines_excludes_gateway(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         """The agent view (`/api/cluster/machines`) lists only machines that run
         agent processes — the gateway (which runs none) is filtered out.
@@ -201,7 +194,6 @@ class TestAgentMachineList:
         from datetime import UTC, datetime
 
         from base.api_contracts.status import MachineStatus
-        from gateway.cluster import router as cluster_router
 
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
@@ -240,8 +232,8 @@ class TestAgentMachineList:
                 ),
             ]
 
-        monkeypatch.setattr(cluster_router, "gather_cluster_status", _fake_gather)  # pyright: ignore[reportUnknownArgumentType]
         with gateway_test_client() as client:
+            client.app.state.cluster_status_gatherer = _fake_gather
             r = client.get("/api/cluster/machines")
         assert r.status_code == 200
         body = r.json()
@@ -416,7 +408,6 @@ class TestMachinePauseResume:
         self,
         db_conn: psycopg.Connection,
         set_machine_identity: MachineIdentitySetter,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -428,8 +419,6 @@ class TestMachinePauseResume:
         """A machine whose ops server cannot take the graceful terminate (already
         unreachable) gets its agent rows force-marked terminated in the shared
         DB — pause must not leave agents 'running' on a machine that is leaving."""
-        from gateway.agents import forward as _fwd
-
         machine: MachineIdentity = set_machine_identity(role="agent-runner", name="test-host")
         seed_away_machine(db_conn)
         aid = seed_agent_on_machine(
@@ -449,8 +438,8 @@ class TestMachinePauseResume:
         async def _unreachable(_db: object, target: str, path: str, json_body: dict) -> dict:
             raise RuntimeError("ops server unreachable")
 
-        monkeypatch.setattr(_fwd, "enqueue_lifecycle", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
         with gateway_test_client(machine=machine) as client:
+            client.app.state.machine_pause_lifecycle_enqueuer = _unreachable
             r = client.post("/api/cluster/machines/away/pause", json={})
         assert r.status_code == 200
         body = r.json()

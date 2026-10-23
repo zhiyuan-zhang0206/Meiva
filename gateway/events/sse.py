@@ -26,7 +26,7 @@ gets the same ``{role, agent_id, content, ...}`` shape.
 import json
 import logging
 import time
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Callable, Sequence
 from typing import Any
 
 import redis
@@ -140,6 +140,7 @@ async def event_stream(
     role_filter: frozenset[str] | None = None,
     broadcast: bool = False,
     validator: Any = EVENT_ADAPTER,
+    monotonic: Callable[[], float] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Yield a stream of SSE frames (bytes) until the client disconnects
     or Redis goes down.
@@ -180,13 +181,14 @@ async def event_stream(
         bytes: SSE frame (`data: ...\n\n`).
     """
     _channel = channel if channel is not None else bus.channel
+    clock = time.monotonic if monotonic is None else monotonic
     client = bus.open_async_redis()
     pubsub: Any = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     # Attach/detach bracket: a reconnect storm (client watchdog cycling) or a
     # subscriber that never detaches is invisible without the pair; the detach
     # line carries duration + frames so a half-open stream is distinguishable
     # from a healthy long-lived one.
-    opened = time.monotonic()
+    opened = clock()
     data_frames = 0
     metrics_opened = False
     _log.info("sse attach: agent_id=%s channel=%s broadcast=%s", agent_id, _channel, broadcast)
@@ -202,8 +204,8 @@ async def event_stream(
         # Last time a real `data:` frame went out (business event or heartbeat).
         # The `: hb` comment does NOT count — the browser can't see it, so it
         # can't keep the client watchdog alive.
-        last_data_frame = time.monotonic()
-        last_comment = time.monotonic()
+        last_data_frame = clock()
+        last_comment = clock()
 
         while True:
             if stopping.is_stopping():
@@ -225,7 +227,7 @@ async def event_stream(
                 yield sse_frame(_error_payload(agent_id, exc))
                 return
 
-            now = time.monotonic()
+            now = clock()
             if msg is not None and isinstance(msg["data"], str):
                 try:
                     event = validator.validate_json(msg["data"])
@@ -254,7 +256,7 @@ async def event_stream(
         _log.info(
             "sse detach: agent_id=%s duration=%.1fs data_frames=%d",
             agent_id,
-            time.monotonic() - opened,
+            clock() - opened,
             data_frames,
         )
         await close_pubsub(pubsub, client, _channel)

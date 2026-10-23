@@ -11,14 +11,20 @@ for illegal parameters. The telemetry reader is mocked;
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
 import pytest
 
-from gateway.events import telemetry_rows
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+)
+from gateway.tests.auth.gateway_config import (
+    gateway_test_client as _base_gateway_test_client,
+)
 
 _EVENT_KEYS = {
     "id",
@@ -69,24 +75,44 @@ class _FakeEvents:
         self.totals: list[int] = []
         self.has_more = False
 
+    def query(self, _conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+        self.calls.append(kwargs)
+        return self.rows, self.has_more
+
+    def count(self, _conn: object, **kwargs: Any) -> int:
+        self.calls.append(kwargs)
+        return self.totals[-1] if self.totals else len(self.rows)
+
+
+_active_fake_events: list[_FakeEvents] = []
+
+
+@contextmanager
+def gateway_test_client(
+    *,
+    query_events: Any = None,
+    default_limit: int | None = None,
+) -> Generator[GatewayTestClient]:
+    with _base_gateway_test_client() as client:
+        if _active_fake_events:
+            client.app.state.telemetry_events_reader = _active_fake_events[-1].query
+            client.app.state.telemetry_events_counter = _active_fake_events[-1].count
+        if query_events is not None:
+            client.app.state.telemetry_events_reader = query_events
+        if default_limit is not None:
+            client.app.state.events_default_limit = default_limit
+        yield client
+
 
 @pytest.fixture
-def fake_events(monkeypatch: pytest.MonkeyPatch) -> _FakeEvents:
-    """Patch telemetry_rows.query_events + count_events; record kwargs."""
-
+def fake_events() -> Generator[_FakeEvents]:
+    """Configure telemetry_events_reader + telemetry_events_counter; record kwargs."""
     fake = _FakeEvents()
-
-    def _query(_conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
-        fake.calls.append(kwargs)
-        return fake.rows, fake.has_more
-
-    def _count(_conn: object, **kwargs: Any) -> int:
-        fake.calls.append(kwargs)
-        return fake.totals[-1] if fake.totals else len(fake.rows)
-
-    monkeypatch.setattr(telemetry_rows, "query_events", _query)
-    monkeypatch.setattr(telemetry_rows, "count_events", _count)
-    return fake
+    _active_fake_events.append(fake)
+    try:
+        yield fake
+    finally:
+        _active_fake_events.clear()
 
 
 class TestEventsApi:
@@ -102,14 +128,11 @@ class TestEventsApi:
         assert body["meta"]["offset"] == 0
         assert body["meta"]["window_from"] is not None  # 24h default echoes
 
-    def test_a_read_that_exceeds_its_statement_timeout_returns_503(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_read_that_exceeds_its_statement_timeout_returns_503(self) -> None:
         def _boom(_conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
             raise psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
 
-        monkeypatch.setattr(telemetry_rows, "query_events", _boom)
-        with gateway_test_client() as client:
+        with gateway_test_client(query_events=_boom) as client:
             r = client.get("/api/events")
         assert r.status_code == 503
         assert r.json()["detail"] == "events read timed out"
@@ -264,17 +287,12 @@ class TestEventsApi:
         assert kw["limit"] == 5
         assert kw["offset"] == 10
 
-    def test_default_limit_comes_from_display_config(
-        self, fake_events: _FakeEvents, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_default_limit_comes_from_display_config(self, fake_events: _FakeEvents) -> None:
         """The implicit window is ``settings.display.events_default_limit``
         (``MEIVA_EVENTS_DEFAULT_LIMIT``); the literal 100 is only that field's
         default, not a hard-coded page size. The meta echo reports the
         resolved window, not the raw None."""
-        from base.config import settings
-
-        monkeypatch.setattr(settings.display, "events_default_limit", 7)
-        with gateway_test_client() as client:
+        with gateway_test_client(default_limit=7) as client:
             r = client.get("/api/events")
         assert r.status_code == 200
         assert fake_events.calls[0]["limit"] == 7

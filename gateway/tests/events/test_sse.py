@@ -14,9 +14,8 @@ tailer filters by agent_id, test agent_ids are all newly created in tests).
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
-from types import SimpleNamespace
 
 import psycopg
 import pytest
@@ -64,6 +63,7 @@ async def _collect_frames(
     broadcast: bool = False,
     count_heartbeats: bool = False,
     overall_timeout: float = 90.0,
+    monotonic: Callable[[], float] | None = None,
 ) -> list[bytes]:
     """Start event_stream + async publish + stop after collecting enough n data frames.
 
@@ -89,6 +89,7 @@ async def _collect_frames(
         channel=channel,
         role_filter=role_filter,
         broadcast=broadcast,
+        monotonic=monotonic,
     )
 
     # pull the opening frame to confirm subscribe is ready
@@ -356,38 +357,30 @@ def test_per_agent_stream_carries_full_roles_for_one_agent_only(
     assert all(d["agent_id"] == tid_a for d in decoded)  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_sse_system_endpoint_response_headers(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_sse_system_endpoint_response_headers() -> None:
     """/system SSE endpoint should have correct Content-Type + Cache-Control etc. headers."""
 
     async def fake_stream(*_args: object, **_kwargs: object) -> AsyncIterator[bytes]:
         yield b": stream open\n\n"
 
-    from gateway.events import system as system_router
-
-    monkeypatch.setattr(system_router, "event_stream", fake_stream)
-
-    with gateway_test_client() as client, client.stream("GET", "/api/agents/1/system") as resp:
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("text/event-stream")
-        assert resp.headers["cache-control"] == "no-cache"
-        assert resp.headers["x-accel-buffering"] == "no"
+    with gateway_test_client() as client:
+        client.app.state.system_event_stream = fake_stream
+        with client.stream("GET", "/api/agents/1/system") as resp:
+            assert resp.status_code == 200
+            assert resp.headers["content-type"].startswith("text/event-stream")
+            assert resp.headers["cache-control"] == "no-cache"
+            assert resp.headers["x-accel-buffering"] == "no"
 
 
 def test_sse_emits_heartbeat_data_event_when_idle(
     db_conn: psycopg.Connection,
     redis_client: sync_redis.Redis,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Idle (no business event) for _HEARTBEAT_SECONDS -> a visible
     `data: {"role":"heartbeat"}` frame goes out. The client watchdog needs a real
     data frame (the `: hb` comment is invisible to EventSource.onmessage), so this
     pins that one actually reaches the client. Advance the stream's clock past its
     normal heartbeat interval on the first idle tick."""
-    from gateway.events import sse as sse_mod
-
     now = 0.0
 
     def monotonic() -> float:
@@ -395,12 +388,18 @@ def test_sse_emits_heartbeat_data_event_when_idle(
         now += 20.0
         return now
 
-    monkeypatch.setattr(sse_mod, "time", SimpleNamespace(monotonic=monotonic))
     tid = create_agent(db_conn)
     # no payloads -> the stream sits idle -> the heartbeat is the first data frame (count_heartbeats=True: this test is
     # ABOUT the heartbeat — the default filters them out as load noise)
     frames = asyncio.run(
-        _collect_frames(tid, redis_client, [], n_data_frames=1, count_heartbeats=True)
+        _collect_frames(
+            tid,
+            redis_client,
+            [],
+            n_data_frames=1,
+            count_heartbeats=True,
+            monotonic=monotonic,
+        )
     )
     decoded = decode_frames_for_test(frames)
     assert decoded[0] == {"role": "heartbeat"}

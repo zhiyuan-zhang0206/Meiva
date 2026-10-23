@@ -114,28 +114,22 @@ def test_resolve_cross_agent_path_409(
 
 
 def test_open_default_limit_comes_from_display_config(
-    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+    db_conn: psycopg.Connection,
 ) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.display, "notices_open_default_limit", 2)
     a = seed_agent(db_conn)
     insert_notice(db_conn, a, "older", require_response=True)
     insert_notice(db_conn, a, "newer", require_response=True)
     insert_notice(db_conn, a, "newest", require_response=True)
 
     with gateway_test_client() as client:
+        client.app.state.notices_open_default_limit = 2
         data = client.get("/api/notices/open").json()
     assert [r["title"] for r in data] == ["older", "newer"]
 
 
 def test_feed_defaults_come_from_display_config(
-    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+    db_conn: psycopg.Connection,
 ) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.display, "notices_open_default_limit", 1)
-    monkeypatch.setattr(settings.display, "notices_resolved_default_page", 1)
     a = seed_agent(db_conn)
     insert_notice(db_conn, a, "open older", require_response=True)
     insert_notice(db_conn, a, "open newer", require_response=True)
@@ -159,6 +153,8 @@ def test_feed_defaults_come_from_display_config(
     )
 
     with gateway_test_client() as client:
+        client.app.state.notices_open_default_limit = 1
+        client.app.state.notices_resolved_default_page = 1
         feed = client.get("/api/notices").json()
     assert [r["title"] for r in feed["awaiting"]] == ["open older"]
     assert [r["title"] for r in feed["resolved_page"]] == ["resolved r1"]
@@ -290,10 +286,8 @@ def test_live_empty_after_cursor(db_conn: psycopg.Connection) -> None:
 # leaves the resolved row in the open list until a refresh.
 # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
 def test_resolution_publishes_global_notice_id(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
-    from ops import lifecycle as ops_lifecycle
-
     agent_id = seed_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("SELECT coalesce(max(id), 0) FROM agent_notices")
@@ -310,8 +304,8 @@ def test_resolution_publishes_global_notice_id(
     async def _capture(_bus: object, _agent_id: int, notice_id: int, **_: object) -> None:
         published.append(notice_id)
 
-    monkeypatch.setattr(ops_lifecycle, "publish_notice_resolved", _capture)
     with gateway_test_client() as client:
+        client.app.state.notice_resolved_publisher = _capture
         resp = client.post(
             f"/api/keyed/v1/agents/{agent_id}/notices/{open_id}/resolve",
             json={"action": "dismiss"},

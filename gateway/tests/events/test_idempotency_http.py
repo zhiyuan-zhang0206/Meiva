@@ -19,17 +19,13 @@ def test_authenticated_admin_retry_and_scoped_reconcile(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
     agent_id: int,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from base.config import settings
-
     del gateway_data_plane
     secret = "principal-scope-test-secret"  # noqa: S105 — isolated test credential
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     url = f"/api/agents/{agent_id}/messages"
     body = {"content": "admin principal retry", "source": "user"}
     headers = {"Authorization": f"Bearer {secret}"} | keyed_headers("new-logical-message")
-    with gateway_test_client() as client:
+    with gateway_test_client(cluster_secret=secret) as client:
         first = client.post(url, json=body, headers=headers)
         repeated = client.post(url, json=body, headers=headers)
         assert first.status_code == repeated.status_code == 201, first.text
@@ -64,19 +60,15 @@ def test_browser_rotation_and_bearer_share_admin_retry_namespace(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
     agent_id: int,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from base.config import settings
     from base.host.net.auth import cookie_name
 
     del gateway_data_plane
     secret = "principal-rotation-test-secret"  # noqa: S105 — isolated test credential
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(settings.gateway, "session_cookie_secure", False)
     url = f"/api/agents/{agent_id}/messages"
     body = {"content": "same administrator across sessions", "source": "user"}
     headers = {"Idempotency-Key": "session-rotation", "Idempotency-Scope": "principal-v1"}
-    with gateway_test_client() as client:
+    with gateway_test_client(cluster_secret=secret, session_cookie_secure=False) as client:
         client.headers.pop("Authorization", None)
         login = client.post("/api/auth/login", json={"password": secret})
         assert login.status_code == 200, login.text
