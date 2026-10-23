@@ -49,7 +49,6 @@ from fastapi import Request
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
 from gateway.events import sse
-from gateway.http.middleware import stopping
 from gateway.tests.bootstrap.child_gateway_scenarios import (
     MARKERS_ENV as _MARKERS_ENV,
 )
@@ -366,31 +365,41 @@ def cleanup(monkeypatch: pytest.MonkeyPatch) -> _Cleanup:
         return _RedisClient(record)
 
     patch_open_async_redis(monkeypatch, open_redis)
-
-    async def pass_through(call: Callable[[], Awaitable[Any]]) -> Any:
-        return await call()
-
-    monkeypatch.setattr(sse, "retry_auth_failures_async", pass_through)
     return record
 
 
-def _sse_stream(mode: str) -> AsyncGenerator[bytes, None]:
+async def _pass_through(call: Callable[[], Awaitable[Any]]) -> Any:
+    return await call()
+
+
+def _sse_stream(mode: str, *, is_stopping_fn: Callable[[], bool]) -> AsyncGenerator[bytes, None]:
     request = cast(Request, _ConnectedRequest())
     if mode == "filtered":
-        return sse.event_stream(EventBus.from_settings(), 7, request)
-    return sse.throttled_event_stream(EventBus.from_settings(), request, throttle_rate=20.0)
+        return sse.event_stream(
+            EventBus.from_settings(),
+            7,
+            request,
+            is_stopping_fn=is_stopping_fn,
+            retry_auth_fn=_pass_through,
+        )
+    return sse.throttled_event_stream(
+        EventBus.from_settings(),
+        request,
+        throttle_rate=20.0,
+        is_stopping_fn=is_stopping_fn,
+        retry_auth_fn=_pass_through,
+    )
 
 
 @pytest.mark.parametrize("mode", ["filtered", "throttled"])
 async def test_stream_ends_cleanly_once_the_server_is_stopping(
-    monkeypatch: pytest.MonkeyPatch, cleanup: _Cleanup, mode: str
+    cleanup: _Cleanup, mode: str
 ) -> None:
     marked = False
-    monkeypatch.setattr(stopping, "is_stopping", lambda: marked)
     frames: list[bytes] = []
 
     async def consume() -> None:
-        async for frame in _sse_stream(mode):
+        async for frame in _sse_stream(mode, is_stopping_fn=lambda: marked):
             frames.append(frame)
 
     consumer = asyncio.create_task(consume())

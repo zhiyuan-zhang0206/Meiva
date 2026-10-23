@@ -26,7 +26,7 @@ gets the same ``{role, agent_id, content, ...}`` shape.
 import json
 import logging
 import time
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from typing import Any
 
 import redis
@@ -101,11 +101,18 @@ def _matches_filter(
 
 
 async def _subscribe_error_frame(
-    pubsub: Any, channel: str, agent_id: int, *, batched: bool = False
+    pubsub: Any,
+    channel: str,
+    agent_id: int,
+    *,
+    batched: bool = False,
+    retry_auth_fn: Callable[
+        [Callable[[], Awaitable[Any]]], Awaitable[Any]
+    ] = retry_auth_failures_async,
 ) -> bytes | None:
     """Return a wire-shaped error after a failed subscribe, else None."""
     try:
-        await retry_auth_failures_async(lambda: pubsub.subscribe(channel))
+        await retry_auth_fn(lambda: pubsub.subscribe(channel))
     except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
         _log.warning("sse pubsub subscribe failed: %r agent_id=%s", exc, agent_id)
         payload = _error_payload(agent_id, exc)
@@ -141,6 +148,10 @@ async def event_stream(
     broadcast: bool = False,
     validator: Any = EVENT_ADAPTER,
     monotonic: Callable[[], float] | None = None,
+    is_stopping_fn: Callable[[], bool] = stopping.is_stopping,
+    retry_auth_fn: Callable[
+        [Callable[[], Awaitable[Any]]], Awaitable[Any]
+    ] = retry_auth_failures_async,
 ) -> AsyncGenerator[bytes, None]:
     """Yield a stream of SSE frames (bytes) until the client disconnects
     or Redis goes down.
@@ -193,7 +204,9 @@ async def event_stream(
     metrics_opened = False
     _log.info("sse attach: agent_id=%s channel=%s broadcast=%s", agent_id, _channel, broadcast)
     try:
-        if error_frame := await _subscribe_error_frame(pubsub, _channel, agent_id):
+        if error_frame := await _subscribe_error_frame(
+            pubsub, _channel, agent_id, retry_auth_fn=retry_auth_fn
+        ):
             yield error_frame
             return
         runtime_metrics.sse_opened("filtered")
@@ -208,12 +221,12 @@ async def event_stream(
         last_comment = clock()
 
         while True:
-            if stopping.is_stopping():
+            if is_stopping_fn():
                 return  # a clean end: the client's EventSource reconnects to the next gateway
             try:
                 if await request.is_disconnected():
                     return
-                msg = await retry_auth_failures_async(
+                msg = await retry_auth_fn(
                     lambda: pubsub.get_message(
                         ignore_subscribe_messages=True,
                         # Client disconnect-detection polling window; deltas shorter
@@ -268,6 +281,10 @@ async def _drain_redis_messages(
     flush_interval: float,
     *,
     agent_filter: set[int] | None,
+    is_stopping_fn: Callable[[], bool] = stopping.is_stopping,
+    retry_auth_fn: Callable[
+        [Callable[[], Awaitable[Any]]], Awaitable[Any]
+    ] = retry_auth_failures_async,
 ) -> tuple[list[str], bool]:
     """Drain all available messages from Redis within one flush window.
 
@@ -284,7 +301,7 @@ async def _drain_redis_messages(
     # Check disconnect once per drain cycle — a disconnect detected on
     # the next cycle (≤ flush_interval away) is a rounding error. A gateway
     # shutdown ends the stream the same way.
-    if stopping.is_stopping() or await request.is_disconnected():
+    if is_stopping_fn() or await request.is_disconnected():
         return [], True
 
     buffer: list[str] = []
@@ -295,7 +312,7 @@ async def _drain_redis_messages(
         if remaining <= 0:
             break
         poll = min(remaining, 0.1)
-        msg = await retry_auth_failures_async(
+        msg = await retry_auth_fn(
             lambda poll=poll: pubsub.get_message(  # pyright: ignore[reportUnknownMemberType]
                 ignore_subscribe_messages=True,
                 timeout=poll,
@@ -324,6 +341,10 @@ async def throttled_event_stream(
     channel: str | None = None,
     throttle_rate: float,
     agent_filter: set[int] | None = None,
+    is_stopping_fn: Callable[[], bool] = stopping.is_stopping,
+    retry_auth_fn: Callable[
+        [Callable[[], Awaitable[Any]]], Awaitable[Any]
+    ] = retry_auth_failures_async,
 ) -> AsyncGenerator[bytes, None]:
     """Yield a throttled, batched SSE stream of events.
 
@@ -365,7 +386,9 @@ async def throttled_event_stream(
         throttle_rate,
     )
     try:
-        if error_frame := await _subscribe_error_frame(pubsub, _channel, 0, batched=True):
+        if error_frame := await _subscribe_error_frame(
+            pubsub, _channel, 0, batched=True, retry_auth_fn=retry_auth_fn
+        ):
             yield error_frame
             return
         runtime_metrics.sse_opened("throttled")
@@ -382,6 +405,8 @@ async def throttled_event_stream(
                     request,
                     flush_interval,
                     agent_filter=agent_filter,
+                    is_stopping_fn=is_stopping_fn,
+                    retry_auth_fn=retry_auth_fn,
                 )
             except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
                 _log.warning("sse throttle pubsub read failed: %r", exc)

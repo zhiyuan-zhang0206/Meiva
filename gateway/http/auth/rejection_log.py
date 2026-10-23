@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 
 from fastapi import Request
 
@@ -51,10 +52,11 @@ def _is_browser_user_agent(user_agent: str) -> bool:
 class AuthRejectionLog:
     """Authentication rejection counters and throttles owned by one gateway lifespan."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
         self.total = 0
         self.last_warn: dict[tuple[str, str], float] = {}
         self.suppressed: dict[tuple[str, str], int] = {}
+        self._clock = clock
 
     def _prune(self, now: float) -> None:
         """Forget client/path keys idle for more than two warning windows."""
@@ -84,7 +86,7 @@ class AuthRejectionLog:
             )
             return
 
-        now = time.monotonic()
+        now = self._clock()
         self._prune(now)
         key = (client, path)
         last_warn = self.last_warn.get(key)

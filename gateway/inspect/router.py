@@ -87,7 +87,12 @@ def _shell_ttls_blocking(pool: ConnectionPool, agent_id: int) -> dict[int, datet
 
 
 async def _probe_agent_shells(
-    database: Database, agent_id: int, machine: str, pool: ConnectionPool
+    database: Database,
+    agent_id: int,
+    machine: str,
+    pool: ConnectionPool,
+    *,
+    rpc_dispatcher: Callable[..., Any] = cluster_rpc.dispatch_to_machine,
 ) -> tuple[list[ShellInfo], bool]:
     """The agent's live persistent shells, probed on the machine it runs on.
 
@@ -107,7 +112,7 @@ async def _probe_agent_shells(
     empty set. Malformed successful responses fail rather than invent data.
     """
     try:
-        result = await cluster_rpc.dispatch_to_machine(
+        result = await rpc_dispatcher(
             database,
             machine,
             "shell_probe",
@@ -177,10 +182,15 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     """
     pool = request.app.state.db_pool
     rows_reader = getattr(request.app.state, "inspect_db_rows", db_rows_blocking)
+    rpc_dispatcher = getattr(
+        request.app.state, "inspect_rpc_dispatcher", cluster_rpc.dispatch_to_machine
+    )
     db = await asyncio.to_thread(rows_reader, pool, agent_id)
     notice, shells, last_pause = await asyncio.gather(
         asyncio.to_thread(notice_blocking, pool, agent_id),
-        _probe_agent_shells(request.app.state.db, agent_id, db.machine, pool),
+        _probe_agent_shells(
+            request.app.state.db, agent_id, db.machine, pool, rpc_dispatcher=rpc_dispatcher
+        ),
         asyncio.to_thread(_heartbeat_last_pause, pool, agent_id),
     )
     return AgentInspectLive(

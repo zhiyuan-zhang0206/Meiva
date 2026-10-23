@@ -596,9 +596,9 @@ def create_app_from_environment() -> FastAPI:
     )
 
 
-def openapi_schema() -> dict[str, Any]:
+def openapi_schema(*, config_factory: Callable[[], ConfigBoot] = ConfigBoot) -> dict[str, Any]:
 
-    config = ConfigBoot()
+    config = config_factory()
     process = GatewayProcess(
         home=paths.resolve_meiva_home(),
         config=config,

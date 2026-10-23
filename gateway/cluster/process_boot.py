@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -37,12 +37,14 @@ class GatewayProcess:
         image: LoadedCommit,
         machine: MachineIdentity,
         host: Host,
+        database_cls: Callable[..., Database] = Database,
     ) -> None:
         self.home = home
         self.config = config
         self.machine = machine
         self.host = host
         self.image = image
+        self._database_cls = database_cls
         self.version = CodeVersion(image)
         self.gate = ProcessDbGate(version=self.version.get, process="gateway")
         self.clients = ClientSet(
@@ -54,7 +56,7 @@ class GatewayProcess:
 
     def database(self) -> Database:
         """Read the current root config, retaining this entry's original gate."""
-        return Database(
+        return self._database_cls(
             db_config_from_boot(self.config),
             gate=self.gate,
             direct_url=ClusterDirectUrl(self.machine.host),

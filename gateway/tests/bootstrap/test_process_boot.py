@@ -39,18 +39,13 @@ def test_both_gateway_entries_use_the_same_first_load_fact() -> None:
     assert gateway_app.LOADED_IMAGE is LOADED_IMAGE
 
 
-def _forbid_config_reads(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden(_boot: ConfigBoot, _name: str) -> object:
-        raise AssertionError("entry owner read configuration during cold construction")
-
-    monkeypatch.setattr(ConfigBoot, "get_field", forbidden)
+class _ColdConfigBoot(ConfigBoot):
+    def get_field(self, name: str) -> object:
+        raise AssertionError(f"entry owner read configuration {name!r} during cold construction")
 
 
-def test_gateway_owner_construction_is_cold(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    config = ConfigBoot()
-    _forbid_config_reads(monkeypatch)
+def test_gateway_owner_construction_is_cold(*, machine_identity: MachineIdentity) -> None:
+    config = _ColdConfigBoot()
     process = GatewayProcess(
         home=meiva_home(),
         config=config,
@@ -63,17 +58,12 @@ def test_gateway_owner_construction_is_cold(
         assert process.clients.sync_events().status is DrainStatus.COMPLETED
 
 
-def test_gateway_handles_retain_the_same_entry_gate(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
+def test_gateway_handles_retain_the_same_entry_gate(*, machine_identity: MachineIdentity) -> None:
     gates: list[ProcessDbGate] = []
-    original = Database.__init__
 
-    def build(
-        handle: Database, config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
-    ) -> None:
+    def build(config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
         gates.append(gate)
-        original(handle, config, gate=gate, direct_url=direct_url)
+        return Database(config, gate=gate, direct_url=direct_url)
 
     process = GatewayProcess(
         home=meiva_home(),
@@ -81,8 +71,8 @@ def test_gateway_handles_retain_the_same_entry_gate(
         image=LOADED_IMAGE,
         machine=machine_identity,
         host=fake_host(),
+        database_cls=build,
     )
-    monkeypatch.setattr(Database, "__init__", build)
     with process.lifetime():
         first = process.database()
         second = process.database()
@@ -90,16 +80,15 @@ def test_gateway_handles_retain_the_same_entry_gate(
     assert gates == [process.gate, process.gate]
 
 
-def test_gateway_cleanup_preserves_a_startup_primary(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
+def test_gateway_cleanup_preserves_a_startup_primary(*, machine_identity: MachineIdentity) -> None:
     from base.agents.context.clients import ClientSet
 
     primary = ValueError("startup failed")
     cleanup = RuntimeError("writer close failed")
 
-    def fail(_clients: ClientSet) -> None:
-        raise cleanup
+    class _FailingClientSet(ClientSet):
+        def close(self, *, pipeline_timeout: float = 10.0) -> None:
+            raise cleanup
 
     process = GatewayProcess(
         home=meiva_home(),
@@ -108,7 +97,7 @@ def test_gateway_cleanup_preserves_a_startup_primary(
         machine=machine_identity,
         host=fake_host(),
     )
-    monkeypatch.setattr(ClientSet, "close", fail)
+    process.clients = _FailingClientSet(database=process.database)
     with pytest.raises(ValueError) as caught, process.lifetime():
         raise primary
     assert caught.value is primary
@@ -166,16 +155,11 @@ def test_gateway_first_load_image_does_not_follow_a_checkout_move(tmp_path: Path
 
 @pytest.mark.parametrize("sha", [None, "entry-image-sha"])
 def test_asgi_health_keeps_its_explicit_entry_image(
-    monkeypatch: pytest.MonkeyPatch,
     sha: str | None,
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    def test_database(_process: GatewayProcess) -> Database:
-        return database
-
-    monkeypatch.setattr(GatewayProcess, "database", test_database)
     image = LoadedCommit(Path("entry-source"), sha)
     process = GatewayProcess(
         home=meiva_home(),
@@ -183,6 +167,7 @@ def test_asgi_health_keeps_its_explicit_entry_image(
         image=image,
         machine=machine_identity,
         host=fake_host(),
+        database_cls=lambda *_a, **_kw: database,
     )
     app = gateway_test_app(process=process)
     with (
@@ -197,9 +182,8 @@ def test_asgi_health_keeps_its_explicit_entry_image(
         assert app.state.process_image is image
 
 
-def test_openapi_schema_is_cold(monkeypatch: pytest.MonkeyPatch) -> None:
-    _forbid_config_reads(monkeypatch)
-    schema = gateway_app.openapi_schema()
+def test_openapi_schema_is_cold() -> None:
+    schema = gateway_app.openapi_schema(config_factory=_ColdConfigBoot)
     assert isinstance(schema, dict)
     assert "/api/health" in schema["paths"]
 

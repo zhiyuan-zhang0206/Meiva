@@ -86,7 +86,6 @@ def test_inspect_unknown_agent_404(db_conn: psycopg.Connection) -> None:
 
 def test_inspect_live_returns_only_window_independent_fields(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     aid = _insert_agent(
         db_conn,
@@ -110,8 +109,8 @@ def test_inspect_live_returns_only_window_independent_fields(
             "shells": [{"id": 5, "name": "live-shell", "created_at": None, "uptime_seconds": 42}]
         }
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
     with gateway_test_client() as client:
+        client.app.state.inspect_rpc_dispatcher = dispatch
         response = client.get(f"/api/agents/{aid}/inspect/live")
 
     assert response.status_code == 200
@@ -158,7 +157,6 @@ def test_inspect_live_unknown_agent_404(db_conn: psycopg.Connection) -> None:
 
 def test_inspect_live_probe_failure_is_unavailable_not_empty_success(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     aid = _insert_agent(db_conn)
     db_conn.commit()
@@ -166,8 +164,8 @@ def test_inspect_live_probe_failure_is_unavailable_not_empty_success(
     async def unreachable(*args: object, **kwargs: object) -> dict[str, object]:
         raise inspect_router.cluster_rpc.ClusterOpUnreachable("connect failed")
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", unreachable)
     with gateway_test_client() as client:
+        client.app.state.inspect_rpc_dispatcher = unreachable
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.status_code == 200
     assert response.json()["shells"] == []
@@ -176,7 +174,7 @@ def test_inspect_live_probe_failure_is_unavailable_not_empty_success(
 
 @pytest.mark.parametrize("malformed", [False, True])
 def test_inspect_live_distinguishes_valid_empty_from_missing_shell_data(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, malformed: bool
+    db_conn: psycopg.Connection, malformed: bool
 ) -> None:
     aid = _insert_agent(db_conn)
     db_conn.commit()
@@ -184,8 +182,8 @@ def test_inspect_live_distinguishes_valid_empty_from_missing_shell_data(
     async def probe(*args: object, **kwargs: object) -> dict[str, object]:
         return {} if malformed else {"shells": []}
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", probe)
     with gateway_test_client() as client:
+        client.app.state.inspect_rpc_dispatcher = probe
         if malformed:
             with pytest.raises(KeyError, match="shells"):
                 client.get(f"/api/agents/{aid}/inspect/live")
@@ -221,7 +219,7 @@ def test_inspect_null_config_overlay_is_empty_dict(db_conn: psycopg.Connection) 
 
 
 def test_inspect_shells_probed_on_agents_machine(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -242,9 +240,8 @@ def test_inspect_shells_probed_on_agents_machine(
             ]
         }
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
-
     with gateway_test_client() as client:
+        client.app.state.inspect_rpc_dispatcher = _fake_dispatch
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert seen == {
         "machine": "runner-a",
@@ -264,7 +261,7 @@ def test_inspect_shells_probed_on_agents_machine(
 
 @pytest.mark.parametrize("name", ["page-preview", "schedule-check"])
 def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, name: str
+    db_conn: psycopg.Connection, name: str
 ) -> None:
     launched = datetime.now(UTC) - timedelta(minutes=30)
     deadline = datetime.now(UTC) + timedelta(hours=2)
@@ -288,9 +285,8 @@ def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
             ]
         }
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
-
     with gateway_test_client() as client:
+        client.app.state.inspect_rpc_dispatcher = _fake_dispatch
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     by_id = {s["id"]: s for s in body["shells"]}
     assert datetime.fromisoformat(by_id[5]["expires_at"]) == deadline
@@ -298,7 +294,7 @@ def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
 
 
 def test_inspect_shells_degrade_to_empty_on_unreachable(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -310,16 +306,15 @@ def test_inspect_shells_degrade_to_empty_on_unreachable(
     ) -> dict[str, object]:
         raise cluster_rpc.ClusterOpUnreachable("connect failed")
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable_dispatch)
-
     with gateway_test_client() as client:
+        client.app.state.inspect_rpc_dispatcher = _unreachable_dispatch
         resp = client.get(f"/api/agents/{aid}/inspect/live")
     assert resp.status_code == 200
     assert resp.json()["shells"] == []
 
 
 def test_inspect_shells_degrade_to_empty_on_failed_op(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -331,9 +326,8 @@ def test_inspect_shells_degrade_to_empty_on_failed_op(
     ) -> dict[str, object]:
         raise cluster_rpc.ClusterOpFailed({"error": "unknown kind: shell_probe"})
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed_dispatch)
-
     with gateway_test_client() as client:
+        client.app.state.inspect_rpc_dispatcher = _failed_dispatch
         resp = client.get(f"/api/agents/{aid}/inspect/live")
     assert resp.status_code == 200
     assert resp.json()["shells"] == []

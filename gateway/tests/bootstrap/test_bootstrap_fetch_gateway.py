@@ -1,6 +1,5 @@
 """A runner's bootstrap fetch against the live gateway endpoint."""
 
-import os
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -25,18 +24,16 @@ def test_fetch_bootstrap_config_against_live_endpoint(
 ) -> None:
     # An authenticated gateway: the runner presents its delivered machine API
     # token (the active generation's runner token), never the human secret.
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "live-secret")
-    monkeypatch.setitem(os.environ, "MEIVA_API_TOKEN", served_gateway_home.api.runner)
-    monkeypatch.delitem(os.environ, "MEIVA_CLUSTER_SECRET")
-
     # Route base.host.env.bootstrap's dial_get (base.host.net.http_dial.get) through the
     # in-process ASGI app.
     def fake_get(url, **kw):
-        with gateway_test_client(machine=machine_identity) as c:
+        with gateway_test_client(
+            machine=machine_identity, fields={"cluster_secret": "live-secret"}
+        ) as c:
             return c.get(url.replace("http://cp", ""), **kw)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     monkeypatch.setattr(bootstrap, "dial_get", fake_get)  # pyright: ignore[reportUnknownArgumentType]
-    values = bootstrap.fetch_bootstrap_config("http://cp")
+    values = bootstrap.fetch_bootstrap_config("http://cp", bearer=served_gateway_home.api.runner)
     # Bootstrap serves the credential-free endpoint even though this gateway
     # keeps an active write generation: its runner login never travels here. A
     # multi-host gateway also rewrites its loopback host to the reachable

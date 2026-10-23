@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-from base import config, paths
+from base import paths
 from base.api_contracts.agent_contract import AgentNotFound, ErrorReason, MeivaAgentError
 from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
@@ -158,12 +158,10 @@ def test_global_handlers_emit_typed_envelopes(
 
 
 def test_active_otel_trace_id_wins_over_request_fallback(
-    handler_client: GatewayTestClient, monkeypatch: pytest.MonkeyPatch
+    handler_client: GatewayTestClient,
 ) -> None:
     """Envelope correlation uses the active OTel trace when one exists."""
-    from gateway.http.middleware import error_envelope
-
-    monkeypatch.setattr(error_envelope.telemetry, "capture_trace_ids", lambda: ("a" * 32, None))
+    handler_client.app.state.trace_ids_capturer = lambda: ("a" * 32, None)
     response = handler_client.get("/agent")
     assert response.json()["trace_id"] == "a" * 32
 
@@ -174,6 +172,7 @@ def _request(
     path: str = "/api/agents",
     headers: list[tuple[bytes, bytes]] | None = None,
     client: tuple[str, int] | None = ("127.0.0.1", 1),
+    cluster_value: str = "test-secret",
 ) -> Request:
     """Build the smallest request shape accepted by the direct middleware calls.
 
@@ -182,7 +181,9 @@ def _request(
     bearer and anonymous requests pay no session lookup.
     """
     _middleware_app.state.gateway_config = replace(
-        gateway_config_from_boot(snapshot_process_config()), human_auth="required"
+        gateway_config_from_boot(snapshot_process_config()),
+        human_auth="required",
+        cluster_secret=cluster_value,
     )
     return Request(
         {
@@ -211,10 +212,6 @@ def _auth401_state() -> None:
     _middleware_app.state.gateway_process = SimpleNamespace(home=paths.meiva_home())
 
 
-def _enable_cluster_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
-
-
 def _unauthorized_auth_response(request: Request) -> Response:
     async def call_next(_request: Request) -> Response:
         raise AssertionError("authentication middleware must short-circuit")
@@ -231,9 +228,8 @@ def _auth401_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord
     ]
 
 
-def test_auth_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_auth_middleware_uses_envelope() -> None:
     """Unauthorized short-circuits remain 401 but expose the shared contract."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
 
     async def call_next(_request: Request) -> Response:
         raise AssertionError("authentication middleware must short-circuit")
@@ -242,11 +238,8 @@ def test_auth_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
     _assert_envelope(response, status=401, code="authentication_required", retryable=False)
 
 
-def test_auth_middleware_requires_cluster_auth_for_alert_reads(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_auth_middleware_requires_cluster_auth_for_alert_reads() -> None:
     """The webhook exemption must not expose the alerts read API."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
 
     async def call_next(_request: Request) -> Response:
         raise AssertionError("unauthenticated alert reads must short-circuit")
@@ -255,11 +248,8 @@ def test_auth_middleware_requires_cluster_auth_for_alert_reads(
     _assert_envelope(response, status=401, code="authentication_required", retryable=False)
 
 
-def test_auth_middleware_leaves_alert_webhook_auth_to_router(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_auth_middleware_leaves_alert_webhook_auth_to_router() -> None:
     """Only the POST alert webhook reaches its router without cluster auth."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
 
     async def call_next(_request: Request) -> Response:
         return Response(status_code=204)
@@ -273,11 +263,8 @@ def test_auth_middleware_leaves_alert_webhook_auth_to_router(
     assert response.status_code == 204
 
 
-def test_auth_middleware_accepts_bearer_for_alert_reads(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_auth_middleware_accepts_bearer_for_alert_reads() -> None:
     """Authenticated alert reads continue through ordinary cluster auth."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
 
     async def call_next(_request: Request) -> Response:
         return Response(status_code=204)
@@ -305,10 +292,9 @@ def test_auth_middleware_accepts_bearer_for_alert_reads(
     ],
 )
 def test_auth_middleware_logs_sse_poll_401_at_debug(
-    path: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    path: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Stale EventSource reconnects stay forensic-only without changing the response."""
-    _enable_cluster_auth(monkeypatch)
     caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
 
     response = _unauthorized_auth_response(
@@ -323,12 +309,11 @@ def test_auth_middleware_logs_sse_poll_401_at_debug(
 
 
 def test_auth_middleware_logs_browser_ua_401_at_debug(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A console tab whose session died in a rollout retries every open request
     at once; the 401 is visible in the UI and still counted in the aggregate,
     but never WARNING-throttled per path (2026-10-03 triage #7)."""
-    _enable_cluster_auth(monkeypatch)
     caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
     browser_ua = (
         b"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -347,10 +332,9 @@ def test_auth_middleware_logs_browser_ua_401_at_debug(
 
 
 def test_auth_middleware_warns_on_first_non_stream_401(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A new client/path source remains visible once at WARNING."""
-    _enable_cluster_auth(monkeypatch)
     caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
 
     response = _unauthorized_auth_response(_request(headers=[(b"user-agent", b"curl/8.1")]))
@@ -363,10 +347,9 @@ def test_auth_middleware_warns_on_first_non_stream_401(
 
 
 def test_auth_middleware_suppresses_immediate_non_stream_401_repeat(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A repeated client/path key is downgraded and counted during cooldown."""
-    _enable_cluster_auth(monkeypatch)
     caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
     request = _request()
 
@@ -382,12 +365,11 @@ def test_auth_middleware_suppresses_immediate_non_stream_401_repeat(
 
 
 def test_auth_middleware_warns_after_cooldown_with_suppressed_count(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The next warning reports repeats hidden during the elapsed cooldown."""
-    _enable_cluster_auth(monkeypatch)
     now = [100.0]
-    monkeypatch.setattr(rejection_log.time, "monotonic", lambda: now[0])
+    _middleware_app.state.auth401_log = rejection_log.AuthRejectionLog(clock=lambda: now[0])
     caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
     request = _request()
 
@@ -403,13 +385,10 @@ def test_auth_middleware_warns_after_cooldown_with_suppressed_count(
     assert "suppressed 1 repeats in the last 300s" in records[0].getMessage()
 
 
-def test_auth_middleware_prunes_idle_401_throttle_keys(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_auth_middleware_prunes_idle_401_throttle_keys() -> None:
     """A client/path key idle for two windows stops consuming throttle state."""
-    _enable_cluster_auth(monkeypatch)
     now = [100.0]
-    monkeypatch.setattr(rejection_log.time, "monotonic", lambda: now[0])
+    _middleware_app.state.auth401_log = rejection_log.AuthRejectionLog(clock=lambda: now[0])
     stale_key = ("127.0.0.1", "/api/agents")
 
     _unauthorized_auth_response(_request())
@@ -423,10 +402,9 @@ def test_auth_middleware_prunes_idle_401_throttle_keys(
 
 
 def test_auth_middleware_throttles_non_stream_401s_per_client_and_path(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A warning for one client/path key does not hide either neighboring key."""
-    _enable_cluster_auth(monkeypatch)
     caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
     _unauthorized_auth_response(_request())
     caplog.clear()
@@ -450,11 +428,10 @@ def test_auth_middleware_throttles_non_stream_401s_per_client_and_path(
     assert any("path=/api/alerts client=127.0.0.1" in message for message in messages)
 
 
-def test_auth401_aggregate_counts_every_rejection(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_auth401_aggregate_counts_every_rejection() -> None:
     """The process-local counter increments on EVERY middleware rejection —
     SSE flood paths and throttled repeats included (the log severity is
     throttled, the count must not be; task #1712)."""
-    _enable_cluster_auth(monkeypatch)
     assert _middleware_app.state.auth401_log.total == 0
 
     _unauthorized_auth_response(_request(path="/api/events/stream"))
@@ -465,10 +442,9 @@ def test_auth401_aggregate_counts_every_rejection(monkeypatch: pytest.MonkeyPatc
     assert _middleware_app.state.auth401_log.total == 4
 
 
-def test_auth401_drain_returns_count_once_and_resets(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_auth401_drain_returns_count_once_and_resets() -> None:
     """drain_auth401_count() reads the aggregate and resets — the flusher's
     read-and-reset must not double-count a window."""
-    _enable_cluster_auth(monkeypatch)
     _unauthorized_auth_response(_request())
     _unauthorized_auth_response(_request())
 

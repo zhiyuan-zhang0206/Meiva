@@ -69,7 +69,17 @@ def serve(kwargs: dict[str, Any]) -> None:
         sys.exit(STARTUP_FAILURE)
 
 
-def main(*, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
+def main(
+    *,
+    build_app: Callable[[GatewayProcess], FastAPI],
+    config_factory: Callable[[], ConfigBoot] = ConfigBoot,
+    schema_checker: Callable[[Any], None] = assert_schema_current,
+    fd_limit_raiser: Callable[[int], None] = raise_fd_limit,
+    process_logger_initializer: Callable[..., None] = init_gateway_process,
+    faulthandler_registrar: Callable[[int], None] = faulthandler.register,
+    server_runner: Callable[[dict[str, Any]], None] = serve,
+    code_version_raiser: Callable[[Any, Any], Any] | None = None,
+) -> None:
     """Prepare the gateway process and start its ASGI server.
 
     The builder borrows this entry's process. Development reload creates its
@@ -77,13 +87,13 @@ def main(*, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
     """
     # The API always authenticates: a gateway without a human secret refuses to
     # serve, before it touches the database or binds a port.
-    config = ConfigBoot()
+    config = config_factory()
     config.boot()
     config.ensure_eager()
     machine = machine_from_boot(config)
     if "gateway" in machine.role():
         require_cluster_secret(config.view.data_plane.cluster_secret, where="this gateway")
-    assert_schema_current(config.view.data_plane.db_url)
+    schema_checker(config.view.data_plane.db_url)
 
     # pidfile — `services/supervision/healthchecks/gateway.py` uses it to probe.
     # SIGKILL does not trigger atexit; the healthcheck uses kill -0 to
@@ -103,18 +113,33 @@ def main(*, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
     # the launchd 256 default (errno 24 -> requests connection-reset, surfaced
     # in the frontend as "Failed to fetch"), and the session children it spawns
     # inherit the raised ceiling.
-    raise_fd_limit(65536)
+    fd_limit_raiser(65536)
 
     process = GatewayProcess(
         home=meiva_home(), config=config, image=LOADED_IMAGE, machine=machine, host=Host.system()
     )
     with process.lifetime():
-        _serve_process(process, build_app)
+        _serve_process(
+            process,
+            build_app,
+            process_logger_initializer=process_logger_initializer,
+            faulthandler_registrar=faulthandler_registrar,
+            server_runner=server_runner,
+            code_version_raiser=code_version_raiser,
+        )
 
 
-def _serve_process(process: GatewayProcess, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
+def _serve_process(
+    process: GatewayProcess,
+    build_app: Callable[[GatewayProcess], FastAPI],
+    *,
+    process_logger_initializer: Callable[..., None] = init_gateway_process,
+    faulthandler_registrar: Callable[[int], None] = faulthandler.register,
+    server_runner: Callable[[dict[str, Any]], None] = serve,
+    code_version_raiser: Callable[[Any, Any], Any] | None = None,
+) -> None:
     """Serve one owned entry; the ASGI lifespan borrows its existing root."""
-    init_gateway_process(
+    process_logger_initializer(
         producer=process.event_pipeline,
         machine_reader=process.machine.name,
         image=process.image,
@@ -125,14 +150,17 @@ def _serve_process(process: GatewayProcess, build_app: Callable[[GatewayProcess]
     # to write. After the schema assertion and the logger init, so a refusal or
     # a failure is logged; a runner's local gateway holds no write on the row.
     if "gateway" in process.machine.role():
-        process.gate.raise_min_code_version(process.database())
+        if code_version_raiser is not None:
+            code_version_raiser(process.gate, process.database())
+        else:
+            process.gate.raise_min_code_version(process.database())
 
     # Thread dump on SIGUSR1: the watchdog's gateway healthcheck sends this
     # before respawning a frozen gateway, so a stall lands a stack trace in
     # the pane log instead of a silent black box (2026-08-03: 13 freezes in
     # 8h, none left a trace between the last log line and the kill). uvicorn
     # does not touch SIGUSR1, so the registration survives into the loop.
-    faulthandler.register(signal.SIGUSR1)
+    faulthandler_registrar(signal.SIGUSR1)
 
     # Bind address depends on role.
     #
@@ -178,7 +206,7 @@ def _serve_process(process: GatewayProcess, build_app: Callable[[GatewayProcess]
     _log.warning("gateway starts with one uvicorn worker because rate limiters are process-local")
     if process.config.view.gateway.gateway_reload:
         # The parent never constructs the ASGI app a reload worker will serve.
-        serve(
+        server_runner(
             serve_kwargs(
                 host=host,
                 app="gateway.app:create_app_from_environment",
@@ -187,7 +215,9 @@ def _serve_process(process: GatewayProcess, build_app: Callable[[GatewayProcess]
             )
         )
     else:
-        serve(serve_kwargs(host=host, app=build_app(process), factory=False, config=process.config))
+        server_runner(
+            serve_kwargs(host=host, app=build_app(process), factory=False, config=process.config)
+        )
 
 
 def serve_kwargs(*, host: str, app: Any, factory: bool, config: ConfigBoot) -> dict[str, Any]:
