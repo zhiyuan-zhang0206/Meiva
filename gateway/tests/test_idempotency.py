@@ -11,42 +11,51 @@ Tests run against the real app + test DB (TestClient + lifespan).
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterator
+import json
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack
 from pathlib import Path
-from unittest.mock import patch
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.idempotency import keyed_headers
 from base.events.live.bus import EventBus
-from base.lm.catalog import ModelCatalog
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.support.live_events.faults import unpublishable_bus
+from gateway.tests.support.live_events.recorder import recording_live_events
+from gateway.tests.support.runner_ops.ops_stub import (
+    OpsCall,
+    OpsReply,
+    completed,
+    failed,
+    runner_ops,
+)
+
+_HOME_RUNNER = "idem-runner"
+_VISION_MODEL = "claude-sonnet-5-5"
+_TEXT_ONLY_MODEL = "glm-5.2"
 
 
 @pytest.fixture
-def client(gateway_data_plane: None) -> Iterator[TestClient]:
+def client(gateway_data_plane: None) -> Iterator[GatewayTestClient]:
     del gateway_data_plane
-    # A real lifespan boots its own delivered environment; restore that root's
-    # projection as well as closing its HTTP/database resources.
-    with patch.dict(os.environ), gateway_test_client() as c:
+    with gateway_test_client() as c:
         yield c
 
 
 @pytest.fixture
 def agent_id(db_conn: psycopg.Connection) -> int:
-    """A minimal agents row (agents + agents_meta) for message delivery."""
+    """A minimal agents row (agents + agents_meta) for message delivery, homed on a runner."""
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents (label) VALUES ('idem-test') RETURNING id")
         row = cur.fetchone()
         assert row is not None
         aid = row[0]
         cur.execute(
-            "INSERT INTO agents_meta (id, status) VALUES (%s, 'running')",
-            (aid,),
+            "INSERT INTO agents_meta (id, status, machine) VALUES (%s, 'running', %s)",
+            (aid, _HOME_RUNNER),
         )
     db_conn.commit()
     return int(aid)
@@ -63,7 +72,17 @@ def count_inbounds(conn: psycopg.Connection, agent_id: int, content: str) -> int
         return int(row[0])
 
 
-def test_reconcile_endpoint_finds_the_durable_inbound(client: TestClient, agent_id: int) -> None:
+def _set_model(conn: psycopg.Connection, agent_id: int, model: str) -> None:
+    conn.execute(
+        "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
+        (json.dumps({"llm_model": model}), agent_id),
+    )
+    conn.commit()
+
+
+def test_reconcile_endpoint_finds_the_durable_inbound(
+    client: GatewayTestClient, agent_id: int
+) -> None:
     """A browser whose POST timed out can resolve the unknown outcome by key."""
     sent = client.post(
         f"/api/agents/{agent_id}/messages",
@@ -82,24 +101,19 @@ def test_reconcile_endpoint_finds_the_durable_inbound(client: TestClient, agent_
     assert receipt.json()["inbound_id"] == sent.json()["inbound_id"]
 
 
+# meiva:note
+# A receipt survives model/upload changes after the original commit: the agent moves to a
+# model that cannot see images and the upload is gone, yet the same key still resolves.
 def test_reconcile_does_not_repeat_mutable_multimodal_validation(
-    client: TestClient,
-    agent_id: int,
-    monkeypatch: pytest.MonkeyPatch,
+    client: GatewayTestClient, db_conn: psycopg.Connection, agent_id: int
 ) -> None:
-    """A receipt survives model/upload changes after the original commit."""
     from base.agents.upload_delivery.paths import agent_upload_dir
-    from base.lm import factory
 
     upload_dir = agent_upload_dir(agent_id, home=Path.home())
     upload_dir.mkdir(parents=True, exist_ok=True)
     image = upload_dir / "gone.png"
     image.write_bytes(b"test image")
-
-    def supports_vision(_model: str, *, catalog: ModelCatalog) -> bool:
-        return True
-
-    monkeypatch.setattr(factory, "model_supports_vision", supports_vision)
+    _set_model(db_conn, agent_id, _VISION_MODEL)
 
     body = {
         "content": [
@@ -116,12 +130,16 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
         headers=keyed_headers("key-multimodal-reconcile"),
     )
     assert sent.status_code == 201, sent.text
+
     image.unlink()
+    _set_model(db_conn, agent_id, _TEXT_ONLY_MODEL)
+    fresh = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json=body,
+        headers=keyed_headers("key-new-intent"),
+    )
+    assert fresh.status_code == 422, "the current model and uploads gate a new message"
 
-    def _mutable_gate_must_not_run(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("same-key receipt lookup re-ran current model/upload validation")
-
-    monkeypatch.setattr(factory, "model_supports_vision", _mutable_gate_must_not_run)
     retried = client.post(
         f"/api/agents/{agent_id}/messages",
         json=body,
@@ -139,97 +157,60 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
     assert receipt.json()["inbound_id"] == sent.json()["inbound_id"]
 
 
-def test_reconcile_heals_crash_after_commit_before_resurrect(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    agent_id: int,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A lost first response heals one pending chat and its terminated owner."""
-    from ops import lifecycle as ops_lifecycle
+# meiva:note
+# The home runner's answer to a resurrection request: the effect the real op writes.
+def _resurrecting_runner(
+    db_conn: psycopg.Connection, agent_id: int
+) -> Callable[[OpsCall], OpsReply]:
 
-    with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
-    db_conn.commit()
-    calls = 0
-
-    async def _crash_then_heal(_db: object, _bus: EventBus, aid: int, **kw: object) -> AgentStatus:
-        nonlocal calls
-        calls += 1
-        assert aid == agent_id
-        assert kw["trigger_inbound_kind"] == "chat"
-        if calls == 1:
-            raise RuntimeError("gateway died after commit")
+    def resurrect(call: OpsCall) -> OpsReply:
+        assert call.payload["path"] == f"/api/agents/{agent_id}/resurrect-if-pending-work"
+        assert call.payload["trigger_inbound_kind"] == "chat"
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE agents_meta SET status = 'idling' WHERE id = %s AND status = 'terminated'",
-                (aid,),
+                "UPDATE agents_meta SET status='idling' WHERE id=%s AND status='terminated'",
+                (agent_id,),
             )
             if cur.rowcount == 1:
                 cur.execute(
-                    "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-                    "VALUES (%s, '', 'resurrect', 'system')",
-                    (aid,),
+                    "INSERT INTO inbound_messages (agent_id,content,kind,source) "
+                    "VALUES (%s,'','resurrect','system')",
+                    (agent_id,),
                 )
         db_conn.commit()
-        return AgentStatus.IDLING
+        return completed({"status": "spawned"})
 
-    monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _crash_then_heal)
-    with pytest.raises(RuntimeError, match="gateway died after commit"):
-        client.post(
-            f"/api/agents/{agent_id}/messages",
-            json={"content": "survive crash", "source": "user"},
-            headers=keyed_headers("key-crash-heal"),
-        )
+    return resurrect
 
-    receipt = client.post(
-        f"/api/agents/{agent_id}/messages/reconcile",
-        json={"content": "survive crash", "source": "user"},
-        headers=keyed_headers("key-crash-heal"),
+
+# meiva:note
+# Make one post-commit step of message delivery fail until `broken` closes.
+def _break_the_tail(
+    step: str, client: GatewayTestClient, db_conn: psycopg.Connection, broken: ExitStack
+) -> None:
+    if step == "live-bus":
+        working = client.app.state.bus
+        client.app.state.bus = unpublishable_bus()
+        broken.callback(setattr, client.app.state, "bus", working)
+        return
+    reply = (
+        failed({"error": "RuntimeError: the runner's resurrect op crashed"})
+        if step == "resurrection-fails"
+        else completed({"status": "not-a-resurrect-result"})
     )
-    assert receipt.status_code == 200, receipt.text
-    assert receipt.json()["status"] == "idling"
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT kind, count(*) FROM inbound_messages WHERE agent_id = %s "
-            "GROUP BY kind ORDER BY kind",
-            (agent_id,),
-        )
-        assert cur.fetchall() == [("chat", 1), ("resurrect", 1)]
+    broken.enter_context(runner_ops(db_conn, _HOME_RUNNER, {"lifecycle": reply}))
 
 
-def _inject_delivery_failure(patch: pytest.MonkeyPatch, step: str) -> None:
-    from ops import lifecycle
-    from ops.cluster import rpc
-    from ops.lifecycle import delivery
-
-    async def fail_async(*_args: object, **_kwargs: object) -> None:
-        raise AttributeError("injected postcommit bug")
-
-    def fail_sync(*_args: object, **_kwargs: object) -> None:
-        raise AttributeError("injected postcommit bug")
-
-    targets = {
-        "wake": (delivery, "publish_inbound_wake", fail_sync),
-        "live": (lifecycle, "publish_inbound_arrived", fail_async),
-        "resurrection": (lifecycle, "resurrect_if_terminated", fail_async),
-        "resurrection_rpc": (rpc, "dispatch_to_machine", fail_async),
-    }
-    target, name, failure = targets[step]
-    patch.setattr(target, name, failure)
-
-
-@pytest.mark.parametrize("step", ["wake", "live", "resurrection", "resurrection_rpc"])
+@pytest.mark.parametrize(
+    "step", ["live-bus", "resurrection-fails", "resurrection-answer-malformed"]
+)
 def test_postcommit_error_response_preserves_receipt_and_same_key_recovery(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     agent_id: int,
-    monkeypatch: pytest.MonkeyPatch,
     step: str,
 ) -> None:
     """Unknown tail failures fail this request, preserve its row and permit keyed healing."""
-    from ops import lifecycle
-
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
     db_conn.commit()
@@ -237,47 +218,31 @@ def test_postcommit_error_response_preserves_receipt_and_same_key_recovery(
     path = f"/api/agents/{agent_id}/messages"
     key = f"postcommit-{step}"
     body = {"content": "one logical message", "source": "user"}
-    with monkeypatch.context() as patch:
-        _inject_delivery_failure(patch, step)
-        # The fixture already owns the real app lifespan. This client only
-        # observes the HTTP error body instead of re-raising server exceptions.
-        observer = TestClient(client.app, raise_server_exceptions=False)
-        try:
-            failed = observer.post(path, json=body, headers=keyed_headers(key))
-            assert failed.status_code == 500, failed.text
-            error = failed.json()
-            assert error["committed"] is True
-            assert error["idempotency_key"] == key
-            assert error["retryable"] is False
-            assert count_inbounds(db_conn, agent_id, body["content"]) == 1
-            # Another request is still served by the same app after this bug.
-            healthy = observer.get(f"/api/agents/{agent_id}")
-            assert healthy.status_code == 200, healthy.text
-        finally:
-            observer.close()
+    # The fixture already owns the real app lifespan. This client only
+    # observes the HTTP error body instead of re-raising server exceptions.
+    observer = TestClient(client.app, raise_server_exceptions=False)
+    with ExitStack() as broken:
+        broken.callback(observer.close)
+        _break_the_tail(step, client, db_conn, broken)
+        failed_response = observer.post(path, json=body, headers=keyed_headers(key))
+        assert failed_response.status_code == 500, failed_response.text
+        error = failed_response.json()
+        assert error["committed"] is True
+        assert error["idempotency_key"] == key
+        assert error["retryable"] is False
+        assert count_inbounds(db_conn, agent_id, body["content"]) == 1
+        # Another request is still served by the same app after this bug.
+        healthy = observer.get(f"/api/agents/{agent_id}")
+        assert healthy.status_code == 200, healthy.text
 
-    async def heal_once(_db: object, _bus: object, aid: int, **_kwargs: object) -> AgentStatus:
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET status='idling' WHERE id=%s AND status='terminated'",
-                (aid,),
-            )
-            if cur.rowcount == 1:
-                cur.execute(
-                    "INSERT INTO inbound_messages (agent_id,content,kind,source) "
-                    "VALUES (%s,'','resurrect','system')",
-                    (aid,),
-                )
-        db_conn.commit()
-        return AgentStatus.IDLING
-
-    monkeypatch.setattr(lifecycle, "resurrect_if_terminated", heal_once)
-    healed = client.post(path + "/reconcile", json=body, headers=keyed_headers(key))
-    assert healed.status_code == 200, healed.text
-    assert healed.json()["inbound_id"] == error["inbound_id"]
-    repeated = client.post(path, json=body, headers=keyed_headers(key))
-    assert repeated.status_code == 201, repeated.text
-    assert repeated.json()["inbound_id"] == error["inbound_id"]
+    with runner_ops(db_conn, _HOME_RUNNER, {"lifecycle": _resurrecting_runner(db_conn, agent_id)}):
+        healed = client.post(path + "/reconcile", json=body, headers=keyed_headers(key))
+        assert healed.status_code == 200, healed.text
+        assert healed.json()["inbound_id"] == error["inbound_id"]
+        assert healed.json()["status"] == "idling"
+        repeated = client.post(path, json=body, headers=keyed_headers(key))
+        assert repeated.status_code == 201, repeated.text
+        assert repeated.json()["inbound_id"] == error["inbound_id"]
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT kind,count(*) FROM inbound_messages WHERE agent_id=%s GROUP BY kind ORDER BY kind",
@@ -286,32 +251,31 @@ def test_postcommit_error_response_preserves_receipt_and_same_key_recovery(
         assert cur.fetchall() == [("chat", 1), ("resurrect", 1)]
 
 
-def test_large_message_response_waits_for_live_publish(
-    client: TestClient,
+# meiva:note
+# The near-limit HTTP message commits first; its live announcement carries the whole text.
+def test_large_message_is_announced_only_after_it_is_committed(
+    client: GatewayTestClient,
+    db_url: str,
     db_conn: psycopg.Connection,
     agent_id: int,
-    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
 ) -> None:
-    """The near-limit HTTP message commits before its awaited live publish returns."""
-    from ops import lifecycle
-
     content = "x" * (1024 * 1024 - 1)
-    published: list[int] = []
-    real_publish = lifecycle.publish_inbound_arrived
 
-    async def publish(
-        bus: EventBus, aid: int, inbound_id: int, kind: str, source: str, text: str
-    ) -> None:
-        assert text == content
-        assert count_inbounds(db_conn, agent_id, content) == 1
-        await real_publish(bus, aid, inbound_id, kind, source, text)
-        published.append(inbound_id)
+    def committed_rows_at_announcement(payload: dict[str, object]) -> int:
+        with psycopg.connect(db_url) as reader:
+            return count_inbounds(reader, agent_id, content)
 
-    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", publish)
-    response = client.post(
-        f"/api/agents/{agent_id}/messages",
-        json={"content": content, "source": "user"},
-        headers=keyed_headers("large-awaited-live"),
-    )
-    assert response.status_code == 201, response.text
-    assert published == [response.json()["inbound_id"]]
+    with recording_live_events(event_bus, react=committed_rows_at_announcement) as live:
+        response = client.post(
+            f"/api/agents/{agent_id}/messages",
+            json={"content": content, "source": "user"},
+            headers=keyed_headers("large-awaited-live"),
+        )
+        assert response.status_code == 201, response.text
+        (arrived,) = live.settle("inbound_arrived", 1)
+        live.quiet()
+        announced = live.events("inbound_arrived")
+    assert [event.payload["inbound_id"] for event in announced] == [response.json()["inbound_id"]]
+    assert arrived.payload["content"] == content
+    assert arrived.reaction == 1

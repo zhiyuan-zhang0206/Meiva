@@ -1,14 +1,14 @@
-"""Machine pause/resume endpoints — `POST /api/cluster/machines/{name}/pause`
-and `.../resume` (Task #1283: temporarily pull a machine out of the cluster,
-e.g. the operator is away for a week and disconnects it; the cluster then
-shows only its active members, no offline signal is emitted for the expected
-absence, rollouts and spawns skip it, and `meiva cluster resume` brings it
-back).
-
-Split out of gateway/cluster/router.py at the 800-line ceiling (same pattern
-as `_roster_rows.py`): the pause contract is the three-step operator act
-below, the roster/staging/delete endpoints stay in cluster.py.
-"""
+# meiva:note
+# Machine pause/resume endpoints — `POST /api/cluster/machines/{name}/pause`
+# and `.../resume` (Task #1283: temporarily pull a machine out of the cluster,
+# e.g. the operator is away for a week and disconnects it; the cluster then
+# shows only its active members, no offline signal is emitted for the expected
+# absence, rollouts and spawns skip it, and `meiva cluster resume` brings it
+# back).
+#
+# Split out of gateway/cluster/router.py at the 800-line ceiling (same pattern
+# as `roster_rows.py`): the pause contract is the three-step operator act
+# below, the roster/staging/delete endpoints stay in cluster.py.
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger
-from gateway.agents import forward
+from gateway.agents.launch import forward
 from gateway.cluster.schemas import MachinePauseRequest, MachinePauseResponse, MachineResumeResponse
 from ops.lifecycle import force_mark_terminated
 
@@ -183,10 +183,6 @@ async def pause_cluster_machine(
 
     agent_rows = await asyncio.to_thread(_list_agent_rows_for_pause_blocking, pool, name)
 
-    enqueuer = (
-        getattr(request.app.state, "machine_pause_lifecycle_enqueuer", None)
-        or forward.enqueue_lifecycle
-    )
     terminated = force_marked = 0
     for agent_id, was_live in agent_rows:
         # The same lifecycle path the frontend/SDK terminate uses — the target
@@ -194,11 +190,12 @@ async def pause_cluster_machine(
         # that is already unreachable raises; the agent's process is on the
         # departing host anyway, so force-mark its row terminated in the DB.
         try:
-            await enqueuer(  # pyright: ignore[reportUnknownMemberType]
+            await forward.enqueue_lifecycle(
                 request.app.state.db,
                 name,
                 f"/api/agents/{agent_id}/terminate",
                 {"force": True, "source": "machine-pause"},
+                config=request.app.state.gateway_config,
             )
             if was_live:
                 terminated += 1

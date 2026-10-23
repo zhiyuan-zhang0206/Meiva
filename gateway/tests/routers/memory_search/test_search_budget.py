@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -10,26 +9,14 @@ import pytest
 from fastapi import Request
 
 from base.config import settings
-from gateway.routers import memory as memory_router
+from gateway.routers.memory_api import memory as memory_router
 from gateway.schemas import MemorySearchRequest
-from gateway.tests.routers.test_memory_search import (
+from gateway.tests.routers.memory_search.search_support import (
     Judge,
-    StubProvider,
+    SearchRig,
     asgi_client,
-    gateway_test_client,
-    memory_config,
-    memory_search_app,
-    patch_backend,
-    patch_provider,
-    set_memory_inputs,
 )
-from gateway.tests.routers.test_memory_search import (
-    judge as judge,
-)
-from gateway.tests.routers.test_memory_search import (
-    memory_search_app_db as memory_search_app_db,
-)
-from services.derived.memory_indexer import rerank
+from gateway.tests.routers.memory_search.search_support import rig as rig
 from services.derived.memory_indexer.backends.base import ChunkHit
 
 _CANDIDATES = 30
@@ -40,40 +27,28 @@ def _name(index: int) -> str:
     return f"notes/n{index:03d}.md"
 
 
+# meiva:note
+# A note pool of `_POOL_SIZE` files whose vector hits the rig's service answers.
 class _Pool:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, rig: SearchRig) -> None:
         self.root = root
+        self.service = rig.service
         (root / "notes").mkdir()
         for index in range(_POOL_SIZE):
             (root / _name(index)).write_text(f"passage {index:03d}\n", encoding="utf-8")
-        self.asked: list[int] = []
-        hits = [
+        rig.service.hits = [
             ChunkHit(str(root / _name(i)), "body", 0, 1.0 - i / 1000) for i in range(_POOL_SIZE)
         ]
-        asked = self.asked
+        rig.configure(memory_rerank_candidates=_CANDIDATES)
 
-        class _Backend:
-            def __init__(self, *args: object, **kwargs: object) -> None:
-                pass
-
-            async def search_topk_async(
-                self, _vec: object, k: int, *, timeout: float
-            ) -> list[ChunkHit]:
-                del timeout
-                asked.append(k)
-                return hits[:k]
-
-        patch_backend(_Backend)
-        patch_provider(StubProvider)
-        set_memory_inputs(rerank_candidates=lambda: _CANDIDATES)
-        app = memory_search_app()
-        app.state.gateway_config = replace(app.state.gateway_config, memory_root=root)
-        app.state.memory_search_gate = asyncio.Semaphore(2)
+    @property
+    def asked(self) -> list[int]:
+        return self.service.asked
 
 
 @pytest.fixture
-def pool(tmp_path: Path) -> _Pool:
-    return _Pool(tmp_path)
+def pool(tmp_path: Path, rig: SearchRig) -> _Pool:
+    return _Pool(tmp_path, rig)
 
 
 def _search(**fields: Any) -> dict[str, Any]:
@@ -86,9 +61,10 @@ def _judged_numbers(judge: Judge) -> list[str]:
 
 @pytest.mark.parametrize("excluded", [0, 10, 60])
 def test_decision_requests_do_not_grow_with_the_exclusion_list(
-    pool: _Pool, judge: Judge, excluded: int
+    pool: _Pool, rig: SearchRig, excluded: int
 ) -> None:
-    with gateway_test_client(config=memory_config(pool.root)) as client:
+    judge = rig.judge
+    with rig.client(pool.root) as client:
         resp = client.post(
             "/api/memory/search",
             json=_search(exclude=[_name(index) for index in range(excluded)]),
@@ -102,12 +78,13 @@ def test_decision_requests_do_not_grow_with_the_exclusion_list(
 
 
 def test_excluded_notes_never_reach_the_decision_model_or_the_response(
-    pool: _Pool, judge: Judge
+    pool: _Pool, rig: SearchRig
 ) -> None:
+    judge = rig.judge
     judge.rules = {"passage 001": 0.99, "passage 002": 0.98, "passage 031": 0.97}
     excluded = [_name(1), _name(2)]
 
-    with gateway_test_client(config=memory_config(pool.root)) as client:
+    with rig.client(pool.root) as client:
         resp = client.post("/api/memory/search", json=_search(exclude=excluded))
 
     assert resp.status_code == 200
@@ -122,9 +99,10 @@ def test_excluded_notes_never_reach_the_decision_model_or_the_response(
 
 @pytest.mark.parametrize("k", [31, 60, 100])
 def test_a_large_k_does_not_raise_the_decision_request_count(
-    pool: _Pool, judge: Judge, k: int
+    pool: _Pool, rig: SearchRig, k: int
 ) -> None:
-    with gateway_test_client(config=memory_config(pool.root)) as client:
+    judge = rig.judge
+    with rig.client(pool.root) as client:
         resp = client.post("/api/memory/search", json=_search(purpose="search", k=k))
 
     assert resp.status_code == 200
@@ -134,11 +112,12 @@ def test_a_large_k_does_not_raise_the_decision_request_count(
 
 
 def test_dedup_ranks_its_own_smaller_candidate_count_whatever_k_is(
-    pool: _Pool, judge: Judge
+    pool: _Pool, rig: SearchRig
 ) -> None:
-    set_memory_inputs(dedup_candidates=lambda: 7)
+    judge = rig.judge
+    rig.configure(memory_dedup_candidates=7)
 
-    with gateway_test_client(config=memory_config(pool.root)) as client:
+    with rig.client(pool.root) as client:
         resp = client.post("/api/memory/search", json=_search(purpose="dedup", k=50))
 
     assert resp.status_code == 200
@@ -172,17 +151,17 @@ _VALID_PATHS = ["a.md", "notes/n001.md", "a b/c-d_e.md", "ünï/çode.md"]
     ],
     ids=lambda value: repr(value)[:40],
 )
-def test_an_invalid_exclusion_list_is_rejected(pool: _Pool, exclude: Any) -> None:
-    with gateway_test_client(config=memory_config(pool.root)) as client:
+def test_an_invalid_exclusion_list_is_rejected(pool: _Pool, rig: SearchRig, exclude: Any) -> None:
+    with rig.client(pool.root) as client:
         resp = client.post("/api/memory/search", json=_search(exclude=exclude))
 
     assert resp.status_code == 422
     assert pool.asked == []
 
 
-def test_the_largest_exclusion_list_is_accepted(pool: _Pool) -> None:
+def test_the_largest_exclusion_list_is_accepted(pool: _Pool, rig: SearchRig) -> None:
     exclude = [f"n{i}.md" for i in range(800)]
-    with gateway_test_client(config=memory_config(pool.root)) as client:
+    with rig.client(pool.root) as client:
         resp = client.post("/api/memory/search", json=_search(exclude=exclude))
 
     assert resp.status_code == 200
@@ -198,8 +177,8 @@ def test_the_exclusion_limit_fits_the_vector_service_query_limit() -> None:
     assert MEMORY_SEARCH_MAX_EXCLUDE + limit <= MAX_K
 
 
-def test_valid_paths_are_accepted(pool: _Pool) -> None:
-    with gateway_test_client(config=memory_config(pool.root)) as client:
+def test_valid_paths_are_accepted(pool: _Pool, rig: SearchRig) -> None:
+    with rig.client(pool.root) as client:
         resp = client.post("/api/memory/search", json=_search(exclude=_VALID_PATHS))
 
     assert resp.status_code == 200
@@ -207,8 +186,8 @@ def test_valid_paths_are_accepted(pool: _Pool) -> None:
 
 
 @pytest.mark.parametrize("deadline", [0, -1, "soon", "inf"])
-def test_an_invalid_deadline_is_rejected(pool: _Pool, deadline: Any) -> None:
-    with gateway_test_client(config=memory_config(pool.root)) as client:
+def test_an_invalid_deadline_is_rejected(pool: _Pool, rig: SearchRig, deadline: Any) -> None:
+    with rig.client(pool.root) as client:
         resp = client.post(
             "/api/memory/search",
             content=_json({"deadline_seconds": deadline}),
@@ -225,34 +204,23 @@ def _json(fields: dict[str, Any]) -> str:
     return json.dumps(_search(**fields))
 
 
-class _Blocked:
-    def __init__(self) -> None:
-        self.started = 0
-        self.cancelled = 0
-        self.all_started = asyncio.Event()
-
-    async def __call__(self, *_args: object, **_kwargs: object) -> float:
-        self.started += 1
-        if self.started == _CANDIDATES:
-            self.all_started.set()
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            self.cancelled += 1
-            raise
-        raise AssertionError("unreachable")
+# meiva:note
+# Every decision request waits until cancelled; `all_started` fires when all are out.
+def _block_every_decision(rig: SearchRig) -> Judge:
+    rig.judge.blocking = True
+    rig.judge.expected_started = _CANDIDATES
+    return rig.judge
 
 
 async def test_the_caller_deadline_bounds_the_search_below_the_gateway_deadline(
-    pool: _Pool, monkeypatch: pytest.MonkeyPatch
+    pool: _Pool, rig: SearchRig
 ) -> None:
-    del pool
-    blocked = _Blocked()
-    monkeypatch.setattr(rerank, "ask_relevance", blocked)
-    set_memory_inputs(deadline=lambda: 30.0)
+    blocked = _block_every_decision(rig)
+    rig.configure(memory_search_deadline_seconds=30.0)
+    app = rig.asgi_app(pool.root, permits=2)
 
     started = time.monotonic()
-    async with asgi_client() as client:
+    async with asgi_client(app) as client:
         resp = await asyncio.wait_for(
             client.post("/api/memory/search", json=_search(deadline_seconds=0.3)), timeout=10
         )
@@ -267,13 +235,13 @@ async def test_the_caller_deadline_bounds_the_search_below_the_gateway_deadline(
 
 
 async def test_a_caller_deadline_above_the_gateway_deadline_does_not_extend_it(
-    pool: _Pool, monkeypatch: pytest.MonkeyPatch
+    pool: _Pool, rig: SearchRig
 ) -> None:
-    del pool
-    monkeypatch.setattr(rerank, "ask_relevance", _Blocked())
-    set_memory_inputs(deadline=lambda: 0.3)
+    _block_every_decision(rig)
+    rig.configure(memory_search_deadline_seconds=0.3)
+    app = rig.asgi_app(pool.root, permits=2)
 
-    async with asgi_client() as client:
+    async with asgi_client(app) as client:
         resp = await asyncio.wait_for(
             client.post("/api/memory/search", json=_search(deadline_seconds=600)), timeout=10
         )
@@ -282,7 +250,7 @@ async def test_a_caller_deadline_above_the_gateway_deadline_does_not_extend_it(
     assert "0.3s deadline" in resp.json()["detail"]
 
 
-def _request_that_disconnects_when(gone: asyncio.Event) -> Request:
+def _request_that_disconnects_when(app: Any, gone: asyncio.Event) -> Request:
 
     async def receive() -> dict[str, str]:
         if gone.is_set():
@@ -290,19 +258,18 @@ def _request_that_disconnects_when(gone: asyncio.Event) -> Request:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
-    return Request({"type": "http", "app": memory_search_app()}, receive)
+    return Request({"type": "http", "app": app}, receive)
 
 
 async def test_a_disconnect_cancels_the_decision_requests_still_in_flight(
-    pool: _Pool, monkeypatch: pytest.MonkeyPatch
+    pool: _Pool, rig: SearchRig
 ) -> None:
-    del pool
-    blocked = _Blocked()
-    monkeypatch.setattr(rerank, "ask_relevance", blocked)
+    blocked = _block_every_decision(rig)
+    app = rig.asgi_app(pool.root, permits=2)
     gone = asyncio.Event()
     handler = asyncio.create_task(
         memory_router.post_memory_search(
-            _request_that_disconnects_when(gone), MemorySearchRequest(**_search())
+            _request_that_disconnects_when(app, gone), MemorySearchRequest(**_search())
         )
     )
     try:
@@ -319,27 +286,26 @@ async def test_a_disconnect_cancels_the_decision_requests_still_in_flight(
     assert blocked.cancelled == _CANDIDATES
 
 
-async def test_a_connected_caller_gets_the_ranking(pool: _Pool, judge: Judge) -> None:
-    del pool
+async def test_a_connected_caller_gets_the_ranking(pool: _Pool, rig: SearchRig) -> None:
+    app = rig.asgi_app(pool.root, permits=2)
     gone = asyncio.Event()
 
     response = await memory_router.post_memory_search(
-        _request_that_disconnects_when(gone), MemorySearchRequest(**_search())
+        _request_that_disconnects_when(app, gone), MemorySearchRequest(**_search())
     )
 
     assert len(response.results) == 3
-    assert len(judge.calls) == _CANDIDATES
+    assert len(rig.judge.calls) == _CANDIDATES
 
 
 async def test_cancelling_the_search_cancels_every_decision_request(
-    pool: _Pool, monkeypatch: pytest.MonkeyPatch
+    pool: _Pool, rig: SearchRig
 ) -> None:
-    del pool
-    blocked = _Blocked()
-    monkeypatch.setattr(rerank, "ask_relevance", blocked)
+    blocked = _block_every_decision(rig)
+    app = rig.asgi_app(pool.root, permits=2)
     handler = asyncio.create_task(
         memory_router.post_memory_search(
-            _request_that_disconnects_when(asyncio.Event()), MemorySearchRequest(**_search())
+            _request_that_disconnects_when(app, asyncio.Event()), MemorySearchRequest(**_search())
         )
     )
     await asyncio.wait_for(blocked.all_started.wait(), timeout=10)

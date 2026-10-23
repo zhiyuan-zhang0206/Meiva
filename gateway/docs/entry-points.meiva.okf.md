@@ -12,8 +12,20 @@ tags: []
 - `gateway/app.py` — FastAPI application factories (`create_app`, `create_app_from_environment`), cold `openapi_schema()`, lifespan, middleware, route mounting
 - `gateway/http/config.py` — frozen `GatewayConfig` snapshot (`gateway_config_from_boot`) shared across app assembly, auth, CORS, memory reads, and lifespan
 - `gateway/__main__.py` — `.venv/bin/python -m gateway` → uvicorn
+- `gateway/cluster/server.py` — the process root `main(config=..., build_app=...)`: it reads three facts from the booted config and executes the plan `gateway/cluster/serve_plan.py` returns
 - `services/wake/schedule_manager/engine.py` — the schedule execution engine; the ScheduleManager launches `services/wake/schedule_manager/runner.py` to compose the SDK in an independent process
 - `scripts/entrypoints/gateway.py` — canonical launch script (per `gateway/app.py` docstring)
+
+`gateway.app.main` boots the `ConfigBoot` and hands it to `server.main`. `serve_plan` is a
+strict module over three values (does this machine serve the gateway role, does it declare a
+reachable address, is hot reload on) and returns what `main` then does in order: require the
+cluster secret, bind the loopback or every interface, require the transport-encryption
+declaration off the loopback, raise the cluster's minimum code version, and either build the
+app or leave it to a reload worker's factory. The effects (schema assertion, pidfile, fd limit,
+logging, `faulthandler`, uvicorn) are the shell's; they are process globals, so the tests run the
+real `main` in a child process against the throwaway Postgres
+(`gateway/tests/bootstrap/test_server.py`) and assert the pidfile, the served port, the
+`deployment_state.min_code_version` row and the exit on SIGTERM.
 
 `cluster/process_boot.py` owns one immutable first-module-load image shared by
 the Python entry and the ASGI factory entry (`gateway.app:create_app_from_environment`).
@@ -25,19 +37,22 @@ Health, local cluster status and MCP status report that same image, including
 unknown SHA, without reading a later checkout HEAD. Uvicorn reload children
 capture their own generation in their new process. Startup failures still
 close constructed clients; cleanup errors preserve the original primary.
-The lifespan registers each start-up resource for release as it acquires it and
-unwinds them in reverse order: telemetry flushers, the MCP manager, upload
-recovery, the runtime monitor, HTTP clients and the inspector cache finish
-before the pools close, and one failing release never skips the rest.
+The lifespan registers each start-up resource for release as it acquires it, with
+`gateway.app.startup_releases`, and unwinds them in reverse order: telemetry flushers, the
+MCP manager, upload recovery, the runtime monitor, HTTP clients and the inspector cache finish
+before the pools close, and one failing release never skips the rest. A start-up error is the
+error that propagates; a release that also fails is a note on it. The lifespan calls the real
+client builders, the cron registration and the flushers directly; the flushers and the
+notification outbox run as named tasks (`gateway-latency-flusher`, `gateway-auth-flusher`,
+`gateway-notification-outbox`) that the lifespan tests find in `asyncio.all_tasks()`. The
+release policy is asserted with plain steps in `gateway/tests/bootstrap/lifespan/test_startup_releases.py`;
+the ordering against the real pools and tasks in `test_gateway_lifespan.py` and
+`test_inspect_lifespan.py`.
 
-`create_app` also assembles the request operations for configuration RPCs, command
-catalog discovery and task/page/schedule receipt writes. Routes read those handles
-from their own application; transactional helpers require the collaborators as
-arguments and retain transaction ownership. A missing handle is an assembly error,
-not a reason to select a process-global implementation. The lifespan receives a
-frozen `LifespanServices` bundle from the same root for its HTTP client construction,
-cron registration and telemetry flushers. Their replacement does not replace the
-startup/cleanup sequence or the process ownership contract.
+Routes call the real configuration RPCs, command catalog, receipt writers and wake publishers
+directly; transactional helpers require the collaborators as arguments and retain transaction
+ownership. A test controls them with real resources (a runner served on a listener, the
+throwaway Postgres and Redis), never through a handle on the application.
 
 Bootstrap credential validation reads the app's captured `GatewayConfig`, just like
 request authentication. Page URL construction reads its serving process config;

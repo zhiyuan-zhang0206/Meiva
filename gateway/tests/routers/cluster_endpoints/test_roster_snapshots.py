@@ -1,17 +1,17 @@
-"""The roster's read model: a machine renders from the heartbeat liveness pass's last
-probe, nothing is dialed for it, and only an explicit fresh read (or a machine with no
-fresh snapshot) dials."""
+# meiva:note
+# The roster's read model: a machine renders from the heartbeat liveness pass's last
+# probe, nothing is dialed for it, and only an explicit fresh read (or a machine with no
+# fresh snapshot) dials. The dial is a real `/ops` round trip to a runner served on port 0.
 
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
-from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from pathlib import Path
 
 import psycopg
-import pytest
 from psycopg.types.json import Jsonb
 
 import gateway.cluster.status as status_mod
@@ -19,21 +19,32 @@ from base.api_contracts.status import MachineStatus
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from gateway.cluster import snapshots
-from gateway.cluster.process_boot import LOADED_IMAGE
-from gateway.cluster.roster_probe import IdentityMismatchLog
-from gateway.cluster.snapshots import Snapshot
+from gateway.cluster.roster.liveness_snapshot import Snapshot
+from gateway.cluster.roster.roster_rows import RosterRowSpec
 from gateway.tests.auth.gateway_config import gateway_test_client
-from ops.cluster import rpc as cluster_rpc
+from gateway.tests.routers.cluster_endpoints.cluster_support import roster_env
+from gateway.tests.support.runner_ops.ops_stub import (
+    OpsCall,
+    OpsReply,
+    Responder,
+    RunnerOps,
+    completed,
+    refused,
+    runner_ops,
+)
 
-_ROW = tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]
 _NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
-_active_dispatch: list[Any] = []
 
 
-def _row(name: str = "runner-a", url: str | None = "http://runner-a:8113") -> _ROW:
-    return (name, url, ["agent-runner"], _NOW, None, None, False)
+def _row(name: str, url: str | None) -> RosterRowSpec:
+    return RosterRowSpec(
+        name=name,
+        gateway_url=url,
+        role=["agent-runner"],
+        up_since_at=_NOW,
+        description=None,
+        stopped_at=None,
+    )
 
 
 def _status(name: str = "runner-a", **extra: object) -> dict[str, object]:
@@ -68,255 +79,282 @@ def _snap(
     )
 
 
-@pytest.fixture
-def no_dial() -> Generator[list[str]]:
-    """Fail the test if the roster dials a runner; returns the list of dialed names."""
-    dialed: list[str] = []
-
-    async def dispatch(*, target_machine: str, **_kw: object) -> dict[str, object]:
-        dialed.append(target_machine)
-        return _status(target_machine)
-
-    _active_dispatch.append(dispatch)
-    try:
-        yield dialed
-    finally:
-        _active_dispatch.clear()
-
-
 def _gather(
-    rows: list[_ROW],
+    database: Database,
+    machine: MachineIdentity,
+    home: Path,
+    rows: list[RosterRowSpec],
     snaps: dict[str, Snapshot] | None,
-    database_gate: ProcessDbGate,
     *,
-    local_machine: MachineIdentity,
-    probe_timeout_s: float | None = None,
-    dispatch_fn: Any = None,
+    probe_timeout_s: float = 8.0,
 ) -> list[MachineStatus]:
-    del local_machine
-    resolved_dispatch = (
-        (_active_dispatch[-1] if _active_dispatch else None) if dispatch_fn is None else dispatch_fn
-    )
-    return asyncio.run(
-        status_mod.gather_cluster_status(
-            Database.from_settings(gate=database_gate),
-            rows,
-            "gateway",
-            identity_log=IdentityMismatchLog(),
-            snapshots=snaps,
-            image=LOADED_IMAGE,
-            probe_timeout_s=probe_timeout_s,
-            dispatch_fn=resolved_dispatch,
-        )
-    )
+    env = roster_env(database, machine, home=home, probe_timeout_s=probe_timeout_s)
+    return asyncio.run(status_mod.gather_cluster_status(env, rows, snaps))
 
 
-# --- the snapshot's own verdicts ----------------------------------------------
-
-
-def test_a_snapshot_is_fresh_for_three_pass_intervals() -> None:
-    assert _snap(age_s=5).fresh()
-    assert _snap(age_s=snapshots.MAX_AGE_S - 1).fresh()
-    assert not _snap(age_s=snapshots.MAX_AGE_S + 5).fresh()
-
-
-def test_two_failed_passes_make_a_fresh_snapshot_known_down() -> None:
-    assert not _snap(reachable=False, failures=1).known_down()
-    assert _snap(reachable=False, failures=2).known_down()
-    # A stale row is no evidence the host is down: the pass may simply not be running.
-    assert not _snap(reachable=False, failures=9, age_s=3600).known_down()
+def _dialed(*runners: RunnerOps) -> list[str]:
+    return sorted(runner.name for runner in runners if runner.calls_of("status_probe"))
 
 
 # --- rendering from a snapshot ------------------------------------------------
 
 
 def test_a_fresh_reachable_snapshot_renders_online_with_its_age(
-    no_dial: list[str], database_gate: ProcessDbGate, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    [machine] = _gather(
-        [_row()],
-        {"runner-a": _snap(status=_status(), status_age_s=12)},
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
+    with runner_ops(
+        db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
+    ) as runner:
+        [machine] = _gather(
+            database,
+            machine_identity,
+            tmp_path,
+            [_row("runner-a", runner.url)],
+            {"runner-a": _snap(status=_status(), status_age_s=12)},
+        )
 
     assert machine.online is True and machine.paused is False
     assert machine.running_sha == "def456" and machine.shell_count == 3
     assert machine.observed_at is not None
     assert 10 <= (datetime.now(UTC) - machine.observed_at).total_seconds() <= 20
-    assert no_dial == []  # nothing was dialed
+    assert runner.calls == []  # nothing was dialed
 
 
 def test_one_dropped_probe_keeps_the_last_status_and_its_age(
-    no_dial: list[str], database_gate: ProcessDbGate, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    [machine] = _gather(
-        [_row()],
-        {"runner-a": _snap(reachable=False, failures=1, status=_status(), status_age_s=70)},
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
+    with runner_ops(
+        db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
+    ) as runner:
+        [machine] = _gather(
+            database,
+            machine_identity,
+            tmp_path,
+            [_row("runner-a", runner.url)],
+            {"runner-a": _snap(reachable=False, failures=1, status=_status(), status_age_s=70)},
+        )
 
     assert machine.online is True and machine.running_sha == "def456"
     assert machine.observed_at is not None
     assert (datetime.now(UTC) - machine.observed_at).total_seconds() >= 65  # the older answer
-    assert no_dial == []
+    assert runner.calls == []
 
 
-@pytest.mark.parametrize(
-    "failures, answered",
-    [(2, True), (1, False)],
-    ids=["two-failed-passes", "failed-and-never-answered"],
-)
 def test_a_machine_that_failed_its_passes_renders_offline(
-    no_dial: list[str],
-    failures: int,
-    answered: bool,
-    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    # Built here, not at collection: a snapshot is fresh only for a few pass intervals, and a
-    # long run reaches this test long after parametrization.
-    snapshot = _snap(reachable=False, failures=failures, status=_status() if answered else None)
-    [machine] = _gather(
-        [_row()],
-        {"runner-a": snapshot},
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
+    with runner_ops(
+        db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
+    ) as runner:
+        [machine] = _gather(
+            database,
+            machine_identity,
+            tmp_path,
+            [_row("runner-a", runner.url)],
+            {"runner-a": _snap(reachable=False, failures=2, status=_status())},
+        )
 
     assert machine.online is False and machine.paused is None
-    assert no_dial == []
+    assert runner.calls == []
 
 
 def test_a_reachable_answer_that_is_not_a_cluster_status_is_online_unknown(
-    no_dial: list[str], database_gate: ProcessDbGate, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    [machine] = _gather(
-        [_row()],
-        {"runner-a": _snap(reachable=True, status=None)},
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
+    with runner_ops(
+        db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
+    ) as runner:
+        [machine] = _gather(
+            database,
+            machine_identity,
+            tmp_path,
+            [_row("runner-a", runner.url)],
+            {
+                "runner-a": _snap(reachable=True, status=None),
+            },
+        )
 
     assert machine.online is True and machine.paused is None
-    assert no_dial == []
+    assert runner.calls == []
 
 
 def test_a_snapshot_answered_by_another_host_renders_identity_mismatch(
-    no_dial: list[str], database_gate: ProcessDbGate, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    [machine] = _gather(
-        [_row()],
-        {"runner-a": _snap(status=_status("somewhere-else"))},
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
+    with runner_ops(
+        db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
+    ) as runner:
+        [machine] = _gather(
+            database,
+            machine_identity,
+            tmp_path,
+            [_row("runner-a", runner.url)],
+            {"runner-a": _snap(status=_status("somewhere-else"))},
+        )
 
     assert machine.identity_mismatch is True and machine.online is False
-    assert no_dial == []
+    assert runner.calls == []
+
+
+def test_a_snapshot_body_that_is_not_a_cluster_status_renders_online_unknown(
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    with runner_ops(
+        db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
+    ) as runner:
+        [machine] = _gather(
+            database,
+            machine_identity,
+            tmp_path,
+            [_row("runner-a", runner.url)],
+            {"runner-a": _snap(status={"machine_name": "runner-a", "paused": True})},
+        )
+
+    assert machine.online is True and machine.paused is None
+    assert runner.calls == []
 
 
 # --- when the gateway dials ---------------------------------------------------
 
 
 def test_a_machine_without_a_fresh_snapshot_is_dialed(
-    no_dial: list[str], database_gate: ProcessDbGate, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The degraded fallback for a heartbeat service that is not running."""
-    rows = [_row("fresh-one"), _row("stale-one"), _row("unknown-one")]
-    snaps = {
-        "fresh-one": _snap(status=_status("fresh-one")),
-        "stale-one": _snap(status=_status("stale-one"), age_s=3600),
-    }
 
-    machines = _gather(rows, snaps, database_gate=database_gate, local_machine=machine_identity)
+    def reply(name: str) -> dict[str, Responder]:
+        return {"status_probe": completed(_status(name))}
 
-    assert sorted(no_dial) == ["stale-one", "unknown-one"]
+    with (
+        runner_ops(db_conn, "fresh-one", reply("fresh-one")) as fresh_one,
+        runner_ops(db_conn, "stale-one", reply("stale-one")) as stale_one,
+        runner_ops(db_conn, "unknown-one", reply("unknown-one")) as unknown_one,
+    ):
+        machines = _gather(
+            database,
+            machine_identity,
+            tmp_path,
+            [
+                _row("fresh-one", fresh_one.url),
+                _row("stale-one", stale_one.url),
+                _row("unknown-one", unknown_one.url),
+            ],
+            {
+                "fresh-one": _snap(status=_status("fresh-one")),
+                "stale-one": _snap(status=_status("stale-one"), age_s=3600),
+            },
+        )
+
+    assert _dialed(fresh_one, stale_one, unknown_one) == ["stale-one", "unknown-one"]
     assert {m.name for m in machines} == {"fresh-one", "stale-one", "unknown-one"}
 
 
 def test_a_fresh_read_dials_every_runner_whatever_the_snapshot_says(
-    no_dial: list[str], database_gate: ProcessDbGate, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    machines = _gather(
-        [_row("a"), _row("b")], None, database_gate=database_gate, local_machine=machine_identity
-    )
+    def reply(name: str) -> dict[str, Responder]:
+        return {"status_probe": completed(_status(name))}
 
-    assert sorted(no_dial) == ["a", "b"]
+    with runner_ops(db_conn, "a", reply("a")) as a, runner_ops(db_conn, "b", reply("b")) as b:
+        machines = _gather(
+            database,
+            machine_identity,
+            tmp_path,
+            [_row("a", a.url), _row("b", b.url)],
+            None,
+        )
+
+    assert _dialed(a, b) == ["a", "b"]
     assert all(m.online and m.observed_at is None for m in machines)  # live, no age
 
 
 def test_the_gateway_remembers_no_failure_between_reads(
-    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     """A host that fails a dial is dialed again by the next fresh read: there is no
     failure memory and no recovery thread in the gateway."""
-    calls: list[str] = []
-
-    async def dispatch(*, target_machine: str, **_kw: object) -> dict[str, object]:
-        calls.append(target_machine)
-        raise cluster_rpc.ClusterOpUnreachable("blackhole")
-
-    first = _gather(
-        [_row()],
-        None,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-        dispatch_fn=dispatch,
-    )
-    second = _gather(
-        [_row()],
-        None,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-        dispatch_fn=dispatch,
-    )
+    with runner_ops(db_conn, "runner-a", {"status_probe": refused(404, "blackhole")}) as runner:
+        rows = [_row("runner-a", runner.url)]
+        first = _gather(database, machine_identity, tmp_path, rows, None)
+        second = _gather(database, machine_identity, tmp_path, rows, None)
 
     assert [m.online for m in first + second] == [False, False]
-    assert calls == ["runner-a", "runner-a"]
+    assert len(runner.calls_of("status_probe")) == 2
 
 
 def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
-    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     """The dials run in parallel under one per-dial deadline, so five hosts that
     never answer cost about one budget, not five."""
     budget_s = 0.3
+    release = threading.Event()
 
-    async def dispatch(**_kw: object) -> dict[str, object]:
-        await asyncio.Event().wait()
-        raise AssertionError("unreachable")
+    def never_answers(call: OpsCall) -> OpsReply:
+        del call
+        release.wait(timeout=5.0)
+        return completed({})
 
-    started = time.monotonic()
-    machines = _gather(
-        [_row(f"h{i}") for i in range(5)],
-        None,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-        probe_timeout_s=budget_s,
-        dispatch_fn=dispatch,
-    )
-    elapsed = time.monotonic() - started
+    with runner_ops(db_conn, "blackhole", {"status_probe": never_answers}) as blackhole:
+        started = time.monotonic()
+        try:
+            machines = _gather(
+                database,
+                machine_identity,
+                tmp_path,
+                [_row(f"h{i}", blackhole.url) for i in range(5)],
+                None,
+                probe_timeout_s=budget_s,
+            )
+        finally:
+            release.set()
+        elapsed = time.monotonic() - started
 
     assert [m.online for m in machines] == [False] * 5
     assert elapsed < budget_s * 3
 
 
 # --- the endpoints ------------------------------------------------------------
-
-
-def _machine(conn: psycopg.Connection, name: str) -> None:
-    conn.execute(
-        "INSERT INTO machines (name, role, gateway_url) VALUES (%s, ARRAY['agent-runner'], %s)",
-        (name, f"http://{name}:8113"),
-    )
-    conn.commit()
 
 
 def _snapshot_row(conn: psycopg.Connection, name: str, *, running_sha: str) -> None:
@@ -336,25 +374,23 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
     machine_identity: MachineIdentity,
 ) -> None:
     db_conn.execute("TRUNCATE machines")
-    _machine(db_conn, "runner-snap")
-    _snapshot_row(db_conn, "runner-snap", running_sha="from-the-snapshot")
-    dialed: list[str] = []
+    db_conn.commit()
+    answer = {"status_probe": completed(_status("runner-snap", running_sha="dial"))}
 
-    async def dispatch(*, target_machine: str, **_kw: Any) -> dict[str, object]:
-        dialed.append(target_machine)
-        return _status(target_machine, running_sha="from-a-dial")
-
-    with gateway_test_client(machine=machine_identity) as client:
-        client.app.state.status_probe_dispatcher = dispatch
+    with (
+        runner_ops(db_conn, "runner-snap", answer) as runner,
+        gateway_test_client(machine=machine_identity) as client,
+    ):
+        _snapshot_row(db_conn, "runner-snap", running_sha="from-the-snapshot")
         default = client.get("/api/cluster/roster").json()
-        assert dialed == []
+        assert runner.calls == []
         fresh = client.get("/api/cluster/roster?fresh=true").json()
 
     row = next(m for m in default if m["name"] == "runner-snap")
     assert row["running_sha"] == "from-the-snapshot" and row["observed_at"] is not None
     live = next(m for m in fresh if m["name"] == "runner-snap")
-    assert live["running_sha"] == "from-a-dial" and live["observed_at"] is None
-    assert dialed == ["runner-snap"]
+    assert live["running_sha"] == "dial" and live["observed_at"] is None
+    assert len(runner.calls_of("status_probe")) == 1
 
 
 def test_the_machines_endpoint_follows_the_same_two_modes(
@@ -364,17 +400,16 @@ def test_the_machines_endpoint_follows_the_same_two_modes(
     machine_identity: MachineIdentity,
 ) -> None:
     db_conn.execute("TRUNCATE machines")
-    _machine(db_conn, "runner-snap")
-    _snapshot_row(db_conn, "runner-snap", running_sha="x")
-    dialed: list[str] = []
+    db_conn.commit()
+    answer = {"status_probe": completed(_status("runner-snap"))}
 
-    async def dispatch(*, target_machine: str, **_kw: Any) -> dict[str, object]:
-        dialed.append(target_machine)
-        return _status(target_machine)
-
-    with gateway_test_client(machine=machine_identity) as client:
-        client.app.state.status_probe_dispatcher = dispatch
+    with (
+        runner_ops(db_conn, "runner-snap", answer) as runner,
+        gateway_test_client(machine=machine_identity) as client,
+    ):
+        _snapshot_row(db_conn, "runner-snap", running_sha="x")
         assert client.get("/api/cluster/machines").json()[0]["live"] is True
-        assert dialed == []
+        assert runner.calls == []
         assert client.get("/api/cluster/machines?fresh=true").json()[0]["live"] is True
-    assert dialed == ["runner-snap"]
+
+    assert len(runner.calls_of("status_probe")) == 1

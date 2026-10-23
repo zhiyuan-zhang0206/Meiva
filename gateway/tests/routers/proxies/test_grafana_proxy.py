@@ -25,10 +25,9 @@ import socketserver
 import threading
 from collections.abc import Iterator
 
-import httpx
 import pytest
 
-from gateway.routers import grafana as grafana_router
+from gateway.routers.proxies import grafana as grafana_router
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import gateway_config_fields, gateway_test_client
 
@@ -255,14 +254,4 @@ def test_proxy_client_ignores_ambient_proxy_env() -> None:
     """The Grafana upstream is a co-located cluster host — the shared client
     must never route it through the machine's ambient HTTP proxy (mirrors the
     page-proxy hardening, 2026-09-10 incident)."""
-    real_client = httpx.AsyncClient
-    seen: dict[str, object] = {}
-
-    def _client_factory(
-        *, timeout: httpx.Timeout, trust_env: bool, limits: httpx.Limits
-    ) -> httpx.AsyncClient:
-        seen["trust_env"] = trust_env
-        return real_client(timeout=timeout, trust_env=trust_env, limits=limits)
-
-    grafana_router.build_proxy_client(client_cls=_client_factory)
-    assert seen["trust_env"] is False
+    assert grafana_router.build_proxy_client().trust_env is False

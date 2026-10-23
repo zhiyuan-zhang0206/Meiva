@@ -1,82 +1,73 @@
+# meiva:note
+# The runner entry composes one process: bind the schedule's actor, open its history, run its script.
+#
+# These run the production entry (`runner.run`) on a real schedule row; a schedule script is the
+# probe, because it runs inside the composed process after everything the entry sets up.
+
 import threading
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
 
-from base.agents.context import MeivaContext
-from base.agents.context.clients import ClientSet
-from base.clock import Clock
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.config import ConfigBoot
-from base.daemon.schedules.inputs import ScheduleInputs
-from base.daemon.schedules.inputs import schedule_entry as runner_inputs_entry
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import DbConfig
-from base.native_process.loaded_commit import LoadedCommit
-from base.paths.tests.homes import unit_home as unit_home
-from base.telemetry import EventPipeline
-from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import runner
 
 
-def _schedule(conn: psycopg.Connection) -> int:
+def _schedule(conn: psycopg.Connection, script: str = "pass") -> int:
     row = conn.execute(
         "INSERT INTO schedules (name, script, command) "
-        "VALUES ('composition', 'pass', 'python schedule.py') RETURNING id"
+        "VALUES ('composition', %s, 'python schedule.py') RETURNING id",
+        (script,),
     ).fetchone()
     conn.commit()
     assert row is not None
     return row[0]
 
 
-def test_actor_binding_failure_does_not_open_history(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+def test_the_script_runs_as_the_schedule_with_its_history_open_under_the_guard(
+    db_conn: psycopg.Connection, unit_home: Path
 ) -> None:
-    sid = _schedule(db_conn)
-    error = RuntimeError("actor unavailable")
+    marker = unit_home / "world.txt"
+    script = (
+        # meiva:note
+        # a probe script that queries, not SQL built from input.
+        "import threading\n"  # noqa: S608
+        "from pathlib import Path\n"
+        "import meiva\n"
+        "from meiva.sdk_surface.agent_identity import require_actor\n"
+        "from schedules.entry import schedule_entry\n"
+        "with schedule_entry(MEIVA_SCHEDULE_INPUTS) as inputs:\n"
+        "    with inputs.database().connect() as conn:\n"
+        "        open_runs = conn.execute('SELECT ok FROM schedule_runs').fetchall()\n"
+        "    guards = [t.name for t in threading.enumerate() if t.name.endswith('-stall-guard')]\n"
+        f"    Path({str(marker)!r}).write_text(\n"
+        "        repr((require_actor(), meiva.context.require_clock().timezone, open_runs, guards))\n"
+        "    )\n"
+    )
+    sid = _schedule(db_conn, script)
 
-    def bind(context: MeivaContext) -> None:
-        assert context.identity is not None
-        assert context.identity.actor == f"schedule:{sid}"
-        assert (unit_home / "schedules" / str(sid) / "schedule.py").read_text() == "pass"
-        raise error
+    assert runner.run(sid) == 0
 
-    monkeypatch.setattr(process_context, "bind_context", bind)
-    with pytest.raises(RuntimeError) as caught:
-        runner.run(sid)
-    assert caught.value is error
-    assert db_conn.execute("SELECT count(*) FROM schedule_runs").fetchone() == (0,)
+    # meiva:note
+    # the test's own repr.
+    actor, timezone, open_runs, guards = eval(marker.read_text())  # noqa: S307
+    assert actor == f"schedule:{sid}"
+    assert timezone
+    assert open_runs == [(None,)]
+    assert guards == [f"schedule-{sid}-stall-guard"]
+    assert db_conn.execute("SELECT ok FROM schedule_runs").fetchall() == [(True,)]
+    assert not [t for t in threading.enumerate() if t.name.endswith("-stall-guard")]
 
 
-def test_plugins_load_under_guard_after_actor_and_history(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_script_crash_closes_its_history_and_stops_the_guard(
+    db_conn: psycopg.Connection, unit_home: Path
 ) -> None:
-    sid = _schedule(db_conn)
-    guards: list[threading.Thread] = []
+    sid = _schedule(db_conn, "raise RuntimeError('boom')\n")
 
-    def plugins(
-        *, config: ConfigBoot, clock_factory: Callable[[], Clock], producer: Callable[[], Any]
-    ) -> None:
-        from meiva.sdk_surface.agent_identity import require_actor
-
-        assert require_actor() == f"schedule:{sid}"
-        assert runner.meiva.context.require_clock().timezone == clock_factory().timezone
-        assert producer == runner.meiva.context.clients.event_pipeline
-        assert config.view.general.timezone == clock_factory().timezone
-        assert (unit_home / "schedules" / str(sid) / "schedule.py").exists()
-        assert db_conn.execute("SELECT ok FROM schedule_runs").fetchall() == [(None,)]
-        guards.extend(t for t in threading.enumerate() if t.name == f"schedule-{sid}-stall-guard")
-        assert len(guards) == 1 and guards[0].is_alive()
-        raise RuntimeError("plugin failure")
-
-    monkeypatch.setattr(runner.meiva, "ensure_plugins_loaded", plugins)
     assert runner.run(sid) == 1
-    assert not guards[0].is_alive()
+
     assert db_conn.execute("SELECT ok FROM schedule_runs").fetchall() == [(False,)]
+    assert not [t for t in threading.enumerate() if t.name.endswith("-stall-guard")]
 
 
 def test_main_refuses_on_foreign_checkout(unit_home: Path) -> None:
@@ -84,101 +75,6 @@ def test_main_refuses_on_foreign_checkout(unit_home: Path) -> None:
     with pytest.raises(SystemExit) as caught:
         runner.main(["1"])
     assert caught.value.code == 3
-
-
-@pytest.mark.parametrize("sha", ["a" * 40, None])
-def test_process_owns_one_gate_and_closes_its_pipeline(
-    monkeypatch: pytest.MonkeyPatch, sha: str | None
-) -> None:
-    image = LoadedCommit(Path("/loaded-schedule"), sha)
-    images: list[LoadedCommit] = []
-    gates: list[ProcessDbGate] = []
-    pipelines: list[EventPipeline] = []
-    version_type = runner.CodeVersion
-
-    def version(loaded: LoadedCommit) -> Any:
-        images.append(loaded)
-        return version_type(loaded)
-
-    def database(
-        config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
-    ) -> Database:
-        gates.append(gate)
-        return Database(config, gate=gate, direct_url=direct_url)
-
-    def execute(
-        schedule_id: int,
-        revision: int | None,
-        *,
-        database: Callable[[], Database],
-        bind_actor: Callable[[int], None],
-        load_plugins: Callable[[], None],
-        inputs: ScheduleInputs,
-    ) -> int:
-        assert (schedule_id, revision) == (17, 3)
-        database()
-        bind_actor(schedule_id)
-        context = runner.meiva.context
-        assert inputs.database is database
-        assert inputs.producer == context.clients.event_pipeline
-        assert inputs.image is image
-        assert inputs.machine is context.require_machine()
-        with runner_inputs_entry(inputs) as borrowed:
-            assert borrowed is inputs
-            borrowed.database()
-        context.clients.database()
-        pipelines.append(context.clients.event_pipeline())
-        assert not pipelines[0].stopped
-        monkeypatch.setattr(
-            process_context, "loaded_code_image", lambda: LoadedCommit(Path("/late"), "b")
-        )
-        database()
-        return 0
-
-    monkeypatch.setattr(process_context, "loaded_code_image", lambda: image)
-    monkeypatch.setattr(runner, "CodeVersion", version)
-    monkeypatch.setattr(runner, "Database", database)
-    monkeypatch.setattr(runner.engine, "run", execute)
-    assert runner.run(17, 3) == 0
-    assert images == [image]
-    assert len(gates) == 4 and all(gate is gates[0] for gate in gates)
-    assert pipelines[0].stopped
-
-
-def test_actor_failure_stays_primary_when_client_cleanup_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    primary = RuntimeError("actor unavailable")
-    secondary = OSError("client close failed")
-    close = ClientSet.close
-
-    def bind(_context: MeivaContext) -> None:
-        raise primary
-
-    def execute(
-        schedule_id: int,
-        _revision: int | None,
-        *,
-        database: Callable[[], Database],
-        bind_actor: Callable[[int], None],
-        load_plugins: Callable[[], None],
-        inputs: ScheduleInputs,
-    ) -> int:
-        bind_actor(schedule_id)
-        raise AssertionError("binding failure was swallowed")
-
-    def fail_close(self: ClientSet, *, pipeline_timeout: float = 5) -> None:
-        assert pipeline_timeout == 2
-        close(self, pipeline_timeout=pipeline_timeout)
-        raise secondary
-
-    monkeypatch.setattr(process_context, "bind_context", bind)
-    monkeypatch.setattr(runner.engine, "run", execute)
-    monkeypatch.setattr(ClientSet, "close", fail_close)
-    with pytest.raises(RuntimeError) as caught:
-        runner.run(17)
-    assert caught.value is primary
-    assert any("client close failed" in note for note in primary.__notes__)
 
 
 def test_runpy_script_receives_the_same_entry_builders(

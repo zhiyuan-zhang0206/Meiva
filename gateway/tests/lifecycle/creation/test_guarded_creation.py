@@ -1,6 +1,6 @@
 """Guarded routing must reject legacy servers and unverified creation identities."""
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import Any
@@ -11,16 +11,13 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
-from gateway.agents import creation as agent_creation
 from gateway.agents.creation import scoped_creation_key
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_test_client,
 )
-from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
-from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+from gateway.tests.support.runner_ops.ops_stub import RunnerOps, completed, launched, runner_ops
 
 PATH = "/api/keyed/v1/agents"
 SECRET = "guarded-test-secret"  # noqa: S105 -- isolated auth fixture
@@ -28,22 +25,22 @@ HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
 
 
 @pytest.fixture
-def client(
-    gateway_data_plane: None,
-    monkeypatch: pytest.MonkeyPatch,
-    set_machine_identity: Any,
-    *,
-    machine_identity: MachineIdentity,
-) -> Iterator[GatewayTestClient]:
+def runner(
+    gateway_data_plane: None, db_conn: psycopg.Connection, set_machine_identity: Any
+) -> Generator[RunnerOps]:
+    """The runner `local-test`, which accepts every launch it is asked for."""
     set_machine_identity(role="agent-runner", name="local-test")
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
+    replies = {"spawn-launch": launched, "launch-reconcile": completed({"wake_published": False})}
+    with runner_ops(db_conn, "local-test", replies) as value:
+        yield value
 
-    async def accept(db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
-        return SpawnedAgent(id=body.agent_id)
 
-    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
+@pytest.fixture
+def client(runner: RunnerOps, *, machine_identity: MachineIdentity) -> Generator[GatewayTestClient]:
     with gateway_test_client(
-        headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+        cluster_secret=SECRET,
+        headers={"Authorization": f"Bearer {SECRET}"},
+        machine=machine_identity,
     ) as value:
         yield value
 

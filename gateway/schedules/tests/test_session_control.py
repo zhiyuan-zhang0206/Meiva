@@ -1,35 +1,35 @@
+# meiva:note
+# The API reads a schedule session's output straight from the real session service.
+
 from __future__ import annotations
 
-import pytest
+from pathlib import Path
 
+from base.cluster import session_name
 from base.sessions.backend import get_shell_backend
+from base.sessions.env_forwarding import forward_env_dict
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_shells import wait_for
 from gateway.schedules import session_control
 
 
-class _Backend:
-    def __init__(self, live: set[str]) -> None:
-        self.live = live
-
-    def has_session(self, name: str) -> bool:
-        return name in self.live
-
-    def capture_pane(self, name: str, lines: int) -> str:
-        return f"{name}:{lines}"
+def test_capture_returns_none_without_a_session(pty_service: PtyServiceProcess) -> None:
+    assert session_control.capture_blocking(get_shell_backend(), 123, 200) is None
 
 
-def test_capture_returns_none_without_a_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(session_control, "get_shell_backend", lambda: _Backend(set()))
-
-    assert session_control.capture_blocking(123, 200) is None
-
-
-def test_capture_reads_the_live_sessions_pane(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        session_control, "get_shell_backend", lambda: _Backend({"meiva-schedule-123"})
+def test_capture_reads_the_live_sessions_pane(
+    pty_service: PtyServiceProcess, tmp_path: Path
+) -> None:
+    backend = get_shell_backend()
+    backend.new_session(
+        session_name("schedule-123"),
+        "echo SCHEDULE_OUTPUT; sleep 30",
+        tmp_path,
+        env=forward_env_dict(),
     )
 
-    assert session_control.capture_blocking(123, 50) == "meiva-schedule-123:50"
+    def captured() -> bool:
+        return "SCHEDULE_OUTPUT" in (session_control.capture_blocking(backend, 123, 50) or "")
 
-
-def test_capture_uses_the_shell_backend() -> None:
-    assert session_control.get_shell_backend is get_shell_backend
+    assert wait_for(captured)

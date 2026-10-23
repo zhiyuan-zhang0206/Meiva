@@ -17,6 +17,7 @@ import math
 import socket
 import socketserver
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -51,19 +52,41 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch, machine_identity
         yield
 
 
+# meiva:note
+# `meiva.ui` calls run against a page host with a short ready timeout.
+#
+# Retained patch: `meiva.ui.page_host()` builds its page host from the process context with
+# the production ready timeout (60s+), and a test about the timeout cannot wait that long
+# (needs meiva: the ready timeout as a value of the process context).
 def _use_page_host(
-    monkeypatch: pytest.MonkeyPatch, *, local_machine: MachineIdentity, **overrides: Any
+    monkeypatch: pytest.MonkeyPatch, *, local_machine: MachineIdentity, ready_timeout_s: float
 ) -> None:
-    """`meiva.ui` calls run against a page host with the given probes / ready timeout."""
 
     def build() -> meiva.ui.PageHost:
         return meiva.ui.PageHost(
             host=local_machine.host(),
             agent_id=agent_identity.require_agent_id(),
-            **overrides,
+            ready_timeout_s=ready_timeout_s,
         )
 
     monkeypatch.setattr(ui, "page_host", build)
+
+
+# meiva:note
+# (created_at, expires_at) of the agent's open page `name`.
+def _expiry_window(db: psycopg.Connection, agent_id: int, name: str) -> tuple[datetime, datetime]:
+    db.rollback()
+    row = db.execute(
+        "SELECT created_at, expires_at FROM agent_pages "
+        "WHERE agent_id = %s AND name = %s AND closed_at IS NULL",
+        (agent_id, name),
+    ).fetchone()
+    assert row is not None and row[1] is not None
+    return row[0], row[1]
+
+
+def _seconds_between(start: datetime, end: datetime) -> float:
+    return (end - start).total_seconds()
 
 
 def _open_pages(db: psycopg.Connection, agent_id: int) -> list[tuple[Any, ...]]:
@@ -295,69 +318,45 @@ class TestShow:
 
     def test_show_passes_integer_ttl_to_gateway(
         self,
-        monkeypatch: pytest.MonkeyPatch,
+        db_conn: psycopg.Connection,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        pin_agent(
-            spawn_agent(
-                catalog=model_catalog,
-                authority=config_authority,
-                database_gate=database_gate,
-                machine=machine_identity,
-            )
+        agent_id = spawn_agent(
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
         )
-        captured: dict[str, object] = {}
-
-        def _register(agent_id: int, **kwargs: object) -> dict[str, object]:
-            captured.update(agent_id=agent_id, **kwargs)
-            return {
-                "id": 1,
-                "name": "timed",
-                "port": 12000,
-                "title": None,
-                "url": "http://gateway/page",
-            }
-
-        monkeypatch.setattr(meiva.gateway_client, "register_page", _register)
+        pin_agent(agent_id)
         meiva.ui.show("timed", port=12000, ttl=12.9)
-        assert captured["ttl_seconds"] == 12
+        created_at, expires_at = _expiry_window(db_conn, agent_id, "timed")
+        assert _seconds_between(created_at, expires_at) == pytest.approx(12, abs=0.5)
 
     def test_show_without_ttl_omits_gateway_field(
         self,
-        monkeypatch: pytest.MonkeyPatch,
+        db_conn: psycopg.Connection,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        pin_agent(
-            spawn_agent(
-                catalog=model_catalog,
-                authority=config_authority,
-                database_gate=database_gate,
-                machine=machine_identity,
-            )
+        agent_id = spawn_agent(
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
         )
-        captured: dict[str, object] = {}
-
-        def _register(_agent_id: int, **kwargs: object) -> dict[str, object]:
-            captured.update(kwargs)
-            return {
-                "id": 1,
-                "name": "plain",
-                "port": 12000,
-                "title": None,
-                "url": "http://gateway/page",
-            }
-
-        monkeypatch.setattr(meiva.gateway_client, "register_page", _register)
+        pin_agent(agent_id)
         meiva.ui.show("plain", port=12000)
-        assert "ttl_seconds" not in captured
+        created_at, expires_at = _expiry_window(db_conn, agent_id, "plain")
+        # meiva:note
+        # No ttl on the wire: the gateway applies its configured default (86400s).
+        assert _seconds_between(created_at, expires_at) == pytest.approx(86400, abs=0.5)
 
 
 @pytest.mark.parametrize("ttl", [0.0, -1.0, math.inf, math.nan])
@@ -473,7 +472,7 @@ class TestServe:
 
     def test_serve_passes_ttl(
         self,
-        monkeypatch: pytest.MonkeyPatch,
+        db_conn: psycopg.Connection,
         tmp_path: Path,
         *,
         model_catalog: ModelCatalog,
@@ -481,35 +480,17 @@ class TestServe:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        pin_agent(
-            spawn_agent(
-                catalog=model_catalog,
-                authority=config_authority,
-                database_gate=database_gate,
-                machine=machine_identity,
-            )
+        agent_id = spawn_agent(
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
         )
-        captured: dict[str, object] = {}
-        _use_page_host(
-            monkeypatch,
-            bindable=lambda *_a: True,
-            health=lambda *_a: "ok:stub",
-            local_machine=machine_identity,
-        )
-
-        def _register(_agent_id: int, **kwargs: object) -> dict[str, object]:
-            captured.update(kwargs)
-            return {
-                "id": 1,
-                "name": "srv-ttl",
-                "port": 12000,
-                "title": None,
-                "url": "http://gateway/page",
-            }
-
-        monkeypatch.setattr(meiva.gateway_client, "register_page", _register)
-        meiva.ui.serve(str(tmp_path), "srv-ttl", port=12000, ttl=30)
-        assert captured["ttl_seconds"] == 30
+        pin_agent(agent_id)
+        with _StubPageServer("127.0.0.1") as stub:
+            meiva.ui.serve(str(tmp_path), "srv-ttl", port=stub.port, ttl=30)
+        created_at, expires_at = _expiry_window(db_conn, agent_id, "srv-ttl")
+        assert _seconds_between(created_at, expires_at) == pytest.approx(30, abs=0.5)
 
     def test_serve_waits_for_server_to_come_up(
         self,

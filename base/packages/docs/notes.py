@@ -1,12 +1,12 @@
-"""Shared markdown-note model + walkers — one parser for the whole repo.
-
-The memory pool graph (`gateway/routers/memory.py`) and the OKF bundle graph
-(`base/packages/docs/okf_graph.py`) both build graphs out of `---`-frontmatter markdown
-notes; this module is the single place that reads a note off disk, decides it
-is a note, and maps frontmatter to the fields both consumers need. It stays
-schema-free: `Note` is plain data, and graph-specific semantics (primary_tag,
-edge filtering) live in the callers.
-"""
+# meiva:note
+# Shared markdown-note model + walkers — one parser for the whole repo.
+#
+# The memory pool graph (`gateway/routers/memory_api/memory.py`) and the OKF bundle graph
+# (`base/packages/docs/okf_graph.py`) both build graphs out of `---`-frontmatter markdown
+# notes; this module is the single place that reads a note off disk, decides it
+# is a note, and maps frontmatter to the fields both consumers need. It stays
+# schema-free: `Note` is plain data, and graph-specific semantics (primary_tag,
+# edge filtering) live in the callers.
 
 from __future__ import annotations
 

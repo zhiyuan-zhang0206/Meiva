@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 import psycopg
 import pytest
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
+from base.config import settings
 from base.db import create_agent
 from gateway.tests.auth.gateway_config import GatewayTestClient
 from gateway.tests.history.test_timeline import CompactHistoryCases
 from gateway.tests.history.test_timeline import test_client as test_client
+from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
 
 
 class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
@@ -52,25 +52,16 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         from langchain_core.messages import AIMessage
 
         tid = create_agent(db_conn)
+        self._put_checkpoint(tid, self._segment("older", 1), version="1", boundary=True)
+        # meiva:note
+        # The newer boundary exists in the index but holds no messages: its segment is gone.
+        self._put_checkpoint(tid, [], version="2", boundary=True)
         self._put_checkpoint(
             tid,
             self._current(AIMessage(content="current item")),
-            version="1",
+            version="3",
         )
         test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
-
-        def boundary_ids(_db: object, _agent_id: int, *, limit: int | None = None) -> list[str]:
-            del limit
-            return ["missing-newer", "still-older"]
-
-        def missing_segment(_db: object, _agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
-            return []
-
-        test_client.app.state.timeline_policy = replace(
-            test_client.app.state.timeline_policy,
-            list_boundary_ids=boundary_ids,
-            load_segment=missing_segment,
-        )
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -129,41 +120,33 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from base.agents.history.checkpoint import CheckpointReadError
-
         tid = create_agent(db_conn)
+        if damage == "read_error":
+            checkpoint_id = put_unreadable_head(
+                settings.data_plane.db_url, tid, version="1", boundary=True
+            )
+        else:
+            segment: list[BaseMessage] = (
+                []
+                if damage == "missing"
+                else [
+                    SystemMessage(content="system"),
+                    HumanMessage(
+                        content="damaged inbound",
+                        additional_kwargs={
+                            "meiva_msg_type": "inbound",
+                            "meiva_inbound_id": "not-an-integer",
+                        },
+                    ),
+                ]
+            )
+            checkpoint_id = self._put_checkpoint(tid, segment, version="1", boundary=True)
         self._put_checkpoint(
             tid,
             self._current(AIMessage(content="current item")),
-            version="1",
+            version="2",
         )
-        checkpoint_id = "1f0b9b12-0000-6000-8000-000000000000"
         test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
-
-        def boundary_ids(_db: object, _agent_id: int, *, limit: int | None = None) -> list[str]:
-            del limit
-            return [checkpoint_id]
-
-        def load_segment(*_args: object) -> list[BaseMessage]:
-            if damage == "missing":
-                return []
-            if damage == "read_error":
-                raise CheckpointReadError("damaged boundary")
-            return [
-                HumanMessage(
-                    content="damaged inbound",
-                    additional_kwargs={
-                        "meiva_msg_type": "inbound",
-                        "meiva_inbound_id": "not-an-integer",
-                    },
-                )
-            ]
-
-        test_client.app.state.timeline_policy = replace(
-            test_client.app.state.timeline_policy,
-            list_boundary_ids=boundary_ids,
-            load_segment=load_segment,
-        )
 
         url = f"/api/agents/{tid}/timeline"
         params = {"before": f"s1.{checkpoint_id}.1.0", "limit": 50}

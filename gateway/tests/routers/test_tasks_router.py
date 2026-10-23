@@ -28,10 +28,10 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.idempotency import keyed_headers
 from gateway.routers.tasks import get_tasks
 from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.support.runner_ops.ops_stub import completed, runner_ops
 
 
 def make_agent(db: psycopg.Connection) -> int:
@@ -242,24 +242,26 @@ class TestOwner:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (new_owner,))
         db_conn.commit()
-        resurrection_calls: list[tuple[int, str]] = []
+        home = db_conn.execute("SELECT machine FROM agents_meta WHERE id = %s", (new_owner,))
+        machine = home.fetchone()
+        assert machine is not None
 
-        async def _record_resurrection(
-            _db: object, _bus: object, agent_id: int, **kw: Any
-        ) -> AgentStatus:
-            assert kw["trigger_inbound_id"] > 0
-            resurrection_calls.append((agent_id, kw["trigger_inbound_kind"]))
-            return cast("AgentStatus", "idling")
-
-        with gateway_test_client() as client:
-            client.app.state.task_resurrector = _record_resurrection
+        with (
+            runner_ops(
+                db_conn, machine[0], {"lifecycle": completed({"status": "already_alive"})}
+            ) as runner,
+            gateway_test_client() as client,
+        ):
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"owner": new_owner},
                 headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
-        assert resurrection_calls == [(new_owner, "system_note")]
+        (resurrection,) = runner.payloads("lifecycle")
+        assert resurrection["path"] == f"/api/agents/{new_owner}/resurrect-if-pending-work"
+        assert resurrection["trigger_inbound_kind"] == "system_note"
+        assert resurrection["trigger_inbound_id"] > 0
         assert len(_task_notes(db_conn, new_owner)) == 1
 
     def test_reassign_skips_terminated_previous_owner(self, db_conn: psycopg.Connection) -> None:

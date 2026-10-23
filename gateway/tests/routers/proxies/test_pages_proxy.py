@@ -20,26 +20,39 @@ import socketserver
 import threading
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
-from base.db import create_agent
+from base.config.tests.configuration import snapshot_process_config
+from base.db import Database, create_agent
 from base.packages.docs.pages_copy import (
     PAGE_LANGUAGE_DEFAULT,
     PAGE_SERVER_DOWN_BODY,
     PAGE_SERVER_TIMEOUT_BODY,
 )
-from gateway.routers import pages as pages_router
+from gateway.http.config import GatewayConfig, gateway_config_from_boot
+from gateway.routers.page_serving import page_target
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.support.db_faults.missing_table import missing_table
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
+
+
+# meiva:note
+# The test gateway's HTTP policy with a short page-proxy read bound.
+def _with_read_bound(seconds: float) -> GatewayConfig:
+    return replace(
+        gateway_config_from_boot(snapshot_process_config()),
+        human_auth="required",
+        page_proxy_read_seconds=seconds,
+    )
 
 
 def _keyed_headers() -> dict[str, str]:
@@ -65,46 +78,25 @@ def _close_page(client: TestClient, agent_id: int, name: str) -> Any:
     )
 
 
-def test_machine_dial_host_cache_evicts_least_recently_used_machine() -> None:
+def test_machine_dial_host_cache_evicts_least_recently_used_machine(
+    db_conn: psycopg.Connection, database: Database
+) -> None:
     """The page-proxy allowlist cache remains bounded while preserving recent hosts."""
+    for machine in ("first", "second", "third"):
+        db_conn.execute(
+            "INSERT INTO machine_units (machine_name, home, url) VALUES (%s, %s, %s)",
+            (machine, f"/home/{machine}", f"http://{machine}.internal:8106"),
+        )
+    db_conn.commit()
 
-    class _Cursor:
-        machine = ""
+    cache = page_target.PageHostCache(max_entries=2)
+    with database.pool(max_size=1) as pool:
+        hosts = [
+            cache.dial_hosts(pool, machine) for machine in ("first", "second", "first", "third")
+        ]
 
-        def execute(self, _query: str, params: tuple[str]) -> None:
-            self.machine = params[0]
-
-        def fetchall(self) -> list[tuple[str]]:
-            return [(f"http://{self.machine}.internal:8106",)]
-
-        def __enter__(self) -> _Cursor:
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-    class _Connection:
-        def cursor(self) -> _Cursor:
-            return _Cursor()
-
-        def __enter__(self) -> _Connection:
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-    class _Pool:
-        def connection(self) -> _Connection:
-            return _Connection()
-
-    cache = pages_router.PageHostCache(max_entries=2)
-    pool = _Pool()
-    cache.dial_hosts(pool, "first")  # pyright: ignore[reportArgumentType]
-    cache.dial_hosts(pool, "second")  # pyright: ignore[reportArgumentType]
-    cache.dial_hosts(pool, "first")  # pyright: ignore[reportArgumentType]
-    cache.dial_hosts(pool, "third")  # pyright: ignore[reportArgumentType]
-
-    assert list(cache._hosts) == ["first", "third"]
+    assert hosts[0] == {"first", "first.internal"}
+    assert cache.cached_machines() == ["first", "third"]
 
 
 class _QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -191,27 +183,6 @@ def test_proxy_serves_page_content(db_conn, page_server: int) -> None:
         with_qs = client.get(f"/pages/{aid}-p/?v=2")
         assert with_qs.status_code == 200
         assert "<h1>hello</h1>" in with_qs.text
-
-
-def test_proxy_client_ignores_ambient_proxy_env(db_conn, page_server: int) -> None:
-    """The page-proxy dial target is a registry-validated cluster host — the
-    client must never route it through the machine's ambient HTTP proxy
-    (proxy-configured gateway hosts forwarded Clash's own 502, 2026-09-10)."""
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-    real_client = httpx.AsyncClient
-    seen: dict[str, object] = {}
-
-    def _client_factory(**kwargs):  # type: ignore[no-untyped-def]
-        seen["trust_env"] = kwargs["trust_env"]
-        return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
-
-    with gateway_test_client() as client:
-        client.app.state.page_proxy_client_factory = _client_factory
-        _register(client, aid, "p", page_server)
-        resp = client.get(f"/pages/{aid}-p/")
-    assert resp.status_code == 200
-    assert "<h1>hello</h1>" in resp.text
-    assert seen["trust_env"] is False
 
 
 def test_proxy_redirects_root_without_trailing_slash(db_conn, page_server: int) -> None:
@@ -413,19 +384,26 @@ def test_proxy_502_emits_structured_log_line(db_conn) -> None:
     assert extra["exc_message"]
 
 
-def test_proxy_504_timeout_friendly_copy_and_log(
-    db_conn: psycopg.Connection,
-) -> None:
-    """A dial timeout surfaces as 504 with friendly copy (never the raw
-    host:port) and one structured log line carrying the timeout exception —
-    the 504 branch's traceability mirrors the 502 branch (task #2212)."""
+# meiva:note
+# Accepts the request and never answers, so the proxy's read bound is what ends it.
+class _HangingHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        import time
+
+        time.sleep(2.0)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+# meiva:note
+# A stalled page server surfaces as 504 with friendly copy (never the raw
+# host:port) and one structured log line carrying the timeout exception —
+# the 504 branch's traceability mirrors the 502 branch (task #2212).
+def test_proxy_504_timeout_friendly_copy_and_log(db_conn: psycopg.Connection) -> None:
     from typing import Any as _Any
 
-    import httpx
     from loguru import logger as _loguru
-
-    async def _send_times_out(_request: httpx.Request) -> httpx.Response:
-        raise httpx.TimeoutException("connect timed out")
 
     records: list[_Any] = []
 
@@ -433,26 +411,19 @@ def test_proxy_504_timeout_friendly_copy_and_log(
         records.append(message.record)
 
     aid = create_agent(db_conn)
-    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    probe.bind(("127.0.0.1", 0))
-    free_port = probe.getsockname()[1]
-    probe.close()
+    hanging = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _HangingHandler)
+    hanging.daemon_threads = True
+    threading.Thread(target=hanging.serve_forever, daemon=True).start()
+    port = hanging.server_address[1]
     sink_id = _loguru.add(_capture, level="WARNING")
     try:
-        with gateway_test_client() as client:
-
-            def _timeout_client(**_kwargs: object) -> httpx.AsyncClient:
-                return httpx.AsyncClient(
-                    transport=httpx.MockTransport(_send_times_out),
-                    follow_redirects=False,
-                    trust_env=False,
-                )
-
-            client.app.state.page_proxy_client_factory = _timeout_client
-            _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
+        with gateway_test_client(config=_with_read_bound(0.2)) as client:
+            _post_page(client, aid, {"name": "p", "port": port, "host": "127.0.0.1"})
             resp = client.get(f"/pages/{aid}-p/")
     finally:
         _loguru.remove(sink_id)
+        hanging.shutdown()
+        hanging.server_close()
 
     assert resp.status_code == 504
     # Friendly copy (zh default) replaces the raw host:port detail.
@@ -465,10 +436,10 @@ def test_proxy_504_timeout_friendly_copy_and_log(
     assert extra["agent_id"] == aid
     assert extra["page"] == "p"
     assert extra["host"] == "127.0.0.1"
-    assert extra["port"] == free_port
+    assert extra["port"] == port
     assert extra["trace_id"]
-    assert extra["exc_type"] == "TimeoutException"
-    assert extra["exc_message"]
+    assert extra["exc_type"] == "ReadTimeout"
+    assert extra["exc_message"] is not None
 
 
 def test_proxy_502_language_lookup_failure_falls_back_to_default(
@@ -476,19 +447,15 @@ def test_proxy_502_language_lookup_failure_falls_back_to_default(
 ) -> None:
     """A DB failure while reading the copy language must not turn the 502
     into a 500 — the default-language copy is served instead (QA nit A)."""
-
-    def _boom(_conn: object) -> str:
-        raise RuntimeError("pg down")
-
     aid = create_agent(db_conn)
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))
     free_port = probe.getsockname()[1]
     probe.close()
     with gateway_test_client() as client:
-        client.app.state.page_language_reader = _boom
         _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
-        resp = client.get(f"/pages/{aid}-p/")
+        with missing_table(db_conn, "user_settings"):
+            resp = client.get(f"/pages/{aid}-p/")
     assert resp.status_code == 502
     assert resp.json()["detail"] == PAGE_SERVER_DOWN_BODY[PAGE_LANGUAGE_DEFAULT]
 
@@ -557,7 +524,7 @@ def test_new_url_parses_page_key_with_dashes_in_name() -> None:
     """Name charset allows dashes; the composite key splits on the FIRST
     dash only (agent_id is numeric), so `12-my-page` parses to
     (12, "my-page"). The proxy then serves that page."""
-    from gateway.routers.pages import parse_page_key
+    from gateway.routers.page_serving.pages import parse_page_key
 
     assert parse_page_key("12-my-page") == (12, "my-page")
     assert parse_page_key("7-page") == (7, "page")

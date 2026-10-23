@@ -35,11 +35,21 @@ binding's fallback. The published effort default is the model's tuning value,
 nonempty and within its options. A cluster-wide effort pin does not replace
 that picker default.
 
-Lifecycle handlers pass the actual request app's database and pool to
-`forward_to_home_machine`; home lookup borrows that pool and RPC uses that
-database. MCP termination passes its server-composed database and pool through
-`terminate_agent_with_open_tasks`, including the advisory task hint and shell
-TTL cleanup. Forward helpers do not import the assembled `gateway.app`.
+Lifecycle handlers pass the actual request app's database, pool and `GatewayConfig` to
+`forward_to_home_machine`; home lookup borrows that pool, RPC uses that database, and the
+config carries the dispatch budget (`lifecycle_attempt_timeout_seconds`,
+`lifecycle_retries`, `lifecycle_deadline_seconds`: an offline runner becomes a named 502
+inside the caller's window). MCP termination reaches the same handler through the app, so
+`terminate_agent_with_open_tasks` serves the advisory task hint and shell TTL cleanup for
+both. Forward helpers do not import the assembled `gateway.app`.
+
+`gateway/agents/launch/forward.py` holds the effects (the registry read, the dispatch and the
+clock bound around it); every decision is a pure function in a strict module:
+`lifecycle_plan` (the op a request becomes, the typed error a failed, silent or unreachable
+runner stands for) and `launch_plan` (a spawn target's refusal, the `spawn-launch`
+payload, the launch receipt and the launch state a failure records). A test serves the runner on a real listener
+(`gateway/tests/support/runner_ops`) and asserts the response and the envelopes it received, or
+passes values to the plan functions.
 
 ## Spawn boundary
 

@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import shutil
-from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -14,12 +13,13 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
 from base.cluster import session_name
-from base.config import settings
 from base.db.transaction import write_transaction
+from base.sessions.protocol import SessionBackend
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
+from gateway.http.config import GatewayConfig, runtime_view
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
-from gateway.schedules import receipts, session_control
+from gateway.schedules import plans, receipts, session_control
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()
@@ -30,8 +30,6 @@ _SUMMARY_COLS = (
 )
 _FULL_COLS = _SUMMARY_COLS + ", script"
 
-
-_UPDATABLE = ("name", "description", "script", "command", "enabled")
 
 _DEFAULT_COMMAND = "python schedule.py"
 
@@ -116,17 +114,6 @@ def _validate_script(script: str) -> None:
         ) from exc
 
 
-def _changed_fields(previous: tuple[Any, ...], fields: dict[str, Any]) -> dict[str, Any]:
-    current = dict(
-        zip(
-            _UPDATABLE,
-            (previous[1], previous[2], previous[9], previous[3], previous[4]),
-            strict=True,
-        )
-    )
-    return {col: fields[col] for col in _UPDATABLE if col in fields and fields[col] != current[col]}
-
-
 def _edit_assignments(changed: dict[str, Any], *, code_changed: bool) -> list[sql.Composable]:
     assignments: list[sql.Composable] = [
         sql.SQL("{} = %s").format(sql.Identifier(col)) for col in changed
@@ -149,10 +136,6 @@ def update_blocking(
     schedule_id: int,
     fields: dict[str, Any],
     key: str | None = None,
-    *,
-    enqueue_sync: Callable[[psycopg.Connection[Any], int], None] = (
-        session_control.enqueue_in_transaction
-    ),
 ) -> tuple[tuple[Any, ...], bool]:
 
     if "script" in fields:
@@ -170,7 +153,7 @@ def update_blocking(
             previous = cur.fetchone()
             if previous is None:
                 raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-            changed = _changed_fields(previous, fields)
+            changed = plans.changed_fields(previous, fields)
             if not changed:
                 receipts.finish(conn, key, previous)
                 return previous, False
@@ -190,9 +173,9 @@ def update_blocking(
                     "VALUES (%s, %s, %s, %s)",
                     (schedule_id, row[9], row[3], "edit"),
                 )
-            needs_sync = (code_changed and row[4]) or "enabled" in changed
+            needs_sync = plans.edit_needs_sync(changed, enabled=row[4])
             if needs_sync:
-                enqueue_sync(conn, schedule_id)
+                session_control.enqueue_in_transaction(conn, schedule_id)
             receipts.finish(conn, key, row)
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(
@@ -224,10 +207,6 @@ def create_blocking(
     pool: ConnectionPool[Any],
     body: ScheduleCreate,
     key: str | None = None,
-    *,
-    finish_receipt: Callable[
-        [psycopg.Connection[Any], str | None, creation_receipts.Creation], None
-    ],
 ) -> tuple[Any, ...]:
 
     _validate_script(body.script)
@@ -261,7 +240,7 @@ def create_blocking(
                 "VALUES (%s, %s, %s, %s)",
                 (row[0], body.script, body.command, "initial"),
             )
-            finish_receipt(conn, key, creation_receipts.Creation(row[0], row[7], row[8]))
+            creation_receipts.finish(conn, key, creation_receipts.Creation(row[0], row[7], row[8]))
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(
             status_code=409, detail=f"schedule named {body.name!r} already exists"
@@ -281,7 +260,6 @@ async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleVie
         request.app.state.db_pool,
         body,
         creation_receipts.operation_key(request),
-        finish_receipt=request.app.state.schedule_receipt_finisher,
     )
 
     return _view(row)
@@ -297,23 +275,11 @@ async def get_schedule(request: Request, schedule_id: int) -> ScheduleView:
     return _view(row)
 
 
-def wait_schedule_consumed() -> Callable[[ConnectionPool[Any], int], Awaitable[None]]:
-    return session_control.wait_consumed
-
-
 @router.put(
     "/api/schedules/{schedule_id}",
     description="Partial-update a schedule — only the fields present in the body change. A\nscript/command change is snapshotted into schedule_versions and, if the\nschedule is enabled, applied immediately (the session is relaunched on the new\nscript). An enabled-flag value change also converges immediately, so disable\nreaps the session and enable creates it; a same-value update leaves the\nsession intact. 400 on a script syntax error, 404 if missing, 409 on a name\nclash.",
 )
-async def update_schedule(
-    request: Request,
-    schedule_id: int,
-    body: ScheduleUpdate,
-    wait_consumed: Annotated[
-        Callable[[ConnectionPool[Any], int], Awaitable[None]],
-        Depends(wait_schedule_consumed),
-    ],
-) -> ScheduleView:
+async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpdate) -> ScheduleView:
 
     fields = body.model_dump(exclude_unset=True)
     if not fields:
@@ -327,24 +293,27 @@ async def update_schedule(
         receipts.operation_key(request),
     )
     if needs_sync:
-        await wait_consumed(request.app.state.db_pool, schedule_id)
+        await _wait_consumed(request, schedule_id)
     return _view(row)
 
 
-def delete_blocking(
-    pool: ConnectionPool[Any],
-    schedule_id: int,
-    *,
-    enqueue_sync: Callable[[psycopg.Connection[Any], int], None] = (
-        session_control.enqueue_in_transaction
-    ),
-) -> None:
+def delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
 
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM schedules WHERE id = %s RETURNING id", (schedule_id,))
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-        enqueue_sync(conn, schedule_id)
+        session_control.enqueue_in_transaction(conn, schedule_id)
+
+
+async def _wait_consumed(request: Request, schedule_id: int) -> None:
+    config: GatewayConfig = request.app.state.gateway_config
+    await session_control.wait_consumed(
+        request.app.state.db_pool,
+        schedule_id,
+        wait_s=config.schedule_consume_wait_seconds,
+        poll_s=config.schedule_consume_poll_seconds,
+    )
 
 
 def _remove_schedule_dir(home: Path, schedule_id: int) -> None:
@@ -360,7 +329,7 @@ async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
 
     pool = request.app.state.db_pool
     await asyncio.to_thread(delete_blocking, pool, schedule_id)
-    await session_control.wait_consumed(pool, schedule_id)
+    await _wait_consumed(request, schedule_id)
     await asyncio.to_thread(
         _remove_schedule_dir, request.app.state.gateway_process.home, schedule_id
     )
@@ -394,18 +363,11 @@ async def restart_schedule(request: Request, schedule_id: int) -> ScheduleView:
     return await _control_and_sync(request, schedule_id, action="restart")
 
 
-def _strip_trailing_blank(lines_list: list[str]) -> list[str]:
+def _read_transcript_blocking(
+    backend: SessionBackend, schedule_id: int, lines: int
+) -> list[str] | None:
 
-    while lines_list and not lines_list[-1].strip():
-        lines_list.pop()
-    return lines_list
-
-
-def _read_transcript_blocking(schedule_id: int, lines: int) -> list[str] | None:
-
-    from base.sessions.backend import get_shell_backend
-
-    log_path = get_shell_backend().session_log_path(session_name(f"schedule-{schedule_id}"))
+    log_path = backend.session_log_path(session_name(f"schedule-{schedule_id}"))
     if log_path is None or not log_path.exists():
         return None
     try:
@@ -425,19 +387,18 @@ async def get_schedule_logs(
 
     row = await asyncio.to_thread(fetch_full_blocking, request.app.state.db_pool, schedule_id)
 
-    window = max(lines, 200)
-    captured = await session_control.capture(schedule_id, window)
-    if captured is not None:
-        tail = _strip_trailing_blank(captured.splitlines())
-        return ScheduleLogsView(source="live", lines=tail[-lines:] if lines else tail)
-    transcript = await asyncio.to_thread(_read_transcript_blocking, schedule_id, window)
-    if transcript:
-        tail = _strip_trailing_blank(transcript)
-        return ScheduleLogsView(source="transcript", lines=tail[-lines:] if lines else tail)
-    last_error = row[6]
-    if last_error:
-        return ScheduleLogsView(source="last_error", lines=last_error.splitlines())
-    return ScheduleLogsView(source="none", lines=[])
+    backend: SessionBackend = request.app.state.shell_backend
+    window = plans.capture_window(lines)
+    captured = await session_control.capture(backend, schedule_id, window)
+    transcript = (
+        None
+        if captured is not None
+        else await asyncio.to_thread(_read_transcript_blocking, backend, schedule_id, window)
+    )
+    source, shown = plans.logs_view(
+        lines, captured=captured, transcript=transcript, last_error=row[6]
+    )
+    return ScheduleLogsView(source=source, lines=shown)
 
 
 def _runs_blocking(
@@ -465,7 +426,7 @@ async def get_schedule_runs(
 ) -> list[ScheduleRunView]:
 
     if limit is None:
-        limit = settings.display.schedules_runs_default_limit
+        limit = runtime_view(request).display.schedules_runs_default_limit
     pool = request.app.state.db_pool
     await asyncio.to_thread(fetch_full_blocking, pool, schedule_id)
     return await asyncio.to_thread(_runs_blocking, pool, schedule_id, limit)
@@ -520,14 +481,7 @@ def fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[An
 
 # meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
 def control_blocking(
-    pool: ConnectionPool[Any],
-    schedule_id: int,
-    action: str,
-    key: str | None,
-    *,
-    finish_receipt: Callable[[psycopg.Connection[Any], str | None, tuple[Any, ...]], None] = (
-        receipts.finish
-    ),
+    pool: ConnectionPool[Any], schedule_id: int, action: str, key: str | None
 ) -> tuple[tuple[Any, ...], bool]:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         replay = receipts.begin(conn, key, {"schedule_id": schedule_id, "action": action})
@@ -537,27 +491,20 @@ def control_blocking(
         row = cur.fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-        enabled = action != "stop"
-        if action == "restart" and not row[4]:
-            raise HTTPException(
-                status_code=409, detail="schedule is disabled; start it instead of restarting"
-            )
-        needs_sync = (
-            action == "restart"
-            or row[4] != enabled
-            or (enabled and row[5] in ("completed", "error"))
-        )
-        if needs_sync:
+        plan = plans.control_plan(action, enabled=row[4], status=row[5])
+        if plan.refusal is not None:
+            raise HTTPException(status_code=409, detail=plan.refusal)
+        if plan.needs_sync:
             cur.execute(
                 f"UPDATE schedules SET enabled = %s, desired_revision = desired_revision + 1, "  # noqa: S608
                 f"launch_count = 0, next_launch_at = NULL, updated_at = now() WHERE id = %s RETURNING {_FULL_COLS}",
-                (enabled, schedule_id),
+                (plan.enabled, schedule_id),
             )
             row = cur.fetchone()
             assert row is not None  # noqa: S101
             session_control.enqueue_in_transaction(conn, schedule_id)
-        finish_receipt(conn, key, row)
-    return row, needs_sync
+        receipts.finish(conn, key, row)
+    return row, plan.needs_sync
 
 
 async def _control_and_sync(request: Request, schedule_id: int, *, action: str) -> ScheduleView:
@@ -566,5 +513,5 @@ async def _control_and_sync(request: Request, schedule_id: int, *, action: str) 
         control_blocking, pool, schedule_id, action, receipts.operation_key(request)
     )
     if needs_sync:
-        await session_control.wait_consumed(pool, schedule_id)
+        await _wait_consumed(request, schedule_id)
     return _view(row)

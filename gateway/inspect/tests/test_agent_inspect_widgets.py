@@ -1,19 +1,18 @@
-"""Integration tests for GET /api/agents/{id}/inspect/widgets (task #2909;
-taskList payload reshaped in #3216).
-
-The extension surface where enabled plugins embed inspector widgets: the
-gateway builds the widget registry in process (mocked here by patching
-`load_inspect_widgets`), resolves each widget's payload for the agent — a
-`taskList` lists the agent's active tasks — every one — and drops
-widgets with nothing to show.
-
-Locks: empty registry -> [], unknown agent -> 404, the taskList resolution
-rules (owner filter, active statuses only, priority-first order — P0..P3,
-ties by id — each row's own priority carried through, no cap, empty payload
--> widget dropped), widget
-ordering/attribution passthrough, the loader's enabled-set filtering, and its
-fail-soft skip of a broken inspector.py.
-"""
+# meiva:note
+# Integration tests for GET /api/agents/{id}/inspect/widgets (task #2909;
+# taskList payload reshaped in #3216).
+#
+# The extension surface where enabled plugins embed inspector widgets: the
+# gateway builds the widget registry in process (`load_inspect_widgets`), resolves each widget's payload for the agent — a
+# `taskList` lists the agent's active tasks — every one — and drops
+# widgets with nothing to show.
+#
+# Locks: empty registry -> [], unknown agent -> 404, the taskList resolution
+# rules (owner filter, active statuses only, priority-first order — P0..P3,
+# ties by id — each row's own priority carried through, no cap, empty payload
+# -> widget dropped), widget
+# ordering/attribution passthrough, the loader's enabled-set filtering, and its
+# fail-soft skip of a broken inspector.py.
 
 from __future__ import annotations
 
@@ -25,8 +24,8 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
+from psycopg_pool import ConnectionPool
 
 import meiva_builtins.plugins as shipped_plugins
 from base.db import Database
@@ -36,17 +35,14 @@ from base.packages.plugins.surface.inspector import DuplicateInspectWidget, Insp
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.inspect import _plugin_widgets
-from gateway.inspect.router import router
+from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
 
 
 @pytest.fixture
-def app(database: Database) -> Iterator[FastAPI]:
-    """Exercise this package's HTTP router with a real isolated database."""
-    application = FastAPI()
-    application.include_router(router)
-    with database.pool(max_size=2) as pool:
-        application.state.db_pool = pool
-        yield application
+def pool(database: Database) -> Iterator[ConnectionPool]:
+    """A real isolated database, borrowed the way the route borrows it."""
+    with database.pool(max_size=2) as opened:
+        yield opened
 
 
 def _widget(**over: Any) -> InspectWidgetSpec:
@@ -62,16 +58,6 @@ def _widget(**over: Any) -> InspectWidgetSpec:
     registry, refused = build_data_registry([face])
     assert refused == []
     return next(iter(registry.inspect_widgets()))
-
-
-def _patch_loader(app: FastAPI, *specs: InspectWidgetSpec) -> None:
-    """Seed the in-process loader with the given registry rows — the loader
-    itself is covered by the tests at the bottom of this file."""
-
-    def _loaded() -> list[InspectWidgetSpec]:
-        return list(specs)
-
-    app.state.inspect_widget_loader = _loaded
 
 
 def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
@@ -136,34 +122,36 @@ def _insert_task(
     return row[0]
 
 
-def _get(app: FastAPI, aid: int) -> Any:
-    with TestClient(app) as client:
-        return client.get(f"/api/agents/{aid}/inspect/widgets")
+# meiva:note
+# The inspector widgets of `aid` for these registry rows, as the route serializes them.
+def _get(pool: ConnectionPool, aid: int, *specs: InspectWidgetSpec) -> list[dict[str, Any]]:
+    results = _plugin_widgets.widgets_for_agent(pool, aid, specs=specs)
+    return [result.model_dump(mode="json") for result in results]
 
 
 # ── empty registry / unknown agent ────────────────────────────────────────────
 
 
-def test_empty_registry_returns_empty(app: FastAPI, db_conn: psycopg.Connection) -> None:
-    _patch_loader(app)
+def test_empty_registry_returns_empty(pool: ConnectionPool, db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     db_conn.commit()
-    resp = _get(app, aid)
-    assert resp.status_code == 200
-    assert resp.json() == []
+    assert _get(pool, aid) == []
 
 
-def test_unknown_agent_404(app: FastAPI, db_conn: psycopg.Connection) -> None:
+def test_unknown_agent_404(pool: ConnectionPool, db_conn: psycopg.Connection) -> None:
     """No agents_meta row -> 404 (same contract as /inspect)."""
-    _patch_loader(app, _widget())
     db_conn.commit()
-    assert _get(app, 999999).status_code == 404
+    with pytest.raises(HTTPException) as caught:
+        _get(pool, 999999, _widget())
+    assert caught.value.status_code == 404
 
 
 # ── taskList resolution ───────────────────────────────────────────────────────
 
 
-def test_lists_only_the_agents_active_tasks(app: FastAPI, db_conn: psycopg.Connection) -> None:
+def test_lists_only_the_agents_active_tasks(
+    pool: ConnectionPool, db_conn: psycopg.Connection
+) -> None:
     aid = _insert_agent(db_conn)
     other = _insert_agent(db_conn, label="other")
     root = _root_task_id(db_conn)
@@ -184,10 +172,9 @@ def test_lists_only_the_agents_active_tasks(app: FastAPI, db_conn: psycopg.Conne
         ("theirs", "in_progress", other),
     ):
         _insert_task(db_conn, owner=owner, parent_id=root, title=title, status=status)
-    _patch_loader(app, _widget())
     db_conn.commit()
 
-    body = _get(app, aid).json()
+    body = _get(pool, aid, _widget())
     assert len(body) == 1
     widget = body[0]
     assert (widget["plugin"], widget["id"], widget["kind"], widget["order"]) == (
@@ -201,7 +188,9 @@ def test_lists_only_the_agents_active_tasks(app: FastAPI, db_conn: psycopg.Conne
     assert widget["tasks"][0] == {"id": older, "title": "older", "priority": "P2"}
 
 
-def test_task_list_shows_every_active_task(app: FastAPI, db_conn: psycopg.Connection) -> None:
+def test_task_list_shows_every_active_task(
+    pool: ConnectionPool, db_conn: psycopg.Connection
+) -> None:
     aid = _insert_agent(db_conn)
     root = _root_task_id(db_conn)
     # Regression (user ruling 2026-09-17): the Inspector shows EVERY active
@@ -210,16 +199,17 @@ def test_task_list_shows_every_active_task(app: FastAPI, db_conn: psycopg.Connec
         _insert_task(db_conn, owner=aid, parent_id=root, title=f"t{i}", updated_seconds_ago=i)
         for i in range(11)
     ]
-    _patch_loader(app, _widget())
     db_conn.commit()
 
-    tasks = _get(app, aid).json()[0]["tasks"]
+    tasks = _get(pool, aid, _widget())[0]["tasks"]
     assert len(tasks) == 11
     # One rung (the default P2): id ascending — the complete list, no cap.
     assert [t["id"] for t in tasks] == ids
 
 
-def test_task_rows_carry_their_own_priority(app: FastAPI, db_conn: psycopg.Connection) -> None:
+def test_task_rows_carry_their_own_priority(
+    pool: ConnectionPool, db_conn: psycopg.Connection
+) -> None:
     """Each taskList row carries its own P0..P3 rung (task #3819) and the rows
     come rung-first, not newest-first (task #3866, user request 2026-09-17:
     the panel's order must be legible) — a mixed-priority queue sorts by rung,
@@ -238,10 +228,9 @@ def test_task_rows_carry_their_own_priority(app: FastAPI, db_conn: psycopg.Conne
     p0 = _insert_task(
         db_conn, owner=aid, parent_id=root, title="urgent", priority="P0", updated_seconds_ago=120
     )
-    _patch_loader(app, _widget())
     db_conn.commit()
 
-    tasks = _get(app, aid).json()[0]["tasks"]
+    tasks = _get(pool, aid, _widget())[0]["tasks"]
     # P0 first, then the P1 pair in id order — p1b ("next-b") is the more
     # RECENT update but carries the later id, so a recency tie-break would
     # flip them; then the newest-row P3.
@@ -253,25 +242,19 @@ def test_task_rows_carry_their_own_priority(app: FastAPI, db_conn: psycopg.Conne
     ]
 
 
-def test_widget_without_tasks_is_dropped(app: FastAPI, db_conn: psycopg.Connection) -> None:
+def test_widget_without_tasks_is_dropped(pool: ConnectionPool, db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
-    _patch_loader(app, _widget())
     db_conn.commit()
-    assert _get(app, aid).json() == []
+    assert _get(pool, aid, _widget()) == []
 
 
-def test_widgets_keep_registration_order(app: FastAPI, db_conn: psycopg.Connection) -> None:
+def test_widgets_keep_registration_order(pool: ConnectionPool, db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     root = _root_task_id(db_conn)
     _insert_task(db_conn, owner=aid, parent_id=root, title="work")
-    _patch_loader(
-        app,
-        _widget(id="second", order=750),
-        _widget(id="first", order=10),
-    )
     db_conn.commit()
 
-    body = _get(app, aid).json()
+    body = _get(pool, aid, _widget(id="second", order=750), _widget(id="first", order=10))
     assert [w["id"] for w in body] == ["second", "first"]
     assert [w["order"] for w in body] == [750, 10]
 
@@ -328,16 +311,10 @@ def _fixture_inspector(root: Path, plugin: str, source: str, *, widget_id: str) 
 # ── the loader ────────────────────────────────────────────────────────────────
 
 
-def _shipped_fleet_module() -> Any:
-    path = _plugin_widgets.PLUGINS_DIR / "meiva_fleet" / "inspector.py"
-    assert path.is_file(), "meiva_fleet must ship inspector.py for this test"
-    return path
-
-
 def test_loader_imports_shipped_fleet_widget() -> None:
-    module = _shipped_fleet_module()
+    assert (SHIPPED_PLUGINS_DIR / "meiva_fleet" / "inspector.py").is_file()
 
-    specs = _plugin_widgets.load_inspect_widgets([module])
+    specs = _plugin_widgets.load_inspect_widgets(SHIPPED_PLUGINS_DIR, {"meiva_fleet"})
     assert [(s.plugin, s.id, s.kind, s.order) for s in specs] == [
         ("meiva_fleet", "today-tasks", "taskList", 250)
     ]
@@ -347,41 +324,26 @@ def test_loader_imports_shipped_fleet_widget() -> None:
 def test_loader_filters_widgets_of_disabled_plugins() -> None:
     """A plugin disabled after its module was imported (and served) must not
     serve widgets: the registry is rebuilt from the enabled set on every call."""
-    module = _shipped_fleet_module()
-    assert [s.id for s in _plugin_widgets.load_inspect_widgets([module])] == ["today-tasks"]
-    assert _plugin_widgets.load_inspect_widgets([]) == []
+    assert [
+        s.id for s in _plugin_widgets.load_inspect_widgets(SHIPPED_PLUGINS_DIR, {"meiva_fleet"})
+    ] == ["today-tasks"]
+    assert _plugin_widgets.load_inspect_widgets(SHIPPED_PLUGINS_DIR, set()) == []
 
 
-def test_enabled_modules_skips_a_disabled_plugin() -> None:
-    """`enabled_inspector_modules` reads the enable bit per request."""
-    from base.packages.plugins import enable_config
-
-    module = _shipped_fleet_module()
-
-    def _installed() -> dict[str, Path]:
-        return {"meiva_fleet": module.parent}
-
-    def _loader(config: enable_config.PluginsConfig) -> Any:
-        def _load(_known: set[str]) -> enable_config.PluginsConfig:
-            return config
-
-        return _load
-
-    enabled = enable_config.PluginsConfig(
-        plugins={"meiva_fleet": enable_config.PluginEntry(enabled=True)}
+# meiva:note
+# `enabled_inspector_modules` follows the enable bit the machine's plugin config holds,
+# read per request.
+def test_enabled_modules_skips_a_disabled_plugin(unit_home: Path) -> None:
+    module = SHIPPED_PLUGINS_DIR / "meiva_fleet" / "inspector.py"
+    assert module in _plugin_widgets.enabled_inspector_modules(
+        SHIPPED_PLUGINS_DIR, enabled_plugin_names()
     )
-    assert _plugin_widgets.enabled_inspector_modules(
-        installed_dirs=_installed, runtime_loader=_loader(enabled)
-    ) == [module]
 
-    disabled = enable_config.PluginsConfig(
-        plugins={"meiva_fleet": enable_config.PluginEntry(enabled=False)}
+    (unit_home / "plugins_config.json").write_text(
+        json.dumps({"plugins": {"meiva_fleet": {"enabled": False}}}), encoding="utf-8"
     )
-    assert (
-        _plugin_widgets.enabled_inspector_modules(
-            installed_dirs=_installed, runtime_loader=_loader(disabled)
-        )
-        == []
+    assert module not in _plugin_widgets.enabled_inspector_modules(
+        SHIPPED_PLUGINS_DIR, enabled_plugin_names()
     )
 
 
@@ -397,8 +359,8 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     at module import) restated for the inspector surface: the load must not
     raise, the remaining plugin still serves, and the failure is loud on both
     channels (loguru ERROR + the plugin_load_failed telemetry event)."""
-    good = _shipped_fleet_module()
-    bad = _fixture_inspector(
+    _fixture_inspector(tmp_path, "fx_fine", _widget_source("fine"), widget_id="fine")
+    _fixture_inspector(
         tmp_path,
         "fx_broken_plugin",
         "import _missing_for_the_test\n" + _widget_source("w"),
@@ -407,11 +369,11 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
 
     # A failed import must not leave the module behind (importlib's own cleanup).
     leftover = "meiva_builtins.plugins.fx_broken_plugin.inspector"
-    specs = _plugin_widgets.load_inspect_widgets([bad, good])  # must not raise
+    specs = _plugin_widgets.load_inspect_widgets(tmp_path, {"fx_fine", "fx_broken_plugin"})
     assert leftover not in sys.modules
 
     # the healthy plugin still serves; the broken one contributes nothing
-    assert [(s.plugin, s.id) for s in specs] == [("meiva_fleet", "today-tasks")]
+    assert [(s.plugin, s.id) for s in specs] == [("fx_fine", "fine")]
     # loud: a loguru error naming the plugin
     assert any(
         "fx_broken_plugin" in r["message"] and "fail-soft" in r["message"] for r in loguru_records
@@ -422,7 +384,7 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     assert "ModuleNotFoundError" in str(attrs[0]["error"])
 
     # every plugin broken -> still no raise, an empty registry
-    assert _plugin_widgets.load_inspect_widgets([bad]) == []
+    assert _plugin_widgets.load_inspect_widgets(tmp_path, {"fx_broken_plugin"}) == []
 
 
 def test_loader_skips_a_failing_inspector_and_recovers(
@@ -437,15 +399,16 @@ def test_loader_skips_a_failing_inspector_and_recovers(
         _widget_source("drop_partial_widget") + "raise RuntimeError('inspector boom')\n",
         widget_id="drop_partial_widget",
     )
+    enabled = {"fx_drop_partial_insp"}
 
-    assert _plugin_widgets.load_inspect_widgets([inspector_py]) == []  # must not raise
+    assert _plugin_widgets.load_inspect_widgets(tmp_path, enabled) == []  # must not raise
     assert any(
         "fx_drop_partial_insp" in r["message"] and "failed to load" in r["message"]
         for r in loguru_records
     )
 
     inspector_py.write_text(_widget_source("drop_partial_widget"), encoding="utf-8")
-    specs = _plugin_widgets.load_inspect_widgets([inspector_py])
+    specs = _plugin_widgets.load_inspect_widgets(tmp_path, enabled)
     assert [(s.plugin, s.id) for s in specs] == [("fx_drop_partial_insp", "drop_partial_widget")]
 
 
@@ -454,15 +417,15 @@ def test_loader_refuses_a_plugin_declaring_a_widget_id_twice(
 ) -> None:
     """A widget id repeated within one plugin refuses that plugin whole (none
     of its widgets serve); another plugin's widgets are untouched."""
-    twice = _fixture_inspector(
+    _fixture_inspector(
         tmp_path,
         "fx_twice",
         _widget_source("same") + "WIDGETS = (_W, _W)\n",
         widget_id="same",
     )
-    fine = _fixture_inspector(tmp_path, "fx_fine", _widget_source("fine"), widget_id="fine")
+    _fixture_inspector(tmp_path, "fx_fine", _widget_source("fine"), widget_id="fine")
 
-    specs = _plugin_widgets.load_inspect_widgets([twice, fine])
+    specs = _plugin_widgets.load_inspect_widgets(tmp_path, {"fx_twice", "fx_fine"})
     assert [(s.plugin, s.id) for s in specs] == [("fx_fine", "fine")]
     assert any(
         "fx_twice" in r["message"]

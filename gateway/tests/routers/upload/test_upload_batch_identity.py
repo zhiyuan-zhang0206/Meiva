@@ -1,17 +1,20 @@
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
 
 import httpx2 as httpx
 import psycopg
 import pytest
 
 from base.agents.messages.inbound_images import image_mime_for, parse_upload_url
-from base.lm.catalog import ModelCatalog
-from gateway.routers.upload import batches as upload_batches
-from gateway.routers.upload.batches import UploadItem
-from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    gateway_test_client,
+    gateway_test_config,
+    spawn_via_http,
+)
+from gateway.tests.support.db_faults.update_fault import failing_update
 
 
 def _headers(key: str) -> dict[str, str]:
@@ -35,10 +38,9 @@ def _post(
 
 @pytest.fixture
 def uploaded_agent(
-    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, tmp_path: Path
 ) -> Iterator[tuple[GatewayTestClient, int]]:
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    with gateway_test_client() as client:
+    with gateway_test_client(config=gateway_test_config(upload_home=tmp_path)) as client:
         agent = spawn_via_http(client, {}).json()["id"]
         yield client, agent
 
@@ -143,18 +145,14 @@ def test_ready_receipt_survives_deleted_target(
 
 
 def test_immutable_url_passes_native_image_message_validation(
-    uploaded_agent: tuple[GatewayTestClient, int],
-    monkeypatch: pytest.MonkeyPatch,
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection
 ) -> None:
-    from base.lm import factory
-
     client, agent = uploaded_agent
-
-    def supports_vision(model: str, *, catalog: ModelCatalog) -> bool:
-        assert catalog is client.app.state.catalog
-        return True
-
-    monkeypatch.setattr(factory, "model_supports_vision", supports_vision)
+    db_conn.execute(
+        "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
+        ('{"llm_model": "claude-opus-4-8"}', agent),
+    )
+    db_conn.commit()
     url = _post(client, agent, "native").json()["files"][0]["url"]
     response = client.post(
         f"/api/agents/{agent}/messages",
@@ -180,26 +178,15 @@ def test_concurrent_same_key_one_reservation(
 
 
 def test_receiving_reservation_survives_partial_publish_and_recovery(
-    uploaded_agent: tuple[GatewayTestClient, int],
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection
 ) -> None:
     client, agent = uploaded_agent
-    original = upload_batches.publish_files
-
-    def fail_after_publish(
-        directory: Path, manifest: list[dict[str, Any]], batch: list[UploadItem]
-    ) -> None:
-        original(directory, manifest, batch)
-        raise OSError("lost DB transaction after durable publication")
-
-    monkeypatch.setattr(upload_batches, "publish_files", fail_after_publish)
-    with pytest.raises(OSError, match="lost DB"):
-        _post(client, agent, "recover")
-    row = db_conn.execute("SELECT manifest, receipt FROM agent_upload_batches").fetchone()
-    assert row is not None and row[1] is None
-    assert _post(client, agent, "recover", body=b"changed").status_code == 409
-    monkeypatch.setattr(upload_batches, "publish_files", original)
+    with failing_update(db_conn, "agent_upload_batches", message="lost DB transaction"):
+        with pytest.raises(psycopg.errors.RaiseException, match="lost DB"):
+            _post(client, agent, "recover")
+        row = db_conn.execute("SELECT manifest, receipt FROM agent_upload_batches").fetchone()
+        assert row is not None and row[1] is None
+        assert _post(client, agent, "recover", body=b"changed").status_code == 409
     recovered = _post(client, agent, "recover")
     assert recovered.status_code == 200
     assert Path(recovered.json()["files"][0]["path"]).name == row[0][0]["stored_name"]
@@ -208,27 +195,20 @@ def test_receiving_reservation_survives_partial_publish_and_recovery(
 
 
 def test_shared_quota_counts_receiving_once(
-    uploaded_agent: tuple[GatewayTestClient, int], monkeypatch: pytest.MonkeyPatch
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection
 ) -> None:
     client, agent = uploaded_agent
-    from gateway.routers.upload import router
-
-    monkeypatch.setattr(router, "MAX_AGENT_UPLOAD_BYTES", 5)
-    original = upload_batches.publish_files
-
-    def interrupted(
-        directory: Path, manifest: list[dict[str, Any]], batch: list[UploadItem]
-    ) -> None:
-        original(directory, manifest, batch)
-        raise OSError("interrupted")
-
-    monkeypatch.setattr(upload_batches, "publish_files", interrupted)
-    with pytest.raises(OSError):
-        _post(client, agent, "quota")
-    other = _post(client, agent, "other-key", body=b"x", name="ordinary.png")
-    assert other.status_code == 413
-    monkeypatch.setattr(upload_batches, "publish_files", original)
-    assert _post(client, agent, "quota").status_code == 200
+    small = replace(client.app.state.gateway_config, max_agent_upload_bytes=5)
+    with (
+        gateway_test_client(process=client.app.state.gateway_process, config=small) as limited,
+        failing_update(db_conn, "agent_upload_batches", message="interrupted"),
+        pytest.raises(psycopg.errors.RaiseException),
+    ):
+        _post(limited, agent, "quota")
+    with gateway_test_client(process=client.app.state.gateway_process, config=small) as limited:
+        other = _post(limited, agent, "other-key", body=b"x", name="ordinary.png")
+        assert other.status_code == 413
+        assert _post(limited, agent, "quota").status_code == 200
 
 
 def test_duplicate_display_names_have_distinct_objects_and_order_is_identity(

@@ -22,14 +22,17 @@ requests. Unexpected failures remain visible.
 
 The aggregate reads registered runners and the existing heartbeat snapshots.
 Intentionally stopped or known-down hosts stay columns and are marked
-unreachable without dialing. Other runners fan out concurrently under the same
-15-second total budget and one fast retry. Recognized remote failures become
+unreachable without dialing (`inventory_matrix.plan_dials` decides, from the machines,
+their snapshots and `now`). Other runners fan out concurrently under the same total
+budget (`GatewayConfig.inventory_host_wait_seconds`, 15 seconds by default) and one
+fast retry. Recognized remote failures become
 unreachable hosts; unexpected exceptions are re-raised.
 
-`gateway/extensions/inventory_matrix.py:collapse_inventory` owns only the pure
+`gateway/extensions/inventory_matrix.py:collapse_inventory` owns the pure
 collapse of validated reads. It sorts columns and item rows, uses the first
 non-empty description in sorted reachable-host order, emits absent cells on
 reachable hosts lacking an item, excludes unreachable hosts from item cells,
 and retains MCP capability verdicts. Its tests import the matrix owner and wire
 models directly. HTTP contracts continue to exercise the assembled app, real
-machines SQL and validated RPC results, stubbing the public transport boundary.
+machines SQL and validated RPC results, each runner served on a real listener
+(`gateway/tests/support/runner_ops`).

@@ -33,8 +33,11 @@ _log = logging.getLogger(__name__)
 _BATCH = 50
 
 
-def consume_requests(pool: ConnectionPool, manager: ScheduleManager) -> int:
-    """Run the sync of every queued request, oldest first; return how many ran."""
+# meiva:note
+# Run the sync of every queued request, oldest first; return how many ran.
+#
+# ``now`` is the loop's monotonic reading for this pass, the clock of the manager's streak decisions.
+def consume_requests(pool: ConnectionPool, manager: ScheduleManager, *, now: float) -> int:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT schedule_id, requested_at FROM schedule_sync_requests "
@@ -44,7 +47,7 @@ def consume_requests(pool: ConnectionPool, manager: ScheduleManager) -> int:
         queued = cur.fetchall()
     handled = 0
     for schedule_id, requested_at in queued:
-        if not manager.sync_one(schedule_id):
+        if not manager.sync_one(schedule_id, now=now):
             continue  # leave held/uncertain work queued without blocking other schedules
         with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(

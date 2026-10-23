@@ -23,12 +23,12 @@ def test_shared_completion_allows_immediate_zero_ttl_load(failed: bool, next_key
 
     def on_completion(_future: object) -> None:
         try:
-            observed.append(cache.get_or_load(next_key, lambda: "next", ttl_s=0, now=lambda: 0))
+            observed.append(cache.get_or_load(next_key, lambda: "next", ttl_s=0, now=0.0))
         except BaseException as exc:
             observed.append(exc)
 
     with ThreadPoolExecutor(max_workers=1) as executor:
-        leader = executor.submit(cache.get_or_load, "same", load, ttl_s=0, now=lambda: 0)
+        leader = executor.submit(cache.get_or_load, "same", load, ttl_s=0, now=0.0)
         try:
             assert started.wait(timeout=1)
             cache._inflight["same"].add_done_callback(on_completion)
@@ -41,7 +41,7 @@ def test_shared_completion_allows_immediate_zero_ttl_load(failed: bool, next_key
             assert leader.result(timeout=1) == "first"
 
     assert observed == ["next"]
-    assert cache.get_or_load("after", lambda: "available", ttl_s=0, now=lambda: 0) == "available"
+    assert cache.get_or_load("after", lambda: "available", ttl_s=0, now=0.0) == "available"
 
 
 def test_inspect_cache_admission_bounds_concurrent_loads() -> None:
@@ -64,7 +64,7 @@ def test_inspect_cache_admission_bounds_concurrent_loads() -> None:
             "first",
             blocking_load,
             ttl_s=10,
-            now=lambda: 0,
+            now=0.0,
         )
         assert started.wait(timeout=1)
         follower = executor.submit(
@@ -72,15 +72,15 @@ def test_inspect_cache_admission_bounds_concurrent_loads() -> None:
             "first",
             lambda: pytest.fail("a follower must not load"),
             ttl_s=10,
-            now=lambda: 0,
+            now=0.0,
         )
         with pytest.raises(InspectCacheFullError):
-            cache.get_or_load("second", lambda: "second", ttl_s=10, now=lambda: 0)
+            cache.get_or_load("second", lambda: "second", ttl_s=10, now=0.0)
         release.set()
         assert leader.result(timeout=1) == "first"
         assert follower.result(timeout=1) == "first"
 
-    assert cache.get_or_load("second", lambda: "second", ttl_s=10, now=lambda: 0) == "second"
+    assert cache.get_or_load("second", lambda: "second", ttl_s=10, now=0.0) == "second"
 
 
 def test_inspect_singleflight_cancellation_releases_key_for_retry() -> None:
@@ -96,8 +96,8 @@ def test_inspect_singleflight_cancellation_releases_key_for_retry() -> None:
         return expected
 
     with pytest.raises(asyncio.CancelledError):
-        cache.get_or_load("same", load, ttl_s=10, now=lambda: 0)
-    assert cache.get_or_load("same", load, ttl_s=10, now=lambda: 0) is expected
+        cache.get_or_load("same", load, ttl_s=10, now=0.0)
+    assert cache.get_or_load("same", load, ttl_s=10, now=0.0) is expected
     assert calls == 2
 
 
@@ -116,9 +116,7 @@ async def test_inspect_async_followers_timeout_without_retaining_executor_worker
         assert release.wait(timeout=2)
         return expected
 
-    leader = asyncio.create_task(
-        cache.get_or_load_async("same", blocking_load, ttl_s=10, now=lambda: 0)
-    )
+    leader = asyncio.create_task(cache.get_or_load_async("same", blocking_load, ttl_s=10, now=0.0))
     for _ in range(100):
         if started.is_set():
             break
@@ -132,7 +130,7 @@ async def test_inspect_async_followers_timeout_without_retaining_executor_worker
                     "same",
                     lambda: pytest.fail("a follower must not load"),
                     ttl_s=10,
-                    now=lambda: 0,
+                    now=0.0,
                 ),
                 timeout=0.01,
             )
@@ -149,7 +147,7 @@ async def test_inspect_async_followers_timeout_without_retaining_executor_worker
     assert await asyncio.wait_for(leader, timeout=1) is expected
     assert (
         await cache.get_or_load_async(
-            "same", lambda: pytest.fail("late result must be cached"), ttl_s=10, now=lambda: 0
+            "same", lambda: pytest.fail("late result must be cached"), ttl_s=10, now=0.0
         )
         is expected
     )
@@ -171,7 +169,7 @@ async def test_inspect_async_leader_deadline_fails_followers_fast() -> None:
         raise TimeoutError("inspect deadline expired")
 
     leader = asyncio.create_task(
-        cache.get_or_load_async("same", deadline_expired_load, ttl_s=10, now=lambda: 0)
+        cache.get_or_load_async("same", deadline_expired_load, ttl_s=10, now=0.0)
     )
     assert await asyncio.to_thread(started.wait, 1)
     follower = asyncio.create_task(
@@ -179,7 +177,7 @@ async def test_inspect_async_leader_deadline_fails_followers_fast() -> None:
             "same",
             lambda: pytest.fail("a follower must not load"),
             ttl_s=10,
-            now=lambda: 0,
+            now=0.0,
         )
     )
     await asyncio.sleep(0)
@@ -190,9 +188,7 @@ async def test_inspect_async_leader_deadline_fails_followers_fast() -> None:
     with pytest.raises(TimeoutError, match="inspect deadline expired"):
         await follower
     assert calls == 1
-    assert (
-        await cache.get_or_load_async("same", lambda: expected, ttl_s=10, now=lambda: 0) is expected
-    )
+    assert await cache.get_or_load_async("same", lambda: expected, ttl_s=10, now=0.0) is expected
 
 
 def test_inspect_cache_bounds_values_and_distinct_inflight_keys() -> None:
@@ -203,10 +199,10 @@ def test_inspect_cache_bounds_values_and_distinct_inflight_keys() -> None:
         loads[key] = loads.get(key, 0) + 1
         return f"{key}-{loads[key]}"
 
-    assert cache.get_or_load("a", lambda: load("a"), ttl_s=10, now=lambda: 0) == "a-1"
-    assert cache.get_or_load("b", lambda: load("b"), ttl_s=10, now=lambda: 0) == "b-1"
-    assert cache.get_or_load("c", lambda: load("c"), ttl_s=10, now=lambda: 0) == "c-1"
-    assert cache.get_or_load("a", lambda: load("a"), ttl_s=10, now=lambda: 0) == "a-2"
+    assert cache.get_or_load("a", lambda: load("a"), ttl_s=10, now=0.0) == "a-1"
+    assert cache.get_or_load("b", lambda: load("b"), ttl_s=10, now=0.0) == "b-1"
+    assert cache.get_or_load("c", lambda: load("c"), ttl_s=10, now=0.0) == "c-1"
+    assert cache.get_or_load("a", lambda: load("a"), ttl_s=10, now=0.0) == "a-2"
 
     started = threading.Event()
     release = threading.Event()
@@ -217,11 +213,9 @@ def test_inspect_cache_bounds_values_and_distinct_inflight_keys() -> None:
         return "held"
 
     with ThreadPoolExecutor(max_workers=1) as executor:
-        holder = executor.submit(
-            cache.get_or_load, "holder", blocking_load, ttl_s=10, now=lambda: 0
-        )
+        holder = executor.submit(cache.get_or_load, "holder", blocking_load, ttl_s=10, now=0.0)
         assert started.wait(timeout=1)
         with pytest.raises(InspectCacheFullError):
-            cache.get_or_load("overflow", lambda: "no", ttl_s=10, now=lambda: 0)
+            cache.get_or_load("overflow", lambda: "no", ttl_s=10, now=0.0)
         release.set()
         assert holder.result(timeout=1) == "held"

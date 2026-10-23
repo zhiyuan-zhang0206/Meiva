@@ -1,6 +1,4 @@
 import asyncio
-from collections.abc import Callable
-from functools import partial
 from typing import Any, cast
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -32,7 +30,7 @@ from gateway.agents.task_assignment.schemas import (
     TaskAssignmentIn,
     TaskAssignmentResult,
 )
-from gateway.http.model_catalog import require_model_catalog
+from gateway.http.model_catalog import CatalogLoadFailure, require_catalog, require_model_catalog
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()
@@ -120,8 +118,8 @@ async def observe_launch(
     request: dict[str, Any],
     result: TaskAssignmentResult,
     *,
-    catalog_reader: Callable[[], ModelCatalog],
-    default_model_reader: Callable[[], str],
+    catalog: ModelCatalog | CatalogLoadFailure,
+    default_model: str,
 ) -> TaskAssignmentAccepted:
 
     def current() -> CreationReceipt | None:
@@ -138,8 +136,8 @@ async def observe_launch(
             db,
             bus,
             existing,
-            catalog=catalog_reader(),
-            default_model_reader=default_model_reader,
+            catalog=require_catalog(catalog),
+            default_model=default_model,
         )
     except AgentLaunchFailed as exc:
         response.launch_failure = str(exc)
@@ -222,8 +220,8 @@ async def post_task_assignment(
         key,
         raw,
         result,
-        catalog_reader=partial(require_model_catalog, request),
-        default_model_reader=lambda: cast(
+        catalog=request.app.state.catalog,
+        default_model=cast(
             str, request.app.state.config_authority.service_field_value("llm_model")
         ),
     )

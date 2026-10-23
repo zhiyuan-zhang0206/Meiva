@@ -13,14 +13,16 @@ from fastapi import HTTPException, Request
 
 from base.config import settings
 from base.db import create_agent
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, EventBusConfig
 from base.events.live.projection import ChatDelta, LabelUpdated
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 # meiva:note
 # Pins the merged stream's contract: one frame per channel per flush with the
 # channel named, per-source failures scoped to the channels they serve, and the
 # bounded-queue drop that must reach both the frame and `sse_drop`.
-# meiva:link gateway/events/docs/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
 from gateway.events.merged import (
     ALERTS_CHANNEL,
     CHANNELS,
@@ -28,17 +30,16 @@ from gateway.events.merged import (
     merged_event_stream,
     parse_agents,
     parse_channels,
+    plan_sources,
+    subscribe_errors,
 )
+from gateway.events.sse_frames import SseCadence
 from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.events.test_sse import FakeRequest
+from gateway.tests.events.sse_support import FakeRequest, refused_redis_url
 from gateway.tests.events.test_sse import redis_client as redis_client
 from ops.alerts import AlertRow
 
 Channels = dict[str, list[dict[str, Any]]]
-
-
-def _no_report(queue: ChannelQueue, n: int) -> None:
-    return None
 
 
 def _alert_payload(row_id: int = 1) -> str:
@@ -90,7 +91,6 @@ async def _collect(
     agent_filter: set[int] | None = None,
     throttle_rate: float = 50.0,
     pending_limit: int = 1000,
-    reporter: Callable[[ChannelQueue, int], None] = _no_report,
     frame_timeout: float = 5.0,
     overall_timeout: float = 60.0,
 ) -> Collected:
@@ -102,7 +102,7 @@ async def _collect(
         agent_filter=agent_filter,
         throttle_rate=throttle_rate,
         pending_limit=pending_limit,
-        reporter=reporter,
+        cadence=SseCadence(),
     )
     seen = Collected(by_channel={}, errors=[], dropped=[])
 
@@ -259,93 +259,51 @@ def test_merged_stream_honours_a_channel_subset(
     assert set(seen.by_channel) == {"global"}
 
 
-class _FakePubsub:
-    def __init__(self, messages: list[tuple[str, str]], refused: set[str]) -> None:
-        self.messages = messages
-        self.refused = refused
-        self.subscribed: list[str] = []
-        self.closed = False
-
-    async def subscribe(self, *sources: str) -> None:
-        for source in sources:
-            if source in self.refused:
-                raise sync_redis.ConnectionError(f"{source} unavailable")
-        self.subscribed.extend(sources)
-
-    async def get_message(self, *, ignore_subscribe_messages: bool, timeout: float) -> Any:
-        await asyncio.sleep(0)
-        if not self.messages:
-            return None
-        source, payload = self.messages.pop(0)
-        return {"channel": source, "data": payload}
-
-    async def unsubscribe(self, *sources: str) -> None:
-        return None
-
-    async def aclose(self) -> None:
-        self.closed = True
+def test_each_redis_channel_is_subscribed_once_for_the_channels_it_serves() -> None:
+    assert plan_sources("meiva:events", CHANNELS) == [
+        ("meiva:events", ["global", "all"]),
+        (ALERTS_CHANNEL, ["alerts"]),
+    ]
+    assert plan_sources("meiva:events", ("alerts",)) == [(ALERTS_CHANNEL, ["alerts"])]
+    assert plan_sources("meiva:events", ("global",)) == [("meiva:events", ["global"])]
 
 
-class _FakeClient:
-    async def aclose(self) -> None:
-        return None
+def test_a_failed_source_flags_only_the_channels_it_serves() -> None:
+    error = sync_redis.ConnectionError("alerts unavailable")
+    assert subscribe_errors(["alerts"], error) == {
+        "alerts": "event stream interrupted: ConnectionError"
+    }
+    assert subscribe_errors(["global", "all"], error) == {
+        "global": "event stream interrupted: ConnectionError",
+        "all": "event stream interrupted: ConnectionError",
+    }
 
 
-def test_merged_stream_reports_one_channel_failure_and_keeps_streaming(
-    db_conn: psycopg.Connection,
-) -> None:
-    tid = create_agent(db_conn)
-    pubsub = _FakePubsub(
-        messages=[
-            (
-                settings.data_plane.events_channel,
-                LabelUpdated(agent_id=tid, label="busy").model_dump_json(),
-            )
-        ],
-        refused={ALERTS_CHANNEL},
-    )
+def test_merged_stream_with_an_unreachable_redis_answers_every_channel_with_an_error() -> None:
+    bus = EventBus(EventBusConfig(redis_url=refused_redis_url(), events_channel="meiva:events"))
 
     async def run() -> list[bytes]:
-        req = FakeRequest()
         gen = merged_event_stream(
-            EventBus.from_settings(),
-            cast(Request, req),
+            bus,
+            cast(Request, FakeRequest()),
             channels=CHANNELS,
             agent_filter=None,
             throttle_rate=50.0,
             pending_limit=100,
-            open_connection=lambda _bus: (pubsub, _FakeClient()),
+            cadence=SseCadence(),
         )
-        frames: list[bytes] = []
-        while True:
-            frame = await asyncio.wait_for(anext(gen), timeout=5.0)
-            frames.append(frame)
-            if b'"global"' in frame:
-                break
-        req.disconnected = True
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(gen.aclose(), timeout=2.0)
-        return frames
+        return [frame async for frame in gen]
 
-    frames = asyncio.run(run())
-    decoded = [_decode(frame) for frame in frames if frame.startswith(b"data: ")]
-    assert [frame.get("ch") for frame in decoded if "error" in frame] == ["alerts"]
-    assert decoded[-1]["ch"] == "global"
-    assert [event["role"] for event in decoded[-1]["events"]] == ["label_updated"]
-    assert pubsub.subscribed == [settings.data_plane.events_channel]
-    assert pubsub.closed
+    decoded = [_decode(frame) for frame in asyncio.run(run()) if frame.startswith(b"data: ")]
+    assert {frame["ch"] for frame in decoded} == set(CHANNELS)
+    assert {frame["error"] for frame in decoded} == {"event stream interrupted: ConnectionError"}
 
 
 def test_merged_stream_counts_shed_payloads_in_the_frame_and_in_telemetry(
     db_conn: psycopg.Connection,
     redis_client: sync_redis.Redis,
+    emitted_events: EmittedEvents,
 ) -> None:
-    reported: list[tuple[str, int, int]] = []
-
-    def record(queue: ChannelQueue, n: int) -> None:
-        if n:
-            reported.append((queue.channel, n, queue.dropped))
-
     tid = create_agent(db_conn)
     payloads = [
         ChatDelta(agent_id=tid, item_id="5.0", content=f"tok{index}").model_dump_json()
@@ -359,14 +317,14 @@ def test_merged_stream_counts_shed_payloads_in_the_frame_and_in_telemetry(
             channels=("all",),
             throttle_rate=20.0,
             pending_limit=1,
-            reporter=record,
         )
     )
     assert seen.events("all"), "the surviving payload must still reach the client"
     assert seen.dropped, "the frame must declare what it shed"
+    reported = emitted_events.attributes("sse_drop")
     assert reported, "the drop must be reported, not only counted in the frame"
-    assert {channel for channel, _n, _total in reported} == {"all"}
-    assert sum(n for _channel, n, _total in reported) >= seen.dropped[0][1]
+    assert {attributes["kind"] for attributes in reported} == {"queue_full"}
+    assert sum(attributes["n"] for attributes in reported) >= seen.dropped[0][1]
 
 
 def test_merged_frame_reports_drops_per_flush() -> None:

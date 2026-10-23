@@ -3,14 +3,14 @@
 # channels, so a browser holds one socket instead of one per projection. Every
 # channel owns its bounded queue and its own error frame; a shed payload is
 # counted for the client and for the ops series, never silently dropped.
-# meiva:link gateway/events/docs/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
 from __future__ import annotations
 
 import json
 import logging
 import math
 import time
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -18,17 +18,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import TypeAdapter, ValidationError
 
 from base import telemetry
-from base.config import settings
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, GLOBAL_ROLES
 from base.events.live.redis_client import retry_auth_failures_async
-from gateway.events.sse import (
-    REDIS_ACL_ERRORS,
-    REDIS_IO_ERRORS,
-    close_pubsub,
-    sse_frame,
-    warm_frame,
-)
+from gateway.events.sse import REDIS_ACL_ERRORS, REDIS_IO_ERRORS, close_pubsub
+from gateway.events.sse_frames import SseCadence, parse_agent_ids, sse_frame, warm_frame
+from gateway.http.config import runtime_view
 from gateway.http.middleware import runtime_metrics, stopping
 from ops.alerts import ALERTS_CHANNEL, AlertRow
 
@@ -68,10 +63,8 @@ def parse_channels(raw: str | None) -> tuple[Channel, ...]:
 
 
 def parse_agents(raw: str | None) -> set[int] | None:
-    if raw is None:
-        return None
     try:
-        return {int(token) for token in raw.split(",")}
+        return parse_agent_ids(raw)
     except ValueError as exc:
         raise HTTPException(
             status_code=422, detail="agents must be comma-separated integers"
@@ -94,7 +87,7 @@ def channel_error_frame(channel: Channel, message: str) -> bytes:
 # its OLDEST payload (the agent-side publisher's own policy) so the newest state
 # survives, and counts every shed or unusable payload for the frame and for the
 # `sse_drop` report.
-# meiva:link gateway/events/docs/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
 class ChannelQueue:
     def __init__(self, channel: Channel, limit: int) -> None:
         self.channel = channel
@@ -139,9 +132,7 @@ class ChannelQueue:
         return n
 
 
-Reporter = Callable[[ChannelQueue, int], None]
 PubsubPair = tuple[Any, Any]
-OpenPubsub = Callable[[EventBus], PubsubPair]
 
 
 def _report_drops(queue: ChannelQueue, n: int) -> None:
@@ -160,16 +151,11 @@ def _report_drops(queue: ChannelQueue, n: int) -> None:
         _log.warning("sse merged drop report failed: channel=%s n=%d", queue.channel, n)
 
 
-async def _subscribe(
-    pubsub: Any, source: str, served: Sequence[Channel], errors: dict[Channel, str]
-) -> None:
-    try:
-        await retry_auth_failures_async(lambda: pubsub.subscribe(source))
-    except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
-        _log.warning("sse merged subscribe failed: source=%s %r", source, exc)
-        message = f"event stream interrupted: {type(exc).__name__}"
-        for channel in served:
-            errors[channel] = message
+# meiva:note
+# The error frame text every channel served by a failed source carries.
+def subscribe_errors(served: Sequence[Channel], exc: BaseException) -> dict[Channel, str]:
+    message = f"event stream interrupted: {type(exc).__name__}"
+    return dict.fromkeys(served, message)
 
 
 def open_pubsub(bus: EventBus) -> PubsubPair:
@@ -237,34 +223,48 @@ async def _drain(
     return False
 
 
-async def attach_sources(
-    bus: EventBus, pubsub: Any, channels: Sequence[Channel]
-) -> tuple[list[tuple[str, list[Channel]]], dict[Channel, str]]:
+# meiva:note
+# The Redis channels a stream subscribes to, each with the merged channels it serves.
+def plan_sources(bus_channel: str, channels: Sequence[Channel]) -> list[tuple[str, list[Channel]]]:
     event_channels: list[Channel] = [channel for channel in channels if channel in _EVENT_CHANNELS]
     alert_channels: list[Channel] = [channel for channel in channels if channel == "alerts"]
     sources: list[tuple[str, list[Channel]]] = []
     if event_channels:
-        sources.append((bus.channel, event_channels))
+        sources.append((bus_channel, event_channels))
     if alert_channels:
         sources.append((ALERTS_CHANNEL, alert_channels))
+    return sources
+
+
+async def attach_sources(
+    bus: EventBus, pubsub: Any, channels: Sequence[Channel]
+) -> tuple[list[tuple[str, list[Channel]]], dict[Channel, str]]:
+    sources = plan_sources(bus.channel, channels)
     errors: dict[Channel, str] = {}
     for source, served in sources:
-        await _subscribe(pubsub, source, served, errors)
+        try:
+            await retry_auth_failures_async(lambda source=source: pubsub.subscribe(source))
+        except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
+            _log.warning("sse merged subscribe failed: source=%s %r", source, exc)
+            errors.update(subscribe_errors(served, exc))
     return sources, errors
 
 
+# meiva:note
+# The frames one flush sends, the events they carry, and the drops now due for a report.
 def flush_frames(
-    queues: dict[Channel, ChannelQueue], now: float, reporter: Reporter
-) -> tuple[list[bytes], int]:
+    queues: dict[Channel, ChannelQueue], now: float
+) -> tuple[list[bytes], int, list[tuple[ChannelQueue, int]]]:
     frames: list[bytes] = []
     events_sent = 0
+    due: list[tuple[ChannelQueue, int]] = []
     for channel, queue in queues.items():
         events, dropped = queue.take()
         if events:
             frames.append(merged_frame(channel, events, dropped))
             events_sent += len(events)
-        reporter(queue, queue.report_due(now))
-    return frames, events_sent
+        due.append((queue, queue.report_due(now)))
+    return frames, events_sent, due
 
 
 # meiva:note
@@ -272,19 +272,18 @@ def flush_frames(
 # the batch endpoint's cadence. Lifetime defenses mirror `event_stream`:
 # subscription failure is a frame, not a crash; the yields sit inside the try so a
 # client abort still closes the pubsub socket; `stopping` ends a gateway handover.
-# meiva:link gateway/events/docs/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
 async def _finish(
     pubsub: Any,
     client: Any,
     sources: Sequence[tuple[str, list[Channel]]],
     queues: dict[Channel, ChannelQueue],
-    reporter: Reporter,
     opened: float,
     data_frames: int,
     total_events: int,
 ) -> None:
     for queue in queues.values():
-        reporter(queue, queue.report_remaining(time.monotonic()))
+        _report_drops(queue, queue.report_remaining(time.monotonic()))
     _log.info(
         "sse merged detach: duration=%.1fs data_frames=%d total_events=%d dropped=%s",
         time.monotonic() - opened,
@@ -303,10 +302,9 @@ async def merged_event_stream(
     agent_filter: set[int] | None,
     throttle_rate: float,
     pending_limit: int,
-    reporter: Reporter = _report_drops,
-    open_connection: OpenPubsub = open_pubsub,
+    cadence: SseCadence,
 ) -> AsyncGenerator[bytes, None]:
-    pubsub, client = open_connection(bus)
+    pubsub, client = open_pubsub(bus)
     queues: dict[Channel, ChannelQueue] = {
         channel: ChannelQueue(channel, pending_limit) for channel in channels
     }
@@ -348,7 +346,9 @@ async def merged_event_stream(
                 return
 
             now = time.monotonic()
-            frames, events_sent = flush_frames(queues, now, reporter)
+            frames, events_sent, due = flush_frames(queues, now)
+            for queue, count in due:
+                _report_drops(queue, count)
             if frames:
                 for frame in frames:
                     yield frame
@@ -358,13 +358,15 @@ async def merged_event_stream(
                 last_comment = now
                 continue
 
-            frame, last_comment, last_data_frame = warm_frame(now, last_comment, last_data_frame)
+            frame, last_comment, last_data_frame = warm_frame(
+                now, last_comment, last_data_frame, cadence
+            )
             if frame is not None:
                 yield frame
     finally:
         if metrics_opened:
             runtime_metrics.sse_closed("merged")
-        await _finish(pubsub, client, sources, queues, reporter, opened, data_frames, total_events)
+        await _finish(pubsub, client, sources, queues, opened, data_frames, total_events)
 
 
 # meiva:note
@@ -372,21 +374,23 @@ async def merged_event_stream(
 # `agents` defaults to no filter, and `agents=0` keeps system-level events only.
 # Each flush is `data: {"ch": .., "events": [..]}` plus `"dropped"` when that
 # channel shed payloads since its previous flush.
-# meiva:link gateway/events/docs/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
 @router.get("/api/stream")
 async def get_merged_stream(
     request: Request,
     agents: str | None = None,
     channels: str | None = None,
 ) -> StreamingResponse:
+    gateway = runtime_view(request).gateway
     return StreamingResponse(
         merged_event_stream(
             request.app.state.bus,
             request,
             channels=parse_channels(channels),
             agent_filter=parse_agents(agents),
-            throttle_rate=settings.gateway.sse_throttle_rate,
-            pending_limit=settings.gateway.sse_channel_pending_limit,
+            throttle_rate=gateway.sse_throttle_rate,
+            pending_limit=gateway.sse_channel_pending_limit,
+            cadence=SseCadence(),
         ),
         media_type="text/event-stream",
         headers={

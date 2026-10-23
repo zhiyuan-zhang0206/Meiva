@@ -1,12 +1,13 @@
-exports = ["test_notices_endpoint.py"]
+exports = ["event_rows.py", "sse_support.py", "test_notices_endpoint.py"]
 
 [uses]
+"test_agent_events_query.py" = ["event_rows.py"]
+"test_events_api.py" = ["event_rows.py"]
+"test_events_api_audit.py" = ["event_rows.py"]
+"test_notices_endpoint.py" = ["sse_support.py"]
 "test_notices_resolve_history_live.py" = ["test_notices_endpoint.py"]
 "test_notification_audit_endpoint.py" = ["test_notices_endpoint.py"]
-"test_sse_merged.py" = ["test_sse.py"]
-"test_sse_throttled.py" = ["test_sse.py"]
+"test_sse.py" = ["sse_support.py"]
+"test_sse_merged.py" = ["sse_support.py", "test_sse.py"]
+"test_sse_throttled.py" = ["sse_support.py", "test_sse.py"]
 "test_weixin_ingress_command_http.py" = ["test_notices_endpoint.py"]
-
-[debt.third-party-patch]
-"test_sse.py#monkeypatch.setattr redis.asyncio.client.PubSub.get_message" = 1
-"test_sse.py#monkeypatch.setattr redis.asyncio.client.PubSub.subscribe" = 1

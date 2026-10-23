@@ -9,7 +9,6 @@ any child remains in progress.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, LiteralString, cast, overload
 
@@ -17,10 +16,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.inbound import InboundKind
 from base.agents.tasks.delivery import (
     TaskNoteReceipt,
     emit_task_note_events,
+    enqueue_task_notifications,
     supersede_task_assignments,
 )
 from base.agents.tasks.owner_notifications import (
@@ -31,7 +32,7 @@ from base.agents.tasks.rules import first_open_child, is_closed, open_title_hold
 from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
-from gateway.routers.receipts.task import existing_task_receipt
+from gateway.routers.receipts.task import existing_task_receipt, save_task_receipt
 from gateway.schemas.tasks import (
     TaskGraphRow,
     TaskListResponse,
@@ -39,6 +40,7 @@ from gateway.schemas.tasks import (
     TaskSummaryRow,
     TaskUpdateRequest,
 )
+from ops import lifecycle
 
 router = APIRouter()
 
@@ -347,9 +349,6 @@ def patch_task_blocking(
     body: TaskUpdateRequest,
     operation_key: str,
     operation_path: str | None = None,
-    *,
-    enqueue_notifications_fn: Callable[..., list[TaskNoteReceipt]],
-    save_receipt_fn: Callable[..., None],
 ) -> tuple[TaskRow, list[TaskNoteReceipt]]:
     """Commit the task and its owner-change inbounds in the same transaction.
 
@@ -424,7 +423,7 @@ def patch_task_blocking(
         receipts: list[TaskNoteReceipt] = []
         if "owner" in body.model_fields_set and previous_owner != task.owner:
             supersede_task_assignments(cur, task_id)
-            receipts = enqueue_notifications_fn(
+            receipts = enqueue_task_notifications(
                 cur,
                 task_id,
                 owner_change_notifications(
@@ -437,7 +436,7 @@ def patch_task_blocking(
                 ),
                 "user",
             )
-        save_receipt_fn(cur, path, operation_key, request_body, task)
+        save_task_receipt(cur, path, operation_key, request_body, task)
     emit_task_note_events(receipts)
     return task, receipts
 
@@ -483,21 +482,17 @@ async def patch_task(
         body,
         operation_key,
         request.url.path,
-        enqueue_notifications_fn=request.app.state.task_notifications_enqueuer,
-        save_receipt_fn=request.app.state.task_receipt_saver,
     )
-    wake_publisher = request.app.state.task_wake_publisher
-    resurrect_fn = request.app.state.task_resurrector
     for note in notes:
         await asyncio.to_thread(
-            wake_publisher,
+            publish_inbound_wake,
             request.app.state.db,
             request.app.state.bus,
             note.agent_id,
             str(note.inbound_id),
         )
         if note.resurrect:
-            await resurrect_fn(
+            await lifecycle.resurrect_if_terminated(
                 request.app.state.db,
                 request.app.state.bus,
                 note.agent_id,

@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
-from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import ValidationError
 
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.api_contracts.agent_contract import AgentStatus
+from base.db import Database
 from base.lm.call import extract_text
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import Decision, DecisionError, Question, YesNo
@@ -20,16 +18,24 @@ from base.lm.compat.stop import StopCategory, classify_stop
 from base.lm.errors import ErrorClass, classify_error, normalize_provider_transport_error
 from base.lm.usage import log_usage_from_message
 from base.log import logger
-from gateway.agents.reply_suggestion.excerpt import (
-    ConversationExcerpt,
-    ExcerptItem,
-    build_excerpt,
+from gateway.agents.history.timeline import load_current_timeline_items
+from gateway.agents.reply_suggestion.cache import CACHE_ENTRIES, SuggestionCache
+from gateway.agents.reply_suggestion.excerpt import ConversationExcerpt, build_excerpt
+from gateway.agents.reply_suggestion.plan import (
+    ReplySuggestionPolicy,
+    draft_instruction,
+    draft_verdict,
+    gate_refusal,
+    model_problem,
+    refusal_before_reading,
 )
 from gateway.agents.reply_suggestion.schemas import (
     DraftReplies,
     ReplySuggestionResponse,
     SuggestionReason,
 )
+from gateway.http.model_catalog import CatalogLoadFailure, require_catalog
+from ops.agents import get_agent_status
 
 GATE_USAGE_KIND = "reply_suggestion_gate"
 DRAFT_USAGE_KIND = "reply_suggestion"
@@ -37,8 +43,6 @@ DRAFT_USAGE_KIND = "reply_suggestion"
 
 GATE_TIMEOUT_S = 15.0
 DRAFT_TIMEOUT_S = 20.0
-
-CACHE_ENTRIES = 512
 
 USEFUL_REPLY = "useful_reply"
 GATE_QUESTION = YesNo(
@@ -49,133 +53,69 @@ GATE_QUESTION = YesNo(
     ),
 )
 
-
-def draft_instruction(max_candidates: int) -> str:
-    return (
-        "Draft replies the user could send next, in the user's language. "
-        "Give one reply when the user's next move is obvious; give more only when the "
-        f"conversation really offers a choice, and never more than {max_candidates}. "
-        "When the agent asks the user to approve or confirm going ahead, the first reply is "
-        "the shortest natural answer the user would send ('go' or 'not yet'), not a sentence."
-    )
-
-
-LoadTimeline = Callable[[int], Sequence[ExcerptItem]]
-AgentStatusReader = Callable[[int], AgentStatus]
 DecideCall = Callable[..., Awaitable[Mapping[str, Decision]]]
 DraftModelFactory = Callable[[str, ModelCatalog, ProviderKeys], Any]
-UsageLogger = Callable[..., object]
-
-
-@dataclass(frozen=True)
-class DraftRuntime:
-    draft_model: DraftModelFactory
-    log_usage: UsageLogger = log_usage_from_message
-    monotonic: Callable[[], float] = time.monotonic
-
-
-# meiva:note
-# The catalog and the provider keys, each read at the request that uses them.
-@dataclass(frozen=True)
-class ModelReaders:
-    catalog: Callable[[], ModelCatalog]
-    keys: Callable[[ModelCatalog], ProviderKeys]
-
-
-@dataclass(frozen=True)
-class ReplySuggestionPolicy:
-    enabled: Callable[[], bool]
-    model: Callable[[], str]
-    gate_model: Callable[[], str]
-    gate_threshold: Callable[[], float]
-    max_input_tokens: Callable[[], int]
-    max_candidates: Callable[[], int]
 
 
 class ReplySuggestionConfigurationError(ValueError):
     pass
 
 
-def validate_models(policy: ReplySuggestionPolicy, catalog: ModelCatalog) -> None:
-
-    if not policy.enabled():
-        return
-    draft, gate = policy.model(), policy.gate_model()
-    if draft not in catalog.models:
-        raise ReplySuggestionConfigurationError(
-            f"reply_suggestion_model {draft!r} is not a registered chat model; "
-            f"available: {sorted(catalog.models)}"
-        )
-    if gate not in catalog.decision_models:
-        raise ReplySuggestionConfigurationError(
-            f"reply_suggestion_gate_model {gate!r} is not a registered decision model; "
-            f"available: {sorted(catalog.decision_models)}"
-        )
-
-
+# meiva:note
+# Gate, draft and remember reply suggestions.
+#
+# `decide` answers the gate's question and `draft_model` builds the drafting chat model; the
+# gateway passes the real ones, a test passes doubles. Everything else a request needs
+# (the store, the settings, the catalog) arrives with the request.
 class ReplySuggestionService:
-    def __init__(
-        self,
-        *,
-        policy: ReplySuggestionPolicy,
-        models: ModelReaders,
-        load_timeline: LoadTimeline,
-        agent_status: AgentStatusReader,
-        decide: DecideCall,
-        draft: DraftRuntime,
-    ) -> None:
-        self._policy = policy
-        self._models = models
-        self._load_timeline = load_timeline
-        self._agent_status = agent_status
+    def __init__(self, *, decide: DecideCall, draft_model: DraftModelFactory) -> None:
         self._decide = decide
-        self._draft_model = draft.draft_model
-        self._log_usage = draft.log_usage
-        self._monotonic = draft.monotonic
-        self._cache: OrderedDict[tuple[int, str], ReplySuggestionResponse] = OrderedDict()
+        self._draft_model = draft_model
+        self._cache = SuggestionCache(CACHE_ENTRIES)
 
-    async def suggest(self, agent_id: int) -> ReplySuggestionResponse:
-
-        status = await asyncio.to_thread(self._agent_status, agent_id)
-        if not self._policy.enabled():
-            return _none("disabled")
-        if status is not AgentStatus.IDLING:
-            return _none("agent_not_idle")
-        excerpt = await asyncio.to_thread(self._excerpt, agent_id)
+    async def suggest(
+        self,
+        agent_id: int,
+        *,
+        db: Database,
+        policy: ReplySuggestionPolicy,
+        rendering: TimelineReadInputs,
+        catalog: ModelCatalog | CatalogLoadFailure,
+        keys: ProviderKeys | None,
+    ) -> ReplySuggestionResponse:
+        status = await asyncio.to_thread(get_agent_status, db, agent_id)
+        refusal = refusal_before_reading(enabled=policy.enabled, idle=status is AgentStatus.IDLING)
+        if refusal is not None:
+            return _none(refusal)
+        items = await asyncio.to_thread(load_current_timeline_items, db, agent_id, inputs=rendering)
+        excerpt = build_excerpt(items, policy.max_input_tokens)
         if excerpt is None:
             return _none("no_agent_text")
-        catalog = self._models.catalog()
-        validate_models(self._policy, catalog)
+        ready = require_catalog(catalog)
+        if keys is None:
+            raise RuntimeError("the provider keys are read whenever the catalog loaded")
+        problem = model_problem(policy, ready.models, ready.decision_models)
+        if problem is not None:
+            raise ReplySuggestionConfigurationError(problem)
         key = (agent_id, excerpt.last_message_id)
         cached = self._cache.get(key)
         if cached is not None:
-            self._cache.move_to_end(key)
             return cached
-        keys = await asyncio.to_thread(self._models.keys, catalog)
-        result = await self._gate_and_draft(agent_id, excerpt, catalog, keys)
+        result = await self._gate_and_draft(agent_id, excerpt, policy, ready, keys)
         if result.reason in (None, "not_useful"):
-            self._remember(key, result)
+            self._cache.remember(key, result)
         return result
-
-    def _excerpt(self, agent_id: int) -> ConversationExcerpt | None:
-        items = self._load_timeline(agent_id)
-        return build_excerpt(items, self._policy.max_input_tokens())
-
-    def _remember(self, key: tuple[int, str], result: ReplySuggestionResponse) -> None:
-        self._cache[key] = result
-        self._cache.move_to_end(key)
-        while len(self._cache) > CACHE_ENTRIES:
-            self._cache.popitem(last=False)
 
     async def _gate_and_draft(
         self,
         agent_id: int,
         excerpt: ConversationExcerpt,
+        policy: ReplySuggestionPolicy,
         catalog: ModelCatalog,
         keys: ProviderKeys,
     ) -> ReplySuggestionResponse:
         try:
-            useful = await self._useful_reply_probability(agent_id, excerpt, catalog, keys)
+            useful = await self._useful_reply_probability(agent_id, excerpt, policy, catalog, keys)
         except DecisionError:
             logger.opt(exception=True).warning(
                 "reply suggestion gate failed for agent {agent_id}",
@@ -183,28 +123,29 @@ class ReplySuggestionService:
                 agent_id=agent_id,
             )
             return _none("gate_failed")
-        threshold = self._policy.gate_threshold()
         logger.info(
             "reply suggestion gate for agent {agent_id}: useful={useful:.3f} threshold={threshold}",
             event="reply_suggestion_gate",
             agent_id=agent_id,
             useful=useful,
-            threshold=threshold,
+            threshold=policy.gate_threshold,
         )
-        if useful < threshold:
-            return _none("not_useful")
-        return await self._draft(agent_id, excerpt, catalog, keys)
+        refusal = gate_refusal(useful, policy.gate_threshold)
+        if refusal is not None:
+            return _none(refusal)
+        return await self._draft(agent_id, excerpt, policy, catalog, keys)
 
     async def _useful_reply_probability(
         self,
         agent_id: int,
         excerpt: ConversationExcerpt,
+        policy: ReplySuggestionPolicy,
         catalog: ModelCatalog,
         keys: ProviderKeys,
     ) -> float:
         questions: dict[str, Question] = {USEFUL_REPLY: GATE_QUESTION}
         decisions = await self._decide(
-            self._policy.gate_model(),
+            policy.gate_model,
             excerpt.text,
             questions,
             catalog=catalog,
@@ -219,22 +160,21 @@ class ReplySuggestionService:
         self,
         agent_id: int,
         excerpt: ConversationExcerpt,
+        policy: ReplySuggestionPolicy,
         catalog: ModelCatalog,
         keys: ProviderKeys,
     ) -> ReplySuggestionResponse:
-        model_id = self._policy.model()
-        max_candidates = self._policy.max_candidates()
-        llm = self._draft_model(model_id, catalog, keys).with_structured_output(
+        llm = self._draft_model(policy.model, catalog, keys).with_structured_output(
             DraftReplies.model_json_schema(),
             method="json_schema",
             strict=True,
             include_raw=True,
         )
-        started = self._monotonic()
+        started = time.monotonic()
         try:
             response = await llm.ainvoke(
                 [
-                    SystemMessage(content=draft_instruction(max_candidates)),
+                    SystemMessage(content=draft_instruction(policy.max_candidates)),
                     HumanMessage(content=excerpt.text),
                 ]
             )
@@ -248,44 +188,33 @@ class ReplySuggestionService:
                 agent_id=agent_id,
             )
             return _none("generation_failed")
-        self._log_usage(
+        log_usage_from_message(
             response["raw"],
-            model=model_id,
+            policy.model,
             usage_kind=DRAFT_USAGE_KIND,
-            latency_ms=(self._monotonic() - started) * 1000,
+            latency_ms=(time.monotonic() - started) * 1000,
             for_agent_id=agent_id,
             catalog=catalog,
         )
         stop, _ = classify_stop(response["raw"], stops=catalog.stops)
-        if stop is not StopCategory.NORMAL or response["parsing_error"] is not None:
+        verdict = draft_verdict(
+            finished=stop is StopCategory.NORMAL,
+            parse_failed=response["parsing_error"] is not None,
+            text=extract_text(response["raw"]),
+            parsed=response["parsed"],
+            max_candidates=policy.max_candidates,
+        )
+        if verdict.rejection is not None:
             logger.warning(
-                "reply suggestion draft for agent {agent_id} rejected: incomplete or unparsable structured output",
+                "reply suggestion draft for agent {agent_id} rejected: {rejection}",
                 event="reply_suggestion_draft_rejected",
                 agent_id=agent_id,
+                rejection=verdict.rejection,
                 stop=stop.value,
+                max_candidates=policy.max_candidates,
             )
             return _none("invalid_generation")
-        try:
-            json.loads(extract_text(response["raw"]))
-            suggestions = DraftReplies.model_validate(response["parsed"]).suggestions
-        except (json.JSONDecodeError, ValidationError):
-            logger.warning(
-                "reply suggestion draft for agent {agent_id} rejected: invalid candidates",
-                event="reply_suggestion_draft_rejected",
-                agent_id=agent_id,
-            )
-            return _none("invalid_generation")
-        if len(suggestions) > max_candidates:
-            logger.warning(
-                "reply suggestion draft for agent {agent_id} rejected: {count} candidates "
-                "exceed the bound of {max_candidates}",
-                event="reply_suggestion_draft_rejected",
-                agent_id=agent_id,
-                count=len(suggestions),
-                max_candidates=max_candidates,
-            )
-            return _none("invalid_generation")
-        return ReplySuggestionResponse(suggestions=suggestions)
+        return ReplySuggestionResponse(suggestions=verdict.suggestions)
 
 
 def _none(reason: SuggestionReason) -> ReplySuggestionResponse:

@@ -1,11 +1,13 @@
-"""Fresh-process scenarios for the gateway bootstrap tests.
-
-Usage: `child_gateway_scenarios.py <scenario> [args]`.
-
-- `checkout_move <source> <repo>`: import the gateway's first-load image from a
-  throwaway checkout, move that checkout's HEAD, and print what the image reports.
-- `server_shutdown`: run the real gateway server child for the SIGTERM tests.
-"""
+# meiva:note
+# Fresh-process scenarios for the gateway bootstrap tests.
+#
+# Usage: `child_gateway_scenarios.py <scenario> [args]`.
+#
+# - `checkout_move <source> <repo>`: import the gateway's first-load image from a
+#   throwaway checkout, move that checkout's HEAD, and print what the image reports.
+# - `server_shutdown`: run the real gateway server child for the SIGTERM tests.
+# - `server_main`: run the real `gateway.cluster.server.main` (the process root) with a probe app.
+# - `app_from_environment`: build the gateway app twice from the environment, as a reload worker does.
 
 from __future__ import annotations
 
@@ -19,11 +21,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+# meiva:note
+# the route annotation is resolved from module globals
+from starlette.requests import Request
+
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
 MARKERS_ENV = "GATEWAY_SHUTDOWN_TEST_MARKERS"
 PORT_ENV = "GATEWAY_SHUTDOWN_TEST_PORT"
+REDIS_ENV = "GATEWAY_SHUTDOWN_TEST_REDIS"
 
 
 def _mark(name: str) -> None:
@@ -73,6 +80,30 @@ def build_app() -> FastAPI:
 
         return StreamingResponse(_frames(), media_type="text/event-stream")
 
+    @app.get("/sse/{mode}")
+    async def _sse(mode: str, request: Request) -> StreamingResponse:
+        from base.events.live.bus import EventBus, EventBusConfig
+        from gateway.events import sse
+        from gateway.events.sse_frames import SseCadence
+
+        bus = EventBus(
+            EventBusConfig(redis_url=os.environ[REDIS_ENV], events_channel="gateway-shutdown-test")
+        )
+        if mode == "filtered":
+            frames = sse.event_stream(bus, 7, request, poll_s=0.5, cadence=SseCadence())
+        else:
+            frames = sse.throttled_event_stream(
+                bus, request, throttle_rate=20.0, cadence=SseCadence()
+            )
+
+        async def _marked() -> AsyncIterator[bytes]:
+            async for frame in frames:
+                _mark(f"sse-frame:{frame[:20]!r}")
+                yield frame
+            _mark("sse-ended-itself")
+
+        return StreamingResponse(_marked(), media_type="text/event-stream")
+
     @app.get("/slow")
     async def _slow(seconds: float = 1.0) -> PlainTextResponse:
         _mark("slow-started")
@@ -81,6 +112,51 @@ def build_app() -> FastAPI:
         return PlainTextResponse("slow-done")
 
     return app
+
+
+# meiva:note
+# The app a `server_main` child serves: one route that says the process is up.
+def probe_app() -> FastAPI:
+    from fastapi import FastAPI
+
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.get("/probe")
+    def _probe() -> dict[str, int]:
+        return {"pid": os.getpid()}
+
+    return app
+
+
+def run_main() -> None:
+    from base.config import ConfigBoot
+    from gateway.cluster import server as _server
+
+    config = ConfigBoot()
+    config.boot()
+    config.ensure_eager()
+    _server.main(config=config, build_app=lambda _process: probe_app())
+
+
+def _app_from_environment() -> None:
+    from base.config import ConfigBoot
+    from gateway import app as gateway_app
+
+    first = gateway_app.create_app_from_environment()
+    second = gateway_app.create_app_from_environment()
+    expected = gateway_app.gateway_config_from_boot(ConfigBoot())
+    sys.stdout.write(
+        json.dumps(
+            {
+                "distinct_apps": first is not second,
+                "config_matches_boot": first.state.gateway_config == expected,
+                "acceptance_empty": first.state.machine_token_acceptance == {},
+                "acceptance_independent": first.state.machine_token_acceptance
+                is not second.state.machine_token_acceptance,
+            }
+        )
+        + "\n"
+    )
 
 
 def run_child() -> None:
@@ -147,5 +223,9 @@ if __name__ == "__main__":
         _checkout_move(sys.argv[2], sys.argv[3])
     elif sys.argv[1] == "server_shutdown":
         run_child()
+    elif sys.argv[1] == "server_main":
+        run_main()
+    elif sys.argv[1] == "app_from_environment":
+        _app_from_environment()
     else:
         raise SystemExit(f"unknown scenario {sys.argv[1]!r}")

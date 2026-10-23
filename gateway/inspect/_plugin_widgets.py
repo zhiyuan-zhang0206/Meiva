@@ -29,7 +29,7 @@ family.
 from __future__ import annotations
 
 import importlib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -38,43 +38,28 @@ from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
 from base.agents.tasks.priority import Priority
-from base.packages.plugins import data_registry, enable_config
+from base.packages.plugins import data_registry
 from base.packages.plugins.surface.inspector import InspectWidgetSpec
 from gateway.inspect._plugin_faces import enabled_face_files
 from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 
-# The shipped-plugin inspector directory — every builtin plugin dir with an
-# inspector.py is part of the in-process registry (the metric loader's
-# convention; external plugin code is not imported by the gateway).
-PLUGINS_DIR = Path(__file__).resolve().parents[2] / "meiva_builtins" / "plugins"
 
-
-def enabled_inspector_modules(
-    plugins_dir: Path | None = None,
-    *,
-    installed_dirs: Callable[[], Mapping[str, Path]] | None = None,
-    runtime_loader: Callable[[set[str]], enable_config.PluginsConfig] | None = None,
-) -> list[Path]:
+def enabled_inspector_modules(plugins_dir: Path, enabled: Collection[str]) -> list[Path]:
     """``inspector.py`` of every ENABLED builtin plugin, sorted — the import
     set of one registry build."""
-    return enabled_face_files(
-        PLUGINS_DIR if plugins_dir is None else plugins_dir,
-        "inspector.py",
-        installed_dirs=installed_dirs,
-        runtime_loader=runtime_loader,
-    )
+    return enabled_face_files(plugins_dir, "inspector.py", enabled)
 
 
-def load_inspect_widgets(modules: Sequence[Path] | None = None) -> list[InspectWidgetSpec]:
-    """The widget registry of the plugins enabled right now: each enabled
-    builtin plugin's ``inspector.py`` declaration, admitted into a data registry
-    (``modules`` names the ``inspector.py`` files to load instead of the enabled set).
-
-    Fail-soft per plugin (user ruling 2026-09-11): a plugin whose
-    ``inspector.py`` fails to import, or whose declaration is refused, is
-    reported loudly and skipped — the remaining widgets still serve. A
-    declaration is admitted whole or not at all, so a fixed file is picked up
-    cleanly on a later request."""
+# meiva:note
+# The widget registry of the plugins enabled right now: each enabled
+# builtin plugin's ``inspector.py`` declaration, admitted into a data registry.
+#
+# Fail-soft per plugin (user ruling 2026-09-11): a plugin whose
+# ``inspector.py`` fails to import, or whose declaration is refused, is
+# reported loudly and skipped — the remaining widgets still serve. A
+# declaration is admitted whole or not at all, so a fixed file is picked up
+# cleanly on a later request.
+def load_inspect_widgets(plugins_dir: Path, enabled: Collection[str]) -> list[InspectWidgetSpec]:
     declared = [
         data_registry.load_declaration(
             module.parent.name,
@@ -83,7 +68,7 @@ def load_inspect_widgets(modules: Sequence[Path] | None = None) -> list[InspectW
             ),
             (module.parent, data_registry.WIDGETS_KEY),
         )
-        for module in (enabled_inspector_modules() if modules is None else modules)
+        for module in enabled_inspector_modules(plugins_dir, enabled)
     ]
     registry, _refused = data_registry.build_data_registry(declared)
     return list(registry.inspect_widgets())
@@ -114,11 +99,9 @@ def widgets_for_agent(
     pool: ConnectionPool[Any],
     agent_id: int,
     *,
-    loader: Callable[[], list[InspectWidgetSpec]] | None = None,
+    specs: Sequence[InspectWidgetSpec],
 ) -> list[InspectWidgetResult]:
     """Sync twin of the widgets endpoint — runs via asyncio.to_thread."""
-    loader_fn = load_inspect_widgets if loader is None else loader
-    specs = loader_fn()
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:

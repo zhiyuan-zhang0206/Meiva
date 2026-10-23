@@ -1,4 +1,4 @@
-exports = ["router.py"]
+exports = ["router.py", "schemas.py"]
 
 [uses]
 "receipts.py" = ["schemas.py"]

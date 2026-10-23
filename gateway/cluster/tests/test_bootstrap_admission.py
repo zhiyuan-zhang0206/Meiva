@@ -13,7 +13,9 @@ from fastapi.testclient import TestClient
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from base import config
+from base.config import Settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
 from base.host.env import bootstrap
 from base.host.env.boot_policy import BootstrapFetch
@@ -27,23 +29,36 @@ _SECRET = "bootstrap-admission-test"  # noqa: S105 — isolated test credential
 _TURN_LIMIT = "MEIVA_HOST_MAX_CONCURRENT_TURNS"
 
 
+# meiva:note
+# The unit's `.env` as the gateway reads it: assigning an alias rewrites the real file.
+class _UnitEnv:
+    def __init__(self, path: Path, aliases: dict[str, str]) -> None:
+        self._path = path
+        self._aliases = aliases
+        self._write()
+
+    def __setitem__(self, alias: str, value: str) -> None:
+        self._aliases[alias] = value
+        self._write()
+
+    def _write(self) -> None:
+        self._path.write_text("".join(f'{k}="{v}"\n' for k, v in self._aliases.items()))
+
+
 @pytest.fixture
-def gateway_snapshot(
-    monkeypatch: pytest.MonkeyPatch, config_authority: ConfigAuthority
-) -> dict[str, str]:
-    aliases = {"MEIVA_DB_URL": str(config.settings.data_plane.db_url)}
-    for alias in (_TURN_LIMIT, "MEIVA_HOST_DB_POOL_MAX_SIZE", "MEIVA_HOST_CONTROL_POOL_MAX_SIZE"):
-        aliases.pop(alias, None)
+def gateway_snapshot(unit_home: Path) -> _UnitEnv:
+    return _UnitEnv(unit_home / ".env", {"MEIVA_DB_URL": str(config.settings.data_plane.db_url)})
 
-    def read_aliases(owner: ConfigAuthority) -> dict[str, str]:
-        assert owner is config_authority
-        return aliases
 
-    monkeypatch.setattr(ConfigAuthority, "read_env_aliases", read_aliases)
-    monkeypatch.setattr(config.settings.daemon, "host_max_concurrent_turns", 0)
-    monkeypatch.setattr(config.settings.daemon, "host_db_pool_max_size", 64)
-    monkeypatch.setattr(config.settings.daemon, "host_control_pool_max_size", 8)
-    return aliases
+@pytest.fixture
+def served_authority(unit_home: Path) -> ConfigAuthority:
+    """An authority whose hosted-agent limits are the gateway's own, read from its unit file."""
+    boot = snapshot_process_config()
+    boot.set_field("host_max_concurrent_turns", 0)
+    boot.set_field("host_db_pool_max_size", 64)
+    boot.set_field("host_control_pool_max_size", 8)
+    complete = boot.view if boot.view.profile is None else Settings(profile=None)
+    return ConfigAuthority(boot.view, complete, unit_home / ".env")
 
 
 @pytest.fixture
@@ -66,13 +81,13 @@ def runner_token(
 
 @pytest.fixture
 def gateway_client(
-    config_authority: ConfigAuthority, model_catalog: ModelCatalog, gateway_home: Path
+    served_authority: ConfigAuthority, model_catalog: ModelCatalog, gateway_home: Path
 ) -> Iterator[TestClient]:
     """Own the isolated router's admission cache without a full Gateway lifespan."""
     app = FastAPI()
     machine_token_acceptance: AcceptanceCache = {}
     app.state.machine_token_acceptance = machine_token_acceptance
-    app.state.config_authority = config_authority
+    app.state.config_authority = served_authority
     app.state.catalog = model_catalog
     app.state.gateway_process = SimpleNamespace(home=gateway_home)
     app.state.gateway_config = GatewayConfig(
@@ -83,6 +98,7 @@ def gateway_client(
         browser_origin="",
         session_cookie_secure=False,
         memory_root=gateway_home / "memory",
+        upload_home=gateway_home,
         human_auth="required",
     )
     app.include_router(router)
@@ -95,7 +111,7 @@ def gateway_client(
     "raw", [None, "0", "00", "+0", " 0 ", "0.0", "7", "+007", "7.0", "invalid"]
 )
 def test_bootstrap_serves_turn_limit_verbatim(
-    gateway_snapshot: dict[str, str], gateway_client: TestClient, role: str | None, raw: str | None
+    gateway_snapshot: _UnitEnv, gateway_client: TestClient, role: str | None, raw: str | None
 ) -> None:
     if raw is not None:
         gateway_snapshot[_TURN_LIMIT] = raw
@@ -110,7 +126,7 @@ def test_bootstrap_serves_turn_limit_verbatim(
 
 @pytest.mark.parametrize("secret", [None, "wrong-secret"])
 def test_bootstrap_admission_preserves_auth(
-    gateway_snapshot: dict[str, str], gateway_client: TestClient, secret: str | None
+    gateway_snapshot: _UnitEnv, gateway_client: TestClient, secret: str | None
 ) -> None:
     headers = bearer_header(secret) if secret else {}
     gateway_client.headers.pop("Authorization", None)
@@ -132,7 +148,7 @@ class _RecordingApp:
 
 
 def test_runner_fetch_replaces_stale_admission(
-    gateway_snapshot: dict[str, str],
+    gateway_snapshot: _UnitEnv,
     gateway_client: TestClient,
     tmp_path: Path,
     runner_token: str,
@@ -161,7 +177,7 @@ def test_runner_fetch_replaces_stale_admission(
 # reused, whatever its age: the runner fetches and rewrites it.
 @pytest.mark.parametrize("age_seconds", [1.0, 10_000.0], ids=["fresh", "stale"])
 def test_runner_refreshes_an_outdated_admission_snapshot(
-    gateway_snapshot: dict[str, str],
+    gateway_snapshot: _UnitEnv,
     gateway_client: TestClient,
     tmp_path: Path,
     age_seconds: float,

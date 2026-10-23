@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from contextlib import AbstractContextManager
+from dataclasses import replace
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 
-from base import config
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    gateway_test_client,
+    gateway_test_config,
+)
 
 ACCEPT = "application/json, text/event-stream"
 
@@ -85,6 +90,15 @@ def tool_result(message: dict[str, Any]) -> Any:
     return structured
 
 
-@pytest.fixture(autouse=True)
-def enable_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config.settings.gateway, "mcp_endpoint_enabled", True)
+# meiva:note
+# A gateway test client whose app serves (or, with `enabled=False`, refuses) `/mcp`.
+#
+# The endpoint switch is a `GatewayConfig` value the app is built with; `client_options` are
+# the usual `gateway_test_client` arguments. A `config` among them keeps its other fields.
+def mcp_client(
+    *, enabled: bool = True, **client_options: Any
+) -> AbstractContextManager[GatewayTestClient, bool | None]:
+    config = client_options.pop("config", None) or gateway_test_config()
+    return gateway_test_client(
+        config=replace(config, mcp_endpoint_enabled=enabled), **client_options
+    )

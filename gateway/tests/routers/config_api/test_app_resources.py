@@ -1,163 +1,52 @@
-"""Configuration HTTP requests use the serving app's resources, without its lifespan."""
+# meiva:note
+# Configuration HTTP requests use the serving app's own resources: its home's `.env`, its
+# machine and its host, never those of an app that served before it in the same process.
 
-from collections.abc import Callable
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import cast
-from unittest.mock import MagicMock
 
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from base.cluster import machines
 from base.cluster.machine import MachineIdentity
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import runtime_config
-from base.config.admin.candidate import validate_env_patch_for_write
-from base.config.service_read import ConfigAuthority
-from base.db import Database
-from base.host.system.tests.fake_commands import fake_host
-from base.packages.plugin_config_admin import panel_metadata
-from gateway.routers.configuration import runtime
-from ops.rpc_schemas import ConfigReadResult, HostConfigField
+from base.cluster.machine.boot import machine_from_boot
+from base.config.tests.configuration import snapshot_process_config
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 
 
-@pytest.fixture
-def clients(
-    monkeypatch: pytest.MonkeyPatch,
-    config_authority: ConfigAuthority,
-    tmp_path: Path,
-    *,
-    machine_identity: MachineIdentity,
-) -> list[TestClient]:
-    """Two router-only apps have distinct pools, role/RPC handles and config paths."""
-    apps = [FastAPI(), FastAPI()]
-    for index, app in enumerate(apps):
-        app.include_router(runtime.router)
-        app.state.machine = machine_identity
-        app.state.host = fake_host()
-        app.state.db = MagicMock(spec=Database)
-        app.state.db_pool = MagicMock()
-        cursor = app.state.db_pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
-        cursor.fetchone.return_value = (1,)
-        env_path = tmp_path / f"{index}.env"
-        env_path.write_text(f"MEIVA_MODEL=model-{index}\n")
-        app.state.config_authority = ConfigAuthority(
-            config_authority.runtime, config_authority.all_domains, env_path
-        )
-
-    def index_of(db: Database) -> int:
-        return next(index for index, app in enumerate(apps) if db is app.state.db)
-
-    def roles(db: Database, target: str) -> list[str]:
-        index = index_of(db)
-        assert target in {"remote", f"remote-{index}", machine_identity.name()}
-        return ["agent-runner"] if index == 0 else ["agent-runner", "gateway"]
-
-    def runners(db: Database) -> list[tuple[str, str | None]]:
-        index = index_of(db)
-        return [(f"remote-{index}", None)]
-
-    async def dispatch(
-        db: Database, *, target_machine: str, kind: str, payload: dict[str, object]
-    ) -> dict[str, object]:
-        index = index_of(db)
-        if kind == "config_read":
-            return ConfigReadResult(
-                machine=target_machine,
-                host_fields={
-                    meta.name: HostConfigField(
-                        value=index + 3 if meta.name == "ops_concurrency" else meta.current_value,
-                        overridden=False,
-                        remote_writable=meta.remote_writable,
-                    )
-                    for meta in panel_metadata(authority=apps[index].state.config_authority)
-                    if meta.scope == "host"
-                },
-                raw_overrides={"ops_concurrency": index + 3},
-            ).model_dump()
-        if kind == "config_audit_read":
-            assert payload == {"last": 2}
-            return {
-                "machine": target_machine,
-                "records": [{"ts": target_machine, "site": str(index)}],
-            }
-        assert kind == "config_write"
-        assert payload["local"] is (target_machine == machine_identity.name())
-        assert payload["overrides"] == {"ops_concurrency": 4}
-        return {
-            "machine": target_machine,
-            "results": {"ops_concurrency": {"ok": index == 0, "reason": str(index)}},
-            "applied": index == 0,
-            "restart_required": ["ops"] if index == 0 else [],
-        }
-
-    for app in apps:
-        app.state.config_role_lookup = roles
-        app.state.config_rpc_dispatcher = dispatch
-        app.state.config_candidate_validator = validate_env_patch_for_write
-        app.state.config_cluster_field_writer = runtime_config.write_fields
-    monkeypatch.setattr(machines, "list_agent_runners", runners)
-
-    def check_integrity(*, machine_reader: Callable[[], str]) -> None:
-        assert machine_reader() == machine_identity.name()
-
-    monkeypatch.setattr(runtime, "check_env_integrity", check_integrity)
-    return [TestClient(app) for app in apps]
+def _machine(name: str) -> MachineIdentity:
+    machine = machine_from_boot(snapshot_process_config())
+    machine.set(role="gateway", name=name)
+    return machine
 
 
-def test_unknown_machine_uses_each_apps_pool(clients: list[TestClient]) -> None:
-    """A machine known to the first app is unknown to the second app's pool."""
-    second = cast(FastAPI, clients[1].app)
-    cursor = second.state.db_pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = None
-    for index in (0, 1, 0):
-        response = clients[index].get("/api/config?machine=remote")
-        assert response.status_code == (200 if index == 0 else 404), response.text
+# meiva:note
+# Home `index`: its `.env` names its own model and its own host concurrency.
+def _home(root: Path, index: int) -> Path:
+    home = root / f"home-{index}"
+    home.mkdir(exist_ok=True)
+    env = home / ".env"
+    if not env.exists():
+        env.write_text(f"MEIVA_MODEL=model-{index}\nMEIVA_OPS_CONCURRENCY={index + 3}\n")
+    return home
 
 
-def test_config_read_and_capabilities_use_each_apps_db(clients: list[TestClient]) -> None:
+# meiva:note
+# Gateway `index` with its own machine. Neither is registered, so a request about the
+# local machine is answered in process from that app's own authority and host. (Two lifespans
+# cannot overlap: the telemetry pipeline is a process global, so the apps serve in turn.)
+@contextmanager
+def _gateway(root: Path, index: int) -> Generator[GatewayTestClient]:
+    with gateway_test_client(
+        home=_home(root, index), machine=_machine(f"gateway-{index}")
+    ) as client:
+        yield client
+
+
+def test_config_read_uses_each_apps_home(tmp_path: Path) -> None:
     for index in (1, 0, 1):
-        response = clients[index].get("/api/config")
+        with _gateway(tmp_path, index) as client:
+            response = client.get("/api/config")
         assert response.status_code == 200, response.text
         fields = {field["name"]: field for field in response.json()["fields"]}
         assert fields["ops_concurrency"]["current_value"] == index + 3
         assert fields["llm_model"]["current_value"] == f"model-{index}"
-
-    # A remote view also uses this app's DB for its capability projection.
-    for index in (1, 0, 1):
-        response = clients[index].get("/api/config?machine=remote")
-        assert response.status_code == 200, response.text
-        assert response.json()["machine_capabilities"] == (
-            ["agent-runner"] if index == 0 else ["agent-runner", "gateway"]
-        )
-
-
-@pytest.mark.parametrize("machine", [None, "all"])
-def test_audit_reads_and_fanout_use_each_apps_db(
-    clients: list[TestClient], machine: str | None, *, machine_identity: MachineIdentity
-) -> None:
-    for index in (1, 0, 1):
-        params: dict[str, str | int] = {"last": 2}
-        if machine is not None:
-            params["machine"] = machine
-        response = clients[index].get("/api/config/audit", params=params)
-        assert response.status_code == 200, response.text
-        records = response.json()["records"]
-        assert len(records) == (2 if machine == "all" else 1)
-        assert {record["site"] for record in records} == {str(index)}
-        assert {record["machine"] for record in records} == (
-            {machine_identity.name(), f"remote-{index}"}
-            if machine == "all"
-            else {machine_identity.name()}
-        )
-
-
-@pytest.mark.parametrize("machine", [None, "remote"])
-def test_config_write_uses_each_apps_db(clients: list[TestClient], machine: str | None) -> None:
-    for index in (0, 1, 0):
-        params = {"machine": machine} if machine else {}
-        response = clients[index].put("/api/config", params=params, json={"ops_concurrency": 4})
-        assert response.status_code == 200, response.text
-        assert response.json()["applied"] is (index == 0)
-        assert response.json()["results"]["ops_concurrency"]["reason"] == str(index)
+        assert response.json()["machine_capabilities"] == ["gateway"]

@@ -1,40 +1,42 @@
-"""GET/PUT /api/config integration tests.
+# meiva:note
+# GET/PUT /api/config integration tests.
+#
+# Regression: required fields (db_url / redis_url etc. with no default) must not
+# let FastAPI hit the PydanticUndefined sentinel during response serialization and 500.
+#
+# PUT scope routing: the self PUT splits the body by ownership scope — cluster
+# keys are written to this gateway's .env, host keys to this machine's .env (the
+# single config store); agent-scope fields have writable=False and are rejected by
+# the writable gate ("unknown or read-only fields"), same as any other read-only field.
+#
+# Cross-machine (`?machine=`): GET/PUT POST the host section to a remote
+# agent-runner's ops server. The remote runner is a real listener on port 0
+# (`runner_ops`) registered in `machines`, so a known host that answers 404 503s
+# as unreachable, a failed op 503s, and an unknown name 404s. The local machine is
+# served by the in-process ops route the `gateway_local_runner` fixture registers.
 
-Regression: required fields (db_url / redis_url etc. with no default) must not
-let FastAPI hit the PydanticUndefined sentinel during response serialization and 500.
-
-PUT scope routing: the self PUT splits the body by ownership scope — cluster
-keys are written to this gateway's .env, host keys to this machine's .env (the
-single config store); agent-scope fields have writable=False and are rejected by
-the writable gate ("unknown or read-only fields"), same as any other read-only field.
-
-Cross-machine (`?machine=`): GET/PUT POST the host section to a remote
-agent-runner's ops server. The dispatch is stubbed (AsyncMock on
-`dispatch_to_machine`) so these tests stay deterministic without a real remote
-host — a known-but-offline host 503s on ClusterOpUnreachable, an unknown name
-404s. Capability probes are monkeypatched so headless CI is deterministic.
-"""
-
+import json
 from pathlib import Path
-from typing import Any, cast
-from unittest.mock import AsyncMock
+from typing import Any
 
 import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import runtime_config, settings
-from base.config.admin.candidate import validate_env_patch_for_write
+from base.config import runtime_config
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
 from base.host.env.tests.env_files import unit_env_aliases, unit_env_path
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
-from gateway.routers.configuration import runtime as config_router
 from gateway.tests.auth.gateway_config import gateway_test_client
-from ops.cluster import rpc as cluster_rpc
-from ops.rpc_schemas import ConfigWriteOpResult, FieldWriteResult
+from gateway.tests.support.runner_ops.ops_stub import (
+    completed,
+    failed,
+    refused,
+    runner_ops,
+)
 
 
 def test_get_config_serializes_required_fields():
@@ -142,6 +144,9 @@ def stub_browser_capability(monkeypatch: pytest.MonkeyPatch) -> None:
     the aggregate browser_capable() gate reports capable -> can_enable True.
 
     Patches the predicate as bound in `config_validators`: no real display / Chrome / npx.
+    Retained: the display probe reads the ambient environment and the macOS Chrome path
+    is read from disk, so no `Host` value makes a "capable" host on every machine (needs
+    base: display and Chrome path as `Host` facts).
     """
     monkeypatch.setattr(config_validators, "browser_capable", lambda _chrome, **_kwargs: True)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -168,14 +173,15 @@ def test_get_self_host_fields_carry_capability_hint(stub_browser_capability: Non
     assert fields["ops_concurrency"]["can_enable"] is None
 
 
+# meiva:note
+# GET self with no display: browser_enabled.can_enable is False + a reason. The display probe
+# reads the ambient environment, so no host value makes a headless machine on every platform;
+# the probe is replaced here, once.
 def test_get_self_browser_disabled_when_no_display(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GET self with no display: browser_enabled.can_enable is False + a reason."""
-    monkeypatch.setattr(config_validators, "browser_capable", lambda _chrome, **_kwargs: False)  # pyright: ignore[reportUnknownArgumentType]
-
-    def fake_display_available(*, host: Host) -> bool:
+    def no_display(*, host: Host) -> bool:
         return False
 
-    monkeypatch.setattr(config_validators, "display_available", fake_display_available)
+    monkeypatch.setattr(config_validators, "display_available", no_display)
     with gateway_test_client() as client:
         resp = client.get("/api/config")
     assert resp.status_code == 200, resp.text
@@ -184,34 +190,15 @@ def test_get_self_browser_disabled_when_no_display(monkeypatch: pytest.MonkeyPat
     assert be["reason"] == "no display detected"
 
 
-# ── machines-table seeding helper ──
-
-
-def seed_machine(name: str) -> None:
-    """Insert a minimal agent-runner row so `_assert_machine_known` finds it.
-
-    role defaults to 'agent-runner'; gateway_url is nullable. The per-test
-    TRUNCATE (conftest `_clean_state`) clears it again.
-    """
-    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO machines (name, gateway_url) VALUES (%s, %s) "
-            "ON CONFLICT (name) DO NOTHING",
-            (name, "http://remote.invalid:8000"),
-        )
-        conn.commit()
-
-
 REMOTE = "remote-host"
 
 
 def test_get_remote_machine_composes_host_from_dispatch(
-    *, config_authority: ConfigAuthority
+    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
 ) -> None:
     """GET ?machine=<remote>: host fields reflect the remote config_read result,
     cluster fields reflect local metadata, raw_overrides == the remote host
     overrides."""
-    seed_machine(REMOTE)
     # The GET composer iterates every host-scope meta and indexes the result, so
     # the canned host_fields must answer for all of them — fill the explicit ones
     # plus a neutral stub for the rest.
@@ -239,10 +226,10 @@ def test_get_remote_machine_composes_host_from_dispatch(
         "raw_overrides": {"browser_enabled": True, "ops_concurrency": 16},
     }
 
-    enqueue = AsyncMock(return_value=canned)
-
-    with gateway_test_client() as client:
-        client.app.state.config_rpc_dispatcher = enqueue
+    with (
+        runner_ops(db_conn, REMOTE, {"config_read": completed(canned)}) as runner,
+        gateway_test_client() as client,
+    ):
         resp = client.get(f"/api/config?machine={REMOTE}")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -258,12 +245,9 @@ def test_get_remote_machine_composes_host_from_dispatch(
     # raw_overrides == the remote host overrides (not the local merged set)
     assert body["raw_overrides"] == {"browser_enabled": True, "ops_concurrency": 16}
 
-    # the dispatch was a config_read on the remote target
-    assert enqueue.await_count == 1
-    assert enqueue.await_args is not None
-    kwargs = enqueue.await_args.kwargs
-    assert kwargs["target_machine"] == REMOTE
-    assert kwargs["kind"] == "config_read"
+    # meiva:note
+    # the dispatch was one config_read on the remote target
+    assert [call.kind for call in runner.calls] == ["config_read"]
 
 
 def _full_host_fields_for_remote(
@@ -299,39 +283,45 @@ def test_get_unknown_machine_404() -> None:
     assert "unknown machine" in resp.json()["detail"]
 
 
-def test_get_offline_machine_503() -> None:
+def test_get_offline_machine_503(db_conn: psycopg.Connection) -> None:
     """GET ?machine=<known-but-offline>: ops server unreachable -> 503."""
-    seed_machine(REMOTE)
-    enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpUnreachable("no ack"))
-
-    with gateway_test_client() as client:
-        client.app.state.config_rpc_dispatcher = enqueue
+    with (
+        runner_ops(db_conn, REMOTE, {"config_read": refused(404, "no ack")}),
+        gateway_test_client() as client,
+    ):
         resp = client.get(f"/api/config?machine={REMOTE}")
     assert resp.status_code == 503, resp.text
     assert REMOTE in resp.json()["detail"]
 
 
-def test_get_remote_failed_503() -> None:
+def test_get_remote_failed_503(db_conn: psycopg.Connection) -> None:
     """GET ?machine=<known>: the remote op fails (row marked failed) -> 503."""
-    seed_machine(REMOTE)
-    enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpFailed({"error": "boom"}))
-
-    with gateway_test_client() as client:
-        client.app.state.config_rpc_dispatcher = enqueue
+    with (
+        runner_ops(db_conn, REMOTE, {"config_read": failed({"error": "boom"})}),
+        gateway_test_client() as client,
+    ):
         resp = client.get(f"/api/config?machine={REMOTE}")
     assert resp.status_code == 503, resp.text
     assert REMOTE in resp.json()["detail"]
 
 
-def test_get_local_unreachable_503_no_in_process_fallback() -> None:
-    """The LOCAL machine's ops server unreachable -> 503 like any other machine.
-    The router has NO in-process fallback — a silent local read would mask the
-    outage (the old behavior). This overrides the conftest's in-process stand-in
-    for the local ops daemon."""
-    enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpUnreachable("no ack"))
-
-    with gateway_test_client() as client:
-        client.app.state.config_rpc_dispatcher = enqueue
+# meiva:note
+# The LOCAL machine's ops server unreachable -> 503 like any other machine.
+# The router has NO in-process fallback — a silent local read would mask the
+# outage (the old behavior). The listener registered here replaces the in-process
+# ops route the `gateway_local_runner` fixture serves for the local machine.
+def test_get_local_unreachable_503_no_in_process_fallback(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
+    with (
+        runner_ops(
+            db_conn,
+            machine_identity.name(),
+            {"config_read": refused(404, "no ack")},
+            roles=("gateway", "agent-runner"),
+        ),
+        gateway_test_client(machine=machine_identity) as client,
+    ):
         resp = client.get("/api/config")  # machine absent -> the local machine
     assert resp.status_code == 503, resp.text
     assert "unreachable" in resp.json()["detail"]
@@ -590,17 +580,10 @@ def test_put_nonsensitive_field_can_hold_literal_sentinel(clean_overrides: Path)
     assert unit_env_aliases()["MEIVA_MODEL"] == CONFIG_UNCHANGED_SENTINEL
 
 
-def test_put_self_edits_writable_host_capability_field(
-    clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_put_self_edits_writable_host_capability_field(clean_overrides: Path) -> None:
     """A writable host capability field (cross_machine_transfer_backend, not
     remote_writable) is editable on the self/Cluster view — the local write honors
     `writable`."""
-    monkeypatch.setattr(
-        config_validators,
-        "validate",
-        lambda _f, _v, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
-    )
     with gateway_test_client() as client:
         resp = client.put("/api/config", json={"cross_machine_transfer_backend": "none"})
     assert resp.status_code == 200, resp.text
@@ -608,53 +591,20 @@ def test_put_self_edits_writable_host_capability_field(
     assert unit_env_aliases()["MEIVA_CROSS_MACHINE_TRANSFER_BACKEND"] == "none"
 
 
-@pytest.mark.asyncio
-async def test_put_self_host_field_skips_empty_cluster_audit(
-    config_authority: ConfigAuthority,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
+def test_put_self_host_field_skips_empty_cluster_audit(clean_overrides: Path) -> None:
     """A host-only self PUT must not append an empty gateway cluster record."""
-    from types import SimpleNamespace
+    with gateway_test_client() as client:
+        response = client.put("/api/config", json={"cross_machine_transfer_backend": "none"})
 
-    host_result = ConfigWriteOpResult(
-        machine=machine_identity.name(),
-        results={"cross_machine_transfer_backend": FieldWriteResult(ok=True)},
-        applied=True,
-        restart_required=[],
+    assert response.status_code == 200, response.text
+    assert response.json()["applied"] is True
+    audit = clean_overrides / ".env.audit.jsonl"
+    sites = (
+        [json.loads(line)["site"] for line in audit.read_text().splitlines()]
+        if audit.exists()
+        else []
     )
-    dispatch = AsyncMock(return_value=host_result.model_dump())
-    writes: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def _write_fields(*args: object, **kwargs: object) -> None:
-        writes.append((args, kwargs))
-
-    def roles(_db: object, _target: str) -> list[str]:
-        return ["agent-runner"]
-
-    anon = cast(
-        "Any",
-        SimpleNamespace(
-            state=SimpleNamespace(),
-            app=SimpleNamespace(
-                state=SimpleNamespace(
-                    config_authority=config_authority,
-                    config_role_lookup=roles,
-                    config_rpc_dispatcher=dispatch,
-                    config_candidate_validator=validate_env_patch_for_write,
-                    config_cluster_field_writer=_write_fields,
-                    db=object(),
-                    db_pool=object(),
-                    machine=machine_identity,
-                    host=fake_host(),
-                )
-            ),
-        ),
-    )
-    result = await config_router.put_config(anon, {"cross_machine_transfer_backend": "none"})
-
-    assert result.applied is True
-    assert writes == []
+    assert "gateway_config_put" not in sites
 
 
 def test_put_self_rejects_readonly_identity_field(clean_overrides: Path) -> None:
@@ -685,7 +635,7 @@ def test_get_self_raw_overrides_exposes_writable_host_field_not_readonly(
 
 
 def test_put_explicit_self_edits_remote_writable_host_toggle(
-    clean_overrides: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    clean_overrides: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """On a dual-role box, `?machine=<self>` is a host view (remote_writable gate),
     NOT the Cluster view — so a gateway-capability host toggle that is
@@ -693,11 +643,6 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
     while the Cluster view (machine omitted) rejects it as read-only. Regression:
     the two used to collapse because both resolve target to machine_name(), leaving
     heartbeat_enabled / task_maintenance_enabled uneditable on a single box."""
-    monkeypatch.setattr(
-        config_validators,
-        "validate",
-        lambda _f, _v, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
-    )
     with gateway_test_client(machine=machine_identity) as client:
         # Cluster view (machine omitted): writable=False -> rejected read-only.
         cluster_resp = client.put("/api/config", json={"heartbeat_enabled": False})

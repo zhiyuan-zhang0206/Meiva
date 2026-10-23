@@ -1,38 +1,54 @@
-"""Cross-machine resurrect forward (`gateway/agents/lifecycle.py:post_agent_resurrect`)
-unit tests —
-
-resurrect must forward to the home machine (a session spawn starting a new process
-is a physical local-machine operation). Forward has no local shortcut: even when
-the target is the local machine, the ops server executes in-process on localhost.
-This endpoint covers the scenario auto-resurrect can't — a pure wake with no message
-to deliver (frontend resurrect button).
-"""
+# meiva:note
+# Cross-machine resurrect forward (`gateway/agents/lifecycle.py:post_agent_resurrect`) tests —
+#
+# resurrect must forward to the home machine (a session spawn starting a new process
+# is a physical local-machine operation). Forward has no local shortcut: even when
+# the target is the local machine, the ops server executes in-process on localhost.
+# This endpoint covers the scenario auto-resurrect can't — a pure wake with no message
+# to deliver (frontend resurrect button).
+#
+# The home machine is a runner served on a real listener (`gateway/tests/support/runner_ops`) and
+# registered in `machines`. The lifecycle dispatch budget is `GatewayConfig.lifecycle_*`.
 
 from __future__ import annotations
 
-import asyncio
-import importlib
-from typing import Any
+import time
 
 import psycopg
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from psycopg_pool import ConnectionPool
 
-from base.api_contracts.agent_contract import CrossMachineGatewayUnavailable, MachineNotRegistered
+from base.api_contracts.agent_contract import CrossMachineGatewayUnavailable
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from gateway.agents import forward as forward_module
 from gateway.agents import lifecycle as lifecycle_module
-from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
+from gateway.agents.launch import forward
+from gateway.http.config import GatewayConfig
+from gateway.tests.auth.gateway_config import (
+    gateway_test_client,
+    gateway_test_config,
+    spawn_via_http,
+)
+from gateway.tests.support.runner_ops.ops_stub import (
+    OpsCall,
+    OpsReply,
+    RunnerOps,
+    completed,
+    failed,
+    refused,
+    runner_ops,
+)
 
 
 @pytest.fixture
-def _force_local_machine(set_machine_identity) -> MachineIdentity:
-    """Sets this unit's identity at the source via set_machine_identity so every
-    machine_name() / machine_role() call site sees role=agent-runner, name='local-test'."""
-    return set_machine_identity(role="agent-runner", name="local-test")
+def local_machine(
+    set_machine_identity: MachineIdentitySetter, gateway_local_runner: RunnerOps
+) -> MachineIdentity:
+    """The gateway's own machine, serving as an agent-runner through its in-process ops route."""
+    return set_machine_identity(role="agent-runner")
 
 
 def _set_agent_machine(db_conn: psycopg.Connection, agent_id: int, machine: str) -> None:
@@ -46,202 +62,223 @@ def _set_agent_machine(db_conn: psycopg.Connection, agent_id: int, machine: str)
 
 class TestResurrectRouting:
     def test_remote_machine_forwards(
-        self,
-        _force_local_machine: MachineIdentity,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
         """machine != local → forward entire body to home machine's ops server,
         local does not touch DB / does not spawn a session."""
-        captured: dict[str, Any] = {}
-
-        with gateway_test_client(machine=_force_local_machine) as client:
-
-            async def _capture_forward(
-                agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
-            ) -> dict:
-                assert db is client.app.state.db
-                assert pool is client.app.state.db_pool
-                captured["agent_id"] = agent_id
-                captured["path"] = path
-                captured["json_body"] = json_body
-                return {"status": "spawned"}
-
+        with (
+            runner_ops(db_conn, "remote-mac", {"lifecycle": completed({"status": "spawned"})}) as (
+                runner
+            ),
+            gateway_test_client(machine=local_machine) as client,
+        ):
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
                 f"/api/agents/{agent_id}/resurrect",
                 json={"resurrected_by": "user", "prompt": "hello"},
             )
         assert resp.status_code == 200
         assert resp.json() == {"status": "spawned"}
-        assert captured["agent_id"] == agent_id
-        assert captured["path"] == f"/api/agents/{agent_id}/resurrect-explicit"
-        assert captured["json_body"]["resurrected_by"] == "user"
-        assert captured["json_body"]["prompt"] == "hello"
+        (call,) = runner.calls_of("lifecycle")
+        assert call.payload["path"] == f"/api/agents/{agent_id}/resurrect-explicit"
+        assert call.payload["body"]["resurrected_by"] == "user"
+        assert call.payload["body"]["prompt"] == "hello"
+        status = db_conn.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+        assert status.fetchone() == ("terminated",)
 
     def test_bare_resurrect_forwards_with_defaults(
-        self,
-        _force_local_machine: MachineIdentity,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
         """Bare lifecycle wake with no body (frontend resurrect button) → forward,
         prompt=None, resurrected_by defaults to 'user'. This is the scenario
         auto-resurrect cannot cover."""
-        captured: dict[str, Any] = {}
-
-        with gateway_test_client(machine=_force_local_machine) as client:
-
-            async def _capture_forward(
-                agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
-            ) -> dict:
-                assert db is client.app.state.db
-                assert pool is client.app.state.db_pool
-                captured["json_body"] = json_body
-                return {"status": "spawned"}
-
+        with (
+            runner_ops(db_conn, "remote-mac", {"lifecycle": completed({"status": "spawned"})}) as (
+                runner
+            ),
+            gateway_test_client(machine=local_machine) as client,
+        ):
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(f"/api/agents/{agent_id}/resurrect")
         assert resp.status_code == 200
         assert resp.json() == {"status": "spawned"}
-        assert captured["json_body"]["prompt"] is None
-        assert captured["json_body"]["resurrected_by"] == "user"
+        (body,) = [payload["body"] for payload in runner.payloads("lifecycle")]
+        assert body["prompt"] is None
+        assert body["resurrected_by"] == "user"
 
-    def test_machine_not_registered_propagates_404(
-        self,
-        _force_local_machine: MachineIdentity,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
+    # meiva:note
+    # A failed op that names a wire reason is re-raised as that error on the gateway.
+    def test_a_runners_wire_error_keeps_its_status_and_reason(
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
-        """target not in machines table → lookup raises MachineNotRegistered → handler converts to 404."""
-
-        async def _forward_raises(*args: Any, **kw: Any) -> None:
-            raise MachineNotRegistered("machine 'remote-mac' not found in machines table")
-
-        with gateway_test_client(machine=_force_local_machine) as client:
+        refusal = failed(
+            {
+                "error": "MachineNotRegistered: remote-mac",
+                "detail": "machine 'remote-mac' not found in machines table",
+                "reason": "machine_not_registered",
+            }
+        )
+        with (
+            runner_ops(db_conn, "remote-mac", {"lifecycle": refusal}),
+            gateway_test_client(machine=local_machine) as client,
+        ):
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/resurrect")
         assert resp.status_code == 404
         assert resp.json()["reason"] == "machine_not_registered"
 
+    # meiva:note
+    # A home machine the registry has never seen cannot be dialed: 502, named.
+    def test_an_unregistered_home_machine_is_a_gateway_error(
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+    ) -> None:
+        with gateway_test_client(machine=local_machine) as client:
+            agent_id = spawn_via_http(client, {}).json()["id"]
+            _set_agent_machine(db_conn, agent_id, "ghost-mac")
+            resp = client.post(f"/api/agents/{agent_id}/resurrect")
+        assert resp.status_code == 502
+        assert resp.json()["reason"] == "cross_machine_gateway_unavailable"
+        assert "ghost-mac" in resp.json()["detail"]
+
     def test_cross_machine_gateway_unavailable_propagates_502(
-        self,
-        _force_local_machine: MachineIdentity,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
         """target ops server transport error → CrossMachineGatewayUnavailable → 502."""
-
-        async def _forward_raises(*args: Any, **kw: Any) -> None:
-            raise CrossMachineGatewayUnavailable("target unreachable after 3 retries")
-
-        with gateway_test_client(machine=_force_local_machine) as client:
+        with (
+            runner_ops(db_conn, "remote-mac", {"lifecycle": refused(404, "no ops server here")}),
+            gateway_test_client(machine=local_machine) as client,
+        ):
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/resurrect")
         assert resp.status_code == 502
         assert resp.json()["reason"] == "cross_machine_gateway_unavailable"
 
-    def test_nonexistent_agent_404(self, _force_local_machine: MachineIdentity) -> None:
+    def test_nonexistent_agent_404(self, local_machine: MachineIdentity) -> None:
         """Nonexistent → helper's own SELECT hits AgentNotFound (404), does not query machines table."""
-        with gateway_test_client(machine=_force_local_machine) as client:
+        with gateway_test_client(machine=local_machine) as client:
             resp = client.post("/api/agents/9999/resurrect")
         assert resp.status_code == 404
 
 
-def test_local_home_machine_is_forwarded(
-    _force_local_machine: MachineIdentity,
+# meiva:note
+# Even when agents_meta.machine is local, resurrect still goes through the dial —
+# no local shortcut. Single box is just the special case where the ops server
+# happens to be on localhost.
+def test_local_home_machine_is_dialed_like_any_other(
+    local_machine: MachineIdentity,
+    gateway_local_runner: RunnerOps,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Even when agents_meta.machine is local, resurrect still goes through forward —
-    no local shortcut. Single box is just the special case where the ops server
-    happens to be on localhost."""
-    captured: dict[str, Any] = {}
-
-    async def _capture_enqueue(_db: object, target: str, path: str, json_body: dict) -> dict:
-        captured["target"] = target
-        captured["path"] = path
-        return {"status": "spawned"}
-
-    with gateway_test_client(machine=_force_local_machine) as client:
+    local = gateway_local_runner.name
+    with gateway_test_client(machine=local_machine) as client:
         agent_id = spawn_via_http(client, {}).json()["id"]
-        _set_agent_machine(db_conn, agent_id, "local-test")
-        monkeypatch.setattr(forward_module, "enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
-        resp = client.post(f"/api/agents/{agent_id}/resurrect")
+        _set_agent_machine(db_conn, agent_id, local)
+        with runner_ops(
+            db_conn, local, {"lifecycle": completed({"status": "spawned"})}
+        ) as scripted:
+            resp = client.post(f"/api/agents/{agent_id}/resurrect")
     assert resp.status_code == 200
     assert resp.json() == {"status": "spawned"}
-    assert captured["target"] == "local-test"
-    assert captured["path"] == f"/api/agents/{agent_id}/resurrect-explicit"
+    (call,) = scripted.calls_of("lifecycle")
+    assert call.payload["path"] == f"/api/agents/{agent_id}/resurrect-explicit"
 
 
+# meiva:note
+# An unreachable remote host must produce a gateway error before the caller's request
+# deadline, without giving up retry-safe lifecycle dispatch.
+def test_lifecycle_budget_defaults_are_short_and_retry_safe() -> None:
+    config = gateway_test_config()
+    assert config.lifecycle_attempt_timeout_seconds < 15.0
+    assert config.lifecycle_deadline_seconds < 15.0
+    assert config.lifecycle_retries == 1
+
+
+# meiva:note
+# A runner that fails once answers the retry: one extra attempt, the same dedup key.
 @pytest.mark.asyncio
-async def test_lifecycle_forward_uses_a_short_idempotent_retry_budget(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+async def test_lifecycle_forward_retries_a_transient_failure_once_under_one_key(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
-    """An unreachable remote host must produce a gateway error before the
-    caller's request deadline, without giving up retry-safe lifecycle dispatch."""
-    forward = importlib.reload(forward_module)
-    captured: dict[str, Any] = {}
+    attempts: list[OpsCall] = []
 
-    async def _dispatch(_db: object, **kwargs: Any) -> dict[str, Any]:
-        captured.update(kwargs)
-        return {"status": "enqueued"}
+    def flaky(call: OpsCall) -> OpsReply:
+        attempts.append(call)
+        return refused(503, "restarting") if len(attempts) == 1 else completed({"status": "ok"})
 
-    monkeypatch.setattr(forward.cluster_rpc, "dispatch_to_machine", _dispatch)
-
-    result = await forward.enqueue_lifecycle(
-        Database.from_settings(gate=database_gate), "offline-runner", "/restart", {}
-    )
-
-    assert result == {"status": "enqueued"}
-    assert isinstance(captured["timeout_s"], float)
-    assert captured["timeout_s"] < 15.0
-    assert captured["retries"] == 1
-
-
-@pytest.mark.asyncio
-async def test_lifecycle_forward_deadline_becomes_a_clear_gateway_error(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-) -> None:
-    """A transport that ignores its own per-attempt timeout is still bounded at
-    the router boundary, where the user receives a named 502 instead of silence."""
-    forward = importlib.reload(forward_module)
-    never = asyncio.Event()
-
-    async def _never_dispatch(_db: object, **_kwargs: Any) -> dict[str, Any]:
-        await never.wait()
-        return {}
-
-    monkeypatch.setattr(forward.cluster_rpc, "dispatch_to_machine", _never_dispatch)
-    monkeypatch.setattr(forward, "_LIFECYCLE_DISPATCH_DEADLINE_S", 0.01, raising=False)
-
-    with pytest.raises(CrossMachineGatewayUnavailable, match="did not answer"):
-        await asyncio.wait_for(
-            forward.enqueue_lifecycle(
-                Database.from_settings(gate=database_gate), "offline-runner", "/restart", {}
-            ),
-            timeout=0.2,
+    with runner_ops(db_conn, "flaky-runner", {"lifecycle": flaky}):
+        result = await forward.enqueue_lifecycle(
+            Database.from_settings(gate=database_gate),
+            "flaky-runner",
+            "/restart",
+            {},
+            config=gateway_test_config(),
         )
 
+    assert result == {"status": "ok"}
+    assert len(attempts) == 2
+    assert attempts[0].idempotency_key == attempts[1].idempotency_key
+    assert attempts[0].idempotency_key is not None
 
-def test_resurrect_routes_through_each_request_apps_resources(
-    database: Database,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    database_gate: ProcessDbGate,
+
+# meiva:note
+# A runner that never recovers costs `lifecycle_retries + 1` attempts, then a named 502.
+@pytest.mark.asyncio
+async def test_lifecycle_forward_gives_up_after_its_retry_budget(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
-    """Home lookup and RPC use the serving app even beside an assembled app."""
-    from fastapi import FastAPI
+    with (
+        runner_ops(db_conn, "down-runner", {"lifecycle": refused(503, "down")}) as runner,
+        pytest.raises(CrossMachineGatewayUnavailable, match="down-runner"),
+    ):
+        await forward.enqueue_lifecycle(
+            Database.from_settings(gate=database_gate),
+            "down-runner",
+            "/restart",
+            {},
+            config=gateway_test_config(lifecycle_retries=2),
+        )
+    assert len(runner.calls_of("lifecycle")) == 3
 
+
+# meiva:note
+# A runner that accepts the connection and never answers is still bounded at the
+# router boundary, where the user receives a named 502 instead of silence.
+@pytest.mark.asyncio
+async def test_lifecycle_forward_deadline_becomes_a_clear_gateway_error(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
+    deadline = 0.3
+
+    def silent(call: OpsCall) -> OpsReply:
+        time.sleep(deadline * 4)
+        return completed({})
+
+    config: GatewayConfig = gateway_test_config(lifecycle_deadline_seconds=deadline)
+    started = time.monotonic()
+    with (
+        runner_ops(db_conn, "silent-runner", {"lifecycle": silent}),
+        pytest.raises(CrossMachineGatewayUnavailable, match="did not answer"),
+    ):
+        await forward.enqueue_lifecycle(
+            Database.from_settings(gate=database_gate),
+            "silent-runner",
+            "/restart",
+            {},
+            config=config,
+        )
+    assert time.monotonic() - started < deadline * 4
+
+
+# meiva:note
+# Home lookup and RPC use the resources on the serving app's state, nothing ambient:
+# an app that carries only a database, its pool and a config can serve the route.
+def test_resurrect_needs_only_the_serving_apps_resources(
+    database: Database, db_conn: psycopg.Connection
+) -> None:
     from base.db import create_agent
 
     agent_id = create_agent(db_conn)
@@ -250,28 +287,21 @@ def test_resurrect_routes_through_each_request_apps_resources(
         (agent_id, "request-owned-home"),
     )
     db_conn.commit()
-    seen: list[Database] = []
-
-    async def enqueue(
-        db: Database, target: str, path: str, json_body: dict[str, object]
-    ) -> dict[str, object]:
-        assert target == "request-owned-home"
-        assert path == f"/api/agents/{agent_id}/resurrect-explicit"
-        assert json_body["resurrected_by"] == "user"
-        seen.append(db)
-        return {"status": "spawned"}
-
-    monkeypatch.setattr(forward_module, "enqueue_lifecycle", enqueue)
-    other_database = Database.from_settings(gate=database_gate)
-    with database.pool(max_size=2) as first_pool, other_database.pool(max_size=2) as second_pool:
-        for db, pool in [(database, first_pool), (other_database, second_pool)]:
-            serving_app = FastAPI()
-            serving_app.state.db = db
-            serving_app.state.db_pool = pool
-            serving_app.include_router(lifecycle_module.router)
-            with TestClient(serving_app) as client:
-                response = client.post(f"/api/agents/{agent_id}/resurrect")
-                assert response.status_code == 200, response.text
-                assert response.json() == {"status": "spawned"}
-            assert seen == [db]
-            seen.clear()
+    with (
+        runner_ops(
+            db_conn, "request-owned-home", {"lifecycle": completed({"status": "spawned"})}
+        ) as runner,
+        database.pool(max_size=2) as pool,
+    ):
+        serving_app = FastAPI()
+        serving_app.state.db = database
+        serving_app.state.db_pool = pool
+        serving_app.state.gateway_config = gateway_test_config()
+        serving_app.include_router(lifecycle_module.router)
+        with TestClient(serving_app) as client:
+            response = client.post(f"/api/agents/{agent_id}/resurrect")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"status": "spawned"}
+    (call,) = runner.calls_of("lifecycle")
+    assert call.payload["path"] == f"/api/agents/{agent_id}/resurrect-explicit"
+    assert call.payload["body"]["resurrected_by"] == "user"

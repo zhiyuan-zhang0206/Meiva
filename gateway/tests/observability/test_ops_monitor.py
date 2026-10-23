@@ -8,9 +8,9 @@ from typing import Any
 import psycopg
 import pytest
 
-from gateway.cluster import ops_monitor
-from gateway.cluster.ops_series import GRID_ORIGIN, bucket_start_times
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.cluster.monitor import ops_monitor
+from gateway.cluster.monitor.ops_series import GRID_ORIGIN, bucket_start_times
+from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_config
 
 
 def _add(
@@ -201,13 +201,19 @@ def test_ops_monitor_grid_alignment(db_conn: psycopg.Connection) -> None:
     assert start.minute % 30 == 0 and start.second == 0
 
 
-def test_ops_monitor_read_that_exceeds_its_statement_timeout_is_a_retriable_503() -> None:
-    def cancelled(*_args: object, **_kwargs: object) -> dict[str, Any]:
-        raise psycopg.errors.QueryCanceled("statement timeout")
-
-    with gateway_test_client() as client:
-        client.app.state.ops_series_reader = cancelled
-        response = client.get("/api/ops/monitor")
+# meiva:note
+# A read stuck behind a lock on the event table is cancelled at the configured statement
+# timeout and answered as a retriable 503, not left to hang.
+def test_ops_monitor_read_that_exceeds_its_statement_timeout_is_a_retriable_503(
+    db_conn: psycopg.Connection,
+) -> None:
+    config = gateway_test_config(stats_statement_timeout_ms=50)
+    with gateway_test_client(config=config) as client:
+        db_conn.execute("LOCK TABLE telemetry_events IN ACCESS EXCLUSIVE MODE")
+        try:
+            response = client.get("/api/ops/monitor")
+        finally:
+            db_conn.rollback()
     assert response.status_code == 503
     assert "retry" in response.json()["detail"]
     _ = ops_monitor

@@ -13,7 +13,6 @@ from base.clock import Clock
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
-from gateway.agents.history.timeline import window_before
 from gateway.tests.auth.gateway_config import GatewayTestClient
 from gateway.tests.history.test_timeline import test_client as test_client
 from gateway.tests.history.test_timeline import timeline_items
@@ -106,11 +105,11 @@ def test_aimessage_blocks_share_one_real_meiva_created_at() -> None:
     ]
 
 
+# meiva:note
+# tail_window pure-function contract — the slicing behind the
+# agent-published snapshot trim (no DB). The page rules are asserted in
+# `gateway/agents/history/tests/test_paging.py`.
 class TestTimelineWindowing:
-    """tail_window / window_before pure-function contract — the slicing
-    behind GET /timeline pagination + the agent-published snapshot trim
-    (no DB)."""
-
     def test_tail_window_shorter_than_limit_returns_all_no_more(self) -> None:
         window, has_more = tail_window(timeline_items("1.0", "2.0"), 5)
         assert [i.item_id for i in window] == ["1.0", "2.0"]
@@ -120,23 +119,6 @@ class TestTimelineWindowing:
         window, has_more = tail_window(timeline_items("1.0", "2.0", "3.0", "4.0"), 2)
         assert [i.item_id for i in window] == ["3.0", "4.0"]
         assert has_more is True
-
-    def test_window_before_returns_items_immediately_older(self) -> None:
-        window, has_more = window_before(
-            timeline_items("1.0", "2.0", "3.0", "4.0", "5.0"), "4.0", 2
-        )
-        assert [i.item_id for i in window] == ["2.0", "3.0"]
-        assert has_more is True  # 1.0 still older than the window
-
-    def test_window_before_reaching_start_has_no_more(self) -> None:
-        window, has_more = window_before(timeline_items("1.0", "2.0", "3.0"), "3.0", 5)
-        assert [i.item_id for i in window] == ["1.0", "2.0"]
-        assert has_more is False
-
-    def test_window_before_unknown_cursor_returns_empty(self) -> None:
-        window, has_more = window_before(timeline_items("1.0", "2.0"), "9.9", 5)
-        assert window == []
-        assert has_more is False
 
 
 class TestMultimodalInbound:

@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import secrets
-from dataclasses import replace
-from typing import NoReturn
 
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 
-from base.agents.history.checkpoint import CheckpointReadError
+from base.config import settings
 from base.db import create_agent
 from base.host.net.auth import bearer_header
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.history.test_timeline import CompactHistoryCases
 from gateway.tests.history.test_timeline import test_client as test_client
+from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
+
+
+def _put_boundary(agent_id: int, name: str, *, version: str) -> str:
+    messages: list[BaseMessage] = [
+        SystemMessage(content="system"),
+        *(AIMessage(content=f"{name} {i}", id=f"{name}{i}") for i in range(3)),
+    ]
+    return CompactHistoryCases._put_checkpoint(agent_id, messages, version=version, boundary=True)
 
 
 def test_retained_read_requires_auth_and_serializes_for_authenticated_caller(
@@ -34,48 +42,33 @@ def test_retained_history_can_start_and_page_without_reading_broken_live_head(
 ) -> None:
     tid = create_agent(db_conn)
     test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
-    boundaries = ["retained-newer", "retained-older"]
-    reads: list[str] = []
+    older = _put_boundary(tid, "older", version="1")
+    newer = _put_boundary(tid, "newer", version="2")
+    # meiva:note
+    # The live head declares messages it cannot deserialize: retained reads must not touch it.
+    put_unreadable_head(settings.data_plane.db_url, tid)
 
-    def index(_db: object, _id: int, *, limit: int | None = None) -> list[str]:
-        return boundaries
-
-    def segment(_db: object, _id: int, checkpoint_id: str) -> list[BaseMessage]:
-        reads.append(checkpoint_id)
-        return [AIMessage(content=f"retained {i}", id=f"r{i}") for i in range(3)]
-
-    def broken_live(*_args: object) -> NoReturn:
-        raise CheckpointReadError("live parent is missing")
-
-    test_client.app.state.timeline_policy = replace(
-        test_client.app.state.timeline_policy,
-        list_boundary_ids=index,
-        load_segment=segment,
-        load_messages=broken_live,
-        load_message_count=broken_live,
-    )
     live = test_client.get(f"/api/agents/{tid}/timeline")
     assert live.status_code == 503
     first = test_client.get(f"/api/agents/{tid}/timeline/retained", params={"limit": 1})
     assert first.status_code == 200
     body = first.json()
-    assert body["boundary_checkpoint_id"] == boundaries[0]
+    assert body["boundary_checkpoint_id"] == newer
     assert "msg_count" not in body
-    assert [item["item_id"] for item in body["items"]] == ["s1.retained-newer.2.0"]
+    assert [item["item_id"] for item in body["items"]] == [f"s1.{newer}.2.0"]
     assert body["has_more"] is True
     second = test_client.get(
         f"/api/agents/{tid}/timeline/retained",
         params={"limit": 1, "before": body["items"][0]["item_id"]},
     )
     assert second.status_code == 200
-    assert [item["item_id"] for item in second.json()["items"]] == ["s1.retained-newer.1.0"]
-    assert reads == ["retained-newer", "retained-newer"]
+    assert [item["item_id"] for item in second.json()["items"]] == [f"s1.{newer}.1.0"]
     explicit = test_client.get(
-        f"/api/agents/{tid}/timeline/retained", params={"checkpoint_id": boundaries[1], "limit": 1}
+        f"/api/agents/{tid}/timeline/retained", params={"checkpoint_id": older, "limit": 1}
     )
     assert explicit.status_code == 200
-    assert explicit.json()["boundary_checkpoint_id"] == boundaries[1]
-    assert [item["item_id"] for item in explicit.json()["items"]] == ["s2.retained-older.2.0"]
+    assert explicit.json()["boundary_checkpoint_id"] == older
+    assert [item["item_id"] for item in explicit.json()["items"]] == [f"s2.{older}.2.0"]
 
 
 @pytest.mark.parametrize(

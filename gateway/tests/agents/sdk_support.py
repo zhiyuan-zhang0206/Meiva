@@ -1,22 +1,27 @@
 """Shared real-route SDK apparatus and SQL setup for Gateway agent tests."""
 
-from dataclasses import replace
-from typing import Any
+from collections.abc import Generator
+from contextlib import contextmanager
+from pathlib import Path
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-import meiva
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import Settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
+from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_process
+from gateway.tests.support.runner_ops.ops_stub import RunnerOps
 from meiva.gateway_client import use_client
-from meiva.sdk_surface.installation import Installation
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 
 def spawn_agent(
@@ -40,130 +45,107 @@ def spawn_agent(
     return agent_id
 
 
+# meiva:note
+# isolated test credential.
+SDK_CLUSTER_SECRET = "sdk-test-secret"  # noqa: S105
+
+
 @pytest.fixture(autouse=True)
 def sdk_via_gateway(
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-    event_bus: EventBus,
-    model_installation: Installation,
-    config_authority: ConfigAuthority,
+    sdk_model_owner: None,
+    gateway_local_runner: RunnerOps,
     *,
     machine_identity: MachineIdentity,
-):
-    """SDK ↔ Gateway path in-process test apparatus:
-    1. monkeypatch session noop — spawn / resurrect / respawn don't really start child python
-    2. TestClient(app) starts lifespan (build db_pool etc.), mount it as meiva SDK's
-       httpx client — SDK calls go through ASGI directly into gateway endpoint, real DB real logic,
-       not bound to TCP port
+) -> Generator[TestClient]:
+    """SDK <-> gateway path in-process: the SDK's gateway client is the test client of a real app.
+
+    Calls go through ASGI directly into the gateway's endpoints, against the real database
+    and Redis. The gateway's own machine is registered as a runner whose ops route runs in
+    this process (`gateway_local_runner`), so a spawn or lifecycle request the gateway forwards
+    to it is executed by the real op code. The SDK's installation is the one process-global
+    slot on the `meiva` module, bound by `sdk_model_owner`.
     """
-    monkeypatch.setattr(
-        meiva,
-        "__plugin_installation__",
-        replace(model_installation, authority=config_authority),
-        raising=False,
-    )
-    # Mock all API keys so spawn validation passes — these tests exercise
-    # the full gateway spawn path, which validates model config before forwarding.
-    from pydantic import SecretStr
-
-    from base.cluster import machines as _machines
-    from base.config import settings as _settings
-    from gateway.agents import creation as _agents_creation
-    from gateway.agents import forward as _agents_forward_router
-    from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_process
-    from ops.lifecycle import launch_agent_op, lifecycle_op
-    from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-
-    for _attr in (
-        "anthropic_api_key",
-        "deepseek_api_key",
-        "gemini_api_key",
-        "openai_api_key",
-        "xiaomi_api_key",
-        "moonshot_api_key",
-        "zhipu_api_key",
-        "dashscope_api_key",
-    ):
-        monkeypatch.setattr(_settings.lm, _attr, SecretStr("sk-test"))
-
-    monkeypatch.setattr(_settings.data_plane, "cluster_secret", "sdk-test-secret")
+    _ = gateway_local_runner
     with gateway_test_process(machine=machine_identity) as process:
-        app = gateway_test_app(process=process)
-
-        # POST /api/agents always forwards the launch to a runner's ops server over
-        # HTTP, even for the co-located box. There is no live ops server in-process,
-        # so stand in for the runner's ops daemon: dispatch launch_agent_op in-process
-        # against the gateway's db_pool (exactly what the daemon does on receiving the
-        # forwarded op), so the SDK spawn yields a real local agent row.
-        async def _in_process_forward(
-            _db: object, target: str, body: LaunchAgentRequest
-        ) -> SpawnedAgent:
-            return await launch_agent_op(
-                database,
-                event_bus,
-                body,
-                app.state.db_pool,
-                catalog=build_model_catalog(),
-                authority=app.state.config_authority,
-                local_machine=machine_identity.name(),
-            )
-
-        # Same pattern for lifecycle ops (terminate / resurrect / restart): the
-        # runner's ops daemon dispatches lifecycle_op in-process; mirror that here
-        # so a forwarded local lifecycle call executes against the test DB.
-        async def _in_process_lifecycle(
-            _db: object, target: str, path: str, json_body: dict[str, Any]
-        ) -> dict[str, Any]:
-            # model_dump mirrors the daemon serializing the response model onto the wire.
-            return (
-                await lifecycle_op(
-                    database,
-                    event_bus,
-                    path,
-                    json_body,
-                    app.state.db_pool,
-                    catalog=build_model_catalog(),
-                )
-            ).model_dump(mode="json")
-
-        # post_agents reads the target's capability from the registry; the SDK targets
-        # the local machine, so resolve it to agent-runner as register_self would.
-        real_lookup_role = _machines.lookup_role
-
-        def _lookup_role(_db: Database, name: str) -> list[str]:
-            if name == machine_identity.name():
-                return ["gateway", "agent-runner"]
-            return real_lookup_role(_db, name)
-
-        # The spawn preflight also reads the pause latch for the same target; the
-        # local machine is never paused in tests, so stub it alongside the role.
-        real_is_paused = _machines.is_paused
-
-        def _is_paused(_db: Database, name: str) -> bool:
-            if name == machine_identity.name():
-                return False
-            return real_is_paused(_db, name)
-
+        app = gateway_test_app(process=process, cluster_secret=SDK_CLUSTER_SECRET)
         with (
             TestClient(
                 app,
                 base_url="http://test-gateway",
-                headers={"Authorization": "Bearer sdk-test-secret"},
-            ) as tc,
-            use_client(tc),
+                headers={"Authorization": f"Bearer {SDK_CLUSTER_SECRET}"},
+            ) as client,
+            use_client(client),
         ):
-            monkeypatch.setattr(_agents_creation, "forward_spawn_to_remote", _in_process_forward)
-            monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)
-            monkeypatch.setattr(_machines, "lookup_role", _lookup_role)
-            monkeypatch.setattr(_machines, "is_paused", _is_paused)
-            yield
+            yield client
 
 
-def inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple]:
+@pytest.fixture
+def self_agent(
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> int:
+    """The SDK caller's own agent: a committed row on the local machine, pinned as its identity."""
+    agent_id = spawn_agent(
+        config_authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity,
+    )
+    pin_agent(agent_id)
+    return agent_id
+
+
+# meiva:note
+# The SDK's gateway client against a scripted gateway; yields the requests that reached it.
+#
+# For what the real gateway cannot say (an answer its own models refuse to produce) and for
+# asserting that an invalid call never reached the wire. Without `answer`, a request is
+# answered 500 and recorded, so the test fails on the assertion that none arrived.
+@contextmanager
+def gateway_wire(answer: httpx.Response | None = None) -> Generator[list[httpx.Request]]:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return answer if answer is not None else httpx.Response(500)
+
+    with (
+        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
+        use_client(http),
+    ):
+        yield requests
+
+
+# meiva:note
+# The SDK's configuration authority over a boot whose `fields` are set to the given values.
+#
+# A test overrides the `config_authority` fixture with this when the SDK resolves a default
+# from configuration (`neighbors_default_depth`), instead of rewriting the process settings.
+def authority_with(unit_home: Path, **fields: object) -> ConfigAuthority:
+    boot = snapshot_process_config()
+    for name, value in fields.items():
+        boot.set_field(name, value)
+    view = boot.view
+    return ConfigAuthority(
+        runtime=view,
+        all_domains=view if view.profile is None else Settings(profile=None),
+        env_path=unit_home / ".env",
+    )
+
+
+def agent_machine(db: psycopg.Connection, agent_id: int) -> str:
+    row = db.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,)).fetchone()
+    assert row is not None
+    return row[0]
+
+
+# meiva:note
+# (content, kind, source) of the agent's inbound messages, oldest first.
+def inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
     with db.cursor() as cur:
         cur.execute(
             "SELECT content, kind, source FROM inbound_messages "
             "WHERE agent_id = %s ORDER BY id ASC",
             (agent_id,),
         )
-        return cur.fetchall()
+        return [(row[0], row[1], row[2]) for row in cur.fetchall()]

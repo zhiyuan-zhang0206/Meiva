@@ -50,5 +50,26 @@ caller's key and credentials, so it shares the route's principal namespace and
 retained original birth recovery. See the
 [MCP endpoint owner](../../mcp_server/docs/mcp-endpoint/mcp-endpoint.meiva.okf.md).
 
-Creation, SDK and immutable fork recovery tests live in `tests/creation/`.
+## Decisions and effects
+
+`gateway/agents/creation.py` is the shell: it reads the registry and the agent row, runs the
+birth transaction and dispatches the launch. Every decision that needs no effect is a pure
+function in a strict module, tested by value in `gateway/agents/tests/`:
+
+- `launch_plan.py`: which refusal a spawn target earns from its registry row (no
+  `agent-runner` capability, paused), the `spawn-launch` payload, and the typed error an
+  unreachable, rejecting or malformed runner turns into.
+- `fork_plan.py`: what a fork's config overlay may differ in from its source, and the skills
+  it adds at the context tail.
+- `launch_state.py`: the verdict a failed dispatch is reported with (admitted anyway, retry
+  legal, the 502 with its retry path) and the receipt of an accepted launch.
+
+A test serves the target runner's `/ops` answer from a real listener and registers the machine
+(`gateway/tests/support/runner_ops`), so the registry reads, the dispatch and the result handling run;
+the gateway's own machine is registered by the `gateway_local_runner` fixture, whose route
+executes the real op code. Races between requests for one key are produced by holding the
+key's birth lock (`gateway/tests/support/db_faults/held_lock.py`); a failed write is a trigger in the
+test's Postgres, never a replaced function.
+
+Creation, SDK and immutable fork recovery tests live in `gateway/tests/lifecycle/creation/`.
 Its local `path_scopes.toml` retains the creation identity fixture scope.

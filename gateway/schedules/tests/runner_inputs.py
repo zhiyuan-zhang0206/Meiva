@@ -1,35 +1,37 @@
 from contextlib import closing
 from functools import partial
 
-import meiva
 from base.agents.context import MeivaContext
-from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
+from base.config.tests.configuration import snapshot_process_config
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.code_version import CodeVersion
+from base.paths import meiva_home
 from base.telemetry import process_name
 from meiva.boot import process_clients
 from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import engine
+from services.wake.schedule_manager.stall_policy import StallPolicy
+
+# meiva:note
+# Today's production budget: a test that needs a stall passes a short one.
+UNHURRIED = StallPolicy(timeout_s=1200.0)
 
 
-def bind_actor(schedule_id: int, *, clients: ClientSet, machine: MachineIdentity) -> None:
-    process_context.bind_context(
-        MeivaContext(
-            identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
-            clients=clients,
-            machine=machine,
-            clock_factory=Clock.from_settings,
-        )
-    )
-
-
-def run_schedule(schedule_id: int, revision: int | None = None, *, machine: MachineIdentity) -> int:
+# meiva:note
+# Run the schedule in this process the way `runner.run` does: bind the actor, then the engine.
+def run_schedule(
+    schedule_id: int,
+    revision: int | None = None,
+    *,
+    machine: MachineIdentity,
+    policy: StallPolicy = UNHURRIED,
+) -> int:
     image = process_context.loaded_code_image()
     version = CodeVersion(image)
     gate = ProcessDbGate(process=process_name(), version=version.get)
@@ -39,11 +41,28 @@ def run_schedule(schedule_id: int, revision: int | None = None, *, machine: Mach
         direct_url=ClusterDirectUrl(machine.host),
     )
     with closing(process_clients(database=database, machine=machine)) as clients:
+        process_context.bind_context(
+            MeivaContext(
+                identity=AgentIdentity(
+                    agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"
+                ),
+                clients=clients,
+                machine=machine,
+                clock_factory=Clock.from_settings,
+            )
+        )
         return engine.run(
             schedule_id,
             revision,
-            database=database,
-            inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine),
-            bind_actor=partial(bind_actor, clients=clients, machine=machine),
-            load_plugins=meiva.ensure_plugins_loaded,
+            engine.RunnerRoot(
+                database=database(),
+                inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine),
+                plugins=engine.PluginInputs(
+                    config=snapshot_process_config(),
+                    clock_factory=Clock.from_settings,
+                    producer=clients.event_pipeline,
+                ),
+                policy=policy,
+                home=meiva_home(),
+            ),
         )

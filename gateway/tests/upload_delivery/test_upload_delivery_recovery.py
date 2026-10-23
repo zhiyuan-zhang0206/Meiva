@@ -1,8 +1,8 @@
 """Real native transactions, filesystem faults and guarded delivered-upload consumers."""
 
-import asyncio
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.agents.upload_delivery import source, storage
+from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import (
     CopyProof,
     ReceiveRequest,
@@ -22,9 +22,13 @@ from base.agents.upload_delivery.models import (
 )
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
-from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    gateway_test_client,
+    gateway_test_config,
+)
 from gateway.tests.events.test_notices_endpoint import seed_agent
+from gateway.tests.support.db_faults.update_fault import failing_update
 from gateway.upload_delivery.worker import UploadRecovery
 from ops import upload_delivery as receiver
 
@@ -40,14 +44,11 @@ def uploaded_agent(
     *,
     machine_identity: MachineIdentity,
 ) -> Iterator[tuple[GatewayTestClient, int]]:
+    # meiva:note
+    # The native upload code (`base.agents.upload_delivery.source`, `ops.upload_delivery`) reads
+    # `Path.home()` itself, so the one retained patch points it at the directory the gateway is
+    # built with (needs base/ops: take the home as a value).
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-
-    # Deterministic fault tests call a real round explicitly; no background race.
-    def no_background(_self: UploadRecovery, _group: asyncio.TaskGroup) -> None:
-        return None
-
-    monkeypatch.setattr(UploadRecovery, "start", no_background)
     unit = current_unit(local_machine=machine_identity.name())
     agent = seed_agent(db_conn)
     db_conn.execute(
@@ -62,12 +63,53 @@ def uploaded_agent(
     )
     db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (unit.machine, agent))
     db_conn.commit()
+    # Deterministic fault tests call a real round explicitly; no background race.
+    config = gateway_test_config(
+        upload_home=tmp_path, cluster_secret=SECRET, upload_recovery_enabled=False
+    )
     with gateway_test_client(
-        headers={"Authorization": f"Bearer {SECRET}"},
-        machine=machine_identity,
-        raise_server_exceptions=False,
+        machine=machine_identity, config=config, raise_server_exceptions=False
     ) as client:
         yield client, agent
+
+
+# meiva:note
+# Make the agent's machine serve from a second home too, and return that unit.
+#
+# `url` is the address the machine's registry row advertises (a `runner_ops` listener's).
+# Only the second unit advertises it, so the next upload binds that unit as its target: the
+# copy then has to cross to another native home, as a remote receiver would.
+def register_second_home(
+    db_conn: psycopg.Connection, unit: UnitIdentity, *, url: str
+) -> UnitIdentity:
+    target = unit.model_copy(update={"home": unit.home + "-second"})
+    db_conn.execute("UPDATE machine_units SET url=NULL WHERE machine_name=%s", (unit.machine,))
+    db_conn.execute(
+        "INSERT INTO machine_units(machine_name,home,serve_agent_runner,url) "
+        "VALUES (%s,%s,true,%s)",
+        (unit.machine, target.home, url),
+    )
+    db_conn.commit()
+    return target
+
+
+# meiva:note
+# The recovery worker's claim lease for a constructed worker: these tests drive one batch at a
+# time, so any positive lease behaves the same here.
+CLAIM_SECONDS = 300.0
+
+
+# meiva:note
+# A recovery worker on the gateway's resources, driven by the test one round at a time.
+def recovery_for(client: GatewayTestClient, machine: MachineIdentity) -> UploadRecovery:
+    return UploadRecovery(
+        client.app.state.db_pool,
+        client.app.state.db,
+        client.app.state.bus,
+        machine=machine,
+        home=client.app.state.gateway_config.upload_home,
+        claim_seconds=CLAIM_SECONDS,
+    )
 
 
 def post(
@@ -171,21 +213,17 @@ def test_changed_manifest_and_invalid_guard_have_no_effect(
 def test_source_fsync_loss_and_concurrent_recovery_use_one_identity(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ):
     client, agent = uploaded_agent
-    original = storage.publish
-
-    def fail_after(*args: Any):
-        original(*args)
-        raise OSError("fault after source fsync")
-
-    monkeypatch.setattr(storage, "publish", fail_after)
-    assert post(client, agent).status_code == 500
-    assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == ("receiving",)
-    monkeypatch.setattr(storage, "publish", original)
+    # meiva:note
+    # The files are durable and fsynced, then the batch's ready write fails: the response is lost.
+    with failing_update(db_conn, "upload_delivery_batches", message="fault after source fsync"):
+        assert post(client, agent).status_code == 500
+        assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == (
+            "receiving",
+        )
 
     def recover(_index: int):
         return source.accept(
@@ -304,18 +342,19 @@ def test_receiver_wrong_actual_unit_cannot_overwrite_nested_final(
 
 
 def test_silent_admission_counts_hidden_files_and_receiving_reservation(
-    uploaded_agent: tuple[GatewayTestClient, int], monkeypatch: pytest.MonkeyPatch
+    uploaded_agent: tuple[GatewayTestClient, int],
 ):
     client, agent = uploaded_agent
     assert post(client, agent).status_code == 202
-    from gateway.routers.upload import router as uploads
-
-    monkeypatch.setattr(uploads, "MAX_AGENT_UPLOAD_BYTES", 5)
-    response = client.post(
-        f"/api/agents/{agent}/uploads",
-        headers={**HEADERS, "Idempotency-Key": "silent"},
-        files=[("files", ("flat", b"x"))],
-    )
+    small = replace(client.app.state.gateway_config, max_agent_upload_bytes=5)
+    with gateway_test_client(
+        process=client.app.state.gateway_process, config=small, raise_server_exceptions=False
+    ) as limited:
+        response = limited.post(
+            f"/api/agents/{agent}/uploads",
+            headers={**HEADERS, "Idempotency-Key": "silent"},
+            files=[("files", ("flat", b"x"))],
+        )
     assert response.status_code == 413
 
 

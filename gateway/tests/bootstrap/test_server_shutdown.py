@@ -1,35 +1,34 @@
-"""Real child-process regression for the gateway's bounded connection drain.
-
-2026-09-17: the gateway stall was uvicorn's connection-drain phase
-("Waiting for connections to close") entered without a
-``timeout_graceful_shutdown`` — an unfinished streaming response held it until
-a forced kill. That defect lives below the request handlers, so it needs a real
-server, a real stream and a real signal: these tests start genuine child
-processes from the production launch assembly
-(``gateway.cluster.server.serve_kwargs``) and only swap the bind address, the port and
-the ASGI app. Removing ``timeout_graceful_shutdown`` from the assembly makes the
-stuck-stream test fail through the parent's own deadline (the child is killed —
-the suite never hangs).
-
-The test app mirrors the shape that stalled production: a streaming response
-that only ends on client disconnect or task cancellation, with ``finally``
-cleanup. The parent holds its client connection open through the whole
-shutdown — closing it would make shutdown pass for the wrong reason.
-
-The drain budget reaches the child through a throwaway `$MEIVA_HOME/.env`, the
-operator's real channel; a bare environment variable is dropped for
-cluster-scope fields before Settings reads it.
-
-The child runs the production server class (`_server.GatewayServer`), which
-marks the shutdown for streams that end themselves (`gateway.http.middleware.stopping`):
-such a stream must cost none of the drain budget, while a stream that never
-ends still costs exactly the budget and no more. The last section checks that the
-two SSE bridges in `gateway.events.sse` are such streams, against a fake Redis.
-"""
+# meiva:note
+# Real child-process regression for the gateway's bounded connection drain.
+#
+# 2026-09-17: the gateway stall was uvicorn's connection-drain phase
+# ("Waiting for connections to close") entered without a
+# ``timeout_graceful_shutdown`` — an unfinished streaming response held it until
+# a forced kill. That defect lives below the request handlers, so it needs a real
+# server, a real stream and a real signal: these tests start genuine child
+# processes from the production launch assembly
+# (``gateway.cluster.server.serve_kwargs``) and only swap the bind address, the port and
+# the ASGI app. Removing ``timeout_graceful_shutdown`` from the assembly makes the
+# stuck-stream test fail through the parent's own deadline (the child is killed —
+# the suite never hangs).
+#
+# The test app mirrors the shape that stalled production: a streaming response
+# that only ends on client disconnect or task cancellation, with ``finally``
+# cleanup. The parent holds its client connection open through the whole
+# shutdown — closing it would make shutdown pass for the wrong reason.
+#
+# The drain budget reaches the child through a throwaway `$MEIVA_HOME/.env`, the
+# operator's real channel; a bare environment variable is dropped for
+# cluster-scope fields before Settings reads it.
+#
+# The child runs the production server class (`_server.GatewayServer`), which
+# marks the shutdown for streams that end themselves (`gateway.http.middleware.stopping`):
+# such a stream must cost none of the drain budget, while a stream that never
+# ends still costs exactly the budget and no more. The last test checks that the
+# two SSE bridges in `gateway.events.sse` are such streams, against the throwaway Redis.
 
 from __future__ import annotations
 
-import asyncio
 import http.client
 import os
 import signal
@@ -37,24 +36,21 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any, cast
+from typing import IO
 
 import pytest
-from fastapi import Request
 
-from base.events.live.bus import EventBus
-from base.events.live.tests.fakes import patch_open_async_redis
-from gateway.events import sse
-from gateway.http.middleware import stopping
 from gateway.tests.bootstrap.child_gateway_scenarios import (
     MARKERS_ENV as _MARKERS_ENV,
 )
 from gateway.tests.bootstrap.child_gateway_scenarios import (
     PORT_ENV as _PORT_ENV,
+)
+from gateway.tests.bootstrap.child_gateway_scenarios import (
+    REDIS_ENV as _REDIS_ENV,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -170,7 +166,7 @@ def _connect_with_retry(port: int, *, timeout_s: float = 15.0) -> http.client.HT
 _CHILD_ENTRY = Path(__file__).with_name("child_gateway_scenarios.py")
 
 
-def _spawn_child(tmp_path: Path, *, drain_seconds: float) -> _Child:
+def _spawn_child(tmp_path: Path, *, drain_seconds: float, redis_url: str = "") -> _Child:
     port = _free_port()
     markers_path = tmp_path / "markers.txt"
     log_path = tmp_path / "child.log"
@@ -188,6 +184,7 @@ def _spawn_child(tmp_path: Path, *, drain_seconds: float) -> _Child:
     env["MEIVA_HOME"] = str(home)
     env[_MARKERS_ENV] = str(markers_path)
     env[_PORT_ENV] = str(port)
+    env[_REDIS_ENV] = redis_url
     log_file = log_path.open("wb")
     proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter + in-repo entry, no shell
         [sys.executable, str(_CHILD_ENTRY), "server_shutdown"],
@@ -310,95 +307,38 @@ def test_slow_request_cut_by_the_budget_still_exits(tmp_path: Path) -> None:
         child.close()
 
 
-# --- The SSE bridges themselves end at the shutdown mark (fake Redis, in-process) ---
+# meiva:note
+# --- The SSE bridges themselves end at the shutdown mark (real Redis, real server) ---
 #
 # The stream ending is the generator's own decision, not the transport's: hold a
-# stream open on a quiet channel, flip the mark, and require a clean end.
-
-_POLL_S = 0.05
-_ENDS_WITHIN_S = 2.0
-
-
-@dataclass
-class _Cleanup:
-    steps: list[str] = field(default_factory=list[str])
-
-
-class _PubSub:
-    def __init__(self, cleanup: _Cleanup) -> None:
-        self._cleanup = cleanup
-
-    async def subscribe(self, _channel: str) -> None:
-        return None
-
-    async def get_message(self, *, ignore_subscribe_messages: bool, timeout: float) -> None:
-        del ignore_subscribe_messages
-        await asyncio.sleep(min(timeout, _POLL_S))
-
-    async def unsubscribe(self, _channel: str) -> None:
-        self._cleanup.steps.append("unsubscribe")
-
-    async def aclose(self) -> None:
-        self._cleanup.steps.append("pubsub.aclose")
-
-
-class _RedisClient:
-    def __init__(self, cleanup: _Cleanup) -> None:
-        self._cleanup = cleanup
-
-    def pubsub(self) -> _PubSub:
-        return _PubSub(self._cleanup)
-
-    async def aclose(self) -> None:
-        self._cleanup.steps.append("client.aclose")
-
-
-class _ConnectedRequest:
-    async def is_disconnected(self) -> bool:
-        return False
-
-
-@pytest.fixture
-def cleanup(monkeypatch: pytest.MonkeyPatch) -> _Cleanup:
-    record = _Cleanup()
-
-    def open_redis(_url: str, **_kw: object) -> _RedisClient:
-        return _RedisClient(record)
-
-    patch_open_async_redis(monkeypatch, open_redis)
-
-    async def pass_through(call: Callable[[], Awaitable[Any]]) -> Any:
-        return await call()
-
-    monkeypatch.setattr(sse, "retry_auth_failures_async", pass_through)
-    return record
-
-
-def _sse_stream(mode: str) -> AsyncGenerator[bytes, None]:
-    request = cast(Request, _ConnectedRequest())
-    if mode == "filtered":
-        return sse.event_stream(EventBus.from_settings(), 7, request)
-    return sse.throttled_event_stream(EventBus.from_settings(), request, throttle_rate=20.0)
+# meiva:note
+# stream open on a quiet channel, stop the server, and require a clean end that
+# costs none of the drain budget.
 
 
 @pytest.mark.parametrize("mode", ["filtered", "throttled"])
-async def test_stream_ends_cleanly_once_the_server_is_stopping(
-    monkeypatch: pytest.MonkeyPatch, cleanup: _Cleanup, mode: str
+def test_sse_stream_ends_cleanly_once_the_server_is_stopping(
+    tmp_path: Path, redis_url: str, mode: str
 ) -> None:
-    marked = False
-    monkeypatch.setattr(stopping, "is_stopping", lambda: marked)
-    frames: list[bytes] = []
-
-    async def consume() -> None:
-        async for frame in _sse_stream(mode):
-            frames.append(frame)
-
-    consumer = asyncio.create_task(consume())
-    await asyncio.sleep(0.3)
-    assert not consumer.done(), "the stream ended before the server was stopping"
-    assert frames[0] == b": stream open\n\n"
-    assert cleanup.steps == []
-
-    marked = True
-    await asyncio.wait_for(consumer, _ENDS_WITHIN_S)  # a clean end, not a cancellation
-    assert cleanup.steps == ["unsubscribe", "pubsub.aclose", "client.aclose"]
+    drain = 30.0
+    child = _spawn_child(tmp_path, drain_seconds=drain, redis_url=redis_url)
+    conn: http.client.HTTPConnection | None = None
+    try:
+        conn = _connect_with_retry(child.port)
+        conn.request("GET", f"/sse/{mode}")
+        resp = conn.getresponse()
+        assert resp.status == 200, child.log_tail(700)
+        assert resp.readline() == b": stream open\n"
+        assert "sse-ended-itself" not in child.markers(), "the stream ended before the stop"
+        child.terminate()
+        child.wait_bounded_exit(drain_seconds=0.0, what=f"{mode} SSE stream, none of the budget")
+        assert "sse-ended-itself" in child.markers()
+        # meiva:note
+        # The response ended with the stream, not with a cut connection: the body reads to its
+        # end (an unfinished chunk would raise) and every frame it carried is complete.
+        assert resp.read().endswith(b"\n")
+        assert "lifespan-shutdown" in child.markers(), "lifespan shutdown did not run"
+    finally:
+        if conn is not None:
+            conn.close()
+        child.close()

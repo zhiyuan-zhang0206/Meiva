@@ -1,71 +1,57 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.config import ConfigBoot
-from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.call import decide
 from base.lm.effort import ReasoningEffort
-from gateway.agents.history.timeline import load_current_timeline_items
+from base.lm.factory import build_chat_model
+from gateway.agents.reply_suggestion.plan import ReplySuggestionPolicy
 from gateway.agents.reply_suggestion.service import (
     DRAFT_TIMEOUT_S,
-    DraftRuntime,
-    ModelReaders,
-    ReplySuggestionPolicy,
+    DraftModelFactory,
     ReplySuggestionService,
 )
-from ops.agents import get_agent_status
 
-__all__ = ["reply_suggestion_policy", "reply_suggestion_service"]
+__all__ = ["draft_model_options", "reply_suggestion_policy", "reply_suggestion_service"]
 
 
+# meiva:note
+# The suggestion settings as `config` holds them now.
 def reply_suggestion_policy(config: ConfigBoot) -> ReplySuggestionPolicy:
-
+    lm = config.view.lm
     return ReplySuggestionPolicy(
-        enabled=lambda: config.view.lm.reply_suggestion_enabled,
-        model=lambda: config.view.lm.reply_suggestion_model,
-        gate_model=lambda: config.view.lm.reply_suggestion_gate_model,
-        gate_threshold=lambda: config.view.lm.reply_suggestion_gate_threshold,
-        max_input_tokens=lambda: config.view.lm.reply_suggestion_max_input_tokens,
-        max_candidates=lambda: config.view.lm.reply_suggestion_max_candidates,
+        enabled=lm.reply_suggestion_enabled,
+        model=lm.reply_suggestion_model,
+        gate_model=lm.reply_suggestion_gate_model,
+        gate_threshold=lm.reply_suggestion_gate_threshold,
+        max_input_tokens=lm.reply_suggestion_max_input_tokens,
+        max_candidates=lm.reply_suggestion_max_candidates,
     )
 
 
-def reply_suggestion_service(
-    config: ConfigBoot,
-    *,
-    db: Database,
-    catalog_reader: Callable[[], ModelCatalog],
-    keys_reader: Callable[[ModelCatalog], ProviderKeys],
-    rendering: TimelineReadInputs,
-    model_builder: Callable[..., object],
-) -> ReplySuggestionService:
+# meiva:note
+# How the drafting model is built: reasoning off (DeepSeek defaults to maximum effort,
+# which makes a one-line draft run for tens of seconds), a bounded wait, and no metering of
+# its own (the service logs the usage).
+def draft_model_options(llm_override: str) -> dict[str, Any]:
+    return {
+        "reasoning_effort": ReasoningEffort.NONE,
+        "timeout": DRAFT_TIMEOUT_S,
+        "meter": False,
+        "llm_override": llm_override,
+        "overrides": ModelOverrides.from_pins({}),
+    }
 
-    policy = reply_suggestion_policy(config)
 
+def reply_suggestion_service(config: ConfigBoot) -> ReplySuggestionService:
     def draft_model(model: str, catalog: ModelCatalog, keys: ProviderKeys) -> Any:
-
-        return model_builder(
-            model,
-            reasoning_effort=ReasoningEffort.NONE,
-            timeout=DRAFT_TIMEOUT_S,
-            meter=False,
-            catalog=catalog,
-            keys=keys,
-            llm_override=config.view.lm.llm_override,
-            overrides=ModelOverrides.from_pins({}),
+        return build_chat_model(
+            model, catalog=catalog, keys=keys, **draft_model_options(config.view.lm.llm_override)
         )
 
-    return ReplySuggestionService(
-        policy=policy,
-        models=ModelReaders(catalog=catalog_reader, keys=keys_reader),
-        load_timeline=lambda agent_id: load_current_timeline_items(db, agent_id, inputs=rendering),
-        agent_status=lambda agent_id: get_agent_status(db, agent_id),
-        decide=decide,
-        draft=DraftRuntime(draft_model=draft_model),
-    )
+    factory: DraftModelFactory = draft_model
+    return ReplySuggestionService(decide=decide, draft_model=factory)

@@ -1,170 +1,134 @@
-from collections.abc import Generator
-from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
-from typing import Any
+# meiva:note
+# GET /api/cluster/admin/events over real `telemetry_events` rows.
+#
+# The rules about the filters (limit range, level threshold, `since` forms, the default
+# window) are asserted on the planned query in `gateway/cluster/tests/test_admin_events_plan.py`;
+# these tests show the endpoint returns the rows that query selects.
 
-from gateway.tests.auth.gateway_config import (
-    GatewayTestClient,
-)
-from gateway.tests.auth.gateway_config import (
-    gateway_test_client as _base_gateway_test_client,
-)
-from gateway.tests.routers.cluster_endpoints.cluster_support import (
-    active_admin_query,
-)
-from gateway.tests.routers.cluster_endpoints.cluster_support import (
-    fake_admin_events as fake_admin_events,
-)
+from __future__ import annotations
 
+import psycopg
+import pytest
 
-@contextmanager
-def gateway_test_client(*, default_limit: int | None = None) -> Generator[GatewayTestClient]:
-    with _base_gateway_test_client() as client:
-        query = active_admin_query()
-        if query is not None:
-            client.app.state.cluster_events_reader = query
-        if default_limit is not None:
-            client.app.state.cluster_events_default_limit = default_limit
-        yield client
+from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.routers.cluster_endpoints.cluster_support import seed_event
+
+_URL = "/api/cluster/admin/events"
 
 
-def _row(
-    *, msg: str = "hi", level: str = "info", event: str = "log", agent_id: int | None = None
-) -> dict[str, Any]:
-    return {
-        "id": 1,
-        "line_sha256": "a" * 64,
-        "ts": datetime(2026, 8, 12, tzinfo=UTC),
-        "agent_id": agent_id,
-        "machine": "machine-1",
-        "process": "gateway",
-        "category": "telemetry",
-        "event_name": event,
-        "level": level,
-        "source": "test",
-        "target_agent_id": None,
-        "attributes": {"msg": msg},
+def _messages(body: dict[str, object]) -> list[str]:
+    # meiva:note
+    # The annotated shape is the one the untyped call returns.
+    items: list[dict[str, dict[str, str]]] = body["items"]  # pyright: ignore[reportAssignmentType]
+    return [item["payload"]["msg"] for item in items]
+
+
+def test_returns_newest_first_in_the_row_shape(db_conn: psycopg.Connection) -> None:
+    seed_event(db_conn, msg="oldest", seconds_ago=300)
+    seed_event(db_conn, msg="newest", seconds_ago=10, agent_id=1)
+
+    with gateway_test_client() as client:
+        response = client.get(f"{_URL}?limit=10")
+
+    assert response.status_code == 200
+    assert _messages(response.json()) == ["newest", "oldest"]
+    assert set(response.json()["items"][0]) == {
+        "id",
+        "line_sha256",
+        "ts",
+        "agent_id",
+        "level",
+        "event",
+        "payload",
     }
 
 
-class TestAdminEvents:
-    def test_returns_newest_first(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:
-        fake_admin_events["rows"].extend([_row(msg="oldest"), _row(msg="newest", agent_id=1)])
-        with gateway_test_client() as client:
-            r = client.get("/api/cluster/admin/events?limit=10")
-        assert r.status_code == 200
-        items = r.json()["items"]
-        assert [i["payload"]["msg"] for i in items] == ["oldest", "newest"]
-        assert set(items[0]) == {"id", "line_sha256", "ts", "agent_id", "level", "event", "payload"}
+def test_agent_id_filter_keeps_only_that_agents_events(db_conn: psycopg.Connection) -> None:
+    seed_event(db_conn, msg="mine", agent_id=3)
+    seed_event(db_conn, msg="other agent", agent_id=4)
+    seed_event(db_conn, msg="service")
 
-    def test_telemetry_and_log_categories_only(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/cluster/admin/events")
-        assert fake_admin_events["calls"][0]["categories"] == ["telemetry", "log"]
+    with gateway_test_client() as client:
+        response = client.get(f"{_URL}?agent_id=3")
 
-    def test_filter_agent_id(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/cluster/admin/events?agent_id=3")
-        kw = fake_admin_events["calls"][0]
-        assert kw["agent_id"] == 3
-        assert kw["service_only"] is False
+    assert _messages(response.json()) == ["mine"]
 
-    def test_filter_service_only(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/cluster/admin/events?service_only=true")
-        kw = fake_admin_events["calls"][0]
-        assert kw["service_only"] is True
-        assert kw["agent_id"] is None
 
-    def test_rejects_agent_id_with_service_only(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/cluster/admin/events?agent_id=1&service_only=true")
-        assert r.status_code == 400
-        assert fake_admin_events["calls"] == []
+def test_service_only_keeps_events_with_no_agent(db_conn: psycopg.Connection) -> None:
+    seed_event(db_conn, msg="service")
+    seed_event(db_conn, msg="agent", agent_id=3)
 
-    def test_filter_level_threshold(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/cluster/admin/events?level=WARNING")
-        kw = fake_admin_events["calls"][0]
-        assert kw["level_min"] == "warning"
-        assert "level" not in kw
+    with gateway_test_client() as client:
+        response = client.get(f"{_URL}?service_only=true")
 
-    def test_rejects_invalid_level(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/cluster/admin/events?level=NOPE")
-        assert r.status_code == 400
-        assert fake_admin_events["calls"] == []
+    assert _messages(response.json()) == ["service"]
 
-    def test_filter_since_relative(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:
-        before = datetime.now(UTC)
-        with gateway_test_client() as client:
-            client.get("/api/cluster/admin/events?since=1m")
-        after = datetime.now(UTC)
-        from_ = fake_admin_events["calls"][0]["from_"]
-        assert from_ is not None
-        assert before - timedelta(seconds=70) <= from_ <= after - timedelta(seconds=50)
 
-    def test_filter_since_absolute(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/cluster/admin/events?since=2026-08-01T00:00:00Z")
-        assert fake_admin_events["calls"][0]["from_"] == datetime(2026, 8, 1, tzinfo=UTC)
+def test_level_is_a_minimum(db_conn: psycopg.Connection) -> None:
+    for level in ("debug", "info", "warning", "error", "critical"):
+        seed_event(db_conn, msg=level, level=level)
 
-    def test_rejects_invalid_since(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/cluster/admin/events?since=garbage")
-        assert r.status_code == 400
-        assert fake_admin_events["calls"] == []
+    with gateway_test_client() as client:
+        response = client.get(f"{_URL}?level=WARNING")
 
-    def test_filter_event_multi(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/cluster/admin/events?event=spawn,terminate")
-        assert fake_admin_events["calls"][0]["event_names"] == ["spawn", "terminate"]
+    assert sorted(_messages(response.json())) == ["critical", "error", "warning"]
 
-    def test_filter_grep(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/cluster/admin/events?grep=hello")
-        assert fake_admin_events["calls"][0]["grep"] == "hello"
 
-    def test_limit_defaults_to_200(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/cluster/admin/events")
-        assert fake_admin_events["calls"][0]["limit"] == 200
+def test_since_bounds_the_window_in_both_forms(db_conn: psycopg.Connection) -> None:
+    seed_event(db_conn, msg="recent", seconds_ago=30)
+    seed_event(db_conn, msg="two hours old", seconds_ago=7200)
 
-    def test_limit_defaults_come_from_display_config(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:
-        with gateway_test_client(default_limit=7) as client:
-            client.get("/api/cluster/admin/events")
-        assert fake_admin_events["calls"][0]["limit"] == 7
+    with gateway_test_client() as client:
+        relative = client.get(f"{_URL}?since=1h")
+        absolute = client.get(f"{_URL}?since=2020-01-01T00:00:00Z")
 
-    def test_limit_caps_at_1000(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/cluster/admin/events?limit=1001")
-        assert r.status_code == 400
-        assert fake_admin_events["calls"] == []
+    assert _messages(relative.json()) == ["recent"]
+    assert _messages(absolute.json()) == ["recent", "two hours old"]
 
-    def test_no_since_uses_default_window(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:
-        before = datetime.now(UTC)
-        with gateway_test_client() as client:
-            client.get("/api/cluster/admin/events")
-        from_ = fake_admin_events["calls"][0]["from_"]
-        assert from_ is not None
-        assert before - timedelta(hours=24, seconds=5) <= from_ <= before - timedelta(hours=23)
+
+def test_the_default_window_is_the_last_day(db_conn: psycopg.Connection) -> None:
+    seed_event(db_conn, msg="inside", seconds_ago=23 * 3600)
+    seed_event(db_conn, msg="outside", seconds_ago=25 * 3600)
+
+    with gateway_test_client() as client:
+        response = client.get(_URL)
+
+    assert _messages(response.json()) == ["inside"]
+
+
+def test_event_names_and_grep_narrow_the_rows(db_conn: psycopg.Connection) -> None:
+    seed_event(db_conn, event_name="spawn", msg="hello world")
+    seed_event(db_conn, event_name="terminate", msg="bye")
+    seed_event(db_conn, event_name="log", msg="hello again")
+
+    with gateway_test_client() as client:
+        by_name = client.get(f"{_URL}?event=spawn,terminate")
+        by_text = client.get(f"{_URL}?grep=hello")
+
+    assert sorted(_messages(by_name.json())) == ["bye", "hello world"]
+    assert sorted(_messages(by_text.json())) == ["hello again", "hello world"]
+
+
+def test_an_explicit_limit_wins_and_the_default_comes_from_display_config(
+    db_conn: psycopg.Connection,
+) -> None:
+    for index in range(4):
+        seed_event(db_conn, msg=f"row {index}", seconds_ago=10 + index)
+
+    with gateway_test_client(fields={"cluster_events_default_limit": 3}) as client:
+        default = client.get(_URL)
+        explicit = client.get(f"{_URL}?limit=2")
+
+    assert _messages(default.json()) == ["row 0", "row 1", "row 2"]
+    assert _messages(explicit.json()) == ["row 0", "row 1"]
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["agent_id=1&service_only=true", "level=NOPE", "since=garbage", "limit=1001", "limit=0"],
+)
+def test_a_filter_that_cannot_be_satisfied_is_a_400(query: str) -> None:
+    with gateway_test_client() as client:
+        response = client.get(f"{_URL}?{query}")
+
+    assert response.status_code == 400

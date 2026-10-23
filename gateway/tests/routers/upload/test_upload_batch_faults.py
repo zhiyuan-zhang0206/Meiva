@@ -3,12 +3,7 @@
 import json
 import subprocess
 import sys
-import threading
-from collections.abc import Generator
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
@@ -24,14 +19,18 @@ from gateway.schemas.uploads import UploadedBatch
 _CHILD = Path(__file__).with_name("child_batch_writer.py")
 
 
+_ITEMS: list[UploadItem] = [("a.png", b"aaa", "image/png"), ("b.png", b"bbb", "image/png")]
+_NAMES = ["a.png", "b.png"]
+
+
 def _save(pool: ConnectionPool, directory: Path, *, local_machine: str) -> UploadedBatch:
     return upload_batches.save_keyed_batch(
         pool,
         "crash",
         123,
         directory,
-        [("a.png", b"aaa", "image/png"), ("b.png", b"bbb", "image/png")],
-        ["a.png", "b.png"],
+        _ITEMS,
+        _NAMES,
         max_bytes=6,
         max_files=2,
         local_machine=local_machine,
@@ -84,52 +83,35 @@ def test_hard_death_recovers_fixed_objects(
     assert len([p for p in batch_target.iterdir() if p.is_file()]) == 2
 
 
+# meiva:note
+# A writer that outlives its database connection holds its manifest and keeps publishing.
+#
+# Another writer recovers the batch first. The old one then links the same objects: create-only
+# publication verifies the finals already there and leaves every one of them in place.
 def test_disconnected_writer_can_finish_after_recovery_without_overwriting(
-    db_conn: psycopg.Connection,
-    batch_target: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+    db_conn: psycopg.Connection, batch_target: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    original_transaction = upload_batches.write_transaction
-    original_publish = upload_batches.publish_files
-    blocked = threading.Event()
-    release = threading.Event()
-    pid: list[int] = []
-    writer_thread: list[int] = []
-
-    @contextmanager
-    def transaction(pool: ConnectionPool) -> Generator[psycopg.Connection, None, None]:
-        with original_transaction(pool) as conn:
-            if threading.get_ident() == writer_thread[0]:
-                pid[:] = [conn.info.backend_pid]
-            yield conn
-
-    def publish(directory: Path, manifest: list[dict[str, Any]], batch: list[UploadItem]) -> None:
-        if threading.get_ident() == writer_thread[0]:
-            blocked.set()
-            assert release.wait(10)
-        original_publish(directory, manifest, batch)
-
-    def old_writer(pool: ConnectionPool) -> UploadedBatch:
-        writer_thread.append(threading.get_ident())
-        return _save(pool, batch_target, local_machine=machine_identity.name())
-
-    monkeypatch.setattr(upload_batches, "write_transaction", transaction)
-    monkeypatch.setattr(upload_batches, "publish_files", publish)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn, min_size=1, max_size=3) as pool:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(old_writer, pool)
-            try:
-                assert blocked.wait(10)
-                db_conn.execute("SELECT pg_terminate_backend(%s)", (pid[0],))
-                db_conn.commit()
-                recovered = _save(pool, batch_target, local_machine=machine_identity.name())
-            finally:
-                release.set()
-            with pytest.raises(psycopg.OperationalError):
-                future.result(timeout=10)
+        old_writer = upload_batches.claim_batch(
+            pool,
+            "crash",
+            123,
+            batch_target,
+            _ITEMS,
+            _NAMES,
+            max_bytes=6,
+            max_files=2,
+            local_machine=machine_identity.name(),
+        )
+        recovered = _save(pool, batch_target, local_machine=machine_identity.name())
+        finals = {
+            path.name: path.stat().st_ino for path in batch_target.iterdir() if path.is_file()
+        }
+        upload_batches.publish_files(batch_target, old_writer.manifest, _ITEMS)
         assert _save(pool, batch_target, local_machine=machine_identity.name()) == recovered
+    assert {
+        path.name: path.stat().st_ino for path in batch_target.iterdir() if path.is_file()
+    } == finals
     assert [Path(file.path).read_bytes() for file in recovered.files] == [b"aaa", b"bbb"]
     row = db_conn.execute("SELECT count(*) FROM agent_upload_batches").fetchone()
     assert row is not None and row[0] == 1

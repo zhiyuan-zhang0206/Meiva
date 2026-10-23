@@ -15,23 +15,22 @@ inspector panel).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Annotated
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from base.config import settings
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.events import telemetry_rows
+from gateway.events.events_plan import AgentEventsRequest, plan_agent_events
 from gateway.events.schemas import AgentEventRow
 from gateway.events.sse import event_stream
+from gateway.events.sse_frames import SseCadence
+from gateway.http.config import GatewayConfig, runtime_view
 
 router = APIRouter()
-
-# Bound on one read, below the route's client timeouts.
-_READ_STATEMENT_TIMEOUT_MS = 10_000
 
 
 @router.get(
@@ -54,7 +53,13 @@ async def get_events_stream(agent_id: int, request: Request) -> StreamingRespons
     visibility lag would 404.
     """
     return StreamingResponse(
-        event_stream(request.app.state.bus, agent_id, request),
+        event_stream(
+            request.app.state.bus,
+            agent_id,
+            request,
+            poll_s=runtime_view(request).gateway.sse_disconnect_poll_seconds,
+            cadence=SseCadence(),
+        ),
         media_type="text/event-stream",
         headers={
             # Reverse proxies like nginx / cloudflare buffer text responses
@@ -108,24 +113,33 @@ def get_agent_events(
     No agent-existence precondition (same as `…/activity` and `…/pending`):
     an unknown agent or an empty window just returns `[]`.
     """
-    if limit is None:
-        limit = settings.display.events_default_limit
-
-    if from_ is None:
-        from_ = datetime.now(UTC) - timedelta(hours=24)
+    query = plan_agent_events(
+        AgentEventsRequest(
+            agent_id=agent_id,
+            event=event,
+            level=level,
+            from_=from_,
+            to=to,
+            limit=limit,
+            offset=offset,
+        ),
+        now=datetime.now(UTC),
+        default_limit=runtime_view(request).display.events_default_limit,
+    )
+    config: GatewayConfig = request.app.state.gateway_config
     try:
         with request.app.state.db_pool.connection() as conn:
-            conn.execute(f"SET LOCAL statement_timeout = {_READ_STATEMENT_TIMEOUT_MS}")
+            conn.execute(f"SET LOCAL statement_timeout = {config.events_read_timeout_ms}")
             rows, _ = telemetry_rows.query_events(
                 conn,
-                agent_id=agent_id,
-                categories=["telemetry", "log"],
-                event_names=[event] if event is not None else None,
-                level=level,
-                from_=from_,
-                to=to,
-                limit=limit,
-                offset=offset,
+                agent_id=query.agent_id,
+                categories=query.categories,
+                event_names=query.event_names,
+                level=query.level,
+                from_=query.from_,
+                to=query.to,
+                limit=query.limit,
+                offset=query.offset,
             )
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="events read timed out") from exc

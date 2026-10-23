@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import time
 
 from base import telemetry
 
@@ -14,16 +13,17 @@ class AutoRestartLedger:
         self._attempts: dict[int, list[float]] = {}
         self._intents: dict[int, tuple[str, str]] = {}
 
-    def recent(self, schedule_id: int, window_seconds: float) -> list[float]:
-        now = time.monotonic()
+    def recent(self, schedule_id: int, window_seconds: float, now: float) -> list[float]:
         return [seen for seen in self._attempts.get(schedule_id, []) if now - seen < window_seconds]
 
     def in_flight(self, schedule_id: int) -> tuple[str, str] | None:
         return self._intents.get(schedule_id)
 
-    def record(self, schedule_id: int, intent: tuple[str, str], window_seconds: float) -> int:
-        attempts = self.recent(schedule_id, window_seconds)
-        attempts.append(time.monotonic())
+    def record(
+        self, schedule_id: int, intent: tuple[str, str], window_seconds: float, now: float
+    ) -> int:
+        attempts = self.recent(schedule_id, window_seconds, now)
+        attempts.append(now)
         self._attempts[schedule_id] = attempts
         self._intents[schedule_id] = intent
         return len(attempts)

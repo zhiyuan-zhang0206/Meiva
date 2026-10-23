@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
+import psycopg
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -15,7 +16,7 @@ from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db import Database
 from base.lm.catalog import ModelCatalog
-from gateway.routers import insights as proxy
+from gateway.routers.proxies import insights as proxy
 from services.derived.insights.app import build_app
 from services.derived.insights.config import InsightsConfig
 
@@ -46,17 +47,11 @@ def _upstream() -> FastAPI:
     return app
 
 
-def _gateway(
-    transport: httpx.AsyncBaseTransport,
-    *,
-    isolation_checker: Any = None,
-) -> FastAPI:
+def _gateway(transport: httpx.AsyncBaseTransport, *, pool: ConnectionPool | None = None) -> FastAPI:
     app = FastAPI()
     app.include_router(proxy.router)
     app.state.insights_client = httpx.AsyncClient(transport=transport, base_url="http://insights")
-    app.state.db_pool = object()
-    if isolation_checker is not None:
-        app.state.caller_eval_isolation_checker = isolation_checker
+    app.state.db_pool = pool
     return app
 
 
@@ -107,19 +102,30 @@ def test_a_path_that_could_address_another_route_is_refused(client: TestClient) 
     assert client.get("/api/insights/a%5Cb").status_code == 400
 
 
-def test_an_eval_isolated_caller_is_refused_before_the_service_is_asked() -> None:
+def test_an_eval_isolated_caller_is_refused_before_the_service_is_asked(
+    db_conn: psycopg.Connection, database: Database
+) -> None:
     def refuse(_transport_request: httpx.Request) -> httpx.Response:
         raise AssertionError("the service must not be reached")
 
-    def isolated_caller(_pool: object, _agent: int) -> bool:
-        return True
-
-    with TestClient(
-        _gateway(httpx.MockTransport(refuse), isolation_checker=isolated_caller)
-    ) as isolated:
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO agents (label) VALUES ('isolated') RETURNING id")
+        row = cur.fetchone()
+        assert row is not None
+        caller: int = row[0]
+        cur.execute(
+            "INSERT INTO agents_meta (id, spawner, status, config_overlay) "
+            "VALUES (%s, 'user', 'idling', %s::jsonb)",
+            (caller, '{"eval_isolation": true}'),
+        )
+    db_conn.commit()
+    with (
+        database.pool(max_size=2) as pool,
+        TestClient(_gateway(httpx.MockTransport(refuse), pool=pool)) as isolated,
+    ):
         for path in (
-            "/api/agents/7/run-timeline/context?at=1&caller=agent:5",
-            "/api/insights/x?caller=agent:5",
+            f"/api/agents/7/run-timeline/context?at=1&caller=agent:{caller}",
+            f"/api/insights/x?caller=agent:{caller}",
         ):
             assert isolated.get(path).status_code == 403
 

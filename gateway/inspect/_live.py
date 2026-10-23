@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from typing import Any, NamedTuple
 
 from fastapi import HTTPException
@@ -10,10 +9,10 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.observation.evidence import AgentObservation, observation
 from base.agents.observation.snapshot import OpenNotice
-from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
-from base.config import settings
+from base.api_contracts.agent_contract import Harness, LivenessState
+from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState, plan_heartbeat
 from gateway.inspect.schemas import HeartbeatInfo, HeartbeatLastPause
-from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
+from services.wake.heartbeat import STALE_PENDING_S
 
 
 class InspectDbRows(NamedTuple):
@@ -115,91 +114,20 @@ def notice_blocking(pool: ConnectionPool[Any], agent_id: int) -> OpenNotice | No
     )
 
 
+# meiva:note
+# The inspector's heartbeat block: the daemon's projection (`plan_heartbeat`) plus the
+# configured interval and the latest recent committed row from heartbeat_pause_log.
+#
+# Every input comes from the request's fresh agents_meta projection; current heartbeat state
+# does not depend on historical statistics or logs.
 def project_heartbeat(
-    status: str,
-    last_active_at: datetime,
-    last_heartbeat_at: datetime | None,
-    paused_until: datetime | None,
-    *,
-    agent_id: int,
-    pending_inbound: bool,
-    last_pause: HeartbeatLastPause | None,
-    jitter_span_s: int | None = None,
+    state: HeartbeatState, cadence: HeartbeatCadence, last_pause: HeartbeatLastPause | None
 ) -> HeartbeatInfo:
-    """Idle-heartbeat state for one agent — the projected next check-in (or the
-    active pause / already-queued wake) plus the most recent pause from history.
-
-    `paused_until` is the agents_meta column already narrowed by the caller to a
-    *future* value (a NULL / past pause arrives here as None = not paused). The
-    display states are mutually exclusive:
-
-    - idling, paused → `paused_until`.
-    - idling, not paused, a wake already queued → `heartbeat_pending`.
-    - idling, not paused, nothing queued → `next_at` (the daemon's projected
-      check-in due time — the later of the idle clock plus its per-agent jitter
-      and the durable last-reminder cadence floor; the daemon dispatches at its
-      first poll tick at/after that, at most one 15s dispatch step later. The
-      frontend renders an overdue one as "due").
-    - running or terminated → all off (never checked in on).
-
-    `heartbeat_pending` mirrors the daemon's `NOT EXISTS (pending inbound)` guard
-    in full — including its 900s freshness window (`STALE_PENDING_S`): only a
-    *fresh* pending inbound (a heartbeat check-in already sent but not yet
-    processed, or a chat about to wake it) suppresses the daemon's next check-in.
-    A pending inbound older than that window no longer counts as "about to wake" —
-    the daemon checks in on the agent anyway. Surfacing this state —
-    instead of projecting `next_at` off a stale clock — is what keeps a stuck
-    agent (an unconsumed check-in it never woke to process) from rendering a
-    nonsensical past "next heartbeat" time. When no inbound is pending, any
-    earlier check-in was already consumed, `last_heartbeat_at` remains the
-    durable cadence floor even when its turn did not produce any LLM work.
-
-    `last_pause` is the latest recent committed row from heartbeat_pause_log.
-    Every other input comes from the request's fresh agents_meta projection;
-    current heartbeat state does not depend on historical statistics or logs.
-    """
-    # The daemon's due predicate takes the later of `last_active_at` plus the
-    # idle threshold/jitter and `last_heartbeat_at` plus the configured interval.
-    # The dispatcher runs every <=15 seconds only to notice due work; it is not
-    # the per-agent reminder cadence.
-    idle_threshold_s = int(settings.daemon.heartbeat_idle_threshold_seconds)
-    interval_s = int(settings.daemon.heartbeat_interval_seconds)
-
-    next_at: datetime | None = None
-    active_pause: datetime | None = None
-    heartbeat_pending = False
-    if status == AgentStatus.IDLING:
-        if paused_until is not None:
-            active_pause = paused_until
-        # Mirror the daemon's `NOT EXISTS (pending inbound)` guard: with a
-        # wake already queued, no check-in is scheduled (heartbeat_pending);
-        # with nothing queued, project from the idle clock.
-        # `pending_inbound` is computed by the caller on the same DB
-        # connection (the inspector's agents_meta read).
-        elif pending_inbound:
-            heartbeat_pending = True
-        else:
-            # Overdue → frontend shows "due".
-            # Match the daemon's due-time exactly: the later of the idle clock
-            # plus per-agent jitter and the durable reminder floor. The actual
-            # dispatch happens at the first daemon tick at/after this, so
-            # next_at never overstates it.
-            # JITTER_SPAN_S is int-typed (whole seconds) so this matches the
-            # daemon's `NULLIF(span, 0)::int` cast exactly; the `0` guard mirrors
-            # the daemon's disabled-jitter collapse (mod never divides by zero).
-            span_s = JITTER_SPAN_S if jitter_span_s is None else jitter_span_s
-            jitter_s = agent_id % span_s if span_s else 0
-            idle_due_at = last_active_at + timedelta(seconds=idle_threshold_s + jitter_s)
-            reminder_due_at = (
-                last_heartbeat_at + timedelta(seconds=interval_s)
-                if last_heartbeat_at is not None
-                else idle_due_at
-            )
-            next_at = max(idle_due_at, reminder_due_at)
+    plan = plan_heartbeat(state, cadence)
     return HeartbeatInfo(
-        interval_s=interval_s,
-        next_at=next_at,
-        paused_until=active_pause,
-        heartbeat_pending=heartbeat_pending,
+        interval_s=cadence.interval_s,
+        next_at=plan.next_at,
+        paused_until=plan.paused_until,
+        heartbeat_pending=plan.heartbeat_pending,
         last_pause=last_pause,
     )

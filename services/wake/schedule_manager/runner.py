@@ -6,12 +6,10 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Sequence
-from functools import partial
 from pathlib import Path
 
 from loguru import logger
 
-import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
@@ -26,11 +24,12 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.native_process.code_version import CodeVersion
-from base.paths import prod_service_checkout_error
+from base.paths import meiva_home, prod_service_checkout_error
 from base.telemetry import process_name
 from meiva.boot import process_clients
 from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import engine
+from services.wake.schedule_manager.stall_policy import StallPolicy
 
 
 def _bind_schedule_actor(
@@ -71,19 +70,23 @@ def run(schedule_id: int, revision: int | None = None) -> int:
     clients = process_clients(config=config, database=database, machine=machine)
     primary: BaseException | None = None
     try:
+        # meiva:note
+        # The script's `meiva.agents.*` calls attribute to the schedule: bind its actor before
+        # the engine opens any history for it.
+        _bind_schedule_actor(
+            schedule_id, clients=clients, clock_factory=clock_factory, machine=machine
+        )
         return engine.run(
             schedule_id,
             revision,
-            database=database,
-            inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine),
-            bind_actor=partial(
-                _bind_schedule_actor, clients=clients, clock_factory=clock_factory, machine=machine
-            ),
-            load_plugins=partial(
-                meiva.ensure_plugins_loaded,
-                config=config,
-                clock_factory=clock_factory,
-                producer=clients.event_pipeline,
+            engine.RunnerRoot(
+                database=database(),
+                inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine),
+                plugins=engine.PluginInputs(
+                    config=config, clock_factory=clock_factory, producer=clients.event_pipeline
+                ),
+                policy=StallPolicy(timeout_s=config.view.gateway.schedule_stall_timeout_seconds),
+                home=meiva_home(),
             ),
         )
     except BaseException as exc:

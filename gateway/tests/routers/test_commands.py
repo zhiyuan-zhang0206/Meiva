@@ -1,104 +1,98 @@
-from collections.abc import Callable
-from typing import NoReturn
-from unittest.mock import MagicMock
+# meiva:note
+# `GET /api/commands`: the composer catalog, globally or as one agent's runner sees it.
+#
+# The catalog scans real command files under the unit home; an agent view is answered by the
+# agent's runner over a real listener (`runner_ops`), and the gateway-local catalog is the
+# fallback when that runner is absent or failing.
 
+from pathlib import Path
+
+import psycopg
 import pytest
 
-from base.packages.composer_commands import Command
 from gateway.tests.auth.gateway_config import gateway_test_client
-from ops.cluster import rpc as cluster_rpc
+from gateway.tests.support.runner_ops.ops_stub import (
+    OpsReply,
+    completed,
+    failed,
+    refused,
+    runner_ops,
+)
+
+LOCAL_COMMAND = {"name": "recap", "description": "d", "instruction_hint": "h"}
 
 
-def _one_command(name: str, description: str, hint: str, body: str) -> Callable[[], list[Command]]:
-
-    def discover() -> list[Command]:
-        return [
-            {
-                "name": name,
-                "description": description,
-                "instruction_hint": hint,
-                "body": body,
-                "skill_target": None,
-            }
-        ]
-
-    return discover
+@pytest.fixture
+def local_command(unit_home: Path) -> dict[str, str]:
+    """A command file in the unit's own `commands/` directory."""
+    commands = unit_home / "commands"
+    commands.mkdir(exist_ok=True)
+    (commands / "recap.md").write_text(
+        "---\ndescription: d\ninstruction-hint: h\n---\nbody\n", encoding="utf-8"
+    )
+    return LOCAL_COMMAND
 
 
-def _agent_pool(machine: str | None) -> MagicMock:
-    pool = MagicMock()
-    cursor = pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = (machine,) if machine else None
-    return pool
+def _insert_agent(db: psycopg.Connection, machine: str) -> int:
+    row = db.execute("INSERT INTO agents (label) VALUES ('t') RETURNING id").fetchone()
+    assert row is not None
+    db.execute(
+        "INSERT INTO agents_meta (id, spawner, status, machine) VALUES (%s, 'user', 'idling', %s)",
+        (row[0], machine),
+    )
+    db.commit()
+    return row[0]
 
 
-def _runner_unreachable() -> cluster_rpc.ClusterOpUnreachable:
-    return cluster_rpc.ClusterOpUnreachable("runner down")
-
-
-def _runner_failed() -> cluster_rpc.ClusterOpFailed:
-    return cluster_rpc.ClusterOpFailed({"error": "unknown op"})
-
-
-def test_endpoint_returns_command_metadata():
+def test_endpoint_returns_command_metadata(local_command: dict[str, str]) -> None:
     with gateway_test_client() as client:
-        client.app.state.command_catalog_discoverer = _one_command("recap", "d", "h", "b")
         resp = client.get("/api/commands")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == [{"name": "recap", "description": "d", "instruction_hint": "h"}]
+    assert local_command in resp.json()
 
 
-def test_endpoint_agent_view_dispatches_to_agents_machine():
-    seen: dict[str, object] = {}
-
-    async def _dispatch(
-        _db: object, machine: str, kind: str, payload: dict[str, int], *, timeout_s: float
-    ) -> dict[str, object]:
-        seen["machine"] = machine
-        seen["kind"] = kind
-        seen["payload"] = payload
-        seen["timeout_s"] = timeout_s
-        return {
+def test_endpoint_agent_view_dispatches_to_agents_machine(db_conn: psycopg.Connection) -> None:
+    agent_id = _insert_agent(db_conn, "runner-a")
+    view = completed(
+        {
             "commands": [{"name": "project", "description": "d", "instruction_hint": "h"}],
             "mcp_names": ["runner-only-groundwork"],
         }
+    )
 
-    with gateway_test_client() as client:
-        client.app.state.command_rpc_dispatcher = _dispatch
-        client.app.state.db_pool = _agent_pool("runner-a")
-        resp = client.get("/api/commands?agent_id=42")
+    with (
+        runner_ops(db_conn, "runner-a", {"agent_skill_view": view}) as runner,
+        gateway_test_client() as client,
+    ):
+        resp = client.get(f"/api/commands?agent_id={agent_id}")
     assert resp.status_code == 200, resp.text
     assert resp.json() == [{"name": "project", "description": "d", "instruction_hint": "h"}]
-    assert seen == {
-        "machine": "runner-a",
-        "kind": "agent_skill_view",
-        "payload": {"agent_id": 42},
-        "timeout_s": 3.0,
-    }
+    assert runner.payloads("agent_skill_view") == [{"agent_id": agent_id}]
 
 
 @pytest.mark.parametrize(
-    "failure", [_runner_unreachable, _runner_failed], ids=["unreachable", "failed"]
+    "answer",
+    [refused(404, "runner down"), failed({"error": "unknown op"})],
+    ids=["unreachable", "failed"],
 )
 def test_endpoint_agent_view_unavailable_falls_back_locally(
-    failure: Callable[[], Exception],
-):
-    async def _unavailable(*_args: object, **_kwargs: object) -> NoReturn:
-        raise failure()
+    db_conn: psycopg.Connection, local_command: dict[str, str], answer: OpsReply
+) -> None:
+    agent_id = _insert_agent(db_conn, "runner-a")
 
-    with gateway_test_client() as client:
-        client.app.state.command_catalog_discoverer = _one_command("local", "d", "h", "b")
-        client.app.state.command_rpc_dispatcher = _unavailable
-        client.app.state.db_pool = _agent_pool("runner-a")
-        resp = client.get("/api/commands?agent_id=42")
+    with (
+        runner_ops(db_conn, "runner-a", {"agent_skill_view": answer}),
+        gateway_test_client() as client,
+    ):
+        resp = client.get(f"/api/commands?agent_id={agent_id}")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == [{"name": "local", "description": "d", "instruction_hint": "h"}]
+    assert local_command in resp.json()
 
 
-def test_endpoint_agent_view_missing_agent_falls_back_locally():
+def test_endpoint_agent_view_missing_agent_falls_back_locally(
+    local_command: dict[str, str],
+) -> None:
     with gateway_test_client() as client:
-        client.app.state.command_catalog_discoverer = _one_command("local", "d", "h", "b")
-        client.app.state.db_pool = _agent_pool(None)
         resp = client.get("/api/commands?agent_id=999")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == [{"name": "local", "description": "d", "instruction_hint": "h"}]
+    assert local_command in resp.json()

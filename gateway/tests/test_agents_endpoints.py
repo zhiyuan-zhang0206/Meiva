@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, cast
 
@@ -13,6 +12,7 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import AddModels
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.support.runner_ops.ops_stub import OpsReply, RunnerOps, runner_ops
 
 
 @pytest.fixture
@@ -102,14 +102,10 @@ def test_get_models_returns_grouped_supported_models() -> None:
 def test_get_models_surfaces_superseded_by(
     add_models: AddModels,
     model_catalog: ModelCatalog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     glm = model_catalog.models["glm-5.2"]
     catalog = add_models(model_catalog, {"glm-5.2": replace(glm, superseded_by="kimi-k3")})
-    import gateway.app as gateway_app
-
-    monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-    with gateway_test_client() as client:
+    with gateway_test_client(catalog=catalog) as client:
         resp = client.get("/api/models")
     body = resp.json()
     assert body["models"]["glm-5.2"]["superseded_by"] == "kimi-k3"
@@ -167,11 +163,7 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
     assert models["claude-haiku-4-5-20251001"]["reasoning_effort_options"] == ["none", "high"]
 
 
-def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.config import settings
-
+def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value() -> None:
     with gateway_test_client() as client:
         resp = client.get("/api/models")
     assert resp.status_code == 200
@@ -190,8 +182,7 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
         assert expected, model
         assert expected in info["reasoning_effort_options"], model
 
-    monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
-    with gateway_test_client() as client:
+    with gateway_test_client(fields={"reasoning_effort": "low"}) as client:
         resp = client.get("/api/models")
     models = resp.json()["models"]
     assert models["deepseek-flash"]["reasoning_effort_default"] == "max"
@@ -232,13 +223,9 @@ class TestSpawn:
         self,
         db_conn: psycopg.Connection,
         withdrawn_model: tuple[str, ModelCatalog],
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         model, catalog = withdrawn_model
-        import gateway.app as gateway_app
-
-        monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-        with gateway_test_client() as client:
+        with gateway_test_client(catalog=catalog) as client:
             resp = spawn_via_http(client, {"config": {"llm_model": model}})
         assert resp.status_code == 201, resp.text
         body = resp.json()
@@ -317,17 +304,17 @@ class TestSpawn:
         assert "prompt_source" in resp.text
 
 
+# meiva:note
+# A runner whose answer is not an ops envelope at all (a proxy's HTML page under a 200) is
+# a failure nothing classified: the committed agent is named and the reason is `launch_unknown`.
 def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection, gateway_local_runner: RunnerOps
 ) -> None:
-    import gateway.agents.creation as _agents_creation
-    from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-
-    async def _explode(_db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(_agents_creation, "forward_spawn_to_remote", _explode)
-    with gateway_test_client() as client:
+    proxy_page = OpsReply(200, "<html>502 Bad Gateway</html>")
+    with (
+        runner_ops(db_conn, gateway_local_runner.name, {"spawn-launch": proxy_page}),
+        gateway_test_client() as client,
+    ):
         allowed_origin = client.app.state.gateway_config.allowed_origins[0]
         resp = spawn_via_http(client, {}, headers={"Origin": allowed_origin})
     assert resp.status_code == 502
@@ -480,6 +467,8 @@ class TestAutoResurrect:
         assert resp.status_code == 422
 
 
+# meiva:note
+# Every surface that returns agent results. An eval-isolated caller is refused on each of them.
 _RESULT_READ_ENDPOINTS = [
     ("GET", "/api/agents/{agent_id}/messages"),
     ("GET", "/api/agents/{agent_id}/traces/trace-1/messages"),
@@ -493,54 +482,22 @@ _RESULT_READ_ENDPOINTS = [
     ("GET", "/api/tasks"),
 ]
 
+# meiva:note
+# Where a permitted caller gets an ordinary answer from a bare gateway: the event stream never
+# ends (its own tests read it from a served app) and the memory search needs an embedding
+# provider (its tests run against a vector service); both are refused by the same gate above.
+_ANSWERING_RESULT_READ_ENDPOINTS = [
+    endpoint
+    for endpoint in _RESULT_READ_ENDPOINTS
+    if endpoint[1] not in {"/api/agents/{agent_id}/events/stream", "/api/memory/search"}
+]
+
 
 def _result_read(client: TestClient, method: str, path: str, *, caller: str | None = None):
     params = {"caller": caller} if caller is not None else None
     if method == "POST":
         return client.post(path, params=params, json={"query": "test", "k": 1, "purpose": "search"})
     return client.get(path, params=params)
-
-
-def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
-    import gateway.events.agent_events as agent_events_router
-    from services.derived.memory_indexer.backends import factory as backend_factory
-    from services.derived.memory_indexer.embeddings import factory as _embedding_factory
-
-    class _StubProvider:
-        dim = 8
-        fingerprint = "fake:provider:dim=8"
-
-        def __init__(
-            self,
-            name: str,
-            *,
-            catalog: ModelCatalog,
-            timeout_reader: Callable[[], float],
-            api_key_reader: Callable[[], str | None],
-        ) -> None:
-            assert name
-            self.catalog = catalog
-            self.timeout_reader = timeout_reader
-            self.api_key_reader = api_key_reader
-
-        @staticmethod
-        async def embed_query_async(_query: str) -> list[float]:
-            return [0.0] * 8
-
-    class StubBackend:
-        async def search_topk_async(self, *_args: object, **_kwargs: object) -> list[object]:
-            return []
-
-    def backend(*_args: object, **_kwargs: object) -> StubBackend:
-        return StubBackend()
-
-    async def _stream(*_args: object, **_kwargs: object):
-        if False:
-            yield ""
-
-    monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
-    monkeypatch.setattr(backend_factory, "get_backend", backend)
-    monkeypatch.setattr(agent_events_router, "event_stream", _stream)
 
 
 @pytest.mark.parametrize(("method", "path_template"), _RESULT_READ_ENDPOINTS)
@@ -579,16 +536,12 @@ def test_eval_isolated_callers_cannot_read_result_surfaces(
         )
 
 
-@pytest.mark.parametrize(("method", "path_template"), _RESULT_READ_ENDPOINTS)
+@pytest.mark.parametrize(("method", "path_template"), _ANSWERING_RESULT_READ_ENDPOINTS)
 def test_result_surfaces_allow_non_isolated_and_unmarked_callers(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    method: str,
-    path_template: str,
+    db_conn: psycopg.Connection, method: str, path_template: str
 ) -> None:
     from base.db import create_agent
 
-    _stub_result_read_backends(monkeypatch)
     target_id = create_agent(db_conn)
     caller_id = create_agent(db_conn)
     with db_conn.cursor() as cur:

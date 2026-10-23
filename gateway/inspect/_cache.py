@@ -38,13 +38,15 @@ class _CacheClaim[V]:
     load_slot_acquired: bool = False
 
 
+# meiva:note
+# Share one loader per key and retain successful values for a short TTL.
+#
+# `now` is the instant of the request, in the caller's monotonic seconds: a hit is a value whose
+# expiry is after it, and a stored value expires `ttl_s` after it.
+#
+# When configured, admission bounds concurrent distinct-key loaders without
+# charging cache hits or followers against the load capacity.
 class InspectQueryCache[K, V]:
-    """Share one loader per key and retain successful values for a short TTL.
-
-    When configured, admission bounds concurrent distinct-key loaders without
-    charging cache hits or followers against the load capacity.
-    """
-
     def __init__(
         self,
         *,
@@ -71,9 +73,9 @@ class InspectQueryCache[K, V]:
         loader: Callable[[], V],
         *,
         ttl_s: float,
-        now: Callable[[], float],
+        now: float,
     ) -> V:
-        claim = self._lookup_or_claim(key, now())
+        claim = self._lookup_or_claim(key, now)
         if isinstance(claim, _CacheHit):
             return claim.value
         if not claim.leader:
@@ -93,7 +95,7 @@ class InspectQueryCache[K, V]:
         loader: Callable[[], V],
         *,
         ttl_s: float,
-        now: Callable[[], float],
+        now: float,
     ) -> V:
         """Async request path: only the leader occupies a worker thread.
 
@@ -101,7 +103,7 @@ class InspectQueryCache[K, V]:
         is required because a response deadline cancels the follower task, not
         the shared claim the synchronous leader will eventually complete.
         """
-        claim = self._lookup_or_claim(key, now())
+        claim = self._lookup_or_claim(key, now)
         if isinstance(claim, _CacheHit):
             return claim.value
         if not claim.leader:
@@ -186,13 +188,12 @@ class InspectQueryCache[K, V]:
         *,
         release_load_slot: bool,
         ttl_s: float,
-        now: Callable[[], float],
+        now: float,
     ) -> V:
         try:
             try:
                 value = loader()
-                current = now()
-                self._store(key, value, current=current, expires_at=current + ttl_s)
+                self._store(key, value, current=now, expires_at=now + ttl_s)
             finally:
                 # Retire admission before publishing completion: a follower
                 # can immediately ask for a fresh zero-TTL load on either key.

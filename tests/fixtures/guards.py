@@ -207,28 +207,6 @@ def permissions_helper_native_io(
 
 
 @pytest.fixture
-def guard_schedule_session_control(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The Gateway owner's schedule guard: control paths reach the real session
-    backend (`capture`) and wait for a schedule-manager service that no test
-    runs (`request_sync` waits for its queued row to be consumed). Under
-    `TestClient(app)` that would hit the real backend and stall every start /
-    stop / restart for the wait. Neutralize both; the request row itself is still
-    written, so API tests can assert it. Tests of the real consume / sync logic
-    call the service's functions directly with a faked backend."""
-
-    async def _noop_wait(pool: object, schedule_id: int) -> None:
-        return None
-
-    async def _noop_capture(schedule_id: int, lines: int) -> None:
-        return None
-
-    from gateway.schedules import session_control
-
-    monkeypatch.setattr(session_control, "wait_consumed", _noop_wait)
-    monkeypatch.setattr(session_control, "capture", _noop_capture)
-
-
-@pytest.fixture
 def guard_service_readiness(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:

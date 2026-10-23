@@ -6,10 +6,11 @@ low-level lifecycle contracts live in ops/agents/tests/test_agents_internals.py.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
-from typing import Any
 from uuid import uuid4
 
+import httpx
 import psycopg
 import pytest
 
@@ -19,11 +20,16 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
-from gateway.tests.agents.sdk_support import inbound_rows, spawn_agent
+from gateway.tests.agents.sdk_support import (
+    agent_machine,
+    gateway_wire,
+    inbound_rows,
+    spawn_agent,
+)
 from gateway.tests.agents.sdk_support import sdk_via_gateway as sdk_via_gateway
-from meiva import gateway_client
+from gateway.tests.agents.sdk_support import self_agent as self_agent
+from gateway.tests.support.runner_ops.ops_stub import completed, launched, runner_ops
 from meiva.agents import AgentNotFound, ForkSourceEmpty, TerminateResult
-from meiva.sdk_surface.installation import Installation
 from meiva.tests.fixtures.pin_agent import pin_agent
 
 
@@ -108,39 +114,26 @@ class TestSpawn:
         ]
 
     def test_spawn_defaults_machine_to_local(
-        self, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+        self,
+        db_conn: psycopg.Connection,
+        self_agent: int,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """When machine omitted, SDK defaults to local machine (meiva.self.MACHINE_SPEC), gateway receives explicit target, no longer falls back to gateway's own machine."""
+        child_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
 
-        captured: dict[str, Any] = {}
+        assert agent_machine(db_conn, child_id) == machine_identity.name()
 
-        def _fake_spawn(
-            *,
-            spawner: str,
-            prompt: object,
-            fork_from: object,
-            prompt_source: str,
-            machine: str,
-            config: object = None,
-            label: object = None,
-            harness: object = None,
-            idempotency_key: str | None = None,
-        ) -> int:
-            captured["machine"] = machine
-            return 999
-
-        monkeypatch.setattr(meiva.gateway_client, "spawn", _fake_spawn)
-
-        assert meiva.agents.spawn(idempotency_key=str(uuid4())) == 999
-        assert captured["machine"] == machine_identity.name()
-
-    def test_spawn_explicit_machine_passthrough(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_spawn_explicit_machine_passthrough(
+        self, db_conn: psycopg.Connection, self_agent: int
+    ) -> None:
         """Explicit machine passthrough unchanged, not overridden by local default."""
-        captured: dict[str, Any] = {}
-        monkeypatch.setattr(meiva.gateway_client, "spawn", lambda **kw: captured.update(kw) or 7)  # pyright: ignore[reportUnknownArgumentType]
+        with runner_ops(db_conn, "other-host", {"spawn-launch": launched}) as runner:
+            child_id = meiva.agents.spawn(machine="other-host", idempotency_key=str(uuid4()))
 
-        assert meiva.agents.spawn(machine="other-host", idempotency_key=str(uuid4())) == 7
-        assert captured["machine"] == "other-host"
+        assert agent_machine(db_conn, child_id) == "other-host"
+        assert [call.payload["agent_id"] for call in runner.calls_of("spawn-launch")] == [child_id]
 
     @pytest.mark.parametrize(
         ("prompt", "expected"),
@@ -153,28 +146,22 @@ class TestSpawn:
     )
     def test_spawn_normalizes_prompt_before_gateway_call(
         self,
-        monkeypatch: pytest.MonkeyPatch,
+        db_conn: psycopg.Connection,
+        self_agent: int,
         prompt: object,
         expected: str,
     ) -> None:
-        from meiva import agents
+        child_id = meiva.agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
+        assert inbound_rows(db_conn, child_id) == [(expected, "chat", f"agent:{self_agent}")]
 
-        assert agents.spawn(prompt=prompt, idempotency_key=str(uuid4())) == 3  # pyright: ignore[reportArgumentType]
-        assert seen["prompt"] == expected
-
-    def test_spawn_rejects_non_string_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from meiva import agents
-
-        monkeypatch.setattr(gateway_client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType]
-
-        with pytest.raises(
-            TypeError,
-            match="prompt must be a string, got int",
+    def test_spawn_rejects_non_string_prompt(self) -> None:
+        with (
+            gateway_wire() as requests,
+            pytest.raises(TypeError, match="prompt must be a string, got int"),
         ):
-            agents.spawn(prompt=42, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            meiva.agents.spawn(prompt=42, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+        assert requests == []
 
     @pytest.mark.parametrize(
         "prompt",
@@ -183,16 +170,12 @@ class TestSpawn:
             pytest.param(["a", "b"], id="multi-string-list"),
         ],
     )
-    def test_spawn_rejects_multi_element_prompt(
-        self, monkeypatch: pytest.MonkeyPatch, prompt: object
-    ) -> None:
+    def test_spawn_rejects_multi_element_prompt(self, prompt: object) -> None:
         """A multi-element prompt sequence is a coding mistake — TypeError, never
         silently joined (user ruling 2026-08-28)."""
-        from meiva import agents
-
-        monkeypatch.setattr(gateway_client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType]
-        with pytest.raises(TypeError, match="prompt must be a string"):
-            agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+        with gateway_wire() as requests, pytest.raises(TypeError, match="prompt must be a string"):
+            meiva.agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+        assert requests == []
 
 
 class TestSpawnFork:
@@ -409,15 +392,15 @@ class TestTerminate:
         assert str(hint).startswith("6 open task(s):")
 
     def test_already_terminated_keeps_old_style_compare(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         """The str-carrier contract holds for the already-dead result too."""
+        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        db_conn.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
+        db_conn.commit()
 
-        def _terminate(*_args: object, **_kwargs: object) -> dict[str, Any]:
-            return {"status": "already_terminated", "open_tasks": None}
+        result = meiva.agents.terminate(peer_id)
 
-        monkeypatch.setattr(gateway_client, "terminate", _terminate)
-        result = meiva.agents.terminate(7)
         assert result == "already_terminated"
         assert result == TerminateResult.ALREADY_TERMINATED
         assert result.status is TerminateResult.ALREADY_TERMINATED
@@ -425,100 +408,74 @@ class TestTerminate:
         # No kill was requested (and an older runner reports none): None.
         assert result.shell_sessions is None
 
+    # meiva:note
+    # The home runner's report of the kill (`now`, with the killed ids) comes back verbatim.
     def test_terminate_reports_the_shell_session_kill(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
-        def _terminate(*_args: object, **kwargs: object) -> dict[str, Any]:
-            assert kwargs["kill_all_shell_sessions"] is True
-            shell = {"when": "now", "killed": [2, 5]}
-            return {"status": "already_terminated", "open_tasks": None, "shell_sessions": shell}
+        report = {"when": "now", "killed": [2, 5]}
+        answer = completed(
+            {"status": "already_terminated", "open_tasks": None, "shell_sessions": report}
+        )
+        with runner_ops(
+            db_conn, "runner-x", {"spawn-launch": launched, "lifecycle": answer}
+        ) as runner:
+            peer_id = meiva.agents.spawn(machine="runner-x", idempotency_key=str(uuid4()))
+            result = meiva.agents.terminate(peer_id, kill_all_shell_sessions=True)
 
-        monkeypatch.setattr(gateway_client, "terminate", _terminate)
-        result = meiva.agents.terminate(7, kill_all_shell_sessions=True)
         assert result.shell_sessions == meiva.agents.ShellSessionsKill(
             when=ShellSessionKillTiming.NOW, killed=[2, 5]
         )
+        (terminate,) = runner.payloads("lifecycle")
+        assert terminate["path"] == f"/api/agents/{peer_id}/terminate"
+        assert terminate["body"]["kill_all_shell_sessions"] is True
 
+    # meiva:note
+    # A gateway answer outside the shared timing enum is an error, not a guess. The real
+    # gateway validates its own answer, so this one is scripted on the wire.
     @pytest.mark.parametrize("when", ["later", "", None])
     def test_terminate_rejects_unknown_shell_cleanup_timing(
-        self, monkeypatch: pytest.MonkeyPatch, when: object
+        self, self_agent: int, when: object
     ) -> None:
-        def _terminate(*_args: object, **_kwargs: object) -> dict[str, Any]:
-            return {
+        answer = httpx.Response(
+            200,
+            json={
                 "status": "enqueued",
                 "open_tasks": None,
                 "shell_sessions": {"when": when, "killed": []},
-            }
-
-        monkeypatch.setattr(gateway_client, "terminate", _terminate)
-        with pytest.raises(ValueError, match="ShellSessionKillTiming"):
+            },
+        )
+        with gateway_wire(answer), pytest.raises(ValueError, match="ShellSessionKillTiming"):
             meiva.agents.terminate(7, kill_all_shell_sessions=True)
 
-    def test_rejects_non_string_message_before_gateway_call(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        called = False
-
-        def _terminate(*_args: object, **_kwargs: object) -> dict[str, Any]:
-            nonlocal called
-            called = True
-            return {"status": "enqueued", "open_tasks": None}
-
-        monkeypatch.setattr(gateway_client, "terminate", _terminate)
-        with pytest.raises(TypeError, match="message must be a string, got int"):
+    def test_rejects_non_string_message_before_gateway_call(self, self_agent: int) -> None:
+        with (
+            gateway_wire() as requests,
+            pytest.raises(TypeError, match="message must be a string, got int"),
+        ):
             meiva.agents.terminate(7, message=42)  # pyright: ignore[reportArgumentType]
-        assert not called
+        assert requests == []
 
 
 class TestSendMessage:
     def test_send_message_inserts_chat_inbound_with_agent_source(
-        self,
-        db_conn: psycopg.Connection,
-        *,
-        config_authority: ConfigAuthority,
-        monkeypatch: pytest.MonkeyPatch,
-        model_installation: Installation,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         """send_message purely INSERT inbound — no status check, no wait, no SendResult return."""
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(
-            spawn_agent(
-                config_authority=config_authority,
-                database_gate=database_gate,
-                local_machine=machine_identity,
-            )
-        )
         peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
 
         result = meiva.agents.send_message(peer_id, "you got mail")
         assert result is None
 
         assert inbound_rows(db_conn, peer_id) == [
-            ("you got mail", "chat", f"agent:{meiva.self.AGENT_ID}"),
+            ("you got mail", "chat", f"agent:{self_agent}"),
         ]
 
     def test_send_message_to_terminated_is_fine(
-        self,
-        db_conn: psycopg.Connection,
-        *,
-        config_authority: ConfigAuthority,
-        monkeypatch: pytest.MonkeyPatch,
-        model_installation: Installation,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         """send_message to terminated agent also INSERT inbound.
         SDK doesn't care about target state — purely send message, auto-resurrect is gateway-side detail."""
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(
-            spawn_agent(
-                config_authority=config_authority,
-                database_gate=database_gate,
-                local_machine=machine_identity,
-            )
-        )
         peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
@@ -528,40 +485,33 @@ class TestSendMessage:
         assert result is None
         # Chat inbound was inserted — that's all the SDK cares about.
         rows = inbound_rows(db_conn, peer_id)
-        assert ("still works", "chat", f"agent:{meiva.self.AGENT_ID}") in rows
+        assert ("still works", "chat", f"agent:{self_agent}") in rows
 
-    def test_send_message_to_nonexistent_raises(
-        self,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
-        model_installation: Installation,
-    ) -> None:
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
+    def test_send_message_to_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
         with pytest.raises(AgentNotFound):
             meiva.agents.send_message(9999, "ghost")
 
     def test_send_message_does_not_touch_agents_lifecycle(
-        self,
-        db_conn: psycopg.Connection,
-        *,
-        config_authority: ConfigAuthority,
-        monkeypatch: pytest.MonkeyPatch,
-        model_installation: Installation,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         """send_message only INSERT inbound, doesn't modify agents.status."""
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(
-            spawn_agent(
-                config_authority=config_authority,
-                database_gate=database_gate,
-                local_machine=machine_identity,
-            )
-        )
         peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        before = db_conn.execute(
+            "SELECT status FROM agents_meta WHERE id = %s", (peer_id,)
+        ).fetchone()
+        db_conn.commit()
+
         meiva.agents.send_message(peer_id, "hi")
 
+        after = db_conn.execute(
+            "SELECT status FROM agents_meta WHERE id = %s", (peer_id,)
+        ).fetchone()
+        assert after == before
+
+    # meiva:note
+    # A trailing-comma string tuple must reach the gateway as the string it
+    # wraps — an all-string array on the wire 422s the gateway's
+    # `AgentMessageIn.content` (2026-08-28 agents 2697/2986).
     @pytest.mark.parametrize(
         ("content", "expected"),
         [
@@ -573,25 +523,16 @@ class TestSendMessage:
     )
     def test_send_message_normalizes_tuple_content_before_gateway_call(
         self,
-        monkeypatch: pytest.MonkeyPatch,
+        db_conn: psycopg.Connection,
+        self_agent: int,
         content: object,
         expected: str,
     ) -> None:
-        """A trailing-comma string tuple must reach the client as the string it
-        wraps — an all-string array on the wire 422s the gateway's
-        `AgentMessageIn.content` (2026-08-28 agents 2697/2986)."""
-        from meiva import agents
+        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
 
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            gateway_client,
-            "send_message",
-            lambda _agent_id, **kw: seen.update(kw) or None,  # pyright: ignore[reportUnknownArgumentType]
-        )
+        meiva.agents.send_message(peer_id, content)  # pyright: ignore[reportArgumentType]
 
-        agents.send_message(7, content)  # pyright: ignore[reportArgumentType]
-        assert seen["content"] == expected
-        assert seen["source"] == f"agent:{meiva.self.AGENT_ID}"
+        assert inbound_rows(db_conn, peer_id) == [(expected, "chat", f"agent:{self_agent}")]
 
     @pytest.mark.parametrize(
         "content",
@@ -602,67 +543,44 @@ class TestSendMessage:
             pytest.param(42, id="int"),
         ],
     )
-    def test_send_message_rejects_ambiguous_content(
-        self, monkeypatch: pytest.MonkeyPatch, content: object
-    ) -> None:
+    def test_send_message_rejects_ambiguous_content(self, self_agent: int, content: object) -> None:
         """A multi-element string sequence is a coding mistake, not a message —
         it fails loud with TypeError instead of being silently joined (user
         ruling 2026-08-28: multi-element sequences raise TypeError)."""
-        from meiva import agents
+        with gateway_wire() as requests, pytest.raises(TypeError, match="content must be a string"):
+            meiva.agents.send_message(7, content)  # pyright: ignore[reportArgumentType]
+        assert requests == []
 
-        monkeypatch.setattr(gateway_client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-        with pytest.raises(TypeError, match="content must be a string"):
-            agents.send_message(7, content)  # pyright: ignore[reportArgumentType]
-
-    def test_send_message_content_blocks_pass_through(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A list of content-block dicts (multimodal path) is not string-joined."""
-        from meiva import agents
-
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            gateway_client,
-            "send_message",
-            lambda _agent_id, **kw: seen.update(kw) or None,  # pyright: ignore[reportUnknownArgumentType]
-        )
+    # meiva:note
+    # A list of content-block dicts (multimodal path) reaches the wire as the blocks,
+    # not string-joined.
+    def test_send_message_content_blocks_pass_through(self, self_agent: int) -> None:
         blocks: list[dict[str, object]] = [
             {"type": "text", "text": "hi"},
             {"type": "image_url", "image_url": {"url": "u"}},
         ]
-        agents.send_message(7, blocks)  # pyright: ignore[reportArgumentType]
-        assert seen["content"] == blocks
+        with gateway_wire(httpx.Response(201, json={})) as requests:
+            meiva.agents.send_message(7, blocks)  # pyright: ignore[reportArgumentType]
 
-    def test_send_message_rejects_non_string_content(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from meiva import agents
+        [request] = requests
+        assert request.url.path == "/api/agents/7/messages"
+        sent = json.loads(request.content)
+        assert sent["content"] == blocks
+        assert sent["source"] == f"agent:{self_agent}"
 
-        monkeypatch.setattr(gateway_client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-        with pytest.raises(
-            TypeError,
-            match="content must be a string, got int",
+    def test_send_message_rejects_non_string_content(self, self_agent: int) -> None:
+        with (
+            gateway_wire() as requests,
+            pytest.raises(TypeError, match="content must be a string, got int"),
         ):
-            agents.send_message(7, 42)  # pyright: ignore[reportArgumentType]
+            meiva.agents.send_message(7, 42)  # pyright: ignore[reportArgumentType]
+        assert requests == []
 
     def test_send_message_tuple_content_inserts_unwrapped_inbound(
-        self,
-        db_conn: psycopg.Connection,
-        *,
-        config_authority: ConfigAuthority,
-        monkeypatch: pytest.MonkeyPatch,
-        model_installation: Installation,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         """End-to-end: the trailing-comma tuple lands as the string it wraps,
         never as a JSON array (which the gateway would reject 422)."""
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(
-            spawn_agent(
-                config_authority=config_authority,
-                database_gate=database_gate,
-                local_machine=machine_identity,
-            )
-        )
         peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
 
         # Runtime value of `("you got " "mail",)`: implicit concatenation plus
@@ -671,5 +589,5 @@ class TestSendMessage:
         meiva.agents.send_message(peer_id, content)  # pyright: ignore[reportArgumentType]
 
         assert inbound_rows(db_conn, peer_id) == [
-            ("you got mail", "chat", f"agent:{meiva.self.AGENT_ID}"),
+            ("you got mail", "chat", f"agent:{self_agent}"),
         ]
