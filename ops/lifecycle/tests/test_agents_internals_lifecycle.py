@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 import psycopg
 import pytest
 
@@ -17,6 +15,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import resurrect_agent
+from ops.agents.wake import transition_terminated_to_unclaimed_idling
 from ops.lifecycle.tests.resurrection_setup import (
     agents_row,
     hosted_agent,
@@ -238,7 +237,7 @@ class TestResurrectAgent:
             )
         assert inbound_count(db_conn, agent_id) == 0
 
-    def test_resurrect_select_update_race_does_not_insert_inbound(
+    def test_resurrection_cas_rejects_an_alive_row_without_changing_it(
         self,
         db_conn: psycopg.Connection,
         database: Database,
@@ -257,20 +256,14 @@ class TestResurrectAgent:
             local_machine=machine_identity,
         )
 
-        def lying_fetchone(cur: psycopg.Cursor) -> tuple[Any, ...]:
-            row = cur.fetchone()
-            assert row is not None
-            return ("terminated", *row[1:])
-
-        with pytest.raises(ResurrectAlreadyAlive, match="concurrently modified"):
-            resurrect_agent(
-                database,
-                event_bus,
-                agent_id,
-                resurrected_by="user",
-                prompt="test",
-                row_fetcher=lying_fetchone,
+        with (
+            db_conn.cursor() as cur,
+            pytest.raises(ResurrectAlreadyAlive, match="concurrently modified"),
+        ):
+            transition_terminated_to_unclaimed_idling(
+                cur, agent_id, trigger_inbound_id=None, trigger_inbound_kind=None
             )
+        db_conn.commit()
 
         assert inbound_count(db_conn, agent_id) == 0
         row = agents_row(db_conn, agent_id)

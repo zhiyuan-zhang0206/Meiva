@@ -1,8 +1,7 @@
 """Resume a terminated agent by preserving its identity and enqueuing a wake."""
 
-from collections.abc import Callable
 from datetime import datetime
-from typing import Any, LiteralString
+from typing import LiteralString
 
 import psycopg
 from psycopg import sql
@@ -131,11 +130,8 @@ def _prepare_resurrect_attempt(
     prompt: str | None,
     trigger_inbound_id: int | None,
     trigger_inbound_kind: WakeTriggerKind | None,
-    publish_wake_fn: Callable[[Database, EventBus, int, str], object] | None = None,
-    row_fetcher: Callable[[psycopg.Cursor], tuple[Any, ...] | None] | None = None,
 ) -> telemetry.Event:
     """Commit ordinary resurrection and its optional prompt before waking the host."""
-    publish_wake = publish_wake_fn or publish_inbound_wake
     with db.write_transaction() as conn, conn.cursor() as cur:
         # Task before agent: producers hold the task while inserting an inbound
         # whose foreign key can lock agents_meta. Keep the same lock order.
@@ -149,7 +145,7 @@ def _prepare_resurrect_attempt(
             )
         latched_machine = _lock_active_home_machine(cur, agent_id)
         cur.execute(RESURRECTION_ROW, (agent_id,))
-        row = row_fetcher(cur) if row_fetcher is not None else cur.fetchone()
+        row = cur.fetchone()
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
         if row[1] != latched_machine:
@@ -195,7 +191,7 @@ def _prepare_resurrect_attempt(
         )
         conn.commit()
         publish_agent_updated_sync(bus, agent_id)
-    publish_wake(db, bus, agent_id, "0")
+    publish_inbound_wake(db, bus, agent_id, "0")
     return prepared_event
 
 
@@ -235,8 +231,6 @@ def resurrect_agent(
     prompt: str | None = None,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
-    publish_wake_fn: Callable[[Database, EventBus, int, str], object] | None = None,
-    row_fetcher: Callable[[psycopg.Cursor], tuple[Any, ...] | None] | None = None,
 ) -> int:
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
@@ -250,8 +244,6 @@ def resurrect_agent(
         prompt=prompt,
         trigger_inbound_id=trigger_inbound_id,
         trigger_inbound_kind=trigger_inbound_kind,
-        publish_wake_fn=publish_wake_fn,
-        row_fetcher=row_fetcher,
     )
     telemetry.emit_prepared(prepared_event)
     logger.info(

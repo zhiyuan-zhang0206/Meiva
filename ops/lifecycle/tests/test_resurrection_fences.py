@@ -21,7 +21,6 @@ from ops.lifecycle.tests.resurrection_setup import (
     agents_row,
     hosted_agent,
     inbound_rows,
-    noop,
 )
 from ops.tests.pool_support import make_test_pool
 
@@ -55,7 +54,7 @@ class TestResurrectAgent:
         db_conn.commit()
 
         with make_test_pool() as pool:
-            force_mark_terminated(database, event_bus, agent_id, pool, publish_wake_fn=noop)
+            force_mark_terminated(database, event_bus, agent_id, pool)
             with db_conn.cursor() as cur:
                 cur.execute(
                     "SELECT status_changed_at, (SELECT max(id) FROM inbound_messages "
@@ -72,7 +71,7 @@ class TestResurrectAgent:
             assert first_agent_row is not None and first_page_row is not None
             assert first_page_row[0] == first_agent_row[0]
 
-            force_mark_terminated(database, event_bus, agent_id, pool, publish_wake_fn=noop)
+            force_mark_terminated(database, event_bus, agent_id, pool)
 
         with db_conn.cursor() as cur:
             cur.execute(
@@ -139,7 +138,7 @@ class TestResurrectAgent:
             database=database,
         )
         with make_test_pool() as pool:
-            force_mark_terminated(database, event_bus, agent_id, pool, publish_wake_fn=noop)
+            force_mark_terminated(database, event_bus, agent_id, pool)
 
         with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
             resurrect_agent(
@@ -457,7 +456,7 @@ class TestResurrectAgent:
             database=database,
         )
         with make_test_pool() as pool:
-            force_mark_terminated(database, event_bus, agent_id, pool, publish_wake_fn=noop)
+            force_mark_terminated(database, event_bus, agent_id, pool)
 
         with pytest.raises(ResurrectTriggerStaleError):
             resurrect_agent(
