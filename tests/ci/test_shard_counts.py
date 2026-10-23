@@ -319,7 +319,7 @@ def _index(steps: list[dict[str, Any]], name: str) -> int:
     [
         ("backend-shard", "${{ matrix.group }}"),
         ("backend-serial", "serial"),
-        ("backend-static", "static"),
+        ("backend-static-tests", "static"),
     ],
 )
 def test_every_test_running_job_reports_and_uploads_its_counts(job: str, group: str) -> None:
@@ -375,7 +375,7 @@ def test_the_total_job_is_informational_and_needs_only_read_access() -> None:
     assert job["permissions"] == {"contents": "read", "actions": "read"}
     assert set(job["needs"]) == {
         "classify",
-        "backend-static",
+        "backend-static-tests",
         "backend-shard",
         "backend-serial",
     }

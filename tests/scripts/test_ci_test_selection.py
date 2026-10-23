@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -263,6 +264,7 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
     assert aggregator["needs"] == [
         "classify",
         "backend-static",
+        "backend-static-tests",
         "backend-structure",
         "backend-shard",
         "backend-selected",
@@ -314,14 +316,45 @@ def test_backend_admission_preserves_draft_skip_and_propagates_classify_failure(
         assert (result.returncode == 0) is expected, (classify, backend, structure, cancelled)
 
 
+def test_static_contracts_job_has_no_native_toolchain() -> None:
+    static_job = _workflow_jobs()["backend-static-tests"]
+    assert static_job["needs"] == ["classify"]
+    assert static_job["if"] == "${{ needs.classify.outputs.backend == 'true' }}"
+    assert "continue-on-error" not in static_job
+    assert not any(
+        step.get("uses")
+        in {"./.github/actions/install-pg-redis", "./.github/actions/vendor-pg-runtime"}
+        for step in static_job["steps"]
+    )
+
+
+def test_native_validation_remains_in_its_own_job() -> None:
+    native_steps = {step.get("name") for step in _workflow_jobs()["backend-static"]["steps"]}
+    assert {
+        "Install Postgres 17 + Redis (server binaries on PATH)",
+        "Validate native Grafana alert provisioning and Trace navigation (no Docker)",
+        "Apply migrations to fresh DB + trigger smoke",
+        "Run pyright",
+        "Run ruff check",
+    } <= native_steps
+
+
 def test_static_contracts_run_once_outside_the_native_data_plane() -> None:
     jobs = _workflow_jobs()
-    static = _step(jobs["backend-static"], "Run static pytest contracts")
+    static = _step(jobs["backend-static-tests"], "Run static pytest contracts")
     assert static["if"] == "needs.classify.outputs.backend == 'true'"
     assert "--test-environment=static" in static["run"]
     assert "--junit-xml=tmp/junit-backend-static.xml" in static["run"]
     assert "-o junit_family=xunit1" in static["run"]
     assert "continue-on-error" not in static
+    assert (
+        sum(
+            str(step.get("run", "")).count("--test-environment=static")
+            for job in jobs.values()
+            for step in job["steps"]
+        )
+        == 1
+    )
     for job, name in (
         ("backend-shard", "Run pytest shard"),
         ("backend-selected", "Run selected pytest subset"),
@@ -329,6 +362,23 @@ def test_static_contracts_run_once_outside_the_native_data_plane() -> None:
     ):
         run = _step(jobs[job], name)["run"]
         assert run.count("--omit-static-tests") == run.count("uv run pytest") > 0
+
+
+@pytest.mark.parametrize("mode", ["enforce", "shadow"])
+@pytest.mark.parametrize("decision", ["FULL", "SELECTED"])
+@pytest.mark.parametrize("outcome", ["failure", "cancelled", "skipped"])
+def test_static_test_failure_reaches_every_backend_pytest_path(
+    mode: str, decision: str, outcome: str
+) -> None:
+    aggregator = _workflow_jobs()["backend"]
+    results = dict.fromkeys(aggregator["needs"], "success")
+    results["backend-static-tests"] = outcome
+    if mode == "enforce" and decision == "SELECTED":
+        results["backend-shard"] = "skipped"
+    verify = _step(aggregator, "Verify backend job results")["run"]
+    actual = _backend_verdict(verify, "true", results, mode=mode, decision=decision)
+    assert actual.returncode == 1, actual.stdout
+    assert f"backend-static-tests: {outcome}" in actual.stdout
 
 
 def test_coverage_gate_stays_on_the_full_fanout() -> None:

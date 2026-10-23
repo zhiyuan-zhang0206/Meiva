@@ -36,16 +36,18 @@ directory, similarly named sibling or symlink escaping ownership is refused.
 Keep integration tests that require the data plane outside these owned paths;
 do not temporarily enable drivers inside a static process.
 
-Required CI runs this lane once inside `backend-static` with four xdist
+Required CI runs this lane once inside `backend-static-tests` with four xdist
 workers, each retaining the process-lifetime native refusal and isolation
 guards. JUnit validation, executed counts and combined coverage include all
 workers. Unhandled test-thread exceptions are errors in the actual CI command;
 a refused background driver call cannot leave only a warning and green JUnit.
-It runs alongside the existing structure job so tool lint and pure
-unit execution do not accumulate on one runner. Native full, selected and flaky commands use
+The job installs Python dependencies without Postgres/Redis binaries, Grafana,
+Node or browser setup. It runs alongside `backend-static`, which retains ruff,
+types, migration and native Grafana smoke checks, and the existing structure job.
+The required backend aggregator checks both jobs. Native full, selected and flaky commands use
 `--omit-static-tests` from the same owner; combined counts and coverage include
 the static artifacts. Local pytest remains native unless explicitly selected.
-Nightly duration refresh still measures the full native environment, so its
-static-file timings do not measure this lane's cheaper execution cost.
+Nightly duration refresh uses the native environment with `--omit-static-tests`;
+it does not measure this lane's static population or its execution cost.
 
 Isolation plugins: [[tests/docs/test-fixtures/test-fixtures.meiva.okf.md]].

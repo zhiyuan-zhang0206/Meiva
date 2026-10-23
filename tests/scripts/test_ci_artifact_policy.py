@@ -39,7 +39,7 @@ def test_every_artifact_upload_is_non_blocking() -> None:
 
 
 def test_coverage_uploads_retry_once_and_expose_the_outcome() -> None:
-    for job_name in ("backend-shard", "backend-serial", "backend-static"):
+    for job_name in ("backend-shard", "backend-serial", "backend-static-tests"):
         job = _workflow_jobs()[job_name]
         upload = _step(job, "Upload coverage data")
         assert upload["id"] == "coverage-upload"

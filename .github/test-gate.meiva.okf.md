@@ -18,6 +18,12 @@ the verifier fails before dependency installation or coverage processing. A
 non-backend diff with successful structure retains the skipped backend check.
 Draft eligibility and the Trunk full-suite policy remain owned by `classify`.
 
+The independent `backend-static-tests` job owns static pytest execution and its
+JUnit, counts and coverage artifacts. It uses the same static population and
+process guards without installing the native toolchain. The required backend
+aggregator rejects its failure, cancellation or unexpected skip alongside the
+native/type job; non-backend changes retain their existing admission policy.
+
 Backend shards, enforced selected subsets, the serial timing-sensitive bucket,
 frontend Vitest and every e2e family propagate their native test command's final
 exit status. No external quarantine service or repository secrets change that
@@ -43,7 +49,7 @@ and canonical runs use the same test verdict.
 The same step counts the tests from the JUnit report pytest already wrote
 (`scripts/ci/shard_counts.py`), per `tests/` directory, into the job log and
 summary. The informational `backend test counts (all shards)` job adds the 8
-shards and the flaky bucket up and prints the difference against the previous
+shards, the flaky bucket and the static bucket up and prints the difference against the previous
 queue run's total, which each green Trunk merge-queue run records as the
 `test-count-baseline` artifact (main itself runs no CI), so a moved test that fell out of the suite shows as a changed count.
 It is not required and cannot fail the run.
