@@ -89,7 +89,7 @@ def finish_start(result: int, *, helper: HelperFactory | None, host: Host, home:
     except (RuntimeError, OSError, TimeoutError):
         from base.deploy.lifecycle.start_serving import clear_serving
 
-        clear_serving()
+        clear_serving(home)
         raise
 
 

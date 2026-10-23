@@ -206,7 +206,7 @@ class ScheduleManager:
     def _launch_revision(self, schedule_id: int, now: float) -> bool:
         from base.deploy.lifecycle import start_serving
 
-        with start_serving.recovery_permitted() as permitted:
+        with start_serving.recovery_permitted(self._home) as permitted:
             if not permitted:
                 self._refuse_launch(
                     schedule_id, "the serving receipt does not name this root; run meiva start"
@@ -277,7 +277,7 @@ class ScheduleManager:
 
         step = observe_gate(
             self._gate,
-            permitted=start_serving.is_serving(),
+            permitted=start_serving.is_serving(self._home),
             now=now,
             alert_after_s=self._policy.recovery_gate_alert_seconds,
         )

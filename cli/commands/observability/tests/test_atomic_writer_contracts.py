@@ -25,11 +25,11 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 _START_GENERATION = "00000000-0000-4000-8000-000000000001"
 
 
-def _marker_write(case: str, path: Path) -> None:
+def _marker_write(case: str, path: Path, home: Path) -> None:
     payload: dict[str, object] = {"z": 1, "a": "value"}
     if case == "start":
         start_serving.write_state(
-            start_serving.ServingState(state="starting", generation=_START_GENERATION)
+            home, start_serving.ServingState(state="starting", generation=_START_GENERATION)
         )
     elif case == "locks":
         home_lifecycle_locks.write_atomic(path, payload)
@@ -46,20 +46,16 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
         "locks": home_lifecycle_locks,
     }
     module = modules[case]
-    path = tmp_path / "state.json"
+    home = tmp_path / "home"
+    path = start_serving.state_path(home) if case == "start" else tmp_path / "state.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"old")
-    if case == "start":
-
-        def state_path(*_args: object) -> Path:
-            return path
-
-        monkeypatch.setattr(module, "state_path", state_path)
 
     def fail_sync(_path: Path) -> None:
         raise OSError("directory sync failure")
 
     monkeypatch.setattr(module, "_fsync_parent", fail_sync)
-    _marker_write(case, path)
+    _marker_write(case, path, home)
     raw = path.read_bytes()
     if case == "start":
         assert raw == (
@@ -69,7 +65,7 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
         )
     else:
         assert raw == b'{"a":"value","z":1}'
-    assert sorted(tmp_path.iterdir()) == [path]
+    assert sorted(path.parent.iterdir()) == [path]
     assert path.stat().st_mode & 0o777 == 0o600
 
 

@@ -46,8 +46,8 @@ def provenance(unit_home: Path) -> Generator[list[dict[str, Any]]]:
 def backend(
     provenance: list[dict[str, Any]], serving_root: start_serving.RootBirth, unit_home: Path
 ) -> Backend:
-    generation = start_serving.begin_start()
-    assert start_serving.mark_serving(generation, runtime=serving_root.runtime)
+    generation = start_serving.begin_start(unit_home)
+    assert start_serving.mark_serving(unit_home, generation, runtime=serving_root.runtime)
     return Backend(provenance)
 
 

@@ -13,4 +13,3 @@ exports = ["serving_entrypoint.py", "serving_root.py"]
 "test_start_serving.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.is_serving" = 1
 "test_start_serving.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.observe_root" = 2
 "test_start_serving.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.recovery_permitted" = 1
-"test_start_serving.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1

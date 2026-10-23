@@ -92,13 +92,15 @@ def _insert_schedule(
 def _host_is_serving(serving_root: RootBirth, _pty_home: str) -> Iterator[None]:
     """PTY schedule cases model a gateway that completed its start gate."""
     from base.deploy.lifecycle import start_serving
+    from base.paths import meiva_home
 
-    generation = start_serving.begin_start()
-    assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True
+    home = meiva_home()
+    generation = start_serving.begin_start(home)
+    assert start_serving.mark_serving(home, generation, runtime=serving_root.runtime) is True
     try:
         yield
     finally:
-        start_serving.clear_serving()
+        start_serving.clear_serving(home)
 
 
 # meiva:note

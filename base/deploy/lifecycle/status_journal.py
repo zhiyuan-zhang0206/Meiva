@@ -34,7 +34,7 @@ from typing import Any, cast
 import psutil
 
 from base.log import logger
-from base.paths import meiva_home, run_dir
+from base.paths import run_dir
 
 
 @dataclass
@@ -71,13 +71,13 @@ class LifecycleOp:
     resumed_from: ResumedFrom | None = None
 
 
-def journal_path() -> Path:
-    return run_dir(meiva_home()) / "lifecycle-op.json"
+def journal_path(home: Path) -> Path:
+    return run_dir(home) / "lifecycle-op.json"
 
 
-def _write(op: LifecycleOp) -> None:
+def _write(home: Path, op: LifecycleOp) -> None:
     """Atomic best-effort write; a failure is loud but never fails the op."""
-    path = journal_path()
+    path = journal_path(home)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         _fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".lifecycle-op.", suffix=".tmp")
@@ -110,7 +110,7 @@ def writer_alive(op: LifecycleOp) -> bool:
         return True
 
 
-def begin(operation: str, *, deadline: float | None = None) -> bool:
+def begin(home: Path, operation: str, *, deadline: float | None = None) -> bool:
     """Start journaling `operation` (stop / restart).
 
     Returns True when this call OWNS the journal: it started a fresh one,
@@ -126,11 +126,12 @@ def begin(operation: str, *, deadline: float | None = None) -> bool:
     whose pid a later process recycled reads as still-running and is not
     taken over — the conservative direction.
     """
-    op = read()
+    op = read(home)
     if op is not None and not op.complete:
         if writer_alive(op):
             return False
         _write(
+            home,
             LifecycleOp(
                 operation=operation,
                 pid=os.getpid(),
@@ -140,22 +141,23 @@ def begin(operation: str, *, deadline: float | None = None) -> bool:
                 resumed_from=ResumedFrom(
                     pid=op.pid, operation=op.operation, started_at=op.started_at
                 ),
-            )
+            ),
         )
         return True
     _write(
+        home,
         LifecycleOp(
             operation=operation,
             pid=os.getpid(),
             started_at=time.monotonic(),
             deadline=deadline,
-        )
+        ),
     )
     return True
 
 
 @contextmanager
-def phase(name: str) -> Generator[None, None, None]:
+def phase(home: Path, name: str) -> Generator[None, None, None]:
     """Record one named phase; its outcome is written even when it raises.
 
     With no journal yet (a caller that skipped begin), an implicit one is
@@ -163,7 +165,7 @@ def phase(name: str) -> Generator[None, None, None]:
     the close re-reads the current journal instead of writing the opener's
     snapshot, which would clobber inner phases.
     """
-    op = read()
+    op = read(home)
     if op is None:
         op = LifecycleOp(
             operation="unknown",
@@ -174,36 +176,38 @@ def phase(name: str) -> Generator[None, None, None]:
     entry = LifecyclePhase(name=name, started_at=time.monotonic())
     op.phases.append(entry)
     op.complete = False
-    _write(op)
+    _write(home, op)
     try:
         yield
     except BaseException:
-        _close_phase(entry, ok=False)
+        _close_phase(home, entry, ok=False)
         raise
-    _close_phase(entry, ok=True)
+    _close_phase(home, entry, ok=True)
 
 
-def _close_phase(entry: LifecyclePhase, *, ok: bool) -> None:
+def _close_phase(home: Path, entry: LifecyclePhase, *, ok: bool) -> None:
     """Mark one phase finished on the journal as it stands now."""
-    op = read()
+    op = read(home)
     if op is None:
         return
     for candidate in op.phases:
         if candidate.name == entry.name and candidate.started_at == entry.started_at:
             candidate.finished_at = time.monotonic()
             candidate.ok = ok
-            _write(op)
+            _write(home, op)
             return
 
 
-def finish(rc: int, *, error: str | None = None, extra: dict[str, Any] | None = None) -> None:
+def finish(
+    home: Path, rc: int, *, error: str | None = None, extra: dict[str, Any] | None = None
+) -> None:
     """Mark the operation complete with its final diagnosis."""
-    op = read()
+    op = read(home)
     if op is None:
         return
     op.complete = True
     op.result = {"rc": rc, "error": error, **(extra or {})}
-    _write(op)
+    _write(home, op)
 
 
 def _parse_phases(raw_phases: object) -> list[LifecyclePhase]:
@@ -249,10 +253,10 @@ def _parse_resumed_from(raw_resumed: object) -> ResumedFrom | None:
     return None
 
 
-def read() -> LifecycleOp | None:
+def read(home: Path) -> LifecycleOp | None:
     """The current journal, or None when absent or unreadable."""
     try:
-        raw = json.loads(journal_path().read_text())
+        raw = json.loads(journal_path(home).read_text())
     except (OSError, ValueError):
         return None
     if not isinstance(raw, dict):
@@ -283,6 +287,6 @@ def read() -> LifecycleOp | None:
     )
 
 
-def status_path() -> Path:
+def status_path(home: Path) -> Path:
     """The journal path, for printing the pointer line."""
-    return journal_path()
+    return journal_path(home)

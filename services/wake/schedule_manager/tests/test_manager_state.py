@@ -73,10 +73,9 @@ def pool(db_url: str) -> Iterator[ConnectionPool[psycopg.Connection]]:
 def fake_session(
     serving_root: start_serving.RootBirth, unit_home: Path
 ) -> tuple[_FakeBackend, list[int]]:
-    del unit_home
     backend = _FakeBackend()
-    generation = start_serving.begin_start()
-    assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True
+    generation = start_serving.begin_start(unit_home)
+    assert start_serving.mark_serving(unit_home, generation, runtime=serving_root.runtime) is True
     return backend, backend.launched
 
 
@@ -385,12 +384,13 @@ def test_a_refused_launch_does_not_consume_the_auto_restart_budget(
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
     emitted_events: EmittedEvents,
+    unit_home: Path,
 ) -> None:
     backend, _launched = fake_session
     sid = _insert_running(db_conn, "host-gated", generation="host-a")
     backend.epoch = "host-b"
     manager = schedule_manager(pool, backend)
-    start_serving.begin_start()
+    start_serving.begin_start(unit_home)
 
     for _ in range(POLICY.auto_restart_max_per_window + 2):
         manager.reconcile(now=NOW)
