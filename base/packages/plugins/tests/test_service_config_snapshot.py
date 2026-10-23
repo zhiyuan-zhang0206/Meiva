@@ -1,39 +1,36 @@
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
 from base.packages.plugins.config_registration import (
     read_config_image,
-    read_service_config,
     service_config_packet,
 )
 from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
-
-
-class Config(BaseModel):
-    model_config = ConfigDict(frozen=True)
-    enabled: bool = Field(default=True, strict=True)
-    interval: float = Field(default=300, strict=True)
+from base.packages.plugins.tests.plugin_boundary import run_boundary
+from base.packages.plugins.tests.plugin_boundary_child import Config
 
 
 def test_service_birth_snapshot_survives_authority_image_changes(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     image = tmp_path / "config.json"
     image.write_text('{"enabled":true,"interval":42}')
     captured = read_config_image(Config, image)
-    monkeypatch.setenv(SERVICE_PLUGIN_CONFIG_ENV, service_config_packet("fleet", captured))
+    packet = service_config_packet("fleet", captured)
     image.write_text('{"enabled":false,"interval":900}')
-    assert read_service_config("fleet", Config) == captured
-    assert read_config_image(Config, image).enabled is False
+    run_boundary(
+        "service-snapshot",
+        home=tmp_path,
+        env={SERVICE_PLUGIN_CONFIG_ENV: packet},
+        args=[str(image)],
+    )
 
 
-def test_absent_service_carrier_is_distinct_from_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(SERVICE_PLUGIN_CONFIG_ENV, raising=False)
-    assert read_service_config("fleet", Config) is None
+def test_absent_service_carrier_is_distinct_from_invalid(tmp_path: Path) -> None:
+    run_boundary("service-carrier", home=tmp_path, env={}, args=["absent"])
 
 
 @pytest.mark.parametrize(
@@ -49,11 +46,14 @@ def test_absent_service_carrier_is_distinct_from_invalid(monkeypatch: pytest.Mon
 def test_present_service_packet_never_falls_back(
     packet: str,
     error: type[Exception],
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv(SERVICE_PLUGIN_CONFIG_ENV, packet)
-    with pytest.raises(error):
-        read_service_config("fleet", Config)
+    run_boundary(
+        "service-carrier",
+        home=tmp_path,
+        env={SERVICE_PLUGIN_CONFIG_ENV: packet},
+        args=[error.__name__],
+    )
 
 
 def test_canonical_packet_rejects_sensitive_fields_and_nonfinite_values() -> None:
