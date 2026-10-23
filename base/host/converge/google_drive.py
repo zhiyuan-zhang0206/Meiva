@@ -9,9 +9,10 @@ machine cannot participate. This is framework plumbing, not the agent SDK.
 from __future__ import annotations
 
 import secrets
+from collections.abc import Iterable
 from pathlib import Path
 
-from base.native_process.os_platform import is_linux, is_macos
+from base.host.system.hostport import Host
 
 __all__ = ["candidate_drive_dirs", "find_writable_google_drive"]
 
@@ -52,14 +53,11 @@ def _linux_candidates(home: Path) -> list[Path]:
     return out
 
 
-def candidate_drive_dirs() -> list[Path]:
+def candidate_drive_dirs(*, home: Path, host: Host) -> list[Path]:
     """Likely Google Drive synced folders on this host (existence not checked)."""
-    home = Path.home()
-    if is_macos():
+    if host.platform.system == "darwin":
         return _macos_candidates(home)
-    if is_linux():
-        return _linux_candidates(home)
-    return []
+    return _linux_candidates(home)
 
 
 def is_writable(d: Path) -> bool:
@@ -77,14 +75,14 @@ def is_writable(d: Path) -> bool:
     return ok
 
 
-def find_writable_google_drive() -> Path | None:
+def find_writable_google_drive(candidates: Iterable[Path]) -> Path | None:
     """Return a Google Drive synced folder this process can write to, or None.
 
     Writability is verified by an actual write+read+delete round-trip: a Drive
     mount root can exist yet reject writes (only its synced subfolder accepts
     them), so directory existence alone is not enough to confirm participation.
     """
-    for d in candidate_drive_dirs():
+    for d in candidates:
         if is_writable(d):
             return d
     return None

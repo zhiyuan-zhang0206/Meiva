@@ -4,8 +4,3 @@ exports = ["containers.py", "db_authority_tests.py", "pgbouncer.py"]
 "authority" = ["db_authority_tests.py"]
 "pgbouncer.py" = ["containers.py"]
 "test_cluster_redis_acl.py" = ["containers.py"]
-
-[debt.first-party-patch]
-"test_timing_topology.py#monkeypatch.setattr base.config.settings.daemon.wedged_agent_inbound_age_seconds" = 1
-"test_timing_topology.py#monkeypatch.setattr base.deploy.progress_timeout.GATEWAY_PREFLIGHT_BUDGET_S" = 2
-"test_timing_topology.py#monkeypatch.setattr base.deploy.progress_timeout.UNIT_BUNDLE_TTL_S" = 1
