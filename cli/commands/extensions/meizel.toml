@@ -17,8 +17,3 @@ exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plug
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.private-name]
-"tests/test_external_skills.py -> external_skills.py#_SKILL_NAMES" = 1
-"tests/test_external_skills_adversarial.py -> external_skills.py#_SKILL_NAMES" = 1
-"tests/test_external_skills_crash_safety.py -> external_skills.py#_SKILL_NAMES" = 1

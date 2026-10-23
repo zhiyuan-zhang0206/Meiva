@@ -22,15 +22,6 @@ from cli.database.tests.command_inputs import command_config_machine as command_
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 SKILL_NAME = "operating-meiva-cluster"
-
-
-@pytest.fixture(autouse=True)
-def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        external_skills_module, "_SKILL_NAMES", ("operating-meiva-cluster",), raising=False
-    )
-
-
 MARKER_NAME = ".meiva-managed.json"
 
 
@@ -90,6 +81,19 @@ def _target(client_home: Path) -> Path:
     return target
 
 
+def _converge(
+    ctx: converge_host.ConvergeCtx,
+    *,
+    host_home: Path | None = None,
+    skill_names: tuple[str, ...] = (SKILL_NAME,),
+) -> None:
+    _bridge_module().converge_external_agent_skill(
+        ctx,
+        host_home=host_home,
+        skill_names=skill_names,
+    )
+
+
 def _run(
     repo: Path,
     home: Path,
@@ -97,8 +101,9 @@ def _run(
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    skill_names: tuple[str, ...] = (SKILL_NAME,),
 ) -> None:
-    _bridge_module().converge_external_agent_skill(
+    _converge(
         _ctx(
             repo,
             home,
@@ -107,6 +112,7 @@ def _run(
             command_config_machine=command_config_machine,
         ),
         host_home=home,
+        skill_names=skill_names,
     )
 
 
@@ -199,9 +205,8 @@ def test_second_converge_is_byte_and_timestamp_idempotent(
     _write_source(repo)
     client_home = home / ".codex"
     client_home.mkdir()
-    module = _bridge_module()
 
-    module.converge_external_agent_skill(
+    _converge(
         _ctx(
             repo,
             home,
@@ -215,7 +220,7 @@ def test_second_converge_is_byte_and_timestamp_idempotent(
     before = _tree_snapshot(target)
     mtimes = {path.relative_to(target): path.stat().st_mtime_ns for path in target.rglob("*")}
 
-    module.converge_external_agent_skill(
+    _converge(
         _ctx(
             repo,
             home,
@@ -245,8 +250,7 @@ def test_unmodified_managed_copy_updates_and_removes_only_stale_target_content(
     source = _write_source(repo)
     client_home = home / ".claude"
     client_home.mkdir()
-    module = _bridge_module()
-    module.converge_external_agent_skill(
+    _converge(
         _ctx(
             repo,
             home,
@@ -263,7 +267,7 @@ def test_unmodified_managed_copy_updates_and_removes_only_stale_target_content(
     (source / "SKILL.md").write_text("operator v2\n")
     (source / "references" / "recovery.md").unlink()
     (source / "references" / "workspace.md").write_text("workspace lookup\n")
-    module.converge_external_agent_skill(
+    _converge(
         _ctx(
             repo,
             home,
@@ -325,8 +329,7 @@ def test_user_modified_managed_copy_is_preserved_and_reported(
     source = _write_source(repo)
     client_home = home / ".claude"
     client_home.mkdir()
-    module = _bridge_module()
-    module.converge_external_agent_skill(
+    _converge(
         _ctx(
             repo,
             home,
@@ -342,7 +345,7 @@ def test_user_modified_managed_copy_is_preserved_and_reported(
     (source / "SKILL.md").write_text("operator v2\n")
     before = _tree_snapshot(target)
 
-    module.converge_external_agent_skill(
+    _converge(
         _ctx(
             repo,
             home,
@@ -372,7 +375,7 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
     client_home = home / ".codex"
     client_home.mkdir()
     module = _bridge_module()
-    module.converge_external_agent_skill(
+    _converge(
         _ctx(
             repo,
             home,
@@ -397,7 +400,7 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
 
     monkeypatch.setattr(module, "rename_no_replace", fail_staged_activation)
 
-    module.converge_external_agent_skill(
+    _converge(
         _ctx(
             repo,
             home,
@@ -411,7 +414,7 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
     assert _tree_snapshot(target) == before
     assert (unrelated / "keep").read_text() == "untouched\n"
     monkeypatch.setattr(module, "rename_no_replace", original_rename)
-    module.converge_external_agent_skill(
+    _converge(
         _ctx(
             repo,
             home,
@@ -442,15 +445,12 @@ def _write_deploy_source(repo: Path) -> Path:
 def test_both_operator_skills_install_and_update_independently(
     home: Path,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     client: str,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    bridge = _bridge_module()
-    monkeypatch.setattr(bridge, "_SKILL_NAMES", _DISTRIBUTED_SKILLS)
     repo = tmp_path / "repo"
     operate = _write_source(repo)
     deploy = _write_deploy_source(repo)
@@ -462,6 +462,7 @@ def test_both_operator_skills_install_and_update_independently(
         operator_database=operator_database,
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
+        skill_names=_DISTRIBUTED_SKILLS,
     )
     targets = client_home / "skills"
     operate_before = _tree_snapshot(targets / SKILL_NAME)
@@ -475,6 +476,7 @@ def test_both_operator_skills_install_and_update_independently(
         operator_database=operator_database,
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
+        skill_names=_DISTRIBUTED_SKILLS,
     )
     assert (targets / "deploy-meiva-cluster" / "SKILL.md").read_text() == "deployment v2\n"
     assert _tree_snapshot(targets / SKILL_NAME) == operate_before
@@ -485,6 +487,7 @@ def test_both_operator_skills_install_and_update_independently(
         operator_database=operator_database,
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
+        skill_names=_DISTRIBUTED_SKILLS,
     )
     assert (targets / SKILL_NAME / "SKILL.md").read_text() == "operator v2\n"
     assert (targets / "deploy-meiva-cluster" / "SKILL.md").read_text() == "deployment v2\n"
@@ -497,14 +500,11 @@ def test_both_operator_skills_install_and_update_independently(
 def test_operator_conflict_does_not_block_deployment_update(
     home: Path,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    bridge = _bridge_module()
-    monkeypatch.setattr(bridge, "_SKILL_NAMES", _DISTRIBUTED_SKILLS)
     repo = tmp_path / "repo"
     _write_source(repo)
     deploy = _write_deploy_source(repo)
@@ -515,6 +515,7 @@ def test_operator_conflict_does_not_block_deployment_update(
         operator_database=operator_database,
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
+        skill_names=_DISTRIBUTED_SKILLS,
     )
     target = _target(home / ".codex")
     (target / "SKILL.md").write_text("user customization\n")
@@ -525,6 +526,7 @@ def test_operator_conflict_does_not_block_deployment_update(
         operator_database=operator_database,
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
+        skill_names=_DISTRIBUTED_SKILLS,
     )
     assert (target / "SKILL.md").read_text() == "user customization\n"
     assert (target.parent / "deploy-meiva-cluster" / "SKILL.md").read_text() == "deployment v2\n"
@@ -553,7 +555,6 @@ def test_deployment_publication_crash_is_reported_without_changing_operator(
         command_config_machine=command_config_machine,
     )
     operator_before = _tree_snapshot(_target(home / ".codex"))
-    monkeypatch.setattr(bridge, "_SKILL_NAMES", _DISTRIBUTED_SKILLS)
     original_rename = bridge.rename_no_replace
 
     def interrupt_publication(source: Path, destination: Path) -> None:
@@ -569,6 +570,7 @@ def test_deployment_publication_crash_is_reported_without_changing_operator(
             operator_database=operator_database,
             producer=operator_pipeline,
             command_config_machine=command_config_machine,
+            skill_names=_DISTRIBUTED_SKILLS,
         )
     monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     capsys.readouterr()
@@ -578,6 +580,7 @@ def test_deployment_publication_crash_is_reported_without_changing_operator(
         operator_database=operator_database,
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
+        skill_names=_DISTRIBUTED_SKILLS,
     )
     assert "not resumed" in capsys.readouterr().err
     assert _tree_snapshot(_target(home / ".codex")) == operator_before
@@ -654,7 +657,7 @@ def test_explicit_home_seam_never_calls_platform_home(
         raise AssertionError("tests must not resolve the real platform home")
 
     monkeypatch.setattr(bridge.Path, "home", real_home_forbidden)
-    bridge.converge_external_agent_skill(
+    _converge(
         _ctx(
             repo,
             home,

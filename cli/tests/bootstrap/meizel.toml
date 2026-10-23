@@ -1,11 +1,16 @@
-exports = ["child_first_start.py", "child_main_dispatch.py", "child_telemetry_exit.py"]
+exports = [
+    "child_first_start.py",
+    "child_main_dispatch.py",
+    "child_telemetry_exit.py",
+    "init_identity.py",
+]
 
 
 [uses]
 "test_logging_entry.py" = ["_logging_entry_child.py"]
 "test_python_install.py" = ["_python_install_fixture.py"]
 "test_redis_binary_selection.py" = ["child_redis_probe.py"]
-"test_start_identity.py" = ["_init_identity.py"]
+"test_start_identity.py" = ["init_identity.py"]
 
 [loads]
 "_logging_entry_child.py" = ["services/agent_runner/agent_ops"]

@@ -45,7 +45,7 @@ _START: tuple[Group, ...] = (
 
 
 @pytest.fixture
-def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Callable[..., int]]:
+def env(tmp_path: Path) -> tuple[Cluster, Callable[..., int]]:
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q", "--initial-branch=main")
@@ -60,8 +60,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Calla
         (repo / "uv.lock").write_text(message)
         git(repo, "add", "-A")
         git(repo, "commit", "-qm", message)
-    cluster = Cluster(git(repo, "rev-parse", "HEAD~1"), git(repo, "rev-parse", "HEAD"))
-    monkeypatch.setattr(fleet_update, "REPO", repo)
+    cluster = Cluster(git(repo, "rev-parse", "HEAD~1"), git(repo, "rev-parse", "HEAD"), repo=repo)
     # meiva:note
     # The shipped table names real machines; a test cluster has its own aliases, so the table
     # in this repository is written the way an operator's pull request would write it.
@@ -70,12 +69,6 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Calla
     table.write_text(json.dumps(dict.fromkeys(cluster.hosts, cluster.helper_cert_root)))
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "baselines")
-    monkeypatch.setattr(fleet_update, "ssh", cluster.ssh)
-    # meiva:note
-    # The verification takes the clock from its caller, so the one fake clock the window already
-    # uses reaches it without a second patch.
-    monkeypatch.setattr(fleet_update, "time", cluster)
-    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
     logs = str(tmp_path / "logs")
 
     def run(half: str, *extra: str) -> int:
@@ -87,6 +80,12 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Calla
         new = ["--new", cluster.new] if half in ("run", "down") else []
         cluster.run_started_at = len(cluster.effects)
         argv = [half, "--gateway", "gw", "--log-dir", logs, *new, *chosen, *extra]
-        return fleet_update.main(argv)
+        return fleet_update.main(
+            argv,
+            repo=cluster.repo,
+            ssh_fn=cluster.ssh,
+            clock=cluster,
+            env=cluster.environ,
+        )
 
     return cluster, run

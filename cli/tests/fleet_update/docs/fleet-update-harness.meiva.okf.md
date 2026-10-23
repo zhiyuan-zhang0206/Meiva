@@ -10,8 +10,8 @@ tags: [cli, updates, testing]
 `cli/tests/fleet_update/` proves `cli.fleet_update` without SSH, a shell or
 launchd. `fleet_update_cluster.py` holds the in-memory `Cluster` each test
 drives; `conftest.py` builds the shared `env` fixture on top — a real git
-repository with an OLD and a NEW commit, `fleet_update.ssh` patched to the
-cluster, `fleet_update.time` patched to its fake clock. `test_fleet_update.py`
+repository with an OLD and a NEW commit, and `fleet_update.main` bound to the
+cluster's `repo`, `ssh` transport, fake clock, and environment map. `test_fleet_update.py`
 covers the halves' behavior and the explicit-argument forwarding (the `run`
 fixture supplies a default for every required choice, which a test overrides by
 passing that choice), `test_fleet_update_leases.py` the lease announcement and its

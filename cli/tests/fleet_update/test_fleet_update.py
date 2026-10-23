@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import plistlib
 import re
 import shlex
@@ -483,10 +484,10 @@ def test_preflight_refuses(
 
 @pytest.mark.parametrize("command", ["run", "down", "up"])
 def test_refuses_inside_an_meiva_agent(
-    env: tuple[Cluster, Callable[..., int]], monkeypatch: pytest.MonkeyPatch, command: str
+    env: tuple[Cluster, Callable[..., int]], command: str
 ) -> None:
     cluster, run = env
-    monkeypatch.setenv("MEIVA_AGENT_ID", "7")
+    cluster.environ["MEIVA_AGENT_ID"] = "7"
     assert run(command) == 2
     assert cluster.effects == []
 
@@ -503,7 +504,7 @@ def test_hosts_that_disagree_on_head_are_refused(
 
 def test_a_python_change_needs_the_flag(env: tuple[Cluster, Callable[..., int]]) -> None:
     cluster, run = env
-    repo = fleet_update.REPO
+    repo = cluster.repo
     (repo / ".python-version").write_text("3.12.13\n")
     git(repo, "commit", "-qam", "python")
     cluster.new = git(repo, "rev-parse", "HEAD")
@@ -539,7 +540,7 @@ _JOURNAL_WITH_BACKSLASHES = json.dumps(
 
 # meiva:note
 # A host home the real PROBE script can read: a checkout with a venv python and a journal.
-def _host_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, journal: str | None) -> Path:
+def _host_home(tmp_path: Path, journal: str | None) -> Path:
     source = tmp_path / ".meiva" / "source"
     (source / ".venv" / "bin").mkdir(parents=True)
     (source / ".venv" / "bin" / "python").symlink_to(sys.executable)
@@ -550,13 +551,16 @@ def _host_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, journal: str | N
         run = tmp_path / ".meiva" / "run"
         run.mkdir(parents=True)
         (run / "lifecycle-op.json").write_text(journal)
-    monkeypatch.setenv("HOME", str(tmp_path))
     return tmp_path / ".meiva" / "run" / "meiva-root" / "meiva-root.lock"
 
 
-def _probed(shell: str) -> dict[str, str]:
+def _probed(shell: str, home: Path) -> dict[str, str]:
     result = subprocess.run(
-        [shell, "-c", fleet_gate.PROBE], capture_output=True, text=True, check=True
+        [shell, "-c", fleet_gate.PROBE],
+        env={**os.environ, "HOME": str(home)},
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return {
         key: value for key, _, value in (line.partition("=") for line in result.stdout.splitlines())
@@ -564,14 +568,12 @@ def _probed(shell: str) -> dict[str, str]:
 
 
 @pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])
-def test_the_probe_carries_backslashes_in_the_journal_unchanged(
-    shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_probe_carries_backslashes_in_the_journal_unchanged(shell: str, tmp_path: Path) -> None:
     if not Path(shell).exists():
         pytest.skip(f"{shell} is not installed")
-    _host_home(tmp_path, monkeypatch, _JOURNAL_WITH_BACKSLASHES)
+    _host_home(tmp_path, _JOURNAL_WITH_BACKSLASHES)
 
-    facts = _probed(shell)
+    facts = _probed(shell, tmp_path)
 
     assert facts["head"] == git(tmp_path / ".meiva" / "source", "rev-parse", "HEAD")
     assert facts["dirty"] == "0"
@@ -581,20 +583,20 @@ def test_the_probe_carries_backslashes_in_the_journal_unchanged(
 
 @pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])
 def test_the_probe_reads_whether_a_meiva_root_holds_its_instance_lock(
-    shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    shell: str, tmp_path: Path
 ) -> None:
     if not Path(shell).exists():
         pytest.skip(f"{shell} is not installed")
-    lock = _host_home(tmp_path, monkeypatch, None)
-    assert _probed(shell)["root"] == "down", "no lock file: no root has ever run"
+    lock = _host_home(tmp_path, None)
+    assert _probed(shell, tmp_path)["root"] == "down", "no lock file: no root has ever run"
     lock.parent.mkdir(parents=True)
     held = instance_lock.acquire_instance_lock(lock.parent)
     try:
-        assert _probed(shell)["root"] == "up"
+        assert _probed(shell, tmp_path)["root"] == "up"
     finally:
         instance_lock.release_instance_lock(held)
-    assert _probed(shell)["root"] == "down"
-    assert _probed(shell)["op"] == "", "no journal reads as an empty record"
+    assert _probed(shell, tmp_path)["root"] == "down"
+    assert _probed(shell, tmp_path)["op"] == "", "no journal reads as an empty record"
 
 
 # meiva:note
@@ -635,9 +637,7 @@ def test_a_host_is_already_stopped_only_when_its_last_operation_is_a_completed_s
 
 
 @pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])
-def test_the_machine_name_is_asked_through_the_hosts_real_shell(
-    shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_machine_name_is_asked_through_the_hosts_real_shell(shell: str, tmp_path: Path) -> None:
     if not Path(shell).exists():
         pytest.skip(f"{shell} is not installed")
     source = tmp_path / ".meiva" / "source"
@@ -657,22 +657,27 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(
     python.parent.mkdir(parents=True)
     python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
     python.chmod(0o755)
-    monkeypatch.setenv("HOME", str(tmp_path))
 
     def ssh(_alias: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
-        return _run_locally(shell, command, stdin, emit)
+        return _run_locally(shell, command, stdin, emit, home=tmp_path)
 
-    monkeypatch.setattr(fleet_update, "ssh", ssh)
     args = argparse.Namespace(dry_run=False, log_dir=tmp_path / "logs", half="up")
 
-    names = fleet_verify.machine_names(fleet_update.Session(args), ["mac"])
+    names = fleet_verify.machine_names(fleet_update.Session(args, ssh_fn=ssh), ["mac"])
 
     assert names == {"mac": "mac-mini"}
 
 
-def _run_locally(shell: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
+def _run_locally(
+    shell: str, command: str, stdin: str | None, emit: Callable[[str], None], *, home: Path
+) -> int:
     done = subprocess.run(
-        [shell, "-c", command], input=stdin or "", capture_output=True, text=True, check=False
+        [shell, "-c", command],
+        env={**os.environ, "HOME": str(home)},
+        input=stdin or "",
+        capture_output=True,
+        text=True,
+        check=False,
     )
     for line in done.stdout.splitlines():
         emit(line)

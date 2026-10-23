@@ -9,8 +9,6 @@
 [debt.first-party-patch]
 "test_cli_pool_teardown.py#monkeypatch.setattr base.packages.extensions.adopt.adopt_local_installs" = 2
 "test_cli_pool_teardown.py#monkeypatch.setattr base.packages.extensions.materialize.materialize_skills" = 2
-"test_external_skills.py#monkeypatch.setattr cli.commands.extensions.external_skills._SKILL_NAMES" = 1
-"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills._SKILL_NAMES" = 1
 "test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.commit_activation" = 2
 "test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.materialize_source_snapshot" = 2
 "test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.rename_no_replace" = 9
@@ -22,7 +20,6 @@
 "test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skill_host.filesystem.os.fchmod" = 1
 "test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skill_host.filesystem.os.fstat" = 1
 "test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skill_host.filesystem.verify_cleanup_file" = 1
-"test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skills._SKILL_NAMES" = 1
 "test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skills.rename_no_replace" = 11
 "test_manifest_gate.py#monkeypatch.setattr base.host.git.host_version.host_version" = 1
 "test_manifest_gate.py#monkeypatch.setattr cli.commands.extensions.mcp.uv_sync" = 1
@@ -48,7 +45,6 @@
 
 [debt.unresolved-patch]
 "test_external_skills.py#monkeypatch.setattr bridge.Path.home" = 1
-"test_external_skills.py#monkeypatch.setattr bridge._SKILL_NAMES" = 3
 "test_external_skills.py#monkeypatch.setattr bridge.rename_no_replace" = 2
 "test_external_skills.py#monkeypatch.setattr module.rename_no_replace" = 2
 "test_packages_refresh.py#monkeypatch.setattr pass_._process_git" = 1

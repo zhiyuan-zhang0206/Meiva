@@ -27,7 +27,10 @@ from cli.commands._repo import repo_root
 from cli.commands.data_plane.stop_waits import deadline_after, remaining
 from cli.commands.lifecycle import _temporary_stop, root_driver, root_readiness
 from cli.commands.lifecycle._exclusive_resources import exclusive_resources
-from cli.commands.lifecycle.service_stop import force_close_shell_sessions
+from cli.commands.lifecycle.service_stop import (
+    SHELL_SESSION_STOP_WAIT_S,
+    force_close_shell_sessions,
+)
 from cli.database import OperatorDatabaseFactory
 from cli.database.lifecycle_audit import (
     operator_lifecycle_audit,
@@ -268,6 +271,7 @@ def do_stop(
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
     helper: HelperFactory | None,
+    shell_cleanup_wait_s: float = SHELL_SESSION_STOP_WAIT_S,
 ) -> int:
     """Shared stop kernel; only explicit force escalates a service stop."""
     _temporary_stop.require_extras_retirable(
@@ -310,6 +314,7 @@ def do_stop(
         producer=producer,
         machine=machine,
         helper=helper,
+        shell_cleanup_wait_s=shell_cleanup_wait_s,
     )
 
 
@@ -330,6 +335,7 @@ def cmd_stop(
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
     helper: HelperFactory | None,
+    shell_cleanup_wait_s: float = SHELL_SESSION_STOP_WAIT_S,
 ) -> int:
     # meiva:note
     # Stop this unit as the operator chose; retain its data.
@@ -355,6 +361,7 @@ def cmd_stop(
             producer=producer,
             machine=machine,
             helper=helper,
+            shell_cleanup_wait_s=shell_cleanup_wait_s,
         )
         command.exited(code)
         return code

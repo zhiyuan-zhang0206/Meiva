@@ -26,9 +26,11 @@ _ROW = ("name", "online", "identity_mismatch", "head_sha", "running_sha", "serve
 
 # meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
 class Cluster:
-    def __init__(self, old: str, new: str) -> None:
+    def __init__(self, old: str, new: str, *, repo: Path | None = None) -> None:
         self.old = old
         self.new = new
+        self.repo = repo or fleet_update.REPO
+        self.environ: dict[str, str] = {}
         self.hosts: dict[str, dict[str, Any]] = {
             a: {**_IDLE, "os": o, "head": old}
             for a, o in (("gw", "Linux"), ("mac", "Darwin"), ("lin", "Linux"))

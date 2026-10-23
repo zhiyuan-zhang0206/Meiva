@@ -21,7 +21,11 @@ from base.native_process.ownership import OwnedProcess, capture_tree, retain_pro
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.stop_waits import deadline_after, remaining, wait_for_exit
-from cli.commands.lifecycle.service_stop import close_shell_sessions, stop_data_plane
+from cli.commands.lifecycle.service_stop import (
+    SHELL_SESSION_STOP_WAIT_S,
+    close_shell_sessions,
+    stop_data_plane,
+)
 from services.supervision.roster import build_services
 
 
@@ -340,6 +344,7 @@ def _stop_selected(
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
     helper: HelperFactory | None,
+    shell_cleanup_wait_s: float = SHELL_SESSION_STOP_WAIT_S,
 ) -> None:
     start_serving.clear_serving()
     if announce:
@@ -369,6 +374,7 @@ def _stop_selected(
                 direct_db="gateway" in roles,
                 database_factory=database_factory,
                 local_machine=machine,
+                cleanup_wait_s=shell_cleanup_wait_s,
             ),
         )
         # meiva:note
@@ -419,6 +425,7 @@ def stop(
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
     helper: HelperFactory | None,
+    shell_cleanup_wait_s: float = SHELL_SESSION_STOP_WAIT_S,
 ) -> int:
     # meiva:note
     # Stop the selected resources; agent-host settles the in-flight turns on its own SIGTERM.
@@ -488,6 +495,7 @@ def stop(
             producer=producer,
             machine=machine,
             helper=helper,
+            shell_cleanup_wait_s=shell_cleanup_wait_s,
         )
     except (RuntimeError, TimeoutError, OSError, subprocess.TimeoutExpired) as exc:
         report_incomplete(exc, phases, owns_journal=owns_journal)

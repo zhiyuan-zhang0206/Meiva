@@ -26,7 +26,7 @@ from cli.commands.tests import test_single_box as _single_box
 from cli.commands.tests.test_single_box import Born
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from cli.tests.bootstrap._init_identity import prepare_init_identity
+from cli.tests.bootstrap.init_identity import prepare_init_identity
 
 configured = _single_box.configured
 born = _single_box.born

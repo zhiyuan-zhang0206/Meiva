@@ -80,9 +80,6 @@ exports = ["bootstrap"]
 "test_unit_capability_cli.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
 "test_unit_capability_cli.py#monkeypatch.setattr cli.start_intent.checkout" = 1
 
-[debt.private-module]
-"test_unit_capability_cli.py -> bootstrap/_init_identity.py" = 1
-
 [debt.stdlib-patch]
 "test_main_dispatch.py#monkeypatch.setattr os.environ" = 1
 "test_plugin_scaffold.py#monkeypatch.setattr subprocess.run" = 1

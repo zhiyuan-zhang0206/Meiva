@@ -16,7 +16,7 @@ from base.host import proc
 from base.packages.plugins.enable_config import write_local
 from base.telemetry import EventPipeline
 from cli.commands.extensions import memory
-from cli.commands.extensions._plugin_scaffold import run_plugin_scaffolds
+from cli.commands.extensions.memory import run_plugin_scaffolds
 from cli.commands.lifecycle import converge_host
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database

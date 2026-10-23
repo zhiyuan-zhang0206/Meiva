@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import PIPE, STDOUT
@@ -98,14 +98,24 @@ def ssh(alias: str, command: str, stdin: str | None, emit: Callable[[str], None]
     return process.wait()
 
 
-def _git(*args: str) -> subprocess.CompletedProcess[str]:
-    command = ["git", "-C", str(REPO), *args]
+def _git(*args: str, repo: Path = REPO) -> subprocess.CompletedProcess[str]:
+    command = ["git", "-C", str(repo), *args]
     return subprocess.run(command, capture_output=True, text=True, check=False)
 
 
 class Session:
-    def __init__(self, args: argparse.Namespace) -> None:
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        *,
+        repo: Path = REPO,
+        ssh_fn: Callable[[str, str, str | None, Callable[[str], None]], int] = ssh,
+        clock: Any = time,
+    ) -> None:
         self.dry_run: bool = args.dry_run
+        self.repo: Path = repo
+        self.ssh_fn = ssh_fn
+        self.clock: Any = clock
         args.log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         path = args.log_dir / f"{datetime.now(UTC):%Y%m%dT%H%M%S.%fZ}-{args.half}.log"
         self.log = os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w")
@@ -131,7 +141,7 @@ class Session:
             lines.append(line)
             self.say(f"    {alias}| {line}")
 
-        if rc := ssh(alias, script, stdin, emit):
+        if rc := self.ssh_fn(alias, script, stdin, emit):
             raise FailedError(f"{alias}: exit {rc}: {lines[-1] if lines else 'no output'}")
         return "\n".join(lines)
 
@@ -147,13 +157,13 @@ def _old_target(
     if len(older) > 1:
         return [f"hosts disagree on HEAD: {heads}"], None
     resolved = next(iter(older)) if older else None
-    if resolved and _git("cat-file", "-e", f"{resolved}^{{commit}}").returncode:
-        return [f"OLD {resolved} is not in {REPO}: git fetch origin"], None
+    if resolved and _git("cat-file", "-e", f"{resolved}^{{commit}}", repo=s.repo).returncode:
+        return [f"OLD {resolved} is not in {s.repo}: git fetch origin"], None
     reasons: list[str] = []
     if resolved:
-        stat = _git("diff", "--stat", resolved, new, "--", *_WATCHED).stdout.rstrip()
+        stat = _git("diff", "--stat", resolved, new, "--", *_WATCHED, repo=s.repo).stdout.rstrip()
         s.say(stat or "no change under " + " ".join(_WATCHED))
-        python = _git("diff", "--quiet", resolved, new, "--", ".python-version")
+        python = _git("diff", "--quiet", resolved, new, "--", ".python-version", repo=s.repo)
         if python.returncode and args.python != "--allow-python-change":
             reasons.append(".python-version changes (venvs rebuild): pass --allow-python-change")
     return reasons, resolved
@@ -187,7 +197,7 @@ def _preflight(
         s.run(alias, f'{HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
     probes = {alias: probe_helper(s, alias, new) for alias in everyone}
     rebuild = bool(getattr(args, "rebuild_extras", False))
-    table = baselines(REPO)
+    table = baselines(s.repo)
     return (
         refusals(probes, table, rebuild=rebuild),
         resolved,
@@ -301,10 +311,10 @@ def _lease_window(s: Session, args: argparse.Namespace) -> None:
     if s.dry_run:
         s.say(f"leases: dry run: not waiting {args.lease_confirm_seconds}s")
         return
-    deadline = time.monotonic() + args.lease_confirm_seconds
-    while (left := deadline - time.monotonic()) > 0:
+    deadline = s.clock.monotonic() + args.lease_confirm_seconds
+    while (left := deadline - s.clock.monotonic()) > 0:
         s.say(f"leases: {left:.0f}s left: release or renew them, or let the stop end them")
-        time.sleep(min(LEASE_TICK_S, left))
+        s.clock.sleep(min(LEASE_TICK_S, left))
 
 
 # meiva:note
@@ -369,9 +379,9 @@ def _host_up_and_journal(s: Session, alias: str) -> tuple[bool, dict[str, Any] |
 
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 def down(s: Session, args: argparse.Namespace) -> None:
-    new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}").stdout.strip()
+    new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}", repo=s.repo).stdout.strip()
     if not new:
-        raise FailedError(f"refused: {args.new} is not a commit in {REPO}; git fetch origin")
+        raise FailedError(f"refused: {args.new} is not a commit in {s.repo}; git fetch origin")
     reasons, _old, serving, rebuilding = _preflight(s, args, new)
     if reasons:
         raise FailedError("refused: " + "; ".join(reasons))
@@ -494,7 +504,7 @@ def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
         started=started,
         program=f"{_PYTHON} -",
         gateway_stdin=program_text(VERIFY_SCRIPTS / "fleet_gateway.py"),
-        clock=time,
+        clock=s.clock,
     )
     failures += verified
     # meiva:note
@@ -665,15 +675,23 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    repo: Path = REPO,
+    ssh_fn: Callable[[str, str, str | None, Callable[[str], None]], int] = ssh,
+    clock: Any = time,
+    env: Mapping[str, str] | None = None,
+) -> int:
     args = _parse(argv)
-    if "MEIVA_AGENT_ID" in os.environ:
+    effective_env = os.environ if env is None else env
+    if "MEIVA_AGENT_ID" in effective_env:
         print(
             "refused: run from a plain login shell or an OS-owned job, not an Meiva "
             "agent's shell (a stop closes it); submit the job and return so the agent can drain"
         )
         return 2
-    s = Session(args)
+    s = Session(args, repo=repo, ssh_fn=ssh_fn, clock=clock)
     phase = "down" if args.half == "run" else args.half
     try:
         hosts = [args.gateway, *args.runner]
