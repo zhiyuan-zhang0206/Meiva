@@ -25,6 +25,13 @@ STATIC_TEST_PATHS = (
 )
 
 
+# meiva:note
+# These compiler contracts require the existing native job's locked Node/TypeScript installation.
+# Keep their exact file separate from the enclosing standard-library static tool contracts.
+# meiva:link tests/fixtures/docs/static-environment.meiva.okf.md
+NATIVE_TEST_PATHS = ("meizel/tests/explain/test_typescript.py",)
+
+
 class TestEnvironment(StrEnum):
     NATIVE = "native"
     STATIC = "static"
@@ -54,10 +61,17 @@ def _owned_path(config: pytest.Config, path: Path) -> bool:
         relative = path.resolve().relative_to(config.rootpath.resolve())
     except ValueError:
         return False
-    return any(
+    return relative.as_posix() not in NATIVE_TEST_PATHS and any(
         relative == Path(owned)
         or ((config.rootpath / owned).is_dir() and relative.is_relative_to(owned))
         for owned in STATIC_TEST_PATHS
+    )
+
+
+def _contains_native_tests(config: pytest.Config, path: Path) -> bool:
+    return any(
+        (config.rootpath / native).resolve().is_relative_to(path.resolve())
+        for native in NATIVE_TEST_PATHS
     )
 
 
@@ -95,14 +109,17 @@ def pytest_configure(config: pytest.Config) -> None:
         return
     missing = [
         path
-        for path in STATIC_TEST_PATHS
+        for path in (*STATIC_TEST_PATHS, *NATIVE_TEST_PATHS)
         if not (config.rootpath / path).is_file() and not (config.rootpath / path).is_dir()
     ]
     if missing:
         raise pytest.UsageError(f"Static test ownership names missing paths: {missing}")
     if not static_mode(config):
         config.args[:] = [
-            arg for arg in config.args if not _owned_path(config, _argument_path(config, arg))
+            arg
+            for arg in config.args
+            if not _owned_path(config, _argument_path(config, arg))
+            or _contains_native_tests(config, _argument_path(config, arg))
         ]
         return
     if config.getoption("omit_static_tests"):
@@ -114,7 +131,16 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
-    if config.getoption("omit_static_tests") and _owned_path(config, collection_path):
+    if static_mode(config) and any(
+        collection_path.resolve() == (config.rootpath / path).resolve()
+        for path in NATIVE_TEST_PATHS
+    ):
+        return True
+    if (
+        config.getoption("omit_static_tests")
+        and _owned_path(config, collection_path)
+        and not _contains_native_tests(config, collection_path)
+    ):
         return True
     return None
 

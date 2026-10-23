@@ -72,3 +72,8 @@ Source observations do not enter PurityItem, Fact, Code, diagnostics, verdict,
 recorded debt, bootstrap JSON, selectors or static admission. The baseline-only
 `debt` report retains its separate evidence basis. No caching or speedup claim is
 part of this feature. Owner: [[meizel/docs/checker/purity.meiva.okf.md]].
+
+The producer integration contracts require Node and the locked installed compiler.
+They belong to the existing native backend test lane; the explicit static-test
+owner excludes only `meizel/tests/explain/test_typescript.py`. The tool's ordinary
+stdlib startup and Python explain contracts do not gain that execution dependency.
