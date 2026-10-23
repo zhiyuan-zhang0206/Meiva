@@ -8,7 +8,6 @@ from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
-from radon.complexity import ComplexityVisitor
 from radon.visitors import Class, Function
 
 COMPLEXITY_HARD = 15
@@ -61,7 +60,7 @@ def complexity_scores(
     tree: ast.AST,
     nodes: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
     *,
-    visitor_from_ast: Callable[[ast.AST], Any] = ComplexityVisitor.from_ast,
+    visitor_from_ast: Callable[[ast.AST], Any],
 ) -> dict[str, int]:
     """Use Radon 6.0.1 on the shared AST, including its local-class collection gap."""
     scores = _block_scores(visitor_from_ast(tree).blocks)
@@ -117,7 +116,7 @@ def measure_quality(
     tree: ast.AST,
     path: str,
     *,
-    visitor_from_ast: Callable[[ast.AST], Any] = ComplexityVisitor.from_ast,
+    visitor_from_ast: Callable[[ast.AST], Any],
 ) -> dict[str, dict[str, int]]:
     nodes = function_nodes(tree, path)
     return {

@@ -93,7 +93,10 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path, PurePosixPath
+
+from radon.complexity import ComplexityVisitor
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
@@ -347,9 +350,7 @@ def _check_ast_and_quality(
     repo_root: Path,
     renames: dict[str, str] | None = None,
     parse_ast: Callable[..., ast.Module],
-    measure_quality: Callable[
-        [ast.AST, str], dict[str, dict[str, int]]
-    ] = quality_budget.measure_quality,
+    measure_quality: Callable[[ast.AST, str], dict[str, dict[str, int]]],
 ) -> list[str]:
     files = limits.budget_files(targets, repo_root, _STRUCTURE_DIRS)
     ast_files = _ast_rule_files(argv, repo_root)
@@ -419,9 +420,7 @@ def main(
     env_base: str | None = None,
     use_env_base: bool = True,
     parse_ast: Callable[..., ast.Module],
-    measure_quality: Callable[
-        [ast.AST, str], dict[str, dict[str, int]]
-    ] = quality_budget.measure_quality,
+    measure_quality: Callable[[ast.AST, str], dict[str, dict[str, int]]] | None = None,
 ) -> int:
     """Run the gate for CLI arguments against an explicit checkout and comparison commit.
 
@@ -431,6 +430,10 @@ def main(
     Diagnostics use stdout/stderr and the return value is the CLI exit status.
     """
     repo_root = repo_root.resolve() if repo_root is not None else _REPO_ROOT
+    if measure_quality is None:
+        measure_quality = partial(
+            quality_budget.measure_quality, visitor_from_ast=ComplexityVisitor.from_ast
+        )
     argv, full, nothing_changed = _parse_args(argv if argv is not None else sys.argv[1:], repo_root)
     if nothing_changed:
         return 0
