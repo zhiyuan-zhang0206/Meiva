@@ -1,9 +1,13 @@
 exports = []
 
 [debt.first-party-patch]
+"test_load_report.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_config_boot_race.py#monkeypatch.setattr base.packages.plugins.config_registration.config_from_image" = 1
 "test_config_boot_race.py#monkeypatch.setattr base.packages.plugins.config_registration.read_plugin_config" = 1
 "test_config_boot_race.py#monkeypatch.setattr base.packages.plugins.config_registration.write_default_disk_image" = 3
 
 [debt.restricted-python]
 "test_config_boot_race.py#python -c" = 1
+
+[debt.unresolved-patch]
+"test_flags.py#monkeypatch.setattr type(settings).has_domain" = 1

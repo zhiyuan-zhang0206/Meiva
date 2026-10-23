@@ -9,6 +9,7 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
+from base import config
 from base.lm.catalog import ModelCatalog
 from base.lm.provider_api import ProviderBinding
 from base.packages.tests.model_catalog import AddBindings
@@ -38,7 +39,17 @@ class _RecordingTracer:
         return span
 
 
-def test_emit_billing_event_records_schema_v1_attributes() -> None:
+def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
+    from base.telemetry import tracing as tracing_mod
+
+    tracer = _RecordingTracer()
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
+    monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
+    return tracer
+
+
+def test_emit_billing_event_records_schema_v1_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
     """A priced cached call is one immediately-ended billing span with the v1 fields.
 
     The regression this catches is a billed provider call missing an attribute,
@@ -46,7 +57,8 @@ def test_emit_billing_event_records_schema_v1_attributes() -> None:
     """
     from base.lm.usage import emit_billing_event
 
-    tracer = _RecordingTracer()
+    tracer = _enable_tracing(monkeypatch)
+
     emit_billing_event(
         vendor="deepseek",
         model="deepseek-v4-pro",
@@ -56,8 +68,6 @@ def test_emit_billing_event_records_schema_v1_attributes() -> None:
         cost_usd=0.0003476,
         usage_kind="agent",
         start_time_ns=123_456,
-        trace_enabled=True,
-        get_tracer=lambda _name: tracer,
     )
 
     assert len(tracer.spans) == 1
@@ -83,11 +93,12 @@ def test_emit_billing_event_records_schema_v1_attributes() -> None:
 @pytest.mark.parametrize("path", ["message", "durable"])
 def test_message_billing_accounts_for_both_cache_write_ttls(
     model_catalog: ModelCatalog,
+    monkeypatch: pytest.MonkeyPatch,
     path: str,
 ) -> None:
     from base.lm.usage import emit_billing_from_message, log_usage_from_message
 
-    tracer = _RecordingTracer()
+    tracer = _enable_tracing(monkeypatch)
     message = AIMessage(
         content="answer",
         usage_metadata={
@@ -103,21 +114,11 @@ def test_message_billing_accounts_for_both_cache_write_ttls(
     )
     if path == "message":
         emit_billing_from_message(
-            message,
-            model="claude-opus-5-5",
-            usage_kind="chat",
-            catalog=model_catalog,
-            trace_enabled=True,
-            get_tracer=lambda _name: tracer,
+            message, model="claude-opus-5-5", usage_kind="chat", catalog=model_catalog
         )
     else:
         log_usage_from_message(
-            message,
-            model="claude-opus-5-5",
-            usage_kind="agent",
-            catalog=model_catalog,
-            trace_enabled=True,
-            get_tracer=lambda _name: tracer,
+            message, model="claude-opus-5-5", usage_kind="agent", catalog=model_catalog
         )
     assert len(tracer.spans) == 1
     attrs = tracer.spans[0].attributes
@@ -127,7 +128,7 @@ def test_message_billing_accounts_for_both_cache_write_ttls(
 
 
 def test_emit_billing_from_message_marks_unpriced_model(
-    model_catalog: ModelCatalog,
+    model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A known vendor without catalog pricing records an explicit free-unpriced span.
 
@@ -136,19 +137,14 @@ def test_emit_billing_from_message_marks_unpriced_model(
     """
     from base.lm.usage import emit_billing_from_message
 
-    tracer = _RecordingTracer()
+    tracer = _enable_tracing(monkeypatch)
     message = AIMessage(
         content="answer",
         usage_metadata={"input_tokens": 20, "output_tokens": 5, "total_tokens": 25},
     )
 
     emit_billing_from_message(
-        message,
-        model="deepseek-not-priced",
-        usage_kind="chat",
-        catalog=model_catalog,
-        trace_enabled=True,
-        get_tracer=lambda _name: tracer,
+        message, model="deepseek-not-priced", usage_kind="chat", catalog=model_catalog
     )
 
     assert len(tracer.spans) == 1
@@ -159,6 +155,7 @@ def test_emit_billing_from_message_marks_unpriced_model(
 
 def test_emit_billing_from_message_skips_missing_usage_metadata(
     model_catalog: ModelCatalog,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A response with no standardized token usage produces no billing span.
 
@@ -167,15 +164,13 @@ def test_emit_billing_from_message_skips_missing_usage_metadata(
     """
     from base.lm.usage import emit_billing_from_message
 
-    tracer = _RecordingTracer()
+    tracer = _enable_tracing(monkeypatch)
 
     emit_billing_from_message(
         AIMessage(content="answer"),
         model="deepseek-v4-pro",
         usage_kind="chat",
         catalog=model_catalog,
-        trace_enabled=True,
-        get_tracer=lambda _name: tracer,
     )
 
     assert tracer.spans == []
@@ -234,7 +229,9 @@ def test_vendor_of_model_uses_registered_plugin_display_name(
     assert vendor_of_model("acme-fast", catalog=model_catalog) == "acme ai"
 
 
-def test_emit_billing_event_is_noop_when_tracing_is_disabled() -> None:
+def test_emit_billing_event_is_noop_when_tracing_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Disabling tracing prevents even tracer acquisition on the hot path.
 
     The regression this catches is the observability kill switch still
@@ -243,6 +240,9 @@ def test_emit_billing_event_is_noop_when_tracing_is_disabled() -> None:
     from base.lm.usage import emit_billing_event
 
     tracer = _RecordingTracer()
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", False)
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
+
     emit_billing_event(
         vendor="deepseek",
         model="deepseek-v4-pro",
@@ -250,14 +250,12 @@ def test_emit_billing_event_is_noop_when_tracing_is_disabled() -> None:
         tok_out=1,
         cost_usd=0.0,
         usage_kind="chat",
-        trace_enabled=False,
-        get_tracer=lambda _name: tracer,
     )
 
     assert tracer.spans == []
 
 
-def test_emit_billing_event_absorbs_tracing_failure() -> None:
+def test_emit_billing_event_absorbs_tracing_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """A tracing failure cannot turn a completed provider call into an error.
 
     The regression this catches is observability availability changing the
@@ -265,8 +263,12 @@ def test_emit_billing_event_absorbs_tracing_failure() -> None:
     """
     from base.lm.usage import emit_billing_event
 
+    _enable_tracing(monkeypatch)
+
     def _broken_tracer(_name: str) -> _RecordingTracer:
         raise RuntimeError("tracing is unavailable")
+
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", _broken_tracer)
 
     emit_billing_event(
         vendor="deepseek",
@@ -275,8 +277,6 @@ def test_emit_billing_event_absorbs_tracing_failure() -> None:
         tok_out=1,
         cost_usd=0.0,
         usage_kind="chat",
-        trace_enabled=True,
-        get_tracer=_broken_tracer,
     )
 
 
@@ -284,12 +284,13 @@ def test_emit_billing_event_absorbs_tracing_failure() -> None:
 @pytest.mark.parametrize("cached", [None, 0])
 def test_billing_distinguishes_unmetered_cache_from_reported_zero(
     model_catalog: ModelCatalog,
+    monkeypatch: pytest.MonkeyPatch,
     path: str,
     cached: int | None,
 ) -> None:
     from base.lm.usage import emit_billing_from_message, log_usage_from_message
 
-    tracer = _RecordingTracer()
+    tracer = _enable_tracing(monkeypatch)
     message = AIMessage(
         content="answer",
         usage_metadata={
@@ -301,21 +302,11 @@ def test_billing_distinguishes_unmetered_cache_from_reported_zero(
     )
     if path == "message":
         emit_billing_from_message(
-            message,
-            model="deepseek-flash",
-            usage_kind="chat",
-            catalog=model_catalog,
-            trace_enabled=True,
-            get_tracer=lambda _name: tracer,
+            message, model="deepseek-flash", usage_kind="chat", catalog=model_catalog
         )
     else:
         log_usage_from_message(
-            message,
-            model="deepseek-flash",
-            usage_kind="chat",
-            catalog=model_catalog,
-            trace_enabled=True,
-            get_tracer=lambda _name: tracer,
+            message, model="deepseek-flash", usage_kind="chat", catalog=model_catalog
         )
     [span] = tracer.spans
     assert span.attributes["meiva.billing.tokens_in"] == 1000

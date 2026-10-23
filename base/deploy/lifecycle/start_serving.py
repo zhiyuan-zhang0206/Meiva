@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, Self, cast
@@ -32,15 +32,13 @@ _STATE_FILENAME = "start-serving.json"
 _LOCK_FILENAME = "start-serving.lock"
 
 
-def state_path(home: Path | None = None) -> Path:
+def state_path() -> Path:
     """The per-unit serving state persisted across service processes."""
-    resolved_home = meiva_home() if home is None else home
-    return run_dir(resolved_home) / _STATE_FILENAME
+    return run_dir(meiva_home()) / _STATE_FILENAME
 
 
-def _lock_path(home: Path | None = None) -> Path:
-    resolved_home = meiva_home() if home is None else home
-    return run_dir(resolved_home) / _LOCK_FILENAME
+def _lock_path() -> Path:
+    return run_dir(meiva_home()) / _LOCK_FILENAME
 
 
 class RootBirth(EvidenceModel):
@@ -76,10 +74,9 @@ class ServingState(EvidenceModel):
         return self
 
 
-def _read_state(home: Path | None = None) -> ServingState | None:
-    path = state_path() if home is None else state_path(home)
+def _read_state() -> ServingState | None:
     try:
-        return ServingState.model_validate_json(regular_bytes(path))
+        return ServingState.model_validate_json(regular_bytes(state_path()))
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as exc:
@@ -124,18 +121,13 @@ def observe_root() -> RootBirth:
     )
 
 
-def born_identity(
-    *,
-    home: Path | None = None,
-    observe_root_fn: Callable[[], RootBirth] | None = None,
-) -> ServingState | None:
+def born_identity() -> ServingState | None:
     """Return only current exact root evidence; missing/unknown never permits."""
-    state = _read_state(home)
+    state = _read_state()
     if state is None or state.state != "serving" or state.birth is None:
         return None
-    observer = observe_root if observe_root_fn is None else observe_root_fn
     try:
-        if state.birth.same_generation(observer()) and _read_state(home) == state:
+        if state.birth.same_generation(observe_root()) and _read_state() == state:
             return state
         return None
     except (OSError, psutil.Error, ValueError, RuntimeError) as exc:
@@ -156,8 +148,8 @@ def _sync_parent_or_log(path: Path) -> None:
         _log.warning("[start-serving] directory fsync failed after marker change", exc_info=True)
 
 
-def write_state(state: ServingState, *, home: Path | None = None) -> None:
-    path = state_path() if home is None else state_path(home)
+def write_state(state: ServingState) -> None:
+    path = state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(
         path, state.model_dump_json(), encoding="utf-8", mode=0o600, prefix=".start-serving-"
@@ -165,62 +157,47 @@ def write_state(state: ServingState, *, home: Path | None = None) -> None:
     _sync_parent_or_log(path)
 
 
-def begin_start(*, home: Path | None = None) -> str:
+def begin_start() -> str:
     """Invalidate any previous success and return this start's generation."""
     generation = str(uuid.uuid4())
-    with file_lock(_lock_path(home)):
-        write_state(ServingState(state="starting", generation=generation), home=home)
+    with file_lock(_lock_path()):
+        write_state(ServingState(state="starting", generation=generation))
     return generation
 
 
-def mark_serving(
-    generation: str,
-    *,
-    runtime: LoadedRuntimeIdentity,
-    home: Path | None = None,
-    observe_root_fn: Callable[[], RootBirth] | None = None,
-) -> bool:
+def mark_serving(generation: str, *, runtime: LoadedRuntimeIdentity) -> bool:
     """Publish serving only when ``generation`` still owns the start attempt."""
-    observer = observe_root if observe_root_fn is None else observe_root_fn
-    with file_lock(_lock_path(home)):
-        current = _read_state(home)
+    with file_lock(_lock_path()):
+        current = _read_state()
         if current is None or current.state != "starting" or current.generation != generation:
             return False
-        birth = observer()
+        birth = observe_root()
         if birth.runtime != runtime:
             raise RuntimeError("serving root differs from the admitted loaded runtime")
-        write_state(ServingState(state="serving", generation=generation, birth=birth), home=home)
+        write_state(ServingState(state="serving", generation=generation, birth=birth))
         return True
 
 
-def is_serving(
-    *,
-    home: Path | None = None,
-    observe_root_fn: Callable[[], RootBirth] | None = None,
-) -> bool:
+def is_serving() -> bool:
     """Whether a completed current-generation start permits recovery actions."""
-    return born_identity(home=home, observe_root_fn=observe_root_fn) is not None
+    return born_identity() is not None
 
 
 @contextmanager
-def recovery_permitted(
-    *,
-    home: Path | None = None,
-    observe_root_fn: Callable[[], RootBirth] | None = None,
-) -> Generator[bool]:
+def recovery_permitted() -> Generator[bool]:
     """Authorize one recovery action while excluding a new start or stop.
 
     The caller keeps this context through the actual revive or launch. That
     makes the serving check and its effect one indivisible operation relative
     to the start generation change, rather than a racy check-then-act pair.
     """
-    with file_lock(_lock_path(home)):
-        yield born_identity(home=home, observe_root_fn=observe_root_fn) is not None
+    with file_lock(_lock_path()):
+        yield born_identity() is not None
 
 
-def clear_serving(*, home: Path | None = None) -> None:
+def clear_serving() -> None:
     """Remove this unit's serving authority before a deliberate stop."""
-    with file_lock(_lock_path(home)):
-        path = state_path() if home is None else state_path(home)
+    with file_lock(_lock_path()):
+        path = state_path()
         path.unlink(missing_ok=True)
         _sync_parent_or_log(path)

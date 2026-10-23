@@ -46,10 +46,12 @@ def test_declared_dependency_reads_the_constructed_process_domain() -> None:
     assert read_declared_flag(FLAG, (FLAG,)) == settings.daemon.notice_ttl_limit_seconds
 
 
-def test_unavailable_domain_is_rejected_without_default() -> None:
-    class _UnavailableSettings:
-        def has_domain(self, _domain: str) -> bool:
-            return False
+def test_unavailable_domain_is_rejected_without_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(_self: object, _domain: str) -> bool:
+        return False
 
+    monkeypatch.setattr(type(settings), "has_domain", unavailable)
     with pytest.raises(FlagDomainUnavailable):
-        read_declared_flag(FLAG, (FLAG,), settings_view=_UnavailableSettings())
+        read_declared_flag(FLAG, (FLAG,))

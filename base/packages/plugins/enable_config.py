@@ -293,7 +293,6 @@ def report_dangling(exc: DanglingPlugin, report: load_report.Reporter | None = N
 def load_for_runtime(
     known_plugins: set[str],
     *,
-    report: load_report.Reporter | None = None,
     home: Path | None = None,
 ) -> PluginsConfig:
     """Runtime-load wrapper around `load()`: dangling config entries are dropped
@@ -311,7 +310,7 @@ def load_for_runtime(
     try:
         return load(known_plugins, home=home)
     except DanglingPlugin as exc:
-        report_dangling(exc, report)
+        report_dangling(exc)
         return load(known_plugins, allow_dangling=True, home=home)
 
 

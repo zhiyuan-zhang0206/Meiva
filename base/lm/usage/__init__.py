@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any
 
 from langchain_core.messages import AIMessage
 
@@ -18,15 +18,6 @@ from base.lm.pricing.cache_writes import cache_write_tokens
 from base.lm.provider_api import InferenceSpeed
 from base.log import logger
 from base.telemetry import ambient_agent_id, report_sink_failure
-
-
-class _BillingSpan(Protocol):
-    def set_attribute(self, key: str, value: object) -> object: ...
-    def end(self) -> object: ...
-
-
-class _BillingTracer(Protocol):
-    def start_span(self, name: str, *, start_time: int | None = None) -> _BillingSpan: ...
 
 
 def usage_model(msg: AIMessage, requested_model: str, *, catalog: ModelCatalog) -> str:
@@ -72,8 +63,6 @@ def log_usage_from_message(
     attribution: str | None = None,
     stamp_message: bool = False,
     catalog: ModelCatalog,
-    trace_enabled: bool | None = None,
-    get_tracer: Callable[[str], _BillingTracer] | None = None,
 ) -> tuple[int, float] | None:
     # meiva:note
     # Log one completed LangChain message's token usage and price snapshot.
@@ -126,8 +115,6 @@ def log_usage_from_message(
         requested_model=model,
         record_out=record,
         catalog=catalog,
-        trace_enabled=trace_enabled,
-        get_tracer=get_tracer,
     )
     if stamp_message:
         message_addl_kwargs(msg)["meiva_usage"] = record
@@ -234,8 +221,6 @@ def _log_usage(
     record_out: dict[str, Any] | None = None,
     calls: int = 1,
     catalog: ModelCatalog,
-    trace_enabled: bool | None = None,
-    get_tracer: Callable[[str], _BillingTracer] | None = None,
 ) -> tuple[int, float]:
     # meiva:note
     # Emit one priced or explicitly unpriced usage event and billing span.
@@ -290,8 +275,6 @@ def _log_usage(
             start_time_ns=(time.time_ns() - int(latency_ms * 1_000_000))
             if latency_ms is not None
             else None,
-            trace_enabled=trace_enabled,
-            get_tracer=get_tracer,
         )
 
     usage_logger = logger.bind(agent_id=for_agent_id) if for_agent_id is not None else logger
@@ -372,8 +355,6 @@ def emit_billing_event(
     cache_write_1h: int = 0,
     unpriced: bool = False,
     start_time_ns: int | None = None,
-    trace_enabled: bool | None = None,
-    get_tracer: Callable[[str], _BillingTracer] | None = None,
 ) -> None:
     # meiva:note
     # End one trace-safe billing span for a completed provider call.
@@ -381,24 +362,18 @@ def emit_billing_event(
     # Billing must never affect the call it observes, including while tracing is initializing or an
     # exporter is unavailable.
     try:
-        enabled = settings.observability.trace_enabled if trace_enabled is None else trace_enabled
-        if not enabled:
+        if not settings.observability.trace_enabled:
             return
 
-        if get_tracer is None:
-            from base.telemetry import tracing
+        from base.telemetry import tracing
 
-            tracing.ensure_init_resolved()
-            if not tracing.is_initialized():
-                return
+        tracing.ensure_init_resolved()
+        if not tracing.is_initialized():
+            return
 
-            from opentelemetry import trace as otel_trace
+        from opentelemetry import trace as otel_trace
 
-            tracer = otel_trace.get_tracer("meiva.billing")
-        else:
-            tracer = get_tracer("meiva.billing")
-
-        span = tracer.start_span(
+        span = otel_trace.get_tracer("meiva.billing").start_span(
             "meiva.billing.call",
             start_time=start_time_ns,
         )
@@ -432,8 +407,6 @@ def emit_billing_from_message(
     start_time_ns: int | None = None,
     vendor: str | None = None,
     catalog: ModelCatalog,
-    trace_enabled: bool | None = None,
-    get_tracer: Callable[[str], _BillingTracer] | None = None,
 ) -> None:
     # meiva:note
     # Price a LangChain message and emit its billing span when usage is known.
@@ -472,8 +445,6 @@ def emit_billing_from_message(
             usage_kind=usage_kind,
             unpriced=priced is None,
             start_time_ns=start_time_ns,
-            trace_enabled=trace_enabled,
-            get_tracer=get_tracer,
         )
     except Exception as exc:
         report_sink_failure("pricing a provider message for billing (its span is dropped)", exc)
