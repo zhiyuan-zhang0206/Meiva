@@ -337,7 +337,11 @@ def _as_str_list(value: object) -> list[str] | None:
     """A skill list as typed as it can be: None for anything that is not a
     list of strings (missing key included) — the fork rule only reasons about
     real skill lists."""
-    return value if isinstance(value, list) and all(isinstance(x, str) for x in value) else None
+    return (
+        cast(list[str], value)
+        if isinstance(value, list) and all(isinstance(x, str) for x in cast(list[object], value))
+        else None
+    )
 
 
 def _fork_source(

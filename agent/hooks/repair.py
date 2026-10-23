@@ -199,7 +199,7 @@ class _RepairDanglingToolPairingHook(Hook):
         _runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         repairs = dangling_tool_pairing_repairs(
             state.messages, pending_notes=state.pending_exec_notes
         )

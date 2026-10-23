@@ -91,7 +91,7 @@ class Hook(ABC):
         runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
-    ) -> dict | None: ...
+    ) -> dict[str, Any] | None: ...
 
     @property
     def name(self) -> str:

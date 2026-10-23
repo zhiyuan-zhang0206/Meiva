@@ -15,6 +15,7 @@ intent, just relocated from the old app.py to here.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from loguru import logger
 from psycopg_pool import ConnectionPool
@@ -80,12 +81,12 @@ def _raise_proxied_wire_error_from_payload(payload: dict[str, object]) -> None:
 async def forward_to_home_machine(
     agent_id: int,
     path: str,
-    json_body: dict,
+    json_body: dict[str, Any],
     *,
     db: Database,
     pool: ConnectionPool,
     idempotency_key: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Lifecycle operations (resurrect / force-terminate / etc.) must run on
     the agent's home machine (`agents_meta.machine`) — they mutate physical
     host state (session / OS process); not doing them on the home
@@ -116,8 +117,13 @@ async def forward_to_home_machine(
 
 
 async def enqueue_lifecycle(
-    db: Database, target: str, path: str, json_body: dict, *, idempotency_key: str | None = None
-) -> dict:
+    db: Database,
+    target: str,
+    path: str,
+    json_body: dict[str, Any],
+    *,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
     """POST a 'lifecycle' op to the target machine's ops server, return its result.
 
     Translates a 'failed' outcome (target machine's op raised an MeivaAgentError)

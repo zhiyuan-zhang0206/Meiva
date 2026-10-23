@@ -193,8 +193,8 @@ def _format_patch_tool_use(tool_input: Mapping[str, Any]) -> str:
         ]
         if blocks:
             return "\n\n".join(blocks)
-    paths = tool_input.get("paths")
-    if isinstance(paths, list) and paths and all(isinstance(p, str) for p in paths):
+    paths = cast("list[Any]", p) if isinstance(p := tool_input.get("paths"), list) else []
+    if paths and all(isinstance(x, str) for x in paths):
         return "\n".join(cast("list[str]", paths))
     return ""
 

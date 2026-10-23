@@ -359,7 +359,7 @@ async def post_notice_create(
     body: NoticeCreateIn,
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
-) -> dict:
+) -> dict[str, Any]:
     # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
     idempotency_key = notice_key(request, idempotency_key)
     request_body: dict[str, object] = body.model_dump(

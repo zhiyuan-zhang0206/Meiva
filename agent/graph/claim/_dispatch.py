@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any, cast
 
 from langchain_core.messages import BaseMessage
 
@@ -50,7 +51,7 @@ class BatchState:
     in-place by the per-kind handlers during dispatch_batch().
     """
 
-    new_msgs: list[BaseMessage] = field(default_factory=list)
+    new_msgs: list[BaseMessage] = field(default_factory=list[BaseMessage])
     next_goto: ClaimGoto = BEFORE_LLM
     compact_payload: tuple[str, str, str | None] | None = None
     """(summary_text, compact_kind, compact_run_id) — the run id pairs the
@@ -59,7 +60,7 @@ class BatchState:
     cancelled: bool = False
     restart_preserves_idle: bool = False
     restart_requested: bool = False
-    committed_chat_ids: list[int] = field(default_factory=list)
+    committed_chat_ids: list[int] = field(default_factory=list[int])
 
     def append_scanned(self, message: BaseMessage, finding: SecurityFindingEntry | None) -> None:
         """Append an inbound `message`; when its injection scan flagged it
@@ -432,7 +433,8 @@ async def _handle_fork(
         from agent.graph.prompt.context_notes import fork_tail_skills_note
 
         note = fork_tail_skills_note(
-            [s for s in tail_skills if isinstance(s, str)], slices.prompt.sdk_disable
+            [s for s in cast("list[Any]", tail_skills) if isinstance(s, str)],
+            slices.prompt.sdk_disable,
         )
         if note is not None:
             st.new_msgs.append(note)

@@ -72,7 +72,7 @@ def _read_machine_config(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         # ValueError (not TypeError): malformed config file content, surfaced to the user.
         raise ValueError(f"{path} is not a JSON object (got {type(data).__name__})")  # noqa: TRY004
-    return data
+    return cast(dict[str, Any], data)
 
 
 def _write_machine_config(path: Path, data: dict[str, Any]) -> None:
@@ -95,7 +95,7 @@ def _build_server_spec(
         parsed = json.loads(json_spec)
         if not isinstance(parsed, dict):
             raise ValueError(f"--json must be a server object (got {type(parsed).__name__})")
-        return parsed
+        return cast(dict[str, Any], parsed)
     if command is not None:
         spec: dict[str, Any] = {"command": command}
         if args:
@@ -189,7 +189,7 @@ def cmd_mcp_list() -> int:
     machine_servers: dict[str, Any] = (
         machine.get("mcpServers", {}) if isinstance(machine, dict) else {}
     )
-    machine_names = set(machine_servers) if isinstance(machine_servers, dict) else set()
+    machine_names: set[str] = set(machine_servers) if isinstance(machine_servers, dict) else set()
     for name in sorted(merged):
         # Order matters: machine config is the top layer, so a name present in
         # both machine and the installed layer is served by machine.

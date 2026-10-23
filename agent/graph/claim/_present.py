@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from langchain_core.messages import BaseMessage
+
 from base.agents.context import MeivaContext
 from base.agents.history.timeline import build_timeline_items, tail_window, timeline_default_limit
 from base.agents.history.timeline_inputs import TimelineReadInputs
@@ -31,7 +33,7 @@ def publish_end_timeline_snapshot(
     ctx: MeivaContext,
     state: Any,  # AgentState (lazy import to avoid circular)
     agent_id: int,
-    new_msgs: list,
+    new_msgs: list[BaseMessage],
 ) -> None:
     """Publish a TimelineSnapshot when claim routes the agent to END.
 
