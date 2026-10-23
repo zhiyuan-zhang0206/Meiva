@@ -117,3 +117,14 @@ environment before importing the application and calls the normal operations
 with the existing `Host` port. It verifies browser capability hints and rejection
 of enabling a display-dependent MCP server on a headless host, while allowing
 that server to be disabled.
+
+## Agent command view evidence
+
+The command view tests use persisted agent config and checkpoint rows, registered
+skill files and the machine MCP config and enable overlay. They retain the real
+built-in file commands (`compact`, `recap`) in exact command-list assertions.
+Unregistered skill directories stay invisible; narrowing preserves file commands
+and selects skills under the dash/underscore fold. Consecutive requests for
+different agents must not retain a previous project skill root. The MCP fixtures
+explicitly disable built-in servers through the persisted enable overlay before
+asserting machine-specific names and default-on behavior.
