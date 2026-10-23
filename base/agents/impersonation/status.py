@@ -57,7 +57,7 @@ class LeaseRecord(TypedDict):
     ttl_seconds: Any
 
 
-def parse_lease(row: dict[str, Any]) -> LeaseRecord:
+def parse_lease(row: dict[str, object]) -> LeaseRecord:
     """Validate only status as a raw SQL row enters lease lifecycle logic."""
     row["status"] = ImpersonationStatus(row["status"])
     return cast(LeaseRecord, row)
@@ -73,12 +73,12 @@ RELAY_HEARTBEAT_STALE_SECONDS = 45.0
 RELAY_FAILURE_STAMP_SECONDS = 600
 
 
-def is_log_native(lease: Mapping[str, Any]) -> bool:
+def is_log_native(lease: Mapping[str, object]) -> bool:
     """Whether this lease records its events in its own entries (protocol v2)."""
     return lease["event_delivery_protocol_version"] == LOG_PROTOCOL_VERSION
 
 
-def pending_reason(lease: Mapping[str, Any]) -> str | None:
+def pending_reason(lease: Mapping[str, object]) -> str | None:
     """Classify a handoff's current delivery uncertainty without inventing state."""
     if lease["events_completed_at"] is not None:
         return None
