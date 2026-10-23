@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from pathlib import Path
+
+from base.host.proc import run_bounded
 
 
 # meiva:note
@@ -15,7 +16,7 @@ def test_custom_database_dials_its_own_resource_with_no_process_default(
 ) -> None:
     explicit_url = tmp_path / "database-url"
     explicit_url.write_text(db_url)
-    result = subprocess.run(  # noqa: S603
+    result = run_bounded(
         [
             sys.executable,
             "-m",
@@ -29,7 +30,6 @@ def test_custom_database_dials_its_own_resource_with_no_process_default(
         },
         capture_output=True,
         text=True,
-        check=False,
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
