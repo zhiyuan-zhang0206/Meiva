@@ -10,7 +10,8 @@ Stop-reason and thinking-block validation cover the remaining mutation gaps.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
+from typing import Any
 from unittest.mock import MagicMock
 
 import anthropic
@@ -154,6 +155,7 @@ def make_runtime(
     event_publisher=None,
     execution_info: ExecutionInfo | None = None,
     database_gate: ProcessDbGate,
+    pins: Mapping[str, Any] | None = None,
 ) -> Runtime[MeivaContext]:
     """test helper: assemble Runtime the same way as test_cancel.py.
 
@@ -171,7 +173,8 @@ def make_runtime(
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            pins,
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
@@ -580,14 +583,10 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops(
 
 async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget(
     hosted_resources: HostedTurnResources,
-    monkeypatch: pytest.MonkeyPatch,
     ledger: LlmLedger,
     database_gate: ProcessDbGate,
 ) -> None:
     """Reasoning-content-only turns cannot bypass the silent-idle cost guard."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.lm, "llm_silent_idle_max_output_tokens", 3)
 
     async def _reasoning_content_only() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
@@ -607,6 +606,7 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
                 llm=fake_llm,
                 event_publisher=MagicMock(),
                 database_gate=database_gate,
+                pins={"llm_silent_idle_max_output_tokens": 3},
             ),
             CONFIG,
             ledger=ledger,
