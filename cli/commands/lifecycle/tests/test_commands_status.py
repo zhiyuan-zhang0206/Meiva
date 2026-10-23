@@ -20,7 +20,7 @@ import services.supervision.roster as _roster
 import services.supervision.roster.spec as roster_spec
 from base import paths
 from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import GatewayAccess, MachineIdentity
 from base.config import ConfigBoot, settings
 from base.host import resource_sample
 from base.host.system.tests.fake_commands import fake_host
@@ -32,6 +32,12 @@ from cli.database.tests.command_fakes import FakeResponse, FakeResult, patch_gat
 from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
 from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+
+
+# meiva:note
+# The gateway view of `meiva status` is a network read; these tests cover the local sections.
+def _no_gateway_view(_access: GatewayAccess) -> None:
+    return None
 
 
 def _launched(names: frozenset[str] | None) -> Callable[[Path], frozenset[str] | None]:
@@ -352,8 +358,8 @@ def test_status_reads_root_units(
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     class _Client:
-        def __init__(self, _socket_path: Path, *, timeout: float = 5.0) -> None:
-            del timeout
+        def __init__(self, _socket_path: Path, *, caller: object, timeout: float = 5.0) -> None:
+            del caller, timeout
 
         def status(self) -> dict[str, object]:
             return {
@@ -403,8 +409,8 @@ def test_status_root_mode_survives_an_unreachable_root(
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     class _Down:
-        def __init__(self, _socket_path: Path, *, timeout: float = 5.0) -> None:
-            del timeout
+        def __init__(self, _socket_path: Path, *, caller: object, timeout: float = 5.0) -> None:
+            del caller, timeout
 
         def status(self) -> dict[str, object]:
             from base.native_process.root_control.client import RootClientError
@@ -686,7 +692,7 @@ def test_status_prints_a_live_host_reading(
     monkeypatch.setattr(status_mod, "repo_root", lambda: "/repo")
     monkeypatch.setattr(status_mod, "source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
-    monkeypatch.setattr(status_mod, "print_gateway_cluster_status", lambda: None)
+    monkeypatch.setattr(status_mod, "print_gateway_cluster_status", _no_gateway_view)
 
     def _print_plane(_config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> None:
         assert database_factory is operator_database
@@ -723,7 +729,7 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     monkeypatch.setattr(status_mod, "repo_root", lambda: "/repo")
     monkeypatch.setattr(status_mod, "source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
-    monkeypatch.setattr(status_mod, "print_gateway_cluster_status", lambda: None)
+    monkeypatch.setattr(status_mod, "print_gateway_cluster_status", _no_gateway_view)
 
     def _print_plane(_config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> None:
         assert database_factory is operator_database

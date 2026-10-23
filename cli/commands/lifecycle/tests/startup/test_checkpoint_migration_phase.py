@@ -9,6 +9,7 @@ from typing import NoReturn
 import psycopg
 import pytest
 
+from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.db.tests.fakes import patch_database
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.paths.home import resolve_meiva_home
@@ -91,8 +92,11 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append(f"admin:{kwargs}")
         return admin_conn
 
-    def fake_dependency_gate(tracked_migrations: object) -> None:
+    def fake_dependency_gate(
+        tracked_migrations: object, *, manifest: object, upstream_migrations: object
+    ) -> None:
         assert isinstance(tracked_migrations, set)
+        assert manifest == {}
         calls.append("dependency")
 
     def fake_meiva_migrations(
@@ -332,33 +336,29 @@ def test_checkpoint_schema_upstream_baseline_is_frozen() -> None:
     assert CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS == {}
 
 
-def test_checkpoint_migration_manifest_must_be_contiguous(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_checkpoint_migration_manifest_must_be_contiguous() -> None:
     from base.cluster import provision
-
-    monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS", {11: "future"})
 
     with pytest.raises(provision.CheckpointDependencyDriftError, match="contiguous"):
-        provision.assert_checkpoint_dependency_pinned(set())
+        provision.assert_checkpoint_dependency_pinned(
+            set(),
+            manifest={11: "future"},
+            upstream_migrations=PostgresCheckpointSchema().migrations,
+        )
 
 
-def test_checkpoint_migration_manifest_follows_upstream_version_order(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_checkpoint_migration_manifest_follows_upstream_version_order() -> None:
     from base.cluster import provision
 
-    monkeypatch.setattr(
-        provision,
-        "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS",
-        {
-            10: "20990102T000000_checkpoint-v10",
-            11: "20990101T000000_checkpoint-v11",
-        },
-    )
+    manifest = {
+        10: "20990102T000000_checkpoint-v10",
+        11: "20990101T000000_checkpoint-v11",
+    }
 
     with pytest.raises(provision.CheckpointDependencyDriftError, match="version order"):
-        provision.assert_checkpoint_dependency_pinned(set())
+        provision.assert_checkpoint_dependency_pinned(
+            set(), manifest=manifest, upstream_migrations=PostgresCheckpointSchema().migrations
+        )
 
 
 @pytest.mark.parametrize(
@@ -368,7 +368,6 @@ def test_checkpoint_migration_manifest_follows_upstream_version_order(
 )
 def test_checkpoint_migration_manifest_requires_a_tracked_migration(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     tracked: bool,
     write_up: bool,
@@ -381,7 +380,6 @@ def test_checkpoint_migration_manifest_requires_a_tracked_migration(
     name = "20990101T000000_checkpoint-v10"
     if write_up:
         (tmp_path / f"{name}.sql").write_text("SELECT 1;\n")
-    monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS", {10: name})
     if tracked:
         git(tmp_path, "add", "-A")
 
@@ -389,15 +387,13 @@ def test_checkpoint_migration_manifest_requires_a_tracked_migration(
         provision.CheckpointDependencyDriftError, match="git-tracked Meiva migration"
     ):
         provision.assert_checkpoint_dependency_pinned(
-            required_migration_set(migrations_dir=tmp_path)
+            required_migration_set(migrations_dir=tmp_path),
+            manifest={10: name},
+            upstream_migrations=[*PostgresCheckpointSchema().migrations, "SELECT 1;"],
         )
 
 
-def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from langgraph.checkpoint.postgres import PostgresSaver
-
+def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(tmp_path: Path) -> None:
     from base.cluster import provision
     from base.deploy.schema.migration_layout import required_migration_set
     from base.deploy.schema.tests.migration_support import init_repo
@@ -407,7 +403,9 @@ def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
     hour.mkdir(parents=True)
     (hour / f"{name}.sql").write_text("SELECT 1;\n")
     init_repo(tmp_path)
-    monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS", {10: name})
-    monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1;"])
 
-    provision.assert_checkpoint_dependency_pinned(required_migration_set(migrations_dir=tmp_path))
+    provision.assert_checkpoint_dependency_pinned(
+        required_migration_set(migrations_dir=tmp_path),
+        manifest={10: name},
+        upstream_migrations=[*PostgresCheckpointSchema().migrations, "SELECT 1;"],
+    )

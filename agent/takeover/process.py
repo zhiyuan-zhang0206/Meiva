@@ -19,9 +19,12 @@ __all__ = ["spawn_relay"]
 def spawn_relay(
     program: tuple[str, ...], binding: RelayBinding, *, token: str
 ) -> subprocess.Popen[bytes]:
+    from base.host.env.registry import process_environment
     from base.sessions.env_forwarding import forward_env_dict
 
-    command = relay_command(program, binding, token=token, forwarded_env=forward_env_dict())
+    command = relay_command(
+        program, binding, token=token, forwarded_env=forward_env_dict(process_environment())
+    )
     process = subprocess.Popen(  # noqa: S603
         command.argv,
         stdin=subprocess.PIPE,

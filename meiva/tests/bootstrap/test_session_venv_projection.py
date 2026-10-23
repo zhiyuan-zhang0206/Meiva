@@ -11,6 +11,8 @@ import pytest
 
 from base.host.env import bootstrap, dotenv_boot
 from base.host.env.tests.env_files import constant
+from base.host.runtime_interpreter import runtime_venv
+from base.host.system.backend import get_backend
 from meiva.shell import sessions
 from meiva.shell.tests.support import FakeDatabase
 from meiva.tests.fixtures.pin_agent import pin_agent
@@ -55,27 +57,18 @@ def test_create_session_activates_only_checkout_cwds(
     claude_sibling_worktree.mkdir(parents=True)
     outside.mkdir()
     backend = _CapturingBackend()
-    activations: list[bool] = []
     handle = _handle(backend)
     monkeypatch.setattr(sessions, "repo_root", lambda: checkout)
-
-    def forward(*, activate_venv: bool = True) -> dict[str, str]:
-        activations.append(activate_venv)
-        return {"PATH": "/venv/bin:/usr/bin", **({"VIRTUAL_ENV": "/venv"} if activate_venv else {})}
-
-    monkeypatch.setattr(sessions, "forward_env_dict", forward)
 
     handle.create("inside", cwd=str(inside), ttl=120)
     handle.create("sibling", cwd=str(sibling_worktree), ttl=120)
     handle.create("claude-sibling", cwd=str(claude_sibling_worktree), ttl=120)
     handle.create("outside", cwd=str(outside), ttl=120)
 
-    assert activations == [True, False, False, False]
-    assert backend.environments[0]["VIRTUAL_ENV"] == "/venv"
-    assert "VIRTUAL_ENV" not in backend.environments[1]
-    assert "VIRTUAL_ENV" not in backend.environments[2]
-    assert "VIRTUAL_ENV" not in backend.environments[3]
-    assert backend.environments[1]["PATH"] == "/venv/bin:/usr/bin"
+    assert "VIRTUAL_ENV" in backend.environments[0]
+    assert all("VIRTUAL_ENV" not in env for env in backend.environments[1:])
+    venv_bin = str(runtime_venv() / get_backend().venv_bin_dir_name())
+    assert all(env["PATH"].split(os.pathsep)[0] == venv_bin for env in backend.environments)
 
 
 def test_watcher_override_reaches_backend_without_changing_generic_sessions(

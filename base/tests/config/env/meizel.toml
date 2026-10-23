@@ -6,13 +6,6 @@
 
 [debt.env-patch]
 "test_agent_slices.py#patch.dict os.environ" = 1
-"test_registry.py#monkeypatch.delenv os.environ" = 1
-"test_registry.py#monkeypatch.setenv os.environ.ALL_PROXY" = 1
-"test_registry.py#monkeypatch.setenv os.environ.HTTPS_PROXY" = 1
-"test_registry.py#monkeypatch.setenv os.environ.LOGNAME" = 1
-"test_registry.py#monkeypatch.setenv os.environ.USER" = 1
-"test_registry.py#monkeypatch.setenv os.environ.no_proxy" = 1
-"test_registry.py#monkeypatch.setitem os.environ.MEIVA_CLUSTER_SECRET" = 1
 
 [debt.first-party-patch]
 "test_agent_slices.py#monkeypatch.setattr base.config.settings.agent.history_dump_keep" = 1

@@ -5,6 +5,7 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.host.env.registry import process_environment
 from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
@@ -45,7 +46,10 @@ def test_schedule_launch(
     )
     try:
         schedule_manager(
-            pool, get_shell_backend(), repo_root=unit_home, launch_env=forward_env_dict()
+            pool,
+            get_shell_backend(),
+            repo_root=unit_home,
+            launch_env=forward_env_dict(process_environment()),
         )._launch(schedule_id, NOW)
     finally:
         pool.close()

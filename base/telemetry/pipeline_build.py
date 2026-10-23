@@ -58,14 +58,22 @@ def build_pipeline(
 
     `flush_interval_s` is how long the drain thread holds a partial batch before it writes it.
     """
+    from base.host.env.registry import process_environment
+    from base.telemetry.observability import endpoint_override_is_explicit
     from base.telemetry.otlp.telemetry_otlp import observability_export_allowed
     from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
 
+    # meiva:note
+    # The process environment is read once, here: every daemon builds its pipeline at its
+    # composition root, after its boot loaded the `.env` it will run with.
+    explicit = endpoint_override_is_explicit("MEIVA_TELEMETRY_OTLP_ENDPOINT", process_environment())
     return ExportingEventPipeline(
         writer=lambda events, exporter: write_batch(
             events, database=database, export=exporter.export_batch
         ),
-        export_allowed=lambda: observability_export_allowed(machine, home=home),
+        export_allowed=lambda: observability_export_allowed(
+            machine, home=home, endpoint_explicit=explicit
+        ),
         flush_interval_s=flush_interval_s,
     )
 

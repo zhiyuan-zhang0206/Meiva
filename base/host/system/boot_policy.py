@@ -63,11 +63,9 @@ import json
 from pathlib import Path
 from typing import Final
 
-import psutil
 from loguru import logger
 
 from base.host.atomic_io import write_text_atomic
-from base.native_process.os_platform import is_macos
 
 # Seconds between two `meiva start` attempts — launchd's ThrottleInterval on
 # macOS and systemd RestartSec on Linux.
@@ -107,9 +105,11 @@ def _recorded_attempts(home: Path, boot_time: float) -> int:
     return attempts
 
 
-def begin_attempt(home: Path) -> int:
-    """Record one boot-job `meiva start` and return its 1-based number within this boot."""
-    boot_time = psutil.boot_time()
+# meiva:note
+# Record one boot-job `meiva start` and return its 1-based number within this boot.
+#
+# `boot_time` is the host's boot timestamp (`psutil.boot_time()`): attempts of one boot share it.
+def begin_attempt(home: Path, *, boot_time: float) -> int:
     attempt = _recorded_attempts(home, boot_time) + 1
     path = _attempts_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -132,7 +132,7 @@ def budget_spent(attempt: int) -> bool:
     return attempt >= BOOT_MAX_ATTEMPTS
 
 
-def exit_code_after_budget(failed_code: int) -> int:
+def exit_code_after_budget(failed_code: int, *, macos: bool) -> int:
     """The exit code of the failing attempt that spends the budget.
 
     launchd retries every nonzero exit and has no attempt limit, so on macOS the
@@ -140,7 +140,7 @@ def exit_code_after_budget(failed_code: int) -> int:
     boot log). systemd keeps the real code: its own start limit stops the unit
     in the `failed` state.
     """
-    return 0 if is_macos() else failed_code
+    return 0 if macos else failed_code
 
 
 def boot_start_arguments(services: frozenset[str]) -> tuple[str, ...]:

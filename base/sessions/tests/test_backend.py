@@ -8,12 +8,14 @@ from pathlib import Path
 
 import pytest
 
+from base.host.env.registry import process_environment
 from base.sessions.backend import (
     PosixProcSessionBackend,
     PtySessionBackend,
     get_backend,
     get_shell_backend,
 )
+from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
 from base.sessions.protocol import SessionBackend
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
@@ -83,7 +85,10 @@ def test_pty_child_virtual_env_projection(
     env = {"VIRTUAL_ENV": "/explicit/venv", "MEIVA_DB_URL": "runner-override"}
     try:
         if projection == "default":
-            assert backend.new_session(name, "", cwd)
+            projected = forward_env_dict(
+                process_environment(), activate_venv=cwd_is_inside_checkout(cwd, checkout)
+            )
+            assert backend.new_session(name, "", cwd, env=projected)
         else:
             assert backend.new_session(name, "", cwd, env=env if projection == "explicit" else {})
         backend.send(name, command)

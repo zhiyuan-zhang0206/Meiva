@@ -19,6 +19,7 @@ from typing import NamedTuple
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
+from base.host.env.registry import process_environment
 from base.sessions.env_forwarding import frontend_toolchain_env
 from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
@@ -119,7 +120,7 @@ def ensure_frontend_deps(repo: Path) -> None:
         ["npm", "ci"],
         cwd=str(fe),
         check=True,
-        env=frontend_toolchain_env(),
+        env=frontend_toolchain_env(process_environment()),
     )
     stamp.write_text(want)
 

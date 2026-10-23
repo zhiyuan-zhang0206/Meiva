@@ -29,7 +29,7 @@ from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.host.system.boot_unit import BootUnitContext
 from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
-from base.native_process.root_control.client import RootClient, RootClientError
+from base.native_process.root_control.client import RootClient, RootClientError, caller_identity
 from base.native_process.root_control.ipc import ResponsePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -106,7 +106,7 @@ def _read_log(path: Path) -> str:
 def _wait_ready(run_dir: Path, proc: subprocess.Popen[bytes], log_path: Path) -> RootClient:
     """Poll the control socket until the daemon answers; fail loudly on early exit."""
     socket_path = run_dir / _SOCKET_NAME
-    client = RootClient(socket_path, timeout=5.0)
+    client = RootClient(socket_path, caller=caller_identity({}), timeout=5.0)
     deadline = time.monotonic() + 15.0
     while time.monotonic() < deadline:
         if proc.poll() is not None:

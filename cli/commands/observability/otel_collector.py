@@ -39,9 +39,10 @@ from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.release import collector_artifact
 from base.host.atomic_io import write_text_atomic
+from base.host.env.registry import process_environment
 from base.host.net.ports import SYSTEM_URL_OPENER
 from base.paths import otel_collector_config, otel_collector_dir
-from base.telemetry.observability import collector_allowed_for_home
+from base.telemetry.observability import collector_allowed_for_home, endpoint_override_is_explicit
 from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._otel_collector_exporters import BACKEND_EXPORTERS, RELAY_EXPORTERS
@@ -579,7 +580,12 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
         ctx.roles is not None
         and "gateway" in ctx.roles
         and not collector_allowed_for_home(
-            ctx.meiva_home, machine=ctx.machine, unit_home=ctx.meiva_home
+            ctx.meiva_home,
+            machine=ctx.machine,
+            unit_home=ctx.meiva_home,
+            endpoint_explicit=endpoint_override_is_explicit(
+                "MEIVA_TELEMETRY_OTLP_ENDPOINT", process_environment()
+            ),
         )
     ):
         print(

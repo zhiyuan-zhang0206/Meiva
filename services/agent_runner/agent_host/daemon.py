@@ -88,7 +88,6 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
 from base.sessions.helper_chain_guard import helper_marker_pid, parent_chain_intact
-from base.telemetry.otlp.trace_config import TraceConfig
 from meiva import skills as meiva_skills
 from meiva.boot import process_clients
 from meiva.sdk_surface import process_context
@@ -577,6 +576,7 @@ async def run(
         clear_exec_run_dir,
         init_process_scope,
         land_cluster_extensions,
+        process_trace_config,
     )
 
     clear_exec_run_dir(home)
@@ -590,9 +590,7 @@ async def run(
     try:
         if on_clients_owned is not None:
             on_clients_owned()
-        init_process_scope(
-            machine=machine, home=home, trace=TraceConfig.of(config.view.observability)
-        )
+        init_process_scope(machine=machine, home=home, trace=process_trace_config(config))
         land_cluster_extensions(db)
         local_machine = machine.name()
         await open_host_pools(workload_pool, control_pool)

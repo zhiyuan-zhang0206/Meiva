@@ -32,16 +32,21 @@ def test_managed_service_path_preserves_tools_across_callers(
     command.chmod(0o700)
     monkeypatch.setattr(runtime_interpreter, "runtime_venv", lambda: venv)
     admitted = os.pathsep.join((str(tools), str(bindir), str(tools)))
-    monkeypatch.setenv("PATH", str(tmp_path / "interactive"))
-    interactive = env_forwarding.managed_service_env(admitted)
-    monkeypatch.setenv("PATH", str(tmp_path / "manager"))
-    manager = env_forwarding.managed_service_env(admitted)
+    interactive = env_forwarding.managed_service_env(
+        admitted, environ={"PATH": str(tmp_path / "interactive")}
+    )
+    manager = env_forwarding.managed_service_env(
+        admitted, environ={"PATH": str(tmp_path / "manager")}
+    )
     assert interactive == manager
     assert manager["PATH"].split(os.pathsep)[:2] == [str(bindir), str(tools)]
     assert manager["PATH"].split(os.pathsep).count(str(bindir)) == 1
     assert manager["MEIVA_SERVICE_PATH"] == str(tools)
     assert shutil.which(command.name, path=manager["PATH"]) == str(command)
-    assert env_forwarding.managed_service_env(str(tmp_path / "changed")) != manager
+    changed = env_forwarding.managed_service_env(
+        str(tmp_path / "changed"), environ={"PATH": str(tmp_path / "manager")}
+    )
+    assert changed != manager
 
 
 @pytest.mark.parametrize("entry", ["relative", ".", "bad\npath", "bad\x00path"])
@@ -77,13 +82,11 @@ def test_venv_activation_prefix_omits_an_empty_path_entry() -> None:
     assert "${PATH:+:$PATH}" in env_forwarding.venv_activation_prefix()
 
 
-def test_forward_env_dict_drops_cluster_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_forward_env_dict_drops_cluster_scope() -> None:
     """`forward_env_dict` (the `meiva start` daemon child env)
     drops the cluster-scope keys too — same policy as the env-file prefix it
     replaced, and it keeps the whole-env copy's PATH the child genuinely needs."""
-    monkeypatch.setattr(
-        os,
-        "environ",
+    env = env_forwarding.forward_env_dict(
         {
             "MEIVA_HOME": "/tmp/meiva-home",  # noqa: S108 — a literal env value, never opened
             "MEIVA_GATEWAY_URL": "http://gw:9000",
@@ -92,9 +95,8 @@ def test_forward_env_dict_drops_cluster_scope(monkeypatch: pytest.MonkeyPatch) -
             "DEEPSEEK_API_KEY": "sk-x",
             "MEIVA_CONFIG_FETCH": "skip",
             "PATH": "/usr/bin",
-        },
+        }
     )
-    env = env_forwarding.forward_env_dict()
     assert env["MEIVA_HOME"] == "/tmp/meiva-home"  # noqa: S108 — literal, never opened
     assert env["MEIVA_GATEWAY_URL"] == "http://gw:9000"
     assert "/usr/bin" in env["PATH"]  # whole-env copy keeps PATH (venv-prefixed)
@@ -105,44 +107,31 @@ def test_forward_env_dict_drops_cluster_scope(monkeypatch: pytest.MonkeyPatch) -
     assert "MEIVA_CONFIG_SOURCE" not in env
 
 
-def test_forward_env_dict_without_venv_activation_keeps_path_but_omits_virtual_env(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_forward_env_dict_without_venv_activation_keeps_path_but_omits_virtual_env() -> None:
     """A foreign-cwd shell still finds tools on PATH without selecting this venv for uv."""
-
-    monkeypatch.setattr(
-        os,
-        "environ",
+    env = env_forwarding.forward_env_dict(
         {"MEIVA_HOME": "/tmp/meiva-home", "PATH": "/usr/bin"},  # noqa: S108 — literal env only
+        activate_venv=False,
     )
-
-    env = env_forwarding.forward_env_dict(activate_venv=False)
 
     assert "VIRTUAL_ENV" not in env
     assert "/usr/bin" in env["PATH"].split(os.pathsep)
 
 
-def test_forward_env_dict_carries_temp_dir(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_forward_env_dict_carries_temp_dir() -> None:
     """TMPDIR is copied from the parent so pinned boot files keep their path."""
-    monkeypatch.setattr(
-        os,
-        "environ",
+    env = env_forwarding.forward_env_dict(
         {
             "MEIVA_HOME": "/tmp/meiva-home",  # noqa: S108 — a literal env value, never opened
             "PATH": "/usr/bin",
             "TMPDIR": "/tmp",  # noqa: S108 — a literal env value, never opened
-        },
+        }
     )
-    env = env_forwarding.forward_env_dict()
     assert env["TMPDIR"] == "/tmp"  # noqa: S108 — literal, never opened
     assert "/usr/bin" in env["PATH"].split(os.pathsep)
 
 
-def test_forward_env_dict_carries_the_machine_proxy_configuration(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_forward_env_dict_carries_the_machine_proxy_configuration() -> None:
     """Issue #2095: the service/session child env carries the machine's proxy
     configuration (`meiva start` and the watchdog respawn both hand this dict to
     the session backend). The frontend's `npm run build` fetches Google Fonts for
@@ -150,19 +139,15 @@ def test_forward_env_dict_carries_the_machine_proxy_configuration(
     that could never download a font. The value's only home is the machine's own
     environment (an exporting shell, or `.env` / `mirror.env`); an empty value is
     not forwarded (that would mean "no proxy" to a client that reads env)."""
-    monkeypatch.setattr(
-        os,
-        "environ",
+    env = env_forwarding.forward_env_dict(
         {
             "MEIVA_HOME": "/tmp/meiva-home",  # noqa: S108 — a literal env value, never opened
             "PATH": "/usr/bin",
             "HTTPS_PROXY": "http://127.0.0.1:7897",
             "no_proxy": "localhost,127.0.0.1",
             "ALL_PROXY": "",
-        },
+        }
     )
-
-    env = env_forwarding.forward_env_dict()
 
     assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
     assert env["no_proxy"] == "localhost,127.0.0.1"

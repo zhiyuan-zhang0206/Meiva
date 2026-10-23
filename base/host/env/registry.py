@@ -22,6 +22,7 @@ Current structure: base/host/env/docs/registry.meiva.okf.md.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
@@ -100,15 +101,15 @@ _NETWORK_PROXY_ROWS = tuple(
 NETWORK_PROXY_KEYS = frozenset(row.key for row in _NETWORK_PROXY_ROWS)
 
 
-def network_proxy_configured() -> bool:
-    """Whether the launching environment names a network proxy (either spelling).
-
-    The single reader for `NETWORK_PROXY_KEYS`: `child_env` forwards whichever of
-    the keys it finds, and a consumer that has to *decide* whether to leave a
-    library's own proxy discovery alone (the Feishu ws handshake, issue #2089)
-    asks this instead of re-listing the keys.
-    """
-    return any(os.environ.get(key) for key in NETWORK_PROXY_KEYS)
+# meiva:note
+# Whether `environ` names a network proxy (either spelling).
+#
+# The single reader for `NETWORK_PROXY_KEYS`: `child_env` forwards whichever of
+# the keys it finds, and a consumer that has to *decide* whether to leave a
+# library's own proxy discovery alone (the Feishu ws handshake, issue #2089)
+# asks this instead of re-listing the keys.
+def network_proxy_configured(environ: Mapping[str, str]) -> bool:
+    return any(environ.get(key) for key in NETWORK_PROXY_KEYS)
 
 
 # Service birth snapshots are delivered per unit, never inherited by its parent.
@@ -356,29 +357,29 @@ def _ensure_validated() -> None:
     _ensure_validated._done = True  # type: ignore[attr-defined]
 
 
-def child_env(role: Literal["gateway", "runner"]) -> dict[str, str]:
-    """The parent->child env dict a daemon / session child of `role` receives.
-
-    POSITIVE allowlist, not a drop list (Task #856 Phase C, audit F-s3-4): a
-    non-modeled knob (MEIVA_AGENT_ID, ...) or agent-scope override never rides a
-    daemon session. `gateway` and `runner` (daemons belong to those profiles)
-    get the same session view; an agent process has no forwarding view (it is
-    launched with the launcher's own environment).
-    Host passthroughs (DISPLAY/WAYLAND_DISPLAY/HOME/USER/LOGNAME), the temp-dir vars and the
-    machine's network proxy configuration (NETWORK_PROXY_KEYS — the one egress
-    channel a build child needs; issue #2095) are carried non-empty only — an
-    empty $DISPLAY means "no display".
-
-    The allow/drop decision is the DATA in this registry; the caller
-    (base.sessions.env_forwarding) is the mechanism that applies it.
-    """
+# meiva:note
+# The parent->child env dict a daemon / session child of `role` receives, read from `environ`.
+#
+# POSITIVE allowlist, not a drop list (Task #856 Phase C, audit F-s3-4): a
+# non-modeled knob (MEIVA_AGENT_ID, ...) or agent-scope override never rides a
+# daemon session. `gateway` and `runner` (daemons belong to those profiles)
+# get the same session view; an agent process has no forwarding view (it is
+# launched with the launcher's own environment).
+# Host passthroughs (DISPLAY/WAYLAND_DISPLAY/HOME/USER/LOGNAME), the temp-dir vars and the
+# machine's network proxy configuration (NETWORK_PROXY_KEYS — the one egress
+# channel a build child needs; issue #2095) are carried non-empty only — an
+# empty $DISPLAY means "no display".
+#
+# The allow/drop decision is the DATA in this registry; the caller
+# (base.sessions.env_forwarding) is the mechanism that applies it.
+def child_env(role: Literal["gateway", "runner"], environ: Mapping[str, str]) -> dict[str, str]:
     if role not in ("gateway", "runner"):
         raise ValueError(f"unknown daemon role {role!r} — must be gateway or runner")
     _ensure_validated()
-    env = {k: os.environ[k] for k in session_forward_keys() if k in os.environ}
+    env = {k: environ[k] for k in session_forward_keys() if k in environ}
     for key in HOST_PASSTHROUGH_KEYS | _TEMP_DIR_KEYS | NETWORK_PROXY_KEYS:
-        if os.environ.get(key):
-            env[key] = os.environ[key]
+        if environ.get(key):
+            env[key] = environ[key]
     return env
 
 

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 import base.db
 from base.cluster import session_name
 from base.db.code_version_gate import ProcessDbGate
+from base.host.env.registry import process_environment
 from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
@@ -228,7 +229,7 @@ class TestLogsRuns:
                 session_name(f"schedule-{sid}"),
                 "echo line one; echo line two; sleep 30",
                 tmp_path,
-                env=forward_env_dict(),
+                env=forward_env_dict(process_environment()),
             )
 
             def shown() -> bool:

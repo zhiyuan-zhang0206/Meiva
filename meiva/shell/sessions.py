@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from base.cluster import session_name
+from base.host.env.registry import process_environment
 from base.log import logger
 from base.paths import repo_root, workspace_dir
 from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
@@ -223,7 +224,7 @@ class ShellSessions:
         # numeric handle must remain stale instead of naming a later session.
         session_cwd = Path(cwd)
         activate_venv = cwd_is_inside_checkout(session_cwd, repo_root())
-        session_env = forward_env_dict(activate_venv=activate_venv)
+        session_env = forward_env_dict(process_environment(), activate_venv=activate_venv)
         # The session is the agent's own: the owner's id rides the environment so a script run
         # in it builds a full MeivaContext (`meiva.boot.launched_context`,
         # `owns_loop=False`) and `meiva.DB` / `meiva.REDIS` / the gateway-backed calls work as in

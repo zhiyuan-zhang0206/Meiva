@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import pytest
@@ -49,13 +48,12 @@ def test_export_gate_roles_marker_and_override(
     expected: bool,
 ) -> None:
     monkeypatch.setattr(derive, "home_label", _production_label)
-    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    if override:
-        monkeypatch.setitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", "http://explicit:4318")
     if marker:
         (tmp_path / "lgtm-host").touch()
     assert (
-        telemetry_otlp.observability_export_allowed(machine_identity(roles=roles), home=tmp_path)
+        telemetry_otlp.observability_export_allowed(
+            machine_identity(roles=roles), home=tmp_path, endpoint_explicit=override
+        )
         is expected
     )
 
@@ -69,8 +67,9 @@ def test_explicit_endpoint_does_not_read_machine(
         raise AssertionError("explicit endpoints need no production identity")
 
     monkeypatch.setattr(machine, "name", reject)
-    monkeypatch.setitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", "http://explicit:4318")
-    assert telemetry_otlp.observability_export_allowed(machine, home=tmp_path)
+    assert telemetry_otlp.observability_export_allowed(
+        machine, home=tmp_path, endpoint_explicit=True
+    )
 
 
 def test_missing_role_preserves_runner_bootstrap_gate(
@@ -83,8 +82,9 @@ def test_missing_role_preserves_runner_bootstrap_gate(
 
     monkeypatch.setattr(machine, "role", missing)
     monkeypatch.setattr(derive, "home_label", _production_label)
-    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    assert telemetry_otlp.observability_export_allowed(machine, home=tmp_path)
+    assert telemetry_otlp.observability_export_allowed(
+        machine, home=tmp_path, endpoint_explicit=False
+    )
 
 
 @pytest.mark.parametrize("operation", ["gateway", "station", "export"])
@@ -93,7 +93,6 @@ def test_invalid_roles_propagate_outside_transport_isolation(
 ) -> None:
     machine = machine_identity(roles=frozenset({"unknown"}))
     monkeypatch.setattr(derive, "home_label", _production_label)
-    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     with pytest.raises(MachineRoleInvalid):
         if operation == "gateway":
             observability.gateway_observability_home(machine, home=tmp_path)
@@ -102,7 +101,9 @@ def test_invalid_roles_propagate_outside_transport_isolation(
                 tmp_path, machine=machine, unit_home=tmp_path
             )
         else:
-            telemetry_otlp.observability_export_allowed(machine, home=tmp_path)
+            telemetry_otlp.observability_export_allowed(
+                machine, home=tmp_path, endpoint_explicit=False
+            )
 
 
 def test_each_backend_freezes_only_its_own_eligibility(monkeypatch: pytest.MonkeyPatch) -> None:

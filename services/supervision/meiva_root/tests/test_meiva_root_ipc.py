@@ -10,7 +10,7 @@ import psutil
 import pytest
 
 from base.native_process.ownership import OwnedProcess
-from base.native_process.root_control.client import RootClient, RootClientError
+from base.native_process.root_control.client import RootClient, RootClientError, caller_identity
 from base.native_process.root_control.ipc import (
     ErrorCode,
     ProtocolError,
@@ -209,7 +209,7 @@ class TestServerClientRoundtrip:
         server = ControlServer(sock_path, refusing_handler)
         await server.start()
         try:
-            client = RootClient(sock_path, timeout=5.0)
+            client = RootClient(sock_path, caller=caller_identity({}), timeout=5.0)
             refused = await asyncio.to_thread(client.restart, "worker")
             assert refused["ok"] is False
             assert refused.get("code") == ErrorCode.INTERNAL.value
