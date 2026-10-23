@@ -3,64 +3,22 @@
 // top-level wiring and state flow (send asks the timeline to stay with a
 // follower, handleSend errors bubble to toast, composerMode tri-state).
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
-//
-// Hooks have too many heavy dependencies (useAgents+useTimeline+useTokenUsage+
-// useEventStream+useStore); running them for real triggers SSE / fetch /
-// Zustand subscribe side effects. Stubs keep HomePage's own
-// useState/useEffect/useCallback transformation logic testable.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/transport/api";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { LAYOUT_INVARIANTS, LAYOUT_VIEWPORT_TIERS } from "@/lib/layout/layout";
-
-import type { AgentRow } from "@/lib/contracts/types";
-import type { ConnectionState } from "@/lib/timeline/use-timeline";
-
-// -- Hook + child-component mocks --
-// hoisted state lets individual tests change hook return values
-// (vi.mock factory runs only once)
-
-const hooksState = {
-  isLarge: true,
-  // Desktop viewport by default (mirrors useMediaQuery's post-mount state);
-  // false = narrow/mobile (<768px, task #805).
-  isDesktop: true,
-  agents: [] as AgentRow[],
-  activeId: null as number | null,
-  toast: null as string | null,
-  timelineItems: [] as unknown[],
-  timelineError: null as Error | null,
-  timelineFetching: false,
-  retryTimeline: vi.fn(),
-  connectionState: "open" as ConnectionState,
-  turnActive: false,
-  spawn: vi.fn().mockResolvedValue(7),
-  fork: vi.fn().mockResolvedValue(8),
-  terminate: vi.fn().mockResolvedValue(undefined),
-  restart: vi.fn().mockResolvedValue(undefined),
-  resurrect: vi.fn().mockResolvedValue(undefined),
-  showToast: vi.fn(),
-  focusComposer: vi.fn(),
-  setMobileSidebarOpen: vi.fn(),
-  setMobileInspectorOpen: vi.fn(),
-  setInspectorHours: vi.fn(),
-  requestScrollToBottom: vi.fn(),
-  setSetting: vi.fn(),
-  // DB-backed user settings — timeline-width ratio is the one HomeContent reads.
-  settings: { "display.timeline_width_ratio": 0.4 } as Record<string, unknown>,
-};
+import {
+  ComposerMock,
+  hooksState,
+  inspectorMockState,
+  makeAgent,
+  resetHomePageTestState,
+  wrap,
+} from "./_page_test_harness";
 
 vi.mock("@/lib/agents/use-agents", () => ({
   useAgents: () => ({
@@ -111,12 +69,6 @@ vi.mock("@/lib/state/use-user-settings", () => ({
   }),
 }));
 
-// The cluster-health poller + the SSE-disconnect banner moved out of the home
-// page to the app root (components/app-connection-banner.tsx) / timeline
-// (components/connection-notice.tsx), so HomePage no longer mounts either —
-// their behavior is covered by use-cluster-health.test.tsx +
-// connection-notice.test.tsx + useEventStream.test.ts.
-
 vi.mock("@/lib/transport/useEventStream", () => ({
   EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
   AgentEventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -137,8 +89,8 @@ vi.mock("@/lib/state/store", () => ({
       inspectorHours: 24,
       setInspectorHours: hooksState.setInspectorHours,
       agents: hooksState.agents,
-    ancestors: [],
-    activeAgent: hooksState.agents.find((a) => a.agent_id === hooksState.activeId),
+      ancestors: [],
+      activeAgent: hooksState.agents.find((a) => a.agent_id === hooksState.activeId),
     };
     return selector(fakeState);
   },
@@ -178,8 +130,6 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ bfcacheId: "_b_test_" }),
 }));
 
-
-
 vi.mock("@/components/agent-sidebar", () => ({
   AgentSidebar: ({ onSpawn }: { onSpawn: (opts: { machine?: string; model?: string }) => void }) => (
     <button data-testid="sidebar-spawn" onClick={() => { onSpawn({}); }}>spawn</button>
@@ -213,63 +163,9 @@ vi.mock("@/components/timeline", () => ({
   ),
 }));
 
-vi.mock("@/components/conversation/composer", () => {
-  function ComposerMock({
-    mode,
-    onSend,
-    onStop,
-    onUploadFiles,
-    onAttachImage,
-    showContextMeter,
-    children,
-    details,
-    maxWidthCss,
-    suggestions,
-  }: {
-    suggestions?: readonly string[] | null;
-    mode: string;
-    onSend: (s: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
-    onStop: () => Promise<void>;
-    onUploadFiles?: (files: File[]) => void;
-    onAttachImage?: (file: File) => Promise<string>;
-    showContextMeter?: boolean;
-    children?: React.ReactNode;
-    details?: React.ReactNode;
-    maxWidthCss?: string;
-  }) {
-    const [thumbnail, setThumbnail] = useState<string | null>(null);
-    const pasteImage = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      const image = Array.from(event.clipboardData.files).find((file) =>
-        file.type.startsWith("image/"),
-      );
-      if (!image) return;
-      event.preventDefault();
-      if (onAttachImage) void onAttachImage(image).then(setThumbnail);
-      else onUploadFiles?.([image]);
-    };
-    return (
-      <div
-        data-testid="composer"
-        data-mode={mode}
-        data-context-meter={String(showContextMeter ?? false)}
-        data-max-width={maxWidthCss ?? "undefined"}
-        data-suggestion={suggestions?.join("|") ?? ""}
-      >
-        <textarea data-testid="composer-paste-target" onPaste={pasteImage} />
-        {thumbnail ? <div data-testid="composer-image-thumbnail" data-url={thumbnail} /> : null}
-        <button data-testid="composer-send" onClick={() => void onSend("hi", [], "test-client-message-id")}>send</button>
-        <button data-testid="composer-send-multi" onClick={() => void onSend("/compact /update", [], "test-client-message-id")}>send multi</button>
-        <button data-testid="composer-send-multi-args" onClick={() => void onSend("/search hello world /compact", [], "test-client-message-id")}>send multi args</button>
-        <button data-testid="composer-stop" onClick={() => void onStop()}>stop</button>
-        <button data-testid="composer-send-plain" onClick={() => void onSend("plain text", [], "test-client-message-id")}>send plain</button>
-        <button data-testid="composer-send-multi-image" onClick={() => void onSend("/compact /update", ["/api/agents/5/uploads/a.png"], "test-client-message-id")}>send multi image</button>
-        {details}
-        {children}
-      </div>
-    );
-  }
-  return { Composer: ComposerMock };
-});
+vi.mock("@/components/conversation/composer", () => ({
+  Composer: ComposerMock,
+}));
 
 vi.mock("@/components/conversation/upload-button", () => ({
   UploadButton: ({ agentId }: { agentId: number | null }) => (
@@ -279,11 +175,6 @@ vi.mock("@/components/conversation/upload-button", () => ({
 
 vi.mock("@/components/content/content-toggle", () => ({
   ContentToggle: () => <div data-testid="content-toggle" />,
-}));
-
-const inspectorMockState = vi.hoisted(() => ({
-  shouldThrow: false,
-  mounts: 0,
 }));
 
 vi.mock("@/components/inspector/inspector-panel", async () => {
@@ -301,57 +192,10 @@ vi.mock("@/components/inspector/inspector-panel", async () => {
   };
 });
 
-
 import HomePage from "./page";
 
 afterEach(cleanup);
-
-function makeAgent(overrides: Partial<AgentRow>): AgentRow {
-  return {
-    agent_id: 1,
-    spawner: "user",
-    harness: "meiva",
-    fork_source_agent_id: null,
-    status: "idling",
-    spawned_at: "2026-05-15T00:00:00Z",
-    last_active_at: "2026-05-15T00:00:00Z", last_inbound_at: "2026-05-15T00:00:00Z",
-    label: null,
-    machine: "test",
-    supports_vision: true,
-    awaiting_response_count: 0, highest_notice_priority: null,
-    unread_notice_count: 0,
-    heartbeat_paused_until: null,
-    liveness_state: "online",
-    ...overrides,
-  };
-}
-
-function wrap(ui: React.ReactElement) {
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
-}
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  inspectorMockState.shouldThrow = false;
-  inspectorMockState.mounts = 0;
-  hooksState.agents = [];
-  hooksState.activeId = null;
-  hooksState.toast = null;
-  hooksState.timelineItems = [];
-  hooksState.timelineError = null;
-  hooksState.timelineFetching = false;
-  hooksState.connectionState = "open";
-  hooksState.turnActive = false;
-  hooksState.settings = { "display.timeline_width_ratio": 0.4 };
-  hooksState.setSetting = vi.fn();
-  hooksState.setMobileInspectorOpen = vi.fn();
-  hooksState.setInspectorHours = vi.fn();
-  hooksState.isLarge = true;
-  hooksState.isDesktop = true;
-});
+beforeEach(resetHomePageTestState);
 
 describe("HomePage reply suggestion", () => {
   const agentSpoke = [
@@ -720,353 +564,5 @@ describe("HomePage top-level render", () => {
     // boundary reset did not tear down a healthy tree.
     expect(inspectorMockState.mounts).toBe(1);
     consoleSpy.mockRestore();
-  });
-});
-
-describe("sidebar app-entry reset", () => {
-  it("resets a loaded collapsed preference when the home surface is entered", () => {
-    hooksState.settings = {
-      "display.timeline_width_ratio": 0.4,
-      "display.sidebar_collapsed": true,
-    };
-
-    wrap(<HomePage />);
-
-    expect(hooksState.setSetting).toHaveBeenCalledWith(
-      "display.sidebar_collapsed",
-      false,
-    );
-  });
-
-  it("preserves a collapse that happens after the home surface has mounted", () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
-    const view = render(
-      <QueryClientProvider client={queryClient}>
-        <HomePage />
-      </QueryClientProvider>,
-    );
-    expect(hooksState.setSetting).not.toHaveBeenCalled();
-
-    hooksState.settings = {
-      "display.timeline_width_ratio": 0.4,
-      "display.sidebar_collapsed": true,
-    };
-    view.rerender(
-      <QueryClientProvider client={queryClient}>
-        <HomePage />
-      </QueryClientProvider>,
-    );
-
-    expect(hooksState.setSetting).not.toHaveBeenCalled();
-  });
-});
-
-describe("composerMode derivation", () => {
-  it("activeId not null + status='terminated' → idle (send auto-resurrects)", () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [
-      makeAgent({ agent_id: 5, status: "terminated" }),
-    ];
-    wrap(<HomePage />);
-    expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("idle");
-  });
-
-  it("activeId + turnActive=true → busy", () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [
-      makeAgent({ agent_id: 5, status: "running" }),
-    ];
-    hooksState.turnActive = true;
-    wrap(<HomePage />);
-    expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("busy");
-  });
-
-  it("activeId + not terminated + turnActive=false → idle", () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [
-      makeAgent({ agent_id: 5, status: "idling" }),
-    ];
-    wrap(<HomePage />);
-    expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("idle");
-  });
-
-  it("status='running' + turnActive=false → busy (Stop available between actions)", () => {
-    // The observed work API refuses stale or inactive work, so Stop is
-    // offered for the whole running state, not only mid-turn (turnActive).
-    hooksState.activeId = 5;
-    hooksState.agents = [
-      makeAgent({ agent_id: 5, status: "running" }),
-    ];
-    hooksState.turnActive = false;
-    wrap(<HomePage />);
-    expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("busy");
-  });
-
-  // Regression (streaming jitter): raw turnActive flips false at every
-  // MID-turn llm_done (one per LLM call, not per turn), which used to make
-  // the timeline's last detail block collapse + re-expand at each call
-  // boundary. TimelineView must receive the steady busy union
-  // (turnActive || status==='running'), same signal as the Stop button.
-  it("TimelineView receives busy=true while status='running' even when turnActive=false", () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "running" })];
-    hooksState.turnActive = false;
-    wrap(<HomePage />);
-    expect(screen.getByTestId("timeline").getAttribute("data-turn-active")).toBe("1");
-  });
-
-  it("TimelineView receives busy=false when idle and no turn in flight", () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    hooksState.turnActive = false;
-    wrap(<HomePage />);
-    expect(screen.getByTestId("timeline").getAttribute("data-turn-active")).toBe("0");
-  });
-});
-
-describe("Spawn flow", () => {
-  it("spawn succeeds → focusComposer is called", async () => {
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("sidebar-spawn"));
-    await waitFor(() => expect(hooksState.focusComposer).toHaveBeenCalled());
-  });
-
-  it("spawn returns null → focusComposer not called", async () => {
-    hooksState.spawn = vi.fn().mockResolvedValue(null);
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("sidebar-spawn"));
-    await waitFor(() => expect(hooksState.spawn).toHaveBeenCalled());
-    expect(hooksState.focusComposer).not.toHaveBeenCalled();
-  });
-});
-
-// meiva:note
-// A send asks the timeline to stay with a FOLLOWER; the view decides, so a
-// reader parked mid-history is never moved.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
-describe("send asks the timeline to stay with the tail", () => {
-  it("send succeeds → requestScrollToBottom called", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("composer-send"));
-    await waitFor(() =>
-      expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(5, "hi", expect.any(String)),
-    );
-    await act(() => Promise.resolve());
-    expect(hooksState.requestScrollToBottom).toHaveBeenCalledTimes(1);
-  });
-
-  it("send fails → requestScrollToBottom NOT called", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    vi.mocked(api.sendMessage).mockRejectedValueOnce(new Error("boom"));
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("composer-send"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalled());
-    await act(() => Promise.resolve());
-    expect(hooksState.requestScrollToBottom).not.toHaveBeenCalled();
-  });
-});
-
-describe("UploadButton receives activeId", () => {
-  it("activeId=null → upload-button data-agent-id 'null'", () => {
-    wrap(<HomePage />);
-    expect(screen.getByTestId("upload-button").getAttribute("data-agent-id")).toBe("null");
-  });
-
-  it("activeId=7 → upload-button data-agent-id '7'", () => {
-    hooksState.activeId = 7;
-    wrap(<HomePage />);
-    expect(screen.getByTestId("upload-button").getAttribute("data-agent-id")).toBe("7");
-  });
-});
-
-describe("pasted image routing", () => {
-  const uploadResult = {
-    files: [
-      {
-        filename: "paste.png",
-        path: "/tmp/paste.png",
-        url: "/api/agents/5/uploads/paste.png",
-        size: 3,
-        content_type: "image/png",
-      },
-    ],
-  };
-
-  it("explains unknown model capabilities while text and stop remain available", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: null, status: "running" })];
-    wrap(<HomePage />);
-    expect(screen.getByText("Model capabilities are unavailable. You can still send text or request a stop.")).toBeTruthy();
-    expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("busy");
-    fireEvent.click(screen.getByTestId("composer-send-plain"));
-    await waitFor(() => expect(api.sendMessage).toHaveBeenCalled());
-    fireEvent.click(screen.getByTestId("composer-stop"));
-    await waitFor(() => expect(api.cancel).toHaveBeenCalledWith(5));
-    expect(hooksState.agents[0].status).toBe("running");
-    const image = new File(["png"], "paste.png", { type: "image/png" });
-    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
-      clipboardData: { files: [image], types: ["Files"] },
-    });
-    await waitFor(() => expect(api.submitUploadedFiles).toHaveBeenCalledTimes(1));
-    expect(api.uploadFiles).not.toHaveBeenCalled();
-  });
-
-  it("uses file delivery without a native thumbnail for a text-only agent", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: false })];
-    const image = new File(["png"], "paste.png", { type: "image/png" });
-
-    wrap(<HomePage />);
-    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
-      clipboardData: { files: [image], types: ["Files"] },
-    });
-
-    await waitFor(() => expect(vi.mocked(api.submitUploadedFiles)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.submitUploadedFiles)).toHaveBeenCalledWith(
-      5,
-      [image],
-      expect.stringMatching(/^[0-9a-f-]{36}$/),
-      expect.any(Function),
-    );
-    expect(vi.mocked(api.uploadFiles)).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
-  });
-
-  it.each(["claude_code", "codex"] as const)("routes images as files and hides native context for %s", async (harness) => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, harness, supports_vision: true })];
-    hooksState.settings["display.composer_context_meter"] = true;
-    wrap(<HomePage />);
-    expect(screen.getByTestId("composer").getAttribute("data-context-meter")).toBe("false");
-    const image = new File(["png"], "paste.png", { type: "image/png" });
-    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
-      clipboardData: { files: [image], types: ["Files"] },
-    });
-    await waitFor(() => expect(api.submitUploadedFiles).toHaveBeenCalledTimes(1));
-    expect(api.uploadFiles).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
-  });
-
-  it("keeps the native image attachment path for a vision-capable agent", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: true })];
-    hooksState.settings["display.composer_context_meter"] = true;
-    vi.mocked(api.uploadFiles).mockResolvedValueOnce(uploadResult);
-    const image = new File(["png"], "paste.png", { type: "image/png" });
-
-    wrap(<HomePage />);
-    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
-      clipboardData: { files: [image], types: ["Files"] },
-    });
-
-    await waitFor(() =>
-      expect(vi.mocked(api.uploadFiles)).toHaveBeenCalledWith(5, [image]),
-    );
-    expect(await screen.findByTestId("composer-image-thumbnail")).toBeTruthy();
-    expect(screen.getByTestId("composer").getAttribute("data-context-meter")).toBe("true");
-  });
-
-  it("submits on private HTTP when randomUUID is unavailable", async () => {
-    const browserCrypto = globalThis.crypto;
-    vi.stubGlobal("crypto", { getRandomValues: browserCrypto.getRandomValues.bind(browserCrypto) });
-    try {
-      hooksState.activeId = 5;
-      hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: false })];
-      const image = new File(["png"], "paste.png", { type: "image/png" });
-      wrap(<HomePage />);
-      fireEvent.paste(screen.getByTestId("composer-paste-target"), {
-        clipboardData: { files: [image], types: ["Files"] },
-      });
-      await waitFor(() => expect(vi.mocked(api.submitUploadedFiles)).toHaveBeenCalledTimes(1));
-      expect(vi.mocked(api.submitUploadedFiles).mock.calls[0][2]).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-      );
-      expect(vi.mocked(api.uploadFiles)).not.toHaveBeenCalled();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-});
-
-// ── Multi-command dispatch ──
-// One send is one message. Text invoking several commands goes to the agent
-// whole; expanding it into the individual commands is the backend's job
-// (base.packages.composer_commands.expand_command), inside that single inbound. Splitting here
-// would make the agent claim each command as its own turn, blind to the rest.
-
-describe("multi-command dispatch", () => {
-  it("sends one message for two space-separated commands", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("composer-send-multi"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
-      5,
-      "/compact /update",
-      expect.any(String),
-    );
-    await act(() => Promise.resolve());
-    expect(hooksState.requestScrollToBottom).toHaveBeenCalledTimes(1);
-  });
-
-  it("sends command arguments verbatim in that one message", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("composer-send-multi-args"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
-      5,
-      "/search hello world /compact",
-      expect.any(String),
-    );
-  });
-
-  it("sends a single message for plain text (no slash prefix)", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("composer-send-plain"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
-      5,
-      "plain text",
-      expect.any(String),
-    );
-  });
-
-  it("attaches images to the one command message", async () => {
-    // Attachments have nowhere else to go now: there is a single message, so
-    // the "which segment carries the image" question does not arise.
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("composer-send-multi-image"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
-      5,
-      [
-        { type: "text", text: "/compact /update" },
-        { type: "image_url", image_url: { url: "/api/agents/5/uploads/a.png" } },
-      ],
-      expect.any(String),
-    );
-  });
-
-  it("does not ask for the tail when the send fails", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    vi.mocked(api.sendMessage).mockRejectedValueOnce(new Error("boom"));
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("composer-send-multi"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalled());
-    await act(() => Promise.resolve());
-    expect(hooksState.requestScrollToBottom).not.toHaveBeenCalled();
   });
 });
