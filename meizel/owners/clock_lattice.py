@@ -84,16 +84,24 @@ INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
 }
 
 
-def _is_unregistered_clock(rel: str, name: str, value: ast.expr | None) -> bool:
+def _is_unregistered_clock(
+    rel: str,
+    name: str,
+    value: ast.expr | None,
+    *,
+    family_modules: tuple[str, ...] = FAMILY_MODULES,
+    independent: Mapping[tuple[str, str], str] = INDEPENDENT_CLOCKS,
+    registered_clocks: frozenset[str] = REGISTERED_CLOCKS,
+) -> bool:
     """A lattice-vocabulary constant outside the family modules, not exempt and not an alias."""
     if not _CONST_NAME.match(name) or not any(term in name for term in _LATTICE_TERMS):
         return False
-    if rel in FAMILY_MODULES:
+    if rel in family_modules:
         return False  # rule 1: the lattice's homes
-    if (rel, name) in INDEPENDENT_CLOCKS:
+    if (rel, name) in independent:
         return False  # rule 3: explicit exemption
     # rule 2: alias of a registered clock
-    return not (isinstance(value, ast.Name) and value.id in _registered_clock_names())
+    return not (isinstance(value, ast.Name) and value.id in registered_clocks)
 
 
 def _carries_vocabulary(name: str) -> bool:
@@ -162,18 +170,65 @@ def literal_bindings(tree: ast.Module) -> list[tuple[str, int]]:
     return found
 
 
-def scan_file(path: Path, *, independent: Mapping[tuple[str, str], str] | None = None) -> list[str]:
+def _root(repo_root: Path | None) -> Path:
+    return _REPO_ROOT if repo_root is None else repo_root
+
+
+def _rel_path(path: Path, root: Path) -> str:
     try:
-        rel = path.relative_to(_REPO_ROOT).as_posix()
+        return path.relative_to(root).as_posix()
     except ValueError:
-        rel = path.as_posix()
+        return path.as_posix()
+
+
+def _constant_errors(
+    path: Path,
+    rel: str,
+    tree: ast.Module,
+    *,
+    family_modules: tuple[str, ...],
+    exempt: Mapping[tuple[str, str], str],
+    registered_clocks: frozenset[str],
+) -> list[str]:
+    registry = family_modules[0] if family_modules else "a lattice family module"
+    errors: list[str] = []
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        for target in targets:
+            if isinstance(target, ast.Name) and _is_unregistered_clock(
+                rel,
+                target.id,
+                node.value,
+                family_modules=family_modules,
+                independent=exempt,
+                registered_clocks=registered_clocks,
+            ):
+                errors.append(
+                    f"{path}:{node.lineno}: {target.id} — lattice-vocabulary clock outside "
+                    f"the lattice family modules; define it in {registry} (and "
+                    "register it in CLOCKS) or make it an alias of a registered clock"
+                )
+    return errors
+
+
+def scan_file(
+    path: Path,
+    *,
+    independent: Mapping[tuple[str, str], str] | None = None,
+    repo_root: Path | None = None,
+    family_modules: tuple[str, ...] = FAMILY_MODULES,
+    registered_clocks: frozenset[str] = REGISTERED_CLOCKS,
+) -> list[str]:
+    rel = _rel_path(path, _root(repo_root))
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, SyntaxError):
         return []  # unreadable entry (dangling symlink / non-UTF-8), or a syntax error the compiler owns
     errors: list[str] = []
     exempt = INDEPENDENT_CLOCKS if independent is None else independent
-    if rel not in FAMILY_MODULES:
+    if rel not in family_modules:
         errors.extend(
             f"{path}:{line}: {name} — a lattice-vocabulary name bound to a literal outside the "
             "lattice family modules; give it no value here (take it from a config the root builds) "
@@ -181,18 +236,16 @@ def scan_file(path: Path, *, independent: Mapping[tuple[str, str], str] | None =
             for name, line in literal_bindings(tree)
             if (rel, name) not in exempt
         )
-    for node in tree.body:
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        for target in targets:
-            if isinstance(target, ast.Name) and _is_unregistered_clock(rel, target.id, node.value):
-                registry = FAMILY_MODULES[0] if FAMILY_MODULES else "a lattice family module"
-                errors.append(
-                    f"{path}:{node.lineno}: {target.id} — lattice-vocabulary clock outside "
-                    f"the lattice family modules; define it in {registry} (and "
-                    "register it in CLOCKS) or make it an alias of a registered clock"
-                )
+    errors.extend(
+        _constant_errors(
+            path,
+            rel,
+            tree,
+            family_modules=family_modules,
+            exempt=exempt,
+            registered_clocks=registered_clocks,
+        )
+    )
     return errors
 
 
@@ -207,15 +260,19 @@ def _module_level_names(tree: ast.Module) -> set[str]:
 
 def stale_allowlist_entries(
     independent: Mapping[tuple[str, str], str] | None = None,
+    *,
+    repo_root: Path | None = None,
+    family_modules: tuple[str, ...] = FAMILY_MODULES,
 ) -> list[str]:
     """Allowlist entries whose file or exempted constant no longer exists."""
+    root = _REPO_ROOT if repo_root is None else repo_root
     exempt = INDEPENDENT_CLOCKS if independent is None else independent
     errors: list[str] = []
-    for rel in FAMILY_MODULES:
-        if not (_REPO_ROOT / rel).is_file():
+    for rel in family_modules:
+        if not (root / rel).is_file():
             errors.append(f"{rel}: stale FAMILY_MODULES entry — the file no longer exists")
     for rel, name in exempt:
-        path = _REPO_ROOT / rel
+        path = root / rel
         if not path.is_file():
             errors.append(
                 f"{rel}: stale INDEPENDENT_CLOCKS entry {name} — the file no longer exists"
@@ -239,26 +296,50 @@ def stale_allowlist_entries(
     return errors
 
 
-def _scan(paths: list[Path], scope: frozenset[str] | None = None) -> list[str]:
+def _scan(
+    paths: list[Path],
+    scope: frozenset[str] | None = None,
+    *,
+    repo_root: Path | None = None,
+    registered_clocks: frozenset[str] = REGISTERED_CLOCKS,
+) -> list[str]:
+    root = _root(repo_root)
     errors: list[str] = []
     for path in paths:
         if path.is_dir():
             for p in sorted(path.rglob("*.py")):
-                try:
-                    rel = p.relative_to(_REPO_ROOT).as_posix()
-                except ValueError:
-                    rel = p.as_posix()
+                rel = _rel_path(p, root)
                 if any(pat.search(rel) for pat in _TEST_PATTERNS):
                     continue
                 if scope is not None and rel not in scope:
                     continue
-                errors.extend(scan_file(p))
+                errors.extend(scan_file(p, repo_root=root, registered_clocks=registered_clocks))
         elif path.suffix == ".py":
-            errors.extend(scan_file(path))
+            errors.extend(scan_file(path, repo_root=root, registered_clocks=registered_clocks))
     return errors
 
 
-def main(argv: list[str] | None = None) -> int:
+def _stale_entries(
+    repo_root: Path | None,
+    family_modules: tuple[str, ...],
+    independent: Mapping[tuple[str, str], str] | None,
+) -> list[str]:
+    if repo_root is None and family_modules == FAMILY_MODULES and independent is None:
+        return stale_allowlist_entries()
+    return stale_allowlist_entries(
+        independent, repo_root=_root(repo_root), family_modules=family_modules
+    )
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    repo_root: Path | None = None,
+    registered_clocks: frozenset[str] = REGISTERED_CLOCKS,
+    family_modules: tuple[str, ...] = FAMILY_MODULES,
+    independent: Mapping[tuple[str, str], str] | None = None,
+) -> int:
+    root = _root(repo_root)
     argv = list(sys.argv[1:] if argv is None else argv)
     argv, only = lint_common.split_only(argv)
     if argv:
@@ -266,15 +347,13 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    paths = (
-        [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(_REPO_ROOT, SCAN_DIRS)
-    )
+    paths = [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(root, SCAN_DIRS)
     # `--only` (the commit hook) judges the changed files under the default scope; the
     # lattice's own family modules are inputs: editing one re-judges every file.
-    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=FAMILY_MODULES)
-    errors = _scan(paths, scope)
+    scope = lint_common.changed_scope(only, root, inputs=family_modules)
+    errors = _scan(paths, scope, repo_root=root, registered_clocks=registered_clocks)
     if not argv:
-        errors.extend(stale_allowlist_entries())
+        errors.extend(_stale_entries(repo_root, family_modules, independent))
     for err in errors:
         print(err, file=sys.stderr)
     return 1 if errors else 0

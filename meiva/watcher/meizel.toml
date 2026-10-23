@@ -5,3 +5,31 @@ exports = ["files.py", "plans.py", "spawn.py", "wiring.py"]
 "plans.py" = ["spawn.py"]
 "spawn.py" = ["files.py"]
 "wiring.py" = ["files.py", "spawn.py"]
+
+[purity]
+"." = "strict-to-be"
+
+[debt.impure-call]
+"__init__.py#datetime.now" = 2
+"files.py#Path.mkdir" = 1
+"files.py#Path.unlink" = 1
+"spawn.py#Path.unlink" = 1
+"spawn.py#Path.write_text" = 2
+"wiring.py#datetime.now" = 1
+"wiring.py#import tempfile" = 1
+
+[debt.impure-edge]
+"__init__.py#base/config/__init__.py" = 1
+"__init__.py#base/daemon/schedules/watcher.py" = 1
+"__init__.py#meiva/shell/__init__.py" = 1
+"plans.py#base/daemon/schedules/watcher.py" = 1
+"spawn.py#base/daemon/schedules/watcher.py" = 1
+"spawn.py#meiva/shell/__init__.py" = 1
+"wiring.py#base/host/env/dotenv_boot.py" = 1
+"wiring.py#base/paths/__init__.py" = 1
+"wiring.py#meiva/shell/background.py" = 1
+"wiring.py#meiva/shell/sessions.py" = 2
+
+[debt.wide-params]
+"plans.py#def plan_cron" = 1
+"spawn.py#def notified_line" = 1

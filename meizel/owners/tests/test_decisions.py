@@ -102,18 +102,17 @@ def test_the_owner_module_itself_is_exempt() -> None:
     assert decisions.owner_bypasses(tree, "base/db/connections.py", ()) == {}
 
 
-def test_allowlist_entry_is_stale_once_the_module_stops_bypassing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_allowlist_entry_is_stale_once_the_module_stops_bypassing() -> None:
     decision = decisions.Decision(
         owners=frozenset({"base/owner.py"}),
         find=lambda _tree, _roots: [],
         fix="use the owner",
         allowed={"gateway/legacy.py": "historical exemption"},
     )
-    monkeypatch.setattr(decisions, "DECISIONS", {"fake-decision": decision})
 
-    errors = decisions.allowlist_errors(_parse("x = 1\n"), "gateway/legacy.py", ())
+    errors = decisions.allowlist_errors(
+        _parse("x = 1\n"), "gateway/legacy.py", (), decisions_map={"fake-decision": decision}
+    )
 
     assert len(errors) == 1
     lineno, message = errors[0]
@@ -122,52 +121,51 @@ def test_allowlist_entry_is_stale_once_the_module_stops_bypassing(
     assert "remove it from [single-owner.<decision>] in meizel.policy.toml" in message
 
 
-def test_allowlist_entry_is_not_stale_while_it_still_bypasses(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_allowlist_entry_is_not_stale_while_it_still_bypasses() -> None:
     decision = decisions.Decision(
         owners=frozenset({"base/owner.py"}),
         find=lambda _tree, _roots: [3],
         fix="use the owner",
         allowed={"gateway/legacy.py": "historical exemption"},
     )
-    monkeypatch.setattr(decisions, "DECISIONS", {"fake-decision": decision})
 
-    assert decisions.allowlist_errors(_parse("x = 1\n"), "gateway/legacy.py", ()) == []
+    assert (
+        decisions.allowlist_errors(
+            _parse("x = 1\n"), "gateway/legacy.py", (), decisions_map={"fake-decision": decision}
+        )
+        == []
+    )
 
 
-def test_allowlist_errors_ignore_modules_outside_the_allowed_map(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_allowlist_errors_ignore_modules_outside_the_allowed_map() -> None:
     decision = decisions.Decision(
         owners=frozenset(), find=lambda _tree, _roots: [], fix="use the owner", allowed={}
     )
-    monkeypatch.setattr(decisions, "DECISIONS", {"fake-decision": decision})
 
-    assert decisions.allowlist_errors(_parse("x = 1\n"), "gateway/other.py", ()) == []
+    assert (
+        decisions.allowlist_errors(
+            _parse("x = 1\n"), "gateway/other.py", (), decisions_map={"fake-decision": decision}
+        )
+        == []
+    )
 
 
-def test_missing_allowlist_errors_flags_a_deleted_allowed_path(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_missing_allowlist_errors_flags_a_deleted_allowed_path(tmp_path: pathlib.Path) -> None:
     decision = decisions.Decision(
         owners=frozenset(),
         find=lambda _tree, _roots: [],
         fix="use the owner",
         allowed={"gateway/gone.py": "historical exemption"},
     )
-    monkeypatch.setattr(decisions, "DECISIONS", {"fake-decision": decision})
 
-    errors = decisions.missing_allowlist_errors(tmp_path)
+    errors = decisions.missing_allowlist_errors(tmp_path, decisions_map={"fake-decision": decision})
 
     assert len(errors) == 1
     assert "gateway/gone.py:1: stale fake-decision allowlist entry" in errors[0]
     assert "the module no longer exists" in errors[0]
 
 
-def test_missing_allowlist_errors_is_clean_for_an_existing_path(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_missing_allowlist_errors_is_clean_for_an_existing_path(tmp_path: pathlib.Path) -> None:
     _write(tmp_path, "gateway/present.py", "x = 1\n")
     decision = decisions.Decision(
         owners=frozenset(),
@@ -175,6 +173,8 @@ def test_missing_allowlist_errors_is_clean_for_an_existing_path(
         fix="use the owner",
         allowed={"gateway/present.py": "historical exemption"},
     )
-    monkeypatch.setattr(decisions, "DECISIONS", {"fake-decision": decision})
 
-    assert decisions.missing_allowlist_errors(tmp_path) == []
+    assert (
+        decisions.missing_allowlist_errors(tmp_path, decisions_map={"fake-decision": decision})
+        == []
+    )

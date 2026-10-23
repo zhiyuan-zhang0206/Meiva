@@ -23,9 +23,10 @@ def _sites(source: str, rel: str) -> dict[str, int]:
 
 
 @pytest.fixture(autouse=True)
-def _governed(monkeypatch: pytest.MonkeyPatch) -> None:
+def _governed() -> None:
     """The shared structure-test isolation blanks the real list; govern one package here."""
-    monkeypatch.setattr(allow, "SLICED_PACKAGES", {_PACKAGE: frozenset({_ROOT})})
+    allow.SLICED_PACKAGES.clear()
+    allow.SLICED_PACKAGES[_PACKAGE] = frozenset({_ROOT})
 
 
 @pytest.mark.parametrize(
@@ -73,12 +74,11 @@ def test_other_names_of_base_config_are_not_reads() -> None:
     assert _sites("from base.config import cluster_tz, Settings\n", f"{_PACKAGE}/core.py") == {}
 
 
-def test_a_listed_package_or_root_that_is_gone_is_stale(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_listed_package_or_root_that_is_gone_is_stale(tmp_path: pathlib.Path) -> None:
     (tmp_path / "pkg").mkdir()
     (tmp_path / "pkg/config.py").write_text("", encoding="utf-8")
-    monkeypatch.setattr(allow, "SLICED_PACKAGES", {"pkg": frozenset({"pkg/root.py"})})
+    allow.SLICED_PACKAGES.clear()
+    allow.SLICED_PACKAGES["pkg"] = frozenset({"pkg/root.py"})
     errors = [e for e in ambient_state.missing_allowlist_errors(tmp_path) if "SLICED" in e]
     assert len(errors) == 1
     assert "pkg/root.py does not exist" in errors[0]

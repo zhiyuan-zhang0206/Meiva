@@ -4,3 +4,19 @@ exports = ["ambient.py", "boot.py", "tests"]
 "ambient.py" = ["__init__.py"]
 "boot.py" = ["__init__.py"]
 "tests" = ["__init__.py", "boot.py"]
+
+[purity]
+"." = "strict-to-be"
+
+[debt.impure-edge]
+"__init__.py#base/host/db_authority/api.py" = 1
+"__init__.py#base/host/db_authority/unit.py" = 1
+"__init__.py#base/host/env/bootstrap.py" = 1
+"__init__.py#base/host/env/dotenv_boot.py" = 1
+"__init__.py#base/host/net/auth.py" = 1
+"__init__.py#base/paths/__init__.py" = 1
+"ambient.py#base/config/__init__.py" = 1
+"boot.py#base/config/__init__.py" = 1
+
+[debt.wide-public-surface]
+"__init__.py#public-surface" = 1

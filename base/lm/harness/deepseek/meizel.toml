@@ -42,7 +42,6 @@
 "usage.py#import subprocess" = 1
 
 [debt.impure-edge]
-"session.py#base/lm/harness/acp/transport.py" = 1
 "session.py#base/lm/harness/process.py" = 1
 "session.py#base/lm/harness/registry.py" = 1
 "types.py#base/lm/harness/process.py" = 1

@@ -14,8 +14,9 @@ _ROOT = f"{_PACKAGE}/daemon.py"
 
 
 @pytest.fixture(autouse=True)
-def _governed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(allow, "BUS_PACKAGES", {_PACKAGE: frozenset({_ROOT})})
+def _governed() -> None:
+    allow.BUS_PACKAGES.clear()
+    allow.BUS_PACKAGES[_PACKAGE] = frozenset({_ROOT})
 
 
 def _sites(source: str, rel: str = f"{_PACKAGE}/core.py") -> dict[str, int]:
@@ -74,10 +75,9 @@ def test_other_modules_and_tests_are_outside_the_rule(rel: str) -> None:
     assert _sites(source, rel) == {}
 
 
-def test_a_listed_root_that_is_gone_is_stale(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(allow, "BUS_PACKAGES", {"pkg": frozenset({"pkg/root.py"})})
+def test_a_listed_root_that_is_gone_is_stale(tmp_path: pathlib.Path) -> None:
+    allow.BUS_PACKAGES.clear()
+    allow.BUS_PACKAGES["pkg"] = frozenset({"pkg/root.py"})
     errors = [e for e in ambient_state.missing_allowlist_errors(tmp_path) if "BUS_" in e]
     assert len(errors) == 1
     assert "pkg/root.py does not exist" in errors[0]

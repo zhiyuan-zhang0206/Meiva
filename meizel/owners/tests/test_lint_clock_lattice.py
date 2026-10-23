@@ -10,6 +10,7 @@ its neighbours.
 
 from __future__ import annotations
 
+import os
 import textwrap
 from pathlib import Path
 
@@ -21,29 +22,25 @@ from meizel.owners import clock_lattice as _lint
 # pyright: reportUnknownMemberType = warning
 # pyright: reportUnknownArgumentType = warning
 
+_TEST_CLOCKS = frozenset({"NO_PROGRESS_TIMEOUT_S"})
+
 
 @pytest.fixture()
-def scan_tmp(tmp_path: Path, monkeypatch) -> None:
-    """Point the lint at a scratch tree so fixtures never touch the real repo.
-
-    `REGISTERED_CLOCKS` is pinned to a fixed set (the lint resolves it once at
-    import from the real tree); `_REPO_ROOT` is redirected so fixture files are
-    written to the scratch tree and nothing in the real repo is read.
-    """
-    monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
-    monkeypatch.setattr(_lint, "REGISTERED_CLOCKS", frozenset({"NO_PROGRESS_TIMEOUT_S"}))
+def scan_tmp(tmp_path: Path) -> Path:
+    """Scratch tree root so fixtures never touch the real repo."""
+    return tmp_path
 
 
-def _write(scan_tmp, rel: str, body: str) -> Path:
-    p = _lint._REPO_ROOT / rel
+def _write(scan_tmp: Path, rel: str, body: str) -> Path:
+    p = scan_tmp / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(textwrap.dedent(body), encoding="utf-8")
     return p
 
 
-def _errors(scan_tmp, rel: str, body: str) -> list[str]:
+def _errors(scan_tmp: Path, rel: str, body: str) -> list[str]:
     p = _write(scan_tmp, rel, body)
-    return _lint.scan_file(p)
+    return _lint.scan_file(p, repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS)
 
 
 def test_bare_lattice_clock_outside_family_is_rejected(scan_tmp) -> None:
@@ -131,30 +128,32 @@ def test_unknown_clock_alias_is_rejected(scan_tmp) -> None:
 
 
 def test_explicit_missing_target_is_an_error(
-    scan_tmp, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    scan_tmp: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A typo'd explicit path must fail the gate, not die in a bare traceback."""
     good = _write(scan_tmp, "ok.py", "value = 1\n")
     missing = tmp_path / "typo.py"
-    assert _lint.main([str(missing)]) == 1
+    assert _lint.main([str(missing)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 1
     assert str(missing) in capsys.readouterr().err
-    assert _lint.main([str(good), str(missing)]) == 1
+    assert (
+        _lint.main([str(good), str(missing)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS)
+        == 1
+    )
 
 
-def test_directory_with_dangling_symlink_member_is_skipped(scan_tmp) -> None:
+def test_directory_with_dangling_symlink_member_is_skipped(scan_tmp: Path) -> None:
     """A broken *.py symlink inside an explicit directory must be skipped like
     any unreadable entry — the scan must not crash on it."""
-    pkg = _lint._REPO_ROOT / "pkg"
+    pkg = scan_tmp / "pkg"
     pkg.mkdir()
     (pkg / "ok.py").write_text("value = 1\n", encoding="utf-8")
     (pkg / "dangling.py").symlink_to(pkg / "missing.py")
-    assert _lint.main([str(pkg)]) == 0
+    assert _lint.main([str(pkg)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 0
 
 
 def test_explicit_outside_repo_and_relative_targets_are_scanned(
-    scan_tmp,
+    scan_tmp: Path,
     tmp_path_factory: pytest.TempPathFactory,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A path outside the repo, or given relative to the cwd, must be scanned
@@ -164,25 +163,29 @@ def test_explicit_outside_repo_and_relative_targets_are_scanned(
     outside = tmp_path_factory.mktemp("outside")
     bad = outside / "bad.py"
     bad.write_text("_MY_STALL_TIMEOUT_S = 5\n", encoding="utf-8")
-    assert _lint.main([str(bad)]) == 1
-    monkeypatch.chdir(outside)
-    assert _lint.main(["bad.py"]) == 1
+    assert _lint.main([str(bad)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 1
+    prev_cwd = Path.cwd()
+    try:
+        os.chdir(outside)
+        assert _lint.main(["bad.py"], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 1
+    finally:
+        os.chdir(prev_cwd)
     assert "bad.py" in capsys.readouterr().err
 
 
 def test_directory_with_non_utf8_member_is_skipped(
-    scan_tmp, capsys: pytest.CaptureFixture[str]
+    scan_tmp: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A non-UTF-8 *.py member of an explicit directory is skipped like any
     unreadable entry — the scan must not crash on it, and a violating sibling
     file is still reported."""
-    pkg = _lint._REPO_ROOT / "pkg"
+    pkg = scan_tmp / "pkg"
     pkg.mkdir()
     (pkg / "ok.py").write_text("value = 1\n", encoding="utf-8")
     (pkg / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
-    assert _lint.main([str(pkg)]) == 0
+    assert _lint.main([str(pkg)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 0
     (pkg / "viol.py").write_text("_MY_STALL_TIMEOUT_S = 5\n", encoding="utf-8")
-    assert _lint.main([str(pkg)]) == 1
+    assert _lint.main([str(pkg)], repo_root=scan_tmp, registered_clocks=_TEST_CLOCKS) == 1
     assert "_MY_STALL_TIMEOUT_S" in capsys.readouterr().err
 
 
@@ -193,47 +196,68 @@ def test_real_allowlists_are_current() -> None:
     assert _lint.stale_allowlist_entries() == []
 
 
-def test_exemption_for_a_deleted_file_is_stale(scan_tmp, monkeypatch) -> None:
-    monkeypatch.setattr(_lint, "FAMILY_MODULES", ())
-    monkeypatch.setattr(_lint, "INDEPENDENT_CLOCKS", {("base/gone.py", "_REAP_S"): "why"})
-    errs = _lint.stale_allowlist_entries()
+def test_exemption_for_a_deleted_file_is_stale(scan_tmp: Path) -> None:
+    errs = _lint.stale_allowlist_entries(
+        {("base/gone.py", "_REAP_S"): "why"},
+        repo_root=scan_tmp,
+        family_modules=(),
+    )
     assert len(errs) == 1
     assert "base/gone.py" in errs[0] and "_REAP_S" in errs[0]
 
 
-def test_exemption_for_a_removed_constant_is_stale(scan_tmp, monkeypatch) -> None:
+def test_exemption_for_a_removed_constant_is_stale(scan_tmp: Path) -> None:
     _write(scan_tmp, "base/host/proc.py", "_OTHER_GRACE_S = 1.0\n")
-    monkeypatch.setattr(_lint, "FAMILY_MODULES", ())
-    monkeypatch.setattr(
-        _lint, "INDEPENDENT_CLOCKS", {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
+    errs = _lint.stale_allowlist_entries(
+        {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"},
+        repo_root=scan_tmp,
+        family_modules=(),
     )
-    errs = _lint.stale_allowlist_entries()
     assert len(errs) == 1
     assert "no module-level _TERMINATE_GRACE_S" in errs[0]
 
 
-def test_live_exemption_and_family_module_are_current(scan_tmp, monkeypatch) -> None:
+def test_live_exemption_and_family_module_are_current(scan_tmp: Path) -> None:
     _write(scan_tmp, "base/host/proc.py", "_TERMINATE_GRACE_S: float = 1.0\n")
     _write(scan_tmp, "base/deploy/timing.py", "CLOCKS = {}\n")
-    monkeypatch.setattr(_lint, "FAMILY_MODULES", ("base/deploy/timing.py",))
-    monkeypatch.setattr(
-        _lint, "INDEPENDENT_CLOCKS", {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
+    assert (
+        _lint.stale_allowlist_entries(
+            {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"},
+            repo_root=scan_tmp,
+            family_modules=("base/deploy/timing.py",),
+        )
+        == []
     )
-    assert _lint.stale_allowlist_entries() == []
 
 
 def test_full_scan_fails_on_a_stale_family_module(
-    scan_tmp, monkeypatch, capsys: pytest.CaptureFixture[str]
+    scan_tmp: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Only the argument-free full scan (pre-commit, CI) judges the allowlists."""
     for scan_dir in _lint.SCAN_DIRS:
-        (_lint._REPO_ROOT / scan_dir).mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(_lint, "FAMILY_MODULES", ("base/retired_timing.py",))
-    monkeypatch.setattr(_lint, "INDEPENDENT_CLOCKS", {})
-    assert _lint.main([]) == 1
+        (scan_tmp / scan_dir).mkdir(parents=True, exist_ok=True)
+    assert (
+        _lint.main(
+            [],
+            repo_root=scan_tmp,
+            registered_clocks=_TEST_CLOCKS,
+            family_modules=("base/retired_timing.py",),
+            independent={},
+        )
+        == 1
+    )
     assert "stale FAMILY_MODULES entry" in capsys.readouterr().err
     ok = _write(scan_tmp, "ok.py", "value = 1\n")
-    assert _lint.main([str(ok)]) == 0
+    assert (
+        _lint.main(
+            [str(ok)],
+            repo_root=scan_tmp,
+            registered_clocks=_TEST_CLOCKS,
+            family_modules=("base/retired_timing.py",),
+            independent={},
+        )
+        == 0
+    )
 
 
 # ── values bound to a clock name ──────────────────────────────────────────────
@@ -294,16 +318,20 @@ def test_a_family_module_may_bind_literals(scan_tmp) -> None:
     assert _errors(scan_tmp, "base/native_process/stop_timing.py", body) == []
 
 
-def test_an_audited_exemption_lets_a_binding_stand(scan_tmp) -> None:
+def test_an_audited_exemption_lets_a_binding_stand(scan_tmp: Path) -> None:
     body = "def go(cfg):\n    return cfg(claude_thinking_budget_tokens=0)\n"
     path = _write(scan_tmp, "ops/z.py", body)
-    assert _lint.scan_file(path, independent={}) != []
+    assert _lint.scan_file(path, independent={}, repo_root=scan_tmp) != []
     reason = {("ops/z.py", "claude_thinking_budget_tokens"): "a token budget, not a time value"}
-    assert _lint.scan_file(path, independent=reason) == []
+    assert _lint.scan_file(path, independent=reason, repo_root=scan_tmp) == []
 
 
-def test_an_exemption_that_binds_nothing_any_more_is_stale(scan_tmp) -> None:
+def test_an_exemption_that_binds_nothing_any_more_is_stale(scan_tmp: Path) -> None:
     _write(scan_tmp, "ops/z.py", "def go(cfg):\n    return cfg(limit=3)\n")
     gone = {("ops/z.py", "claude_thinking_budget_tokens"): "a token budget, not a time value"}
-    stale = [m for m in _lint.stale_allowlist_entries(independent=gone) if "claude_thinking" in m]
+    stale = [
+        m
+        for m in _lint.stale_allowlist_entries(independent=gone, repo_root=scan_tmp)
+        if "claude_thinking" in m
+    ]
     assert len(stale) == 1 and "drop the exemption" in stale[0]

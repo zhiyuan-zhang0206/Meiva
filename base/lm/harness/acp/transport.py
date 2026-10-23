@@ -76,7 +76,7 @@ class PermissionRequest:
 PermissionHandler = Callable[[PermissionRequest], Awaitable[str | None]]
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class _Pending:
     request_id: int
     method: str

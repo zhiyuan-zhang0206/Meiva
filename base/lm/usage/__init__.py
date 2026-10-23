@@ -399,7 +399,7 @@ def emit_billing_event(
 
 
 def emit_billing_from_message(
-    msg: Any,
+    msg: AIMessage,
     *,
     model: str,
     usage_kind: str,
@@ -411,15 +411,18 @@ def emit_billing_from_message(
     # meiva:note
     # Price a LangChain message and emit its billing span when usage is known.
     try:
+        usage_metadata = msg.usage_metadata
+        if not usage_metadata:
+            return
         tok_in, tok_out, tok_cached = tally_tokens([msg])
         if tok_in is None or tok_out is None or tok_cached is None:
             return
-        tok_cached = _metered_cache_read(msg.usage_metadata, tok_cached)
+        tok_cached = _metered_cache_read(usage_metadata, tok_cached)
         model = usage_model(msg, model, catalog=catalog)
         resolved_vendor = vendor or vendor_of_model(model, catalog=catalog)
         if resolved_vendor is None:
             return
-        write_5m, write_1h = cache_write_tokens(msg.usage_metadata.get("input_token_details") or {})
+        write_5m, write_1h = cache_write_tokens(usage_metadata.get("input_token_details") or {})
         priced = quote(
             model,
             tok_in,

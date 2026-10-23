@@ -1,7 +1,6 @@
 """Pending invocation state and the host's database-only failure boundary."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from functools import partial
 
 from langchain_core.runnables import RunnableConfig
@@ -25,13 +24,19 @@ from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoi
 from services.agent_runner.agent_host.runtime import TurnOutcome
 
 
-@dataclass
 class PendingWorkResult:
     """The completed invocation and its in-process database settlement phase."""
 
-    result: dict[str, object]
-    checkpoint_flushed: bool = False
-    trace_attached: bool = False
+    def __init__(
+        self,
+        result: dict[str, object],
+        *,
+        checkpoint_flushed: bool = False,
+        trace_attached: bool = False,
+    ) -> None:
+        self.result = result
+        self.checkpoint_flushed = checkpoint_flushed
+        self.trace_attached = trace_attached
 
 
 # meiva:note

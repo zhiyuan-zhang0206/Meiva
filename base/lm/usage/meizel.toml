@@ -1,5 +1,27 @@
+purity = "strict-to-be"
 exports = ["__init__.py", "metering.py"]
 
 [uses]
 "__init__.py" = []
 "metering.py" = ["__init__.py"]
+
+[debt.impure-call]
+"__init__.py#datetime.now" = 1
+"metering.py#time.monotonic" = 2
+
+[debt.impure-edge]
+"__init__.py#base/config/__init__.py" = 1
+"__init__.py#base/lm/provider_api.py" = 1
+"__init__.py#base/lm/reasoning.py" = 1
+"__init__.py#base/log/__init__.py" = 1
+"__init__.py#base/telemetry/__init__.py" = 1
+"__init__.py#base/telemetry/tracing.py" = 3
+"metering.py#base/log/__init__.py" = 1
+"metering.py#base/telemetry/__init__.py" = 1
+
+[debt.wide-params]
+"__init__.py#def _log_usage" = 1
+"__init__.py#def emit_billing_event" = 1
+"__init__.py#def emit_billing_from_message" = 1
+"__init__.py#def log_usage_fields" = 1
+"__init__.py#def log_usage_from_message" = 1

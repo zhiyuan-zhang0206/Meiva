@@ -27,7 +27,7 @@ channel reducers enforce). This door does not import it.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -66,7 +66,7 @@ def _stamp_created_at(kwargs: dict[str, object], created_at: datetime | None) ->
 
 def inbound_message(
     *,
-    content: str | list[dict[str, Any]],
+    content: str | Sequence[Mapping[str, object]],
     source: str,
     inbound_id: int | None,
     body_start: int,
@@ -178,7 +178,7 @@ def exec_output_message(
     created_at: datetime,
     exec_ms: int | None = None,
     started_at: datetime | None = None,
-    sdk_calls: list[dict[str, Any]] | None = None,
+    sdk_calls: Sequence[Mapping[str, object]] | None = None,
 ) -> ToolMessage:
     """Envelope-wrapped stdout/stderr block after subprocess exec completes
     (product of `agent/graph/exec/node.py:wrap_code_output`).

@@ -3,23 +3,3 @@ exports = ["conftest.py"]
 [external]
 "test_task_owner.py" = "executes sample source the lint rule is exercised on"
 "test_thread_owner.py" = "executes sample source the lint rule is exercised on"
-
-[debt.first-party-patch]
-"conftest.py#monkeypatch.setattr meizel.state.ambient_state.allowlist" = 1
-"test_ambient_bus.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.BUS_PACKAGES" = 2
-"test_ambient_dbhandle.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.DB_HANDLE_PACKAGES" = 2
-"test_ambient_effects.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.ALLOWED" = 2
-"test_ambient_effects.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.PURE_REPO_CALLEES" = 2
-"test_ambient_effects.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.SINK_FACADES" = 3
-"test_ambient_endpoints.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.ENDPOINT_PACKAGES" = 2
-"test_ambient_sliced.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.SLICED_PACKAGES" = 2
-"test_ambient_state.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.ALLOWED" = 1
-
-[debt.impure-test-fixture]
-"conftest.py#fixture monkeypatch" = 1
-"test_ambient_bus.py#fixture monkeypatch" = 2
-"test_ambient_dbhandle.py#fixture monkeypatch" = 2
-"test_ambient_effects.py#fixture monkeypatch" = 4
-"test_ambient_endpoints.py#fixture monkeypatch" = 2
-"test_ambient_sliced.py#fixture monkeypatch" = 2
-"test_ambient_state.py#fixture monkeypatch" = 1

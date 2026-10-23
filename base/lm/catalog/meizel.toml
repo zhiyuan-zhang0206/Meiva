@@ -1,5 +1,11 @@
+purity = "strict-to-be"
 exports = ["decide", "provider_contract.py"]
 
 [uses]
 "__init__.py" = ["decide", "provider_contract.py"]
 "provider_contract.py" = ["decide"]
+
+[debt.impure-edge]
+"__init__.py#base/lm/registry.py" = 1
+"provider_contract.py#base/host/env/agent_slices.py" = 1
+"provider_contract.py#base/lm/registry.py" = 1

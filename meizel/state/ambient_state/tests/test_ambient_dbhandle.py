@@ -17,9 +17,10 @@ _ROOT = f"{_PACKAGE}/daemon.py"
 
 
 @pytest.fixture(autouse=True)
-def _governed(monkeypatch: pytest.MonkeyPatch) -> None:
+def _governed() -> None:
     """The shared structure-test isolation blanks the real list; govern one package here."""
-    monkeypatch.setattr(allow, "DB_HANDLE_PACKAGES", {_PACKAGE: frozenset({_ROOT})})
+    allow.DB_HANDLE_PACKAGES.clear()
+    allow.DB_HANDLE_PACKAGES[_PACKAGE] = frozenset({_ROOT})
 
 
 def _sites(source: str, rel: str = f"{_PACKAGE}/core.py") -> dict[str, int]:
@@ -76,10 +77,9 @@ def test_other_modules_and_tests_are_outside_the_rule(rel: str) -> None:
     assert _sites(source, rel) == {}
 
 
-def test_a_listed_root_that_is_gone_is_stale(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(allow, "DB_HANDLE_PACKAGES", {"pkg": frozenset({"pkg/root.py"})})
+def test_a_listed_root_that_is_gone_is_stale(tmp_path: pathlib.Path) -> None:
+    allow.DB_HANDLE_PACKAGES.clear()
+    allow.DB_HANDLE_PACKAGES["pkg"] = frozenset({"pkg/root.py"})
     errors = [e for e in ambient_state.missing_allowlist_errors(tmp_path) if "DB_HANDLE" in e]
     assert len(errors) == 1
     assert "pkg/root.py does not exist" in errors[0]

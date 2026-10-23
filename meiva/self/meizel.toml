@@ -3,3 +3,25 @@ exports = ["harness", "wake.py"]
 [uses]
 "__init__.py" = ["harness", "wake.py"]
 "harness" = []
+
+[purity]
+"__init__.py" = "strict-to-be"
+"wake.py" = "strict-to-be"
+
+[debt.impure-call]
+"wake.py#import redis" = 1
+
+[debt.impure-edge]
+"__init__.py#base/agents/lifecycle.py" = 1
+"__init__.py#base/agents/model/model_config.py" = 1
+"__init__.py#base/events/live/projection.py" = 1
+"__init__.py#base/lm/registry.py" = 1
+"__init__.py#base/log/__init__.py" = 1
+"__init__.py#base/telemetry/__init__.py" = 4
+"__init__.py#base/telemetry/audit_events.py" = 1
+"__init__.py#meiva/boot.py" = 2
+"__init__.py#meiva/files.py" = 2
+"__init__.py#meiva/self/harness/__init__.py" = 1
+"wake.py#base/cluster/__init__.py" = 1
+"wake.py#base/config/__init__.py" = 1
+"wake.py#base/log/__init__.py" = 1

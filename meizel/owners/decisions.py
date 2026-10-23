@@ -7,7 +7,7 @@ when the module no longer bypasses the owner, or no longer exists.
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -149,12 +149,17 @@ def owner_bypasses(tree: ast.Module, rel_path: str, roots: tuple[str, ...]) -> S
 
 
 def allowlist_errors(
-    tree: ast.Module, rel_path: str, roots: tuple[str, ...]
+    tree: ast.Module,
+    rel_path: str,
+    roots: tuple[str, ...],
+    *,
+    decisions_map: Mapping[str, Decision] | None = None,
 ) -> list[tuple[int, str]]:
     """A listed exemption whose module no longer bypasses the owner is stale."""
+    active = DECISIONS if decisions_map is None else decisions_map
     return [
         (1, f"stale {name} allowlist entry — the module no longer bypasses the owner; {_UNLIST}")
-        for name, decision in DECISIONS.items()
+        for name, decision in active.items()
         if rel_path in decision.allowed and not decision.find(tree, roots)
     ]
 
@@ -162,11 +167,16 @@ def allowlist_errors(
 _UNLIST = f"remove it from [single-owner.<decision>] in {allowances.POLICY}"
 
 
-def missing_allowlist_errors(repo_root: Path) -> list[str]:
+def missing_allowlist_errors(
+    repo_root: Path,
+    *,
+    decisions_map: Mapping[str, Decision] | None = None,
+) -> list[str]:
     """A listed exemption for a module that no longer exists is stale too."""
+    active = DECISIONS if decisions_map is None else decisions_map
     return [
         f"{path}:1: stale {name} allowlist entry — the module no longer exists; {_UNLIST}"
-        for name, decision in DECISIONS.items()
+        for name, decision in active.items()
         for path in sorted(decision.allowed)
         if not (repo_root / path).is_file()
     ]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import tomllib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
@@ -25,13 +25,16 @@ type RepoFactory = Callable[[Mapping[str, str]], Path]
 
 
 @pytest.fixture(autouse=True)
-def synthetic_decision_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
+def synthetic_decision_allowlists() -> Iterator[None]:
     """Keep the real repository's single-owner exemptions out of synthetic roots."""
-    monkeypatch.setattr(
-        decisions,
-        "DECISIONS",
-        {name: replace(decision, allowed={}) for name, decision in decisions.DECISIONS.items()},
-    )
+    saved = dict(decisions.DECISIONS)
+    for name, decision in saved.items():
+        decisions.DECISIONS[name] = replace(decision, allowed={})
+    try:
+        yield
+    finally:
+        decisions.DECISIONS.clear()
+        decisions.DECISIONS.update(saved)
 
 
 def listed_allowances(files: Mapping[str, str]) -> str:
