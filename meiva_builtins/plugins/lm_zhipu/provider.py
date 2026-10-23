@@ -19,7 +19,6 @@ from base.lm.provider_api import (
     PriceTier,
     ProviderBinding,
     ProviderContribution,
-    require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
 from base.packages.plugins.extensions import PluginContributions
@@ -42,7 +41,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # standard `Authorization: Bearer` auth. GLM 5.2 streams thinking in the
     # delta's `reasoning_content` field — same ReasoningContentChatModel recovers
     # it into canonical thinking blocks.
-    api_key = require_key("GLM_API_KEY")
+    api_key = ctx.keys.require("GLM_API_KEY")
     # GLM natively supports turning thinking off — top-level `thinking` in
     # the POST body via extra_body. Disabled thinking skips effort
     # injection (deepseek-style: the caller asked for the cheap path).

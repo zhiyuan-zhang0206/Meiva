@@ -101,6 +101,7 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
         *,
         local_machine: str,
         catalog: ModelCatalog,
+        authority: ConfigAuthority,
     ):
         assert local_machine == machine_identity.name()
         captured["agent_id"] = body.agent_id
@@ -565,6 +566,7 @@ def fake_spawn_factory(calls: dict[str, int]) -> Callable[..., Any]:
         pool: ConnectionPool | None,
         *,
         catalog: ModelCatalog,
+        authority: ConfigAuthority,
         local_machine: str,
     ) -> SpawnedAgent:
         calls["n"] = calls.get("n", 0) + 1

@@ -19,7 +19,6 @@ from base.lm.provider_api import (
     PriceTier,
     ProviderBinding,
     ProviderContribution,
-    require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
 from base.packages.plugins.extensions import PluginContributions
@@ -76,7 +75,9 @@ def _media_resolution(setting: str | None) -> Any | None:
 def build(ctx: BuildContext) -> BaseChatModel:
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    return ChatGoogleGenerativeAI(**chat_model_kwargs(ctx, api_key=require_key("GEMINI_API_KEY")))
+    return ChatGoogleGenerativeAI(
+        **chat_model_kwargs(ctx, api_key=ctx.keys.require("GEMINI_API_KEY"))
+    )
 
 
 def chat_model_kwargs(ctx: BuildContext, *, api_key: str) -> dict[str, Any]:

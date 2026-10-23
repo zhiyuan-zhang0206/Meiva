@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import DecisionError, YesNo, estimate_tokens, question_text
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.log import logger
 
 _QUESTION_ID = "page_addresses_ai"
@@ -90,7 +91,7 @@ def split_for_model(text: str, max_tokens: int) -> list[str]:
 
 
 async def _chunk_probability(
-    model: str, chunk: str, *, catalog: ModelCatalog, for_agent_id: int | None
+    model: str, chunk: str, *, catalog: ModelCatalog, keys: ProviderKeys, for_agent_id: int | None
 ) -> float:
     from base.lm.decision.call import decide  # deferred: keep import meiva off the LM stack
 
@@ -99,6 +100,7 @@ async def _chunk_probability(
         chunk,
         {_QUESTION_ID: QUESTION},
         catalog=catalog,
+        keys=keys,
         usage_kind=_USAGE_KIND,
         source=_USAGE_SOURCE,
         for_agent_id=for_agent_id,
@@ -111,6 +113,7 @@ async def page_probability(
     text: str,
     *,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     url: str,
     for_agent_id: int | None,
 ) -> float | None:
@@ -126,7 +129,7 @@ async def page_probability(
     async def run(chunk: str) -> float | None:
         try:
             return await _chunk_probability(
-                model, chunk, catalog=catalog, for_agent_id=for_agent_id
+                model, chunk, catalog=catalog, keys=keys, for_agent_id=for_agent_id
             )
         except DecisionError as exc:
             logger.warning(
@@ -166,7 +169,7 @@ def begin_check(
             before any work starts.
     """
     from meiva.sdk_surface import agent_identity
-    from meiva.sdk_surface.settings import config_authority, model_catalog
+    from meiva.sdk_surface.settings import config_authority, model_catalog, provider_keys
 
     def nothing() -> None:
         return None
@@ -193,7 +196,9 @@ def begin_check(
     worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="injection-check")
     judged = worker.submit(
         asyncio.run,
-        page_probability(model, text, catalog=catalog, url=url, for_agent_id=agent_id),
+        page_probability(
+            model, text, catalog=catalog, keys=provider_keys(), url=url, for_agent_id=agent_id
+        ),
     )
 
     def finish() -> None:

@@ -23,6 +23,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host import invocation, settlement
 from services.agent_runner.agent_host.host import AgentHost
@@ -365,12 +366,13 @@ def wired(
         *,
         model: str | None = None,
         catalog: ModelCatalog,
+        keys: ProviderKeys,
         llm_override: str,
         overrides: object = None,
     ) -> None:
         """Keep fake host tests independent of installed provider credentials."""
 
-    monkeypatch.setattr(runtime_mod, "validate_model_config", _allow_model_config)
+    monkeypatch.setattr(runtime_mod, "validate_model_launch", _allow_model_config)
 
     # The publisher below never touches the client; the host only passes it through.
     patch_async_redis(monkeypatch, object)

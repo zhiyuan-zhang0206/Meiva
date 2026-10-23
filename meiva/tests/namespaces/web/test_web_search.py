@@ -354,7 +354,9 @@ def test_fetch_deps_read_no_brave_fields(web_harness: WebHarness) -> None:
     base = config_authority()
     authority = _RecordingAuthority(base.runtime, base.all_domains, base.env_path)
     model = web_harness.fetch_deps.fetch_model
-    wiring.fetch_deps_for(authority, catalog=model.catalog, overrides=model.overrides)
+    wiring.fetch_deps_for(
+        authority, catalog=model.catalog, keys=model.keys, overrides=model.overrides
+    )
     assert sorted(authority.reads) == sorted(set(authority.reads))
     assert not {
         "brave_api_key",

@@ -43,6 +43,7 @@ from base.db import Database  # noqa: E402
 from base.db.code_version_gate import ProcessDbGate  # noqa: E402
 from base.lm.catalog import ModelCatalog  # noqa: E402
 from base.lm.context_budget import resolve_context_budget  # noqa: E402
+from base.lm.factory import process_provider_keys  # noqa: E402
 from base.native_process.code_version import CodeVersion  # noqa: E402
 from base.native_process.loaded_commit import LoadedCommit  # noqa: E402
 from base.packages.plugin_providers import build_model_catalog  # noqa: E402
@@ -225,6 +226,7 @@ async def _consume(
             [execute_code],
             agent_id,
             catalog=catalog,
+            keys=process_provider_keys(catalog),
             llm_override=config.view.lm.llm_override,
             inputs=_understanding_inputs(config),
         )
@@ -253,7 +255,7 @@ async def _regroup(
         leaves = await run_rebuild(
             pool,
             db,
-            ModelCache(catalog, config.view.lm.llm_override),
+            ModelCache(catalog, process_provider_keys(catalog), config.view.lm.llm_override),
             agent_id,
             inputs=_understanding_inputs(config),
         )

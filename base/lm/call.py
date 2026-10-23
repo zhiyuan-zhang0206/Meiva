@@ -19,6 +19,8 @@ from typing import Any, cast
 
 from base.host.env.agent_slices import ModelOverrides
 from base.host.net.resilience import extract_retry_after, jittered
+from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.effort import ReasoningEffort
 
 
@@ -61,7 +63,7 @@ def invoke_response(
     retry_max_delay_seconds: float = 30.0,
     model: str | None = None,
     usage_source: str | None = None,
-    catalog: Any,
+    catalog: ModelCatalog,
     usage_agent_id: int | None = None,
 ) -> Any:
     """Invoke `runnable` on an already-built message list; return the response.
@@ -172,7 +174,7 @@ def invoke_text(
     retry_max_delay_seconds: float = 30.0,
     model: str | None = None,
     usage_source: str | None = None,
-    catalog: Any,
+    catalog: ModelCatalog,
 ) -> str:
     """Invoke `llm` on a single HumanMessage of `content`, return flattened text.
 
@@ -220,7 +222,8 @@ def answer_text(
     retry_max_delay_seconds: float = 30.0,
     timeout: float | None = None,
     usage_source: str | None = None,
-    catalog: Any,
+    catalog: ModelCatalog,
+    keys: ProviderKeys,
     llm_override: str,
     overrides: ModelOverrides,
     build_chat_model: Callable[..., Any],
@@ -242,6 +245,7 @@ def answer_text(
             reasoning_effort=effort,
             timeout=timeout,
             catalog=catalog,
+            keys=keys,
             llm_override=llm_override,
             overrides=overrides,
         )

@@ -15,20 +15,26 @@ from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
 from base.host.env.dotenv_boot import enforce_cluster_env_authority
 from base.lm.catalog import ModelCatalog
-from base.lm.factory import build_chat_model, validate_model_config
-from base.lm.provider_api import provider_key_present
+from base.lm.factory import (
+    build_chat_model,
+    process_provider_keys,
+    validate_model_config,
+    validate_model_launch,
+)
 from base.packages.plugin_providers import build_model_catalog
+from base.packages.tests.model_catalog import inert_keys
 from base.paths.home import resolve_meiva_home
 
 
 def validate_model_from_config_wins_over_default(
     model_catalog: ModelCatalog,
 ) -> None:
-    result = validate_model_config(
+    result = validate_model_launch(
         model="claude-sonnet-5",
         config={"llm_model": "deepseek-flash"},
         catalog=model_catalog,
         llm_override="",
+        keys=process_provider_keys(model_catalog),
     )
     assert result == "deepseek-flash"
 
@@ -36,11 +42,12 @@ def validate_model_from_config_wins_over_default(
 def validate_fallback_to_cluster_default_when_config_omits_model(
     model_catalog: ModelCatalog,
 ) -> None:
-    result = validate_model_config(
+    result = validate_model_launch(
         model="deepseek-flash",
         config={"some_other_key": "value"},
         catalog=model_catalog,
         llm_override="",
+        keys=process_provider_keys(model_catalog),
     )
     assert result == "deepseek-flash"
 
@@ -48,31 +55,57 @@ def validate_fallback_to_cluster_default_when_config_omits_model(
 def validate_fallback_to_cluster_default_when_config_is_none(
     model_catalog: ModelCatalog,
 ) -> None:
-    result = validate_model_config(
-        model="deepseek-flash", config=None, catalog=model_catalog, llm_override=""
+    result = validate_model_launch(
+        model="deepseek-flash",
+        config=None,
+        catalog=model_catalog,
+        llm_override="",
+        keys=process_provider_keys(model_catalog),
     )
     assert result == "deepseek-flash"
 
 
 def validate_no_model_configured_raises(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="no model configured"):
-        validate_model_config(model=None, config=None, catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model=None,
+            config=None,
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
 
 
 def validate_no_model_configured_empty_config(
     model_catalog: ModelCatalog,
 ) -> None:
     with pytest.raises(ValueError, match="no model configured"):
-        validate_model_config(model=None, config={}, catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model=None,
+            config={},
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
 
 
 def validate_unknown_model_raises(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="unknown model 'not-a-real-model'"):
-        validate_model_config(model="not-a-real-model", catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model="not-a-real-model",
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
 
 
 def validate_known_model_succeeds(model_catalog: ModelCatalog) -> None:
-    result = validate_model_config(model="deepseek-flash", catalog=model_catalog, llm_override="")
+    result = validate_model_launch(
+        model="deepseek-flash",
+        catalog=model_catalog,
+        llm_override="",
+        keys=process_provider_keys(model_catalog),
+    )
     assert result == "deepseek-flash"
 
 
@@ -81,7 +114,12 @@ def validate_all_supported_models_pass_name_check(
 ) -> None:
     all_models = [m for models in model_catalog.supported_models.values() for m in models]
     for m in all_models:
-        result = validate_model_config(model=m, catalog=model_catalog, llm_override="")
+        result = validate_model_launch(
+            model=m,
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
         assert result == m
 
 
@@ -95,8 +133,12 @@ def validate_superseded_model_stays_spawn_valid(
             "glm-5.2": replace(model_catalog.models["glm-5.2"], superseded_by="kimi-k3"),
         },
     )
-    result = validate_model_config(
-        model="glm-5.2", config={"llm_model": "glm-5.2"}, catalog=model_catalog, llm_override=""
+    result = validate_model_launch(
+        model="glm-5.2",
+        config={"llm_model": "glm-5.2"},
+        catalog=model_catalog,
+        llm_override="",
+        keys=process_provider_keys(model_catalog),
     )
     assert result == "glm-5.2"
 
@@ -106,68 +148,105 @@ def validate_config_only_validation_keeps_exact_model_effort_checks(
 ) -> None:
     assert (
         validate_model_config(
-            config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
-            check_provider_key=False,
-            catalog=model_catalog,
-            llm_override="",
+            config={"llm_model": "deepseek-flash", "reasoning_effort": "max"}, catalog=model_catalog
         )
         == "deepseek-flash"
     )
     with pytest.raises(ValueError, match="unsupported reasoning effort"):
         validate_model_config(
-            config={"llm_model": "deepseek-flash", "reasoning_effort": "low"},
-            check_provider_key=False,
-            catalog=model_catalog,
-            llm_override="",
+            config={"llm_model": "deepseek-flash", "reasoning_effort": "low"}, catalog=model_catalog
         )
     with pytest.raises(ValueError, match="unknown model"):
-        validate_model_config(
-            model="unknown-model", check_provider_key=False, catalog=model_catalog, llm_override=""
-        )
+        validate_model_config(model="unknown-model", catalog=model_catalog)
 
 
 def validate_missing_claude_key_raises(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
-        validate_model_config(model="claude-sonnet-5", catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model="claude-sonnet-5",
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
 
 
 def validate_missing_deepseek_key_raises(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-        validate_model_config(model="deepseek-flash", catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model="deepseek-flash",
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
 
 
 def validate_missing_gemini_key_raises(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="GEMINI_API_KEY"):
-        validate_model_config(model="gemini-3.5-flash", catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model="gemini-3.5-flash",
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
 
 
 def validate_missing_openai_key_raises(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-        validate_model_config(model="gpt-5.6-sol", catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model="gpt-5.6-sol",
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
 
 
 def validate_missing_mimo_key_raises(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="MIMO_API_KEY"):
-        validate_model_config(model="mimo-v2.6-pro", catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model="mimo-v2.6-pro",
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
 
 
 def validate_missing_kimi_key_raises(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="MOONSHOT_API_KEY"):
-        validate_model_config(model="kimi-k3", catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model="kimi-k3",
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
 
 
 def validate_missing_glm_key_raises(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="GLM_API_KEY"):
-        validate_model_config(model="glm-5.2", catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model="glm-5.2",
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
 
 
 def validate_missing_qwen_key_raises(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="DASHSCOPE_API_KEY"):
-        validate_model_config(model="qwen3.8-max", catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model="qwen3.8-max",
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
 
 
 def validate_key_present_succeeds(model_catalog: ModelCatalog) -> None:
-    result = validate_model_config(model="claude-sonnet-5", catalog=model_catalog, llm_override="")
+    result = validate_model_launch(
+        model="claude-sonnet-5",
+        catalog=model_catalog,
+        llm_override="",
+        keys=process_provider_keys(model_catalog),
+    )
     assert result == "claude-sonnet-5"
 
 
@@ -175,22 +254,24 @@ def validate_config_model_with_missing_key_raises(
     model_catalog: ModelCatalog,
 ) -> None:
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
-        validate_model_config(
+        validate_model_launch(
             model="deepseek-flash",
             config={"llm_model": "claude-sonnet-5"},
             catalog=model_catalog,
             llm_override="",
+            keys=process_provider_keys(model_catalog),
         )
 
 
 def validate_config_model_with_key_present_succeeds(
     model_catalog: ModelCatalog,
 ) -> None:
-    result = validate_model_config(
+    result = validate_model_launch(
         model="deepseek-flash",
         config={"llm_model": "claude-sonnet-5"},
         catalog=model_catalog,
         llm_override="",
+        keys=process_provider_keys(model_catalog),
     )
     assert result == "claude-sonnet-5"
 
@@ -198,16 +279,23 @@ def validate_config_model_with_key_present_succeeds(
 def validate_config_with_non_string_model_ignores(
     model_catalog: ModelCatalog,
 ) -> None:
-    result = validate_model_config(
-        model="deepseek-flash", config={"llm_model": 42}, catalog=model_catalog, llm_override=""
+    result = validate_model_launch(
+        model="deepseek-flash",
+        config={"llm_model": 42},
+        catalog=model_catalog,
+        llm_override="",
+        keys=process_provider_keys(model_catalog),
     )
     assert result == "deepseek-flash"
 
 
 def validate_override_skips_api_key_check(model_catalog: ModelCatalog) -> None:
     llm_override = "tests.fakes:build"
-    result = validate_model_config(
-        model="claude-sonnet-5", catalog=model_catalog, llm_override=llm_override
+    result = validate_model_launch(
+        model="claude-sonnet-5",
+        catalog=model_catalog,
+        llm_override=llm_override,
+        keys=process_provider_keys(model_catalog),
     )
     assert result == "claude-sonnet-5"
 
@@ -217,7 +305,13 @@ def validate_supported_explicit_effort_passes_unchanged(
 ) -> None:
     config: dict[str, object] = {"reasoning_effort": effort}
     assert (
-        validate_model_config(model=model, config=config, catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model=model,
+            config=config,
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
         == model
     )
     assert config["reasoning_effort"] == effort
@@ -228,18 +322,24 @@ def validate_invalid_explicit_effort_rejected_even_with_override(
 ) -> None:
     llm_override = "tests.fakes:build"
     with pytest.raises(ValueError, match=message):
-        validate_model_config(
+        validate_model_launch(
             model=model,
             config={"reasoning_effort": effort},
             catalog=model_catalog,
             llm_override=llm_override,
+            keys=process_provider_keys(model_catalog),
         )
 
 
 def validate_restored_model_validates_to_itself(
     model_catalog: ModelCatalog,
 ) -> None:
-    result = validate_model_config(model="gemini-3.8-flash", catalog=model_catalog, llm_override="")
+    result = validate_model_launch(
+        model="gemini-3.8-flash",
+        catalog=model_catalog,
+        llm_override="",
+        keys=process_provider_keys(model_catalog),
+    )
     assert result == "gemini-3.8-flash"
 
 
@@ -250,6 +350,7 @@ def thinking_roster_model_constructs_with_thinking_disabled(
         model,
         thinking={"type": "disabled"},
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         llm_override="",
         overrides=ModelOverrides.from_pins({}),
     )
@@ -267,6 +368,7 @@ def thinking_unregistered_gemini_thinking_disabled_is_noop(
         model,
         thinking={"type": "disabled"},
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         llm_override="",
         overrides=ModelOverrides.from_pins({}),
     )
@@ -285,6 +387,7 @@ def thinking_gemini_3_1_thinking_disabled_maps_to_lowest_declared_level(
         "gemini-3.1-pro-preview",
         thinking={"type": "disabled"},
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         llm_override="",
         overrides=ModelOverrides.from_pins({}),
     )
@@ -308,10 +411,10 @@ def main() -> None:
     (home / ".env").write_text("".join(f"{name}={value}\n" for name, value in keys.items()))
     if legacy:
         enforce_cluster_env_authority(os.environ, home)
-        assert not provider_key_present("MIMO_API_KEY")
-        assert not provider_key_present("MOONSHOT_API_KEY")
+        assert "MIMO_API_KEY" not in os.environ
+        assert "MOONSHOT_API_KEY" not in os.environ
     if case.startswith("validate_"):
-        assert all(not provider_key_present(name) for name in keys)
+        assert all(name not in os.environ for name in keys)
     output = StringIO()
     sink = logger.add(output, diagnose=False)
     try:

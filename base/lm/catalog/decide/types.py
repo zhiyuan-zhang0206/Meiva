@@ -13,6 +13,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from base.lm.catalog.provider_keys import ProviderKeys
+
 TRUE = "true"
 FALSE = "false"
 
@@ -243,5 +245,6 @@ class DecisionBuildContext:
     model: str
     spec: DecisionModelSpec
     timeout: float | None
+    keys: ProviderKeys
     transport: AsyncTransport | None = None
     """HTTP transport override; absent means the real network (tests inject a mock)."""

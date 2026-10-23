@@ -29,34 +29,35 @@ from base.lm.catalog.decide.types import (
     estimate_tokens,
     question_text,
 )
-from base.lm.provider_api import provider_key_present
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.usage import log_usage_fields
 
 DEFAULT_TIMEOUT_S = 30.0
 _EPSILON = 1e-9
 
 
+# meiva:note
+# Ask ``model`` every question about ``state``; return one ``Decision`` per question id.
+#
+# ``usage_kind`` and ``source`` label the one ``llm_usage`` row this call writes (output
+# tokens are always 0). Raises, without sending anything, for an unknown model id, invalid
+# questions or an estimated input above the model's limits; raises ``DecisionKeyMissingError``
+# when ``keys`` lacks the provider's API key; raises ``DecisionRequestError`` /
+# ``DecisionResponseError`` when the provider fails or returns a distribution that is
+# incomplete, has unknown outcomes or does not sum to 1.
 async def decide(
     model: str,
     state: str,
     questions: Mapping[str, Question],
     *,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     usage_kind: str,
     source: str | None = None,
     for_agent_id: int | None = None,
     timeout: float | None = DEFAULT_TIMEOUT_S,
     transport: AsyncTransport | None = None,
 ) -> Mapping[str, Decision]:
-    """Ask ``model`` every question about ``state``; return one ``Decision`` per question id.
-
-    ``usage_kind`` and ``source`` label the one ``llm_usage`` row this call writes (output
-    tokens are always 0). Raises, without sending anything, for an unknown model id, invalid
-    questions or an estimated input above the model's limits; raises ``DecisionKeyMissingError``
-    when the provider's API key is not configured; raises ``DecisionRequestError`` /
-    ``DecisionResponseError`` when the provider fails or returns a distribution that is
-    incomplete, has unknown outcomes or does not sum to 1.
-    """
     _check_inputs(state, questions)
     spec = _spec_of(model, catalog)
     _check_size(model, spec, state, questions)
@@ -64,15 +65,14 @@ async def decide(
     if provider is None:
         raise UnknownDecisionModelError(f"no decision provider owns the prefix of {model!r}")
     try:
-        binding = provider.build(
-            DecisionBuildContext(model=model, spec=spec, timeout=timeout, transport=transport)
-        )
+        keys.require(provider.key_env)
     except RuntimeError as exc:
-        # `require_key` raises a plain RuntimeError; only a build that failed with its key
-        # absent is a key problem, any other build failure propagates unchanged.
-        if provider_key_present(provider.key_env):
-            raise
         raise DecisionKeyMissingError(str(exc)) from exc
+    binding = provider.build(
+        DecisionBuildContext(
+            model=model, spec=spec, timeout=timeout, keys=keys, transport=transport
+        )
+    )
 
     started = time.monotonic()
     try:

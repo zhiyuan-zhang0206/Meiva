@@ -35,6 +35,7 @@ from agent.messages import NoteTag, system_note_message
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import DecisionError, DecisionInputTooLargeError, YesNo
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.call import decide
 from base.log import logger
 
@@ -125,6 +126,7 @@ async def recall_skills(
     *,
     agent: AgentSlices,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     agent_id: int,
     peer_turn: bool = False,
 ) -> SkillRecall | None:
@@ -147,6 +149,7 @@ async def recall_skills(
             STATE_PREAMBLE + query,
             skill_questions(candidates),
             catalog=catalog,
+            keys=keys,
             usage_kind="skill_recall",
             for_agent_id=agent_id,
             timeout=settings.skill_recall_deadline_seconds,
@@ -228,6 +231,7 @@ async def peer_gate_passes(
     *,
     agent: AgentSlices,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     agent_id: int,
 ) -> bool:
     settings = agent.skill_recall
@@ -240,6 +244,7 @@ async def peer_gate_passes(
             PEER_GATE_PREAMBLE + stripped[: settings.skill_recall_peer_gate_max_chars],
             {"work": PEER_GATE_WORK, "method_given": PEER_GATE_METHOD},
             catalog=catalog,
+            keys=keys,
             usage_kind="skill_recall_peer_gate",
             for_agent_id=agent_id,
             timeout=settings.skill_recall_peer_gate_deadline_seconds,

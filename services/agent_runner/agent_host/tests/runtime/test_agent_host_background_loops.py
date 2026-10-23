@@ -5,15 +5,18 @@ from unittest.mock import MagicMock, patch
 
 import services.agent_runner.agent_host.daemon as daemon_mod
 from base.config import ConfigBoot
-from base.lm.catalog import ModelCatalog
+from meiva.sdk_surface.installation import Installation
 
 
 def test_background_loops_are_the_plugin_watch_the_log_rotator_the_memory_guard_and_understanding(
-    model_catalog: ModelCatalog,
+    model_installation: Installation,
 ) -> None:
     with patch.dict(os.environ):
         loops = daemon_mod.background_loops(
-            MagicMock(), MagicMock(), catalog=model_catalog, config=ConfigBoot()
+            MagicMock(),
+            MagicMock(),
+            installation=model_installation,
+            config=ConfigBoot(),
         )
     try:
         assert set(loops) == {

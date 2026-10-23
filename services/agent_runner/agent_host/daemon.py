@@ -84,7 +84,6 @@ from base.deploy.timing import assert_clock_lattice, clock_values
 from base.events.live.bus import EventBus, EventBusConfig
 from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.host.exit_codes import hard_exit as _hard_exit
-from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
@@ -383,7 +382,7 @@ def background_loops(
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
     db: Database,
     *,
-    catalog: ModelCatalog,
+    installation: Installation,
     config: ConfigBoot,
 ) -> dict[str, Coroutine[object, object, None]]:
     """The daemon's background loops for plugins, logs, exec memory and understanding chunks.
@@ -402,7 +401,8 @@ def background_loops(
             control_pool,
             db,
             [execute_code],
-            catalog=catalog,
+            catalog=installation.require_catalog(),
+            keys=installation.require_provider_keys(),
             llm_override=config.view.lm.llm_override,
             inputs=understanding_inputs(config),
         ),
@@ -529,13 +529,13 @@ async def _dispatch_host(
     db: Database,
     bus: EventBus,
     *,
-    catalog: ModelCatalog,
+    installation: Installation,
     config: ConfigBoot,
 ) -> None:
     """Run dispatcher siblings, joined before the owned heartbeat and turn drain."""
     async with asyncio.TaskGroup() as background:
         for name, loop in background_loops(
-            control_pool, db, catalog=catalog, config=config
+            control_pool, db, installation=installation, config=config
         ).items():
             background.create_task(loop, name=name)
         await InboundWakeDispatcher(
@@ -616,7 +616,7 @@ async def run(
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
-            policy=host_policy(config),
+            policy=host_policy(config, keys=installation.require_provider_keys()),
             clients=clients,
             extensions=installation.registry,
             commands=CommandCatalog.system(skills=meiva_skills.names),
@@ -680,7 +680,7 @@ async def run(
                     control_pool,
                     db,
                     bus,
-                    catalog=installation.require_catalog(),
+                    installation=installation,
                     config=config,
                 ),
                 turns=scheduler,

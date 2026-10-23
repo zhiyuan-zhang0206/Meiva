@@ -33,10 +33,10 @@ from base.host.tests.daemon_shutdown import (
     KILL_SLACK_S,
     spawn_child,
 )
-from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import process_name
+from meiva.sdk_surface.installation import Installation
 
 
 def _note_pidfile_removed(events: list[str], _path: object) -> None:
@@ -144,9 +144,9 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
 
     original_loops = daemon.background_loops
 
-    def loops(*args: Any, catalog: ModelCatalog, config: ConfigBoot) -> dict[str, Any]:
+    def loops(*args: Any, installation: Installation, config: ConfigBoot) -> dict[str, Any]:
         if failure == "plugin":
-            return original_loops(*args, catalog=catalog, config=config)
+            return original_loops(*args, installation=installation, config=config)
         failing = {} if failure in {"dispatcher_returns", "heartbeat"} else {"failed": fail()}
         return {**failing, "sibling": background()}
 

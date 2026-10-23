@@ -23,7 +23,8 @@ from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.host.env.agent_slices import AgentBrain, AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.factory import validate_model_config
+from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.factory import validate_model_launch
 from base.lm.harness.bridge import HarnessBridge
 from base.lm.harness.engine import TurnEngine
 from base.lm.harness.handoff import HarnessContribution
@@ -53,11 +54,15 @@ class HostCachePolicy:
     size: int
 
 
+# meiva:note
+# Capacity and the provider keys are fixed at construction; cache and model readers remain live.
+#
+# `provider_keys` is built by the daemon at boot, after the bootstrap delivered the keys to its
+# environment.
 @dataclass(frozen=True)
 class HostPolicy:
-    """Capacity is fixed at construction; cache and model readers remain live."""
-
     max_concurrent_turns: int
+    provider_keys: ProviderKeys
     cache: Callable[[], HostCachePolicy]
     default_model: Callable[[], str]
     llm_override: Callable[[], str]
@@ -182,6 +187,7 @@ def admit_stored_model(
     rejected: dict[int, str],
     normalized: dict[int, str],
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     llm_override: str,
     default_model: Callable[[], str],
 ) -> bool:
@@ -213,7 +219,7 @@ def admit_stored_model(
     """
     model = pins.get("llm_model") or default_model()
     try:
-        validate_model_config(model=model, catalog=catalog, llm_override=llm_override)
+        validate_model_launch(model=model, catalog=catalog, keys=keys, llm_override=llm_override)
     except ValueError as exc:
         stats.config_rejected += 1
         if rejected.get(agent_id) != stored.fingerprint:
@@ -371,6 +377,7 @@ async def build_runtime(
     slices: AgentSlices,
     *,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     llm_override: str,
     harness: Harness = Harness.MEIVA,
     registry: SessionRegistry | None = None,
@@ -385,6 +392,7 @@ async def build_runtime(
         slices.brain.llm_model,
         slices.overrides,
         catalog=catalog,
+        keys=keys,
         llm_override=llm_override,
     )
     return AgentRuntime(

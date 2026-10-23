@@ -11,8 +11,11 @@ from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.api_contracts.agent_contract import AgentStatus
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import Decision, Question
+from base.lm.catalog.provider_keys import ProviderKeys
+from base.packages.tests.model_catalog import inert_keys
 from gateway.agents.reply_suggestion.service import (
     DraftRuntime,
+    ModelReaders,
     ReplySuggestionPolicy,
     ReplySuggestionService,
 )
@@ -98,7 +101,7 @@ class FakeChat:
         self.raw = AIMessage(content=reply)
         self.metadata = {"model_provider": "anthropic", "stop_reason": "end_turn"}
 
-    def factory(self, model: str, _catalog: ModelCatalog) -> FakeChat:
+    def factory(self, model: str, _catalog: ModelCatalog, _keys: ProviderKeys) -> FakeChat:
         self.built.append(model)
         return self
 
@@ -133,7 +136,7 @@ class Harness:
         self._rendering = TimelineReadInputs(_no_clock, lambda: False)
         self.service = ReplySuggestionService(
             policy=self.settings.policy(),
-            catalog_reader=self._read_catalog,
+            models=ModelReaders(catalog=self._read_catalog, keys=inert_keys),
             load_timeline=self._load_timeline,
             agent_status=lambda _agent_id: self.status,
             decide=self.decide,

@@ -28,7 +28,7 @@ from base.agents.history.hierarchy.chunks import (
 )
 from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
-from base.agents.history.hierarchy.tests.consumer_helpers import read_inputs
+from base.agents.history.hierarchy.tests.consumer_helpers import lm_wiring, read_inputs
 from base.agents.history.hierarchy.tests.consumer_history import (
     inbound_history,
     job_spans,
@@ -39,6 +39,7 @@ from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 
 
@@ -237,7 +238,7 @@ async def test_a_cancelled_job_is_failed_and_reported_not_put_back(
     monkeypatch.setattr(loop, "run_job", hang)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     consumer = loop.Consumer(
-        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), inputs=read_inputs()
     )
     task = asyncio.create_task(consumer.run_until_idle())
     await asyncio.wait_for(started.wait(), 10)
@@ -405,7 +406,7 @@ async def test_loop_is_idle_when_the_feature_is_off(
 ) -> None:
     monkeypatch.setattr(settings.agent, "understanding_enabled", False)
     await loop.understanding_loop_forever(
-        MagicMock(), MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+        MagicMock(), MagicMock(), [], **lm_wiring(model_catalog), inputs=read_inputs()
     )  # returns at once
 
 
@@ -420,6 +421,7 @@ def test_generation_models_are_reused_and_never_closed(
         overrides: object,
         *,
         catalog: ModelCatalog,
+        keys: ProviderKeys,
         llm_override: str,
         thinking_off: bool,
     ) -> MagicMock:
@@ -430,7 +432,7 @@ def test_generation_models_are_reused_and_never_closed(
         return llm
 
     monkeypatch.setattr(loop, "build_generation_llm", build)
-    models = loop.ModelCache(catalog=model_catalog, llm_override="")
+    models = loop.ModelCache(**lm_wiring(model_catalog))
     none = ModelOverrides.from_pins(None)
     first = models.get("m", none)
     assert models.get("m", none) is first
@@ -547,7 +549,7 @@ async def _run_rounds(
     for _ in range(count):
         async with asyncio.TaskGroup() as tg:
             await loop.Consumer(
-                pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+                pool, MagicMock(), [], **lm_wiring(model_catalog), inputs=read_inputs()
             ).claim(tg)
 
 
@@ -647,7 +649,7 @@ async def test_different_agents_run_together_and_one_agents_jobs_in_order(
     await _enqueue_ends(aops_pool, 1, "m1", "m3")  # agent 1: a1 then a2
     await _enqueue_ends(aops_pool, 2, "m2")  # agent 2: b
     await loop.Consumer(
-        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), inputs=read_inputs()
     ).run_until_idle()
     assert [s for s, *_ in await _status(aops_pool)] == ["done"] * 3
     assert log.index(("start", "b")) < log.index(("end", "a1"))  # overlapped
@@ -667,7 +669,7 @@ async def test_every_due_job_runs_at_once_each_on_its_own_thread(
     for agent in range(1, 6):
         await _enqueue_ends(aops_pool, agent, "m1")
     consumer = loop.Consumer(
-        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), inputs=read_inputs()
     )
     await consumer.run_until_idle()
     assert [s for s, *_ in await _status(aops_pool)] == ["done"] * 5
@@ -686,7 +688,7 @@ async def test_one_jobs_failure_touches_no_other_job(
     for agent, end in ((1, "m1"), (2, "m2"), (3, "m1")):
         await _enqueue_ends(aops_pool, agent, end)
     await loop.Consumer(
-        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), inputs=read_inputs()
     ).run_until_idle()
     status = [(s, e) for s, _, e in await _status(aops_pool)]
     assert [s for s, _ in status] == ["done", "failed", "done"]
@@ -707,7 +709,7 @@ async def test_a_job_that_cannot_be_settled_is_left_to_its_lease_and_others_fini
     for agent in (1, 2):
         await _enqueue_ends(aops_pool, agent, "m1")
     consumer = loop.Consumer(
-        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), inputs=read_inputs()
     )
     await consumer.run_until_idle()  # does not raise
     assert [s for s, *_ in await _status(aops_pool)] == ["running", "done"]
@@ -719,7 +721,7 @@ async def test_the_backlog_event_carries_in_flight(
 ) -> None:
     await _enqueue_ends(aops_pool, 1, "m1")
     consumer = loop.Consumer(
-        aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+        aops_pool, MagicMock(), [], **lm_wiring(model_catalog), inputs=read_inputs()
     )
     consumer.in_flight = 1
     await consumer.emit_backlog()
@@ -737,7 +739,7 @@ async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
         await _enqueue_ends(aops_pool, agent, "m1")
     task = asyncio.create_task(
         loop.understanding_loop_forever(
-            aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
+            aops_pool, MagicMock(), [], **lm_wiring(model_catalog), inputs=read_inputs()
         )
     )
     for _ in range(100):
@@ -775,7 +777,7 @@ async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upp
         )
     await enqueue_chunk(aops_pool, 2, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await loop.replay_jobs(
-        aops_pool, MagicMock(), [], 1, catalog=model_catalog, llm_override="", inputs=read_inputs()
+        aops_pool, MagicMock(), [], 1, **lm_wiring(model_catalog), inputs=read_inputs()
     )
     assert [s for s, *_ in await _status(aops_pool)] == ["done", "done", "pending"]
     assert asked == []

@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage
 from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.harness import FileSessionRegistry, HarnessTurn
 from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host import host as host_module
@@ -40,6 +41,7 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
         overrides: ModelOverrides,
         *,
         catalog: ModelCatalog,
+        keys: ProviderKeys,
         llm_override: str,
     ) -> tuple[object, None]:
         assert catalog is model_catalog

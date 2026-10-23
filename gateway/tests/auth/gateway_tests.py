@@ -40,6 +40,7 @@ def local_spawn_in_process(
     event_bus: EventBus,
     machine_identity: MachineIdentity,
     model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> Iterator[None]:
     with ExitStack() as stack:
         pool: ConnectionPool | None = None
@@ -59,6 +60,7 @@ def local_spawn_in_process(
                 body,
                 _runner_pool(),
                 catalog=model_catalog,
+                authority=config_authority,
                 local_machine=machine_identity.name(),
             )
 

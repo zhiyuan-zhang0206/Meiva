@@ -12,7 +12,6 @@ exports = ["test_hosted_compact_failure.py"]
 
 [debt.restricted-python]
 "test_hosted_compact_failure.py#string patch target 'agent.graph.hooks.compact.generate_summary'" = 1
-"test_hosted_compact_failure.py#string patch target 'services.agent_runner.agent_host.runtime.validate_model_config'" = 1
 
 [debt.third-party-patch]
 "test_pooled_checkpoint.py#monkeypatch.setattr psycopg.Capabilities.has_pipeline" = 1

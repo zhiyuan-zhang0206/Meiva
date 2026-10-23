@@ -19,7 +19,6 @@ from base.lm.provider_api import (
     PriceTier,
     ProviderBinding,
     ProviderContribution,
-    require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
 from base.packages.plugins.extensions import PluginContributions
@@ -68,7 +67,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # longer modeled as an application-gated trial.
     # ReasoningContentChatModel (not bare ChatOpenAI) recovers MiMo's
     # `reasoning_content` delta into canonical thinking blocks — the base drops it.
-    api_key = require_key("MIMO_API_KEY")
+    api_key = ctx.keys.require("MIMO_API_KEY")
     # MiMo natively supports switching deep thinking off — top-level
     # `thinking` in the POST body, delivered via extra_body (declared on
     # BaseChatOpenAI; model_kwargs would collide). No graded

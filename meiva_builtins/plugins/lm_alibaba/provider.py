@@ -20,7 +20,6 @@ from base.lm.provider_api import (
     PriceTier,
     ProviderBinding,
     ProviderContribution,
-    require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
 from base.packages.plugins.extensions import PluginContributions
@@ -71,7 +70,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # Qwen streams its thinking in the delta's `reasoning_content` field,
     # which ReasoningContentChatModel recovers into canonical thinking blocks —
     # the same reason glm / mimo use it rather than bare ChatOpenAI.
-    api_key = require_key("DASHSCOPE_API_KEY")
+    api_key = ctx.keys.require("DASHSCOPE_API_KEY")
     # The registered Qwen roster thinks by default and can be switched off with
     # the body-level `enable_thinking` boolean, delivered via extra_body
     # (declared on BaseChatOpenAI; model_kwargs would collide). DashScope's

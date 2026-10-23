@@ -50,6 +50,7 @@ from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.packages.plugin_config_contracts import PluginConfigImages, UnboundPluginConfigImages
 from base.packages.plugins import load_report
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
@@ -229,6 +230,7 @@ def install(
     *,
     config_images: PluginConfigImages,
     catalog: ModelCatalog | None = None,
+    provider_keys: ProviderKeys | None = None,
     authority: ConfigAuthority | None = None,
     sampling: SamplingPolicyOwner | None = None,
     clock_factory: Callable[[], Clock] | None = None,
@@ -300,6 +302,7 @@ def install(
         undo=tuple(build.undo),
         configs=MappingProxyType(dict(build.configs)),
         catalog=catalog,
+        provider_keys=provider_keys,
         authority=authority,
         clock_factory=clock_factory,
         producer=producer,

@@ -4,6 +4,7 @@ from langchain_core.messages import AIMessage
 
 from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 from base.lm.factory import build_chat_model, build_chat_model_bound
 from base.lm.usage import usage_model
@@ -28,10 +29,10 @@ def _message(speed: str) -> Message:
 def test_nonstream_receipt_survives_output_conversion(
     monkeypatch: pytest.MonkeyPatch, speed: str, *, model_catalog: ModelCatalog
 ) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     model, binding = build_chat_model_bound(
         "claude-opus-5-5-fast",
         catalog=model_catalog,
+        keys=ProviderKeys({"ANTHROPIC_API_KEY": "test-key"}),
         llm_override="",
         overrides=model_overrides(),
     )
@@ -49,10 +50,10 @@ def test_nonstream_receipt_survives_output_conversion(
 def test_stream_receipt_is_emitted_once_when_chunks_are_combined(
     monkeypatch: pytest.MonkeyPatch, speed: str, *, model_catalog: ModelCatalog
 ) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     model = build_chat_model(
         "claude-opus-5-5-fast",
         catalog=model_catalog,
+        keys=ProviderKeys({"ANTHROPIC_API_KEY": "test-key"}),
         llm_override="",
         overrides=model_overrides(),
     )

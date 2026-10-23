@@ -10,6 +10,7 @@ from base.config import get_field
 from base.config.tests.configuration import defaults, model_overrides
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.context_budget import resolve_context_budget
 from base.lm.factory import build_chat_model
 from base.lm.registry import resolve_setting
@@ -201,10 +202,10 @@ def test_without_overrides_the_context_budget_is_unchanged(*, model_catalog: Mod
 def test_the_chat_model_is_built_with_the_agents_reasoning_effort(
     monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
     default = build_chat_model(
         _MODEL,
         catalog=model_catalog,
+        keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
         llm_override="",
         overrides=model_overrides(),
     )
@@ -214,7 +215,13 @@ def test_the_chat_model_is_built_with_the_agents_reasoning_effort(
         {"reasoning_effort": "high"},
         default_reader=defaults(lm__reasoning_effort=None),
     ).overrides
-    pinned = build_chat_model(_MODEL, overrides=overrides, catalog=model_catalog, llm_override="")
+    pinned = build_chat_model(
+        _MODEL,
+        overrides=overrides,
+        catalog=model_catalog,
+        keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
+        llm_override="",
+    )
     assert isinstance(pinned, ChatAnthropic)
     assert pinned.model_kwargs["extra_body"] == {"output_config": {"effort": "high"}}
     unpinned = build_chat_model(
@@ -223,6 +230,7 @@ def test_the_chat_model_is_built_with_the_agents_reasoning_effort(
             default_reader=defaults(lm__reasoning_effort=None),
         ).overrides,
         catalog=model_catalog,
+        keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
         llm_override="",
     )
     assert isinstance(unpinned, ChatAnthropic)
@@ -232,11 +240,11 @@ def test_the_chat_model_is_built_with_the_agents_reasoning_effort(
 def test_the_chat_model_is_built_with_the_agents_thinking_budget(
     monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     haiku = "claude-haiku-4-5-20251001"
     off = build_chat_model(
         haiku,
         catalog=model_catalog,
+        keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
         llm_override="",
         overrides=model_overrides(),
     )
@@ -249,6 +257,7 @@ def test_the_chat_model_is_built_with_the_agents_thinking_budget(
             default_reader=defaults(lm__claude_thinking_budget_tokens=0, lm__reasoning_effort=None),
         ).overrides,
         catalog=model_catalog,
+        keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
         llm_override="",
     )
     assert isinstance(pinned, ChatAnthropic)
@@ -259,6 +268,7 @@ def test_the_chat_model_is_built_with_the_agents_thinking_budget(
             default_reader=defaults(lm__claude_thinking_budget_tokens=0, lm__reasoning_effort=None),
         ).overrides,
         catalog=model_catalog,
+        keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
         llm_override="",
     )
     assert isinstance(unpinned, ChatAnthropic)

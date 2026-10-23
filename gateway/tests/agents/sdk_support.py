@@ -104,6 +104,7 @@ def sdk_via_gateway(
                 body,
                 app.state.db_pool,
                 catalog=build_model_catalog(),
+                authority=app.state.config_authority,
                 local_machine=machine_identity.name(),
             )
 

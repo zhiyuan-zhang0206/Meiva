@@ -15,10 +15,11 @@ import inspect
 import os as _os
 import sys as _sys
 import types as _types
+from dataclasses import replace
 from typing import Any
 
 from . import meiva_module
-from .installation import SLOT, Loading, installed, record_disabled
+from .installation import SLOT, Loading, installed
 
 
 def mark_load_failed(exc: BaseException) -> None:
@@ -118,7 +119,11 @@ def apply_sdk_disable(entries: list[str]) -> None:
     if not new_entries:
         return
     apply_entries(new_entries)
-    record_disabled(installation.disabled | set(new_entries))
+    setattr(
+        meiva_module(),
+        SLOT,
+        replace(installation, disabled=installation.disabled | set(new_entries)),
+    )
 
 
 def applied_entries() -> frozenset[str]:

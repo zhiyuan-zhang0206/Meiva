@@ -6,12 +6,15 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import settings
 from base.config.tests.configuration import defaults, snapshot_process_config
+from base.packages.plugin_providers import build_model_catalog
+from base.packages.tests.model_catalog import inert_keys
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
 
 
 def configured_policy(**changes: Any) -> HostPolicy:
     return HostPolicy(
         max_concurrent_turns=settings.daemon.host_max_concurrent_turns,
+        provider_keys=inert_keys(build_model_catalog()),
         cache=lambda: HostCachePolicy(
             idle_ttl_seconds=settings.daemon.host_agent_idle_ttl_seconds,
             size=settings.daemon.host_agent_cache_size,

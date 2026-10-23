@@ -76,15 +76,20 @@ both literal rate tables without executing plugin code.
 - `build(ctx)` is a pure function of `BuildContext` (model, spec, thinking,
   resolved_effort, thinking_budget_tokens, disable_streaming, timeout, provider_model_ids): no caller, agent, error
   history, or routing is exposed. The builder validates `resolved_effort` with
-  `validate_effort`; `require_key(key_env)` fails at build time if the bootstrap
-  environment lacks the key.
-- The spawn boundary reads a plugin key from `os.environ` first, then the local
-  cluster `.env` fallback only when that key is absent; an available key does
-  not depend on reading the fallback file. Split runners
+  `validate_effort`; `ctx.keys.require(key_env)` fails at build time if the
+  process's `ProviderKeys` lacks the key.
+- A process holds its keys as one frozen `ProviderKeys` value
+  (`base/lm/provider_keys.py`). Each composition root builds it with
+  `process_provider_keys(catalog)` (`base/lm/factory.py`): the live
+  environment first, then the local cluster `.env` only for declared keys the
+  environment lacks, so an available key never depends on reading the fallback
+  file. The gateway builds it at each use, so a key edited in `.env` is served
+  without a restart; the agent host builds it once at boot and the SDK
+  installation carries it. Split runners
   receive enabled bindings' present keys through bootstrap plugin-secrets, and
   a single-box agent child receives only those declared keys from its parent's
   env. A provider-plugin key is deliberately not a Settings field. `build_chat_model`,
-  `validate_model_config`, model-list and context
+  `validate_model_launch`, model-list and context
   endpoints, vision checks and the compact gate's `resolve_context_budget`
   consume the supplied catalog without constructing an owner. DTO validators
   check overlay structure; admission checks membership with the request owner's

@@ -11,6 +11,7 @@ from base.host.env.agent_slices import ModelOverrides
 from base.host.net.ports import SYSTEM_URL_OPENER
 from base.lm import factory
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from meiva.sdk_surface import settings as sdk_settings
 from meiva.sdk_surface.injection_check import begin_check
 from meiva.security import finding_delivery_active, record_model_finding, scan_content
@@ -61,19 +62,21 @@ def fetch_deps() -> FetchDeps:
     authority = sdk_settings.config_authority()
     try:
         catalog = sdk_settings.model_catalog()
+        keys = sdk_settings.provider_keys()
         overrides = sdk_settings.model_overrides()
     except RuntimeError as exc:
         raise FetchError(
             "web.fetch requires this SDK installation's model configuration (ModelCatalog), "
             "but it carries none; web.search needs no model"
         ) from exc
-    return fetch_deps_for(authority, catalog=catalog, overrides=overrides)
+    return fetch_deps_for(authority, catalog=catalog, keys=keys, overrides=overrides)
 
 
 def fetch_deps_for(
     authority: ConfigAuthority,
     *,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     overrides: ModelOverrides,
 ) -> FetchDeps:
     fetch_timeout_s = authority.service_field_value("web_fetch_timeout_seconds")
@@ -101,6 +104,7 @@ def fetch_deps_for(
             timeout_seconds=authority.service_field_value("llm_invoke_timeout_seconds"),
             llm_override=authority.service_field_value("llm_override"),
             catalog=catalog,
+            keys=keys,
             overrides=overrides,
         ),
         open_url=SYSTEM_URL_OPENER,

@@ -15,6 +15,7 @@ from base.api_contracts.agent_contract import AgentStatus
 from base.lm.call import extract_text
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import Decision, DecisionError, Question, YesNo
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.compat.stop import StopCategory, classify_stop
 from base.lm.errors import ErrorClass, classify_error, normalize_provider_transport_error
 from base.lm.usage import log_usage_from_message
@@ -62,7 +63,7 @@ def draft_instruction(max_candidates: int) -> str:
 LoadTimeline = Callable[[int], Sequence[ExcerptItem]]
 AgentStatusReader = Callable[[int], AgentStatus]
 DecideCall = Callable[..., Awaitable[Mapping[str, Decision]]]
-DraftModelFactory = Callable[[str, ModelCatalog], Any]
+DraftModelFactory = Callable[[str, ModelCatalog, ProviderKeys], Any]
 UsageLogger = Callable[..., object]
 
 
@@ -71,6 +72,14 @@ class DraftRuntime:
     draft_model: DraftModelFactory
     log_usage: UsageLogger = log_usage_from_message
     monotonic: Callable[[], float] = time.monotonic
+
+
+# meiva:note
+# The catalog and the provider keys, each read at the request that uses them.
+@dataclass(frozen=True)
+class ModelReaders:
+    catalog: Callable[[], ModelCatalog]
+    keys: Callable[[ModelCatalog], ProviderKeys]
 
 
 @dataclass(frozen=True)
@@ -109,14 +118,14 @@ class ReplySuggestionService:
         self,
         *,
         policy: ReplySuggestionPolicy,
-        catalog_reader: Callable[[], ModelCatalog],
+        models: ModelReaders,
         load_timeline: LoadTimeline,
         agent_status: AgentStatusReader,
         decide: DecideCall,
         draft: DraftRuntime,
     ) -> None:
         self._policy = policy
-        self._catalog_reader = catalog_reader
+        self._models = models
         self._load_timeline = load_timeline
         self._agent_status = agent_status
         self._decide = decide
@@ -135,14 +144,15 @@ class ReplySuggestionService:
         excerpt = await asyncio.to_thread(self._excerpt, agent_id)
         if excerpt is None:
             return _none("no_agent_text")
-        catalog = self._catalog_reader()
+        catalog = self._models.catalog()
         validate_models(self._policy, catalog)
         key = (agent_id, excerpt.last_message_id)
         cached = self._cache.get(key)
         if cached is not None:
             self._cache.move_to_end(key)
             return cached
-        result = await self._gate_and_draft(agent_id, excerpt, catalog)
+        keys = await asyncio.to_thread(self._models.keys, catalog)
+        result = await self._gate_and_draft(agent_id, excerpt, catalog, keys)
         if result.reason in (None, "not_useful"):
             self._remember(key, result)
         return result
@@ -158,10 +168,14 @@ class ReplySuggestionService:
             self._cache.popitem(last=False)
 
     async def _gate_and_draft(
-        self, agent_id: int, excerpt: ConversationExcerpt, catalog: ModelCatalog
+        self,
+        agent_id: int,
+        excerpt: ConversationExcerpt,
+        catalog: ModelCatalog,
+        keys: ProviderKeys,
     ) -> ReplySuggestionResponse:
         try:
-            useful = await self._useful_reply_probability(agent_id, excerpt, catalog)
+            useful = await self._useful_reply_probability(agent_id, excerpt, catalog, keys)
         except DecisionError:
             logger.opt(exception=True).warning(
                 "reply suggestion gate failed for agent {agent_id}",
@@ -179,10 +193,14 @@ class ReplySuggestionService:
         )
         if useful < threshold:
             return _none("not_useful")
-        return await self._draft(agent_id, excerpt, catalog)
+        return await self._draft(agent_id, excerpt, catalog, keys)
 
     async def _useful_reply_probability(
-        self, agent_id: int, excerpt: ConversationExcerpt, catalog: ModelCatalog
+        self,
+        agent_id: int,
+        excerpt: ConversationExcerpt,
+        catalog: ModelCatalog,
+        keys: ProviderKeys,
     ) -> float:
         questions: dict[str, Question] = {USEFUL_REPLY: GATE_QUESTION}
         decisions = await self._decide(
@@ -190,6 +208,7 @@ class ReplySuggestionService:
             excerpt.text,
             questions,
             catalog=catalog,
+            keys=keys,
             usage_kind=GATE_USAGE_KIND,
             for_agent_id=agent_id,
             timeout=GATE_TIMEOUT_S,
@@ -197,11 +216,15 @@ class ReplySuggestionService:
         return decisions[USEFUL_REPLY].probability("true")
 
     async def _draft(
-        self, agent_id: int, excerpt: ConversationExcerpt, catalog: ModelCatalog
+        self,
+        agent_id: int,
+        excerpt: ConversationExcerpt,
+        catalog: ModelCatalog,
+        keys: ProviderKeys,
     ) -> ReplySuggestionResponse:
         model_id = self._policy.model()
         max_candidates = self._policy.max_candidates()
-        llm = self._draft_model(model_id, catalog).with_structured_output(
+        llm = self._draft_model(model_id, catalog, keys).with_structured_output(
             DraftReplies.model_json_schema(),
             method="json_schema",
             strict=True,

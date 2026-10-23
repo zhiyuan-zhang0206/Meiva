@@ -26,6 +26,7 @@ from base.lm.catalog.decide.types import (
     question_text,
 )
 from base.lm.decision import call as decide_call
+from base.packages.tests.model_catalog import inert_keys
 from meiva import security
 from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface import settings as sdk_settings
@@ -151,7 +152,11 @@ def test_a_long_page_is_split_so_every_request_is_inside_the_model_limits(
     page = "\n".join(f"paragraph {i}: " + "word " * 60 for i in range(200))
     assert estimate_tokens(page) > 10 * 1_500
 
-    asyncio.run(page_probability(_MODEL, page, catalog=small, url=_URL, for_agent_id=None))
+    asyncio.run(
+        page_probability(
+            _MODEL, page, catalog=small, keys=inert_keys(small), url=_URL, for_agent_id=None
+        )
+    )
 
     assert len(fake.calls) > 10
     assert all(estimate_tokens(call["state"]) + question_tokens <= 1_500 for call in fake.calls)

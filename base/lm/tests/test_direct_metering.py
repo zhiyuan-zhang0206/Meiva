@@ -24,6 +24,7 @@ from loguru import logger
 
 from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import build_chat_model
 from base.lm.usage import log_usage_from_message, metering
 from base.log.tests.log_records import LogRecords
@@ -89,6 +90,7 @@ def _build(
     built = build_chat_model(
         _MODEL,
         catalog=catalog,
+        keys=ProviderKeys({}),
         llm_override=_OVERRIDE_PATH,
         overrides=model_overrides(),
         meter=meter,

@@ -17,6 +17,7 @@ from base.lm.catalog.decide.types import (
     Score,
     YesNo,
 )
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.call import decide
 from base.packages.plugin_providers import build_model_catalog
 
@@ -75,15 +76,28 @@ class _Server:
         return self._response
 
 
+_KEYS = ProviderKeys({"OPENAI_API_KEY": "sk-test-key"})
+
+
 @pytest.fixture
-def catalog(monkeypatch: pytest.MonkeyPatch) -> ModelCatalog:
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+def catalog() -> ModelCatalog:
     return build_model_catalog()
 
 
-async def _decide(catalog: ModelCatalog, server: _Server, state: str = "hello") -> Any:
+async def _decide(
+    catalog: ModelCatalog,
+    server: _Server,
+    state: str = "hello",
+    keys: ProviderKeys = _KEYS,
+) -> Any:
     return await decide(
-        _MODEL, state, _QUESTIONS, catalog=catalog, usage_kind="test", transport=server.transport
+        _MODEL,
+        state,
+        _QUESTIONS,
+        catalog=catalog,
+        keys=keys,
+        usage_kind="test",
+        transport=server.transport,
     )
 
 
@@ -185,12 +199,11 @@ async def test_malformed_or_inconsistent_responses_fail(
         await _decide(catalog, _Server(httpx.Response(200, json=body)))
 
 
-async def test_missing_key_fails_before_any_request(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+async def test_missing_key_fails_before_any_request() -> None:
     server = _Server(httpx.Response(200, json=_body()))
 
     with pytest.raises(DecisionKeyMissingError, match="OPENAI_API_KEY not set"):
-        await _decide(build_model_catalog(), server)
+        await _decide(build_model_catalog(), server, keys=ProviderKeys({}))
     assert server.requests == []
 
 

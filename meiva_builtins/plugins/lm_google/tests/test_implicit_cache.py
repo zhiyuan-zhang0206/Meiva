@@ -9,6 +9,7 @@ from agent.llm.invoke import ainvoke_tool_call
 from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import build_chat_model
 from base.lm.usage import log_usage_from_message
 
@@ -18,10 +19,10 @@ async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
     model_catalog: ModelCatalog,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "test-not-a-real-key")
     llm = build_chat_model(
         "gemini-3.8-flash",
         catalog=model_catalog,
+        keys=ProviderKeys({"GEMINI_API_KEY": "test-not-a-real-key"}),
         llm_override="",
         overrides=ModelOverrides.from_pins(None),
         streaming=False,
@@ -74,10 +75,10 @@ async def test_cache_403_has_no_application_recovery(
     from google.genai.errors import ClientError
     from langchain_core.exceptions import ModelError
 
-    monkeypatch.setenv("GEMINI_API_KEY", "test-not-a-real-key")
     llm = build_chat_model(
         "gemini-3.8-flash",
         catalog=model_catalog,
+        keys=ProviderKeys({"GEMINI_API_KEY": "test-not-a-real-key"}),
         llm_override="",
         overrides=ModelOverrides.from_pins(None),
         streaming=False,

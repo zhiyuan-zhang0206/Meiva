@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog.decide.types import DecisionBinding, DecisionBuildContext, DecisionModelSpec
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.compat.stop import StopSpec
 from base.lm.registry import ModelSpec
 
@@ -29,7 +30,7 @@ from base.lm.registry import ModelSpec
 # current version. A plugin written against an older shape keeps working —
 # consumers of a new field must degrade when it is absent. (Mirrors the
 # plugin-spec-v2 ``engines.meiva`` host-compatibility idea.)
-PROVIDER_API_VERSION = 3
+PROVIDER_API_VERSION = 4
 
 
 class InferenceSpeed(StrEnum):
@@ -124,6 +125,7 @@ class BuildContext:
     disable_streaming: bool
     timeout: float | None
     thinking_budget_tokens: int
+    keys: ProviderKeys
     provider_model_ids: tuple[str, ...] = ()
     """Registered IDs for this binding, used in provider validation diagnostics."""
     effort_levels: tuple[str, ...] | None = None
@@ -196,18 +198,17 @@ class ProviderContribution:
     pricing: Mapping[str, PriceRates]
 
 
+# meiva:note
+# What one decision-model provider declares, parallel to ``ProviderContribution``.
+#
+# Decision models never enter the chat catalog: no ``ModelSpec``, no ``build_chat_model``
+# dispatch, no spawn dropdown. ``prefix`` owns the ids in ``models`` and is checked for
+# collisions against chat prefixes of other plugins as well as other decision prefixes; a
+# plugin may contribute both a chat provider and a decision provider under the same vendor
+# prefix. ``build(ctx)`` is a pure function of ``ctx`` that raises immediately when the key
+# named by ``key_env`` is missing (``ctx.keys.require``).
 @dataclass(frozen=True)
 class DecisionProviderContribution:
-    """What one decision-model provider declares, parallel to ``ProviderContribution``.
-
-    Decision models never enter the chat catalog: no ``ModelSpec``, no ``build_chat_model``
-    dispatch, no spawn dropdown. ``prefix`` owns the ids in ``models`` and is checked for
-    collisions against chat prefixes of other plugins as well as other decision prefixes; a
-    plugin may contribute both a chat provider and a decision provider under the same vendor
-    prefix. ``build(ctx)`` is a pure function of ``ctx`` that raises immediately when the key
-    named by ``key_env`` is missing (``require_key``).
-    """
-
     prefix: str
     display_name: str
     key_env: str

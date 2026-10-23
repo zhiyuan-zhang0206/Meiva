@@ -52,7 +52,6 @@ def _run_case(home: Path, case: str, keys: dict[str, str], *arguments: str) -> N
             "MEIVA_PROCESS_PROFILE": "agent"
             if legacy or case.startswith("thinking_")
             else "gateway",
-            **(keys if case.startswith("thinking_") else {}),
         },
     )
     assert result.returncode == 0, result.stdout + result.stderr

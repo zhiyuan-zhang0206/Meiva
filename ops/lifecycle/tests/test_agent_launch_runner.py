@@ -93,6 +93,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
             body,
             pool,
             catalog=build_model_catalog(),
+            authority=config_authority,
             local_machine=machine_identity.name(),
         )
         await lifecycle.launch_agent_op(
@@ -101,6 +102,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
             body,
             pool,
             catalog=build_model_catalog(),
+            authority=config_authority,
             local_machine=machine_identity.name(),
         )
         stale = body.model_copy(update={"launch_attempt_id": uuid4()})
@@ -111,6 +113,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
                 stale,
                 pool,
                 catalog=build_model_catalog(),
+                authority=config_authority,
                 local_machine=machine_identity.name(),
             )
         db_conn.execute("UPDATE agents_meta SET machine='later-placement' WHERE id=%s", (agent_id,))
@@ -122,6 +125,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
                 body,
                 pool,
                 catalog=build_model_catalog(),
+                authority=config_authority,
                 local_machine=machine_identity.name(),
             )
         for _ in range(2):

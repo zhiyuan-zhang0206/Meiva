@@ -6,6 +6,3 @@ exports = ["provider_plugin_support.py"]
 "lm_process.py" = ["_billing_child.py", "_fail_fast_child.py"]
 "test_call_fail_fast.py" = ["lm_process.py"]
 "test_lm_billing.py" = ["lm_process.py"]
-
-[debt.env-patch]
-"test_anthropic_fast.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 2

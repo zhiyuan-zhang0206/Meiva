@@ -11,6 +11,7 @@ from pydantic import SecretStr
 from base.host.env.agent_slices import ModelOverrides
 from base.host.net.ports import UrlOpener
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 
 __all__ = [
     "BraveConfig",
@@ -82,6 +83,7 @@ class FetchModel:
     timeout_seconds: float
     llm_override: str
     catalog: ModelCatalog
+    keys: ProviderKeys
     overrides: ModelOverrides
 
 

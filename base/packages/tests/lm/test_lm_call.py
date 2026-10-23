@@ -21,7 +21,9 @@ from base.host.env.agent_slices import ModelOverrides
 from base.lm import call
 from base.lm.call import answer_text, extract_text, invoke_text
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.effort import ReasoningEffort
+from base.packages.tests.model_catalog import inert_keys
 
 
 class _FakeResponse:
@@ -263,6 +265,7 @@ def test_answer_text_happy_path(
         model: str,
         *,
         catalog: ModelCatalog,
+        keys: ProviderKeys,
         llm_override: str,
         overrides: ModelOverrides,
         reasoning_effort: Any = None,
@@ -281,6 +284,7 @@ def test_answer_text_happy_path(
         error_type=ValueError,
         desc="d",
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         llm_override="",
         overrides=model_overrides(),
         build_chat_model=_fake_build,
@@ -299,6 +303,7 @@ def test_answer_text_build_failure_raises_error_type(
         model: str,
         *,
         catalog: ModelCatalog,
+        keys: ProviderKeys,
         llm_override: str,
         overrides: ModelOverrides,
         reasoning_effort: Any = None,
@@ -315,6 +320,7 @@ def test_answer_text_build_failure_raises_error_type(
             error_type=ValueError,
             desc="d",
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override="",
             overrides=model_overrides(),
             build_chat_model=_fail,
@@ -331,6 +337,7 @@ def test_answer_text_build_failure_uses_build_error_when_given(
         model: str,
         *,
         catalog: ModelCatalog,
+        keys: ProviderKeys,
         llm_override: str,
         overrides: ModelOverrides,
         reasoning_effort: Any = None,
@@ -352,6 +359,7 @@ def test_answer_text_build_failure_uses_build_error_when_given(
             desc="d",
             build_error=_wrap,
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override="",
             overrides=model_overrides(),
             build_chat_model=_fail,

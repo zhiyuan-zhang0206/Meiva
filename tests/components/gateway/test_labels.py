@@ -18,6 +18,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import usage
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import inert_keys
 from gateway.agents import router
 from services.derived.labeler.labeler import generate_label_async
 from services.derived.labeler.labeler import normalize as _normalize_to
@@ -162,6 +163,7 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
             event_bus,
             build_chat_model=_fake_builder(_ResponseLLM()),
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )
@@ -210,6 +212,7 @@ class TestGenerateLabelAsync:
             event_bus,
             build_chat_model=_fake_builder(_FakeLLM("\u67e5 X \u6a21\u5757")),
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )
@@ -254,6 +257,7 @@ class TestGenerateLabelAsync:
             event_bus,
             build_chat_model=_fake_builder(_FakeLLM("LLM \u8d77\u7684")),
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )
@@ -295,6 +299,7 @@ class TestGenerateLabelAsync:
             event_bus,
             build_chat_model=_fake_builder(_FakeLLM("LLM \u8d77\u7684")),
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )
@@ -337,6 +342,7 @@ class TestGenerateLabelAsync:
             event_bus,
             build_chat_model=_fake_builder(_ExplodingLLM()),
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )
@@ -372,6 +378,7 @@ class TestGenerateLabelAsync:
             event_bus,
             build_chat_model=_fake_builder(_FakeLLM('"   "')),
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )
@@ -407,6 +414,7 @@ class TestGenerateLabelAsync:
             event_bus,
             build_chat_model=_fake_builder(_FakeLLMWithThinking("migrate data")),
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )
@@ -456,6 +464,7 @@ class TestGenerateLabelAsync:
             event_bus,
             build_chat_model=_fake_builder(_ThinkingOnlyLLM()),
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )
@@ -502,6 +511,7 @@ class TestGenerateLabelAsync:
             event_bus,
             build_chat_model=_fake_builder(_MultiTextLLM()),
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )

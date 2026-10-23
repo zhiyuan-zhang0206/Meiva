@@ -21,6 +21,7 @@ from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
 from base.lm import usage
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from gateway.routers.memory import MemorySearchInputs
 from gateway.tests.agents.gateway_auth import gateway_credentials
@@ -104,9 +105,16 @@ class Judge:
         self.failure: Exception | None = None
 
     async def __call__(
-        self, model: str, state: str, question: Any, *, catalog: ModelCatalog, usage_kind: str
+        self,
+        model: str,
+        state: str,
+        question: Any,
+        *,
+        catalog: ModelCatalog,
+        keys: ProviderKeys,
+        usage_kind: str,
     ) -> float:
-        del catalog, usage_kind
+        del catalog, keys, usage_kind
         self.calls.append((model, state, question))
         if self.failure is not None:
             raise self.failure

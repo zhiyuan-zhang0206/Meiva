@@ -184,6 +184,7 @@ async def dispatch(
                     LaunchAgentRequest.model_validate(payload),
                     pool,
                     catalog=catalog,
+                    authority=authority,
                     local_machine=local_machine.name(),
                 )
 
