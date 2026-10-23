@@ -24,10 +24,6 @@ import pytest
 
 from scripts.content_lint import lint_meiva_okf as _lint
 
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-
 
 def _node(tmp_path: Path, rel: str, body: str = "") -> Path:
     """Write a minimal valid OKF node at `rel` (no other rule may fire on it)."""
@@ -45,7 +41,9 @@ def _node(tmp_path: Path, rel: str, body: str = "") -> Path:
     return path
 
 
-def _lint_tmp(tmp_path, monkeypatch, capsys) -> tuple[int, str]:
+def _lint_tmp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> tuple[int, str]:
     """Lint `tmp_path` as the repo root; return (effective exit code, stdout)."""
     monkeypatch.chdir(tmp_path)
     code = 0
@@ -64,7 +62,9 @@ def _lint_tmp(tmp_path, monkeypatch, capsys) -> tuple[int, str]:
         "docs/decisions/2026-07-29-some-decision.md",  # as written from the repo root
     ],
 )
-def test_non_node_target_names_the_file_and_the_remedy(tmp_path, monkeypatch, capsys, target):
+def test_non_node_target_names_the_file_and_the_remedy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], target: str
+) -> None:
     """A wikilink to a decision record: the diagnostic names the file it found, says
     it is not a node, and points at the markdown link that is the actual fix."""
     decision = tmp_path / "docs/decisions/2026-07-29-some-decision.md"
@@ -84,7 +84,9 @@ def test_non_node_target_names_the_file_and_the_remedy(tmp_path, monkeypatch, ca
     assert "1 warning(s)" in out
 
 
-def test_markdown_link_to_a_decision_record_is_clean(tmp_path, monkeypatch, capsys):
+def test_markdown_link_to_a_decision_record_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """The remedy the message names really is clean — the linter reads wikilinks
     only, so citing a non-node axis as a markdown link reports nothing."""
     decision = tmp_path / "docs/decisions/2026-07-29-some-decision.md"
@@ -102,7 +104,9 @@ def test_markdown_link_to_a_decision_record_is_clean(tmp_path, monkeypatch, caps
     assert "0 warning(s)" in out
 
 
-def test_target_that_exists_nowhere_reports_a_plain_miss(tmp_path, monkeypatch, capsys):
+def test_target_that_exists_nowhere_reports_a_plain_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """No file of that name anywhere: the axis explanation would be a wrong guess,
     so the message stays the plain "not found"."""
     _node(tmp_path, "base/cluster/machine.meiva.okf.md", "See [[no-such-node.meiva.okf.md]].")
@@ -114,7 +118,9 @@ def test_target_that_exists_nowhere_reports_a_plain_miss(tmp_path, monkeypatch, 
     assert "not an OKF node" not in out
 
 
-def test_labelled_wikilink_to_a_missing_target_reports_the_target(tmp_path, monkeypatch, capsys):
+def test_labelled_wikilink_to_a_missing_target_reports_the_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """`[[target|label]]` that resolves to nothing is a W008 naming the target half,
     not the label."""
     _node(
@@ -128,7 +134,9 @@ def test_labelled_wikilink_to_a_missing_target_reports_the_target(tmp_path, monk
     assert "the node" not in out
 
 
-def test_url_target_is_not_reported_as_a_doc(tmp_path, monkeypatch, capsys):
+def test_url_target_is_not_reported_as_a_doc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A URL is nothing on disk, so it gets the plain miss — never the axis message,
     which would send the reader hunting for a same-named file in an axis dir."""
     doc = tmp_path / "docs/conventions/runbook.md"
@@ -143,7 +151,9 @@ def test_url_target_is_not_reported_as_a_doc(tmp_path, monkeypatch, capsys):
     assert "not an OKF node" not in out
 
 
-def test_wikilinks_inside_code_are_not_edges(tmp_path, monkeypatch, capsys):
+def test_wikilinks_inside_code_are_not_edges(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A `[[wikilink]]` quoted as code — an inline span or a fenced block — is
     documentation about the syntax, not a node-graph edge (the same code-sample
     exemption check_doc_references applies): the teaching samples in the
@@ -163,7 +173,9 @@ def test_wikilinks_inside_code_are_not_edges(tmp_path, monkeypatch, capsys):
     assert "0 warning(s)" in out
 
 
-def test_ambiguous_basename_does_not_resolve(tmp_path, monkeypatch, capsys):
+def test_ambiguous_basename_does_not_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """The basename fallback requires a *unique* match — with the name taken twice,
     a bare-basename link resolves to neither and reports W008."""
     _node(tmp_path, "a/skills.meiva.okf.md")
@@ -177,7 +189,9 @@ def test_ambiguous_basename_does_not_resolve(tmp_path, monkeypatch, capsys):
 
 
 # ── rule 11: the target resolves, but its path does not exist ────────
-def test_wrong_path_rescued_by_the_basename_fallback_warns(tmp_path, monkeypatch, capsys):
+def test_wrong_path_rescued_by_the_basename_fallback_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """`[[wrong/dir/x]]` still reaches `real/dir/x` by basename. The link works, so
     this is a warning — and it names the path the node actually has."""
     _node(tmp_path, "real/dir/target.meiva.okf.md")
@@ -192,7 +206,9 @@ def test_wrong_path_rescued_by_the_basename_fallback_warns(tmp_path, monkeypatch
     assert "1 warning(s)" in out
 
 
-def test_stale_relative_prefix_warns(tmp_path, monkeypatch, capsys):
+def test_stale_relative_prefix_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """The shape this rule was written for: a link copied between siblings keeps a
     directory prefix that is already part of its own directory, so the relative read
     misses and only the basename saves it."""
@@ -218,7 +234,9 @@ def test_stale_relative_prefix_warns(tmp_path, monkeypatch, capsys):
         "target.meiva.okf.md",  # bare basename: the intended cross-tree form
     ],
 )
-def test_paths_that_denote_their_target_are_clean(tmp_path, monkeypatch, capsys, target):
+def test_paths_that_denote_their_target_are_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], target: str
+) -> None:
     """W011 fires on a path that plays no part in the resolution — never on one that
     does, and never on a bare basename, which carries no path to be wrong."""
     _node(tmp_path, "real/dir/target.meiva.okf.md")
@@ -230,7 +248,9 @@ def test_paths_that_denote_their_target_are_clean(tmp_path, monkeypatch, capsys,
     assert "0 warning(s)" in out
 
 
-def test_labelled_wikilink_is_checked_by_its_target(tmp_path, monkeypatch, capsys):
+def test_labelled_wikilink_is_checked_by_its_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """`[[target|label]]`: the label is display text, so the rules read the target
     half — a wrong path is caught through a label just as without one."""
     _node(tmp_path, "real/dir/target.meiva.okf.md")

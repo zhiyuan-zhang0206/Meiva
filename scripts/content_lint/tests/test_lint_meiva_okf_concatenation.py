@@ -19,11 +19,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.content_lint import lint_meiva_okf as _lint
+import pytest
 
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
+from scripts.content_lint import lint_meiva_okf as _lint
 
 
 def _node(tmp_path: Path, rel: str, body: str = "") -> Path:
@@ -42,7 +40,9 @@ def _node(tmp_path: Path, rel: str, body: str = "") -> Path:
     return path
 
 
-def _lint_tmp(tmp_path, monkeypatch, capsys) -> tuple[int, str]:
+def _lint_tmp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> tuple[int, str]:
     """Lint `tmp_path` as the repo root; return (effective exit code, stdout)."""
     monkeypatch.chdir(tmp_path)
     code = 0
@@ -54,7 +54,9 @@ def _lint_tmp(tmp_path, monkeypatch, capsys) -> tuple[int, str]:
 
 
 # ── rule 12: header/bullet glued to the preceding text ───────────────
-def test_header_glued_after_wikilink_blocks(tmp_path, monkeypatch, capsys):
+def test_header_glued_after_wikilink_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """The exact shape found across the campaign: a sentence ending in a
     wikilink runs straight into the next header, no blank line."""
     _node(
@@ -71,7 +73,9 @@ def test_header_glued_after_wikilink_blocks(tmp_path, monkeypatch, capsys):
     assert "Header glued" in out
 
 
-def test_bullet_glued_after_wikilink_blocks(tmp_path, monkeypatch, capsys):
+def test_bullet_glued_after_wikilink_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """The bullet-absorbed-into-the-previous-line shape."""
     _node(
         tmp_path,
@@ -87,7 +91,9 @@ def test_bullet_glued_after_wikilink_blocks(tmp_path, monkeypatch, capsys):
     assert "Bullet glued" in out
 
 
-def test_bullet_glued_after_plain_word_blocks(tmp_path, monkeypatch, capsys):
+def test_bullet_glued_after_plain_word_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """No wikilink involved — a bullet fused directly onto the end of the
     previous bullet's last word, the base/docs/base.meiva.okf.md shape found by
     the tree-wide sweep."""
@@ -103,7 +109,9 @@ def test_bullet_glued_after_plain_word_blocks(tmp_path, monkeypatch, capsys):
     assert "E012" in out
 
 
-def test_header_and_blank_line_is_clean(tmp_path, monkeypatch, capsys):
+def test_header_and_blank_line_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """The fixed shape: a blank line separates the sentence from the header."""
     _node(
         tmp_path,
@@ -118,7 +126,9 @@ def test_header_and_blank_line_is_clean(tmp_path, monkeypatch, capsys):
     assert "E012" not in out
 
 
-def test_language_name_before_hash_is_not_flagged(tmp_path, monkeypatch, capsys):
+def test_language_name_before_hash_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """ "C#" is a letter directly followed by '#' + space + a capitalized word —
     the same surface shape as the bug, but a legitimate language mention. The
     header-glue lookbehind excludes any letter/digit immediately before the
@@ -135,7 +145,9 @@ def test_language_name_before_hash_is_not_flagged(tmp_path, monkeypatch, capsys)
     assert "E012" not in out
 
 
-def test_backtick_quoted_header_name_in_prose_is_not_flagged(tmp_path, monkeypatch, capsys):
+def test_backtick_quoted_header_name_in_prose_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """`# Capabilities` cited by name inside inline code, mid-sentence, is
     prose about a header — not a concatenation defect. Inline code spans are
     masked before the scan runs."""
@@ -151,7 +163,9 @@ def test_backtick_quoted_header_name_in_prose_is_not_flagged(tmp_path, monkeypat
     assert "E012" not in out
 
 
-def test_hash_comment_inside_fenced_code_is_not_flagged(tmp_path, monkeypatch, capsys):
+def test_hash_comment_inside_fenced_code_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A Python comment glued to a period inside a fenced code block reads the
     same as the bug surface-level, but code fences are masked before scanning."""
     _node(
@@ -166,7 +180,9 @@ def test_hash_comment_inside_fenced_code_is_not_flagged(tmp_path, monkeypatch, c
     assert "E012" not in out
 
 
-def test_headers_own_repeated_hash_run_is_not_flagged(tmp_path, monkeypatch, capsys):
+def test_headers_own_repeated_hash_run_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A legitimate header's own '#' characters must never look like glue —
     the lookbehind excludes another '#' immediately before the run."""
     _node(tmp_path, "a.meiva.okf.md", "# A\n\n### A Real Level-3 Header\n\nProse.\n")
@@ -178,7 +194,9 @@ def test_headers_own_repeated_hash_run_is_not_flagged(tmp_path, monkeypatch, cap
 
 
 # ── rule 13: duplicate consecutive headers ────────────────────────────
-def test_duplicate_consecutive_header_blocks(tmp_path, monkeypatch, capsys):
+def test_duplicate_consecutive_header_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _node(
         tmp_path,
         "a.meiva.okf.md",
@@ -193,7 +211,9 @@ def test_duplicate_consecutive_header_blocks(tmp_path, monkeypatch, capsys):
     assert "Duplicate consecutive header" in out
 
 
-def test_same_header_text_apart_is_not_flagged(tmp_path, monkeypatch, capsys):
+def test_same_header_text_apart_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """The same header text reused for two unrelated subsections (each under
     its own parent heading, with real content between) is a legitimate
     pattern, not a duplicate — rule 13 only fires when nothing but blank lines
@@ -212,7 +232,9 @@ def test_same_header_text_apart_is_not_flagged(tmp_path, monkeypatch, capsys):
     assert "E013" not in out
 
 
-def test_single_header_is_not_flagged(tmp_path, monkeypatch, capsys):
+def test_single_header_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _node(tmp_path, "a.meiva.okf.md", "# A\n\n## Just One Section\n\nProse.\n")
 
     code, out = _lint_tmp(tmp_path, monkeypatch, capsys)

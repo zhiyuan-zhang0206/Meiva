@@ -13,14 +13,11 @@ a bump to either one moves the test with it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from scripts.content_lint import lint_meiva_okf as _lint
-
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-
 
 MAX_CHARS: int = _lint.MAX_CHARS
 WARN_MARGIN: int = _lint.WARN_MARGIN
@@ -36,7 +33,7 @@ description: A node built to an exact character count.
 """
 
 
-def _node_of_size(tmp_path, char_count: int) -> None:
+def _node_of_size(tmp_path: Path, char_count: int) -> None:
     """Write an otherwise-valid OKF node whose decoded length is exactly
     `char_count`, padded with prose-shaped filler so no other rule can fire."""
     filler_len = char_count - len(_FRONTMATTER) - 1  # -1 for the trailing newline
@@ -49,7 +46,9 @@ def _node_of_size(tmp_path, char_count: int) -> None:
     assert len(path.read_text(encoding="utf-8")) == char_count
 
 
-def _lint_tmp(tmp_path, monkeypatch, capsys) -> tuple[int, str]:
+def _lint_tmp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> tuple[int, str]:
     """Lint `tmp_path` as the repo root; return (effective exit code, stdout)."""
     monkeypatch.chdir(tmp_path)
     code = 0
@@ -60,7 +59,9 @@ def _lint_tmp(tmp_path, monkeypatch, capsys) -> tuple[int, str]:
     return code, capsys.readouterr().out
 
 
-def test_warns_inside_the_margin_without_blocking(tmp_path, monkeypatch, capsys):
+def test_warns_inside_the_margin_without_blocking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """One character into the band: W010 reports the size and the room left, and
     the linter still exits clean."""
     size = MAX_CHARS - WARN_MARGIN + 1
@@ -75,7 +76,9 @@ def test_warns_inside_the_margin_without_blocking(tmp_path, monkeypatch, capsys)
     assert "0 error(s)" in out
 
 
-def test_silent_at_the_margin_boundary(tmp_path, monkeypatch, capsys):
+def test_silent_at_the_margin_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Room left exactly equal to the margin is not yet in the band — the warning
     fires on *less* room than the margin, not on the margin itself."""
     _node_of_size(tmp_path, MAX_CHARS - WARN_MARGIN)
@@ -87,7 +90,12 @@ def test_silent_at_the_margin_boundary(tmp_path, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("headroom", [WARN_MARGIN + 1, WARN_MARGIN * 2, MAX_CHARS // 2])
-def test_silent_well_below_the_margin(tmp_path, monkeypatch, capsys, headroom: int):
+def test_silent_well_below_the_margin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    headroom: int,
+) -> None:
     _node_of_size(tmp_path, MAX_CHARS - headroom)
     code, out = _lint_tmp(tmp_path, monkeypatch, capsys)
 
@@ -95,7 +103,9 @@ def test_silent_well_below_the_margin(tmp_path, monkeypatch, capsys, headroom: i
     assert "W010" not in out
 
 
-def test_over_the_ceiling_errors_and_does_not_also_warn(tmp_path, monkeypatch, capsys):
+def test_over_the_ceiling_errors_and_does_not_also_warn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Past the ceiling E007 is the only report: a breach already names the
     remedy, so W010 on top of it would be duplicate noise."""
     _node_of_size(tmp_path, MAX_CHARS + 1)
