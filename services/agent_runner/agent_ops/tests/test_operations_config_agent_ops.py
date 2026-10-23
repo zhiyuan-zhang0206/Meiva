@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -15,14 +16,12 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
-from ops import host_config
 from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
 
 
 @pytest.mark.asyncio
 async def test_dispatch_config_read_calls_config_read_op(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -42,7 +41,6 @@ async def test_dispatch_config_read_calls_config_read_op(
         captured.append(True)
         return ConfigReadResult(machine="x", host_fields={}, raw_overrides={})
 
-    monkeypatch.setattr(host_config, "config_read_op", _fake_config_read)
     status, result = await daemon.dispatch(
         "config_read",
         {},
@@ -56,6 +54,7 @@ async def test_dispatch_config_read_calls_config_read_op(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, config_read_op=_fake_config_read),
     )
     assert status == "completed"
     assert result["machine"] == "x"
@@ -65,7 +64,6 @@ async def test_dispatch_config_read_calls_config_read_op(
 @pytest.mark.asyncio
 async def test_dispatch_config_write_passes_overrides(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -95,7 +93,6 @@ async def test_dispatch_config_write_passes_overrides(
         captured["trace_id"] = trace_id
         return ConfigWriteOpResult(machine="x", results={}, applied=True, restart_required=[])
 
-    monkeypatch.setattr(host_config, "config_write_op", _fake_config_write)
     status, _result = await daemon.dispatch(
         "config_write",
         {"overrides": {"ops_concurrency": 2}},
@@ -109,6 +106,9 @@ async def test_dispatch_config_write_passes_overrides(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(
+            daemon.bind_dispatch_sync, config_write_op=_fake_config_write
+        ),
     )
     assert status == "completed"
     assert captured["overrides"] == {"ops_concurrency": 2}

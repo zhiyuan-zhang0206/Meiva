@@ -10,9 +10,11 @@ Covers:
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -26,7 +28,6 @@ from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
 from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
-from ops.cluster import operations as cluster_ops
 from ops.rpc_schemas import LaunchAgentRequest
 from services.agent_runner.agent_ops import daemon, health
 
@@ -106,7 +107,6 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
         captured["pool"] = pool
         return SpawnedAgent(id=777)
 
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_launch)
     status, result = await daemon.dispatch(
         "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
@@ -120,6 +120,7 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        launch_agent=_fake_launch,
     )
     assert status == "completed"
     assert result == {"id": 777}
@@ -129,7 +130,6 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
 @pytest.mark.asyncio
 async def test_dispatch_shell_probe_calls_shell_probe_op(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -147,7 +147,6 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
         seen["agent_id"] = agent_id
         return ShellProbeResult(shells=[ShellInfo(id=5, name="build", uptime_seconds=42)])
 
-    monkeypatch.setattr(cluster_ops, "shell_probe_op", _fake_probe)
     status, result = await daemon.dispatch(
         "shell_probe",
         {"agent_id": 42},
@@ -161,6 +160,7 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, shell_probe_op=_fake_probe),
     )
     assert status == "completed"
     assert seen == {"agent_id": 42}
@@ -180,7 +180,6 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
 @pytest.mark.asyncio
 async def test_dispatch_shell_probe_bad_payload_fails(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -194,11 +193,6 @@ async def test_dispatch_shell_probe_bad_payload_fails(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("must not dispatch on bad payload")
 
-    monkeypatch.setattr(
-        cluster_ops,
-        "shell_probe_op",
-        forbidden,
-    )
     status, result = await daemon.dispatch(
         "shell_probe",
         {},
@@ -212,6 +206,7 @@ async def test_dispatch_shell_probe_bad_payload_fails(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, shell_probe_op=forbidden),
     )
     assert status == "failed"
     assert "agent_id" in str(result["error"])
@@ -220,7 +215,6 @@ async def test_dispatch_shell_probe_bad_payload_fails(
 @pytest.mark.asyncio
 async def test_dispatch_shell_kill_calls_shell_kill_op(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -238,7 +232,6 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
         seen.update(agent_id=agent_id, session_id=session_id)
         return ShellKillResult(mode=ShellKillMode.KILLED)
 
-    monkeypatch.setattr(cluster_ops, "shell_kill_op", _fake_kill)
     status, result = await daemon.dispatch(
         "shell_kill",
         {"agent_id": 42, "session_id": 5},
@@ -252,6 +245,7 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, shell_kill_op=_fake_kill),
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 5}
@@ -261,7 +255,6 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
 @pytest.mark.asyncio
 async def test_dispatch_shell_kill_reports_absent(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -277,11 +270,6 @@ async def test_dispatch_shell_kill_reports_absent(
     def absent(_agent_id: int, _session_id: int) -> ShellKillResult:
         return ShellKillResult(mode=ShellKillMode.ABSENT)
 
-    monkeypatch.setattr(
-        cluster_ops,
-        "shell_kill_op",
-        absent,
-    )
     status, result = await daemon.dispatch(
         "shell_kill",
         {"agent_id": 42, "session_id": 999},
@@ -295,6 +283,7 @@ async def test_dispatch_shell_kill_reports_absent(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, shell_kill_op=absent),
     )
     assert status == "completed"
     assert result == {"mode": "absent", "interrupted": False, "name": None}
@@ -303,7 +292,6 @@ async def test_dispatch_shell_kill_reports_absent(
 @pytest.mark.asyncio
 async def test_dispatch_agent_skill_view_calls_machine_op(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -325,7 +313,6 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
             commands=[OpsCommandItem(name="project", description="d", instruction_hint="h")]
         )
 
-    monkeypatch.setattr(cluster_ops, "agent_skill_view_op", _fake_view)
     status, result = await daemon.dispatch(
         "agent_skill_view",
         {"agent_id": 42},
@@ -339,6 +326,7 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, agent_skill_view_op=_fake_view),
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "pool": pool}
@@ -351,7 +339,6 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
 @pytest.mark.asyncio
 async def test_dispatch_agent_skill_view_bad_payload_fails(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -365,11 +352,6 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("must not dispatch on bad payload")
 
-    monkeypatch.setattr(
-        cluster_ops,
-        "agent_skill_view_op",
-        forbidden,
-    )
     status, result = await daemon.dispatch(
         "agent_skill_view",
         {},
@@ -383,6 +365,7 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, agent_skill_view_op=forbidden),
     )
     assert status == "failed"
     assert "agent_id" in str(result["error"])
@@ -391,7 +374,6 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
 @pytest.mark.asyncio
 async def test_dispatch_shell_capture_calls_shell_capture_op(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -411,7 +393,6 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
         seen["lines"] = lines
         return ShellCaptureResult(session_name="meiva-agent-42-shell-3-build", lines=["a", "b"])
 
-    monkeypatch.setattr(cluster_ops, "shell_capture_op", _fake_capture)
     status, result = await daemon.dispatch(
         "shell_capture",
         {"agent_id": 42, "session_id": 3, "lines": 500},
@@ -425,6 +406,7 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, shell_capture_op=_fake_capture),
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 3, "lines": 500}
@@ -439,7 +421,6 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
 @pytest.mark.asyncio
 async def test_dispatch_shell_capture_defaults_lines(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -457,7 +438,6 @@ async def test_dispatch_shell_capture_defaults_lines(
         seen["lines"] = lines
         return ShellCaptureResult(session_name="n", lines=[])
 
-    monkeypatch.setattr(cluster_ops, "shell_capture_op", _fake_capture)
     status, _ = await daemon.dispatch(
         "shell_capture",
         {"agent_id": 1, "session_id": 2},
@@ -471,6 +451,7 @@ async def test_dispatch_shell_capture_defaults_lines(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, shell_capture_op=_fake_capture),
     )
     assert status == "completed"
     assert seen == {"lines": 200}
@@ -479,7 +460,6 @@ async def test_dispatch_shell_capture_defaults_lines(
 @pytest.mark.asyncio
 async def test_dispatch_unknown_kind(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -510,7 +490,6 @@ async def test_dispatch_unknown_kind(
 @pytest.mark.asyncio
 async def test_dispatch_shell_capture_shell_not_found_fails(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -527,7 +506,6 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
     def _raises(agent_id: int, session_id: int, lines: int = 200) -> object:
         raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
 
-    monkeypatch.setattr(cluster_ops, "shell_capture_op", _raises)
     status, result = await daemon.dispatch(
         "shell_capture",
         {"agent_id": 42, "session_id": 9},
@@ -541,6 +519,7 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, shell_capture_op=_raises),
     )
     assert status == "failed"
     assert "ShellNotFoundError" in str(result["error"])
@@ -575,7 +554,7 @@ def ops_pool(db_url: str) -> object:
         pool.close()
 
 
-def fake_spawn_factory(calls: dict[str, int]) -> object:
+def fake_spawn_factory(calls: dict[str, int]) -> Callable[..., Any]:
     """A launch_agent_op stand-in that counts executions and returns id 777."""
     from ops.rpc_schemas import SpawnedAgent
 

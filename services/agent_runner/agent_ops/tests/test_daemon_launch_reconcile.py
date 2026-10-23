@@ -29,7 +29,6 @@ async def test_reconcile_dispatch_uses_its_own_repeatable_handler(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    from ops.lifecycle import launch_reconcile
 
     pool: ConnectionPool = ConnectionPool(open=False)
     calls: list[tuple[UUID, object]] = []
@@ -50,8 +49,6 @@ async def test_reconcile_dispatch_uses_its_own_repeatable_handler(
     async def forbidden(*_args: object, catalog: ModelCatalog) -> None:
         raise AssertionError("reconciliation cannot invoke the creation launch handler")
 
-    monkeypatch.setattr(launch_reconcile, "reconcile_launch_op", reconcile)
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", forbidden)
     status, result = await daemon.dispatch(
         "launch-reconcile",
         {"launch_attempt_id": str(attempt)},
@@ -65,6 +62,8 @@ async def test_reconcile_dispatch_uses_its_own_repeatable_handler(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        launch_agent=forbidden,
+        reconcile_launch=reconcile,
     )
     assert status == OpStatus.COMPLETED
     assert result == {"wake_published": True}

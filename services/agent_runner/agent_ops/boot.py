@@ -18,6 +18,7 @@ import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import psycopg
 from psycopg.rows import TupleRow
@@ -58,6 +59,7 @@ def register_boot(
     machine: MachineIdentity,
     ops_port: int,
     home: Path,
+    register_self_fn: Callable[..., Any] | None = None,
 ) -> None:
     """Re-announce this unit as up, now that the ops daemon is actually serving.
 
@@ -94,7 +96,7 @@ def register_boot(
             telemetry_otlp_port=config.view.observability.telemetry_otlp_port,
             gateway=gateway,
         )
-        register_self(
+        (register_self_fn or register_self)(
             database(),
             url=url,
             name=machine.name(),

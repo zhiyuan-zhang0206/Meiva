@@ -15,9 +15,14 @@ def run_ops_runner_entry(body: Callable[[], Awaitable[None]]) -> None:
     async def ops_run(**_kwargs: Any) -> None:
         await body()
 
-    daemon.init_gateway_process = lambda **_kwargs: None
-    daemon.serve_ops_daemon = ops_run
-    daemon.main(argv=[])
+    def noop_init(**_kwargs: Any) -> None:
+        return None
+
+    daemon.main(
+        argv=[],
+        init_process=noop_init,
+        serve_daemon=ops_run,
+    )
 
 
 def main(started: Path, marker: Path, mode: str) -> None:

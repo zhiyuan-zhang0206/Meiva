@@ -127,6 +127,7 @@ def bind_dispatch_sync(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
+    **kwargs: Any,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     return dispatch_sync(
@@ -138,7 +139,14 @@ def bind_dispatch_sync(
         image=image,
         local_machine=local_machine,
         host=host,
+        **kwargs,
     )
+
+
+async def _reconcile_launch_op(*args: Any, **kwargs: Any) -> Any:
+    from ops.lifecycle.launch_reconcile import reconcile_launch_op
+
+    return await reconcile_launch_op(*args, **kwargs)
 
 
 async def dispatch(
@@ -156,6 +164,9 @@ async def dispatch(
     local_machine: MachineIdentity,
     host: Host,
     dispatch_arm: Callable[..., Any] | None = None,
+    launch_agent: Callable[..., Any] = lifecycle.launch_agent_op,
+    reconcile_launch: Callable[..., Any] = _reconcile_launch_op,
+    run_lifecycle: Callable[..., Any] = lifecycle.lifecycle_op,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     if not is_op_kind(kind):
@@ -165,7 +176,7 @@ async def dispatch(
         match kind:
             case "spawn-launch":
                 db, bus = boot.ops_handles(database=database, authority=authority)
-                spawned = await lifecycle.launch_agent_op(
+                spawned = await launch_agent(
                     db,
                     bus,
                     LaunchAgentRequest.model_validate(payload),
@@ -176,10 +187,8 @@ async def dispatch(
 
                 return OpStatus.COMPLETED, spawned.model_dump(mode="json", exclude_none=True)
             case "launch-reconcile":
-                from ops.lifecycle.launch_reconcile import reconcile_launch_op
-
                 db, bus = boot.ops_handles(database=database, authority=authority)
-                result = await reconcile_launch_op(
+                result = await reconcile_launch(
                     db,
                     bus,
                     LaunchReconcileRequest.model_validate(payload),
@@ -190,7 +199,7 @@ async def dispatch(
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
                 db, bus = boot.ops_handles(database=database, authority=authority)
-                resp = await lifecycle.lifecycle_op(
+                resp = await run_lifecycle(
                     db,
                     bus,
                     lc.path,
@@ -474,6 +483,12 @@ async def ops_route(
     )
 
 
+def _assert_schema_current(db_url: str) -> None:
+    from base.deploy.schema.migrations import assert_schema_current
+
+    assert_schema_current(db_url)
+
+
 async def serve_ops_daemon(
     *,
     database: Callable[[], Database],
@@ -481,6 +496,16 @@ async def serve_ops_daemon(
     local_machine: MachineIdentity,
     config: ConfigBoot,
     host: Host,
+    is_running: Callable[..., bool] = boot.is_running,
+    write_pidfile: Callable[..., None] = boot.write_pidfile,
+    remove_pidfile: Callable[..., None] = boot.remove_pidfile,
+    check_schema_current: Callable[[str], None] = _assert_schema_current,
+    open_db_pool: Callable[..., Any] = boot.open_db_pool,
+    ops_acceptance: Callable[[], frozenset[str]] = boot.ops_acceptance,
+    ops_bind_host: Callable[..., str] = boot.ops_bind_host,
+    register_boot: Callable[..., None] = boot.register_boot,
+    start_health: Callable[..., Any] = start_health_server,
+    stop_health: Callable[..., Any] = stop_health_server,
 ) -> None:
     runtime = config.ensure_eager()
     catalog = build_model_catalog()
@@ -494,22 +519,20 @@ async def serve_ops_daemon(
     requests: in_flight.RequestTokens = set()
     workers: in_flight.WorkerFutures = set()
     runtime_dir = paths.run_dir(paths.meiva_home())
-    if boot.is_running(config, runtime=runtime_dir):
+    if is_running(config, runtime=runtime_dir):
         _log.info(
             "meiva-ops pidfile %s indicates another instance is alive — exiting",
             boot.pidfile(config, runtime=runtime_dir),
         )
         sys.exit(1)
-    boot.write_pidfile(config, runtime=runtime_dir)
+    write_pidfile(config, runtime=runtime_dir)
 
     dispatch_sem = asyncio.Semaphore(config.view.services.ops_concurrency)
 
     our_machine = local_machine.name()
 
-    from base.deploy.schema.migrations import assert_schema_current
-
     try:
-        assert_schema_current(config.view.data_plane.db_url)
+        check_schema_current(config.view.data_plane.db_url)
     except Exception as exc:
         _log.error(
             "schema version mismatch on ops-server startup: %s — run `git pull && uv sync && meiva start --all-services` (or this unit's own service selection) to catch up",
@@ -517,19 +540,19 @@ async def serve_ops_daemon(
         )
         sys.exit(1)
 
-    pool = boot.open_db_pool(database=database, authority=authority)
+    pool = open_db_pool(database=database, authority=authority)
     executor = boot.op_thread_pool(authority=authority)
     liveness = LivenessGroup()
 
     try:
-        acceptance = boot.ops_acceptance()
-        bind_host = boot.ops_bind_host(machine=local_machine)
+        acceptance = ops_acceptance()
+        bind_host = ops_bind_host(machine=local_machine)
         if bind_host != "127.0.0.1":
             verify_transport_encryption_declaration(
                 bind_host, config.view.data_plane.transport_encryption, authenticated=True
             )
         endpoint = boot.endpoint(config, runtime=runtime_dir)
-        server = await start_health_server(
+        server = await start_health(
             "ops",
             endpoint.health_port,
             host=bind_host,
@@ -575,7 +598,7 @@ async def serve_ops_daemon(
             bind_host,
             endpoint.health_port,
         )
-        boot.register_boot(
+        register_boot(
             database=database,
             config=config,
             machine=local_machine,
@@ -592,17 +615,30 @@ async def serve_ops_daemon(
                     watcher.cancel()
         finally:
             await bus.async_redis().aclose()
-            await stop_health_server(server)
-            boot.remove_pidfile(config, runtime=runtime_dir)
+            await stop_health(server)
+            remove_pidfile(config, runtime=runtime_dir)
     finally:
         pool.close()
         boot.shutdown_op_pool(executor)
 
 
-def main(*, argv: list[str] | None = None, exit_process: Callable[[int], None] = hard_exit) -> None:
+def main(
+    *,
+    argv: list[str] | None = None,
+    exit_process: Callable[[int], None] = hard_exit,
+    capture_image: Callable[[], LoadedCommit] = LoadedCommit.capture,
+    config_factory: Callable[[], ConfigBoot] = ConfigBoot,
+    database_cls: Callable[..., Database] = Database,
+    client_set_cls: Callable[..., Any] = ClientSet,
+    pipeline_builder: Callable[..., Any] = build_pipeline,
+    init_process: Callable[..., None] = init_gateway_process,
+    install_shutdown: Callable[[str], None] = install_graceful_shutdown,
+    runner_factory: Callable[[], asyncio.Runner] = asyncio.Runner,
+    serve_daemon: Callable[..., Any] = serve_ops_daemon,
+) -> None:
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
-    image = LoadedCommit.capture()
-    config = ConfigBoot()
+    image = capture_image()
+    config = config_factory()
     config.boot()
     config.ensure_eager()
     machine = machine_from_boot(config)
@@ -610,15 +646,15 @@ def main(*, argv: list[str] | None = None, exit_process: Callable[[int], None] =
     gate = ProcessDbGate(version=version.get, process="ops", exempt=False)
 
     def database() -> Database:
-        return Database(
+        return database_cls(
             db_config_from_boot(config),
             gate=gate,
             direct_url=ClusterDirectUrl(machine.host),
         )
 
-    clients = ClientSet(
+    clients = client_set_cls(
         database=database,
-        pipeline_factory=lambda: build_pipeline(
+        pipeline_factory=lambda: pipeline_builder(
             database=database, machine=machine, home=paths.meiva_home().resolve()
         ),
     )
@@ -626,14 +662,14 @@ def main(*, argv: list[str] | None = None, exit_process: Callable[[int], None] =
     primary: BaseException | None = None
 
     try:
-        init_gateway_process(
+        init_process(
             name="ops", producer=clients.event_pipeline, machine_reader=machine.name, image=image
         )
-        install_graceful_shutdown("ops")
-        runner = asyncio.Runner()
+        install_shutdown("ops")
+        runner = runner_factory()
         try:
             runner.run(
-                serve_ops_daemon(
+                serve_daemon(
                     database=database,
                     image=image,
                     local_machine=machine,

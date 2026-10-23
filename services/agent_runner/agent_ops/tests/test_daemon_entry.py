@@ -131,22 +131,24 @@ def test_entry_shares_image_gate_factory_and_closes_writer(  # noqa: PLR0915 -- 
     def hard_exit(code: int) -> None:
         raise _ExitError(code)
 
-    monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
-    monkeypatch.setattr(daemon, "Database", build_database)
-    monkeypatch.setattr(daemon, "ConfigBoot", lambda: process_config)
-    monkeypatch.setattr(daemon, "build_pipeline", build_pipeline)
-    monkeypatch.setattr(daemon, "init_gateway_process", init)
-
     def install_shutdown(_name: str) -> None:
         return None
 
-    monkeypatch.setattr(daemon, "install_graceful_shutdown", install_shutdown)
-    monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
-    monkeypatch.setattr(daemon, "serve_ops_daemon", run)
     previous_sigterm = signal.getsignal(signal.SIGTERM)
     try:
         with pytest.raises(_ExitError) as exited:
-            daemon.main(argv=[], exit_process=hard_exit)
+            daemon.main(
+                argv=[],
+                exit_process=hard_exit,
+                capture_image=capture,
+                config_factory=lambda: process_config,
+                database_cls=build_database,
+                pipeline_builder=build_pipeline,
+                init_process=init,
+                install_shutdown=install_shutdown,
+                runner_factory=lambda: runner,
+                serve_daemon=run,
+            )
         assert exited.value.code == (1 if isinstance(failure, Exception) else 0)
         assert captures == [image]
         assert events == (
@@ -163,28 +165,26 @@ def test_entry_shares_image_gate_factory_and_closes_writer(  # noqa: PLR0915 -- 
         runner.close()
 
 
-def test_entry_keeps_startup_failure_when_writer_close_also_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(daemon, "ConfigBoot", snapshot_process_config)
+def test_entry_keeps_startup_failure_when_writer_close_also_fails(tmp_path: Path) -> None:
     primary = RuntimeError("logging startup refused")
     closed: list[float] = []
 
     def init(**_kwargs: Any) -> None:
         raise primary
 
-    def close(_self: object, *, pipeline_timeout: float) -> None:
-        closed.append(pipeline_timeout)
-        raise RuntimeError("writer stop refused")
+    class _FailingClientSet(daemon.ClientSet):
+        def close(self, *, pipeline_timeout: float = 2) -> None:
+            closed.append(pipeline_timeout)
+            raise RuntimeError("writer stop refused")
 
-    monkeypatch.setattr(
-        daemon.LoadedCommit, "capture", lambda: LoadedCommit(source_root=tmp_path, sha=None)
-    )
-    monkeypatch.setattr(daemon, "ConfigBoot", snapshot_process_config)
-    monkeypatch.setattr(daemon, "init_gateway_process", init)
-    monkeypatch.setattr(daemon.ClientSet, "close", close)
     with pytest.raises(RuntimeError) as raised:
-        daemon.main(argv=[])
+        daemon.main(
+            argv=[],
+            capture_image=lambda: LoadedCommit(source_root=tmp_path, sha=None),
+            config_factory=snapshot_process_config,
+            client_set_cls=_FailingClientSet,
+            init_process=init,
+        )
     assert raised.value is primary
     assert closed == [2]
     assert raised.value.__notes__ == [

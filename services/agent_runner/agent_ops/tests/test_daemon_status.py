@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import json
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -15,7 +16,6 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
-from ops.cluster import operations as cluster_ops
 from services.agent_runner.agent_ops import daemon
 
 
@@ -115,7 +115,6 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
             ],
         )
 
-    monkeypatch.setattr(cluster_ops, "cluster_status_op", _status)
     status, body, ctype = await daemon.ops_route(
         json.dumps({"kind": "status_probe"}).encode(),
         active_ops={},
@@ -130,6 +129,10 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=functools.partial(
+            daemon.dispatch,
+            dispatch_arm=functools.partial(daemon.bind_dispatch_sync, cluster_status_op=_status),
+        ),
     )
     assert status == 200
     assert ctype == "application/json"
@@ -171,8 +174,6 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
             resource=None,
         )
 
-    monkeypatch.setattr(cluster_ops, "cluster_status_op", _degraded_status)
-
     status, body, ctype = await daemon.ops_route(
         json.dumps({"kind": "status_probe"}).encode(),
         active_ops={},
@@ -187,6 +188,12 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=functools.partial(
+            daemon.dispatch,
+            dispatch_arm=functools.partial(
+                daemon.bind_dispatch_sync, cluster_status_op=_degraded_status
+            ),
+        ),
     )
 
     assert status == 200
