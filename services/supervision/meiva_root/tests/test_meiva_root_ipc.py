@@ -265,7 +265,7 @@ async def test_status_authenticates_exact_kernel_peer(short_tmp: Path, field: st
 
 @pytest.mark.parametrize("bad", [None, "home", "runtime", "launch", "stopped"])
 async def test_serving_reads_bound_runtime_from_native_peer(
-    short_tmp: Path, monkeypatch: pytest.MonkeyPatch, bad: str | None
+    short_tmp: Path, bad: str | None
 ) -> None:
     from base.deploy.lifecycle import start_serving
     from base.host.runtime_interpreter import LoadedRuntimeIdentity
@@ -279,7 +279,6 @@ async def test_serving_reads_bound_runtime_from_native_peer(
         cwd=str(short_tmp),
         source_digest="f" * 64,
     )
-    monkeypatch.setattr(start_serving, "meiva_home", lambda: short_tmp)
     root = _root_row() | {
         "running": True,
         "home": str(short_tmp),
@@ -302,14 +301,18 @@ async def test_serving_reads_bound_runtime_from_native_peer(
     server = ControlServer(path, status)
     await server.start()
     try:
-        generation = start_serving.begin_start()
+        generation = start_serving.begin_start(short_tmp)
         if bad is None:
-            assert await asyncio.to_thread(start_serving.mark_serving, generation, runtime=runtime)
-            assert await asyncio.to_thread(start_serving.is_serving)
+            assert await asyncio.to_thread(
+                start_serving.mark_serving, short_tmp, generation, runtime=runtime
+            )
+            assert await asyncio.to_thread(start_serving.is_serving, short_tmp)
         else:
             with pytest.raises((ValueError, RootClientError)):
-                await asyncio.to_thread(start_serving.mark_serving, generation, runtime=runtime)
-            assert not start_serving.is_serving()
+                await asyncio.to_thread(
+                    start_serving.mark_serving, short_tmp, generation, runtime=runtime
+                )
+            assert not start_serving.is_serving(short_tmp)
     finally:
         await server.close()
 

@@ -492,8 +492,9 @@ def read_resource_sample(
 def serving_gate_reason(*, is_serving_fn: Callable[[], bool] | None = None) -> PausedReason | None:
     if is_serving_fn is None:
         from base.deploy.lifecycle import start_serving
+        from base.paths import meiva_home
 
-        serving = start_serving.is_serving()
+        serving = start_serving.is_serving(meiva_home())
     else:
         serving = is_serving_fn()
     return None if serving else "startup"

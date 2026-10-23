@@ -23,13 +23,14 @@ from __future__ import annotations
 
 import json
 from contextlib import suppress
+from pathlib import Path
 from typing import cast
 
 import base.paths
 from base.log import logger
 
 
-def record(sessions: list[str]) -> None:
+def record(home: Path, sessions: list[str]) -> None:
     """Write the sessions this start could not launch (empty clears the file).
 
     Unconditional at the end of every start's launch step: an absent file has to
@@ -40,7 +41,7 @@ def record(sessions: list[str]) -> None:
     footnote. The write is atomic (temp + rename) so a reader never sees a
     partial list.
     """
-    target = base.paths.launch_failures_path(base.paths.meiva_home())
+    target = base.paths.launch_failures_path(home)
     with suppress(OSError):  # a diagnostic footnote must not fail the start
         if not sessions:
             target.unlink(missing_ok=True)
@@ -50,7 +51,7 @@ def record(sessions: list[str]) -> None:
         tmp.replace(target)
 
 
-def take() -> list[str]:
+def take(home: Path) -> list[str]:
     """Read the recorded session names and clear the file; `[]` when there are none.
 
     Read-and-unlink because the report belongs to exactly one consumer: the
@@ -63,7 +64,7 @@ def take() -> list[str]:
     rollout. The cost of a failed clear is one duplicate report next time, which
     is strictly better than taking the rollout down over a stale footnote.
     """
-    target = base.paths.launch_failures_path(base.paths.meiva_home())
+    target = base.paths.launch_failures_path(home)
     try:
         raw = target.read_text(encoding="utf-8")
     except FileNotFoundError:

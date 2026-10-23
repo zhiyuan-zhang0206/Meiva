@@ -631,9 +631,10 @@ def test_public_module_entry_launches_with_only_the_explicit_fixture_gate(
         gate.write_text("ready\n")
     target = tmp_path / "fixture_gate_target.py"
     target.write_text(
+        "from pathlib import Path\n"
         "from base.deploy.lifecycle import start_serving\n"
-        "print(start_serving.is_serving(), flush=True)\n"
-        "with start_serving.recovery_permitted() as allowed:\n"
+        "print(start_serving.is_serving(Path('.')), flush=True)\n"
+        "with start_serving.recovery_permitted(Path('.')) as allowed:\n"
         "    print(allowed, flush=True)\n"
     )
     env = os.environ.copy()

@@ -15,7 +15,7 @@ NOTE = "postgres fast shutdown did not complete within 277s; killed leftover pro
 def test_an_escalated_shutdown_is_in_the_report_and_the_journal(
     home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert status_journal.begin("stop")
+    assert status_journal.begin(home, "stop")
 
     assert finish_stop(owns_journal=True, notes=[NOTE], clients=[]) == 0
 
@@ -28,7 +28,7 @@ def test_an_escalated_shutdown_is_in_the_report_and_the_journal(
 def test_a_stop_without_an_escalation_says_nothing_extra(
     home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert status_journal.begin("stop")
+    assert status_journal.begin(home, "stop")
 
     assert finish_stop(owns_journal=True, notes=[], clients=[]) == 0
 
@@ -39,7 +39,7 @@ def test_a_stop_without_an_escalation_says_nothing_extra(
 
 def test_pooler_clients_at_the_stop_land_in_the_journal(home: Path) -> None:
     line = "1 client(s) still connected when the pooler stops: 10.1.2.7:5432 db=meiva"
-    assert status_journal.begin("stop")
+    assert status_journal.begin(home, "stop")
 
     assert finish_stop(owns_journal=True, notes=[], clients=[line]) == 0
 
