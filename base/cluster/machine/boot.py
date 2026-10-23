@@ -26,13 +26,19 @@ def machine_from_boot(config: ConfigBoot) -> MachineIdentity:
     )
 
 
+# meiva:note
+# How to reach and authenticate to the gateway, from this root's configuration.
+#
+# Reads the configuration fields, the launch environment this owner holds and the home's
+# `.env` now; a root builds it where it first dials the gateway.
 def gateway_access_from_boot(config: ConfigBoot) -> GatewayAccess:
-    """How to reach and authenticate to the gateway, from this root's configuration.
-
-    Reads the three fields now; a root builds it where it first dials the gateway."""
     view = config.view
+    facts = config.launch_facts()
     return GatewayAccess(
         gateway_url=view.gateway.gateway_url,
         cluster_secret=view.data_plane.cluster_secret,
         remote_plane=view.data_plane.is_remote,
+        machine_token=facts.machine_token,
+        launcher_profile=facts.launcher_profile,
+        gateway_home=facts.gateway_home,
     )

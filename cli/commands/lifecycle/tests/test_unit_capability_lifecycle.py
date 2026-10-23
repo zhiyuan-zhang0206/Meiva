@@ -9,6 +9,7 @@ from base.cluster.authority.tests.unit_capability_support import runner_boot as 
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
 from base.host.db_authority import delivery, unit
 from base.host.env import bootstrap
+from base.host.env.tests.env_files import constant
 from cli.commands.data_plane import bringup
 from cli.commands.lifecycle.start_generation import write_generation
 
@@ -17,7 +18,7 @@ def test_a_pure_runners_launcher_delivers_the_installed_capability(
     runner_boot: unit.UnitCapability, runner_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("MEIVA_HOME", str(runner_home))
-    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(False))
     assert bringup.db_delivery("runner", remote_data_plane=False) == {
         "MEIVA_DB_URL": runner_boot.dsn,
         delivery.GENERATION_ENV: "0",

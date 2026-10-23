@@ -11,9 +11,10 @@ from psycopg_pool import PoolTimeout
 from base import config
 from base.config import settings
 from base.config.service_read import ConfigAuthority
-from base.host.env import dotenv_file
+from base.host.net.tests.local_http import serve_asgi
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
+from base.paths.home import resolve_meiva_home
 from tests.fixtures.gateway_config import gateway_test_client
 
 
@@ -39,7 +40,7 @@ def test_gateway_health_reports_a_database_failure(gateway_data_plane: None) -> 
 def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
     secret = uuid4().hex
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr("base.paths.meiva_home", dotenv_file.unit_home)
+    monkeypatch.setattr("base.paths.meiva_home", resolve_meiva_home)
     return secret
 
 
@@ -52,7 +53,6 @@ def test_a_runners_first_join_reaches_the_gateway(
 ) -> None:
     del unit_home
     from base.host.db_authority import unit
-    from base.host.env import bootstrap
     from cli.commands.cluster import unit_join
 
     secret = _authenticated(monkeypatch)
@@ -61,7 +61,7 @@ def test_a_runners_first_join_reaches_the_gateway(
     runner = (tmp_path / "runner").resolve()
     runner.mkdir(mode=0o700)
     issued = unit.issue_bundle(
-        dotenv_file.unit_home(),
+        resolve_meiva_home(),
         unit=unit.UnitIdentity(machine="mini", home=str(runner)),
         endpoint=config.bootstrap_config_values(
             bootstrap_authority,
@@ -78,13 +78,7 @@ def test_a_runners_first_join_reaches_the_gateway(
     monkeypatch.setattr(
         unit, "install_bundle", partial(unit.install_bundle, probe=lambda _dsn: None)
     )
-    gateway = "http://127.0.0.1:1"
-    with gateway_test_client() as client, patch.dict(os.environ):
-
-        def dial(url: str, **kwargs: Any) -> Any:
-            return client.get(url.removeprefix(gateway), **kwargs)
-
-        monkeypatch.setattr(bootstrap, "dial_get", dial)
+    with gateway_test_client() as client, serve_asgi(client.app) as gateway, patch.dict(os.environ):
         os.environ[unit.CAPABILITY_KEY_ENV] = issued.transport_key
         unit_join.join_gateway(
             {"MEIVA_GATEWAY_URL": gateway, "MEIVA_MACHINE_NAME": "mini"}, runner, str(bundle)

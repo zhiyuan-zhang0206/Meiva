@@ -19,6 +19,7 @@ from base.config import runtime_config as runtime_config
 from base.host.env import dotenv_file
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
+from base.paths.tests.homes import point_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from ops import env_audit as audit
@@ -33,8 +34,7 @@ from ops.env_audit import (
 @pytest.fixture
 def audit_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Redirect the audited unit `.env` to a scratch home."""
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
-    return tmp_path
+    return point_home(monkeypatch, tmp_path)
 
 
 def test_record_env_write_records_metadata_without_config_values(audit_home: Path) -> None:
@@ -518,7 +518,6 @@ def test_declaration_projection_works_without_a_runtime_settings_image(tmp_path:
 def test_invalid_metadata_prevents_every_audited_file_write(
     audit_home: Path, monkeypatch: pytest.MonkeyPatch, writer: str
 ) -> None:
-    from base.host.env import dotenv_file
 
     env_path = audit_home / ".env"
     original = b"MEIVA_MODEL=before\nUNREGISTERED_SECRET=secret-before\n"
@@ -551,7 +550,6 @@ def test_invalid_metadata_prevents_every_audited_file_write(
 def test_noop_writer_does_not_require_audit_metadata(
     audit_home: Path, monkeypatch: pytest.MonkeyPatch, writer: str
 ) -> None:
-    from base.host.env import dotenv_file
 
     path = audit_home / ".env"
     original = b"MEIVA_MODEL=before\n"
@@ -596,7 +594,6 @@ def test_stale_digest_fails_before_metadata_preparation(
 def test_redaction_is_prepared_once_while_the_old_env_is_still_present(
     audit_home: Path, monkeypatch: pytest.MonkeyPatch, writer: str
 ) -> None:
-    from base.host.env import dotenv_file
 
     env_path = audit_home / ".env"
     original = "MEIVA_MODEL=before\n"

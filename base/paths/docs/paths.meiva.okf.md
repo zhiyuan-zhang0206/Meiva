@@ -14,7 +14,9 @@ tags:
 
 `base/paths/__init__.py` is the single-point resolver for every per-unit path. The root
 comes from `base.paths.home.resolve_meiva_home` (env `MEIVA_HOME`, default
-`~/.meiva`), read on every call — never captured at import. Only
+`~/.meiva`), read on every call — never captured at import; it is the ambient door of the
+pure `home_from_env(env, user_home=...)`, which a function that is handed the environment
+calls instead. Only
 `meiva_home()` reads the environment and creates the home (mode 0700); the composition
 root of a process calls it once and passes the result down.
 
@@ -78,7 +80,7 @@ only itself.
   not re-derive the root as `workspace_dir(...).parent` or by composing
   `meiva_home() / "workspaces"`.
 - The home is `MEIVA_HOME` when set, else `~/.meiva`
-  (`base/host/env/dotenv_boot.py:resolve_meiva_home`), never from cwd and never from a
+  (`base/paths/home.py:resolve_meiva_home`), never from cwd and never from a
   flag: no pointer file, no checkout claim, no in-process override. A home that
   carries its own `<home>/source` checkout is operated only by that checkout's code
   (`base.paths.home.home_checkout_error(repo, home=home)`; `prod_service_checkout_error` applies it to

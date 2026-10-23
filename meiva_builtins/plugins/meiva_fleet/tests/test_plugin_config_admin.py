@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from base.host.env import dotenv_file
+from base.host.env.tests.env_files import unit_env_path
 from base.packages.plugin_config_admin import (
     patch_owner,
     plugin_metadata,
@@ -22,7 +22,7 @@ from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 
 @pytest.fixture(autouse=True)
 def preserve_env_file() -> Generator[None]:
-    env = dotenv_file.env_file_path()
+    env = unit_env_path()
     previous = env.read_bytes() if env.exists() else None
     try:
         yield

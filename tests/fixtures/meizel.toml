@@ -16,7 +16,6 @@ exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guar
 
 [debt.first-party-patch]
 "guards.py#monkeypatch.setattr base.cluster.new_home_ports" = 1
-"guards.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 1
 "guards.py#monkeypatch.setattr base.host.proc.hosting_exec_domain" = 1
 "guards.py#monkeypatch.setattr gateway.schedules.session_control.capture" = 1
 "guards.py#monkeypatch.setattr gateway.schedules.session_control.wait_consumed" = 1

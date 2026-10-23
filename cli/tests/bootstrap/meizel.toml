@@ -68,7 +68,6 @@ exports = [
 "test_init.py#monkeypatch.setattr cli.start_identity.upsert_env" = 3
 "test_init.py#monkeypatch.setattr cli.start_intent.checkout" = 1
 "test_python_install.py#monkeypatch.setattr cli._python_index.sys.platform" = 1
-"test_redis_binary_selection.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
 "test_start_boot_attempts.py#monkeypatch.setattr base.host.system.boot_policy.is_macos" = 4
 "test_start_boot_attempts.py#monkeypatch.setattr base.host.system.boot_policy.psutil.boot_time" = 1
 "test_start_boot_attempts.py#monkeypatch.setattr cli.start_intent.resolve_home" = 1

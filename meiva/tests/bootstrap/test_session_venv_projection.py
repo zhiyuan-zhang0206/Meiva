@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from base.host.env import bootstrap, dotenv_boot
+from base.host.env.tests.env_files import constant
 from meiva.shell import sessions
 from meiva.shell.tests.support import FakeDatabase
 from meiva.tests.fixtures.pin_agent import pin_agent
@@ -129,7 +130,7 @@ def test_watcher_fail_fast_precedes_session_allocation(monkeypatch: pytest.Monke
     from meiva import watcher
 
     monkeypatch.setenv("MEIVA_HOME", str(Path.home() / ".meiva"))
-    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: True)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(True))
     monkeypatch.delenv("MEIVA_PROCESS_PROFILE", raising=False)
     monkeypatch.delenv("MEIVA_LAUNCHER_PROFILE", raising=False)
     monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "test-secret")
@@ -154,25 +155,22 @@ _OWNER_DB = "postgresql://meiva_main:owner@127.0.0.1:6433/meiva"
 _RUNNER_REDIS = "redis://meiva:runner@127.0.0.1:6380/0"
 
 
-def _secured_default_home(monkeypatch: pytest.MonkeyPatch) -> None:
-    # watcher_runner_env reads these launcher values live, before session birth.
-    monkeypatch.setenv("MEIVA_HOME", str(Path.home() / ".meiva"))
-    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: True)
-    monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "test-secret")
+# meiva:note
+# A gateway home that is the OS user's default home, and its launch environment: (user home, home, env).
+def _secured_default_home(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
+    user_home = tmp_path / "user"
+    home = user_home / ".meiva"
+    home.mkdir(parents=True)
+    env = {"MEIVA_MACHINE_SERVE_GATEWAY": "true", "MEIVA_CLUSTER_SECRET": "test-secret"}
+    return user_home, home, env
 
 
 @pytest.mark.parametrize("profile_key", ["MEIVA_PROCESS_PROFILE", "MEIVA_LAUNCHER_PROFILE"])
-def test_agent_context_forwards_only_runner_urls(
-    monkeypatch: pytest.MonkeyPatch, profile_key: str
-) -> None:
-    _secured_default_home(monkeypatch)
-    monkeypatch.delenv("MEIVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.delenv("MEIVA_LAUNCHER_PROFILE", raising=False)
-    monkeypatch.setenv(profile_key, "agent")
-    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", _RUNNER_DB)
-    monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", _RUNNER_REDIS)
+def test_agent_context_forwards_only_runner_urls(tmp_path: Path, profile_key: str) -> None:
+    user_home, home, env = _secured_default_home(tmp_path)
+    env |= {profile_key: "agent", "MEIVA_DB_URL": _RUNNER_DB, "MEIVA_REDIS_URL": _RUNNER_REDIS}
 
-    assert dotenv_boot.watcher_runner_env() == {
+    assert dotenv_boot.project_watcher_runner_env(env, home=home, user_home=user_home) == {
         "MEIVA_DB_URL": _RUNNER_DB,
         "MEIVA_REDIS_URL": _RUNNER_REDIS,
     }
@@ -189,19 +187,15 @@ def test_agent_context_forwards_only_runner_urls(
     ],
 )
 def test_secured_default_home_refuses_missing_or_unsafe_projection(
-    monkeypatch: pytest.MonkeyPatch, profile: str | None, db_url: str, redis_url: str
+    tmp_path: Path, profile: str | None, db_url: str, redis_url: str
 ) -> None:
-    _secured_default_home(monkeypatch)
-    monkeypatch.delenv("MEIVA_LAUNCHER_PROFILE", raising=False)
-    if profile is None:
-        monkeypatch.delenv("MEIVA_PROCESS_PROFILE", raising=False)
-    else:
-        monkeypatch.setenv("MEIVA_PROCESS_PROFILE", profile)
-    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", db_url)
-    monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", redis_url)
+    user_home, home, env = _secured_default_home(tmp_path)
+    env |= {"MEIVA_DB_URL": db_url, "MEIVA_REDIS_URL": redis_url}
+    if profile is not None:
+        env["MEIVA_PROCESS_PROFILE"] = profile
 
     with pytest.raises(RuntimeError, match="Launch the watcher from an agent-profile process"):
-        dotenv_boot.watcher_runner_env()
+        dotenv_boot.project_watcher_runner_env(env, home=home, user_home=user_home)
 
 
 @pytest.mark.parametrize(
@@ -213,21 +207,22 @@ def test_secured_default_home_refuses_missing_or_unsafe_projection(
     ],
 )
 def test_no_secret_home_never_forwards_an_unauthenticated_or_admin_redis_url(
-    monkeypatch: pytest.MonkeyPatch, redis_url: str
+    tmp_path: Path, redis_url: str
 ) -> None:
     """Redis always authenticates, so an empty bearer does not relax the
     watcher projection: only the named runtime ACL URL with its password is
     forwarded, never the `default` admin user or a password-less URL."""
-    _secured_default_home(monkeypatch)
-    monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "")
-    monkeypatch.delenv("MEIVA_LAUNCHER_PROFILE", raising=False)
-    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
-    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", _RUNNER_DB)
-    monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", redis_url)
+    user_home, home, env = _secured_default_home(tmp_path)
+    env |= {
+        "MEIVA_CLUSTER_SECRET": "",
+        "MEIVA_PROCESS_PROFILE": "agent",
+        "MEIVA_DB_URL": _RUNNER_DB,
+        "MEIVA_REDIS_URL": redis_url,
+    }
 
-    assert dotenv_boot.watcher_runner_env() == {}
-    monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", _RUNNER_REDIS)
-    assert dotenv_boot.watcher_runner_env() == {
+    assert dotenv_boot.project_watcher_runner_env(env, home=home, user_home=user_home) == {}
+    env["MEIVA_REDIS_URL"] = _RUNNER_REDIS
+    assert dotenv_boot.project_watcher_runner_env(env, home=home, user_home=user_home) == {
         "MEIVA_DB_URL": _RUNNER_DB,
         "MEIVA_REDIS_URL": _RUNNER_REDIS,
     }
@@ -235,19 +230,17 @@ def test_no_secret_home_never_forwards_an_unauthenticated_or_admin_redis_url(
 
 @pytest.mark.parametrize("different_home", [False, True])
 def test_other_home_or_pure_runner_keeps_existing_child_boot(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, different_home: bool
+    tmp_path: Path, different_home: bool
 ) -> None:
-    _secured_default_home(monkeypatch)
-    monkeypatch.delenv("MEIVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.delenv("MEIVA_LAUNCHER_PROFILE", raising=False)
-    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", _OWNER_DB)
-    monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", _RUNNER_REDIS)
+    user_home, home, env = _secured_default_home(tmp_path)
+    env |= {"MEIVA_DB_URL": _OWNER_DB, "MEIVA_REDIS_URL": _RUNNER_REDIS}
     if different_home:
-        monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "other-cluster"))
+        home = tmp_path / "other-cluster"
+        home.mkdir()
     else:
-        monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
+        del env["MEIVA_MACHINE_SERVE_GATEWAY"]
 
-    assert dotenv_boot.watcher_runner_env() == {}
+    assert dotenv_boot.project_watcher_runner_env(env, home=home, user_home=user_home) == {}
 
 
 def test_unprojected_agent_child_still_hits_owner_url_guard(

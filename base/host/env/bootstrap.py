@@ -1,42 +1,62 @@
-"""Fetch cluster-common config from the gateway at process start.
+# meiva:note
+# Fetch cluster-common config from the gateway at process start.
+#
+# Every process on a configured pure agent-runner (serve_agent_runner flag on,
+# enrolled with a gateway URL) fetches the cluster's config from the gateway at
+# startup and injects it into os.environ before Settings is built — there is no
+# materialized `.env` cache of cluster facts. The
+# one cache that does exist is a transient 0600 config snapshot under
+# `$MEIVA_HOME/run/`: a successful fetch writes it, and a later process skips the
+# fetch while it is fresh, falling back to it (with a warning) when the gateway
+# is unreachable — see the snapshot helpers below. A
+# gateway-capable unit keeps the cluster's config in its own `$MEIVA_HOME/.env` and
+# never fetches; which side a unit is on is derived from its serve flags (see
+# `config_source_is_local` / `should_fetch_from_gateway`), not from an env var. A bare checkout with no role flags (CI, lint
+# scripts) and a not-yet-enrolled runner resolve locally with no fetch — the preflight gate refuses an unenrolled
+# `meiva start`, not the Settings import. The
+# bytes travel the private network; an authenticated gateway requires a bearer,
+# which this presents from the unit's machine API token (`MEIVA_API_TOKEN`, from
+# its installed capability); a unit never holds the human cluster secret.
+# Intentionally imports nothing from base.config (it runs DURING base.config
+# import) — only stdlib and the settings-free EnvBootResult at import;
+# the httpx / base.host.net.auth / base.host.net.http_dial
+# pieces lazily at fetch time (all config-free, so they're safe this early in
+# boot).
+#
+# Nothing here reads the process environment, the clock or the home on its own: the
+# environment is the `env` mapping the caller passes (the config boot,
+# `base.config._lite.ConfigBoot`, hands in `os.environ`), the home is a `Path`, the
+# `.env` file is a mapping of its values (`base.host.env.dotenv_file.read_env_aliases`),
+# and the time is a `now` float. A test passes dicts and a `tmp_path`.
 
-Every process on a configured pure agent-runner (serve_agent_runner flag on,
-enrolled with a gateway URL) fetches the cluster's config from the gateway at
-startup and injects it into os.environ before Settings is built — there is no
-materialized `.env` cache of cluster facts. The
-one cache that does exist is a transient 0600 config snapshot under
-`$MEIVA_HOME/run/`: a successful fetch writes it, and a later process skips the
-fetch while it is fresh, falling back to it (with a warning) when the gateway
-is unreachable — see the snapshot helpers below. A
-gateway-capable unit keeps the cluster's config in its own `$MEIVA_HOME/.env` and
-never fetches; which side a unit is on is derived from its serve flags (see
-`config_source_is_local` / `should_fetch_from_gateway`), not from an env var. A bare checkout with no role flags (CI, lint
-scripts) and a not-yet-enrolled runner resolve locally with no fetch — the preflight gate refuses an unenrolled
-`meiva start`, not the Settings import. The
-bytes travel the private network; an authenticated gateway requires a bearer,
-which this presents from the unit's machine API token (`MEIVA_API_TOKEN`, from
-its installed capability); a unit never holds the human cluster secret.
-Intentionally imports nothing from base.config (it runs DURING base.config
-import) — only stdlib and the settings-free EnvBootResult at import;
-the httpx / base.host.net.auth / base.host.net.http_dial
-pieces lazily at fetch time (all config-free, so they're safe this early in
-boot).
-"""
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
-import time
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping, MutableMapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from base.paths.home import resolve_meiva_home
+from base.host.atomic_io import write_bytes_atomic
+from base.host.env.boot_policy import (
+    BootstrapFetch,
+    fetch_backoff,
+    serve_flag,
+    validated_bootstrap_payload,
+)
 
 LAUNCHER_PROFILE_ENV_KEY = "MEIVA_LAUNCHER_PROFILE"
+
+
+# meiva:note
+# This process's live environment, read-only: the one door below the config boot for a
+# composition root that hands the environment down as a value.
+def process_environment() -> Mapping[str, str]:
+    return os.environ
+
+
 _GENERATION_ENV = "MEIVA_DB_GENERATION"
 # meiva:note
 # Environment key name for the unit API token, not a literal credential.
@@ -63,22 +83,48 @@ class EnvBootResult:
 # boot pass reached through a CLI still knows the launcher context (#4334).
 # None when the tree has no launcher context at all — a plain shell or test
 # process — and the projection exemptions stay off.
-def launcher_context(env: Mapping[str, str] | None = None) -> str | None:
-    source = os.environ if env is None else env
-    return source.get("MEIVA_PROCESS_PROFILE") or source.get(LAUNCHER_PROFILE_ENV_KEY)
+def launcher_context(env: Mapping[str, str]) -> str | None:
+    return env.get("MEIVA_PROCESS_PROFILE") or env.get(LAUNCHER_PROFILE_ENV_KEY)
 
 
 # meiva:note
-# Whether os.environ carries exactly this runner home's installed unit
+# What a process's launch environment says about the credential it presents to the gateway.
+#
+# Read once by the process's config boot (`ConfigBoot.launch_facts`) and handed to the
+# consumers that decide on it (`GatewayAccess`): `machine_token` is the machine API token the
+# launcher (or the boot pass, for an admitted operator) delivered; `launcher_profile` the
+# launcher tree's profile, live or recorded; `gateway_home` whether this unit serves the
+# gateway, so its config source is its own `.env`.
+@dataclass(frozen=True)
+class LaunchFacts:
+    machine_token: str | None = field(repr=False)
+    launcher_profile: str | None
+    gateway_home: bool
+
+
+# meiva:note
+# The `LaunchFacts` of the environment `env` and the home's `.env` values `env_file`.
+def launch_facts(env: Mapping[str, str], *, env_file: Mapping[str, str]) -> LaunchFacts:
+    from base.host.net.auth import delivered_token
+
+    return LaunchFacts(
+        machine_token=delivered_token(env),
+        launcher_profile=launcher_context(env),
+        gateway_home=config_source_is_local(env, env_file=env_file),
+    )
+
+
+# meiva:note
+# Whether `env` carries exactly this runner home's installed unit
 # login (`base.host.db_authority.unit`) with its generation marker.
-def is_delivered_unit_login() -> bool:
-    generation = os.environ.get(_GENERATION_ENV)
-    home = resolve_meiva_home().expanduser().resolve()
+def is_delivered_unit_login(env: Mapping[str, str], *, home: Path) -> bool:
+    generation = env.get(_GENERATION_ENV)
+    home = home.expanduser().resolve()
     if not generation or not (home / "db-authority" / "unit.json").exists():
         return False
     from base.host.db_authority.unit import is_delivered_login
 
-    return is_delivered_login(home, os.environ.get("MEIVA_DB_URL"), generation)
+    return is_delivered_login(home, env.get("MEIVA_DB_URL"), generation)
 
 
 # meiva:note
@@ -87,11 +133,11 @@ def is_delivered_unit_login() -> bool:
 # A launcher delivery of this home's installed capability is kept. An
 # admitted operator consumes the installed capability. A refused process
 # keeps the credential-free endpoint and returns its first-dial reason.
-def deliver_unit_authority() -> EnvBootResult:
-    if is_delivered_unit_login():
+def deliver_unit_authority(env: MutableMapping[str, str], *, home: Path) -> EnvBootResult:
+    if is_delivered_unit_login(env, home=home):
         return EnvBootResult()
-    home = resolve_meiva_home().expanduser().resolve()
-    context = launcher_context()
+    home = home.expanduser().resolve()
+    context = launcher_context(env)
     if context is not None:
         return EnvBootResult(
             db_authority_refusal=(
@@ -108,25 +154,13 @@ def deliver_unit_authority() -> EnvBootResult:
         return EnvBootResult(
             db_authority_refusal=f"no database authority for this agent-runner process: {exc}"
         )
-    os.environ["MEIVA_DB_URL"] = capability.dsn
-    os.environ[_GENERATION_ENV] = str(capability.generation.number)
-    os.environ[_API_TOKEN_ENV] = capability.api.token
+    env["MEIVA_DB_URL"] = capability.dsn
+    env[_GENERATION_ENV] = str(capability.generation.number)
+    env[_API_TOKEN_ENV] = capability.api.token
     return EnvBootResult()
 
 
-# An agent boots by fetching this. The timeout must cover a slow-but-healthy
-# fetch under load (the whole boot -- fetch + import + claim -- has to finish
-# before the parent's launch-confirm poll gives up; too small a cap fails a
-# fetch that would have succeeded -- a 3s cap regressed CI). The retry covers a
-# gateway briefly unreachable mid-restart (connection refused), which fails fast.
-# A ReadTimeout (slow response) is deliberately NOT retried: stacking another
-# full timeout would blow past the launch-confirm window and fail a spawn whose
-# first fetch would have eventually returned.
-_FETCH_ATTEMPTS = 2
-_FETCH_TIMEOUT_S = 10.0
-
-
-def service_plugin_config_packet() -> str | None:
+def service_plugin_config_packet(env: Mapping[str, str]) -> str | None:
     """The launcher's fixed plugin config snapshot for this service generation.
 
     Separate from cluster bootstrap: a later bootstrap fetch must not replace
@@ -134,10 +168,10 @@ def service_plugin_config_packet() -> str | None:
     """
     from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
 
-    return os.environ.get(SERVICE_PLUGIN_CONFIG_ENV)
+    return env.get(SERVICE_PLUGIN_CONFIG_ENV)
 
 
-def cluster_plugin_config_values(plugin: str) -> dict[str, object] | None:
+def cluster_plugin_config_values(env: Mapping[str, str], plugin: str) -> dict[str, object] | None:
     """One plugin's cluster projection from the existing bootstrap payload.
 
     This carrier never contains host fields or service birth snapshots. Schema
@@ -145,7 +179,7 @@ def cluster_plugin_config_values(plugin: str) -> dict[str, object] | None:
     """
     from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
 
-    packet = os.environ.get(PLUGIN_CLUSTER_CONFIG_ENV)
+    packet = env.get(PLUGIN_CLUSTER_CONFIG_ENV)
     if packet is None:
         return None
     raw: object = json.loads(packet)
@@ -158,10 +192,6 @@ def cluster_plugin_config_values(plugin: str) -> dict[str, object] | None:
     if not isinstance(values, dict):
         raise TypeError(f"plugin cluster config {plugin!r} must be a JSON object")
     return cast("dict[str, object]", values)
-
-
-def _fetch_backoff(attempt: int) -> float:
-    return 0.5 * (attempt + 1)
 
 
 # The parent config snapshot (P0 #2100): a successful fetch writes the payload
@@ -178,11 +208,6 @@ _SNAPSHOT_NAME = "bootstrap-snapshot.json"
 # Snapshots carry no database credential (bootstrap serves the credential-free
 # endpoint); a snapshot of any other version is never reused.
 SNAPSHOT_VERSION = 3
-# Freshness window: how long a snapshot may stand in for a live fetch. Bounds
-# cluster-edit propagation to a few minutes in steady state (the first child
-# past the window re-fetches and refreshes the snapshot) while keeping the
-# common per-turn child boot fetch-free.
-_SNAPSHOT_FRESH_S = 300.0
 
 
 # Transport-level httpx failures mean "gateway unreachable / mid-restart" —
@@ -214,82 +239,51 @@ def _transport_failures() -> tuple[type[BaseException], ...]:
 CONFIG_FETCH_ENV = "MEIVA_CONFIG_FETCH"
 CONFIG_FETCH_SKIP = "skip"
 
-_TRUTHY = frozenset({"1", "true", "yes", "on"})
-_FALSY = frozenset({"0", "false", "no", "off"})
+
+# meiva:note
+# Whether this unit's config source is its own `$MEIVA_HOME/.env`.
+#
+# Role-derived (MEIVA_CONFIG_SOURCE deleted 2026-08-01): a unit that serves the
+# gateway owns the cluster's config in its own `.env` and never fetches; a
+# configured pure agent-runner holds only the bootstrap env (gateway URL +
+# secret, from `meiva start`) and fetches the rest from the gateway at every
+# process start (see `should_fetch_from_gateway`). A bare checkout with no
+# role flags — CI, lint scripts, dev tools — is not a unit yet and resolves
+# locally with no fetch.
+#
+# The serve-gateway flag is read settings-free (`env` > `env_file` > False)
+# because this runs DURING the Settings import, before base.cluster.machine can
+# resolve the role. `cli.main` opts the maintenance verbs out of the fetch with
+# MEIVA_CONFIG_FETCH=skip (see CONFIG_FETCH_ENV); that is orthogonal to this
+# derivation.
+#
+# `env` is the process environment (`os.environ` at a composition root) and
+# `env_file` the home's `.env` values (`dotenv_file.read_env_aliases`).
+def config_source_is_local(env: Mapping[str, str], *, env_file: Mapping[str, str]) -> bool:
+    return serve_flag("MEIVA_MACHINE_SERVE_GATEWAY", env, env_file)
 
 
-def _serve_flag(env_key: str, *, env: Mapping[str, str] | None = None) -> bool:
-    """Settings-free mirror of one capability flag's resolution: env
-    `MEIVA_MACHINE_SERVE_*` > `$MEIVA_HOME/.env` > False.
-
-    Normal config boot has already loaded the `.env` before this function runs,
-    so its value is in the environment. Settings-lite maintenance commands do
-    not load it: read the file directly so `meiva config --local` correctly sees
-    a gateway unit without constructing Settings. `base.cluster.machine` reads the
-    flag through Settings, which does not exist yet while this module runs. A
-    malformed value resolves False here; the real resolver raises on it loudly
-    later, so the config-source decision can never silently disagree with the
-    machine role.
-
-    The `.env` read resolves `$MEIVA_HOME` through `base.paths.home.resolve_meiva_home()`: at
-    this point in boot the env var may not be pinned yet (see above).
-    """
-    source = os.environ if env is None else env
-    raw = source.get(env_key)
-    if raw is not None and raw.strip():
-        return raw.strip().lower() in _TRUTHY
-    if env is not None:
-        return False
-    from base.host.env import dotenv_file
-
-    raw = dotenv_file.read_env_aliases().get(env_key)
-    if raw is not None and raw.strip():
-        return raw.strip().lower() in _TRUTHY
-    return False
-
-
-def config_source_is_local(*, env: Mapping[str, str] | None = None) -> bool:
-    """Whether this unit's config source is its own `$MEIVA_HOME/.env`.
-
-    Role-derived (MEIVA_CONFIG_SOURCE deleted 2026-08-01): a unit that serves the
-    gateway owns the cluster's config in its own `.env` and never fetches; a
-    configured pure agent-runner holds only the bootstrap env (gateway URL +
-    secret, from `meiva start`) and fetches the rest from the gateway at every
-    process start (see `should_fetch_from_gateway`). A bare checkout with no
-    role flags — CI, lint scripts, dev tools — is not a unit yet and resolves
-    locally with no fetch.
-
-    The serve-gateway flag is read settings-free (env > `$MEIVA_HOME/.env` > False)
-    because this runs DURING the Settings import, before base.cluster.machine can
-    resolve the role. `cli.main` opts the maintenance verbs out of the fetch with
-    MEIVA_CONFIG_FETCH=skip (see CONFIG_FETCH_ENV); that is orthogonal to this
-    derivation.
-    """
-    return _serve_flag("MEIVA_MACHINE_SERVE_GATEWAY", env=env)
-
-
-def should_fetch_from_gateway() -> bool:
-    """Whether this process's Settings build fetches cluster config from the gateway.
-
-    True only for a CONFIGURED pure agent-runner: the serve_agent_runner flag is
-    on (env `MEIVA_MACHINE_SERVE_AGENT_RUNNER` > `$MEIVA_HOME/.env` > False) AND a gateway
-    URL is present (`meiva start` validates the remote projection before persisting
-    runner identity). Everything else resolves locally:
-
-    - a gateway-capable unit (config_source_is_local) never fetches;
-    - a bare checkout with no role flags (CI, lint scripts, dev tools) and a
-      not-yet-enrolled runner (flag on, no URL) construct Settings from their
-      local env/.env with no fetch and no error — `meiva start`'s preflight gate
-      is what refuses an unenrolled runner, not the Settings import, so any
-      tool that imports base.config keeps working on any machine.
-
-    Reads os.environ only: by the time base.config calls this, load_meiva_env
-    has loaded (and `_enforce_cluster_env_authority` forced) the unit's .env,
-    so the flag and the URL are both present in the environment when they
-    exist on disk.
-    """
-    return _serve_flag("MEIVA_MACHINE_SERVE_AGENT_RUNNER") and bool(
-        os.environ.get("MEIVA_GATEWAY_URL")
+# meiva:note
+# Whether this process's Settings build fetches cluster config from the gateway.
+#
+# True only for a CONFIGURED pure agent-runner: the serve_agent_runner flag is
+# on (`env` `MEIVA_MACHINE_SERVE_AGENT_RUNNER` > `env_file` > False) AND a gateway
+# URL is present (`meiva start` validates the remote projection before persisting
+# runner identity). Everything else resolves locally:
+#
+# - a gateway-capable unit (config_source_is_local) never fetches;
+# - a bare checkout with no role flags (CI, lint scripts, dev tools) and a
+#   not-yet-enrolled runner (flag on, no URL) construct Settings from their
+#   local env/.env with no fetch and no error — `meiva start`'s preflight gate
+#   is what refuses an unenrolled runner, not the Settings import, so any
+#   tool that imports base.config keeps working on any machine.
+#
+# The gateway URL is read from `env` only: by the time base.config calls this,
+# load_meiva_env has loaded (and `_enforce_cluster_env_authority` forced) the
+# unit's .env, so it is present in the environment when it exists on disk.
+def should_fetch_from_gateway(env: Mapping[str, str], *, env_file: Mapping[str, str]) -> bool:
+    return serve_flag("MEIVA_MACHINE_SERVE_AGENT_RUNNER", env, env_file) and bool(
+        env.get("MEIVA_GATEWAY_URL")
     )
 
 
@@ -306,75 +300,42 @@ class BootstrapFetchError(RuntimeError):
     """
 
 
-def _validated_bootstrap_payload(payload: object) -> dict[str, str]:
-    """Assert the bootstrap body is a flat ``{str: str}`` map before the caller
-    writes it into ``os.environ``.
-
-    A gateway version skew, a wrong endpoint, or a proxy substituting the body
-    could feed a non-str value that either raises an opaque ``TypeError`` deep in
-    ``os.environ.__setitem__`` or (for a str-able scalar) writes a value the
-    recipient never round-trips. Fail loud at the trust boundary instead.
-    """
-    if not isinstance(payload, dict):
-        raise TypeError(f"/api/bootstrap returned {type(payload).__name__}, expected a JSON object")
-    raw = cast("dict[str, Any]", payload)
-    for key, value in raw.items():
-        if not isinstance(key, str) or not isinstance(value, str):
-            raise TypeError(
-                "/api/bootstrap must be a flat {str: str} map; got "
-                f"{type(key).__name__} key -> {type(value).__name__} value for {key!r}"
-            )
-    return raw
-
-
-def dial_get(*args: Any, **kwargs: Any) -> Any:
-    """Thin seam over `base.host.net.http_dial.get` (lazy: http_dial/httpx stay off the
-    settings-import path; callers and tests patch this module attribute)."""
-    from base.host.net.http_dial import get as _get
-
-    return _get(*args, **kwargs)
-
-
+# meiva:note
+# GET {base_url}/api/bootstrap. Return {alias: value}.
+#
+# Retries with linear backoff (`fetch_backoff`) so a gateway that is briefly
+# unreachable as the agent boots doesn't strand it.
+#
+# Bootstrap serves the credential-free database endpoint and no cluster
+# secret. The runner's login comes only from its installed unit capability
+# (`base.host.db_authority.unit`).
+#
+# Presents `Authorization: Bearer <bearer>` when `bearer` is given: a joining
+# start holds its bundle's token, a booting process its delivered machine API
+# token (`base.host.net.auth.delivered_token(env)`); without one the gateway
+# answers 401. Never read from Settings — this runs during the Settings import.
+#
+# Raises:
+#     httpx.HTTPError: every attempt failed (gateway unreachable / non-2xx, e.g.
+#         401 when the machine token is missing, revoked or wrong).
+#     TypeError: the response body is not a flat ``{str: str}`` map.
 def fetch_bootstrap_config(
-    base_url: str,
-    timeout: float = _FETCH_TIMEOUT_S,
-    attempts: int = _FETCH_ATTEMPTS,
-    *,
-    bearer: str | None = None,
+    base_url: str, *, bearer: str | None, tuning: BootstrapFetch
 ) -> dict[str, str]:
-    """GET {base_url}/api/bootstrap. Return {alias: value}.
-
-    Retries with linear backoff so a gateway that is briefly unreachable as the
-    agent boots doesn't strand it.
-
-    Bootstrap serves the credential-free database endpoint and no cluster
-    secret. The runner's login comes only from its installed unit capability
-    (`base.host.db_authority.unit`).
-
-    Presents `Authorization: Bearer <bearer>`: an explicit `bearer` (a joining
-    start holding its bundle's token), else this process's machine API token
-    (`MEIVA_API_TOKEN`, delivered by the launcher or the boot pass), else none (the
-    gateway then answers 401). Read from os.environ, not Settings — this runs during the
-    Settings import.
-
-    Raises:
-        httpx.HTTPError: every attempt failed (gateway unreachable / non-2xx, e.g.
-            401 when the machine token is missing, revoked or wrong).
-        TypeError: the response body is not a flat ``{str: str}`` map.
-    """
     import httpx
 
-    from base.host.net.auth import bearer_header, delivered_token
+    from base.host.net.auth import bearer_header
+    from base.host.net.http_dial import get as dial_get
     from base.host.net.resilience import Policy, retry
 
-    token = bearer if bearer is not None else delivered_token()
-    headers = bearer_header(token) if token else {}
+    headers = bearer_header(bearer) if bearer else {}
     url = f"{base_url.rstrip('/')}/api/bootstrap"
     # Gateway briefly down: retry connect errors only; ReadTimeout propagates.
-    # Keep the original 0.5s, 1.0s, ... schedule without Retry-After or jitter.
+    # meiva:note
+    # Linear backoff without Retry-After or jitter.
     policy = Policy(
-        max_attempts=attempts,
-        backoff=_fetch_backoff,
+        max_attempts=tuning.attempts,
+        backoff=lambda attempt: fetch_backoff(attempt, tuning.backoff_step_s),
         jitter="none",
         jitter_span=1.0,
         classify=lambda exc: isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)),
@@ -384,28 +345,30 @@ def fetch_bootstrap_config(
     )
 
     def _fetch_once() -> dict[str, str]:
-        resp = dial_get(url, timeout=timeout, headers=headers)
+        resp = dial_get(url, timeout=tuning.timeout_s, headers=headers)
         resp.raise_for_status()
-        return _validated_bootstrap_payload(resp.json())
+        return validated_bootstrap_payload(resp.json())
 
     return retry(policy)(_fetch_once)
 
 
-def snapshot_path() -> Path:
-    """The unit's config snapshot path, under this process's home."""
-    from base.paths.home import resolve_meiva_home
+# meiva:note
+# The unit's config snapshot path, under `home`.
+def snapshot_path(home: Path) -> Path:
+    return home / "run" / _SNAPSHOT_NAME
 
-    return resolve_meiva_home() / "run" / _SNAPSHOT_NAME
 
-
-def read_config_snapshot(base_url: str) -> tuple[dict[str, str], float] | None:
-    """The last-known cluster config and its age in seconds, or None.
-
-    Guards: the snapshot must have been written for the SAME gateway URL (a
-    re-enrolled runner must not reuse another gateway's values), carry the
-    current version, and hold a flat ``{str: str}`` map. Absent / unreadable /
-    malformed reads as None — the caller falls through to the fetch."""
-    path = snapshot_path()
+# meiva:note
+# The last-known cluster config and its age in seconds at `now`, or None.
+#
+# Guards: the snapshot must have been written for the SAME gateway URL (a
+# re-enrolled runner must not reuse another gateway's values), carry the
+# current version, and hold a flat ``{str: str}`` map. Absent / unreadable /
+# malformed reads as None — the caller falls through to the fetch.
+def read_config_snapshot(
+    base_url: str, *, home: Path, now: float
+) -> tuple[dict[str, str], float] | None:
+    path = snapshot_path(home)
     try:
         raw = json.loads(path.read_text())
     except (OSError, ValueError):
@@ -421,77 +384,67 @@ def read_config_snapshot(base_url: str) -> tuple[dict[str, str], float] | None:
     if not isinstance(written_at, (int, float)):
         return None
     try:
-        values = _validated_bootstrap_payload(data.get("values"))
+        values = validated_bootstrap_payload(data.get("values"))
     except TypeError:
         return None
-    return values, max(0.0, time.time() - float(written_at))
+    return values, max(0.0, now - float(written_at))
 
 
-def _write_config_snapshot(base_url: str, values: dict[str, str]) -> None:
+def _write_config_snapshot(
+    base_url: str, values: dict[str, str], *, home: Path, now: float
+) -> None:
     """Best-effort owner-only snapshot write (atomic replace).
 
     The snapshot carries cluster credentials, so it is 0600 like the rest of
     the unit's private storage. It never raises and never fails the boot: it
     is a cache, and the worst case of losing it is one extra fetch next time."""
-    path = snapshot_path()
+    path = snapshot_path(home)
     payload = json.dumps(
         {
             "v": SNAPSHOT_VERSION,
             "base_url": base_url,
-            "written_at": time.time(),
+            "written_at": now,
             "values": values,
         },
         sort_keys=True,
     ).encode()
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    fd = -1
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as file:
-            fd = -1
-            file.write(payload)
-            file.flush()
-            os.fsync(file.fileno())
-        os.replace(temporary, path)  # noqa: PTH105 — explicit atomic replacement primitive
+        write_bytes_atomic(path, payload, mode=0o600, suppress_cleanup_error=True)
     except OSError:
         return
-    finally:
-        if fd != -1:
-            with contextlib.suppress(OSError):
-                os.close(fd)
-        with contextlib.suppress(OSError):
-            temporary.unlink()
 
 
-def apply_bootstrap_values(base_url: str, values: dict[str, str]) -> None:
-    """Inject one bootstrap payload into os.environ — the shared tail of the
-    fetch path and the snapshot path."""
+# meiva:note
+# Inject one bootstrap payload into `env` — the shared tail of the
+# fetch path and the snapshot path.
+def apply_bootstrap_values(
+    env: MutableMapping[str, str], base_url: str, values: dict[str, str], *, home: Path
+) -> None:
     # ``MEIVA_GATEWAY_HEALTH_URL`` is host-scoped, so the gateway correctly does
     # not serve it in the cluster bootstrap payload.  A pure runner that was
     # enrolled without an explicit override must still probe the gateway it
     # actually fetched from, not ServiceSettings' single-box localhost default.
     # Keep a deliberate host override; otherwise the enrollment base URL is the
     # one reachability fact this process already proved.
-    if not os.environ.get("MEIVA_GATEWAY_HEALTH_URL"):
-        os.environ["MEIVA_GATEWAY_HEALTH_URL"] = f"{base_url.rstrip('/')}/api/health"
-    delivered = is_delivered_unit_login()
+    if not env.get("MEIVA_GATEWAY_HEALTH_URL"):
+        env["MEIVA_GATEWAY_HEALTH_URL"] = f"{base_url.rstrip('/')}/api/health"
+    delivered = is_delivered_unit_login(env, home=home)
     for key, value in values.items():
         if key == "MEIVA_DB_URL" and delivered:
             # The launcher's (or this process's consumed) unit login stays; the
             # served value is only the credential-free endpoint.
             continue
-        os.environ[key] = value
+        env[key] = value
 
 
-def _gateway_base_url() -> str:
+def _gateway_base_url(env: Mapping[str, str]) -> str:
     """The enrolled gateway to dial, or an actionable failure.
 
     The gateway URL is MEIVA_GATEWAY_URL (`meiva start` wrote it to `.env`; this
     runs before Settings, so it is read from the environment directly).
     """
-    base_url = os.environ.get("MEIVA_GATEWAY_URL") or ""
+    base_url = env.get("MEIVA_GATEWAY_URL") or ""
     if not base_url:
         raise BootstrapFetchError(
             "this host is a pure agent-runner but has no MEIVA_GATEWAY_URL — its cluster "
@@ -503,29 +456,33 @@ def _gateway_base_url() -> str:
     return base_url
 
 
-def resolve_bootstrap_values() -> dict[str, str]:
-    """The cluster config values this process would run on — the boot resolution, read-only.
+# meiva:note
+# The cluster config values this process would run on — the boot resolution, read-only.
+#
+# The one resolution shared by `inject_config_from_gateway` (which applies
+# the result to the environment) and callers that must ask "would this host boot
+# against resolvable config right now?" without mutating their process — the
+# hold watchdog's pre-attempt gate (task #4080). The contract is the boot
+# contract, unchanged:
+#
+# - a fresh snapshot (`tuning.snapshot_fresh_s`) is authoritative and skips the
+#   fetch entirely (P0 #2100);
+# - otherwise a live fetch, refreshing the snapshot on success;
+# - a transport failure falls back to the snapshot whatever its age — no
+#   cluster edit can have landed while the gateway was unreachable — with a
+#   logged warning; a non-transport failure (401/5xx) still fails loud.
+#
+# Raises:
+#     BootstrapFetchError: no gateway URL, or every fetch attempt failed — the
+#         process must not start with no config.
+def resolve_bootstrap_values(
+    env: Mapping[str, str], *, home: Path, now: float, tuning: BootstrapFetch
+) -> dict[str, str]:
+    from base.host.net.auth import delivered_token
 
-    The one resolution shared by `inject_config_from_gateway` (which applies
-    the result to os.environ) and callers that must ask "would this host boot
-    against resolvable config right now?" without mutating their process — the
-    hold watchdog's pre-attempt gate (task #4080). The contract is the boot
-    contract, unchanged:
-
-    - a fresh snapshot (`_SNAPSHOT_FRESH_S`) is authoritative and skips the
-      fetch entirely (P0 #2100);
-    - otherwise a live fetch, refreshing the snapshot on success;
-    - a transport failure falls back to the snapshot whatever its age — no
-      cluster edit can have landed while the gateway was unreachable — with a
-      logged warning; a non-transport failure (401/5xx) still fails loud.
-
-    Raises:
-        BootstrapFetchError: no gateway URL, or every fetch attempt failed — the
-            process must not start with no config.
-    """
-    base_url = _gateway_base_url()
-    snapshot = read_config_snapshot(base_url)
-    if snapshot is not None and snapshot[1] <= _SNAPSHOT_FRESH_S:
+    base_url = _gateway_base_url(env)
+    snapshot = read_config_snapshot(base_url, home=home, now=now)
+    if snapshot is not None and snapshot[1] <= tuning.snapshot_fresh_s:
         # Fresh parent snapshot: the authoritative values this unit fetched
         # moments ago. Skip the fetch — a gateway that is down or restarting
         # must not block this process (P0 #2100).
@@ -534,7 +491,7 @@ def resolve_bootstrap_values() -> dict[str, str]:
         # The gateway itself never fetches (config_source_is_local), so every
         # fetch this module makes is a runner fetch; it carries no database
         # login (the unit capability does).
-        values = fetch_bootstrap_config(base_url)
+        values = fetch_bootstrap_config(base_url, bearer=delivered_token(env), tuning=tuning)
     except _transport_failures() as exc:
         if snapshot is not None:
             # Gateway unreachable: continue on the last-known cluster config
@@ -565,32 +522,34 @@ def resolve_bootstrap_values() -> dict[str, str]:
             "MEIVA_GATEWAY_URL / the unit capability's API token / private-network "
             "reachability), then retry."
         ) from exc
-    _write_config_snapshot(base_url, values)
+    _write_config_snapshot(base_url, values, home=home, now=now)
     return values
 
 
-def inject_config_from_gateway() -> EnvBootResult:
-    """Fetch the cluster's config from the gateway and inject it into os.environ.
-
-    Runs at Settings construction on a pure agent-runner (see
-    `config_source_is_local`). The fetched values are AUTHORITATIVE: every key
-    the gateway serves overwrites os.environ, including a stale value a
-    `.env` still carries (`_enforce_cluster_env_authority` forces file values
-    in at `load_meiva_env`, and this runs after it) and a
-    forwarded copy from a spawning process. The gateway's `.env` is the single
-    cluster-wide copy.
-
-    The values come from `resolve_bootstrap_values` (fresh snapshot / fetch /
-    last-known-snapshot fallback); this wrapper applies them, including the
-    derived `MEIVA_GATEWAY_HEALTH_URL` for a runner enrolled without an explicit
-    override. The database login is the one exception to "fetched values are
-    authoritative": a delivered unit login is kept, and a process without one
-    receives the installed capability only when it runs the admitted runtime
-    (`base.host.env.dotenv_boot.deliver_unit_authority`). That delivery runs first:
-    it also supplies the machine API token the fetch authenticates with.
-    """
-    base_url = _gateway_base_url()
-    result = deliver_unit_authority()
-    values = resolve_bootstrap_values()
-    apply_bootstrap_values(base_url, values)
+# meiva:note
+# Fetch the cluster's config from the gateway and inject it into `env`.
+#
+# Runs at Settings construction on a pure agent-runner (see
+# `config_source_is_local`); the config boot passes `os.environ`. The fetched
+# values are AUTHORITATIVE: every key the gateway serves overwrites `env`,
+# including a stale value a `.env` still carries (`_enforce_cluster_env_authority`
+# forces file values in at `load_meiva_env`, and this runs after it) and a
+# forwarded copy from a spawning process. The gateway's `.env` is the single
+# cluster-wide copy.
+#
+# The values come from `resolve_bootstrap_values` (fresh snapshot / fetch /
+# last-known-snapshot fallback); this wrapper applies them, including the
+# derived `MEIVA_GATEWAY_HEALTH_URL` for a runner enrolled without an explicit
+# override. The database login is the one exception to "fetched values are
+# authoritative": a delivered unit login is kept, and a process without one
+# receives the installed capability only when it runs the admitted runtime
+# (`deliver_unit_authority`). That delivery runs first: it also supplies the
+# machine API token the fetch authenticates with.
+def inject_config_from_gateway(
+    env: MutableMapping[str, str], *, home: Path, now: float, tuning: BootstrapFetch
+) -> EnvBootResult:
+    base_url = _gateway_base_url(env)
+    result = deliver_unit_authority(env, home=home)
+    values = resolve_bootstrap_values(env, home=home, now=now, tuning=tuning)
+    apply_bootstrap_values(env, base_url, values, home=home)
     return result

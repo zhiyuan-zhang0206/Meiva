@@ -1,24 +1,24 @@
 """Bootstrap serves the authoritative hosted turn limit without rewriting zero."""
 
 import json
-import os
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import urlsplit
 
-import httpx2
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from base import config
 from base.config.service_read import ConfigAuthority
 from base.host.db_authority.api import AcceptanceCache
 from base.host.env import bootstrap
+from base.host.env.boot_policy import BootstrapFetch
 from base.host.net.auth import bearer_header
+from base.host.net.tests.local_http import serve_asgi
 from base.lm.catalog import ModelCatalog
 from gateway.cluster.bootstrap import router
 from gateway.http.config import GatewayConfig
@@ -57,14 +57,11 @@ def gateway_home(tmp_path: Path) -> Path:
 @pytest.fixture
 def runner_token(
     gateway_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
     seed_write_generation: Callable[[Path], Any],
 ) -> str:
-    """The gateway's active write generation and this runner process's delivered
-    runner API token: a runner never holds the human secret."""
-    token = seed_write_generation(gateway_home).api.runner
-    monkeypatch.setitem(os.environ, "MEIVA_API_TOKEN", token)
-    return token
+    """The gateway's active write generation's runner API token, which a runner process is
+    delivered: a runner never holds the human secret."""
+    return seed_write_generation(gateway_home).api.runner
 
 
 @pytest.fixture
@@ -121,71 +118,72 @@ def test_bootstrap_admission_preserves_auth(
     assert response.status_code == 401
 
 
+# meiva:note
+# An ASGI wrapper that notes the query string of every HTTP request it forwards.
+class _RecordingApp:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+        self.queries: list[bytes] = []
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            self.queries.append(scope["query_string"])
+        await self.app(scope, receive, send)
+
+
 def test_runner_fetch_replaces_stale_admission(
     gateway_snapshot: dict[str, str],
     gateway_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     runner_token: str,
 ) -> None:
-    del runner_token
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))  # the snapshot lives under this home
-    env = {
-        "MEIVA_GATEWAY_URL": "http://gateway",
-        _TURN_LIMIT: "16",
-        "MEIVA_HOST_DB_POOL_MAX_SIZE": "20",
-        "MEIVA_HOST_CONTROL_POOL_MAX_SIZE": "4",
-    }
-    monkeypatch.setattr(bootstrap, "os", SimpleNamespace(**{**vars(bootstrap.os), "environ": env}))
-    requests: list[str] = []
-
-    def dial(url: str, *, timeout: float, headers: dict[str, str]) -> httpx2.Response:
-        assert timeout > 0
-        requests.append(url)
-        return gateway_client.get(url, headers=headers)
-
-    monkeypatch.setattr(bootstrap, "dial_get", dial)
-    bootstrap.inject_config_from_gateway()
-    assert len(requests) == 1
+    recorded = _RecordingApp(gateway_client.app)
+    with serve_asgi(recorded) as url:
+        env = {
+            "MEIVA_GATEWAY_URL": url,
+            "MEIVA_API_TOKEN": runner_token,
+            _TURN_LIMIT: "16",
+            "MEIVA_HOST_DB_POOL_MAX_SIZE": "20",
+            "MEIVA_HOST_CONTROL_POOL_MAX_SIZE": "4",
+        }
+        bootstrap.inject_config_from_gateway(
+            env, home=tmp_path, now=time.time(), tuning=BootstrapFetch()
+        )
     # The fetch requests no projection: bootstrap serves configuration only.
-    assert urlsplit(requests[0]).query == ""
+    assert recorded.queries == [b""]
     assert env[_TURN_LIMIT] == "0"
     assert env["MEIVA_HOST_DB_POOL_MAX_SIZE"] == "64"
     assert env["MEIVA_HOST_CONTROL_POOL_MAX_SIZE"] == "8"
 
 
+# meiva:note
+# A snapshot from before the admission change (an older snapshot version) is never
+# reused, whatever its age: the runner fetches and rewrites it.
 @pytest.mark.parametrize("age_seconds", [1.0, 10_000.0], ids=["fresh", "stale"])
 def test_runner_refreshes_an_outdated_admission_snapshot(
     gateway_snapshot: dict[str, str],
     gateway_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     age_seconds: float,
     runner_token: str,
 ) -> None:
-    del runner_token
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    env = {"MEIVA_GATEWAY_URL": "http://gateway"}
-    snapshot = tmp_path / "run" / "bootstrap-snapshot.json"
-    snapshot.parent.mkdir()
-    snapshot.write_text(
-        json.dumps(
-            {
-                "v": 1,
-                "base_url": "http://gateway",
-                "written_at": time.time() - age_seconds,
-                "values": {_TURN_LIMIT: "16"},
-            }
+    now = time.time()
+    with serve_asgi(gateway_client.app) as url:
+        snapshot = bootstrap.snapshot_path(tmp_path)
+        snapshot.parent.mkdir()
+        snapshot.write_text(
+            json.dumps(
+                {
+                    "v": 1,
+                    "base_url": url,
+                    "written_at": now - age_seconds,
+                    "values": {_TURN_LIMIT: "16"},
+                }
+            )
         )
-    )
-    monkeypatch.setattr(bootstrap, "os", SimpleNamespace(**{**vars(bootstrap.os), "environ": env}))
-    assert bootstrap.read_config_snapshot("http://gateway") is None
-
-    def dial(url: str, *, timeout: float, headers: dict[str, str]) -> httpx2.Response:
-        return gateway_client.get(url, headers=headers)
-
-    monkeypatch.setattr(bootstrap, "dial_get", dial)
-    bootstrap.inject_config_from_gateway()
-    assert env[_TURN_LIMIT] == "0"
-    written = bootstrap.read_config_snapshot("http://gateway")
+        env = {"MEIVA_GATEWAY_URL": url, "MEIVA_API_TOKEN": runner_token}
+        assert bootstrap.read_config_snapshot(url, home=tmp_path, now=now) is None
+        bootstrap.inject_config_from_gateway(env, home=tmp_path, now=now, tuning=BootstrapFetch())
+        assert env[_TURN_LIMIT] == "0"
+        written = bootstrap.read_config_snapshot(url, home=tmp_path, now=now)
     assert written is not None and written[0][_TURN_LIMIT] == "0"

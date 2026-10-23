@@ -13,6 +13,7 @@ from base.config.service_read import ConfigAuthority, served_db_endpoint
 from base.host.db_authority import delivery, unit
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
+from base.paths.tests.homes import point_home
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -28,9 +29,7 @@ born = _single_box.born
 
 
 def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAuthority:
-    from base.host.env import dotenv_file
-
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: born.home)
+    point_home(monkeypatch, born.home)
     monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
     monkeypatch.setitem(os.environ, "MEIVA_MACHINE_SERVE_GATEWAY", "true")
     complete = config.settings if config.settings.profile is None else config.Settings(profile=None)

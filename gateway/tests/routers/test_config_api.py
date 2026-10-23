@@ -28,7 +28,7 @@ from base.config import runtime_config, settings
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
-from base.host.env import dotenv_file
+from base.host.env.tests.env_files import unit_env_aliases, unit_env_path
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from gateway.routers.configuration import runtime as config_router
@@ -369,8 +369,8 @@ def test_put_self_returns_write_result_and_routes_scopes(clean_overrides: Path) 
 
     # Both landed in this gateway's .env (the single store): cluster llm_model +
     # host ops_concurrency.
-    assert runtime_config.env_set_field_names() == {"llm_model", "ops_concurrency"}
-    aliases = dotenv_file.read_env_aliases()
+    assert runtime_config.env_set_field_names(unit_env_path()) == {"llm_model", "ops_concurrency"}
+    aliases = unit_env_aliases()
     assert aliases["MEIVA_MODEL"] == "put-cluster"
     assert aliases["MEIVA_OPS_CONCURRENCY"] == "4"
 
@@ -388,7 +388,7 @@ def test_put_self_capability_failure_writes_nothing(clean_overrides: Path) -> No
     assert body["results"]["ops_concurrency"]["ok"] is False
     assert body["results"]["ops_concurrency"]["reason"]
     # atomic: nothing landed in .env
-    assert dotenv_file.read_env_aliases() == {}
+    assert unit_env_aliases() == {}
 
 
 def test_put_rejects_agent_scope_field(clean_overrides: Path) -> None:
@@ -403,7 +403,7 @@ def test_put_rejects_agent_scope_field(clean_overrides: Path) -> None:
     assert resp.status_code == 400, resp.text
     assert "unknown or read-only" in resp.json()["detail"]
     # nothing written to .env
-    assert dotenv_file.read_env_aliases() == {}
+    assert unit_env_aliases() == {}
 
 
 def test_put_rejects_unknown_field(clean_overrides: Path) -> None:
@@ -419,7 +419,7 @@ def test_put_accepts_valid_enum_value(clean_overrides: Path) -> None:
         resp = client.put("/api/config", json={"agent_reply_reminder_cadence": "every_time"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is True
-    assert dotenv_file.read_env_aliases()["MEIVA_AGENT_REPLY_REMINDER_CADENCE"] == "every_time"
+    assert unit_env_aliases()["MEIVA_AGENT_REPLY_REMINDER_CADENCE"] == "every_time"
 
 
 def test_put_rejects_invalid_enum_value(clean_overrides: Path) -> None:
@@ -429,7 +429,7 @@ def test_put_rejects_invalid_enum_value(clean_overrides: Path) -> None:
         resp = client.put("/api/config", json={"agent_reply_reminder_cadence": "sometimes"})
     assert resp.status_code == 400, resp.text
     assert "invalid enum value" in resp.json()["detail"]
-    assert dotenv_file.read_env_aliases() == {}
+    assert unit_env_aliases() == {}
 
 
 def test_get_self_sensitive_raw_override_is_sentinel(clean_overrides: Path) -> None:
@@ -457,7 +457,7 @@ def test_put_sentinel_preserves_secret(clean_overrides: Path) -> None:
             json={"deepseek_api_key": CONFIG_UNCHANGED_SENTINEL, "llm_model": "m2"},
         )
     assert resp.status_code == 200, resp.text
-    aliases = dotenv_file.read_env_aliases()
+    aliases = unit_env_aliases()
     assert aliases["DEEPSEEK_API_KEY"] == "sk-REAL-SECRET"  # untouched
     assert aliases["MEIVA_MODEL"] == "m2"
 
@@ -475,7 +475,7 @@ def test_put_absent_key_preserves_secret(clean_overrides: Path) -> None:
     with gateway_test_client() as client:
         resp = client.put("/api/config", json={"llm_model": "m2"})
     assert resp.status_code == 200, resp.text
-    aliases = dotenv_file.read_env_aliases()
+    aliases = unit_env_aliases()
     assert aliases["DEEPSEEK_API_KEY"] == "sk-REAL-SECRET"  # untouched (absent from body)
     assert aliases["OPENAI_API_KEY"] == "sk-OPENAI"  # untouched (absent from body)
     assert aliases["MEIVA_MODEL"] == "m2"
@@ -510,7 +510,7 @@ def test_put_replaces_one_secret_leaves_others(clean_overrides: Path) -> None:
             },
         )
     assert resp.status_code == 200, resp.text
-    aliases = dotenv_file.read_env_aliases()
+    aliases = unit_env_aliases()
     assert aliases["DEEPSEEK_API_KEY"] == "sk-NEW-DEEPSEEK"  # rewritten
     assert aliases["OPENAI_API_KEY"] == "sk-OPENAI"  # untouched (sentinel)
     assert aliases["MEIVA_MODEL"] == "m1"
@@ -524,7 +524,7 @@ def test_put_null_unsets_cluster_field(clean_overrides: Path) -> None:
     with gateway_test_client() as client:
         resp = client.put("/api/config", json={"llm_model": None})
     assert resp.status_code == 200, resp.text
-    aliases = dotenv_file.read_env_aliases()
+    aliases = unit_env_aliases()
     assert "MEIVA_MODEL" not in aliases  # explicitly unset
     assert aliases["DEEPSEEK_API_KEY"] == "sk-X"  # untouched
 
@@ -539,7 +539,7 @@ def test_put_host_failure_leaves_cluster_unwritten(clean_overrides: Path) -> Non
         )
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is False
-    assert "MEIVA_MODEL" not in dotenv_file.read_env_aliases()
+    assert "MEIVA_MODEL" not in unit_env_aliases()
 
 
 def test_put_rejects_bad_scalar(
@@ -558,7 +558,7 @@ def test_put_rejects_bad_scalar(
         resp = client.put("/api/config", json={scalar.name: "not-a-number"})
     assert resp.status_code == 400, resp.text
     assert scalar.name in resp.json()["detail"]
-    assert dotenv_file.read_env_aliases() == {}
+    assert unit_env_aliases() == {}
 
 
 def test_put_rejects_bool_for_int_field(
@@ -576,7 +576,7 @@ def test_put_rejects_bool_for_int_field(
     with gateway_test_client() as client:
         resp = client.put("/api/config", json={scalar.name: True})
     assert resp.status_code == 400, resp.text
-    assert dotenv_file.read_env_aliases() == {}
+    assert unit_env_aliases() == {}
 
 
 def test_put_nonsensitive_field_can_hold_literal_sentinel(clean_overrides: Path) -> None:
@@ -587,7 +587,7 @@ def test_put_nonsensitive_field_can_hold_literal_sentinel(clean_overrides: Path)
     with gateway_test_client() as client:
         resp = client.put("/api/config", json={"llm_model": CONFIG_UNCHANGED_SENTINEL})
     assert resp.status_code == 200, resp.text
-    assert dotenv_file.read_env_aliases()["MEIVA_MODEL"] == CONFIG_UNCHANGED_SENTINEL
+    assert unit_env_aliases()["MEIVA_MODEL"] == CONFIG_UNCHANGED_SENTINEL
 
 
 def test_put_self_edits_writable_host_capability_field(
@@ -605,7 +605,7 @@ def test_put_self_edits_writable_host_capability_field(
         resp = client.put("/api/config", json={"cross_machine_transfer_backend": "none"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is True
-    assert dotenv_file.read_env_aliases()["MEIVA_CROSS_MACHINE_TRANSFER_BACKEND"] == "none"
+    assert unit_env_aliases()["MEIVA_CROSS_MACHINE_TRANSFER_BACKEND"] == "none"
 
 
 @pytest.mark.asyncio
@@ -664,7 +664,7 @@ def test_put_self_rejects_readonly_identity_field(clean_overrides: Path) -> None
         resp = client.put("/api/config", json={"machine_name": "renamed"})
     assert resp.status_code == 400, resp.text
     assert "unknown or read-only" in resp.json()["detail"]
-    assert "MEIVA_MACHINE_NAME" not in dotenv_file.read_env_aliases()
+    assert "MEIVA_MACHINE_NAME" not in unit_env_aliases()
 
 
 def test_get_self_raw_overrides_exposes_writable_host_field_not_readonly(
@@ -709,7 +709,7 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
     assert "unknown or read-only" in cluster_resp.json()["detail"]
     assert host_resp.status_code == 200, host_resp.text
     assert host_resp.json()["applied"] is True
-    assert dotenv_file.read_env_aliases()["MEIVA_HEARTBEAT_ENABLED"] == "false"
+    assert unit_env_aliases()["MEIVA_HEARTBEAT_ENABLED"] == "false"
 
 
 # ── PUT remote ──
@@ -719,8 +719,8 @@ def test_plugin_config_owner_metadata_and_mixed_patch_rejection(clean_overrides:
     """A mixed request cannot partly commit Core env and a Fleet image."""
     from base.packages.plugins.config_registration import disk_image_path
 
-    dotenv_file.env_file_path().touch()
-    before_env = dotenv_file.env_file_path().read_bytes()
+    unit_env_path().touch()
+    before_env = unit_env_path().read_bytes()
     image = disk_image_path("meiva_fleet")
     before_image = image.read_bytes() if image.exists() else None
     with gateway_test_client() as client:
@@ -730,7 +730,7 @@ def test_plugin_config_owner_metadata_and_mixed_patch_rejection(clean_overrides:
         response = client.put("/api/config", json={"task_escalate_n": 7, "llm_model": "unknown"})
     assert response.status_code == 400
     assert "mixes owners" in response.json()["detail"]
-    assert dotenv_file.env_file_path().read_bytes() == before_env
+    assert unit_env_path().read_bytes() == before_env
     assert (image.read_bytes() if image.exists() else None) == before_image
 
 
@@ -738,8 +738,8 @@ def test_fleet_cluster_write_goes_only_to_owned_image(clean_overrides: Path) -> 
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
     from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 
-    dotenv_file.env_file_path().touch()
-    before_env = dotenv_file.env_file_path().read_bytes()
+    unit_env_path().touch()
+    before_env = unit_env_path().read_bytes()
     with gateway_test_client() as client:
         response = client.put(
             "/api/config", json={"task_escalate_n": 11, "reduce_context_switch": False}
@@ -751,7 +751,7 @@ def test_fleet_cluster_write_goes_only_to_owned_image(clean_overrides: Path) -> 
     assert invalid.status_code == 400
     saved = read_config_image(FleetConfig, disk_image_path("meiva_fleet"))
     assert saved.task_escalate_n == 11 and saved.reduce_context_switch is False
-    assert dotenv_file.env_file_path().read_bytes() == before_env
+    assert unit_env_path().read_bytes() == before_env
 
 
 def test_remote_host_fleet_toggle_respects_owned_image_and_policy(

@@ -97,12 +97,14 @@ invariant.
 ## Key Dependencies
 
 - [[services/docs/services.meiva.okf.md]] — which services each capability contributes
-- [[base/cluster/docs/paths.meiva.okf.md]] — where the home's `.env` lives
+- [[base/paths/docs/paths.meiva.okf.md]] — where the home's `.env` lives
 - [[cli/docs/cli.meiva.okf.md]] — `meiva start`, which persists these labels
 
-Gateway access is a value, `GatewayAccess(gateway_url, cluster_secret, remote_plane)`, built by a root
-from its configuration (`base/cluster/machine/boot.py:gateway_access_from_boot`).
-`gateway_api_base(gateway_url)`, `gateway_bearer(access)`, `gateway_auth_headers(access)` and
-`daemon_acceptance(access)` read no settings; `resolve_gateway_bearer` keeps token-first admission.
+Gateway access is a value, `GatewayAccess(gateway_url, cluster_secret, remote_plane, machine_token,
+launcher_profile, gateway_home)`, built by a root from its configuration and the launch facts its
+`ConfigBoot` read once (`base/cluster/machine/boot.py:gateway_access_from_boot`).
+`gateway_api_base(gateway_url)`, `gateway_bearer(access)` (in the strict `gateway_access.py`: a pure
+function of the value, token first), `gateway_auth_headers(access)` and `daemon_acceptance(access)` read
+neither settings nor the environment.
 A caller with no root yet calls `base/cluster/machine/ambient.py:gateway_access_from_settings` and labels it
 `# ambient: <batch>`; the list only shrinks and the module goes with the last call.

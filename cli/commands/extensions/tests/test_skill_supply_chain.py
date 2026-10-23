@@ -453,8 +453,20 @@ def gateway_server() -> Iterator[tuple[HTTPServer, type[_Recorder]]]:
         thread.join()
 
 
+_GATEWAY_BEARER = "test-bearer"
+
+
 def _http_gateway(url: str) -> HttpExtensionGateway:
-    return HttpExtensionGateway(GatewayAccess(url, "test-bearer", False))
+    return HttpExtensionGateway(
+        GatewayAccess(
+            gateway_url=url,
+            cluster_secret=_GATEWAY_BEARER,
+            remote_plane=False,
+            machine_token=None,
+            launcher_profile=None,
+            gateway_home=False,
+        )
+    )
 
 
 def test_http_gateway_puts_the_packed_tree_with_the_bearer(

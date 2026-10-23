@@ -2,20 +2,21 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 
 [purity]
 "base.py" = "strict-to-be"
+"lite_parse.py" = "strict"
 "profiles.py" = "strict"
 "wiring.py" = "strict"
 
 [uses]
 "__init__.py" = ["_full.py", "_lite.py", "admin", "config_registry.py", "profiles.py", "service_read.py"]
 "_full.py" = ["admin", "agent_pins.py", "config_registry.py", "domains", "profiles.py", "service_read.py"]
-"_lite.py" = ["_full.py", "config_registry.py", "profiles.py"]
+"_lite.py" = ["_full.py", "config_registry.py", "lite_parse.py", "profiles.py"]
 "admin" = ["config_registry.py", "service_read.py"]
 "agent_pins.py" = ["config_registry.py"]
 "config_registry.py" = ["base.py", "domains", "profiles.py"]
 "domains" = ["base.py"]
 "runtime_config.py" = ["config_registry.py"]
 "service_read.py" = ["config_registry.py", "domains", "runtime_config.py"]
-"tests" = ["__init__.py", "_full.py", "_lite.py", "admin", "base.py", "config_registry.py", "runtime_config.py", "service_read.py"]
+"tests" = ["__init__.py", "_full.py", "_lite.py", "admin", "base.py", "config_registry.py", "lite_parse.py", "runtime_config.py", "service_read.py"]
 
 [debt.impure-edge]
 "base.py#base/paths/home.py" = 1

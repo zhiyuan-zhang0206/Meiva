@@ -186,6 +186,9 @@ from base.host.env.bootstrap import (
     CONFIG_FETCH_SKIP as CONFIG_FETCH_SKIP,
 )
 from base.host.env.bootstrap import (
+    LaunchFacts as LaunchFacts,
+)
+from base.host.env.bootstrap import (
     config_source_is_local as config_source_is_local,
 )
 from base.host.env.bootstrap import (
@@ -359,6 +362,14 @@ def refresh_data_plane_settings() -> None:
     eager chain (settings-lite repair modules import it at module scope);
     calling it upgrades first and refreshes the legacy owner in place."""
     _lite.refresh_data_plane_settings()
+
+
+# meiva:note
+# The process-wide owner's launch facts: its machine token, launcher profile and
+# whether it serves the gateway. For a caller that has no `ConfigBoot` of its own yet
+# (`base.cluster.machine.ambient`).
+def launch_facts() -> LaunchFacts:
+    return _lite.process_launch_facts()
 
 
 # Private acceptance/test hook: the boot-lite state machine snapshot

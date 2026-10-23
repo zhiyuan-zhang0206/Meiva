@@ -100,23 +100,19 @@ def test_the_lock_is_released_when_a_holder_dies(tmp_path: Path) -> None:
         pass
 
 
-def test_env_locking_never_touches_the_env_file_itself(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_env_locking_never_touches_the_env_file_itself(tmp_path: Path) -> None:
     # meiva:note
     # Every door must lock a SIBLING. `file_lock`'s POSIX branch opens its path with
     # "w", which truncates — pointed at the real `.env` it would empty a cluster's
     # secrets outright, which is the accident this guard exists for.
     import base.config.runtime_config as rc
-    from base.host.env import dotenv_file
     from base.host.env.dotenv_file import upsert_env
 
     env = tmp_path / ".env"
     env.write_text("MEIVA_KEEP=1\n")
-    monkeypatch.setattr(dotenv_file, "env_file_path", lambda: env)
 
     assert env_lock_path(env) != env
-    rc.write_fields({}, set())
+    rc.write_fields({}, set(), path=env)
     upsert_env(env, {"MEIVA_NEW": "2"})
 
     body = env.read_text()
@@ -168,18 +164,16 @@ def test_every_env_write_door_takes_the_lock(
     # one door orders nothing.
     import base.config.runtime_config as rc
     import base.host.env.dotenv_file as dotenv_file_mod
-    from base.host.env import dotenv_file
 
     env = tmp_path / ".env"
     env.write_text("MEIVA_OLD=1\n")
-    monkeypatch.setattr(dotenv_file, "env_file_path", lambda: env)
     expected = env_lock_path(env)
 
     taken: list[Path] = []
     _recorded_lock(monkeypatch, rc, taken)
     _recorded_lock(monkeypatch, dotenv_file_mod, taken)
 
-    rc.write_fields({}, set())
+    rc.write_fields({}, set(), path=env)
     dotenv_file_mod.upsert_env(env, {"MEIVA_NEW": "2"})
     dotenv_file_mod.remove_env(env, {"MEIVA_OLD"})
 

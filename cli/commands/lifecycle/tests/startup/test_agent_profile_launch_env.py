@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 
 from base.host.env import bootstrap
+from base.host.env.tests.env_files import constant
+from cli.commands.data_plane import bringup
 from cli.commands.lifecycle import root_driver
 from services.supervision.meiva_root.manifest import load_manifests
 from services.supervision.meiva_root_glue.manifests import generate
@@ -30,8 +32,8 @@ def test_root_manifest_projects_runner_url_for_agent_profile(
     def _fake_projection() -> str:
         return projected
 
-    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: True)
-    monkeypatch.setattr(root_driver, "runner_db_url_projection", _fake_projection)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(True))
+    monkeypatch.setattr(bringup, "runner_db_url", _fake_projection)
     environments = {
         spec.session: root_driver.service_extra_env(spec, remote_data_plane=True)
         for spec in (agent, ops)

@@ -61,9 +61,10 @@ def _field_is_list(name: str) -> bool:
     return get_origin(field_infos()[name].annotation) is list
 
 
-def env_set_field_names() -> set[str]:
-    """`Settings` field names whose alias is explicitly set in this unit's `.env`."""
-    present = set(dotenv_file.read_env_aliases())
+# meiva:note
+# `Settings` field names whose alias is explicitly set in the `.env` at `env_path`.
+def env_set_field_names(env_path: Path) -> set[str]:
+    present = set(dotenv_file.read_env_aliases(env_path))
     return {name for name, alias in _field_alias_map().items() if alias in present}
 
 
@@ -162,7 +163,7 @@ def write_fields(
     (never silent — a silent full-replace once dropped a cluster's secrets).
     `audit`, when given, records the write (`.env` history and `env_write` event).
     """
-    path = dotenv_file.env_file_path() if path is None else path
+    path = dotenv_file.process_env_file() if path is None else path
     path.parent.mkdir(parents=True, exist_ok=True)
     # Cross-process exclusive, for the whole snapshot-and-rewrite section. Each
     # `set_key` / `unset_key` READS the file and rewrites it, so two writers

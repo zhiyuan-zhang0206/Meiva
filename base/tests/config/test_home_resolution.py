@@ -21,47 +21,72 @@ import pytest
 
 from base import config, paths
 from base.config.base import unit_home
-from base.host.env import bootstrap, dotenv_file
-from base.paths.home import resolve_meiva_home
+from base.paths.home import home_from_env, resolve_meiva_home
 
 _REPO = Path(__file__).resolve().parents[3]
 _CHILD = Path(__file__).with_name("_config_child.py")
 
 
+# meiva:note
+# `home_from_env` is the pure resolver; `resolve_meiva_home` is its ambient binding for a
+# meiva:note
+# composition root. The pure cases hand it a dict and a user home, so a bug here can never
+# meiva:note
+# read, create or write the operator's real `~/.meiva`.
+
+
+@pytest.fixture
+def user_home(tmp_path: Path) -> Path:
+    home = tmp_path / "user"
+    home.mkdir()
+    return home
+
+
+def test_unset_resolves_to_dot_meiva_under_home(user_home: Path) -> None:
+    assert home_from_env({}, user_home=user_home) == user_home / ".meiva"
+
+
+def test_empty_counts_as_unset(user_home: Path) -> None:
+    assert home_from_env({"MEIVA_HOME": ""}, user_home=user_home) == user_home / ".meiva"
+
+
+def test_explicit_value_is_used_verbatim(tmp_path: Path, user_home: Path) -> None:
+    env = {"MEIVA_HOME": str(tmp_path / ".meiva-gateway")}
+    assert home_from_env(env, user_home=user_home) == tmp_path / ".meiva-gateway"
+
+
+@pytest.mark.parametrize(
+    ("raw", "relative"), [("~", ""), ("~/.meiva-x", ".meiva-x"), ("~/a/b", "a/b")]
+)
+def test_tilde_expands_against_the_given_user_home(
+    user_home: Path, raw: str, relative: str
+) -> None:
+    assert home_from_env({"MEIVA_HOME": raw}, user_home=user_home) == user_home / relative
+
+
+@pytest.mark.parametrize("raw", ["relative/home", "~other/.meiva", "./here"])
+def test_a_relative_home_is_refused(user_home: Path, raw: str) -> None:
+    """A relative home would follow the working directory."""
+    with pytest.raises(ValueError, match="absolute"):
+        home_from_env({"MEIVA_HOME": raw}, user_home=user_home)
+
+
 @pytest.fixture
 def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """HOME under a temporary directory, with MEIVA_HOME unset."""
-    home = tmp_path / "user"
+    """The ambient binding's inputs: HOME under a temporary directory, MEIVA_HOME unset."""
+    home = tmp_path / "ambient-user"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("MEIVA_HOME", raising=False)
     return home
 
 
-def test_unset_resolves_to_dot_meiva_under_home(fake_home: Path) -> None:
+def test_the_ambient_binding_reads_the_process_environment(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assert resolve_meiva_home() == fake_home / ".meiva"
-
-
-def test_empty_counts_as_unset(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MEIVA_HOME", "")
-    assert resolve_meiva_home() == fake_home / ".meiva"
-
-
-def test_explicit_value_is_used_verbatim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / ".meiva-gateway"))
-    assert resolve_meiva_home() == tmp_path / ".meiva-gateway"
-
-
-def test_tilde_expands_against_home(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MEIVA_HOME", "~/.meiva-x")
     assert resolve_meiva_home() == fake_home / ".meiva-x"
-
-
-def test_a_relative_home_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A relative home would follow the working directory."""
-    monkeypatch.setenv("MEIVA_HOME", "relative/home")
-    with pytest.raises(ValueError, match="absolute"):
-        resolve_meiva_home()
 
 
 def test_meiva_home_door_creates_the_default_home_under_the_fake_home(fake_home: Path) -> None:
@@ -99,8 +124,6 @@ def test_a_fresh_interpreter_with_no_variable_resolves_to_dot_meiva(tmp_path: Pa
 _CONSUMERS: list[tuple[str, Callable[[], Path], str]] = [
     ("paths.meiva_home", paths.meiva_home, ""),
     ("paths.logs_dir", paths.logs_dir, "logs"),
-    ("dotenv_file.env_file_path", dotenv_file.env_file_path, ".env"),
-    ("bootstrap snapshot", bootstrap.snapshot_path, "run/bootstrap-snapshot.json"),
     ("config path-field default", unit_home, ""),
 ]
 

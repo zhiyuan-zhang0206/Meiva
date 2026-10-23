@@ -14,7 +14,7 @@ from base.config.domains.observability.settings import ObservabilitySettings
 from base.config.service_read import ConfigAuthority
 from base.host.db_authority import unit
 from base.host.db_authority.api import telemetry_token
-from base.host.env import dotenv_file
+from base.paths.tests.homes import point_home
 from cli.commands.observability import otel_collector as collector
 from cli.database.tests.command_inputs import command_machine as command_machine
 from gateway.tests.agents.gateway_auth import without_credentials
@@ -42,7 +42,7 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
         f"MEIVA_TELEMETRY_OTLP_ENDPOINT=http://127.0.0.1:{gateway_port}\n"
         "MEIVA_GATEWAY_OTLP_ENDPOINT=http://stale.invalid:1\n"
     )
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
+    point_home(monkeypatch, tmp_path)
     monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
     monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.10")
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "relay-test-token")

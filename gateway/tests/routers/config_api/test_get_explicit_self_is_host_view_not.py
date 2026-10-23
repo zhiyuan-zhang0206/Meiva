@@ -11,7 +11,7 @@ from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config, settings
-from base.host.env import dotenv_file
+from base.host.env.tests.env_files import unit_env_path
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_config_api import REMOTE, seed_machine
 from gateway.tests.routers.test_config_api import (
@@ -196,7 +196,7 @@ def test_get_config_audit_default_last_comes_from_display_config(
     def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
-    env_path = dotenv_file.env_file_path()
+    env_path = unit_env_path()
     env_path.write_text("MEIVA_MODEL=audit-one\n")
     audit.record_env_write(
         env_path,
@@ -229,7 +229,7 @@ def test_get_config_audit_reads_own_records(
     def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
-    env_path = dotenv_file.env_file_path()
+    env_path = unit_env_path()
     env_path.write_text("MEIVA_MODEL=audit-self\n")
     audit.record_env_write(
         env_path,

@@ -28,12 +28,11 @@
 "test_dotenv_file.py#monkeypatch.setenv os.environ.TZ" = 1
 "test_home_resolution.py#monkeypatch.delenv os.environ.MEIVA_HOME" = 1
 "test_home_resolution.py#monkeypatch.setenv os.environ.HOME" = 1
-"test_home_resolution.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 6
+"test_home_resolution.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 3
 "test_paths.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
 
 [debt.first-party-patch]
 "test_cluster_tz.py#monkeypatch.setattr base.config.settings.general" = 2
-"test_config_env_values.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 12
 "test_config_lifecycle.py#assignment base.config.config_registry.DOMAIN_MODELS" = 2
 "test_config_profiles.py#monkeypatch.setattr base.config.config_registry.DOMAIN_MODELS" = 2
 "test_config_profiles.py#monkeypatch.setattr base.config.settings" = 3
@@ -42,8 +41,6 @@
 "test_dotenv_file.py#monkeypatch.setattr base.config.settings.general" = 1
 "test_dotenv_file.py#monkeypatch.setattr base.host.env.dotenv_file.write_private_bytes" = 1
 "test_dotenv_file.py#monkeypatch.setattr base.host.private_storage.os.replace" = 1
-"test_runner_db_url_projection.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 5
-"test_runner_db_url_projection.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 5
 
 [debt.stdlib-patch]
 "test_cluster_tz.py#monkeypatch.setattr os.path.realpath" = 4
