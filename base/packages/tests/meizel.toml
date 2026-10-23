@@ -7,11 +7,3 @@ exports = ["lm", "model_catalog.py", "plugin_config"]
 "providers" = ["lm", "model_catalog.py"]
 "test_composer_commands.py" = ["composer_inputs.py"]
 "test_overlay_fresh_process.py" = ["_overlay_child.py"]
-
-[debt.env-patch]
-"test_update_disk_images.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-
-[debt.first-party-patch]
-"test_update_disk_images.py#monkeypatch.setattr base.paths.meiva_home" = 1
-"test_update_disk_images.py#monkeypatch.setattr base.paths.plugins_dir" = 1
-"test_update_disk_images.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1

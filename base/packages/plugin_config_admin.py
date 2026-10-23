@@ -7,6 +7,7 @@ schema, while the image remains the sole persisted authority.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -17,6 +18,7 @@ from base.config.service_read import ConfigAuthority
 from base.packages.plugin_config_images import (
     PluginConfigChangedError,
     PluginConfigOwner,
+    config_image_path,
     image_revision,
     write_config_image,
 )
@@ -193,23 +195,23 @@ class PluginUpdateResult(BaseModel):
     entries: list[PluginUpdateEntry]
 
 
-def update_all_disk_images() -> PluginUpdateResult:
+def update_all_disk_images(*, plugin_dirs: Mapping[str, Path], home: Path) -> PluginUpdateResult:
     # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
     entries = [
-        _update_one_disk_image(name, plugin_dir)
-        for name, plugin_dir in sorted(discover_plugins().items())
+        _update_one_disk_image(name, plugin_dir, home=home)
+        for name, plugin_dir in sorted(plugin_dirs.items())
     ]
     return PluginUpdateResult(entries=entries)
 
 
-def _update_one_disk_image(name: str, plugin_dir: Path) -> PluginUpdateEntry:
+def _update_one_disk_image(name: str, plugin_dir: Path, *, home: Path) -> PluginUpdateEntry:
     """Merge the config class one plugin declares into its disk image; never raises."""
     try:
         cls = declared_config_class(name, plugin_dir)
         if cls is None:
             return PluginUpdateEntry(name=name, status="skipped", detail="no default_config.py")
         added, removed = merge_disk_image_schema(
-            PluginConfigOwner(name, cls, disk_image_path(name))
+            PluginConfigOwner(name, cls, config_image_path(name, home=home))
         )
     except Exception as e:
         return PluginUpdateEntry(name=name, status="error", detail=str(e))

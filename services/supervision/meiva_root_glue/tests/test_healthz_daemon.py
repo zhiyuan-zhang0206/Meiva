@@ -27,6 +27,7 @@ from base.daemon.tests.fakes import pin_endpoints
 from base.host.env.health_ports import DEFAULT_PORTS
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S, STOP_MARGIN_S
 from base.packages.plugin_config_admin import update_all_disk_images
+from base.packages.plugins.enable_config import discover_plugins
 from services.supervision import roster
 from services.supervision.meiva_root_glue import manifests as gen
 from services.supervision.roster.healthz import (
@@ -210,7 +211,7 @@ _DECLARED_STOP_CEILINGS = {"agent-host": HOST_STOP_CEILING_S, "ops": OPS_STOP_CE
 def test_every_standard_daemon_renders_as_exec_python_dash_m_its_module(unit_home: Path) -> None:
     """I4: the unit pid stays a direct child of root, and a declaration cannot smuggle
     undeclared environment, arguments, a stop window or sealed inputs into the rendered unit."""
-    update_all_disk_images()
+    update_all_disk_images(plugin_dirs=discover_plugins(), home=unit_home)
     for spec in _healthz_specs().values():
         (unit,) = gen.build_units([spec], capabilities=spec.capabilities, repo_root=_REPO)
         assert unit["exec"] == [
