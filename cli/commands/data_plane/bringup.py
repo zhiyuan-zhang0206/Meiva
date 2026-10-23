@@ -25,6 +25,7 @@ import psycopg
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
+from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.dataplane import pooler
 from base.cluster.machine import MachineIdentity
 from base.cluster.record import ClusterRecord
@@ -245,12 +246,14 @@ def prepare_gateway_schema(config: DataPlaneConfig) -> None:
     cluster.ensure_pgvector_extension(
         identity, base_admin_url=admin_url, expected_data_dir=meiva_home() / "pg"
     )
+
     cluster.ensure_checkpoint_schema(
         identity,
         base_admin_url=admin_url,
         database_created=created,
         resume_partial=True,
         expected_data_dir=meiva_home() / "pg",
+        schema=PostgresCheckpointSchema(),
     )
 
 

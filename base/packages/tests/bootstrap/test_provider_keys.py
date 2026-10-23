@@ -22,8 +22,8 @@ def bootstrap_authority(plugin_env: Path) -> ConfigAuthority:
     """Name the tested gateway snapshot without switching its home."""
     from base import config
 
-    complete = config.settings if config.settings.profile is None else config.Settings(profile=None)
-    return ConfigAuthority(config.settings, complete, plugin_env)
+    complete = config.Settings(profile=None)
+    return ConfigAuthority(complete, complete, plugin_env)
 
 
 @pytest.fixture
@@ -125,7 +125,6 @@ def test_bootstrap_serves_a_duplicate_plugin_key_once(
 def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
     provider_plugin: Callable[..., None],
     plugin_env: Path,
-    monkeypatch: pytest.MonkeyPatch,
     bootstrap_authority: ConfigAuthority,
 ) -> None:
     """A plugin key matching a Settings alias cannot undo its bootstrap transform."""
@@ -133,7 +132,7 @@ def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
 
     provider_plugin(key_env="MEIVA_DB_URL")
     _write_bootstrap_env(plugin_env, "MEIVA_DB_URL=postgresql://meiva:pw@127.0.0.1:5433/meiva\n")
-    monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.3")
+    bootstrap_authority.runtime.general.machine_host = "10.0.0.3"
 
     assert (
         urlsplit(

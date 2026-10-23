@@ -143,4 +143,4 @@ allocation lock.
 
 Initial command metadata is opt-in; see [[initial-command.meiva.okf.md]].
 
-Related test premise: [Screen fixture input](screen-tests.meiva.okf.md).
+Tests: [[screen-tests.meiva.okf.md]]. Inputs: [[closure-inputs.meiva.okf.md]].

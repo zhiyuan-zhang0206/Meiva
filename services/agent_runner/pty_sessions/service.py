@@ -38,6 +38,7 @@ import psutil
 from base.log import logger
 from base.native_process import child_env, pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
+from base.native_process.process_control import ProcessControl
 from base.sessions.pty import closure, process_groups, protocol
 from base.sessions.pty.allocation_freeze import locked_freeze_state, state_path
 from base.sessions.pty.paths import (
@@ -133,7 +134,9 @@ def _child_env(overlay: object) -> dict[str, str]:
 class PtyService:
     """The session table and the request handlers; `serve` runs them over a socket."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, home: Path, process_control: ProcessControl) -> None:
+        self._home = home
+        self._process_control = process_control
         self._sessions: dict[str, session.PtySession] = {}
         self._lock = threading.Lock()
         self._closing = False
@@ -239,7 +242,7 @@ class PtyService:
         # The allocation lock is held until the session is registered: once a
         # concurrent freeze returns, every earlier allocation is visible here
         # and every later one observes the marker.
-        with locked_freeze_state() as freeze:
+        with locked_freeze_state(home=self._home) as freeze:
             existing = self._live(name)
             if existing is not None:
                 if (
@@ -267,7 +270,7 @@ class PtyService:
             if freeze.status == "invalid":
                 raise RequestError(
                     protocol.ERROR,
-                    f"pty allocation refused: host freeze marker {state_path()} is invalid "
+                    f"pty allocation refused: host freeze marker {state_path(self._home)} is invalid "
                     f"({freeze.error}); repair it before allocating new sessions",
                 )
             created = self._spawn(name, cwd, env, cmd, freeze.generation)
@@ -348,7 +351,10 @@ class PtyService:
             with self._lock:
                 self._persist()
             return session.kill_session(
-                found, graceful=bool(req.get("graceful", False)), interrupted=interrupted
+                found,
+                graceful=bool(req.get("graceful", False)),
+                interrupted=interrupted,
+                process_control=self._process_control,
             )
         except RuntimeError as exc:
             raise RequestError(protocol.ERROR, str(exc)) from exc
@@ -377,7 +383,9 @@ class PtyService:
                     for n, s in sorted(self._sessions.items())
                 ]
                 self._persist()
-            outcome = closure.close_sessions(targets, grace_s=grace_s, kill_s=kill_s)
+            outcome = closure.close_sessions(
+                targets, grace_s=grace_s, kill_s=kill_s, process_control=self._process_control
+            )
             assert self._loop is not None  # noqa: S101
             for s in closing:
                 if not process_groups.live(s.shell):

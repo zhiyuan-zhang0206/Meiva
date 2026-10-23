@@ -17,6 +17,8 @@ from pathlib import Path
 from base.log import logger
 from base.log.sinks import add_sink
 from base.native_process.os_platform import LockTimeoutError, file_lock
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
+from base.paths import meiva_home
 from base.sessions.pty.paths import fallback_dir, ledger_path, lock_path, service_socket_path
 from services.agent_runner.pty_sessions import ledger, shutdown_budget
 from services.agent_runner.pty_sessions.service import PtyService
@@ -63,8 +65,8 @@ def main() -> int:
 
 
 def _run() -> int:
-    service = PtyService()
-    ledger.sweep(ledger_path())
+    service = PtyService(home=meiva_home(), process_control=SYSTEM_PROCESS_CONTROL)
+    ledger.sweep(ledger_path(), process_control=SYSTEM_PROCESS_CONTROL)
     path = service_socket_path()
     if path.parent == fallback_dir() and not _own_fallback_dir(path.parent):
         return 1

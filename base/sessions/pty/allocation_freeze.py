@@ -59,16 +59,12 @@ def _invalid(message: str) -> Never:
     raise ValueError(message)
 
 
-def state_path() -> Path:
-    from base.paths import meiva_home
-
-    return meiva_home() / _STATE_FILENAME
+def state_path(home: Path) -> Path:
+    return home / _STATE_FILENAME
 
 
-def lock_path() -> Path:
-    from base.paths import meiva_home
-
-    return meiva_home() / _LOCK_FILENAME
+def lock_path(home: Path) -> Path:
+    return home / _LOCK_FILENAME
 
 
 def _timestamp(value: object) -> dt.datetime:
@@ -122,16 +118,18 @@ def _read_unlocked(path: Path) -> PtyAllocationFreeze:
         return PtyAllocationFreeze(status="invalid", error=str(exc))
 
 
-def read() -> PtyAllocationFreeze:
+def read(*, home: Path) -> PtyAllocationFreeze:
     """Read one atomic marker snapshot without taking the allocation lock."""
-    return _read_unlocked(state_path())
+    return _read_unlocked(state_path(home))
 
 
-def current_generation() -> str | None:
+def current_generation(*, home: Path) -> str | None:
     """The current or pending flip generation, failing closed when corrupt."""
-    snapshot = read()
+    snapshot = read(home=home)
     if snapshot.status == "invalid":
-        raise InvalidPtyAllocationFreezeError(f"invalid marker {state_path()}: {snapshot.error}")
+        raise InvalidPtyAllocationFreezeError(
+            f"invalid marker {state_path(home)}: {snapshot.error}"
+        )
     return snapshot.generation
 
 
@@ -153,25 +151,25 @@ def write_atomic(path: Path, payload: dict[str, object], *, writer: AtomicWriter
 
 
 @contextlib.contextmanager
-def locked_freeze_state() -> Generator[PtyAllocationFreeze]:
+def locked_freeze_state(*, home: Path) -> Generator[PtyAllocationFreeze]:
     """Hold the host allocation mutex and yield its current marker state.
 
     The pty-sessions service's ``new`` keeps this lock until the session is registered. Therefore, after
     ``freeze`` returns, every earlier allocation is fully visible and every
     later absent-to-live transition observes the marker and is refused.
     """
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        yield _read_unlocked(state_path())
+    with file_lock(lock_path(home), timeout_s=_LOCK_TIMEOUT_S):
+        yield _read_unlocked(state_path(home))
 
 
-def freeze(*, holder: str, reason: str, writer: AtomicWriter) -> PtyAllocationFreeze:
+def freeze(*, home: Path, holder: str, reason: str, writer: AtomicWriter) -> PtyAllocationFreeze:
     """Create a new operator-owned allocation freeze generation."""
     if not holder:
         raise ValueError("holder must be non-empty")
     if not reason:
         raise ValueError("reason must be non-empty")
-    path = state_path()
-    with locked_freeze_state() as current:
+    path = state_path(home)
+    with locked_freeze_state(home=home) as current:
         if current.status == "invalid":
             raise InvalidPtyAllocationFreezeError(
                 f"cannot replace invalid marker {path}: {current.error}"
@@ -193,12 +191,12 @@ def freeze(*, holder: str, reason: str, writer: AtomicWriter) -> PtyAllocationFr
         return _parse(payload)
 
 
-def resume(generation: str, *, writer: AtomicWriter) -> bool:
+def resume(generation: str, *, home: Path, writer: AtomicWriter) -> bool:
     """CAS-activate exactly ``generation``; never clear a replacement owner."""
     if not generation:
         raise ValueError("generation must be non-empty")
-    path = state_path()
-    with locked_freeze_state() as current:
+    path = state_path(home)
+    with locked_freeze_state(home=home) as current:
         if current.status == "invalid":
             raise InvalidPtyAllocationFreezeError(
                 f"cannot resume invalid marker {path}: {current.error}"

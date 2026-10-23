@@ -11,6 +11,7 @@ import pytest
 from psycopg import sql
 
 from base.cluster import drop_database, provision_database
+from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.dataplane.pg_admin import owner_conninfo
 from base.cluster.derive import swap_db
 from base.config import settings
@@ -307,6 +308,10 @@ def test_default_schema_check_never_setup_after_concurrent_repair(
     monkeypatch.setattr(provision, "checkpoint_schema_versions", checkpoint_versions)
     monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
 
-    provision.ensure_checkpoint_schema("meiva_repaired", base_admin_url=_admin_url())
+    from langgraph.checkpoint.postgres import PostgresSaver
+
+    provision.ensure_checkpoint_schema(
+        "meiva_repaired", base_admin_url=_admin_url(), schema=PostgresCheckpointSchema()
+    )
     with pytest.raises(StopIteration):
         next(observed)

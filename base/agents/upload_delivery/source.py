@@ -85,7 +85,7 @@ def _claim(
     source = current_unit(
         local_machine=local_machine,
     )
-    directory = agent_upload_dir(agent_id, create=False).resolve()
+    directory = agent_upload_dir(agent_id, create=False, home=Path.home()).resolve()
     with write_transaction(pool) as conn:
         storage.lock_agent(conn, agent_id)
         found = _lookup(conn, key, fingerprint)
@@ -161,7 +161,7 @@ def accept(
     ):
         raise UploadDeliveryConflictError("receiving source belongs to another native unit")
     manifest = Manifest.model_validate(claimed[1])
-    directory = agent_upload_dir(agent_id, create=False).resolve()
+    directory = agent_upload_dir(agent_id, create=False, home=Path.home()).resolve()
     if str(directory) != claimed[5]:
         raise UploadDeliveryConflictError("receiving source binds another native physical root")
     # No DB connection is held across filesystem publication. Fixed namespace and

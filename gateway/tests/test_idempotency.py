@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import patch
 
 import psycopg
@@ -90,7 +91,7 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
     from base.agents.upload_delivery.paths import agent_upload_dir
     from base.lm import factory
 
-    upload_dir = agent_upload_dir(agent_id)
+    upload_dir = agent_upload_dir(agent_id, home=Path.home())
     upload_dir.mkdir(parents=True, exist_ok=True)
     image = upload_dir / "gone.png"
     image.write_bytes(b"test image")

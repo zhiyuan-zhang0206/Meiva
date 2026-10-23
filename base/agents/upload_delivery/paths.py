@@ -16,15 +16,28 @@ an arbitrary file.
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 from base.agents.messages.inbound_images import image_mime_for
 from base.paths.private_dir import ensure_private_dir
 
 
-def agent_upload_dir(agent_id: int, *, create: bool = True) -> Path:
+class UploadResponse(Protocol):
+    @property
+    def content(self) -> bytes: ...
+
+    def raise_for_status(self) -> object: ...
+
+
+class UploadClient(Protocol):
+    def get(self, url: str, *, timeout: float) -> UploadResponse: ...
+
+
+def agent_upload_dir(agent_id: int, *, home: Path, create: bool = True) -> Path:
     """Directory holding agent uploads; receipt lookup can omit filesystem creation."""
-    directory = Path.home() / "Downloads" / f"MeivaAgent-{agent_id}"
+    directory = home / "Downloads" / f"MeivaAgent-{agent_id}"
     return ensure_private_dir(directory) if create else directory
 
 
@@ -38,21 +51,23 @@ def upload_url(agent_id: int, name: str) -> str:
     return f"/api/agents/{agent_id}/uploads/{name}"
 
 
-def resolve_upload_path(agent_id: int, name: str) -> Path:
+def resolve_upload_path(agent_id: int, name: str, *, home: Path) -> Path:
     """Resolve an upload name to its on-disk path, guarding against traversal.
 
     Raises:
         ValueError: `name` escapes the agent's upload directory (``..`` / an
             absolute path / a separator that survived).
     """
-    base = agent_upload_dir(agent_id).resolve()
+    base = agent_upload_dir(agent_id, home=home).resolve()
     target = (base / name).resolve()
     if target == base or not target.is_relative_to(base):
         raise ValueError(f"upload name {name!r} escapes agent {agent_id} upload dir")
     return target
 
 
-def fetch_upload_b64(agent_id: int, name: str) -> tuple[str, str]:
+def fetch_upload_b64(
+    agent_id: int, name: str, *, client: Callable[[], UploadClient]
+) -> tuple[str, str]:
     """Fetch an uploaded image from the gateway over HTTP and return
     (mime_type, base64_ascii).
 
@@ -73,14 +88,9 @@ def fetch_upload_b64(agent_id: int, name: str) -> tuple[str, str]:
         raise ValueError(f"upload {name!r} is not a recognized image type")
     import httpx
 
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import get as http_get
-
-    access = gateway_access_from_settings()  # ambient: B2
-    url = f"{gateway_api_base(access.gateway_url).rstrip('/')}/api/agents/{agent_id}/uploads/{name}"
+    url = f"/api/agents/{agent_id}/uploads/{name}"
     try:
-        resp = http_get(url, headers=gateway_auth_headers(access), timeout=15.0)
+        resp = client().get(url, timeout=15.0)
         resp.raise_for_status()
     except httpx.HTTPError as exc:
         raise OSError(f"fetch upload {url!r} failed: {exc}") from exc

@@ -101,7 +101,9 @@ def request_for(pool: ConnectionPool, batch_id: str, *, local_machine: str) -> R
 
 
 def proof_for(request: ReceiveRequest) -> CopyProof:
-    path = source.agent_upload_dir(request.manifest.agent_id, create=False).resolve()
+    path = source.agent_upload_dir(
+        request.manifest.agent_id, create=False, home=Path.home()
+    ).resolve()
     return CopyProof(
         version=1,
         target=request.target,
@@ -386,7 +388,7 @@ def test_guarded_routes_reject_invalid_agent_paths_before_native_effects(
     assert client.get(path).status_code == 422
     assert client.get(path + "/objects/0").status_code == 422
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (0,)
-    assert not source.agent_upload_dir(invalid_agent, create=False).exists()
+    assert not source.agent_upload_dir(invalid_agent, create=False, home=Path.home()).exists()
 
 
 # meiva:note

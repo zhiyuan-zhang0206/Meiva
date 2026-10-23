@@ -21,6 +21,7 @@ from typing import Any, cast
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.native_process.ownership import OwnedProcess
+from base.native_process.process_control import ProcessControl
 from base.sessions.pty import closure
 
 # A crashed service's leftovers are already hung up; the grace only lets a job
@@ -103,7 +104,7 @@ def _has_live_process(target: closure.Target) -> bool:
 # ledger entry. The outcome also names recorded busy sessions whose shells the
 # crash already ended, so their owners can be notified without claiming that
 # unrecorded descendants disappeared.
-def sweep(path: Path) -> closure.Outcome:
+def sweep(path: Path, *, process_control: ProcessControl) -> closure.Outcome:
     recorded = read(path)
     targets = [target for target in recorded if _has_live_process(target)]
     outcome = closure.Outcome()
@@ -113,7 +114,12 @@ def sweep(path: Path) -> closure.Outcome:
             count=len(targets),
             names=sorted(target.name for target in targets),
         )
-        outcome = closure.close_sessions(targets, grace_s=SWEEP_HANGUP_WAIT_S, kill_s=SWEEP_KILL_S)
+        outcome = closure.close_sessions(
+            targets,
+            grace_s=SWEEP_HANGUP_WAIT_S,
+            kill_s=SWEEP_KILL_S,
+            process_control=process_control,
+        )
     write(path, (target for target in recorded if _alive(target.shell)))
     return _with_ended_busy(outcome, recorded)
 

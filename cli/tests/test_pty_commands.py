@@ -11,6 +11,7 @@ import redis
 
 from base.host.atomic_io import AtomicWriter
 from base.native_process.os_platform import LockTimeoutError
+from base.paths import meiva_home
 from base.sessions.pty import allocation_freeze
 from cli import main as cli_main
 
@@ -40,11 +41,11 @@ def test_operator_round_trip_needs_no_gateway_or_data_plane(
         cli_main.main(["pty", "freeze", "--holder", "operator-1818", "--reason", "offline cleanup"])
         == 0
     )
-    frozen = allocation_freeze.read()
+    frozen = allocation_freeze.read(home=meiva_home())
     assert frozen.generation is not None
     assert cli_main.main(["pty", "status"]) == 0
     assert cli_main.main(["pty", "resume", frozen.generation]) == 0
-    assert allocation_freeze.read().status == "inactive"
+    assert allocation_freeze.read(home=meiva_home()).status == "inactive"
     assert "status=frozen" in capsys.readouterr().out
 
 
@@ -52,17 +53,17 @@ def test_cli_refuses_stale_generation_and_preserves_current_owner(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert cli_main.main(["pty", "freeze", "--holder", "current", "--reason", "cleanup"]) == 0
-    current = allocation_freeze.read()
+    current = allocation_freeze.read(home=meiva_home())
 
     assert cli_main.main(["pty", "resume", "stale-generation"]) == 1
-    assert allocation_freeze.read() == current
+    assert allocation_freeze.read(home=meiva_home()) == current
     assert "does not own the freeze" in capsys.readouterr().err
 
 
 def test_cli_status_surfaces_corrupt_marker_as_fail_closed(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    path = allocation_freeze.state_path()
+    path = allocation_freeze.state_path(meiva_home())
     path.write_text("[]")
 
     assert cli_main.main(["pty", "status"]) == 1
@@ -75,7 +76,8 @@ def test_cli_resume_reports_allocation_lock_timeout(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def _locked(_generation: str, *, writer: AtomicWriter) -> bool:
+    def _locked(_generation: str, *, home: Path, writer: AtomicWriter) -> bool:
+        assert home == meiva_home()
         _ = writer
         raise LockTimeoutError("allocation lock remained held")
 

@@ -15,6 +15,8 @@ that wants to fetch an upload by its reference url).
 from __future__ import annotations
 
 import asyncio
+from functools import partial
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
@@ -99,8 +101,8 @@ async def upload_files(
             "this route saves silently; deliver a batch with POST /api/keyed/v1/agents/{id}/uploads",
         )
     batch = await read_upload_batch(files)
-    upload_dir_fn = (
-        getattr(request.app.state, "agent_upload_dir_resolver", None) or agent_upload_dir
+    upload_dir_fn = getattr(request.app.state, "agent_upload_dir_resolver", None) or partial(
+        agent_upload_dir, home=Path.home()
     )
     return await asyncio.to_thread(
         save_keyed_batch,
@@ -126,7 +128,9 @@ def serve_upload(agent_id: int, filename: str, request: Request) -> FileResponse
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise AgentNotFound(agent_id)
-    path_resolver = getattr(request.app.state, "upload_path_resolver", None) or resolve_upload_path
+    path_resolver = getattr(request.app.state, "upload_path_resolver", None) or partial(
+        resolve_upload_path, home=Path.home()
+    )
     try:
         path = path_resolver(agent_id, filename)
     except ValueError as e:

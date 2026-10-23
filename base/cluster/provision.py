@@ -23,6 +23,7 @@ from collections.abc import Collection, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
+from base.cluster.checkpoint_schema import CheckpointSchema, PostgresCheckpointSchema
 from base.cluster.derive import swap_db
 from base.log import logger
 
@@ -317,13 +318,11 @@ def _check_checkpoint_manifest_shape() -> list[int]:
     return declared_versions
 
 
-def _expected_checkpoint_schema_versions() -> frozenset[int]:
+def _expected_checkpoint_schema_versions(schema: CheckpointSchema) -> frozenset[int]:
     """The upstream versions explicitly approved by Meiva's checkpoint migration manifest."""
-    from langgraph.checkpoint.postgres import PostgresSaver
-
     declared_versions = _check_checkpoint_manifest_shape()
     approved_target = CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + len(declared_versions)
-    dependency_target = len(PostgresSaver.MIGRATIONS) - 1
+    dependency_target = len(schema.migrations) - 1
     if dependency_target != approved_target:
         raise CheckpointDependencyDriftError(
             "LangGraph checkpoint migrations changed without an Meiva migration: "
@@ -351,7 +350,7 @@ def assert_checkpoint_dependency_pinned(tracked_migrations: Collection[str]) -> 
                 f"checkpoint version {version} must name a git-tracked Meiva "
                 f"migration: name={name!r}, tracked={name in tracked_migrations}"
             )
-    _expected_checkpoint_schema_versions()
+    _expected_checkpoint_schema_versions(PostgresCheckpointSchema())
 
 
 def checkpoint_schema_versions(
@@ -377,7 +376,7 @@ def assert_checkpoint_schema_current(db_url: str, *, expected_data_dir: Path | N
     acquiring DDL capability.  Ahead is also refused: upstream gives no old-
     runtime/new-schema compatibility guarantee.
     """
-    expected = _expected_checkpoint_schema_versions()
+    expected = _expected_checkpoint_schema_versions(PostgresCheckpointSchema())
     actual = checkpoint_schema_versions(db_url, expected_data_dir=expected_data_dir)
     if actual != expected:
         found: frozenset[int] = frozenset() if actual is None else actual
@@ -393,6 +392,7 @@ def ensure_checkpoint_schema(
     identity: str,
     *,
     base_admin_url: str,
+    schema: CheckpointSchema,
     database_created: bool = False,
     resume_partial: bool = False,
     expected_data_dir: Path | None = None,
@@ -418,14 +418,12 @@ def ensure_checkpoint_schema(
     off and never repair, resume, or drop a partial/older/newer schema. Gaps and
     unknown versions are never resumable.
     """
-    from langgraph.checkpoint.postgres import PostgresSaver
-
-    from base.cluster.dataplane.pg_admin import owner_conninfo, owner_session
+    from base.cluster.dataplane.pg_admin import owner_conninfo
 
     # Act as the schema owner and retain the validated native connection
     # throughout setup; PostgresSaver must not open an unchecked second dial.
     owner_dsn = owner_conninfo(base_admin_url, database=identity, owner=identity)
-    expected = _expected_checkpoint_schema_versions()
+    expected = _expected_checkpoint_schema_versions(schema)
     actual = checkpoint_schema_versions(owner_dsn, expected_data_dir=expected_data_dir)
     if actual == expected:
         return
@@ -435,18 +433,9 @@ def ensure_checkpoint_schema(
         assert_checkpoint_schema_current(owner_dsn, expected_data_dir=expected_data_dir)
         return
     try:
-        from psycopg.rows import dict_row
-
-        with owner_session(
-            base_admin_url,
-            database=identity,
-            owner=identity,
-            expected_data_dir=expected_data_dir,
-            autocommit=True,
-            prepare_threshold=0,
-            row_factory=dict_row,
-        ) as conn:
-            PostgresSaver(conn).setup()
+        schema.setup(
+            base_admin_url=base_admin_url, identity=identity, expected_data_dir=expected_data_dir
+        )
         assert_checkpoint_schema_current(owner_dsn, expected_data_dir=expected_data_dir)
     except Exception:
         if database_created:

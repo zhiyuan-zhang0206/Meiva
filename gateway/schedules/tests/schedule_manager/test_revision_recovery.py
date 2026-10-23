@@ -8,6 +8,7 @@ from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import session_name
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
+from base.paths.tests.homes import unit_home as unit_home
 from base.sessions.protocol import SessionBackend
 from base.sessions.pty.client import SessionInfo
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -63,15 +64,15 @@ class Backend(SessionBackend):
 
 @pytest.fixture
 def backend(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, serving_root: start_serving.RootBirth
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    serving_root: start_serving.RootBirth,
+    unit_home: Path,
 ) -> Backend:
-    from base.sessions.pty import allocation_freeze
-
     backend = Backend()
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation, runtime=serving_root.runtime)
-    monkeypatch.setattr(allocation_freeze, "current_generation", lambda: None)
 
     def infos(prefix: str = "", *, include_initial_command: bool = False) -> list[SessionInfo]:
         return [
