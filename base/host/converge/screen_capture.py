@@ -21,7 +21,6 @@ from enum import StrEnum
 from pathlib import Path
 
 from base.host.converge import _status_file
-from base.paths import meiva_home
 
 _STATUS_FILE = "screen_capture_status.json"
 
@@ -76,21 +75,23 @@ class ScreenCaptureStatus:
         return _status_file.from_file(path, cls.from_json)
 
 
-def status_file_path() -> Path:
-    """Path to the screen capture status file under ``$MEIVA_HOME``."""
-    return meiva_home() / _STATUS_FILE
+# meiva:note
+# Path to the screen capture status file under `home`.
+def status_file_path(home: Path) -> Path:
+    return home / _STATUS_FILE
 
 
-def write_status(status: ScreenCaptureStatus) -> None:
-    """Write the screen capture status to the well-known file under ``$MEIVA_HOME``."""
-    _status_file.write_status(status_file_path(), status.to_json())
+# meiva:note
+# Write the screen capture status to the well-known file under `home`.
+def write_status(home: Path, status: ScreenCaptureStatus) -> None:
+    _status_file.write_status(status_file_path(home), status.to_json())
 
 
-def read_status() -> ScreenCaptureStatus | None:
+def read_status(home: Path) -> ScreenCaptureStatus | None:
     """Read the current screen capture status from disk, or None if absent."""
-    return ScreenCaptureStatus.from_file(status_file_path())
+    return ScreenCaptureStatus.from_file(status_file_path(home))
 
 
-def clear_status() -> None:
+def clear_status(home: Path) -> None:
     """Remove the status file (e.g. after user has been notified)."""
-    status_file_path().unlink(missing_ok=True)
+    status_file_path(home).unlink(missing_ok=True)

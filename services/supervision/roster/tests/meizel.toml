@@ -14,7 +14,6 @@
 "test_service_graceful_stop.py#monkeypatch.setattr base.sessions.posixproc.new_session" = 1
 "test_spec_roster.py#monkeypatch.setattr base.config.settings.services.im_bridge_enabled" = 1
 "test_spec_roster.py#monkeypatch.setattr base.host.system.probes.browser_incapability" = 1
-"test_spec_roster.py#monkeypatch.setattr services.supervision.healthchecks.lgtm.is_lgtm_host" = 2
 "test_spec_roster.py#monkeypatch.setattr services.supervision.roster.healthz.probe_daemon" = 1
 "test_spec_roster.py#monkeypatch.setattr services.supervision.roster.spec.browser_incapability" = 1
 "test_spec_roster.py#monkeypatch.setattr services.supervision.roster.spec.gateway_observability_home" = 4

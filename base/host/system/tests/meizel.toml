@@ -23,7 +23,6 @@ exports = ["fake_commands.py", "fake_crontab.py"]
 "test_cron.py#monkeypatch.setenv os.environ.XPC_SERVICE_NAME" = 4
 "test_job_readers.py#monkeypatch.setenv os.environ.HOME" = 1
 "test_logs_job.py#monkeypatch.setenv os.environ.HOME" = 1
-"test_macos_firewall.py#monkeypatch.setenv os.environ.HOME" = 1
 "test_packages_job.py#monkeypatch.setenv os.environ.HOME" = 1
 "test_pr_flow_job.py#monkeypatch.setenv os.environ.HOME" = 1
 "test_probes.py#monkeypatch.delenv os.environ.DISPLAY" = 2

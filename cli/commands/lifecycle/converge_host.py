@@ -242,16 +242,16 @@ def ensure_screen_capture(ctx: ConvergeCtx) -> None:
     complaint here would be noise rather than news.
     """
     if not _helper_present(ctx):
-        clear_status()
+        clear_status(ctx.meiva_home)
         return
 
     status = ctx.require_helper()().check_screen_capture()
     if status.available:
         # Drop any stale "unavailable" file so a fixed host does not fire a
         # false notification on the next agent startup.
-        clear_status()
+        clear_status(ctx.meiva_home)
         return
-    write_status(status)
+    write_status(ctx.meiva_home, status)
     print(f"  ! {status.headline}: {status.diagnostic}", file=sys.stderr)
 
 
@@ -264,14 +264,14 @@ def ensure_accessibility(ctx: ConvergeCtx) -> None:
     been brought up and only where it can exist.
     """
     if not _helper_present(ctx):
-        clear_accessibility_status()
+        clear_accessibility_status(ctx.meiva_home)
         return
 
     status = ctx.require_helper()().check_accessibility()
     if status.available:
-        clear_accessibility_status()
+        clear_accessibility_status(ctx.meiva_home)
         return
-    write_accessibility_status(status)
+    write_accessibility_status(ctx.meiva_home, status)
     print(f"  ! {status.headline}: {status.diagnostic}", file=sys.stderr)
 
 

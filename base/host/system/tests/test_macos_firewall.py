@@ -295,7 +295,7 @@ def test_manifest_paths_resolves_globs_and_drops_absent(
         monkeypatch,
         (fw.ManifestEntry("pg", (f"{tmp_path}/pg/*/bin/postgres",), "Accept Postgres clients"),),
     )
-    got = fw.manifest_paths(machine_name="test-machine", host=fake_host())
+    got = fw.manifest_paths(machine_name="test-machine", host=fake_host(), user_home=tmp_path)
     assert [p.name for p in got] == ["postgres", "postgres"]
 
 
@@ -311,8 +311,10 @@ def test_manifest_paths_filters_machine_scoped_entries(
         monkeypatch,
         (fw.ManifestEntry("app", (str(app),), "Accept app clients", machine="machine-1"),),
     )
-    assert fw.manifest_paths(machine_name="otherhost", host=fake_host()) == ()
-    assert fw.manifest_paths(machine_name="machine-1", host=fake_host()) == (app,)
+    assert fw.manifest_paths(machine_name="otherhost", host=fake_host(), user_home=tmp_path) == ()
+    assert fw.manifest_paths(machine_name="machine-1", host=fake_host(), user_home=tmp_path) == (
+        app,
+    )
 
 
 def test_manifest_paths_skips_config_shims(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -325,7 +327,9 @@ def test_manifest_paths_skips_config_shims(monkeypatch: pytest.MonkeyPatch, tmp_
         monkeypatch,
         (fw.ManifestEntry("py", (f"{tmp_path}/bin/python3.*",), "Run Python listeners"),),
     )
-    assert fw.manifest_paths(machine_name="test-machine", host=fake_host()) == (real,)
+    assert fw.manifest_paths(machine_name="test-machine", host=fake_host(), user_home=tmp_path) == (
+        real,
+    )
 
 
 def test_observability_manifest_entries_resolve_installed_globs(
@@ -348,9 +352,10 @@ def test_observability_manifest_entries_resolve_installed_globs(
     ids = {"grafana", "loki", "otel collector"}
     entries = tuple(entry for entry in fw.FIREWALL_MANIFEST if entry.id in ids)
     assert {entry.id for entry in entries} == ids
-    monkeypatch.setenv("HOME", str(tmp_path))
     _stub_manifest(monkeypatch, entries)
-    assert set(paths).issubset(fw.manifest_paths(machine_name="test-machine", host=fake_host()))
+    assert set(paths).issubset(
+        fw.manifest_paths(machine_name="test-machine", host=fake_host(), user_home=tmp_path)
+    )
 
 
 def test_stale_manifest_rules_only_touches_managed_absent_paths(
@@ -373,7 +378,9 @@ def test_stale_manifest_rules_only_touches_managed_absent_paths(
             ),
         ),
     )
-    assert fw.stale_manifest_rules(rules) == (Path("/opt/homebrew/Cellar/node/25.6.1/bin/node"),)
+    assert fw.stale_manifest_rules(rules, user_home=tmp_path) == (
+        Path("/opt/homebrew/Cellar/node/25.6.1/bin/node"),
+    )
 
 
 def test_stale_manifest_rules_covers_legacy_family(
@@ -384,7 +391,7 @@ def test_stale_manifest_rules_covers_legacy_family(
     stale_path = tmp_path / "retired-android-sdk/platform-tools/adb"
     monkeypatch.setattr(fw, "FIREWALL_LEGACY_FAMILY", (str(stale_path),))
     rules = {str(stale_path): True}
-    assert fw.stale_manifest_rules(rules) == (stale_path,)
+    assert fw.stale_manifest_rules(rules, user_home=tmp_path) == (stale_path,)
 
 
 def test_render_manifest_status_shows_entry_patterns_paths_and_states(
@@ -406,7 +413,10 @@ def test_render_manifest_status_shows_entry_patterns_paths_and_states(
         ),
     )
     rendered = fw.render_manifest_status(
-        {str(allow): True, str(block): False}, machine_name="test-machine", host=fake_host()
+        {str(allow): True, str(block): False},
+        machine_name="test-machine",
+        host=fake_host(),
+        user_home=tmp_path,
     )
     assert "listeners — Accept inbound test traffic" in rendered
     assert f"pattern: {allow}" in rendered
@@ -587,7 +597,9 @@ def test_repair_retries_verification_until_the_rule_appears(tmp_path: Path) -> N
     assert daemon.reads >= 3  # the retry loop is what made the repair succeed
 
 
-def test_prune_stale_rules_removes_managed_orphans(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prune_stale_rules_removes_managed_orphans(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         fw,
         "FIREWALL_MANIFEST",
@@ -600,7 +612,7 @@ def test_prune_stale_rules_removes_managed_orphans(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(fw, "FIREWALL_LEGACY_FAMILY", ())
     stale = "/opt/homebrew/Cellar/node/25.6.1/bin/node"
     daemon = _FakeAlf({stale: True})
-    repair = fw.prune_stale_rules({stale: True}, host=_alf_daemon(daemon))
+    repair = fw.prune_stale_rules({stale: True}, host=_alf_daemon(daemon), user_home=tmp_path)
     assert repair.removed == (Path(stale),)
     assert daemon.mutations == [[fw.SOCKETFILTERFW, "--remove", stale]]
     assert daemon.state == {}
