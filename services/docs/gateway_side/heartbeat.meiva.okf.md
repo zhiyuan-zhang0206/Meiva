@@ -89,3 +89,6 @@ The work and logging database factory calls `db_config_from_boot` at each
 handle creation and retains the entry's gate and lazy machine host reader.
 Schema checks, health-before-pool ordering and shutdown stay at their original
 boundaries. Business-specific configuration slices keep their existing readers.
+
+Remote station configuration, authenticated outcomes and fail-open policy are
+owned by [[services/wake/heartbeat/docs/station-probe.meiva.okf.md|Station probe]].

@@ -31,7 +31,6 @@ caught and logged; main() never raises.
 
 from __future__ import annotations
 
-import logging
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -41,16 +40,20 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.db_authority.api import read_telemetry_token
+from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
+from base.telemetry.station_endpoint import (
+    StationEndpointConfig,
+    resolve_station_target,
+    validated_observability_base,
+)
 from base.telemetry.station_endpoint import StationTarget as _StationTarget
-from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
-
-_log = logging.getLogger("services.wake.heartbeat.station_probe")
 
 # One OTLP round-trip budget. The station is a private-network peer; 5s
 # covers a slow-but-healthy host while a genuinely offline host still
@@ -59,30 +62,15 @@ _log = logging.getLogger("services.wake.heartbeat.station_probe")
 _PROBE_TIMEOUT_S = 5.0
 
 
-def _configured_observability_base() -> str:
-    """The validated MEIVA_OBSERVABILITY_URL base, or "" when unset/malformed.
-
-    The same validation the collector fan-out uses
-    (base.telemetry.station_endpoint) — the two consumer paths can never
-    disagree about where the station is.
-    """
-    return validated_observability_base(settings.observability.observability_url)
-
-
-def resolve_target(*, database: Callable[[], Database]) -> _StationTarget | None:
-    """The station's dial target from the reachability contract.
-
-    The advertised machine_units url when a station unit has registered;
-    otherwise the configured MEIVA_OBSERVABILITY_URL base + OTLP port (with a
-    loud warning — the operator configured a remote observatory but no
-    station unit has advertised itself). None when no remote observatory is
-    configured at all.
-    """
-    base = _configured_observability_base()
+# meiva:link services/wake/heartbeat/docs/station-probe.meiva.okf.md
+def resolve_target(
+    *, database: Callable[[], Database], config: StationEndpointConfig
+) -> _StationTarget | None:
+    base = validated_observability_base(config.observability_url)
     if not base:
         return None
     try:
-        target = resolve_station_target(database(), base)
+        target = resolve_station_target(database(), base, otlp_port=config.otlp_port)
     except Exception:
         logger.bind(_no_emitter=True, component="station-healthcheck").exception(
             "station probe: cannot read the advertised station address — skipping this round (fail-open)"
@@ -101,44 +89,33 @@ def resolve_target(*, database: Callable[[], Database]) -> _StationTarget | None
     return target
 
 
-def _station_answers(url: str) -> bool:
-    """One bearer-authenticated OTLP round-trip; any 2xx = the ingress serves.
-
-    The bearer is the cluster's telemetry token (the station accepts the same token from its
-    capability), read from the private file the gateway home's start publishes: this process
-    never holds the human secret it is derived from."""
-    from base.host.db_authority.api import read_telemetry_token
-    from base.paths import meiva_home
-
-    token = read_telemetry_token(meiva_home())
+# meiva:note
+# Request targets come from the shared station endpoint resolver, including the
+# station's own ingress advertisement.
+# meiva:link services/wake/heartbeat/docs/station-probe.meiva.okf.md
+def station_answers(url: str, *, token: str | None, open_url: UrlOpener) -> bool | None:
     if token is None:
-        # A remote observatory with no published telemetry token (an open cluster, or a
-        # start that has not run yet) cannot authenticate a probe (and the collector relay
-        # already fails closed at converge). Fail open: warn, never block.
         logger.bind(_no_emitter=True, component="station-healthcheck").warning(
             "station probe: no published telemetry token — cannot authenticate the probe of {}; "
             "skipping this round (fail-open)",
             url,
         )
-        return True
+        return None
 
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    req = urllib.request.Request(  # noqa: S310 — advertised private-network endpoint, deliberate
+    req = urllib.request.Request(  # noqa: S310
         f"{url.rstrip('/')}/v1/traces",
         method="POST",
         data=b'{"resourceSpans":[]}',
         headers=headers,
     )
     try:
-        with urllib.request.urlopen(req, timeout=_PROBE_TIMEOUT_S):  # noqa: S310 — same probe
+        with open_url(req, _PROBE_TIMEOUT_S):
             return True
     except urllib.error.HTTPError as exc:
-        # Any HTTP answer proves the listener is up, but a non-2xx from the
-        # OTLP receiver means the ingestion path is not serving (401 auth,
-        # 415 body, 5xx) — not alive.
         logger.bind(_no_emitter=True, component="station-healthcheck").warning(
             "station probe: {} answered HTTP {} — ingress not serving",
             url,
@@ -152,10 +129,7 @@ def _station_answers(url: str) -> bool:
         return False
 
 
-station_answers = _station_answers
-
-
-def main(*, probe: Callable[[str], bool] = station_answers) -> None:
+def main(*, open_url: UrlOpener) -> None:
     image = LoadedCommit.capture()
     machine_config = ConfigBoot()
     machine_config.boot()
@@ -177,11 +151,15 @@ def main(*, probe: Callable[[str], bool] = station_answers) -> None:
         machine_reader=machine.name,
         image=image,
     )
-    target = resolve_target(database=database)
+    config = StationEndpointConfig(
+        observability_url=settings.observability.observability_url,
+        otlp_port=settings.observability.observability_otlp_port,
+    )
+    target = resolve_target(database=database, config=config)
     if target is None:
         return  # no remote observatory configured — nothing to probe here
-    ok = probe(target.url)
-    if not ok:
+    ok = station_answers(target.url, token=read_telemetry_token(process_home), open_url=open_url)
+    if ok is False:
         logger.bind(_no_emitter=True, component="station-healthcheck").warning(
             "station probe: {} did not answer a bearer OTLP probe — "
             "fail-open: local business is unaffected",
@@ -193,4 +171,4 @@ if __name__ == "__main__":
     from base.log import prepare_process_logging
 
     prepare_process_logging()
-    main()
+    main(open_url=SYSTEM_URL_OPENER)

@@ -15,15 +15,18 @@ from base import telemetry
 from base.agents.context.clients import ClientSet
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.daemon.health import DaemonProbe
+from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.db import Database
 from base.host import proc
+from base.host.db_authority.api import publish_telemetry_token, telemetry_token
+from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.ownership import OwnedProcess
 from base.telemetry import process_logging
 from base.telemetry.delivery.pipeline import EventPipeline
+from base.telemetry.station_endpoint import StationEndpointConfig
 from services.supervision.meiva_root.failure_state import UnitFailureFacts
 from services.supervision.meiva_root.health import HealthMonitor, ProbeRunner
 from services.supervision.meiva_root.probes import ProbeRegistry
@@ -488,16 +491,62 @@ def test_helper_diagnostics_are_macos_only(
     assert names == {"venv", "brew-pin", "permissions-helper"}
 
 
-def test_station_no_credential_is_unknown_and_does_not_send(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    answers = Mock(return_value=True)
-    probe = probes.StationProbe(database=_unused_database, answers=answers)
-    monkeypatch.setattr(
-        probes, "settings", SimpleNamespace(data_plane=SimpleNamespace(cluster_secret=""))
+def test_station_no_credential_is_unknown_and_does_not_send(unit_home: Path) -> None:
+    publish_telemetry_token(unit_home, "other-home-token")
+    opener = FakeUrlOpener()
+    create = Mock(side_effect=AssertionError("missing credentials must not open a database"))
+    probe = probes.StationProbe(
+        database=create,
+        config=StationEndpointConfig("http://station.invalid", 4325),
+        home=unit_home / "unpublished-home",
+        open_url=opener,
     )
     assert probe.probe().verdict.value == "unavailable"
-    answers.assert_not_called()
+    assert opener.calls == []
+    create.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        (Answer(status=202), ProbeVerdict.ALIVE),
+        (Answer(status=401), ProbeVerdict.DOWN),
+        (OSError("offline"), ProbeVerdict.DOWN),
+    ],
+)
+def test_station_observes_the_authenticated_ingress(
+    unit_home: Path, database: Database, answer: Answer | OSError, expected: ProbeVerdict
+) -> None:
+    publish_telemetry_token(unit_home, "station-test-token")
+    opener = FakeUrlOpener()
+    opener.on("http://station.invalid:4325/v1/traces", answer)
+    probe = probes.StationProbe(
+        database=lambda: database,
+        config=StationEndpointConfig("http://station.invalid", 4325),
+        home=unit_home,
+        open_url=opener,
+    )
+    assert probe.probe().verdict is expected
+    assert len(opener.calls) == 1
+    assert (
+        opener.calls[0].headers["Authorization"]
+        == f"Bearer {telemetry_token('station-test-token')}"
+    )
+
+
+def test_station_resolution_failure_is_unavailable_and_does_not_send(unit_home: Path) -> None:
+    publish_telemetry_token(unit_home, "station-test-token")
+    create = Mock(side_effect=RuntimeError("station registry unavailable"))
+    opener = FakeUrlOpener()
+    probe = probes.StationProbe(
+        database=create,
+        config=StationEndpointConfig("http://station.invalid", 4325),
+        home=unit_home,
+        open_url=opener,
+    )
+    assert probe.probe().verdict.value == "unavailable"
+    create.assert_called_once_with()
+    assert opener.calls == []
 
 
 def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(

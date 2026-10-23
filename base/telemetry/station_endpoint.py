@@ -8,8 +8,13 @@ from urllib.parse import urlparse, urlsplit
 
 import psycopg
 
-from base.config import settings
 from base.db import Database
+
+
+@dataclass(frozen=True)
+class StationEndpointConfig:
+    observability_url: str
+    otlp_port: int
 
 
 @dataclass(frozen=True)
@@ -38,7 +43,7 @@ def advertised_station_unit(conn: psycopg.Connection, base: str) -> tuple[str, s
     return matches[0] if matches else None
 
 
-def resolve_station_target(db: Database, base: str) -> StationTarget:
+def resolve_station_target(db: Database, base: str, *, otlp_port: int) -> StationTarget:
     """Use the station's own port, never the consuming unit's receiver port.
 
     Database discovery errors propagate: rendering an invented target during
@@ -49,9 +54,7 @@ def resolve_station_target(db: Database, base: str) -> StationTarget:
     if advertised is not None:
         name, url = advertised
         return StationTarget(url=url, advertised=True, name=name)
-    return StationTarget(
-        url=f"{base}:{settings.observability.observability_otlp_port}", advertised=False
-    )
+    return StationTarget(url=f"{base}:{otlp_port}", advertised=False)
 
 
 def validated_observability_base(observability_url: str) -> str:
