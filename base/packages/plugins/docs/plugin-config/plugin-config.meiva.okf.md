@@ -91,3 +91,9 @@ The complete per-agent overlay surface with a value universe is range-checked: m
 A launched service validates its birth snapshot: a present packet must name this plugin and contain its complete declared image; malformed packets never fall back to disk or defaults, and an absent carrier is distinct from an invalid one.
 
 View contracts: [[config-view.meiva.okf.md]]
+
+Gateway overlay validation tests boot the actual gateway profile in fresh
+processes, where the agent domain is absent. Framework-scope overlay tests
+attach independent configuration read owners to the delivered environment;
+only the explicitly supplied setter changes, and plugin configuration remains
+unchanged. These attachments do not rerun process environment delivery.
