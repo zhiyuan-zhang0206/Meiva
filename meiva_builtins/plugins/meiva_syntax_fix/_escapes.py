@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import tokenize
+from collections.abc import Callable, Iterable
 
 from ._punct import line_starts, tokenize_fix_safe
 
@@ -133,20 +134,24 @@ def _collect_escape_edits(
     return edits
 
 
-def fix_invalid_escapes(code: str) -> tuple[str, int]:
-    """Double-escape every invalid-escape `\\X` inside non-raw string literals
-    (regular, byte, and f-strings). Returns (fixed_code, num_replacements).
-
-    Tokenize-based: walks STRING + FSTRING_MIDDLE tokens with `(row, col)`
-    start positions and applies right-to-left absolute-offset edits so
-    positions stay valid throughout. No `untokenize` — original whitespace /
-    comments preserved verbatim.
-
-    Returns the original code unchanged when tokenization fails (broken
-    syntax, or inputs that crash the C tokenizer -- see tokenize_fix_safe)
-    -- that's compile()'s job to surface downstream.
-    """
-    tokens = tokenize_fix_safe(code)
+# meiva:note
+# Double-escape every invalid-escape `\\X` inside non-raw string literals (regular, byte, and
+# f-strings). Returns (fixed_code, num_replacements).
+#
+# Tokenize-based: walks STRING + FSTRING_MIDDLE tokens with `(row, col)` start positions and
+# applies right-to-left absolute-offset edits so positions stay valid throughout. No `untokenize`
+# — original whitespace / comments preserved verbatim.
+#
+# Returns the original code unchanged when tokenization fails (broken syntax, or inputs that
+# crash the C tokenizer -- see tokenize_fix_safe) -- that's compile()'s job to surface downstream.
+def fix_invalid_escapes(
+    code: str,
+    *,
+    tokenize_lines: Callable[
+        [Callable[[], str]], Iterable[tokenize.TokenInfo]
+    ] = tokenize.generate_tokens,
+) -> tuple[str, int]:
+    tokens = tokenize_fix_safe(code, tokenize_lines=tokenize_lines)
     if tokens is None:
         return code, 0
 

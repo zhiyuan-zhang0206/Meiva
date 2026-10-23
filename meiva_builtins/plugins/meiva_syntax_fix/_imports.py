@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 
 from loguru import logger
 
@@ -263,14 +264,22 @@ def _f821_names(diagnostics: list[dict]) -> set[str]:
     return names
 
 
-def ruff_undefined_names(code: str) -> set[str]:
-    """Run `ruff check --select F821` via stdin; return the undefined names.
-
-    Returns an empty set when ruff is unavailable, crashes, or the source does
-    not parse (syntax errors surface downstream via compile()).
-    """
+# meiva:note
+# Run `ruff check --select F821` via stdin; return the undefined names.
+#
+# Returns an empty set when ruff is unavailable, crashes, or the source does not parse
+# (syntax errors surface downstream via compile()).
+# Same contract as _ruff_fix / _ruff_format (issue #159): a missing ruff is logged per
+# skipped stage, a timeout / OS error at warning — a detection stage that silently returns
+# "no undefined names" would leave missing imports un-repaired with zero signal.
+# ruff exits 1 when diagnostics were found; >1 means it crashed.
+def ruff_undefined_names(
+    code: str,
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> set[str]:
     try:
-        proc = subprocess.run(  # noqa: S603
+        proc = run(
             [
                 ruff_executable(),
                 "check",
@@ -290,13 +299,8 @@ def ruff_undefined_names(code: str) -> set[str]:
             check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError, UnicodeError) as exc:
-        # Same contract as _ruff_fix / _ruff_format (issue #159): a missing
-        # ruff is logged per skipped stage, a timeout / OS error at warning —
-        # a detection stage that silently returns "no undefined names" would
-        # leave missing imports un-repaired with zero signal.
         log_ruff_give_up("check --select F821", code, exc)
         return set()
-    # ruff exits 1 when diagnostics were found; >1 means it crashed.
     if proc.returncode > 1 or not proc.stdout.strip():
         return set()
     try:

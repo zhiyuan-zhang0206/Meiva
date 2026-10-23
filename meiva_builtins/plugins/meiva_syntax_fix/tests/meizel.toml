@@ -17,7 +17,3 @@
 "test_syntax_fix_part2.py#monkeypatch.setattr meiva_builtins.plugins.meiva_syntax_fix.agent_runtime.apply_fix_pipeline" = 1
 "test_syntax_fix_part2.py#monkeypatch.setattr meiva_builtins.plugins.meiva_syntax_fix.agent_runtime.emit_syntax_fix_event" = 3
 "test_syntax_fix_part2.py#patch.object meiva_builtins.plugins.meiva_syntax_fix.agent_runtime.llm_repair_syntax" = 1
-
-[debt.stdlib-patch]
-"test_syntax_fix.py#monkeypatch.setattr tokenize.generate_tokens" = 1
-"test_syntax_fix.py#patch subprocess.run" = 20

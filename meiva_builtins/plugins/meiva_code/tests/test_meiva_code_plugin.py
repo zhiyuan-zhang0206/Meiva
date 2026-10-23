@@ -102,8 +102,8 @@ def get_injected_context_notes(state_update: dict[str, object]) -> list[dict[str
 
 def test_get_cwd_returns_state_value(tmp_path: Path):
     """get_cwd reads from meiva.state.meiva_code.cwd, returns Path."""
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         result = meiva.cwd.get()
         assert result == Path(str(tmp_path))
@@ -128,8 +128,8 @@ def test_get_cwd_after_set_cwd_reads_new_value_without_changing_process_cwd(tmp_
     p1.mkdir()
     p2.mkdir()
 
-    meiva.state = make_state_with_cwd(str(p1))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(p1)))
+    process_context.set_state_update({})
     process_cwd = Path.cwd()
     try:
         meiva.cwd.set(p2)
@@ -168,8 +168,8 @@ def test_default_cwd_home_without_bootstrap(monkeypatch: pytest.MonkeyPatch):
 
 def test_set_cwd_writes_state_update(tmp_path: Path):
     """set_cwd writes new path into state_update["meiva_code__cwd"]."""
-    meiva.state = make_state_with_cwd(str(Path.home()))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(Path.home())))
+    process_context.set_state_update({})
     try:
         meiva.cwd.set(tmp_path)
         assert meiva.state_update["meiva_code__cwd"] == str(tmp_path.resolve())
@@ -180,8 +180,8 @@ def test_set_cwd_writes_state_update(tmp_path: Path):
 def test_set_cwd_nonexistent_raises(tmp_path: Path):
     """path does not exist → FileNotFoundError, state_update unchanged."""
     fake = tmp_path / "no-such-dir"
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         with pytest.raises(FileNotFoundError):
             meiva.cwd.set(fake)
@@ -194,8 +194,8 @@ def test_set_cwd_not_directory_raises(tmp_path: Path):
     """path exists but is not directory → NotADirectoryError."""
     f = tmp_path / "file.txt"
     f.write_text("")
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         with pytest.raises(NotADirectoryError):
             meiva.cwd.set(f)
@@ -228,8 +228,8 @@ def test_read_wrap_injects_agents_md(tmp_path: Path):
     target = repo / "foo.py"
     target.write_text("# code")
 
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -257,8 +257,8 @@ def test_read_wrap_injects_agents_and_claude(tmp_path: Path):
     (repo / "CLAUDE.md").write_text("CLAUDE CONVENTIONS")
     (repo / "foo.py").write_text("# code")
 
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -287,8 +287,8 @@ def test_read_wrap_no_emoji_in_marker(tmp_path: Path):
     (repo / "AGENTS.md").write_text("X")
     (repo / "foo.py").write_text("# code")
 
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -309,8 +309,8 @@ def test_read_wrap_dedup_via_injected_paths(tmp_path: Path):
     agents_md.write_text("PROJECT")
     (repo / "foo.py").write_text("")
 
-    meiva.state = make_state_with_cwd(str(repo), injected={str(agents_md.resolve())})
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo), injected={str(agents_md.resolve())}))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -357,8 +357,8 @@ def test_read_wrap_forwards_line_range_in_turn(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "f.txt").write_text("one\ntwo\nthree\nfour\nfive\n")
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -385,8 +385,8 @@ def test_read_wrap_target_is_agents_md_marks_but_not_prints(tmp_path: Path):
     agents_md = repo / "AGENTS.md"
     agents_md.write_text("PROJECT")
 
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -412,8 +412,8 @@ def test_read_wrap_target_is_claude_md_marks_but_not_prints(tmp_path: Path):
     claude_md = repo / "CLAUDE.md"
     claude_md.write_text("CLAUDE PROJECT")
 
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -440,8 +440,8 @@ def test_read_wrap_target_agents_md_via_symlink_still_primary(tmp_path: Path):
     link = repo / "agents-link.md"
     link.symlink_to(agents_md)
 
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -467,8 +467,8 @@ def test_read_wrap_target_agents_md_then_sibling_no_reinject(tmp_path: Path):
     agents_md.write_text("PROJECT")
     (repo / "foo.py").write_text("# code")
 
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -498,13 +498,15 @@ def test_read_wrap_compact_resets_injected_paths(tmp_path: Path):
     (repo / "foo.py").write_text("")
 
     # previous turn already injected (last_seen_compact=0); but compact has run once → now version=1
-    meiva.state = make_state_with_cwd(
-        str(repo),
-        injected={str(agents_md.resolve())},
-        last_seen_compact=0,
-        compact_version=1,
+    process_context.set_state(
+        make_state_with_cwd(
+            str(repo),
+            injected={str(agents_md.resolve())},
+            last_seen_compact=0,
+            compact_version=1,
+        )
     )
-    meiva.state_update = {}
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -528,13 +530,15 @@ def test_read_wrap_compact_not_advanced_keeps_dedup(tmp_path: Path):
     agents_md.write_text("PROJECT")
     (repo / "foo.py").write_text("")
 
-    meiva.state = make_state_with_cwd(
-        str(repo),
-        injected={str(agents_md.resolve())},
-        last_seen_compact=1,
-        compact_version=1,
+    process_context.set_state(
+        make_state_with_cwd(
+            str(repo),
+            injected={str(agents_md.resolve())},
+            last_seen_compact=1,
+            compact_version=1,
+        )
     )
-    meiva.state_update = {}
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -564,8 +568,8 @@ def test_read_wrap_dedup_within_same_turn(tmp_path: Path):
     (repo / "foo.py").write_text("")
     (repo / "bar.py").write_text("")
 
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -589,8 +593,8 @@ def test_read_wrap_resolves_relative_to_cwd(tmp_path: Path):
     (repo / "foo.py").write_text("# code")
 
     # system cwd unchanged, plugin cwd set to repo
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -612,8 +616,8 @@ def test_read_wrap_no_agents_md_no_op(tmp_path: Path):
     target = isolated / "foo.py"
     target.write_text("# code")
 
-    meiva.state = make_state_with_cwd(str(isolated))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(isolated)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -666,8 +670,8 @@ def test_read_wrap_target_missing_still_injects(tmp_path: Path):
     (repo / "AGENTS.md").write_text("X")
     # don't create foo.py
 
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -740,8 +744,8 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(tmp_path: Path, mo
     pin_agent(123)
     overflow = workspace_dir(123) / ".exec_output"
 
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()

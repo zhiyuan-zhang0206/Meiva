@@ -38,8 +38,6 @@
 "test_meiva_memory_recall_hook.py#monkeypatch.setattr base.config.settings.agent.memory_recall_deadline_seconds" = 1
 "test_meiva_memory_recall_hook.py#monkeypatch.setattr base.config.settings.agent.passive_memory_recall_enabled" = 3
 "test_memory.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
-"test_memory_write_wraps.py#assignment meiva.state" = 1
-"test_memory_write_wraps.py#assignment meiva.state_update" = 2
 "test_memory_write_wraps.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 
 [debt.restricted-python]

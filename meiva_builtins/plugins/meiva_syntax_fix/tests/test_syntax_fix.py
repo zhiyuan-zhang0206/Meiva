@@ -2,7 +2,9 @@ import pathlib
 import shutil
 import subprocess
 import sys
-from unittest.mock import MagicMock, patch
+import tokenize
+from collections.abc import Callable, Iterable
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -148,22 +150,17 @@ class TestTranslateOutsideStringsCrashGuard:
         assert code == self.CRASH_INPUT
         assert n == 0
 
-    def test_memoryerror_from_tokenizer_degrades_to_noop(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import tokenize
-
-        def boom(_readline: object) -> object:
+    def test_memoryerror_from_tokenizer_degrades_to_noop(self) -> None:
+        def boom(_readline: Callable[[], str]) -> Iterable[tokenize.TokenInfo]:
             raise MemoryError("simulated C-tokenizer MemoryError")
 
-        monkeypatch.setattr(tokenize, "generate_tokens", boom)
-        code, n = translate_outside_strings(self.CRASH_INPUT, PUNCT_MAP)
+        code, n = translate_outside_strings(self.CRASH_INPUT, PUNCT_MAP, tokenize_lines=boom)
         assert code == self.CRASH_INPUT
         assert n == 0
 
         from meiva_builtins.plugins.meiva_syntax_fix._escapes import fix_invalid_escapes
 
-        esc, esc_n = fix_invalid_escapes(self.CRASH_INPUT)
+        esc, esc_n = fix_invalid_escapes(self.CRASH_INPUT, tokenize_lines=boom)
         assert esc == self.CRASH_INPUT
         assert esc_n == 0
 
@@ -190,17 +187,18 @@ class TestDetectMissingImports:
         code = 'print("\u4f60\u597d")\nprint(missing_name)\n'
         assert ruff_undefined_names(code) == {"missing_name"}
 
-    @patch("subprocess.run")
-    def test_ruff_undefined_names_uses_utf8_encoding(self, mock_run: MagicMock):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["ruff"],
-            returncode=1,
-            stdout='[{"code":"F821","message":"Undefined name `missing_name`"}]',
-            stderr="",
+    def test_ruff_undefined_names_uses_utf8_encoding(self):
+        mock_run = MagicMock(
+            return_value=subprocess.CompletedProcess(
+                args=["ruff"],
+                returncode=1,
+                stdout='[{"code":"F821","message":"Undefined name `missing_name`"}]',
+                stderr="",
+            )
         )
         code = 'print("\u4f60\u597d")\nprint(missing_name)\n'
 
-        assert ruff_undefined_names(code) == {"missing_name"}
+        assert ruff_undefined_names(code, run=mock_run) == {"missing_name"}
         assert mock_run.call_args.kwargs["encoding"] == "utf-8"
 
     def test_empty_code_returns_empty(self):
@@ -354,43 +352,44 @@ class TestRuffFix:
         assert isinstance(result, str)
         assert "\u4f60\u597d" in result
 
-    @patch("subprocess.run")
-    def test_ruff_fix_uses_utf8_encoding(self, mock_run: MagicMock):
+    def test_ruff_fix_uses_utf8_encoding(self):
         code = 'print("\u4f60\u597d")\n'
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["ruff"], returncode=0, stdout=code, stderr=""
+        mock_run = MagicMock(
+            return_value=subprocess.CompletedProcess(
+                args=["ruff"], returncode=0, stdout=code, stderr=""
+            )
         )
 
-        assert ruff_fix(code) == code
+        assert ruff_fix(code, run=mock_run) == code
         assert mock_run.call_args.kwargs["encoding"] == "utf-8"
 
-    @patch("subprocess.run")
-    def test_ruff_not_found_returns_original(self, mock_run):
-        mock_run.side_effect = FileNotFoundError
+    def test_ruff_not_found_returns_original(self):
+        mock_run = MagicMock(side_effect=FileNotFoundError)
         code = "import os\nimport os\n"
-        assert ruff_fix(code) == code
+        assert ruff_fix(code, run=mock_run) == code
 
-    @patch("subprocess.run")
-    def test_ruff_timeout_returns_original(self, mock_run):
-        mock_run.side_effect = subprocess.TimeoutExpired("ruff", 5)
+    def test_ruff_timeout_returns_original(self):
+        mock_run = MagicMock(side_effect=subprocess.TimeoutExpired("ruff", 5))
         code = "import os\n"
-        assert ruff_fix(code) == code
+        assert ruff_fix(code, run=mock_run) == code
 
-    @patch("subprocess.run")
-    def test_ruff_nonzero_returns_original(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["ruff"], returncode=1, stdout="", stderr="error"
+    def test_ruff_nonzero_returns_original(self):
+        mock_run = MagicMock(
+            return_value=subprocess.CompletedProcess(
+                args=["ruff"], returncode=1, stdout="", stderr="error"
+            )
         )
         code = "import os\n"
-        assert ruff_fix(code) == code
+        assert ruff_fix(code, run=mock_run) == code
 
-    @patch("subprocess.run")
-    def test_ruff_empty_stdout_returns_original(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["ruff"], returncode=0, stdout="", stderr=""
+    def test_ruff_empty_stdout_returns_original(self):
+        mock_run = MagicMock(
+            return_value=subprocess.CompletedProcess(
+                args=["ruff"], returncode=0, stdout="", stderr=""
+            )
         )
         code = "import os\n"
-        assert ruff_fix(code) == code
+        assert ruff_fix(code, run=mock_run) == code
 
 
 class TestRuffFormat:
@@ -398,127 +397,125 @@ class TestRuffFormat:
         result = ruff_format('message="\u4f60\u597d"\n')
         assert result == 'message = "\u4f60\u597d"\n'
 
-    @patch("subprocess.run")
-    def test_ruff_format_uses_utf8_encoding(self, mock_run: MagicMock):
+    def test_ruff_format_uses_utf8_encoding(self):
         code = 'print("\u4f60\u597d")\n'
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["ruff"], returncode=0, stdout=code, stderr=""
+        mock_run = MagicMock(
+            return_value=subprocess.CompletedProcess(
+                args=["ruff"], returncode=0, stdout=code, stderr=""
+            )
         )
 
-        assert ruff_format(code) == code
+        assert ruff_format(code, run=mock_run) == code
         assert mock_run.call_args.kwargs["encoding"] == "utf-8"
 
-    @patch("subprocess.run")
-    def test_ruff_not_found_returns_original(self, mock_run):
-        mock_run.side_effect = FileNotFoundError
-        assert ruff_format("x=1\n") == "x=1\n"
+    def test_ruff_not_found_returns_original(self):
+        mock_run = MagicMock(side_effect=FileNotFoundError)
+        assert ruff_format("x=1\n", run=mock_run) == "x=1\n"
 
-    @patch("subprocess.run")
-    def test_ruff_timeout_returns_original(self, mock_run):
-        mock_run.side_effect = subprocess.TimeoutExpired("ruff", 5)
-        assert ruff_format("x=1\n") == "x=1\n"
+    def test_ruff_timeout_returns_original(self):
+        mock_run = MagicMock(side_effect=subprocess.TimeoutExpired("ruff", 5))
+        assert ruff_format("x=1\n", run=mock_run) == "x=1\n"
 
-    @patch("subprocess.run")
-    def test_ruff_nonzero_returns_original(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["ruff"], returncode=2, stdout="", stderr="error"
+    def test_ruff_nonzero_returns_original(self):
+        mock_run = MagicMock(
+            return_value=subprocess.CompletedProcess(
+                args=["ruff"], returncode=2, stdout="", stderr="error"
+            )
         )
-        assert ruff_format("x=1\n") == "x=1\n"
+        assert ruff_format("x=1\n", run=mock_run) == "x=1\n"
 
-    @patch("subprocess.run")
-    def test_ruff_empty_stdout_returns_original(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["ruff"], returncode=0, stdout="", stderr=""
+    def test_ruff_empty_stdout_returns_original(self):
+        mock_run = MagicMock(
+            return_value=subprocess.CompletedProcess(
+                args=["ruff"], returncode=0, stdout="", stderr=""
+            )
         )
-        assert ruff_format("x=1\n") == "x=1\n"
+        assert ruff_format("x=1\n", run=mock_run) == "x=1\n"
 
 
 class TestRuffGiveUpLogging:
-    @patch("subprocess.run")
     def test_undefined_names_unicode_encode_error_returns_empty(
-        self, mock_run: MagicMock, loguru_records: list[dict[str, str]]
+        self, loguru_records: list[dict[str, str]]
     ):
         code = 'print("\u4f60")\n'
-        mock_run.side_effect = UnicodeEncodeError(
-            "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
+        mock_run = MagicMock(
+            side_effect=UnicodeEncodeError(
+                "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
+            )
         )
 
-        assert ruff_undefined_names(code) == set()
+        assert ruff_undefined_names(code, run=mock_run) == set()
         msgs = [r["message"] for r in loguru_records]
         assert any("UnicodeEncodeError" in m for m in msgs), msgs
 
-    @patch("subprocess.run")
     def test_ruff_fix_unicode_encode_error_returns_original(
-        self, mock_run: MagicMock, loguru_records: list[dict[str, str]]
+        self, loguru_records: list[dict[str, str]]
     ):
         code = 'print("\u4f60")\n'
-        mock_run.side_effect = UnicodeEncodeError(
-            "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
+        mock_run = MagicMock(
+            side_effect=UnicodeEncodeError(
+                "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
+            )
         )
 
-        assert ruff_fix(code) == code
+        assert ruff_fix(code, run=mock_run) == code
         msgs = [r["message"] for r in loguru_records]
         assert any("UnicodeEncodeError" in m for m in msgs), msgs
 
-    @patch("subprocess.run")
     def test_ruff_format_unicode_encode_error_returns_original(
-        self, mock_run: MagicMock, loguru_records: list[dict[str, str]]
+        self, loguru_records: list[dict[str, str]]
     ):
         code = 'print("\u4f60")\n'
-        mock_run.side_effect = UnicodeEncodeError(
-            "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
+        mock_run = MagicMock(
+            side_effect=UnicodeEncodeError(
+                "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
+            )
         )
 
-        assert ruff_format(code) == code
+        assert ruff_format(code, run=mock_run) == code
         msgs = [r["message"] for r in loguru_records]
         assert any("UnicodeEncodeError" in m for m in msgs), msgs
 
-    @patch("subprocess.run")
-    def test_ruff_fix_timeout_logs_warning(self, mock_run, loguru_records):
-        mock_run.side_effect = subprocess.TimeoutExpired("ruff", 5)
+    def test_ruff_fix_timeout_logs_warning(self, loguru_records):
+        mock_run = MagicMock(side_effect=subprocess.TimeoutExpired("ruff", 5))
         code = "import os\n"
-        assert ruff_fix(code) == code
+        assert ruff_fix(code, run=mock_run) == code
         msgs = [r["message"] for r in loguru_records]
         assert any("did not finish within 5s" in m and "char source" in m for m in msgs), msgs
 
-    @patch("subprocess.run")
-    def test_ruff_fix_oserror_logs_errno(self, mock_run, loguru_records):
-        mock_run.side_effect = OSError(24, "Too many open files")
+    def test_ruff_fix_oserror_logs_errno(self, loguru_records):
+        mock_run = MagicMock(side_effect=OSError(24, "Too many open files"))
         code = "import os\n"
-        assert ruff_fix(code) == code
+        assert ruff_fix(code, run=mock_run) == code
         msgs = [r["message"] for r in loguru_records]
         assert any("errno=24" in m and "Too many open files" in m for m in msgs), msgs
 
-    @patch("subprocess.run")
-    def test_ruff_format_timeout_logs_warning(self, mock_run, loguru_records):
-        mock_run.side_effect = subprocess.TimeoutExpired("ruff", 5)
+    def test_ruff_format_timeout_logs_warning(self, loguru_records):
+        mock_run = MagicMock(side_effect=subprocess.TimeoutExpired("ruff", 5))
         code = "x=1\n"
-        assert ruff_format(code) == code
+        assert ruff_format(code, run=mock_run) == code
         msgs = [r["message"] for r in loguru_records]
         assert any("did not finish within 5s" in m and "char source" in m for m in msgs), msgs
 
-    @patch("subprocess.run")
-    def test_ruff_missing_reports_each_skipped_stage(self, mock_run, loguru_records):
-        mock_run.side_effect = FileNotFoundError
+    def test_ruff_missing_reports_each_skipped_stage(self, loguru_records):
+        mock_run = MagicMock(side_effect=FileNotFoundError)
         for code in ("a = 1\n", "b = 2\n"):
-            assert ruff_fix(code) == code
-        assert ruff_format("c = 3\n") == "c = 3\n"
+            assert ruff_fix(code, run=mock_run) == code
+        assert ruff_format("c = 3\n", run=mock_run) == "c = 3\n"
         msgs = [r["message"] for r in loguru_records]
         assert sum("not found" in m for m in msgs) == 3, msgs
 
-    @patch("subprocess.run")
-    def test_undefined_names_timeout_logs_warning(self, mock_run, loguru_records):
-        mock_run.side_effect = subprocess.TimeoutExpired("ruff", 5)
-        assert ruff_undefined_names("import os\n") == set()
+    def test_undefined_names_timeout_logs_warning(self, loguru_records):
+        mock_run = MagicMock(side_effect=subprocess.TimeoutExpired("ruff", 5))
+        assert ruff_undefined_names("import os\n", run=mock_run) == set()
         msgs = [r["message"] for r in loguru_records]
         assert any("did not finish within 5s" in m and "check --select F821" in m for m in msgs), (
             msgs
         )
 
-    @patch("subprocess.run")
-    def test_undefined_names_oserror_logs_errno(self, mock_run, loguru_records):
-        mock_run.side_effect = OSError(28, "No space left on device")
-        assert ruff_undefined_names("import os\n") == set()
+    def test_undefined_names_oserror_logs_errno(self, loguru_records):
+        mock_run = MagicMock(side_effect=OSError(28, "No space left on device"))
+        assert ruff_undefined_names("import os\n", run=mock_run) == set()
         msgs = [r["message"] for r in loguru_records]
         assert any("errno=28" in m for m in msgs), msgs
 

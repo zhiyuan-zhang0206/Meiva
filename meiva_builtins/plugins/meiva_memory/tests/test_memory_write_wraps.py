@@ -66,8 +66,8 @@ def exec_turn(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path
     pin_agent(17)
     registry = _registry()
     install.install(registry)
-    meiva.state = build_agent_state(registry)(messages=[], halted=False)
-    meiva.state_update = {}
+    process_context.set_state(build_agent_state(registry)(messages=[], halted=False))
+    process_context.set_state_update({})
     with (
         httpx.Client(
             base_url="http://gateway.test", transport=httpx.MockTransport(no_request)
@@ -216,7 +216,7 @@ def test_the_exception_of_the_layer_below_propagates_as_is() -> None:
 def test_a_failure_while_recording_is_logged_and_does_not_touch_the_write(
     exec_turn: Path, loguru_records: LogRecords
 ) -> None:
-    meiva.state_update = "tampered"  # the state update the record is merged into is unusable
+    process_context.set_state_update("tampered")
 
     note = meiva.memory.PATH / "survives.md"
     assert meiva.files.write(note, "kept") is None
