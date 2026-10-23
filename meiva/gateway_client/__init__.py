@@ -19,11 +19,50 @@ from base.agents.context.gateway_client import launch_retry as _launch_retry
 from base.agents.context.gateway_client import transport as _transport
 from base.api_contracts.agent_contract import GatewayUnavailable as GatewayUnavailable
 from base.log import logger
+from meiva.gateway_client import agent_plans, plans
+from meiva.gateway_client.plans import Request
 from meiva.sdk_surface import process_context
 
 
 def _ctx(context: MeivaContext | None) -> MeivaContext:
     return context if context is not None else process_context.current_context()
+
+
+# meiva:note
+# Runs one request plan through the base transport and checks the answer against the wire
+# contract; the plan's `None` timeout and retry count leave the context's own configuration in
+# charge. httpx is imported here so `import meiva` does not load it.
+def _run(plan: Request, context: MeivaContext) -> _transport.TransportResponse:
+    timeout = None
+    if plan.timeout_seconds is not None:
+        import httpx
+
+        timeout = httpx.Timeout(plan.timeout_seconds)
+    if plan.method == "GET":
+        response = _transport.get(
+            plan.path,
+            params=plan.params,
+            timeout=timeout,
+            max_retries=plan.max_retries,
+            context=context,
+        )
+    elif plan.method == "PATCH":
+        response = _transport.patch(plan.path, json=plan.body, context=context)
+    else:
+        response = _transport.post(
+            plan.path,
+            plan.body,
+            timeout=timeout,
+            idempotency_key=plan.idempotency_key,
+            max_retries=plan.max_retries,
+            context=context,
+        )
+    _transport.raise_from_response(response)
+    return response
+
+
+def _actor_or(source: str | None) -> str:
+    return source if source is not None else meiva.sdk_surface.agent_identity.require_actor()
 
 
 def get(
@@ -93,33 +132,21 @@ def spawn(
     idempotency_key: str,
 ) -> int:
     """Create or fork an agent with a caller-owned immutable identity."""
-    from base.api_contracts.idempotency import validate_idempotency_key
-
-    idempotency_key = validate_idempotency_key(idempotency_key)
-    body: dict[str, Any] = {"spawner": spawner}
-    if prompt is not None:
-        # prompt_source is schema-required only when prompt is given (the source concept only exists when non-empty)
-        body["prompt"] = prompt
-        body["prompt_source"] = prompt_source
-    if fork_from is not None:
-        body["fork_from"] = fork_from
-    if machine is not None:
-        body["machine"] = machine
-    if config is not None:
-        body["config"] = config
-    if label is not None:
-        body["label"] = label
-    if harness is not None:
-        body["harness"] = harness
-    # Every retry keeps the caller's key, body and fixed admission path, so an
-    # ambiguous outcome is retried and the server replays the original creation.
-    resp = _transport.post(
-        "/api/keyed/v1/agents", body, idempotency_key=idempotency_key, context=_ctx(None)
+    plan = plans.spawn_request(
+        plans.SpawnIntent(
+            spawner=spawner,
+            prompt=prompt,
+            fork_from=fork_from,
+            prompt_source=prompt_source,
+            machine=machine,
+            config=config,
+            label=label,
+            harness=harness,
+        ),
+        idempotency_key,
     )
-    _transport.raise_from_response(resp)
-    data = resp.json()
-    normalized = data.get("config_normalized")
-    if normalized:
+    receipt = plans.spawn_receipt(_run(plan, _ctx(None)).json())
+    if receipt.withdrawn_model is not None:
         # The spawner-visible receipt for a withdrawal settlement (task #4306):
         # the gateway stored the registered fallback, but this template still
         # names the withdrawn id — fix it at the source.
@@ -128,10 +155,10 @@ def spawn(
             "agent was stored on the registered fallback {resolved!r} — update "
             "the template (task #4306)",
             event="spawn_config_normalized",
-            requested=normalized.get("requested"),
-            resolved=normalized.get("resolved"),
+            requested=receipt.withdrawn_model[0],
+            resolved=receipt.withdrawn_model[1],
         )
-    return int(data["id"])
+    return receipt.agent_id
 
 
 def send_message(
@@ -146,22 +173,14 @@ def send_message(
     The gateway's durable inbound key prevents duplicate acceptance after response
     loss. There is no sender journal or delivery after this invocation exits.
     """
-    from uuid import uuid4
-
-    import httpx
-
-    response = _transport.post(
-        f"/api/agents/{agent_id}/messages",
-        {
-            "content": content,
-            "source": source,
-            **({"completion_notice": True} if completion_notice else {}),
-        },
-        timeout=httpx.Timeout(120.0),
-        idempotency_key=str(uuid4()),
-        context=_ctx(None),
+    plan = plans.message_request(
+        agent_id,
+        content=content,
+        source=source,
+        completion_notice=completion_notice,
+        idempotency_key=str(uuid.uuid4()),
     )
-    _transport.raise_from_response(response)
+    _run(plan, _ctx(None))
 
 
 def send_system_note(
@@ -180,38 +199,17 @@ def send_system_note(
     prefix), waking a live agent, reviving a terminated one when `resurrect`
     is set (same 120 s per-call timeout as send_message).
     """
-    import httpx
-
-    from base.api_contracts.idempotency import validate_idempotency_key
-
-    idempotency_key = validate_idempotency_key(idempotency_key)
-
-    body: dict[str, str | bool | int] = {
-        "content": content,
-        "note_tag": note_tag,
-        "source": source,
-        "resurrect": resurrect,
-    }
-    if task_id is not None:
-        body["task_id"] = task_id
-    resp = _transport.post(
-        f"/api/agents/{agent_id}/system-note",
-        body,
-        timeout=httpx.Timeout(120.0),
-        idempotency_key=idempotency_key,
-        context=_ctx(None),
+    note = plans.NoteIntent(
+        content=content, note_tag=note_tag, source=source, task_id=task_id, resurrect=resurrect
     )
-    _transport.raise_from_response(resp)
-    return int(resp.json()["inbound_id"])
+    plan = plans.system_note_request(agent_id, note, idempotency_key)
+    return int(_run(plan, _ctx(None)).json()["inbound_id"])
 
 
 def get_last_message(agent_id: int, caller: str) -> str | None:
     """GET /api/agents/{id}/last-message → the agent's most recent AI turn text."""
-    resp = _transport.get(
-        f"/api/agents/{agent_id}/last-message", params={"caller": caller}, context=_ctx(None)
-    )
-    _transport.raise_from_response(resp)
-    return resp.json()["text"]
+    plan = Request("GET", f"/api/agents/{agent_id}/last-message", params={"caller": caller})
+    return _run(plan, _ctx(None)).json()["text"]
 
 
 def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict[str, Any]]:
@@ -220,13 +218,10 @@ def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict[str, An
     Each dict has id / label / status / depth / score, strongest first
     (order preserved from the gateway).
     """
-    resp = _transport.get(
-        f"/api/agents/{agent_id}/neighbors",
-        params={"depth": depth, "limit": limit},
-        context=_ctx(None),
+    plan = Request(
+        "GET", f"/api/agents/{agent_id}/neighbors", params={"depth": depth, "limit": limit}
     )
-    _transport.raise_from_response(resp)
-    return resp.json()["neighbors"]
+    return _run(plan, _ctx(None)).json()["neighbors"]
 
 
 def get_ancestors(agent_id: int) -> list[dict[str, Any]]:
@@ -234,11 +229,8 @@ def get_ancestors(agent_id: int) -> list[dict[str, Any]]:
     chain above `agent_id`, nearest ancestor first (the gateway walks to the
     top, so the neighbors `depth`/`limit` params do not apply). Same dict
     shape as get_neighbors."""
-    resp = _transport.get(
-        f"/api/agents/{agent_id}/neighbors", params={"depth": 1, "limit": 20}, context=_ctx(None)
-    )
-    _transport.raise_from_response(resp)
-    return resp.json()["ancestors"]
+    plan = Request("GET", f"/api/agents/{agent_id}/neighbors", params={"depth": 1, "limit": 20})
+    return _run(plan, _ctx(None)).json()["ancestors"]
 
 
 # The born-chain read runs at every context establishment, on the agent
@@ -259,16 +251,13 @@ def get_born_chain(agent_id: int, *, context: MeivaContext | None = None) -> lis
     context note at window establishment) can resolve the chain cheaply.
     The call itself is one-shot with a tight timeout (see
     `_BORN_CHAIN_TIMEOUT_S`); callers degrade on `GatewayUnavailable`."""
-    import httpx
-
-    resp = _transport.get(
+    plan = Request(
+        "GET",
         f"/api/agents/{agent_id}/born-chain",
-        timeout=httpx.Timeout(_BORN_CHAIN_TIMEOUT_S),
+        timeout_seconds=_BORN_CHAIN_TIMEOUT_S,
         max_retries=1,
-        context=_ctx(context),
     )
-    _transport.raise_from_response(resp)
-    return resp.json()["ancestors"]
+    return _run(plan, _ctx(context)).json()["ancestors"]
 
 
 def list_agents(
@@ -279,12 +268,8 @@ def list_agents(
     limit: int = 100,
 ) -> dict[str, Any]:
     """Read one bounded directory page; the caller owns cursor traversal."""
-    params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
-    if before_id is not None:
-        params["before_id"] = before_id
-    resp = _transport.get("/api/agents", params=params, context=_ctx(None))
-    _transport.raise_from_response(resp)
-    return resp.json()
+    plan = plans.list_agents_request(scope=scope, query=query, before_id=before_id, limit=limit)
+    return _run(plan, _ctx(None)).json()
 
 
 def patch_label(agent_id: int, label: str, *, source: Literal["user", "self"] = "self") -> None:
@@ -293,17 +278,12 @@ def patch_label(agent_id: int, label: str, *, source: Literal["user", "self"] = 
     The label sticks (the background labeler no longer renames it), the change is
     audited as `label_change` with `source`, and every client's view refreshes live.
     """
-    resp = _transport.patch(
-        f"/api/agents/{agent_id}", json={"label": label, "source": source}, context=_ctx(None)
-    )
-    _transport.raise_from_response(resp)
+    _run(plans.patch_label_request(agent_id, label, source), _ctx(None))
 
 
 def get_agent(agent_id: int) -> dict[str, Any]:
     """Read an agent directly, independently of directory scope or pagination."""
-    resp = _transport.get(f"/api/agents/{agent_id}", context=_ctx(None))
-    _transport.raise_from_response(resp)
-    return resp.json()
+    return _run(Request("GET", f"/api/agents/{agent_id}"), _ctx(None)).json()
 
 
 def terminate(
@@ -332,20 +312,14 @@ def terminate(
     kill_all_shell_sessions=True also kills every shell session the agent owns
     on its home machine. Sent only when set.
     """
-    body: dict[str, Any] = {}
-    if source is not None:
-        body["source"] = source
-    else:
-        body["source"] = meiva.sdk_surface.agent_identity.require_actor()
-    if message is not None:
-        body["message"] = message
-    if force:
-        body["force"] = True
-    if kill_all_shell_sessions:
-        body["kill_all_shell_sessions"] = True
-    resp = _transport.post(f"/api/agents/{agent_id}/terminate", body, context=_ctx(None))
-    _transport.raise_from_response(resp)
-    return resp.json()
+    plan = agent_plans.terminate_request(
+        agent_id,
+        source=_actor_or(source),
+        message=message,
+        force=force,
+        kill_all_shell_sessions=kill_all_shell_sessions,
+    )
+    return _run(plan, _ctx(None)).json()
 
 
 def restart(agent_id: int, *, source: str | None = None) -> str:
@@ -354,30 +328,24 @@ def restart(agent_id: int, *, source: str | None = None) -> str:
     An omitted source requires the established actor identity. Callers without
     an agent or system identity must supply an explicit source.
     """
-    body: dict[str, Any] = {}
-    if source is not None:
-        body["source"] = source
-    else:
-        body["source"] = meiva.sdk_surface.agent_identity.require_actor()
-    resp = _transport.post(f"/api/agents/{agent_id}/restart", body, context=_ctx(None))
-    _transport.raise_from_response(resp)
-    return resp.json()["status"]
+    plan = agent_plans.restart_request(agent_id, _actor_or(source))
+    return _run(plan, _ctx(None)).json()["status"]
 
 
 # meiva:note
 # POST /api/agents/{id}/cancel → status string (`cancelled` / `not_running`).
 def cancel(agent_id: int) -> str:
-    resp = _transport.post(f"/api/agents/{agent_id}/cancel", {}, context=_ctx(None))
-    _transport.raise_from_response(resp)
-    return resp.json()["status"]
+    return _run(Request("POST", f"/api/agents/{agent_id}/cancel", body={}), _ctx(None)).json()[
+        "status"
+    ]
 
 
 # meiva:note
 # POST /api/agents/{id}/compact → the queued `compact_request` inbound id.
 def compact(agent_id: int) -> int:
-    resp = _transport.post(f"/api/agents/{agent_id}/compact", {}, context=_ctx(None))
-    _transport.raise_from_response(resp)
-    return resp.json()["inbound_id"]
+    return _run(Request("POST", f"/api/agents/{agent_id}/compact", body={}), _ctx(None)).json()[
+        "inbound_id"
+    ]
 
 
 def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) -> str:
@@ -389,14 +357,8 @@ def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) 
     prompt is required -- a resurrected agent needs to know why it
     was woken up and what to do.
     """
-    body: dict[str, Any] = {"prompt": prompt}
-    if resurrected_by is not None:
-        body["resurrected_by"] = resurrected_by
-    else:
-        body["resurrected_by"] = meiva.sdk_surface.agent_identity.require_actor()
-    resp = _transport.post(f"/api/agents/{agent_id}/resurrect", body, context=_ctx(None))
-    _transport.raise_from_response(resp)
-    return resp.json()["status"]
+    plan = agent_plans.resurrect_request(agent_id, prompt, _actor_or(resurrected_by))
+    return _run(plan, _ctx(None)).json()["status"]
 
 
 def register_page(
@@ -418,21 +380,11 @@ def register_page(
     can re-serve a dead page server after resurrect/restart. Only
     serve() sets it; show() leaves it None.
     """
-    body: dict[str, Any] = {"name": name, "port": port, "host": host}
-    if title is not None:
-        body["title"] = title
-    if serve_dir is not None:
-        body["serve_dir"] = serve_dir
-    if ttl_seconds is not None:
-        body["ttl_seconds"] = ttl_seconds
-    resp = _transport.post(
-        f"/api/keyed/v1/agents/{agent_id}/pages",
-        body,
-        idempotency_key=uuid.uuid4().hex,
-        context=_ctx(None),
+    page = agent_plans.PageIntent(
+        name=name, port=port, host=host, title=title, serve_dir=serve_dir, ttl_seconds=ttl_seconds
     )
-    _transport.raise_from_response(resp)
-    return resp.json()
+    plan = agent_plans.register_page_request(agent_id, page, uuid.uuid4().hex)
+    return _run(plan, _ctx(None)).json()
 
 
 def close_page(agent_id: int, name: str) -> bool:
@@ -443,28 +395,18 @@ def close_page(agent_id: int, name: str) -> bool:
     that replaces the observed row in between fails the close with 409
     (httpx.HTTPStatusError) instead of closing the newer page.
     """
-    observed = next((p for p in list_open_pages(agent_id) if p["name"] == name), None)
+    observed = agent_plans.open_page(list_open_pages(agent_id), name)
     if observed is None:
         return False
-    resp = _transport.post(
-        f"/api/keyed/v1/agents/{agent_id}/pages/{name}/close",
-        {"expected_page_id": observed["id"]},
-        idempotency_key=uuid.uuid4().hex,
-        context=_ctx(None),
-    )
-    _transport.raise_from_response(resp)
+    _run(agent_plans.close_page_request(agent_id, observed, uuid.uuid4().hex), _ctx(None))
     return True
 
 
 def list_open_pages(agent_id: int) -> list[dict[str, Any]]:
     """GET /api/agents/{id}/pages → the agent's open PageRow dicts."""
-    resp = _transport.get(f"/api/agents/{agent_id}/pages", context=_ctx(None))
-    _transport.raise_from_response(resp)
-    return list(resp.json())
+    return list(_run(Request("GET", f"/api/agents/{agent_id}/pages"), _ctx(None)).json())
 
 
 def list_machines() -> list[dict[str, Any]]:
     """GET /api/cluster/machines → list of {name, description, live} dicts."""
-    resp = _transport.get("/api/cluster/machines", context=_ctx(None))
-    _transport.raise_from_response(resp)
-    return list(resp.json())
+    return list(_run(Request("GET", "/api/cluster/machines"), _ctx(None)).json())

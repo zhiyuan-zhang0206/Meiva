@@ -1,11 +1,12 @@
-exports = ["harness", "wake.py"]
+exports = ["harness", "plans.py", "wake.py"]
 
 [uses]
-"__init__.py" = ["harness", "wake.py"]
+"__init__.py" = ["harness", "plans.py", "wake.py"]
 "harness" = []
 
 [purity]
 "__init__.py" = "strict-to-be"
+"plans.py" = "strict"
 "wake.py" = "strict-to-be"
 
 [debt.impure-call]
@@ -23,5 +24,4 @@ exports = ["harness", "wake.py"]
 "__init__.py#meiva/files.py" = 2
 "__init__.py#meiva/self/harness/__init__.py" = 1
 "wake.py#base/cluster/__init__.py" = 1
-"wake.py#base/config/__init__.py" = 1
 "wake.py#base/log/__init__.py" = 1

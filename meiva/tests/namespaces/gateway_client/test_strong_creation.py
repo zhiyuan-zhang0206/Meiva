@@ -1,8 +1,5 @@
 """Explicit strong creation never downgrades an uncertain intent."""
 
-from unittest.mock import MagicMock
-from uuid import uuid4
-
 import httpx
 import pytest
 
@@ -10,12 +7,12 @@ from base.agents.context.gateway_client import transport
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from meiva.gateway_client import spawn
 from meiva.sdk_surface import process_context
-from meiva.tests.namespaces.gateway_client.test_gateway_client import mock_client as mock_client
+from meiva.tests.fixtures.gateway_wire import GatewayWire, Reply
+from meiva.tests.fixtures.gateway_wire import bound_wire as bound_wire
+from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
+from meiva.tests.fixtures.gateway_wire import wire as wire
 
-
-@pytest.fixture
-def client(mock_client: MagicMock, retry_waits: list[float]) -> MagicMock:
-    return mock_client
+_AGENTS = "/api/keyed/v1/agents"
 
 
 def _spawn(**kwargs: object) -> int:
@@ -29,152 +26,126 @@ def _spawn(**kwargs: object) -> int:
 
 
 @pytest.mark.parametrize("bad", [1, "true", None, [True]])
-def test_removed_mode_never_submits(client: MagicMock, bad: object) -> None:
+def test_removed_mode_never_submits(bound_wire: GatewayWire, bad: object) -> None:
     with pytest.raises(TypeError, match="require_idempotency"):
         _spawn(require_idempotency=bad, idempotency_key="key")
-    client.post.assert_not_called()
+    assert bound_wire.sent == []
 
 
 @pytest.mark.parametrize("key", [None, "", "x" * 129, 123])
-def test_strong_requires_valid_caller_key(client: MagicMock, key: object) -> None:
+def test_strong_requires_valid_caller_key(bound_wire: GatewayWire, key: object) -> None:
     with pytest.raises((ValueError, TypeError), match="idempotency key"):
         _spawn(idempotency_key=key)
-    client.post.assert_not_called()
+    assert bound_wire.sent == []
 
 
-def test_fork_uses_fixed_keyed_admission(client: MagicMock) -> None:
-    client.post.return_value = httpx.Response(
-        201, json={"id": 42}, request=httpx.Request("POST", "http://gateway/api/keyed/v1/agents")
-    )
+def test_fork_uses_fixed_keyed_admission(bound_wire: GatewayWire) -> None:
+    bound_wire.stub.reply("POST", _AGENTS, {"id": 42}, status=201)
     assert (
         spawn(
             spawner="user", prompt=None, fork_from=1, prompt_source="user", idempotency_key="fork"
         )
         == 42
     )
-    assert client.post.call_args.args == ("/api/keyed/v1/agents",)
-    assert client.post.call_args.kwargs["json"]["fork_from"] == 1
-    assert client.post.call_args.kwargs["headers"][SCOPE_HEADER] == PRINCIPAL_SCOPE
+    [sent] = bound_wire.sent
+    assert sent.path == _AGENTS
+    assert sent.body["fork_from"] == 1
+    assert sent.headers[SCOPE_HEADER] == PRINCIPAL_SCOPE
 
 
-def test_unknown_outcome_is_retried_with_the_same_path_and_key(client: MagicMock) -> None:
-    path = "/api/keyed/v1/agents"
-    client.post.side_effect = [
-        httpx.ReadTimeout("lost"),
-        httpx.Response(
-            201, json={"id": 42}, request=httpx.Request("POST", "http://gateway" + path)
-        ),
-    ]
+def test_unknown_outcome_is_retried_with_the_same_path_and_key(bound_wire: GatewayWire) -> None:
+    bound_wire.stub.reply("POST", _AGENTS, {"id": 42}, status=201)
+    bound_wire.fail(httpx.ReadTimeout, delivered=True)
     assert _spawn(idempotency_key="intent") == 42
-    first, second = client.post.call_args_list
-    assert first == second
-    assert first.args == (path,)
-    assert first.kwargs["headers"]["Idempotency-Key"] == "intent"
-    assert first.kwargs["headers"][SCOPE_HEADER] == PRINCIPAL_SCOPE
+    first, second = bound_wire.sent
+    assert first.intent == second.intent
+    assert first.path == _AGENTS
+    assert first.headers["idempotency-key"] == "intent"
+    assert first.headers[SCOPE_HEADER] == PRINCIPAL_SCOPE
+    assert [received.headers["idempotency-key"] for received in bound_wire.stub.received] == [
+        "intent",
+        "intent",
+    ]
 
 
 @pytest.mark.parametrize("status", [404, 405, 422, 409, 500])
-def test_guarded_http_error_never_falls_back(client: MagicMock, status: int) -> None:
-    client.post.return_value = httpx.Response(
-        status,
-        json={"detail": "rejected"},
-        request=httpx.Request("POST", "http://gateway/api/keyed/v1/agents"),
-    )
+def test_guarded_http_error_never_falls_back(bound_wire: GatewayWire, status: int) -> None:
+    bound_wire.stub.reply_in_turn("POST", _AGENTS, [Reply(status, {"detail": "rejected"})])
     with pytest.raises(httpx.HTTPStatusError):
         _spawn(idempotency_key="intent")
-    assert client.post.call_count == 1
-    assert client.post.call_args.args == ("/api/keyed/v1/agents",)
+    [sent] = bound_wire.sent
+    assert sent.path == _AGENTS
 
 
-def test_connect_retry_keeps_exact_guarded_intent(client: MagicMock) -> None:
-    client.post.side_effect = [
-        httpx.ConnectError("not sent"),
-        httpx.Response(
-            201,
-            json={"id": 42},
-            request=httpx.Request("POST", "http://gateway/api/keyed/v1/agents"),
-        ),
-    ]
+def test_connect_retry_keeps_exact_guarded_intent(bound_wire: GatewayWire) -> None:
+    bound_wire.stub.reply("POST", _AGENTS, {"id": 42}, status=201)
+    bound_wire.fail(httpx.ConnectError)
     assert _spawn(idempotency_key="intent") == 42
-    assert len(client.post.call_args_list) == 2
-    assert client.post.call_args_list[0] == client.post.call_args_list[1]
+    first, second = bound_wire.sent
+    assert first.intent == second.intent
+    assert len(bound_wire.stub.received) == 1
 
 
 @pytest.mark.parametrize("key", ["", "x" * 129, 12])
 def test_transport_rejects_an_invalid_key_before_the_network(
-    client: MagicMock, key: object
+    bound_wire: GatewayWire, key: object
 ) -> None:
     with pytest.raises((ValueError, TypeError), match="idempotency key"):
         transport.post(
-            "/api/keyed/v1/agents",
+            _AGENTS,
             idempotency_key=key,  # type: ignore[arg-type]
             context=process_context.current_context(),
         )
-    client.post.assert_not_called()
+    assert bound_wire.sent == []
 
 
-def test_transport_has_no_scope_override(client: MagicMock) -> None:
+def test_transport_has_no_scope_override(bound_wire: GatewayWire) -> None:
     with pytest.raises(TypeError):
         transport.post(
-            "/api/keyed/v1/agents",
+            _AGENTS,
             idempotency_scope="legacy",  # type: ignore[call-arg]
             context=process_context.current_context(),
         )
-    client.post.assert_not_called()
+    assert bound_wire.sent == []
 
 
 class TestSpawn:
-    def test_spawn_returns_agent_id(self, mock_client: MagicMock):
-        from meiva.gateway_client import spawn
-
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-        mock_resp.is_success = True
-        mock_resp.json.return_value = {"id": 42}
-        mock_client.post.return_value = mock_resp
+    def test_spawn_returns_agent_id(self, bound_wire: GatewayWire):
+        bound_wire.stub.reply("POST", _AGENTS, {"id": 42})
 
         agent_id = spawn(
             spawner="user",
             prompt="hello",
             fork_from=None,
             prompt_source="user",
-            idempotency_key=str(uuid4()),
+            idempotency_key="creation",
         )
         assert agent_id == 42
+        assert bound_wire.sent[0].body == {
+            "spawner": "user",
+            "prompt": "hello",
+            "prompt_source": "user",
+        }
 
-    def test_spawn_without_prompt(self, mock_client: MagicMock):
-        from meiva.gateway_client import spawn
-
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-        mock_resp.is_success = True
-        mock_resp.json.return_value = {"id": 7}
-        mock_client.post.return_value = mock_resp
+    def test_spawn_without_prompt(self, bound_wire: GatewayWire):
+        bound_wire.stub.reply("POST", _AGENTS, {"id": 7})
 
         agent_id = spawn(
             spawner="agent:1",
             prompt=None,
             fork_from=5,
             prompt_source="agent",
-            idempotency_key=str(uuid4()),
+            idempotency_key="fork",
         )
         assert agent_id == 7
+        assert bound_wire.sent[0].body == {"spawner": "agent:1", "fork_from": 5}
 
-    @pytest.mark.usefixtures("retry_waits")
-    def test_spawn_read_timeout_is_retried_under_the_same_key(self, mock_client: MagicMock):
+    def test_spawn_read_timeout_is_retried_under_the_same_key(self, bound_wire: GatewayWire):
         """Spawn is keyed: a ReadTimeout may mean the gateway already created
         the agent, so the retry carries the same key and the gateway replays
         the original creation instead of spawning a twin."""
-        from meiva.gateway_client import spawn
-
-        mock_client.post.side_effect = [
-            httpx.ReadTimeout("gateway slow"),
-            httpx.Response(
-                201,
-                json={"id": 7},
-                request=httpx.Request("POST", "http://gateway/api/keyed/v1/agents"),
-            ),
-        ]
+        bound_wire.stub.reply("POST", _AGENTS, {"id": 7}, status=201)
+        bound_wire.fail(httpx.ReadTimeout, delivered=True)
 
         agent_id = spawn(
             spawner="user",
@@ -184,60 +155,36 @@ class TestSpawn:
             idempotency_key="creation-key",
         )
         assert agent_id == 7
-        keys = [
-            call.kwargs["headers"]["Idempotency-Key"] for call in mock_client.post.call_args_list
+        assert [sent.headers["idempotency-key"] for sent in bound_wire.sent] == [
+            "creation-key",
+            "creation-key",
         ]
-        assert keys == ["creation-key", "creation-key"]
 
-    @pytest.mark.parametrize(
-        "error",
-        [
-            httpx.ConnectError("refused"),
-            httpx.ConnectTimeout("dial stalled"),
-            httpx.PoolTimeout("pool busy"),
-        ],
-    )
-    @pytest.mark.usefixtures("retry_waits")
+    @pytest.mark.parametrize("error", [httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout])
     def test_spawn_pre_send_error_is_retried(
-        self, mock_client: MagicMock, error: httpx.TransportError
+        self, bound_wire: GatewayWire, error: type[httpx.TransportError]
     ):
         """Connect-family failures happen before the request reaches the
         server, so re-sending a spawn is safe — the retry stays."""
-        from meiva.gateway_client import spawn
-
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-        mock_resp.is_success = True
-        mock_resp.json.return_value = {"id": 42}
-        mock_client.post.side_effect = [error, mock_resp]
+        bound_wire.stub.reply("POST", _AGENTS, {"id": 42})
+        bound_wire.fail(error)
 
         agent_id = spawn(
             spawner="user",
             prompt="hello",
             fork_from=None,
             prompt_source="user",
-            idempotency_key=str(uuid4()),
+            idempotency_key="creation",
         )
         assert agent_id == 42
-        assert mock_client.post.call_count == 2
-        keys = [
-            call.kwargs["headers"]["Idempotency-Key"] for call in mock_client.post.call_args_list
-        ]
+        assert len(bound_wire.sent) == 2
+        keys = [sent.headers["idempotency-key"] for sent in bound_wire.sent]
         assert keys[0] == keys[1] and keys[0]
 
-    @pytest.mark.usefixtures("retry_waits")
-    def test_spawn_retries_a_read_timeout_after_a_connect_error(self, mock_client: MagicMock):
-        from meiva.gateway_client import spawn
-
-        mock_client.post.side_effect = [
-            httpx.ConnectError("refused"),
-            httpx.ReadTimeout("gateway slow"),
-            httpx.Response(
-                201,
-                json={"id": 7},
-                request=httpx.Request("POST", "http://gateway/api/keyed/v1/agents"),
-            ),
-        ]
+    def test_spawn_retries_a_read_timeout_after_a_connect_error(self, bound_wire: GatewayWire):
+        bound_wire.stub.reply("POST", _AGENTS, {"id": 7}, status=201)
+        bound_wire.fail(httpx.ConnectError)
+        bound_wire.fail(httpx.ReadTimeout, delivered=True)
 
         assert (
             spawn(
@@ -245,11 +192,8 @@ class TestSpawn:
                 prompt="hello",
                 fork_from=None,
                 prompt_source="user",
-                idempotency_key=str(uuid4()),
+                idempotency_key="creation",
             )
             == 7
         )
-        assert mock_client.post.call_count == 3
-
-
-# --- send_message ---
+        assert len(bound_wire.sent) == 3

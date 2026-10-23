@@ -140,17 +140,8 @@ async def dial_computer_mcp(
     raise ConnectionError(f"computer-mcp daemon not reachable at {sock}: {last}")
 
 
-async def connect_computer_direct(
-    sock: str | None = None,
-) -> tuple[ComputerLineSession, AsyncExitStack]:
-    """Dial the per-machine computer-mcp service; return (session, stack).
-
-    Mirrors `meiva.mcps._browser.connect_browser_direct`: the returned stack is
-    empty (the socket is the whole connection; nothing to close beyond the
-    session's own writer), kept for interface parity with the stdio path."""
-    if sock is None:
-        from base.paths import computer_mcp_socket, meiva_home
-
-        sock = str(computer_mcp_socket(meiva_home()))
+# meiva:note
+# Dial the computer-mcp service socket `sock`; return (session, stack). Mirrors `meiva.mcps._browser.connect_browser_direct`: the returned stack is empty (the socket is the whole connection; nothing to close beyond the session's own writer), kept for interface parity with the stdio path.
+async def connect_computer_direct(sock: str) -> tuple[ComputerLineSession, AsyncExitStack]:
     reader, writer = await dial_computer_mcp(sock)
     return ComputerLineSession(reader, writer, sock=sock), AsyncExitStack()

@@ -82,9 +82,7 @@ def run(schedule_id: int, revision: int | None = None) -> int:
             engine.RunnerRoot(
                 database=database(),
                 inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine),
-                plugins=engine.PluginInputs(
-                    config=config, clock_factory=clock_factory, producer=clients.event_pipeline
-                ),
+                plugins=engine.PluginInputs(config=config, machine=machine, clients=clients),
                 policy=StallPolicy(timeout_s=config.view.gateway.schedule_stall_timeout_seconds),
                 home=meiva_home(),
             ),

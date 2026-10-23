@@ -1,28 +1,28 @@
-"""Guard for the namespace / member install primitives (`meiva.sdk_surface.plugins`).
+# meiva:note
+# Guard for the namespace / member install primitives (`meiva.sdk_surface.plugins`).
+#
+# A plugin declares `SdkNamespace` / `SdkMember` values; `meiva.sdk_surface.install` applies
+# each through `install_namespace` / `install_member`, which attach to the `meiva` module and
+# return the record that `uninstall_namespace` / `uninstall_member` reverse. These tests drive
+# the primitives directly (one declaration, one reversal) so a failure points at the primitive;
+# the whole-registry behavior (rollback, ordering, uninstall) is in
+# `meiva/tests/namespaces/sdk_surface/test_install.py`.
+#
+# Coverage matrix: - attach + __all_for_meiva__ + help(meiva) visible (ModuleType and
+# SimpleNamespace equivalent) - Exception hierarchy (InvalidName / InvalidModule /
+# FrameworkConflict / PluginConflict all under RegisterNamespaceError, mutually exclusive) -
+# Module type validation (int/None/str -> InvalidNamespaceModuleError, fail-fast) - Name
+# validation (invalid identifier / underscore prefix, raise separately) - Name collision
+# (framework built-in / top-level attr served by __getattr__ like DB_URL / a name an earlier
+# plugin already holds) - undo + reinstall scenario (cleans up, leaves the framework untouched,
+# the name is reusable) - sys.modules['meiva'] consistency - `import meiva.<name>` / `from meiva
+# import <name>` resolve through sys.modules (ModuleType and SimpleNamespace equivalent; the
+# undo drops the entry again)
 
-A plugin declares `SdkNamespace` / `SdkMember` values; `meiva.sdk_surface.install` applies each through
-`install_namespace` / `install_member`, which attach to the `meiva` module and return the undo that
-reverses it. These tests drive the primitives directly (one declaration, one undo) so a failure points
-at the primitive; the whole-registry behavior (rollback, ordering, uninstall) is in
-`meiva/tests/namespaces/sdk_surface/test_install.py`.
-
-Coverage matrix:
-- attach + __all_for_meiva__ + help(meiva) visible (ModuleType and SimpleNamespace equivalent)
-- Exception hierarchy (InvalidName / InvalidModule / FrameworkConflict / PluginConflict
-  all under RegisterNamespaceError, mutually exclusive)
-- Module type validation (int/None/str -> InvalidNamespaceModuleError, fail-fast)
-- Name validation (invalid identifier / underscore prefix, raise separately)
-- Name collision (framework built-in / top-level attr served by __getattr__ like DB_URL / a name an
-  earlier plugin already holds)
-- undo + reinstall scenario (cleans up, leaves the framework untouched, the name is reusable)
-- sys.modules['meiva'] consistency
-- `import meiva.<name>` / `from meiva import <name>` resolve through sys.modules
-  (ModuleType and SimpleNamespace equivalent; the undo drops the entry again)
-"""
 
 import io
 import sys
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import redirect_stdout
 from importlib import import_module
 from types import ModuleType, SimpleNamespace
@@ -32,38 +32,42 @@ import pytest
 
 import meiva
 from meiva.sdk_surface import plugins
+from meiva.sdk_surface.installation import MemberAdded, NamespaceAdded
 
 PLUGIN = "test-plugin"
 
 
+# meiva:note
+# Installs through the primitives and keeps every record so teardown can reverse them.
 class _Installer:
-    """Installs through the primitives and keeps every undo so teardown can run them."""
-
     def __init__(self) -> None:
-        self.undos: list[Callable[[], None]] = []
+        self.applied: list[NamespaceAdded | MemberAdded] = []
 
     def namespace(
         self, name: str, module: Any, taken: Mapping[str, str] | None = None
-    ) -> Callable[[], None]:
-        undo = plugins.install_namespace(PLUGIN, name, module, {} if taken is None else taken)
-        self.undos.append(undo)
-        return undo
+    ) -> NamespaceAdded:
+        added = plugins.install_namespace(PLUGIN, name, module, {} if taken is None else taken)
+        self.applied.append(added)
+        return added
 
-    def member(self, namespace: str, name: str, fn: Any) -> Callable[[], None]:
-        undo = plugins.install_member(PLUGIN, namespace, name, fn)
-        self.undos.append(undo)
-        return undo
+    def member(self, namespace: str, name: str, fn: Any) -> MemberAdded:
+        added = plugins.install_member(PLUGIN, namespace, name, fn)
+        self.applied.append(added)
+        return added
+
+    def undo(self, added: NamespaceAdded | MemberAdded) -> None:
+        plugins.uninstall(added)
 
 
 @pytest.fixture(autouse=True)
 def installer() -> Iterator[_Installer]:
-    """Undo everything a test installed (newest first), so the meiva surface (package attrs,
-    `__all_for_meiva__`, sys.modules aliases) matches its pre-test state after completion. Every undo
-    is safe to run again, so a test may call its own undo too."""
+    """Reverse everything a test installed (newest first), so the meiva surface (package attrs,
+    `__all_for_meiva__`, sys.modules aliases) matches its pre-test state after completion. Every
+    reversal is safe to run again, so a test may reverse its own record too."""
     inst = _Installer()
     yield inst
-    while inst.undos:
-        inst.undos.pop()()
+    while inst.applied:
+        inst.undo(inst.applied.pop())
 
 
 def _make_module(name: str) -> ModuleType:
@@ -240,11 +244,11 @@ def test_exception_hierarchy_not_overlapping():
 
 def test_namespace_undo_removes_attr_and_all(installer: _Installer):
     """The undo removes the attr + __all_for_meiva__ entry, meiva surface restored to pristine."""
-    undo_code = installer.namespace("code", _make_module("code"))
-    undo_ext = installer.namespace("ext", _make_module("ext"))
+    added_code = installer.namespace("code", _make_module("code"))
+    added_ext = installer.namespace("ext", _make_module("ext"))
 
-    undo_ext()
-    undo_code()
+    installer.undo(added_ext)
+    installer.undo(added_code)
 
     assert not hasattr(meiva, "code")
     assert not hasattr(meiva, "ext")
@@ -256,7 +260,7 @@ def test_namespace_undo_does_not_touch_framework_namespaces(installer: _Installe
     """The undo only removes what it installed, framework built-in submodules untouched."""
     framework_before = set(meiva.__all_for_meiva__)
 
-    installer.namespace("code", _make_module("code"))()
+    installer.undo(installer.namespace("code", _make_module("code")))
 
     assert set(meiva.__all_for_meiva__) == framework_before
     assert hasattr(meiva, "files")
@@ -264,7 +268,7 @@ def test_namespace_undo_does_not_touch_framework_namespaces(installer: _Installe
 
 def test_install_after_undo_reuses_name(installer: _Installer):
     """After the undo, a plugin can install the same name again — required for reload scenario."""
-    installer.namespace("code", _make_module("code-v1"))()
+    installer.undo(installer.namespace("code", _make_module("code-v1")))
 
     installer.namespace("code", _make_module("code-v2"))
     assert meiva.code.greet() == "hello from code-v2"  # type: ignore[attr-defined]
@@ -308,7 +312,7 @@ def test_install_member_visible_in_help(installer: _Installer):
 
 def test_member_undo_tears_it_off_the_parent(installer: _Installer):
     """The undo takes the member off the parent + __all_for_meiva__."""
-    installer.member("self", "sample_member", _noop)()
+    installer.undo(installer.member("self", "sample_member", _noop))
     assert not hasattr(meiva.self, "sample_member")
     assert "sample_member" not in meiva.self.__all_for_meiva__
 
@@ -317,7 +321,7 @@ def test_install_member_reload_round_trip(installer: _Installer):
     """install -> undo -> install again succeeds with no __all_for_meiva__ duplicate: the
     undo takes both the attr and the surface entry, so the second install neither hits
     MemberConflictError nor accumulates a duplicate."""
-    installer.member("self", "sample_member", _noop)()
+    installer.undo(installer.member("self", "sample_member", _noop))
     installer.member("self", "sample_member", _noop)
     assert callable(meiva.self.sample_member)  # type: ignore[attr-defined]
     assert meiva.self.__all_for_meiva__.count("sample_member") == 1
@@ -328,13 +332,13 @@ def test_member_on_a_plugin_namespace_goes_with_it(installer: _Installer):
     the member and then the namespace, and undoing the namespace first is also safe (the module
     is being discarded, so the member goes with it)."""
     # A SimpleNamespace is materialized with a synthesized `__all_for_meiva__`, which is what lets it host members.
-    undo_ns = installer.namespace("code", SimpleNamespace(greet=lambda: "hello", __doc__="ns"))
-    undo_member = installer.member("code", "extra", _noop)
+    added_ns = installer.namespace("code", SimpleNamespace(greet=lambda: "hello", __doc__="ns"))
+    added_member = installer.member("code", "extra", _noop)
     assert meiva.code.extra is _noop  # type: ignore[attr-defined]
     assert "extra" in meiva.code.__all_for_meiva__  # type: ignore[attr-defined]
 
-    undo_ns()
-    undo_member()  # parent already gone: nothing to do, no error
+    installer.undo(added_ns)
+    installer.undo(added_member)  # parent already gone: nothing to do, no error
     assert not hasattr(meiva, "code")
 
 
@@ -430,7 +434,7 @@ def test_materialized_namespace_help_renders_members(installer: _Installer):
 def test_undo_removes_sys_modules_entry(installer: _Installer):
     """The undo drops the importable alias: afterwards `import meiva.code`
     fails again instead of serving a stale module."""
-    installer.namespace("code", _make_module("code"))()
+    installer.undo(installer.namespace("code", _make_module("code")))
 
     assert "meiva.code" not in sys.modules
     with pytest.raises(ModuleNotFoundError):
@@ -440,9 +444,9 @@ def test_undo_removes_sys_modules_entry(installer: _Installer):
 def test_install_undo_install_import_returns_fresh_module(installer: _Installer):
     """The reload round-trip stays consistent: after the second install the import
     serves the new object, never the stale one undone earlier."""
-    undo = installer.namespace("code", _make_module("code-v1"))
+    added = installer.namespace("code", _make_module("code-v1"))
     first = sys.modules["meiva.code"]
-    undo()
+    installer.undo(added)
 
     installer.namespace("code", _make_module("code-v2"))
     second = sys.modules["meiva.code"]

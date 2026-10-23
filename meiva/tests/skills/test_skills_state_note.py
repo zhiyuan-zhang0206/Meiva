@@ -17,37 +17,20 @@ from typing import Any
 import pytest
 
 import meiva
-from base import telemetry
-from base.agents.context import MeivaContext
-from base.db import Database
-from base.telemetry import audit_events
-from meiva.sdk_surface import agent_identity, process_context
-from meiva.sdk_surface.installation import Installation
+from meiva.sdk_surface import process_context
+from meiva.tests.skills._skills_helpers import AuditedAgent, write_skill
+from meiva.tests.skills._skills_helpers import audited_agent as audited_agent
 from meiva.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
-from meiva.tests.skills._skills_helpers import overlay_all_enabled as overlay_all_enabled
-from meiva.tests.skills._skills_helpers import write_skill
 
 pytestmark = pytest.mark.usefixtures("unit_home")
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def _one_agent(_context: MeivaContext | None = None) -> int:
-    return 1
-
-
-def _discard_audit(_db: Database, _event: telemetry.Event, **_kw: Any) -> None:
-    return None
-
-
 @pytest.fixture(autouse=True)
-def _exec_turn(
-    monkeypatch: pytest.MonkeyPatch, sdk_model_owner: Installation
-) -> Iterator[dict[str, Any]]:
-    """An exec turn is bound (the child's state slot and an empty state update), the agent has
-    an identity, and the audit write goes nowhere."""
-    monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
-    monkeypatch.setattr(audit_events, "record_audit_reported", _discard_audit)
+def _exec_turn(sdk_model_owner: object, audited_agent: AuditedAgent) -> Iterator[dict[str, Any]]:
+    """An exec turn is bound (the child's state slot and an empty state update) and the agent has
+    an identity."""
     process_context.unbind_exec_turn()
     process_context.set_state(object())
     update: dict[str, Any] = {}
@@ -137,19 +120,13 @@ def test_agent_code_that_replaced_the_update_does_not_break_the_read(
 
 
 def test_the_audit_is_still_written_when_the_read_is_noted(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    fake_skills_dir: Path, audited_agent: AuditedAgent
 ) -> None:
     _skills(fake_skills_dir)
-    recorded: list[str] = []
-
-    def capture(_db: Database, event: telemetry.Event, **_kw: Any) -> None:
-        recorded.append(event.attributes["skill"])
-
-    monkeypatch.setattr(audit_events, "record_audit_reported", capture)
 
     _ = meiva.skills.alpha.__doc__
 
-    assert recorded == ["alpha"]
+    assert audited_agent.invoked() == [("alpha", "loaded")]
 
 
 # A read in the exec child must cost the child no network or decision stack: it runs on every

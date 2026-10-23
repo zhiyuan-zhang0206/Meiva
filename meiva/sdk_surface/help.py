@@ -20,12 +20,6 @@ from typing import Any, cast
 from meiva.sdk_surface import meiva_module, process_context
 
 from .attachment_transport import format_signature as format_signature
-from .const import (
-    format_docstring as format_docstring,
-)
-from .const import (
-    is_documented_const,
-)
 from .discovery import (
     Constant,
     agent_visible_names,
@@ -33,6 +27,12 @@ from .discovery import (
     is_container,
     is_namespace,
     is_skill_object,
+)
+from .pure.const import (
+    format_docstring as format_docstring,
+)
+from .pure.const import (
+    is_documented_const,
 )
 
 

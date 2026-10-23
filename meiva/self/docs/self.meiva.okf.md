@@ -33,6 +33,13 @@ own an independent identity or borrow and restore the prior context's exact one.
 - `restart(config_overlay=None) → NoReturn` — Replace current process with a new process. `config_overlay` merges into persistent settings. Model/effort edits validate against the final stored overlay and birth configuration under a row lock; configuration and the restart inbound commit together. An invalid pair changes neither.
 - `terminate() → NoReturn` — End current process — the normal last step when your task is done (never idle waiting for someone else to do it); state preserved, a message resurrects you.
 
+## Implementation
+Each lifecycle entry reads the process once (identity, settings, the bound context) and runs
+the rows `meiva/self/plans.py` returns: `restart_statements`, `terminate_statement`,
+`compact_statement`, `heartbeat_pause_statements` and the limit check `pause_duration`, all
+strict functions of values. `meiva/self/wake.py` then publishes the wake on the agent's inbound
+channel from the redis handle, the agent id and the configured events channel it is given.
+
 ## meiva_fleet Plugin Injections
 
 The following members are mounted onto the `meiva.self` namespace by the `meiva_fleet` plugin (non-core), allowing agents to report status to the fleet monitoring view. See plugin-side OKF for details.

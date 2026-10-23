@@ -27,7 +27,7 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.clock import Clock
-from base.config.tests.configuration import defaults
+from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -129,7 +129,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
             agent=AgentSlices.resolve(default_reader=defaults(agent__security_scan_enabled=True)),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
-            clients=process_clients(),
+            clients=process_clients(config=snapshot_process_config()),
             identity=AgentIdentity(agent_id=1042, owns_loop=True),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,

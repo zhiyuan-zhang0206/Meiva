@@ -8,6 +8,7 @@ import pytest
 
 from agent.state import plugin_state_schema
 from base import config
+from base.agents.context.clients import ClientSet
 from meiva.sdk_surface import install, process_context
 from meiva.sdk_surface.extensions import load_extensions
 from services.agent_runner.agent_host import daemon
@@ -36,17 +37,18 @@ def test_host_root_supplies_model_and_config_owners() -> None:
         boot = config.ConfigBoot()
         boot.boot()
         try:
-            producer = Mock(
-                side_effect=AssertionError("plugin loading must keep its producer cold")
+            pipeline = Mock(
+                side_effect=AssertionError("plugin loading must keep its pipeline cold")
             )
+            clients = ClientSet(pipeline_factory=pipeline)
             installation = load_installation(
                 boot,
-                producer=producer,
+                clients=clients,
                 load_extensions=partial(load_extensions, validate_state=plugin_state_schema),
             )
             assert installation.require_catalog().models
-            assert installation.producer is producer
-            producer.assert_not_called()
+            assert installation.clients is clients
+            pipeline.assert_not_called()
             assert installation.authority is not None
             assert installation.authority.runtime is boot.view
             assert installation.authority.all_domains.profile is None
@@ -76,10 +78,10 @@ def _assert_profiled_host_defers_complete_model(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(config, "Settings", build)
     try:
-        producer = Mock(side_effect=AssertionError("plugin loading must keep its producer cold"))
+        pipeline = Mock(side_effect=AssertionError("plugin loading must keep its pipeline cold"))
         installation = load_installation(
             boot,
-            producer=producer,
+            clients=ClientSet(pipeline_factory=pipeline),
             load_extensions=partial(load_extensions, validate_state=plugin_state_schema),
         )
         authority = installation.authority

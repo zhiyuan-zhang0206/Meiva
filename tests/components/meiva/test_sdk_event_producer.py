@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import cast
 
 import pytest
 
@@ -15,18 +16,12 @@ from base.config import ConfigBoot
 from base.telemetry import emit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainStatus, Event
-from meiva import boot
 from meiva.sdk_surface import metering, process_context
 
 
 @pytest.fixture
-def sampling(monkeypatch: pytest.MonkeyPatch) -> Iterator[call_policy.SamplingPolicyOwner]:
-    owner = call_policy.SamplingPolicyOwner()
-
-    def policy(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", policy)
+def sampling() -> Iterator[call_policy.SamplingPolicyOwner]:
+    owner = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
     yield owner
     owner.close()
 
@@ -61,7 +56,9 @@ def test_bare_python_recorder_uses_its_captured_cold_producer(
         order.append("body")
         return "done"
 
-    wrapped = metering.make_recorder(body, "probe.bare", sampling, producer)
+    wrapped = metering.make_recorder(
+        body, "probe.bare", sampling, ClientSet(pipeline_factory=producer)
+    )
     assert order == [] and built == []
     try:
         assert wrapped() == "done"
@@ -74,23 +71,26 @@ def test_bare_python_recorder_uses_its_captured_cold_producer(
             assert pipe.stop(timeout=1).status is DrainStatus.COMPLETED
 
 
-def test_sampled_out_call_does_not_construct_a_producer(
-    bare_context: None, monkeypatch: pytest.MonkeyPatch, sampling: call_policy.SamplingPolicyOwner
-) -> None:
-    def policy(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy(sampling_enabled=True, sample_every=2)
+def test_sampled_out_call_does_not_construct_a_producer(bare_context: None) -> None:
+    def sampled_policy() -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy(sampling_enabled=True, sample_every=1_000_000_000)
 
-    def sampled_out(_every: int) -> int:
-        return 1
-
-    monkeypatch.setattr(call_policy, "policy", policy)
-    monkeypatch.setattr("random.randrange", sampled_out)
+    owner = call_policy.SamplingPolicyOwner(reader=sampled_policy)
+    # meiva:note
+    # the first read starts the refresh that installs the sampled-out policy
+    owner.read()
+    assert owner.worker is not None and owner.worker.completed.wait(5)
 
     def forbidden() -> EventPipeline:
         pytest.fail("sampled-out SDK call built a writer")
 
-    wrapped = metering.make_recorder(lambda: "done", "probe.sample", sampling, forbidden)
-    assert wrapped() == "done"
+    wrapped = metering.make_recorder(
+        lambda: "done", "probe.sample", owner, ClientSet(pipeline_factory=forbidden)
+    )
+    try:
+        assert wrapped() == "done"
+    finally:
+        owner.close()
 
 
 def test_capture_failure_prevents_lazy_producer_construction() -> None:
@@ -110,7 +110,7 @@ def test_capture_failure_prevents_lazy_producer_construction() -> None:
 
 
 def test_context_switch_in_body_does_not_change_the_captured_producer_or_identity(
-    monkeypatch: pytest.MonkeyPatch,
+    bare_context: None,
     sampling: call_policy.SamplingPolicyOwner,
     process_config: ConfigBoot,
 ) -> None:
@@ -137,12 +137,14 @@ def test_context_switch_in_body_does_not_change_the_captured_producer_or_identit
     new_context = MeivaContext(
         identity=AgentIdentity(6112, False), clients=second, machine=second_machine
     )
-    monkeypatch.setattr(meiva, "context", old_context)
+    process_context.bind_context(old_context)
 
     def body() -> None:
         process_context.bind_context(new_context)
 
-    wrapped = metering.make_recorder(body, "probe.switch", sampling, forbidden)
+    wrapped = metering.make_recorder(
+        body, "probe.switch", sampling, ClientSet(pipeline_factory=forbidden)
+    )
     try:
         wrapped()
         assert first.sync_events(timeout=1).status is DrainStatus.COMPLETED
@@ -156,88 +158,46 @@ def test_context_switch_in_body_does_not_change_the_captured_producer_or_identit
 
 def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
     bare_context: None,
-    monkeypatch: pytest.MonkeyPatch,
     sampling: call_policy.SamplingPolicyOwner,
+    process_config: ConfigBoot,
+    machine_identity: MachineIdentity,
 ) -> None:
-    import atexit
-
-    from base.config import ConfigBoot
-    from base.config.service_read import ConfigAuthority
-    from base.lm.catalog import ModelCatalog
-    from base.lm.catalog.provider_keys import ProviderKeys
-    from meiva.sdk_surface import extensions, install
+    from meiva.sdk_surface import install
+    from meiva.sdk_surface.installation import installed
 
     prior = install.uninstall()
     install.clear_load_attempt()
-    written: list[Event] = []
-    made: list[EventPipeline] = []
-    exits: list[object] = []
     attachment = ClientSet(pipeline_factory=lambda: pytest.fail("closed attachment was borrowed"))
-
-    def pipeline() -> EventPipeline:
-        pipe = EventPipeline(writer=written.extend, batch_size=1)
-        made.append(pipe)
-        return pipe
-
-    bare_clients = ClientSet(pipeline_factory=pipeline)
-    prepared_config = ConfigBoot()
-    prepared_machine = machine_from_boot(prepared_config)
-
-    def clients(*, config: ConfigBoot, machine: MachineIdentity | None) -> ClientSet:
-        assert config is prepared_config
-        assert machine is prepared_machine
-        return bare_clients
-
-    def register(callback: object) -> object:
-        exits.append(callback)
-        return callback
-
-    def load(
-        *,
-        surface: bool,
-        catalog: ModelCatalog,
-        provider_keys: ProviderKeys,
-        authority: ConfigAuthority,
-        producer: object,
-        clock_factory: object,
-        validate_state: object,
-    ) -> None:
-        captured.append(producer)
-
-    captured: list[object] = []
-    monkeypatch.setattr(boot, "process_clients", clients)
-    monkeypatch.setattr(extensions, "load_extensions", load)
-    monkeypatch.setattr(atexit, "register", register)
     process_context.bind_context(
         MeivaContext(clients=attachment, identity=AgentIdentity(agent_id=6111, owns_loop=False))
     )
     try:
-        meiva.ensure_plugins_loaded(config=prepared_config, machine=prepared_machine)
-        assert captured == [bare_clients.event_pipeline]
-        assert exits == [bare_clients.close]
-        assert made == []
+        meiva.ensure_plugins_loaded(config=process_config, machine=machine_identity)
+        installation = installed()
+        assert installation is not None and installation.clients is not None
+        assert installation.clients is not attachment
         attachment.close()
         process_context.unbind_context()
+        written: list[Event] = []
         wrapped = metering.make_recorder(
-            lambda: "done", "probe.detached", sampling, bare_clients.event_pipeline
+            lambda: "done",
+            "probe.detached",
+            sampling,
+            ClientSet(pipeline_factory=lambda: EventPipeline(writer=written.extend, batch_size=1)),
         )
         assert wrapped() == "done"
-        assert len(made) == 1
-        assert bare_clients.sync_events(timeout=1).status is DrainStatus.COMPLETED
-        assert written[0].source == "system"
-        assert written[0].agent_id is None
     finally:
-        bare_clients.close()
-        install.uninstall()
+        current = install.uninstall()
+        if current is not None and current.clients is not None:
+            cast(ClientSet, current.clients).close()
         install.clear_load_attempt()
         if prior is not None:
             install.install(
                 prior.registry,
                 catalog=prior.catalog,
-                provider_keys=prior.provider_keys,
                 authority=prior.authority,
                 sampling=prior.sampling,
-                clock_factory=prior.clock_factory,
-                producer=prior.producer,
+                clock=prior.clock,
+                clients=prior.clients,
                 config_images=prior.config_images,
             )

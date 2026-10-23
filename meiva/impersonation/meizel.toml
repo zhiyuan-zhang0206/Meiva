@@ -1,11 +1,14 @@
-exports = ["attachment.py"]
+exports = ["admission.py", "attachment.py"]
 
 [uses]
 "__init__.py" = ["attachment.py"]
+"attachment.py" = ["admission.py"]
+"tests" = ["admission.py"]
 
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
+"admission.py" = "strict"
 
 [debt.impure-call]
 "attachment.py#uuid.uuid4" = 1
@@ -17,15 +20,11 @@ exports = ["attachment.py"]
 "attachment.py#base/agents/impersonation/__init__.py" = 3
 "attachment.py#base/agents/impersonation/manifest.py" = 4
 "attachment.py#base/agents/impersonation/sessions.py" = 1
-"attachment.py#base/clock/configuration.py" = 1
-"attachment.py#base/cluster/dataplane/direct_url.py" = 1
+"attachment.py#base/agents/impersonation/status.py" = 1
 "attachment.py#base/config/__init__.py" = 1
 "attachment.py#base/config/agent_pins.py" = 1
-"attachment.py#base/db/__init__.py" = 1
-"attachment.py#base/db/code_version_gate.py" = 1
-"attachment.py#base/db/config.py" = 1
+"attachment.py#base/config/service_read.py" = 1
 "attachment.py#base/host/env/agent_slices.py" = 1
-"attachment.py#base/native_process/code_version.py" = 1
 "attachment.py#base/native_process/ownership.py" = 1
 "attachment.py#base/packages/plugins/config_view.py" = 1
 "attachment.py#meiva/boot.py" = 1

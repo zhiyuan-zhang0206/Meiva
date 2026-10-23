@@ -12,9 +12,9 @@ disposable exec child applies its agent overlay after the plugin load.
 
 import importlib.util
 import inspect
-import os as _os
 import sys as _sys
 import types as _types
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -26,6 +26,7 @@ def mark_load_failed(exc: BaseException) -> None:
     setattr(meiva_module(), SLOT, Loading(installed(), exc))
 
 
+# meiva:note
 # MEIVA_SDK_DISABLE removes pieces of the agent-facing SDK after the regular
 # imports finish. Each comma-separated entry is either:
 #   - a top-level module name (`monitor`, `schedule`, `agents`) — the submodule
@@ -45,13 +46,12 @@ def mark_load_failed(exc: BaseException) -> None:
 #     AttributeError. Either way help() stops listing it.
 # Used to scope the SDK to a context — e.g. a benchmark runner that owns the
 # agent lifecycle disables watcher / self / agents / shell.sessions.
-def env_entries() -> list[str]:
-    """The entries `MEIVA_SDK_DISABLE` names right now, parsed.
-
-    Applied by `meiva.sdk_surface.install` as it builds an installation — after its
-    submodule imports and `__all_for_meiva__` exist, before any plugin namespace
-    applies."""
-    return [e.strip() for e in _os.environ.get("MEIVA_SDK_DISABLE", "").split(",") if e.strip()]
+# The entries `MEIVA_SDK_DISABLE` names in `env`, parsed.
+#
+# Applied by `meiva.sdk_surface.install` as it builds an installation — after its submodule
+# imports and `__all_for_meiva__` exist, before any plugin namespace applies.
+def env_entries(env: Mapping[str, str]) -> list[str]:
+    return [e.strip() for e in env.get("MEIVA_SDK_DISABLE", "").split(",") if e.strip()]
 
 
 class DisabledSDKModule(_types.ModuleType):

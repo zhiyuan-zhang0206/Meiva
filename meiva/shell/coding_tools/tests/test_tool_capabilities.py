@@ -215,19 +215,13 @@ def test_status_previews_the_requested_mode_and_returns_its_refusal(
     key = coding_session_owner.canonical_key(
         tmp_path / "workspace", tool="claude", cluster=tmp_path / "cluster"
     )
-    reported: list[tuple[str, str, bool]] = []
     line = (
         "harness: claude=2.1.284 [/usr/local/bin/claude] features=[] decision=stream-json (refused)"
     )
 
-    def report(tool: str, *, mode: str = "auto", force: bool = False) -> tuple[str, int]:
-        reported.append((tool, mode, force))
-        return line, 2
-
-    code = _common.status(key, lambda _owner: None, mode="stream-json", force=True, report=report)
+    code = _common.status(key, capability=(line, 2))
 
     assert code == 2
-    assert reported == [("claude", "stream-json", True)]
     assert line in capsys.readouterr().out
 
 
@@ -238,12 +232,77 @@ def test_status_still_reports_the_path_a_launch_would_take(
         tmp_path / "workspace", tool="claude", cluster=tmp_path / "cluster"
     )
 
-    def report(tool: str, *, mode: str = "auto", force: bool = False) -> tuple[str, int]:
-        return f"harness: {tool} decision=pty", 0
-
-    code = _common.status(key, lambda _owner: None, report=report)
+    code = _common.status(key, capability=("harness: claude decision=pty", 0))
 
     output = capsys.readouterr().out
     assert code == 0
     assert "status=inactive" in output
     assert "harness: claude decision=pty" in output
+
+
+@pytest.mark.parametrize("tool", ["claude", "codex"])
+def test_an_explicit_unimplemented_mode_is_refused_whatever_the_machine_has(
+    unit_home: Path, tool: str
+) -> None:
+    # meiva:note
+    # The probe runs the machine's own CLI, so the line differs per host; the decision to refuse a mode this build does not implement does not.
+    line, code = _common.capability_report(tool, mode="stream-json", force=True)
+
+    assert code == 2
+    assert f"harness: {tool}=" in line
+    assert "decision=stream-json" in line
+
+
+@pytest.mark.parametrize("tool", ["claude", "codex"])
+def test_auto_degrades_to_the_one_implemented_path(unit_home: Path, tool: str) -> None:
+    line, code = _common.capability_report(tool)
+
+    assert code == 0
+    assert "decision=pty" in line
+
+
+def test_a_tool_with_no_declared_capabilities_reports_nothing(unit_home: Path) -> None:
+    assert _common.capability_report("antigravity") == ("", 0)
+
+
+def _launching(tmp_path: Path, tool: str) -> coding_session_owner.CodingSessionOwner:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    key = coding_session_owner.canonical_key(workspace, tool=tool, cluster=tmp_path / "cluster")
+    return _common.new_generation(
+        key, owner_agent_id=41, tasks_file=None, work_file=None, ttl_seconds=3600
+    )
+
+
+@pytest.mark.parametrize(
+    ("tool", "present", "absent"),
+    [
+        ("claude", "state_dir=", "supervisor_session_id="),
+        ("codex", "owner_agent_id=41", "state_dir="),
+    ],
+)
+def test_status_lists_every_generation_recorded_for_the_workspace(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], tool: str, present: str, absent: str
+) -> None:
+    owner = _launching(tmp_path, tool)
+
+    assert _common.status(owner.key, capability=("", 0)) == 0
+
+    out = capsys.readouterr().out
+    assert "status=launching" in out
+    assert f"generation={owner.generation}" in out
+    assert present in out
+    assert absent not in out
+
+
+def test_cancel_terminalizes_exactly_the_named_generation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner = _launching(tmp_path, "codex")
+    assert owner.generation is not None
+
+    assert _common.cancel(owner.key, owner.generation) == 0
+
+    assert "status=terminal" in capsys.readouterr().out
+    assert _common.cancel(owner.key, "11111111-2222-3333-4444-555555555555") == 1
+    assert "cancel refused" in capsys.readouterr().err

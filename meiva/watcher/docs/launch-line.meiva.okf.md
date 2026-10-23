@@ -25,12 +25,15 @@ session whose launch command never arrived is not a watcher, and leaving it woul
 sit under the watcher's name (up to the TTL's 7 days for a default cron) with
 nothing to run.
 
-The real-PTY tests provide the existing background-command port with an explicit
-notice CLI. They use the shared line builder and launch-file writer, so shell
-exit status, notification source, long-path sourcing and generated-file cleanup
-still execute through the real session. Only the long-path case allocates its
-log in the supplied long directory rather than testing the workspace log ring.
-The stale-identity case supplies the wrong identity through the spawn's explicit
-runner environment; the shipped bootstrap must overwrite it before SDK import.
+The launch is split into decisions over values and a shell that executes them.
+`meiva/watcher/launch_plan.py` (strict) plans the three generated files, the command
+and the single launch line; `meiva/watcher/spawn.py:run` writes them, sends the line to
+the agent's real shell session and, on any failure after the session exists, removes
+the files and kills the session. Tests assert the plan on values and run the shell
+against the real PTY service: the notice CLI is a value in the deps (a script that
+records its argv), the long-path case points the workspace at a long directory, the
+stale-identity case supplies the wrong identity through the runner environment (the
+shipped bootstrap must overwrite it before SDK import), and the failed-launch cases make
+one generated path a directory.
 
 Parent: [[meiva/watcher/docs/watcher.meiva.okf.md]].

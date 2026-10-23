@@ -7,25 +7,33 @@ import shlex
 import sys
 import time
 from dataclasses import replace
-from functools import partial
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 from uuid import UUID
 
+import httpx
 import pytest
 
-from base.host.atomic_io import AtomicWriter
+from base.api_contracts.agent_contract import AgentStatus, ErrorReason
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.lm.harness.codex.auth import SECRET_ENV_NAMES
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
-from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
-from base.sessions.pty.tests.pty_service import pty_service as pty_service
-from meiva.sdk_surface import agent_identity, settings
 from meiva.sdk_surface.tests.agent_binding import BindAgent
-from meiva.shell import sessions
 from meiva.shell.coding_tools import _common, codex
+from meiva.shell.coding_tools.plans.launch_request import LaunchRequest, worker_bootstrap
+from meiva.shell.coding_tools.plans.pacing import CodexWaits, Pacing
+from meiva.shell.coding_tools.tests.fake_tools import (
+    CODEX_SESSION,
+    gateway_double,
+    install_codex,
+    site_for,
+)
+from meiva.shell.session_env import SessionHost
+from meiva.shell.sessions import ShellSessions
+from meiva.shell.tests.live_shell import seed_agent
 
 _SKILL_DIR = (
     Path(__file__).parents[4]
@@ -34,6 +42,12 @@ _SKILL_DIR = (
     / "platform"
     / "meiva-guide"
     / "external-agents"
+)
+_WAITS = CodexWaits(
+    server=Pacing(timeout=15.0, poll=0.05, settle=0.0),
+    ready=Pacing(timeout=20.0, poll=0.05, settle=0.1),
+    status=Pacing(timeout=15.0, poll=0.05, settle=0.0),
+    submit=Pacing(timeout=15.0, poll=0.05, settle=0.1),
 )
 
 
@@ -48,11 +62,7 @@ def _load(name: str, path: Path) -> ModuleType:
 
 spawn_codex = _load("spawn_codex_under_test", _SKILL_DIR / "scripts" / "spawn_codex.py")
 watch_work = _load("watch_work_under_test", _SKILL_DIR / "scripts" / "watch_work.py")
-
-
-def _record_app_server(events: list[str], _endpoint: str, *, log_path: Path | None = None) -> None:
-    assert log_path is not None and log_path.name == "app-server.log"
-    events.append("app-server")
+_OWNER = 41
 
 
 def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
@@ -142,7 +152,9 @@ def test_launch_command_can_explicitly_declare_external_caller(tmp_path: Path) -
     assert '"instance":"run-42"' in command
 
 
-def test_fresh_launch_publishes_full_handle_and_durable_context(tmp_path: Path) -> None:
+def test_fresh_launch_names_the_full_handle_and_hands_the_worker_both_files(
+    tmp_path: Path,
+) -> None:
     record = _owner(tmp_path)
     workspace = Path(record.key.workspace)
     tasks_file = workspace / "tasks.md"
@@ -153,7 +165,7 @@ def test_fresh_launch_publishes_full_handle_and_durable_context(tmp_path: Path) 
         == "meiva-agent-41-shell-7-codex-workspace-11111111"
     )
     contract = _SKILL_DIR / "references" / "collaboration_protocol.md"
-    message = _common.worker_bootstrap(contract, workspace, tasks_file, work_file)
+    message = worker_bootstrap(contract, workspace, tasks_file, work_file)
     assert str(contract) in message
     assert str(workspace) in message
     assert str(tasks_file) in message
@@ -169,267 +181,247 @@ def test_supervisor_bootstrap_restores_owner_identity(tmp_path: Path) -> None:
 
 
 def test_codex_supervisor_uses_projected_session_environment(
-    pty_service: PtyServiceProcess,
-    unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    bound_agent: BindAgent,
+    pty_service: PtyServiceProcess, unit_home: Path, short_dir: Path, database: Any
 ) -> None:
     from base.sessions.backend import PtySessionBackend
-    from meiva.shell.tests.support import FakeDatabase
+    from base.sessions.pty.client import PtyClientConfig
+    from meiva.shell.tests.live_shell import isolated_host
 
-    owner = _owner(unit_home)
-    workspace = Path(owner.key.workspace)
-    backend = PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()))
-    report = unit_home / "codex-child-env.json"
+    owner = _owner(short_dir)
+    report = short_dir / "env.json"
     pty_service.stop()
-    service = PtyServiceProcess(unit_home, {"VIRTUAL_ENV": str(unit_home / "foreign" / ".venv")})
+    service = PtyServiceProcess(unit_home, {"VIRTUAL_ENV": str(short_dir / "foreign" / ".venv")})
     service.start()
-    bound_agent(41)
-    monkeypatch.setattr(settings, "database", lambda: FakeDatabase(next_index=7))
-
-    def workspace_for_owner(_agent_id: int) -> Path:
-        return workspace
-
-    monkeypatch.setattr(sessions, "workspace_dir", workspace_for_owner)
-
-    def supervisor_probe(_owner: coding_session_owner.CodingSessionOwner, _watcher: Path) -> str:
-        return (
-            "import json, os; from pathlib import Path; "
-            f"report = Path({str(report)!r}); pending = report.with_suffix('.tmp'); "
-            "pending.write_text(json.dumps(dict("
-            "virtual_env=os.environ.get('VIRTUAL_ENV'), cwd=os.getcwd()))); pending.replace(report)"
-        )
-
-    monkeypatch.setattr(codex, "supervisor_code", supervisor_probe)
+    seed_agent(database, 41, next_index=7)
+    shell = ShellSessions(
+        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket())), database=database, agent_id=41
+    )
+    probe = (
+        "import json, os; from pathlib import Path; "
+        f"report = Path({str(report)!r}); pending = report.with_suffix('.tmp'); "
+        "pending.write_text(json.dumps(dict("
+        "virtual_env=os.environ.get('VIRTUAL_ENV'), cwd=os.getcwd()))); pending.replace(report)"
+    )
     name = coding_session_owner.full_session_name(41, 7, codex.supervisor_name(owner))
     try:
+        site = site_for(shell, unit_home, isolated_host(unit_home))
         sid, actual_name = codex.launch_supervisor(
-            owner, 120, _SKILL_DIR / "scripts" / "watch_work.py"
+            site, owner, 120, f"exec {shlex.quote(sys.executable)} -c {shlex.quote(probe)}"
         )
         assert (sid, actual_name) == (7, name)
         deadline = time.monotonic() + 15
         while not report.exists() and time.monotonic() < deadline:
             time.sleep(0.05)
         assert report.exists()
-        assert json.loads(report.read_text()) == {"virtual_env": None, "cwd": str(workspace)}
+        assert json.loads(report.read_text()) == {
+            "virtual_env": None,
+            "cwd": str(site.session_cwd),
+        }
     finally:
-        backend.kill_session(name)
+        shell.kill_all()
         service.stop()
 
 
-def test_failed_early_publish_kills_codex_session_before_startup(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_supervisor_is_refused_for_an_owner_without_an_agent_identity(
+    live_shell: ShellSessions, live_host: SessionHost, unit_home: Path, short_dir: Path
 ) -> None:
-    active = _owner(tmp_path)
-    launching = replace(
-        active, status=CodingSessionStatus.LAUNCHING, session_id=None, session_name=None
-    )
-    events: list[str] = []
-    killed: list[int] = []
+    anonymous = replace(_owner(short_dir), owner_agent_id=None)
 
-    def _claim(
-        _key: coding_session_owner.CodingSessionKey,
-        *,
-        tasks_file: Path,
-        work_file: Path,
-        ttl_seconds: float,
-    ) -> coding_session_owner.CodingSessionOwner:
-        assert tasks_file.name == "tasks.md"
-        assert work_file.name == "work.md"
-        assert ttl_seconds == 3600
-        events.append("claim")
-        return launching
-
-    def _launch_supervisor(
-        _owner: coding_session_owner.CodingSessionOwner,
-        _ttl_seconds: float,
-        _watcher: Path,
-    ) -> tuple[int, str]:
-        return 6, "meiva-agent-41-shell-6-codex-owner-supervisor"
-
-    def _attach(
-        _key: coding_session_owner.CodingSessionKey,
-        _generation: str,
-        *,
-        session_id: int,
-        session_name: str,
-        writer: AtomicWriter,
-    ) -> coding_session_owner.CodingSessionOwner:
-        assert session_id == 6
-        assert session_name.endswith("-codex-owner-supervisor")
-        events.append("attach")
-        return launching
-
-    def _new(*, name: str, ttl: float) -> int:
-        assert name == launching.expected_suffix
-        assert ttl == 3600
-        events.append("new")
-        return 7
-
-    def _send(_session_id: int, _content: str) -> None:
-        events.append("send")
-
-    def _ready(_session_id: int) -> None:
-        events.append("ready")
-
-    def _verified(_sid: int) -> None:
-        events.append("verified")
-
-    def _publish(
-        _key: coding_session_owner.CodingSessionKey,
-        _generation: str,
-        *,
-        session_id: int,
-        session_name: str,
-        writer: AtomicWriter,
-    ) -> coding_session_owner.CodingSessionOwner:
-        assert session_id == 7
-        assert session_name.endswith("-codex-workspace-11111111")
-        events.append("publish")
-        raise coding_session_owner.CodingSessionGenerationChangedError("replacement won")
-
-    def _kill(session_id: int) -> None:
-        killed.append(session_id)
-
-    def _terminate(
-        _key: coding_session_owner.CodingSessionKey,
-        _generation: str,
-        *,
-        reason: str,
-        writer: AtomicWriter,
-    ) -> bool:
-        assert reason == "launch-failed"
-        return False
-
-    monkeypatch.setattr(codex, "new_generation", _claim)
-    monkeypatch.setattr(codex, "launch_supervisor", _launch_supervisor)
-    monkeypatch.setattr(codex.coding_session_owner, "attach_supervisor", _attach)
-    monkeypatch.setattr(codex.sessions, "new", _new)
-    monkeypatch.setattr(codex.sessions, "send", _send)
-    monkeypatch.setattr(codex, "wait_for_ready", _ready)
-    monkeypatch.setattr(codex, "verify_submitted", _verified)
-    monkeypatch.setattr(codex.coding_session_owner, "publish_active", _publish)
-    monkeypatch.setattr(codex.sessions, "kill", _kill)
-    monkeypatch.setattr(codex.coding_session_owner, "terminate_generation", _terminate)
-
-    workspace = Path(launching.key.workspace)
-    with pytest.raises(coding_session_owner.CodingSessionGenerationChangedError):
-        codex.launch(
-            workspace,
-            workspace / "tasks.md",
-            workspace / "work.md",
-            3600,
-            skill_dir=_SKILL_DIR,
+    with pytest.raises(RuntimeError, match="launching owner has no agent identity"):
+        codex.launch_supervisor(
+            site_for(live_shell, unit_home, live_host), anonymous, 120, "exec sleep 60"
         )
 
-    assert events == ["claim", "attach", "new", "publish"]
-    assert killed == [7]
+    assert live_shell.list() == {}
 
 
-def test_takeover_launch_inlines_brief_without_files_or_supervisor(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    active = _owner(tmp_path)
-    launching = replace(
-        active,
-        status=CodingSessionStatus.LAUNCHING,
-        session_id=None,
-        session_name=None,
-        tasks_file=None,
-        work_file=None,
-        supervisor_session_id=None,
-        supervisor_session_name=None,
+def _stub_skill(short_dir: Path, report: Path) -> Path:
+    skill = short_dir / "skill"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "scripts" / "watch_work.py").write_text(
+        "import json\nimport time\n\n\n"
+        "def watch(work_file, **owner):\n"
+        f"    with open({str(report)!r}, 'w') as out:\n"
+        "        json.dump(dict(work_file=work_file, **owner), out)\n"
+        "    time.sleep(60)\n"
     )
-    events: list[str] = []
-    sent: list[str] = []
+    return skill
 
-    def _claim(
-        _key: coding_session_owner.CodingSessionKey,
-        *,
-        tasks_file: Path | None,
-        work_file: Path | None,
-        ttl_seconds: float,
-    ) -> coding_session_owner.CodingSessionOwner:
-        assert tasks_file is None and work_file is None
-        assert ttl_seconds == 3600
-        events.append("claim")
-        return launching
 
-    def _unexpected(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("a takeover launch must not create files or start a supervisor")
+def _request(
+    workspace: Path,
+    skill_dir: Path,
+    *,
+    prompt: str | None = None,
+    resume: str | None = None,
+) -> LaunchRequest:
+    return LaunchRequest(
+        workspace=workspace,
+        tasks_file=None if prompt is not None else workspace / "tasks.md",
+        work_file=None if prompt is not None else workspace / "work.md",
+        ttl_seconds=3600,
+        caller_instance=None,
+        prompt=prompt,
+        skill_dir=skill_dir,
+        resume=resume,
+    )
 
-    def _session_id(_session_id: int) -> str:
-        events.append("session-id")
-        return "01a0e1ac-adc7-7d33-bd13-8ce2c6a686c5"
 
-    def _new(*, name: str, ttl: float) -> int:
-        assert name == launching.expected_suffix
-        assert ttl == 3600
-        events.append("new")
-        return 7
+def _generation(
+    site_cluster: Path, workspace: Path, *, supervised: bool
+) -> coding_session_owner.CodingSessionOwner:
+    key = coding_session_owner.canonical_key(workspace, tool="codex", cluster=site_cluster)
+    return _common.new_generation(
+        key,
+        owner_agent_id=41,
+        tasks_file=workspace / "tasks.md" if supervised else None,
+        work_file=workspace / "work.md" if supervised else None,
+        ttl_seconds=3600,
+    )
 
-    def _send(session_id: int, content: str) -> None:
-        assert session_id == 7
-        sent.append(content)
-        events.append("send")
 
-    def _ready(_session_id: int) -> None:
-        events.append("ready")
+def _wait_for_text(path: Path, text: str, seconds: float = 20.0) -> str:
+    deadline = time.monotonic() + seconds
+    content = ""
+    while time.monotonic() < deadline:
+        content = path.read_text() if path.exists() else ""
+        if text in content:
+            return content
+        time.sleep(0.05)
+    return content
 
-    def _verified(_session_id: int) -> None:
-        events.append("verified")
 
-    def _publish(
-        _key: coding_session_owner.CodingSessionKey,
-        _generation: str,
-        *,
-        session_id: int,
-        session_name: str,
-        writer: AtomicWriter,
-    ) -> coding_session_owner.CodingSessionOwner:
-        assert session_id == 7
-        assert session_name.endswith("-codex-workspace-11111111")
-        events.append("publish")
-        return replace(
-            launching, status=CodingSessionStatus.ACTIVE, session_id=7, session_name=session_name
-        )
-
-    monkeypatch.setattr(codex, "new_generation", _claim)
-    monkeypatch.setattr(codex, "init_file", _unexpected)
-    monkeypatch.setattr(codex, "launch_supervisor", _unexpected)
-    monkeypatch.setattr(codex.coding_session_owner, "attach_supervisor", _unexpected)
-    monkeypatch.setattr(codex, "read_session_id", _session_id)
-    monkeypatch.setattr(codex, "wait_for_app_server", partial(_record_app_server, events))
-    monkeypatch.setattr(codex.sessions, "new", _new)
-    monkeypatch.setattr(codex.sessions, "send", _send)
-    monkeypatch.setattr(codex, "wait_for_ready", _ready)
-    monkeypatch.setattr(codex, "verify_submitted", _verified)
-    monkeypatch.setattr(codex.coding_session_owner, "publish_active", _publish)
-
-    workspace = Path(launching.key.workspace)
+def test_takeover_launch_inlines_the_brief_without_files_or_a_supervisor(
+    live_shell: ShellSessions, live_host: SessionHost, unit_home: Path, short_dir: Path
+) -> None:
+    received = short_dir / "r.txt"
+    install_codex(unit_home, received)
+    workspace = short_dir / "ws"
+    workspace.mkdir()
+    site = site_for(live_shell, short_dir, live_host)
+    owner = _generation(site.cluster, workspace, supervised=False)
     prompt = "Goal: replace the agent. The briefing is inline; read no files."
-    rc = codex.launch(workspace, None, None, 3600, None, skill_dir=_SKILL_DIR, prompt=prompt)
 
-    assert rc == 0
-    assert events == [
-        "claim",
-        "new",
-        "publish",
-        "send",
-        "app-server",
-        "send",
-        "ready",
-        "session-id",
-        "send",
-        "verified",
-    ]
-    assert "codex app-server --listen" in sent[0]
-    assert sent[1].startswith("clear && ") and "exec env -u OPENAI_API_KEY" in sent[1]
-    assert "codex --remote unix://" in sent[1]
-    assert sent[2] == prompt
-    assert "tasks.md" not in sent[2] and "work.md" not in sent[2]
+    active, remote, session = codex.start_generation(
+        site, owner, _request(workspace, _SKILL_DIR, prompt=prompt), _WAITS
+    )
+
+    assert session == CODEX_SESSION
+    assert remote.startswith("unix://")
+    assert _wait_for_text(received, prompt) == prompt + "\n"
+    argv = received.with_suffix(".argv").read_text()
+    assert f"--remote {remote} --dangerously-bypass-approvals-and-sandbox" in argv
+    assert active.status == CodingSessionStatus.ACTIVE
+    assert active.supervisor_session_id is None
+    assert sorted(path.name for path in workspace.iterdir()) == []
+    assert list(live_shell.list().values()) == [owner.expected_suffix]
+
+
+def test_supervised_launch_runs_a_supervisor_for_exactly_this_generation(
+    live_shell: ShellSessions, live_host: SessionHost, unit_home: Path, short_dir: Path
+) -> None:
+    received = short_dir / "r.txt"
+    install_codex(unit_home, received)
+    report = short_dir / "supervisor.json"
+    skill = _stub_skill(short_dir, report)
+    workspace = short_dir / "ws"
+    workspace.mkdir()
+    site = site_for(live_shell, short_dir, live_host)
+    owner = _generation(site.cluster, workspace, supervised=True)
+
+    active, _remote, _session = codex.start_generation(
+        site, owner, _request(workspace, skill), _WAITS
+    )
+
+    delivered = _wait_for_text(received, "Now read the task file and start working.")
+    assert "Read the collaboration contract at" in delivered
+    assert str(workspace / "work.md") in delivered
+    assert _wait_for_text(report, "owner_agent_id")
+    reported = json.loads(report.read_text())
+    assert reported == {
+        "work_file": str(owner.work_file),
+        "cluster": owner.key.cluster,
+        "workspace": owner.key.workspace,
+        "generation": owner.generation,
+        "owner_agent_id": 41,
+    }
+    assert active.supervisor_session_id is not None
+    assert active.supervisor_session_name is not None
+    assert set(live_shell.list()) == {active.supervisor_session_id, active.session_id}
+
+
+@pytest.mark.parametrize("opened", [CODEX_SESSION, "01a0e1eb-472f-7832-81f6-77c7d2e47d75"])
+def test_a_resumed_worker_reopens_its_session_and_is_told_it_was_interrupted(
+    opened: str,
+    live_shell: ShellSessions,
+    live_host: SessionHost,
+    unit_home: Path,
+    short_dir: Path,
+) -> None:
+    received = short_dir / "r.txt"
+    install_codex(unit_home, received, session=opened)
+    skill = _stub_skill(short_dir, short_dir / "supervisor.json")
+    workspace = short_dir / "ws"
+    workspace.mkdir()
+    site = site_for(live_shell, short_dir, live_host)
+    owner = _generation(site.cluster, workspace, supervised=True)
+    request = _request(workspace, skill, resume=CODEX_SESSION)
+
+    if opened != CODEX_SESSION:
+        with pytest.raises(RuntimeError, match=f"not the requested {CODEX_SESSION}"):
+            codex.start_generation(site, owner, request, _WAITS)
+        assert live_shell.list() == {}
+        assert coding_session_owner.read(owner.key, owner.generation or "").status == (
+            CodingSessionStatus.TERMINAL
+        )
+        assert not received.exists()
+        return
+    _active, remote, session = codex.start_generation(site, owner, request, _WAITS)
+
+    assert session == CODEX_SESSION
+    delivered = _wait_for_text(received, "continue from where you stopped")
+    assert delivered.startswith("This session was interrupted")
+    assert f"resume {CODEX_SESSION} --remote {remote}" in received.with_suffix(".argv").read_text()
+
+
+def test_a_generation_that_ended_before_publishing_kills_the_codex_session(
+    live_shell: ShellSessions, live_host: SessionHost, unit_home: Path, short_dir: Path
+) -> None:
+    received = short_dir / "r.txt"
+    install_codex(unit_home, received)
+    workspace = short_dir / "ws"
+    workspace.mkdir()
+    site = site_for(live_shell, short_dir, live_host)
+    owner = _generation(site.cluster, workspace, supervised=False)
+    assert owner.generation is not None
+    coding_session_owner.terminate_generation(
+        owner.key, owner.generation, reason="replaced", writer=AtomicWriter(SYSTEM_FS)
+    )
+
+    with pytest.raises(coding_session_owner.CodingSessionGenerationChangedError):
+        codex.start_generation(site, owner, _request(workspace, _SKILL_DIR, prompt="brief"), _WAITS)
+
+    assert live_shell.list() == {}
+    assert not received.exists()
+
+
+def test_a_supervisor_that_cannot_be_recorded_is_reclaimed_with_the_launch(
+    live_shell: ShellSessions, live_host: SessionHost, unit_home: Path, short_dir: Path
+) -> None:
+    skill = _stub_skill(short_dir, short_dir / "supervisor.json")
+    workspace = short_dir / "ws"
+    workspace.mkdir()
+    site = site_for(live_shell, short_dir, live_host)
+    owner = _generation(site.cluster, workspace, supervised=True)
+    assert owner.generation is not None
+    coding_session_owner.terminate_generation(
+        owner.key, owner.generation, reason="replaced", writer=AtomicWriter(SYSTEM_FS)
+    )
+
+    with pytest.raises(coding_session_owner.CodingSessionGenerationChangedError):
+        codex.start_generation(site, owner, _request(workspace, skill), _WAITS)
+
+    assert live_shell.list() == {}
 
 
 @pytest.mark.parametrize(
@@ -441,40 +433,23 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     ],
 )
 def test_codex_prompt_cli_rejects_files_and_requires_non_empty_prompt(
-    extra: list[str],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    extra: list[str], tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(agent_identity, "require_agent_id", lambda: 41)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["spawn_codex.py", str(tmp_path), *extra],
-    )
-
     with pytest.raises(SystemExit):
-        spawn_codex.main()
+        spawn_codex.main([str(tmp_path), *extra])
 
 
-def test_codex_prompt_rejects_resume(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "spawn_codex.py",
-            str(tmp_path),
-            "--prompt",
-            "briefing",
-            "--resume",
-            "01a0e1ac-adc7-7d33-bd13-8ce2c6a686c5",
-        ],
-    )
-
+def test_codex_prompt_rejects_resume(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
-        spawn_codex.main()
+        spawn_codex.main(
+            [
+                str(tmp_path),
+                "--prompt",
+                "briefing",
+                "--resume",
+                "01a0e1ac-adc7-7d33-bd13-8ce2c6a686c5",
+            ]
+        )
 
 
 @pytest.mark.parametrize(
@@ -488,9 +463,7 @@ def test_codex_prompt_rejects_resume(
     ],
 )
 def test_terminal_reason_covers_every_supervised_lifecycle(
-    status: str,
-    kwargs: dict[str, bool],
-    expected: str,
+    status: str, kwargs: dict[str, bool], expected: str
 ) -> None:
     inputs = {
         "status_is_current": False,
@@ -516,148 +489,142 @@ def test_terminal_reason_covers_every_supervised_lifecycle(
     )
 
 
+# meiva:note
+# The gateway double's state: what the owner's status is and which notes were posted.
+class _Cluster:
+    def __init__(self, owner_status: AgentStatus | None) -> None:
+        self.owner_status = owner_status
+        self.notes: list[dict[str, object]] = []
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.method == "GET" and request.url.path == f"/api/agents/{_OWNER}":
+            if self.owner_status is None:
+                return httpx.Response(
+                    404, json={"reason": ErrorReason.AGENT_NOT_FOUND.value, "detail": "no agent"}
+                )
+            return httpx.Response(200, json={"status": self.owner_status.value})
+        if request.method == "POST" and request.url.path.endswith("/system-note"):
+            self.notes.append(json.loads(request.content))
+            return httpx.Response(200, json={"inbound_id": 1})
+        raise AssertionError(f"unexpected gateway request {request.method} {request.url.path}")
+
+
+def _launched(
+    shell: ShellSessions,
+    host: SessionHost,
+    cluster: Path,
+    workspace: Path,
+    *,
+    session_alive: bool,
+    ttl_seconds: float = 3600,
+) -> coding_session_owner.CodingSessionOwner:
+    key = coding_session_owner.canonical_key(workspace, tool="codex", cluster=cluster)
+    owner = _common.new_generation(
+        key, owner_agent_id=_OWNER, tasks_file=None, work_file=None, ttl_seconds=ttl_seconds
+    )
+    assert owner.generation is not None and owner.expected_suffix is not None
+    session_id = 99
+    if session_alive:
+        session_id, _full = shell.create(owner.expected_suffix, cwd=workspace, ttl=600.0, host=host)
+    return coding_session_owner.publish_active(
+        key,
+        owner.generation,
+        session_id=session_id,
+        session_name=coding_session_owner.full_session_name(
+            _OWNER, session_id, owner.expected_suffix
+        ),
+        writer=AtomicWriter(SYSTEM_FS),
+    )
+
+
 @pytest.mark.parametrize(
-    ("status", "owner_dead", "crashed", "expired", "expected"),
+    ("status", "owner_status", "alive", "ttl", "expected"),
     [
-        ("DONE", False, False, False, "collaboration-done"),
-        ("HANDOFF", False, False, False, "collaboration-handoff"),
-        ("WORKING", True, False, False, "owner-terminated"),
-        ("WORKING", False, True, False, "session-crashed"),
-        ("WORKING", False, False, True, "expired"),
+        ("DONE", AgentStatus.RUNNING, True, 3600, "collaboration-done"),
+        ("HANDOFF", AgentStatus.RUNNING, True, 3600, "collaboration-handoff"),
+        ("WORKING", None, True, 3600, "owner-terminated"),
+        ("WORKING", AgentStatus.RUNNING, False, 3600, "session-crashed"),
+        ("WORKING", AgentStatus.RUNNING, True, 0.01, "expired"),
     ],
 )
 def test_canonical_watch_terminalizes_before_exit(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     status: str,
-    owner_dead: bool,
-    crashed: bool,
-    expired: bool,
+    owner_status: AgentStatus | None,
+    alive: bool,
+    ttl: float,
     expected: str,
+    live_shell: ShellSessions,
+    live_host: SessionHost,
+    bound_agent: BindAgent,
+    short_dir: Path,
 ) -> None:
-    record = _owner(tmp_path)
-    work_file = Path(record.work_file or "")
-    work_file.write_text(f"STATUS: {status}\n")
-    if expired:
-        record = replace(
-            record,
-            expires_at=dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1),
-        )
-    calls: list[tuple[str, str]] = []
-
-    def _read(_key: coding_session_owner.CodingSessionKey, _generation: str) -> Any:
-        return record
-
-    def _terminalize(
-        _key: coding_session_owner.CodingSessionKey,
-        generation: str,
-        _owner_agent_id: int,
-        reason: str,
-    ) -> bool:
-        calls.append((generation, reason))
-        return True
-
-    def _owner_dead(_agent_id: int) -> bool:
-        return owner_dead
-
-    def _crashed(_owner: coding_session_owner.CodingSessionOwner) -> bool:
-        return crashed
-
-    monkeypatch.setattr(watch_work.coding_session_owner, "read", _read)
-    monkeypatch.setattr(watch_work, "_owner_terminated", _owner_dead)
-    monkeypatch.setattr(watch_work, "_session_crashed", _crashed)
-    monkeypatch.setattr(watch_work, "_terminalize", _terminalize)
-
-    watch_work.watch(
-        str(work_file),
-        cluster=record.key.cluster,
-        workspace=record.key.workspace,
-        generation=record.generation,
-        owner_agent_id=record.owner_agent_id,
+    workspace = short_dir / "ws"
+    workspace.mkdir()
+    record = _launched(
+        live_shell, live_host, short_dir / "c", workspace, session_alive=alive, ttl_seconds=ttl
     )
+    assert record.generation is not None
+    work_file = workspace / "work.md"
+    work_file.write_text(f"STATUS: {status}\n")
+    time.sleep(0.05)
+    cluster = _Cluster(owner_status)
 
-    assert calls == [(record.generation, expected)]
+    with gateway_double(cluster) as clients:
+        bound_agent(_OWNER, clients=clients)
+        watch_work.watch(
+            str(work_file),
+            cluster=record.key.cluster,
+            workspace=record.key.workspace,
+            generation=record.generation,
+            owner_agent_id=_OWNER,
+        )
 
-
-def test_canonical_notifications_never_resurrect_owner(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    notes: list[tuple[int, str, str, bool]] = []
-
-    def _note(
-        agent_id: int, content: str, *, tag: str, resurrect: bool, idempotency_key: str
-    ) -> int:
-        assert str(UUID(idempotency_key)) == idempotency_key
-        notes.append((agent_id, content, tag, resurrect))
-        return 1
-
-    def _message(_agent_id: int, _content: str) -> None:
-        raise AssertionError("canonical supervisor must not use resurrecting peer messages")
-
-    monkeypatch.setattr(watch_work.meiva.agents, "send_system_note", _note)
-    monkeypatch.setattr(watch_work.meiva.agents, "send_message", _message)
-
-    assert watch_work._notify(41, "terminal", canonical=True)
-
-    assert notes == [(41, "terminal", "task", False)]
-
-
-def test_submission_check_survives_a_dead_session_at_enter(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-
-    def no_sleep(_seconds: float) -> None:
-        return None
-
-    def idle_capture(_sid: int, **_kwargs: object) -> str:
-        return "composer idle"
-
-    def dead_keys(_sid: int, *_keys: str) -> None:
-        raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
-
-    monkeypatch.setattr(codex.time, "sleep", no_sleep)
-    monkeypatch.setattr(codex.sessions, "capture", idle_capture)
-    monkeypatch.setattr(codex.sessions, "send_keys", dead_keys)
-
-    codex.verify_submitted(7, timeout=0.01)
-    out = capsys.readouterr().out
-    assert "WARNING" in out
-    assert "Enter retry failed" in out
+    final = coding_session_owner.read(record.key, record.generation)
+    assert final.status == CodingSessionStatus.TERMINAL
+    assert final.terminal_reason == expected
+    if expected == "owner-terminated":
+        assert cluster.notes == []
+    else:
+        (note,) = cluster.notes
+        assert note["content"] == f"Codex generation {record.generation} terminalized ({expected})."
+        assert note["resurrect"] is False
+    assert live_shell.list() == {}
 
 
-def test_submission_check_survives_a_dead_session_at_capture(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_canonical_notifications_never_resurrect_owner(bound_agent: BindAgent) -> None:
+    cluster = _Cluster(AgentStatus.RUNNING)
 
-    def dead_capture(_sid: int, **_kwargs: object) -> str:
-        raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
+    with gateway_double(cluster) as clients:
+        bound_agent(_OWNER, clients=clients)
+        assert watch_work._notify(_OWNER, "terminal", canonical=True)
 
-    monkeypatch.setattr(codex.sessions, "capture", dead_capture)
+    (request,) = cluster.requests
+    assert request.url.path == f"/api/agents/{_OWNER}/system-note"
+    body = json.loads(request.content)
+    assert (body["content"], body["note_tag"], body["resurrect"]) == ("terminal", "task", False)
+    keys = [value for value in request.headers.values() if _is_uuid(value)]
+    assert len(keys) == 1
 
-    codex.verify_submitted(7, timeout=5.0)
-    assert "capture failed" in capsys.readouterr().out
+
+def test_a_generic_wake_is_a_peer_message(bound_agent: BindAgent) -> None:
+    cluster = _Cluster(AgentStatus.RUNNING)
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        cluster.requests.append(request)
+        return httpx.Response(200, json={})
+
+    with gateway_double(answer) as clients:
+        bound_agent(_OWNER, clients=clients)
+        assert watch_work._notify(_OWNER, "woken", canonical=False)
+
+    (request,) = cluster.requests
+    assert request.url.path == f"/api/agents/{_OWNER}/messages"
 
 
-def test_submission_check_survives_a_dead_session_after_the_enter_retry(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-
-    def no_sleep(_seconds: float) -> None:
-        return None
-
-    entered = {"sent": False}
-
-    def capture(_sid: int, **_kwargs: object) -> str:
-        if entered["sent"]:
-            raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
-        return "composer idle"
-
-    def keys(_sid: int, *_keys: str) -> None:
-        entered["sent"] = True
-
-    monkeypatch.setattr(codex.time, "sleep", no_sleep)
-    monkeypatch.setattr(codex.sessions, "capture", capture)
-    monkeypatch.setattr(codex.sessions, "send_keys", keys)
-
-    codex.verify_submitted(7, timeout=0.01)
-    assert "capture failed" in capsys.readouterr().out
+def _is_uuid(value: str) -> bool:
+    try:
+        return str(UUID(value)) == value
+    except ValueError:
+        return False

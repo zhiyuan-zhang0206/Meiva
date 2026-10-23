@@ -10,7 +10,7 @@ from typing import Any, cast
 from base.packages.skills.tree import Skill, flatten, identifier
 from base.paths import meiva_home, skills_dir
 from meiva.sdk_surface import process_context, skill_sources
-from meiva.skills.skill_proxies import Namespace, SkillProxy, node_to_obj
+from meiva.skills.skill_proxies import Namespace, SkillProxy, consumed_text, node_to_obj
 
 # Attribution timing: a `skill_invoked` row at depth `"loaded"` — the only
 # depth the producer writes — means the agent CONSUMED a skill's SKILL.md body
@@ -121,14 +121,9 @@ def _consume_skill_body(skill: Skill) -> str:
     body, the shape a proxy's `__doc__` carries. The one body-consumption
     point behind every proxy `__doc__` and `meiva.help` render, so each records
     identically."""
-    from pathlib import Path as _Path
-
-    info = skill
-    content = (_Path(info["path"]) / "SKILL.md").read_text(encoding="utf-8")
-    _record_skill_invoked(info)
-    home = str(_Path.home())
-    short = f"~{info['path'][len(home) :]}" if info["path"].startswith(home + "/") else info["path"]
-    return f"{short}\n\n{content}"
+    content = (Path(skill["path"]) / "SKILL.md").read_text(encoding="utf-8")
+    _record_skill_invoked(skill)
+    return consumed_text(skill["path"], str(Path.home()), content)
 
 
 def record_skill_invoked_by_path(path: str | Path) -> bool:

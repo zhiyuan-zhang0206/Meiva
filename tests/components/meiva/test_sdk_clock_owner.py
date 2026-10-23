@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator
-from unittest.mock import patch
 
 import pytest
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
-from base.clock import SYSTEM_TIMERS, Clock
-from base.clock.configuration import clock_config_from_boot
-from base.config import ConfigBoot
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
@@ -22,8 +18,7 @@ def clock_scope() -> Iterator[None]:
     prior_context = process_context.unbind_context()
     prior = install.uninstall()
     try:
-        with patch.dict(os.environ):
-            yield
+        yield
     finally:
         current = install.uninstall()
         if current is not None:
@@ -35,72 +30,54 @@ def clock_scope() -> Iterator[None]:
                 provider_keys=prior.provider_keys,
                 authority=prior.authority,
                 sampling=prior.sampling,
-                clock_factory=prior.clock_factory,
+                clock=prior.clock,
+                clients=prior.clients,
                 config_images=prior.config_images,
             )
         if prior_context is not None:
             process_context.bind_context(prior_context)
 
 
-def test_bare_sdk_clock_uses_live_installation_owner(clock_scope: None) -> None:
-    first, second = ConfigBoot(), ConfigBoot()
-    first.set_field("timezone", "UTC")
-    second.set_field("timezone", "Asia/Shanghai")
-    calls: list[Clock] = []
+def _clock(timezone: str) -> Clock:
+    config = ClockConfig(
+        timezone=timezone, authoritative_timezone=timezone, message_timestamp_weekday=False
+    )
+    return Clock(config, timers=SYSTEM_TIMERS)
 
-    def clock() -> Clock:
-        value = Clock(clock_config_from_boot(first), timers=SYSTEM_TIMERS)
-        calls.append(value)
-        return value
+
+def test_bare_sdk_clock_is_the_installation_clock(clock_scope: None) -> None:
+    clock = _clock("UTC")
 
     install.install(
         ExtensionRegistry(()),
-        clock_factory=clock,
+        clock=clock,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
-    assert not calls
-    before = settings.clock()
-    assert before.authoritative_timezone == "UTC"
-    first.set_field("timezone", "Asia/Tokyo")
-    after = settings.clock()
-    assert after.authoritative_timezone == "Asia/Tokyo"
-    assert before.authoritative_timezone == "UTC"
-    assert (
-        Clock(clock_config_from_boot(second), timers=SYSTEM_TIMERS).authoritative_timezone
-        == "Asia/Shanghai"
-    )
-    assert len(calls) == 2
+
+    assert settings.clock() is clock
+    assert settings.clock().authoritative_timezone == "UTC"
 
 
 def test_bound_sdk_clock_uses_context_without_borrowing_installation(clock_scope: None) -> None:
-    boot = ConfigBoot()
-    boot.set_field("timezone", "UTC")
-
-    def unrelated() -> Clock:
-        raise AssertionError("a bound operation must keep its context's clock owner")
-
     install.install(
         ExtensionRegistry(()),
-        clock_factory=unrelated,
+        clock=_clock("Asia/Shanghai"),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
+    context_clock = _clock("UTC")
     process_context.bind_context(
-        MeivaContext(
-            clients=ClientSet(),
-            clock_factory=lambda: Clock(clock_config_from_boot(boot), timers=SYSTEM_TIMERS),
-        )
+        MeivaContext(clients=ClientSet(), clock_factory=lambda: context_clock)
     )
     try:
-        assert settings.clock().authoritative_timezone == "UTC"
+        assert settings.clock() is context_clock
     finally:
         process_context.unbind_context()
 
 
 def test_partial_context_refuses_clock_instead_of_falling_back(clock_scope: None) -> None:
-    boot = ConfigBoot()
     install.install(
         ExtensionRegistry(()),
-        clock_factory=lambda: Clock(clock_config_from_boot(boot), timers=SYSTEM_TIMERS),
+        clock=_clock("UTC"),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
     process_context.bind_context(MeivaContext(clients=ClientSet()))
@@ -115,5 +92,5 @@ def test_inventory_installation_remains_cold_and_refuses_clock(clock_scope: None
     install.install(
         ExtensionRegistry(()), config_images=DiskPluginConfigImages(resolve_meiva_home())
     )
-    with pytest.raises(RuntimeError, match="Clock factory"):
+    with pytest.raises(RuntimeError, match="carries no Clock"):
         settings.clock()

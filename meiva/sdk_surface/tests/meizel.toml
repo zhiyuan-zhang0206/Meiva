@@ -1,1 +1,1 @@
-exports = ["agent_binding.py"]
+exports = ["agent_binding.py", "installation_holder.py"]

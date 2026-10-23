@@ -53,7 +53,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config.tests.configuration import defaults
+from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -470,7 +470,7 @@ def make_runtime_and_config(
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
-        clients=process_clients(),
+        clients=process_clients(config=snapshot_process_config()),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,

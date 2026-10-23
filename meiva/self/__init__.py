@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import json as _json
 from pathlib import Path
-from typing import NamedTuple, NoReturn
+from typing import Any, NamedTuple, NoReturn
 
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from meiva import boot, files
 from meiva.sdk_surface import attachment_transport, process_context
 from meiva.sdk_surface import settings as _settings
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
+from meiva.self import plans
 
 # Deliberately NOT in __all_for_meiva__ (importable, but out of the rendered SDK
 # docs): AgentRestart / AgentTermination are framework control-flow exceptions
@@ -102,7 +102,7 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
     with an error naming the allowed set. Attach at most 8 files and 48 MiB per
     turn, with a 20 MiB limit per file. Raises an error outside an agent turn.
     """
-    attachment_transport.register(path, label=label, resolve=files.resolve)
+    attachment_transport.register(path, label=label, base=files.workspace_base())
 
 
 def _publish_self_inbound_wake() -> None:
@@ -112,8 +112,15 @@ def _publish_self_inbound_wake() -> None:
     from meiva.self import wake
 
     wake.publish_inbound_wake(
-        process_context.current_context().redis, agent_identity.require_agent_id()
+        process_context.current_context().redis,
+        agent_identity.require_agent_id(),
+        events_channel=_settings.settings.data_plane.events_channel,
     )
+
+
+def _run(cur: Any, statements: tuple[plans.SqlStatement, ...]) -> None:
+    for statement in statements:
+        cur.execute(statement.sql, statement.params)
 
 
 def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
@@ -126,7 +133,6 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
     from meiva.sdk_surface import agent_identity
 
     agent_identity.assert_self_action("restart")
-    payload_json: str | None = None
     if config_overlay:
         from base.packages.plugins.config_registration import validate_config_overlay
         from meiva.sdk_surface.installation import installed
@@ -159,8 +165,8 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
                 requested=model_receipt[0],
                 resolved=model_receipt[1],
             )
-        payload_json = _json.dumps({"config_overlay": dict(config_overlay)}, sort_keys=True)
 
+    agent_id = agent_identity.require_agent_id()
     with process_context.current_context().sql.cursor() as cur, cur.connection.transaction():
         cur.execute("SET TRANSACTION READ WRITE")
         if config_overlay:
@@ -168,22 +174,12 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
 
             validate_restart_model_config(
                 cur,
-                agent_identity.require_agent_id(),
+                agent_id,
                 config_overlay,
                 catalog=_settings.model_catalog(),
                 default_model=_settings.agent_setting("llm_model"),
             )
-            cur.execute(
-                "UPDATE agents_meta "
-                "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "
-                "WHERE id = %s",
-                (_json.dumps(dict(config_overlay)), agent_identity.agent_id()),
-            )
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-            "VALUES (%s, '', 'restart', 'self', %s::jsonb)",
-            (agent_identity.agent_id(), payload_json),
-        )
+        _run(cur, plans.restart_statements(agent_id, config_overlay))
     _publish_self_inbound_wake()
     raise AgentRestart
 
@@ -204,13 +200,9 @@ def terminate() -> NoReturn:
     )
     if not is_attached:
         agent_identity.assert_self_action("terminate")
-    target_id = agent_identity.require_agent_id() if is_attached else agent_identity.agent_id()
+    target_id = agent_identity.require_agent_id()
     with process_context.current_context().sql.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', 'terminate', 'self')",
-            (target_id,),
-        )
+        _run(cur, (plans.terminate_statement(target_id),))
     _publish_self_inbound_wake()
     if is_attached:
         raise SystemExit(0)
@@ -232,37 +224,19 @@ def pause_heartbeat(duration: float) -> None:
     duration = coerce_typed(duration, "duration", (int, float))
     from meiva.sdk_surface import agent_identity
 
-    if not duration > 0:
-        raise ValueError(f"duration must be greater than 0 seconds, got {duration!r}")
-    limit = _settings.agent_setting("heartbeat_pause_max_seconds")
-    if duration > limit:
-        raise ValueError(
-            f"duration must be at most {limit:.0f} seconds (heartbeat pause limit; "
-            "per-agent override via meiva.self.restart("
-            "config_overlay={'heartbeat_pause_max_seconds': ...}), cluster default via "
-            "MEIVA_HEARTBEAT_PAUSE_MAX_SECONDS), "
-            f"got {duration!r}"
-        )
+    seconds = plans.pause_duration(duration, _settings.agent_setting("heartbeat_pause_max_seconds"))
+    agent_id = agent_identity.require_agent_id()
     with process_context.current_context().sql.cursor() as cur:
-        cur.execute(
-            "INSERT INTO heartbeat_pause_log (agent_id, duration_s) VALUES (%s, %s)",
-            (agent_identity.agent_id(), float(duration)),
-        )
-        cur.execute(
-            "UPDATE agents_meta "
-            "SET heartbeat_paused_until = now() + make_interval(secs => %s) "
-            "WHERE id = %s",
-            (float(duration), agent_identity.agent_id()),
-        )
+        _run(cur, plans.heartbeat_pause_statements(agent_id, seconds))
         from base import telemetry
 
         telemetry.emit(
             "telemetry",
             "heartbeat_paused",
             level="info",
-            agent_id=agent_identity.agent_id(),
+            agent_id=agent_id,
             # int cast stabilizes the emitted metric kind (task #4011).
-            attributes={"duration_s": round(duration)},
+            attributes={"duration_s": round(seconds)},
         )
 
 
@@ -289,11 +263,7 @@ def compact(summary: str) -> NoReturn:
     # The inbound and its audit fact commit together.
     db = process_context.current_context().sql
     with db.transaction(), db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind) "
-            "VALUES (%s, %s, 'compact_summary')",
-            (agent_identity.agent_id(), summary),
-        )
+        _run(cur, (plans.compact_statement(agent_identity.require_agent_id(), summary),))
         compact_event = record_audit(
             cur.connection,
             prepare_event_log(

@@ -9,7 +9,12 @@ import pytest
 
 import meiva
 from base.agents.context import MeivaContext
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import (
+    GatewayAccess,
+    GatewayApiTokenMissing,
+    MachineIdentity,
+    gateway_bearer,
+)
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from meiva.boot import process_clients
@@ -25,17 +30,19 @@ def client_config(machine_identity: MachineIdentity) -> Iterator[ConfigBoot]:
         machine=machine_identity,
         clients=process_clients(config=config, machine=machine_identity),
     )
-    meiva.context = context
+    previous = process_context.bound_context()
+    process_context.bind_context(context)
     try:
         yield config
     finally:
-        del meiva.context
+        if previous is None:
+            process_context.unbind_context()
+        else:
+            process_context.bind_context(previous)
         context.clients.close()
 
 
-def test_gateway_client_base_url_is_gateway_url(
-    monkeypatch: pytest.MonkeyPatch, client_config: ConfigBoot
-) -> None:
+def test_gateway_client_base_url_is_gateway_url(client_config: ConfigBoot) -> None:
     meiva.context.require_machine().set(role="agent-runner")
     client_config.set_field("gateway_url", "https://cp.example.com")
 
@@ -45,9 +52,7 @@ def test_gateway_client_base_url_is_gateway_url(
     assert str(client.base_url).rstrip("/") == "https://cp.example.com"
 
 
-def test_gateway_client_sends_cluster_secret_bearer(
-    monkeypatch: pytest.MonkeyPatch, client_config: ConfigBoot
-) -> None:
+def test_gateway_client_sends_cluster_secret_bearer(client_config: ConfigBoot) -> None:
     """Regression: the gateway requires auth on every route. The SDK client must
     present the cluster secret as `Authorization: Bearer <secret>`, or every
     `meiva.*` gateway call (list_agents / spawn / ...) 401s from inside an agent."""
@@ -60,53 +65,32 @@ def test_gateway_client_sends_cluster_secret_bearer(
     assert client.headers.get("Authorization") == "Bearer s3cr3t-token"
 
 
-def test_gateway_client_without_any_credential_fails_instead_of_sending_none(
-    monkeypatch: pytest.MonkeyPatch, client_config: ConfigBoot
-) -> None:
+def _access(secret: str) -> GatewayAccess:
+    return GatewayAccess(
+        gateway_url="https://cp.example.com", cluster_secret=secret, remote_plane=False
+    )
+
+
+def test_gateway_client_without_any_credential_fails_instead_of_sending_none() -> None:
     """The gateway always authenticates: a process holding neither a machine token nor
     the cluster secret is told so, rather than sending an anonymous (or bogus
     `Bearer `) request that would only come back 401."""
 
-    client_config.set_field("cluster_secret", "")
-    monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
-
-    import base.agents.context.gateway_client.transport as gc
-    from base.cluster.machine import GatewayApiTokenMissing
-
     with pytest.raises(GatewayApiTokenMissing):
-        gc.gateway_http(context=process_context.current_context())  # pyright: ignore[reportUnknownMemberType]
+        gateway_bearer(_access(""), env={})
 
 
-def test_gateway_client_in_an_agent_presents_the_delivered_token(
-    monkeypatch: pytest.MonkeyPatch,
-    client_config: ConfigBoot,
-) -> None:
+def test_gateway_client_in_an_agent_presents_the_delivered_token() -> None:
     """An agent inherits its host's machine API token; the human secret never
     rides along when the token is there."""
 
-    client_config.set_field("cluster_secret", "s3cr3t-token")
-    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
-    monkeypatch.setenv("MEIVA_API_TOKEN", "delivered-token")
-
-    import base.agents.context.gateway_client.transport as gc
-
-    client = cast(Any, gc.gateway_http(context=process_context.current_context()))  # pyright: ignore[reportUnknownMemberType]
-    assert client.headers.get("Authorization") == "Bearer delivered-token"
+    env = {"MEIVA_PROCESS_PROFILE": "agent", "MEIVA_API_TOKEN": "delivered-token"}
+    assert gateway_bearer(_access("s3cr3t-token"), env=env) == "delivered-token"
 
 
-def test_gateway_client_in_an_agent_without_a_token_fails_instead_of_using_the_secret(
-    monkeypatch: pytest.MonkeyPatch,
-    client_config: ConfigBoot,
-) -> None:
-
-    client_config.set_field("cluster_secret", "s3cr3t-token")
-    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
-    monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
-
-    import base.agents.context.gateway_client.transport as gc
-
+def test_gateway_client_in_an_agent_without_a_token_fails_instead_of_using_the_secret() -> None:
     with pytest.raises(RuntimeError, match="MEIVA_API_TOKEN"):
-        gc.gateway_http(context=process_context.current_context())  # pyright: ignore[reportUnknownMemberType]
+        gateway_bearer(_access("s3cr3t-token"), env={"MEIVA_PROCESS_PROFILE": "agent"})
 
 
 def _answering(label: str, seen: list[str]) -> Any:
@@ -119,10 +103,9 @@ def _answering(label: str, seen: list[str]) -> Any:
     return httpx.Client(base_url=f"http://{label}.test", transport=httpx.MockTransport(answer))
 
 
-def test_use_client_routes_sdk_calls_through_the_injected_client_and_restores_the_previous(
-    monkeypatch: pytest.MonkeyPatch,
-    client_config: ConfigBoot,
-) -> None:
+def test_use_client_routes_sdk_calls_through_the_injected_client_and_restores_the_previous() -> (
+    None
+):
     import base.agents.context.gateway_client.transport as gc
 
     seen: list[str] = []
@@ -162,9 +145,7 @@ def test_use_client_leaves_the_caller_client_open_and_restores_the_bound_context
     supplied.close()
 
 
-def test_client_carries_the_configured_timeout(
-    monkeypatch: pytest.MonkeyPatch, client_config: ConfigBoot
-) -> None:
+def test_client_carries_the_configured_timeout(client_config: ConfigBoot) -> None:
     """The client default the sentinel defers to is the configured one.
 
     Without this, `USE_CLIENT_DEFAULT` could be deferring to httpx's own

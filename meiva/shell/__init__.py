@@ -3,18 +3,16 @@ and persistent sessions."""
 
 __all_for_meiva__ = ["SessionHandle", "run", "run_background", "sessions"]
 
-import contextlib
 import os
 import subprocess
 from pathlib import Path
 
-from base.log import logger
 from base.paths import workspace_dir
 from meiva.sdk_surface import agent_identity
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.security import scan_content
 
-from . import background
+from . import background, background_plan, log_ring
 from . import sessions as sessions
 from .handle import SessionHandle as SessionHandle
 
@@ -141,37 +139,25 @@ def run_background(
     cwd = coerce_str(cwd, "cwd", allow_none=True, allow_types=(os.PathLike,))
     keep = coerce_typed(keep, "keep", bool)
     ttl = coerce_typed(ttl, "ttl", (int, float))
-    notify = background.validate_notify(coerce_str(notify, "notify", allow_none=True))
+    notify = background_plan.validate_notify(coerce_str(notify, "notify", allow_none=True))
     if not cmd.strip():
         raise ValueError("cmd cannot be empty")
     aid = agent_identity.require_agent_id()
-    if cwd is None:
-        cwd = str(workspace_dir(aid))
-    session_id, _full = sessions.create_session(name, cwd=cwd, ttl=ttl)
-    output_path = background.allocate_output_path(session_id, name)
-    line = background.notified_line(
-        cmd,
-        agent_id=aid,
-        label=f"Background command '{name}'",
-        source=f"shell:{session_id}",
-        output_path=output_path,
-        keep=keep,
-        notify=notify,
+    workspace = workspace_dir(aid)
+    return background.start(
+        sessions.open_sessions(aid),
+        background.BackgroundRun(
+            cmd=cmd,
+            name=name,
+            cwd=workspace if cwd is None else Path(cwd),
+            keep=keep,
+            ttl=ttl,
+            notify=notify,
+        ),
+        background.BackgroundSite(
+            agent_id=aid,
+            cli=background.cli_path(),
+            log_dir=log_ring.output_dir(workspace),
+            host=sessions.session_host(),
+        ),
     )
-    launch_path = output_path.with_suffix(".sh")
-    try:
-        launch_line = background.write_launch_file(line, launch_path)
-        sessions.send(session_id, launch_line)
-    except Exception:
-        with contextlib.suppress(OSError):
-            launch_path.unlink(missing_ok=True)
-        try:
-            sessions.kill(session_id)
-        except Exception:
-            logger.opt(exception=True).warning(
-                "killing background session {} after its failed start also failed; "
-                "it stays until its TTL expires",
-                session_id,
-            )
-        raise
-    return SessionHandle(session_id=session_id, output_path=str(output_path))
