@@ -50,7 +50,13 @@ def test_remote_station_advertisement_drives_render_and_probe(
             assert cfg["exporters"][f"otlphttp/{name}"]["endpoint"] == endpoint
         assert cfg["receivers"]["otlp"]["protocols"]["http"]["endpoint"] == "127.0.0.1:4319"
         assert oc.lgtm_fanout_bases(database_factory=operator_database) == (endpoint, endpoint)
-        target = station_probe.resolve_target(database=operator_database)
+        target = station_probe.resolve_target(
+            database=operator_database,
+            config=station_endpoint.StationEndpointConfig(
+                settings.observability.observability_url,
+                settings.observability.observability_otlp_port,
+            ),
+        )
         assert target is not None and target.advertised and target.url == endpoint
     finally:
         with db.connect(gate=database_gate) as conn, conn.cursor() as cur:
@@ -68,7 +74,10 @@ def test_unregistered_station_uses_remote_port_projection(
         oc.station_otel_ingress_endpoint(database_factory=operator_database)
         == "http://192.0.2.45:4325"
     )
-    target = station_probe.resolve_target(database=operator_database)
+    target = station_probe.resolve_target(
+        database=operator_database,
+        config=station_endpoint.StationEndpointConfig("http://192.0.2.45", 4325),
+    )
     assert target is not None and not target.advertised
     assert target.url == oc.station_otel_ingress_endpoint(database_factory=operator_database)
 
@@ -79,7 +88,7 @@ def test_runner_does_not_discover_station(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    def fail_discovery(_db: object, base: str) -> None:
+    def fail_discovery(_db: object, base: str, *, otlp_port: int) -> None:
         pytest.fail("pure runners must use their published gateway relay")
 
     monkeypatch.setattr(station_endpoint, "resolve_station_target", fail_discovery)

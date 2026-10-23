@@ -279,7 +279,9 @@ def station_otel_ingress_endpoint(*, database_factory: DatabaseFactory) -> str:
         )
     from base.telemetry.station_endpoint import resolve_station_target
 
-    return resolve_station_target(database_factory(), base).url
+    return resolve_station_target(
+        database_factory(), base, otlp_port=settings.observability.observability_otlp_port
+    ).url
 
 
 def telemetry_bearer() -> str | None:

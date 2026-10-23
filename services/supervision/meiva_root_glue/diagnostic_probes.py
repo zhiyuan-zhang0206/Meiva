@@ -17,7 +17,10 @@ from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.db import Database
+from base.host.db_authority.api import read_telemetry_token
+from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.native_process.os_platform import is_macos
+from base.telemetry.station_endpoint import StationEndpointConfig
 from services.supervision.meiva_root.health import LeaseProbe
 from services.supervision.meiva_root_glue.diagnostics import Diagnostic
 
@@ -176,21 +179,29 @@ class StationProbe:
         self,
         *,
         database: Callable[[], Database],
-        answers: Callable[[str], bool] | None = None,
+        config: StationEndpointConfig,
+        home: Path,
+        open_url: UrlOpener,
     ) -> None:
         from services.wake.heartbeat import station_probe
 
         self._module = station_probe
         self._database = database
-        self._answers = station_probe.station_answers if answers is None else answers
+        self._config = config
+        self._home = home
+        self._open_url = open_url
 
     def probe(self) -> DaemonProbe:
-        if not settings.data_plane.cluster_secret:
+        token = read_telemetry_token(self._home)
+        if token is None:
             return DaemonProbe.unavailable("station probe lacks its authentication credential")
-        target = self._module.resolve_target(database=self._database)
+        target = self._module.resolve_target(database=self._database, config=self._config)
         if target is None:
             return DaemonProbe.unavailable("configured station target could not be resolved")
-        if self._answers(target.url):
+        answer = self._module.station_answers(target.url, token=token, open_url=self._open_url)
+        if answer is None:
+            return DaemonProbe.unavailable("station probe lacks its authentication credential")
+        if answer:
             return DaemonProbe.up("remote station authenticated OTLP request accepted")
         return DaemonProbe.down("remote station OTLP ingress failed")
 
@@ -264,7 +275,17 @@ def build_diagnostics(
             if settings.data_plane.pgbouncer_enabled:
                 checks.append(Diagnostic("pgbouncer", partial(pgbouncer, machine=machine)))
         if settings.observability.observability_url.strip():
-            station = StationProbe(database=database)
+            from base.paths import meiva_home
+
+            station = StationProbe(
+                database=database,
+                config=StationEndpointConfig(
+                    observability_url=settings.observability.observability_url,
+                    otlp_port=settings.observability.observability_otlp_port,
+                ),
+                home=meiva_home().resolve(),
+                open_url=SYSTEM_URL_OPENER,
+            )
             checks.append(Diagnostic("observatory-station", station.probe))
     if "browser" in requested:
         checks.append(

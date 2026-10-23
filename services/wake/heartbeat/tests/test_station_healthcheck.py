@@ -9,8 +9,6 @@ MEIVA_OBSERVABILITY_URL configured the check is a no-op.
 
 from __future__ import annotations
 
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -28,14 +26,16 @@ from base.host.db_authority.api import (
     telemetry_token,
     telemetry_token_path,
 )
+from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
+from base.telemetry.station_endpoint import StationEndpointConfig, StationTarget
 from services.wake.heartbeat import station_probe as hc
 
 
-@pytest.fixture(autouse=True)
-def _log_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def _log_boundary(monkeypatch: pytest.MonkeyPatch, unit_home: Path) -> None:
     monkeypatch.setattr(hc, "init_gateway_process", Mock())
     monkeypatch.setattr(hc, "build_pipeline", Mock(return_value=object()))
 
@@ -49,12 +49,13 @@ def _clean_state(*, db_url: str, database_gate: ProcessDbGate) -> None:
         conn.commit()
 
 
-@pytest.fixture(autouse=True)
-def _no_remote_observatory(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default: no remote observatory (the no-op posture); tests opt in."""
-    monkeypatch.setattr(settings.observability, "observability_url", "")
-    monkeypatch.setattr(hc.settings.observability, "telemetry_otlp_port", 4318)
-    publish_telemetry_token(meiva_home(), "cluster-token")
+@pytest.fixture
+def probe_token(unit_home: Path) -> str:
+    home = unit_home
+    publish_telemetry_token(home, "cluster-token")
+    token = read_telemetry_token(home)
+    assert token is not None
+    return token
 
 
 def _insert_station_unit(
@@ -71,31 +72,27 @@ def _insert_station_unit(
         conn.commit()
 
 
+@pytest.mark.usefixtures("_log_boundary")
 def test_main_is_noop_without_remote_observatory(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No MEIVA_OBSERVABILITY_URL -> nothing to probe: no DB read, no network,
-    no alert (the local observatory is the lgtm check's job)."""
-    calls: list[str] = []
-
-    def _fail_if_called(url: str) -> bool:
-        calls.append(url)
-        return False
-
+    monkeypatch.setattr(settings.observability, "observability_url", "")
     create = Mock(side_effect=AssertionError("a no-op probe must not open its work database"))
     monkeypatch.setattr(hc.Database, "from_settings", create)
-    hc.main(probe=_fail_if_called)
-    assert calls == []
+    opener = FakeUrlOpener()
+    hc.main(open_url=opener)
+    assert opener.calls == []
     create.assert_not_called()
 
 
 def test_resolve_target_uses_advertised_machine_units_url(
-    monkeypatch: pytest.MonkeyPatch, database: Database, *, database_gate: ProcessDbGate
+    database: Database, *, database_gate: ProcessDbGate
 ) -> None:
     """The probe target is the station's ADVERTISED machine_units url — the
     reachability contract — not the configured base."""
-    monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
-    monkeypatch.setattr(settings.observability, "telemetry_otlp_port", 4319)
     _insert_station_unit(database_gate=database_gate)
-    target = hc.resolve_target(database=lambda: database)
+    target = hc.resolve_target(
+        database=lambda: database,
+        config=StationEndpointConfig("http://10.0.0.9", 4325),
+    )
     assert target is not None
     assert target.url == "http://10.0.0.9:4318"
     assert target.advertised is True
@@ -103,134 +100,143 @@ def test_resolve_target_uses_advertised_machine_units_url(
 
 
 def test_resolve_target_falls_back_to_configured_base_without_registration(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
 ) -> None:
     """MEIVA_OBSERVABILITY_URL set but no station unit registered -> warn loudly
     and probe the configured base + OTLP port (fail-open: still give signal)."""
-    monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.46")
-    target = hc.resolve_target(database=lambda: database)
+    target = hc.resolve_target(
+        database=lambda: database,
+        config=StationEndpointConfig("http://10.0.0.46", 4325),
+    )
     assert target is not None
-    assert target.url == "http://10.0.0.46:4318"
+    assert target.url == "http://10.0.0.46:4325"
     assert target.advertised is False
 
 
 def test_resolve_target_skips_hybrid_gateway_station_units(
-    monkeypatch: pytest.MonkeyPatch, database: Database, *, database_gate: ProcessDbGate
+    database: Database, *, database_gate: ProcessDbGate
 ) -> None:
     """A hybrid gateway+station unit advertises its GATEWAY url (unit_dial_url
     lets the gateway capability win), not the OTLP ingress — probing it would
     hit the gateway API and alert forever (QA #1156 NIT-2). Only units whose
     capability set identifies an ingress advertisement qualify."""
-    monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.46")
     _insert_station_unit(url="http://10.0.0.46:4318", database_gate=database_gate)
     with base.db.connect(gate=database_gate) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machine_units SET serve_gateway = true WHERE machine_name = 'station-test-a'"
         )
         conn.commit()
-    target = hc.resolve_target(database=lambda: database)
+    target = hc.resolve_target(
+        database=lambda: database,
+        config=StationEndpointConfig("http://10.0.0.46", 4318),
+    )
     assert target is not None
     assert target.url == "http://10.0.0.46:4318"
     assert target.advertised is False
 
 
-def test_resolve_target_none_without_observability_url(database: Database) -> None:
-    assert hc.resolve_target(database=lambda: database) is None
+@pytest.mark.parametrize("observability_url", ["", "http://station.invalid:3100"])
+def test_resolve_target_none_without_valid_observability_url(observability_url: str) -> None:
+    create = Mock(side_effect=AssertionError("an unconfigured probe must not open its database"))
+    assert (
+        hc.resolve_target(database=create, config=StationEndpointConfig(observability_url, 4318))
+        is None
+    )
+    create.assert_not_called()
 
 
-def test_station_answers_bearer_otlp_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("status", [200, 202, 204])
+def test_station_answers_bearer_otlp_roundtrip(probe_token: str, status: int) -> None:
     """A 2xx on POST <url>/v1/traces with the telemetry bearer = alive."""
-    seen: dict[str, object] = {}
-
-    class _Resp:
-        status = 200
-
-        def __enter__(self) -> _Resp:
-            return self
-
-        def __exit__(self, *_a: object) -> None:
-            return None
-
-    def _open(req: urllib.request.Request, **kw: object) -> _Resp:
-        seen["url"] = req.full_url
-        seen["auth"] = req.headers.get("Authorization")
-        return _Resp()
-
-    monkeypatch.setattr(urllib.request, "urlopen", _open)
-    assert hc.station_answers("http://10.0.0.9:4318") is True
-    assert seen["url"] == "http://10.0.0.9:4318/v1/traces"
-    # The cluster's telemetry token from the file the start published, never the secret.
-    assert seen["auth"] == f"Bearer {telemetry_token('cluster-token')}"
+    opener = FakeUrlOpener()
+    opener.on("http://10.0.0.9:4318/v1/traces", Answer(status=status))
+    assert hc.station_answers("http://10.0.0.9:4318/", token=probe_token, open_url=opener) is True
+    assert len(opener.calls) == 1
+    request = opener.calls[0]
+    assert request.url == "http://10.0.0.9:4318/v1/traces"
+    assert request.method == "POST"
+    assert request.data == b'{"resourceSpans":[]}'
+    assert request.timeout == 5.0
+    assert request.headers["Content-type"] == "application/json"
+    assert request.headers["Authorization"] == f"Bearer {telemetry_token('cluster-token')}"
 
 
-def test_station_answers_http_error_is_not_alive(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A non-2xx answer (401 auth, 415 body, 5xx) proves the listener is up
-    but the ingestion path is not serving — not alive."""
-
-    def _raise(_req: object, **_kw: object) -> None:
-        raise urllib.error.HTTPError("http://x/v1/traces", 401, "unauthorized", {}, None)  # pyright: ignore[reportArgumentType]
-
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)
-    assert hc.station_answers("http://10.0.0.9:4318") is False
+@pytest.mark.parametrize("status", [401, 415, 503])
+def test_station_answers_http_error_is_not_alive(probe_token: str, status: int) -> None:
+    opener = FakeUrlOpener()
+    opener.on("http://10.0.0.9:4318", Answer(status=status))
+    assert hc.station_answers("http://10.0.0.9:4318", token=probe_token, open_url=opener) is False
+    assert len(opener.calls) == 1
 
 
+@pytest.mark.parametrize("error", [OSError("connection refused"), TimeoutError("probe timed out")])
 def test_station_answers_connection_failure_is_not_alive(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    probe_token: str, error: OSError, loguru_records: list[dict[str, Any]]
 ) -> None:
-    def _raise(_req: object, **_kw: object) -> None:
-        raise OSError("connection refused")
-
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)
-    assert hc.station_answers("http://10.0.0.9:4318") is False
+    opener = FakeUrlOpener()
+    opener.on("http://10.0.0.9:4318", error)
+    assert hc.station_answers("http://10.0.0.9:4318", token=probe_token, open_url=opener) is False
+    assert len(opener.calls) == 1
     record = next(r for r in loguru_records if "unreachable" in r["message"])
     assert record["exception"] is not None
-    assert record["exception"].type is OSError
+    assert record["exception"].value is error
 
 
-def test_station_answers_without_a_published_token_warns_and_fails_open(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_station_answers_without_a_published_token_warns_and_skips(
+    loguru_records: list[dict[str, Any]],
 ) -> None:
-    """No published telemetry token -> cannot authenticate the probe; warn and treat as
-    alive rather than alerting on a config problem (fail-open)."""
-    telemetry_token_path(meiva_home()).unlink()  # a start that has not published yet
-    assert read_telemetry_token(meiva_home()) is None
-
-    def _fail_if_called(_req: object, **_kw: object) -> None:
-        pytest.fail("must not dial without a token")
-
-    monkeypatch.setattr(urllib.request, "urlopen", _fail_if_called)
-    assert hc.station_answers("http://10.0.0.9:4318") is True
+    opener = FakeUrlOpener()
+    assert hc.station_answers("http://10.0.0.9:4318", token=None, open_url=opener) is None
+    assert opener.calls == []
+    assert any("no published telemetry token" in record["message"] for record in loguru_records)
 
 
+@pytest.mark.usefixtures("_log_boundary")
 def test_main_probes_advertised_station_and_does_not_raise(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    monkeypatch: pytest.MonkeyPatch,
+    probe_token: str,
+    loguru_records: list[dict[str, Any]],
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """End-to-end: with a registered station, main() runs clean on a healthy
     probe and fails open on a failing one."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
     _insert_station_unit(database_gate=database_gate)
-    answers = [True, False]
+    opener = FakeUrlOpener()
+    opener.on("http://10.0.0.9:4318", Answer(), Answer(status=503))
+    hc.main(open_url=opener)
+    hc.main(open_url=opener)  # must not raise
+    assert opener.urls == ["http://10.0.0.9:4318/v1/traces"] * 2
+    assert all(call.headers["Authorization"] == f"Bearer {probe_token}" for call in opener.calls)
 
-    def probe(_url: str) -> bool:
-        return answers.pop(0)
-
-    hc.main(probe=probe)
-    hc.main(probe=probe)  # must not raise
-    assert answers == []
+    failed_observations = sum(
+        "did not answer a bearer OTLP probe" in r["message"] for r in loguru_records
+    )
+    assert failed_observations == 1
+    telemetry_token_path(meiva_home()).unlink()
+    hc.main(open_url=opener)
+    assert len(opener.calls) == 2
+    assert any("no published telemetry token" in record["message"] for record in loguru_records)
+    assert (
+        sum("did not answer a bearer OTLP probe" in r["message"] for r in loguru_records)
+        == failed_observations
+    )
 
 
 def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, probe_token: str
 ) -> None:
     image = LoadedCommit(tmp_path, "captured-before-checkout-moved")
     capture = Mock(return_value=image)
     count = Mock(return_value=7)
     create = Mock(return_value=Mock(spec=Database))
-    target = Mock(url="http://station.invalid:4318")
+    target = StationTarget(url="http://station.invalid:4318", advertised=True)
     received: list[object] = []
 
-    def resolve(*, database: Callable[[], Database]) -> Any:
+    def resolve(
+        *, database: Callable[[], Database], config: StationEndpointConfig
+    ) -> StationTarget:
         received.append(database)
         database()
         return target
@@ -243,7 +249,11 @@ def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
     monkeypatch.setattr(hc, "resolve_target", resolve)
     monkeypatch.setattr(hc, "build_pipeline", pipeline)
     monkeypatch.setattr(hc, "init_gateway_process", logging)
-    hc.main(probe=Mock(return_value=True))
+    opener = FakeUrlOpener()
+    opener.on(target.url, Answer())
+    hc.main(open_url=opener)
+    assert len(opener.calls) == 1
+    assert opener.calls[0].headers["Authorization"] == f"Bearer {probe_token}"
 
     capture.assert_called_once_with()
     count.assert_not_called()
@@ -261,10 +271,12 @@ def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
     assert not gates[0].min_read_due()
 
 
-def test_station_lookup_keeps_the_original_fail_open_boundary(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings.observability, "observability_url", "http://station.invalid")
+def test_station_lookup_keeps_the_original_fail_open_boundary() -> None:
     create = Mock(side_effect=RuntimeError("original database failure"))
-    assert hc.resolve_target(database=create) is None
+    assert (
+        hc.resolve_target(
+            database=create, config=StationEndpointConfig("http://station.invalid", 4318)
+        )
+        is None
+    )
     create.assert_called_once_with()

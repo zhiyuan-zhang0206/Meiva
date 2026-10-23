@@ -29,15 +29,10 @@
 "test_impersonation_heartbeat.py#monkeypatch.setattr base.agents.context.external_attachment.plugin_state_codec.load_snapshot" = 1
 "test_impersonation_heartbeat.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 "test_impersonation_heartbeat.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
-"test_station_healthcheck.py#monkeypatch.setattr base.config.settings.observability.observability_url" = 6
-"test_station_healthcheck.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_port" = 1
+"test_station_healthcheck.py#monkeypatch.setattr base.config.settings.observability.observability_url" = 2
 "test_station_healthcheck.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_station_healthcheck.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
 "test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.Database.from_settings" = 2
 "test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.build_pipeline" = 2
 "test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.init_gateway_process" = 2
 "test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.resolve_target" = 1
-"test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.settings.observability.telemetry_otlp_port" = 1
-
-[debt.stdlib-patch]
-"test_station_healthcheck.py#monkeypatch.setattr urllib.request.urlopen" = 4

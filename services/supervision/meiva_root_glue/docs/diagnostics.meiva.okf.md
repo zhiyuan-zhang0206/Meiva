@@ -81,3 +81,7 @@ image and a cold `ClientSet`; only startup opens the pipeline. Stop joins the
 actual writer after both observation owners, including when an observation
 close fails. A logging startup failure retains its original error and closes
 any pipeline it constructed. The generic drill wiring opens no DB resources.
+
+The station adapter retains its explicit unit home, endpoint configuration and
+HTTP port. Its authentication and outcome contract is owned by
+[[services/wake/heartbeat/docs/station-probe.meiva.okf.md|Station probe]].

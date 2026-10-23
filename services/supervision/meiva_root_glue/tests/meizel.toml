@@ -31,7 +31,7 @@
 "test_root_diagnostics.py#monkeypatch.setattr base.telemetry.sync" = 1
 "test_root_diagnostics.py#monkeypatch.setattr services.supervision.healthchecks.redis_acl.ping" = 1
 "test_root_diagnostics.py#monkeypatch.setattr services.supervision.meiva_root_glue.diagnostic_probes.is_macos" = 3
-"test_root_diagnostics.py#monkeypatch.setattr services.supervision.meiva_root_glue.diagnostic_probes.settings" = 3
+"test_root_diagnostics.py#monkeypatch.setattr services.supervision.meiva_root_glue.diagnostic_probes.settings" = 2
 
 [debt.restricted-python]
 "test_diagnostic_work_ownership.py#python -c" = 1
