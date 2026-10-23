@@ -12,7 +12,6 @@ from typing import Any
 
 import pytest
 
-import meiva
 from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import (
@@ -70,8 +69,8 @@ def exec_update() -> Iterator[dict[str, Any]]:
     """Bind a real exec turn; findings land in the returned state update."""
     assert not process_context.in_exec_turn()
     update: dict[str, Any] = {}
-    meiva.state = object()
-    meiva.state_update = update
+    process_context.set_state(object())
+    process_context.set_state_update(update)
     try:
         yield update
     finally:

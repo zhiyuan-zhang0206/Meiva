@@ -13,7 +13,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.config import settings
 from base.packages.plugins.extensions import ExtensionRegistry
-from meiva.sdk_surface import install
+from meiva.sdk_surface import install, process_context
 from meiva_builtins.plugins.meiva_memory import plugin
 
 
@@ -30,7 +30,7 @@ def isolated() -> None:
 
     original_path_doc = meiva.memory.PATH.__doc__
     os.environ["MEIVA_AGENT_ID"] = "417"
-    meiva.context = MeivaContext(identity=AgentIdentity(417, True))
+    process_context.bind_context(MeivaContext(identity=AgentIdentity(417, True)))
     settings.agent.eval_isolation = True
     settings.agent.eval_network_allowlist = []
     _apply()
@@ -53,7 +53,7 @@ def isolated() -> None:
 def network_allowlist() -> None:
     install.install(ExtensionRegistry((("meiva_memory", plugin.contribute()),)))
     os.environ["MEIVA_AGENT_ID"] = "418"
-    meiva.context = MeivaContext(identity=AgentIdentity(418, True))
+    process_context.bind_context(MeivaContext(identity=AgentIdentity(418, True)))
     settings.agent.eval_isolation = True
     settings.agent.eval_network_allowlist = ["web"]
     _apply()

@@ -18,6 +18,7 @@ from base.config.tests.configuration import snapshot_process_config
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from meiva.boot import process_clients
+from meiva.sdk_surface import process_context
 
 
 @pytest.fixture
@@ -42,21 +43,27 @@ def pin_agent(
     machine: MachineIdentity | None = None,
 ) -> None:
     bound = getattr(meiva, "context", None)
-    meiva.context = MeivaContext(
-        identity=AgentIdentity(agent_id=agent_id, owns_loop=owns_loop, actor=actor, lease=lease),
-        original_incarnation=incarnation,
-        machine=machine if machine is not None else (None if bound is None else bound.machine),
-        clients=clients if clients is not None else (bound.clients if bound else process_clients()),
-        clock_factory=(
-            clock_factory
-            if clock_factory is not None
-            else (None if bound is None else bound.clock_factory)
-        ),
+    process_context.bind_context(
+        MeivaContext(
+            identity=AgentIdentity(
+                agent_id=agent_id, owns_loop=owns_loop, actor=actor, lease=lease
+            ),
+            original_incarnation=incarnation,
+            machine=machine if machine is not None else (None if bound is None else bound.machine),
+            clients=clients
+            if clients is not None
+            else (bound.clients if bound else process_clients()),
+            clock_factory=(
+                clock_factory
+                if clock_factory is not None
+                else (None if bound is None else bound.clock_factory)
+            ),
+        )
     )
 
 
 def pin_no_identity() -> None:
-    del meiva.context
+    process_context.unbind_context()
 
 
 def exec_context(

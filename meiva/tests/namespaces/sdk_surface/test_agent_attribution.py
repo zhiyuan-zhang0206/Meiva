@@ -9,6 +9,7 @@ import pytest
 import meiva
 from base import telemetry
 from base.agents.context.identity import AgentIdentity
+from meiva.sdk_surface import process_context
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +30,7 @@ async def test_concurrent_events_keep_explicit_or_process_identity(
     restore_process_binding: telemetry.EventPipeline,
 ) -> None:
     telemetry.init_telemetry(process="agent_host", agent_id=None, pipeline=restore_process_binding)
-    meiva.context = replace(meiva.context, identity=AgentIdentity(99, True))
+    process_context.bind_context(replace(meiva.context, identity=AgentIdentity(99, True)))
 
     async def record(agent_id: int):
         await asyncio.sleep(0)
@@ -52,5 +53,5 @@ def test_exec_process_identity_is_retained(
     restore_process_binding: telemetry.EventPipeline,
 ) -> None:
     telemetry.init_telemetry(process="agent-exec", agent_id=7, pipeline=restore_process_binding)
-    meiva.context = replace(meiva.context, identity=AgentIdentity(42, True))
+    process_context.bind_context(replace(meiva.context, identity=AgentIdentity(42, True)))
     assert telemetry.prepare_event("log", "log").agent_id == 7

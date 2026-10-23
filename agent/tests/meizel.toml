@@ -20,8 +20,6 @@ exports = ["agent_tests.py", "claim"]
 
 [debt.first-party-patch]
 "test_compact_part2.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1
-"test_external.py#assignment meiva.state" = 1
-"test_external.py#assignment meiva.state_update" = 1
 "test_external.py#monkeypatch.setattr base.agents.impersonation.manifest.capture_local_event" = 2
 "test_external.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
 "test_external.py#monkeypatch.setattr base.agents.impersonation.manifest.seal_local_participant" = 3
@@ -29,11 +27,6 @@ exports = ["agent_tests.py", "claim"]
 "test_external.py#monkeypatch.setattr meiva.boot.ensure_plugins_loaded" = 1
 "test_external.py#monkeypatch.setattr meiva.gateway_client.send_message" = 2
 "test_external.py#monkeypatch.setattr meiva.impersonation.attachment.control.require_active" = 3
-"test_state_slot.py#assignment meiva.state" = 8
-"test_state_slot.py#assignment meiva.state.delta_test__counter" = 1
-"test_state_slot.py#assignment meiva.state.delta_test__seen" = 1
-"test_state_slot.py#assignment meiva.state.messages" = 3
-"test_state_slot.py#assignment meiva.state_update" = 5
 
 [debt.restricted-python]
 "test_compact.py#string patch target 'agent.graph.hooks.compact.resolve_context_budget'" = 1

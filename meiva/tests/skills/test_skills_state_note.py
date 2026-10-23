@@ -42,11 +42,10 @@ def _discard_audit(_db: Database, _event: telemetry.Event, **_kw: Any) -> None:
 
 @pytest.fixture(autouse=True)
 def _exec_turn(
-    monkeypatch: pytest.MonkeyPatch, model_installation: Installation
+    monkeypatch: pytest.MonkeyPatch, sdk_model_owner: Installation
 ) -> Iterator[dict[str, Any]]:
     """An exec turn is bound (the child's state slot and an empty state update), the agent has
     an identity, and the audit write goes nowhere."""
-    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
     monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
     monkeypatch.setattr(audit_events, "record_audit_reported", _discard_audit)
     process_context.unbind_exec_turn()

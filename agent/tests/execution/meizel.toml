@@ -29,7 +29,6 @@
 "test_exec_child.py#monkeypatch.setattr agent.execution.protocol.write_result" = 2
 "test_exec_child.py#monkeypatch.setattr agent.process_boot.apply_per_agent_eval_isolation" = 1
 "test_exec_child.py#monkeypatch.setattr agent.process_boot.apply_per_agent_sdk_disable" = 1
-"test_exec_child.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
 "test_exec_child.py#monkeypatch.setattr meiva.boot.ensure_plugins_loaded" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1
@@ -38,10 +37,7 @@
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.run_code" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.protocol.read_request" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.protocol.write_result" = 1
-"test_exec_child_signals.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
 "test_exec_child_signals.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 1
-"test_exec_slot.py#assignment meiva.state" = 4
-"test_exec_slot.py#assignment meiva.state_update" = 1
 
 [debt.unresolved-patch]
 "test_delta_read_compat_agent.py#monkeypatch.setattr saver.aget_delta_channel_history" = 1
