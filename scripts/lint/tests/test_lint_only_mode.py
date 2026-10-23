@@ -110,6 +110,11 @@ class Case:
     clean_path: str = ""
     extra: dict[str, str] = field(default_factory=dict[str, str])
     needs_git: bool = False
+    # meiva:note
+    # The lint's baseline counts reads over the whole tree, so its `--only` compares the
+    # whole tree too: a count inside a subset says nothing, and a scoped comparison would
+    # pass a new read here while CI fails it.
+    judges_whole_tree: bool = False
     # How to call `module.main` when the rule takes its application inputs injected.
     call: Callable[..., int] | None = None
 
@@ -182,6 +187,7 @@ CASES = [
         "tests/test_host_read.py",
         "import sys\n\n\ndef test_x():\n    assert sys.platform == 'linux'\n",
         extra={"pyproject.toml": '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'},
+        judges_whole_tree=True,
     ),
     Case(
         no_script_sibling_imports,
@@ -251,7 +257,10 @@ def test_only_judges_exactly_the_changed_files(case: Case, fake_repo: Path) -> N
     main: Callable[[list[str]], int] = partial(case.call or lint.main, repo_root=fake_repo)
     assert main([]) == 1, "the sample must be a violation the full scan reports"
     assert main(["--only", case.bad_path]) == 1, "a changed file gets the full scan's verdict"
-    assert main(["--only", case.clean()]) == 0, "a file that did not change is not judged"
+    # meiva:note
+    # A whole-tree lint keeps an unrelated red in the tree: the price of judging by counts.
+    unrelated = 1 if case.judges_whole_tree else 0
+    assert main(["--only", case.clean()]) == unrelated, "a file that did not change is not judged"
     assert main(["--only", case.clean(), _TOOLING]) == 1, "a tooling edit widens to the full scan"
     assert main(["--only"]) == 0, "nothing changed, nothing to judge"
 
